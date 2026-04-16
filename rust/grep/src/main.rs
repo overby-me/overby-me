@@ -182,6 +182,13 @@ fn parse_args() -> Options {
                         opts.skip_devices = true;
                     }
                 }
+                _ if long.starts_with("directories=") => {
+                    let val = long.strip_prefix("directories=").unwrap();
+                    if val == "recurse" {
+                        opts.recursive = true;
+                    }
+                    // "skip" and "read" are handled implicitly
+                }
                 "null-data" => opts.null_data = true,
                 "recursive" => opts.recursive = true,
                 _ if long.starts_with("regexp=") => {
@@ -228,8 +235,10 @@ fn parse_args() -> Options {
                         .push(long.strip_prefix("exclude=").unwrap().to_string());
                 }
                 _ if long.starts_with("exclude-dir=") => {
+                    let dir = long.strip_prefix("exclude-dir=").unwrap();
+                    // Strip trailing / for matching
                     opts.exclude_dir_glob
-                        .push(long.strip_prefix("exclude-dir=").unwrap().to_string());
+                        .push(dir.trim_end_matches('/').to_string());
                 }
                 "version" => {
                     println!("grep (rust-grep) 0.1.0");
@@ -310,6 +319,21 @@ fn parse_args() -> Options {
                     }
                     'T' => opts.initial_tab = true,
                     'z' => opts.null_data = true,
+                    'd' => {
+                        // -d ACTION: recurse, skip, read
+                        let rest: String = chars[j + 1..].iter().collect();
+                        let action = if rest.is_empty() {
+                            i += 1;
+                            if i < args.len() { args[i].as_str() } else { "read" }
+                        } else {
+                            &rest
+                        };
+                        if action == "recurse" {
+                            opts.recursive = true;
+                        }
+                        j = chars.len();
+                        continue;
+                    }
                     'r' | 'R' => opts.recursive = true,
                     'e' => {
                         // -e PATTERN (rest of chars or next arg)
@@ -1516,14 +1540,72 @@ fn print_context_line<W: Write>(
 }
 
 fn matches_glob(name: &str, pattern: &str) -> bool {
-    // Simple glob matching for --include/--exclude
-    if let Some(suffix) = pattern.strip_prefix('*') {
-        name.ends_with(suffix)
-    } else if let Some(prefix) = pattern.strip_suffix('*') {
-        name.starts_with(prefix)
-    } else {
-        name == pattern
+    let name_chars: Vec<char> = name.chars().collect();
+    let pat_chars: Vec<char> = pattern.chars().collect();
+    glob_match(&name_chars, &pat_chars, 0, 0)
+}
+
+fn glob_match(name: &[char], pat: &[char], mut ni: usize, mut pi: usize) -> bool {
+    while pi < pat.len() {
+        if pat[pi] == '*' {
+            pi += 1;
+            // Skip consecutive *
+            while pi < pat.len() && pat[pi] == '*' {
+                pi += 1;
+            }
+            if pi == pat.len() {
+                return true; // trailing * matches everything
+            }
+            // Try matching rest of pattern at each position
+            while ni <= name.len() {
+                if glob_match(name, pat, ni, pi) {
+                    return true;
+                }
+                ni += 1;
+            }
+            return false;
+        } else if ni >= name.len() {
+            return false;
+        } else if pat[pi] == '?' {
+            ni += 1;
+            pi += 1;
+        } else if pat[pi] == '[' {
+            pi += 1;
+            let negate = pi < pat.len() && (pat[pi] == '!' || pat[pi] == '^');
+            if negate {
+                pi += 1;
+            }
+            let mut matched = false;
+            let mut first = true;
+            while pi < pat.len() && (pat[pi] != ']' || first) {
+                first = false;
+                if pi + 2 < pat.len() && pat[pi + 1] == '-' {
+                    if name[ni] >= pat[pi] && name[ni] <= pat[pi + 2] {
+                        matched = true;
+                    }
+                    pi += 3;
+                } else {
+                    if name[ni] == pat[pi] {
+                        matched = true;
+                    }
+                    pi += 1;
+                }
+            }
+            if pi < pat.len() {
+                pi += 1; // skip ]
+            }
+            if matched == negate {
+                return false;
+            }
+            ni += 1;
+        } else if pat[pi] == name[ni] {
+            ni += 1;
+            pi += 1;
+        } else {
+            return false;
+        }
     }
+    ni == name.len()
 }
 
 fn collect_files(opts: &Options) -> Vec<PathBuf> {
