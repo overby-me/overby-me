@@ -832,6 +832,15 @@ impl Interpreter {
             }
 
             Expr::Assign(target, value) => {
+                // Check for list assignment: ($a, $b, $c) = (list)
+                if let Expr::ArrayLit(targets) = target.as_ref() {
+                    let items = self.eval_list(value);
+                    for (i, t) in targets.iter().enumerate() {
+                        let val = items.get(i).cloned().unwrap_or(Value::Undef);
+                        self.assign_to(t, val);
+                    }
+                    return Value::Num(items.len() as f64);
+                }
                 // Check if target is an array — need list context for RHS
                 if matches!(target.as_ref(), Expr::ArrayVar(_)) {
                     let items = self.eval_list(value);
@@ -846,7 +855,7 @@ impl Interpreter {
                     let items = self.eval_list(value);
                     if let Expr::HashVar(name) = target.as_ref() {
                         self.set_hash_from_list(name, items);
-                        return Value::Num(0.0); // hash in scalar context
+                        return Value::Num(0.0);
                     }
                 }
                 let val = self.eval_expr(value);
