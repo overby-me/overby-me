@@ -2,20 +2,19 @@
 
 ## Current Status
 
-**214/242 tests passing** (88%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
+**216/242 tests passing** (89%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
 
-Up from 104 at the start (+110 tests, +45 percentage points).
+Up from 104 at the start (+112 tests, +46 percentage points).
 
-### Remaining failures (28 tests)
+### Remaining failures (26 tests)
 
-- **Array aliasing (~14)**: Need true reference semantics for nested function calls (arrayparm, arryref2-5, aryprm1-8)
-- **Regex (~5)**: Rust vs POSIX regex character class differences (rebrackloc, rebt8b1, regexpbrack, regrange, range2)
-- **Record separator (~3)**: RS="" paragraph mode edge cases, RT variable (rsnullre, rsnulw, rstest5)
-- **Getline (~3)**: Complex getline forms, EOF in END (getline4, getlnfa, getnr2tm)
-- **Error detection (~3)**: badassign1 column position, gsubasgn multi-error, divzero
-- **Misc (~5)**: parse1 ($$a++++ post-increment), parsefld ($/= regex), rand (PRNG), swaplns (stdin trailing record), trailbs (trailing backslash in regex)
-- **Unicode (~1)**: gsubnulli18n (multibyte gsub)
-- **Function-as-variable (~2)**: fnaryscl (array provenance chain), fnamedat-style (already fixed most)
+- **Array aliasing (~8)**: Need true reference semantics (arryref2-5, aryprm4/6/8, fnaryscl)
+- **Regex (~5)**: Rust vs POSIX regex differences (rebrackloc, rebt8b1, regexpbrack, regrange, range2)
+- **Record separator (~3)**: RS="" paragraph mode, RT variable (rsnullre, rsnulw, rstest5)
+- **Error format (~3)**: Column position mismatches (badassign1, getlnfa), multi-error (gsubasgn)
+- **I/O (~3)**: UTF-8 source (getnr2tm), binary input (trailbs), locale-dependent (gsubnulli18n)
+- **Parser (~2)**: $$a++++ double-eval (parse1), $/= regex ambiguity (parsefld)
+- **Other (~2)**: Compile-time div-by-zero (divzero), different PRNG (rand)
 
 ### Recent fixes
 
