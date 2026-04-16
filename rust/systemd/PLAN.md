@@ -188,7 +188,8 @@ All 23 udev tests fail because the C `udevadm` binary in the overlay lacks featu
 
 ### Priority 3: Major Features
 
-- [ ] Complete Type=notify lifecycle (RELOADING, STOPPING notifications)
+- [x] RELOADING=1 notification handling (deferred_notify_wait recognizes reload as started)
+- [ ] Complete Type=notify lifecycle (STOPPING notification, Restart=on-abort after SIGABRT)
 - [ ] Implement PrivatePIDs= (PID namespace)
 - [ ] Implement OpenFile= directive
 - [ ] Implement ExtraFileDescriptors= directive
