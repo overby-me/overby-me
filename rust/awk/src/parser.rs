@@ -953,8 +953,27 @@ impl Parser {
             }
             Token::Dollar => {
                 self.advance();
-                let expr = self.parse_unary();
-                Expr::FieldRef(Box::new(expr))
+                // $ gets operand and wraps in FieldRef.
+                // For nested $, recursively handle $ + one level of postfix ++/--
+                let has_unary = matches!(
+                    self.peek(),
+                    Token::Plus | Token::Minus | Token::Not | Token::Increment | Token::Decrement
+                );
+                let inner = if has_unary {
+                    self.parse_unary()
+                } else {
+                    self.parse_primary()
+                };
+                let mut expr = Expr::FieldRef(Box::new(inner));
+                // Apply ONE postfix ++ or -- to the FieldRef at this level
+                if matches!(self.peek(), Token::Increment) {
+                    self.advance();
+                    expr = Expr::PostIncrement(Box::new(expr));
+                } else if matches!(self.peek(), Token::Decrement) {
+                    self.advance();
+                    expr = Expr::PostDecrement(Box::new(expr));
+                }
+                expr
             }
             Token::LParen => {
                 self.advance();

@@ -225,7 +225,122 @@ impl Interpreter {
             .join(&subsep)
     }
 
+    fn check_divzero(expr: &Expr) {
+        match expr {
+            Expr::Binop(left, BinOp::Div, right) | Expr::Binop(left, BinOp::Mod, right) => {
+                if matches!(right.as_ref(), Expr::Number(n) if *n == 0.0) {
+                    eprintln!("awk: error: division by zero attempted");
+                    std::process::exit(1);
+                }
+                Self::check_divzero(left);
+                Self::check_divzero(right);
+            }
+            Expr::Binop(left, _, right) => {
+                Self::check_divzero(left);
+                Self::check_divzero(right);
+            }
+            Expr::Unop(_, operand) => Self::check_divzero(operand),
+            Expr::Assign(lhs, rhs) | Expr::OpAssign(lhs, _, rhs) => {
+                Self::check_divzero(lhs);
+                Self::check_divzero(rhs);
+            }
+            Expr::FuncCall(_, args) => {
+                for a in args {
+                    Self::check_divzero(a);
+                }
+            }
+            Expr::Ternary(c, t, f) => {
+                Self::check_divzero(c);
+                Self::check_divzero(t);
+                Self::check_divzero(f);
+            }
+            Expr::Match(l, r) | Expr::NotMatch(l, r) => {
+                Self::check_divzero(l);
+                Self::check_divzero(r);
+            }
+            Expr::FieldRef(e)
+            | Expr::PostIncrement(e)
+            | Expr::PostDecrement(e)
+            | Expr::In(e, _) => Self::check_divzero(e),
+            Expr::ArrayRef(_, indices) => {
+                for idx in indices {
+                    Self::check_divzero(idx);
+                }
+            }
+            Expr::Getline(var, file, _) => {
+                if let Some(v) = var {
+                    Self::check_divzero(v);
+                }
+                if let Some(f) = file {
+                    Self::check_divzero(f);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn check_divzero_stmts(stmts: &[Stmt]) {
+        for stmt in stmts {
+            Self::check_divzero_stmt(stmt);
+        }
+    }
+
+    fn check_divzero_stmt(stmt: &Stmt) {
+        match stmt {
+            Stmt::Expr(e) | Stmt::Exit(Some(e)) | Stmt::Return(Some(e)) => {
+                Self::check_divzero(e);
+            }
+            Stmt::Print(args, _) | Stmt::Printf(args, _) => {
+                for a in args {
+                    Self::check_divzero(a);
+                }
+            }
+            Stmt::If(cond, then_body, else_body) => {
+                Self::check_divzero(cond);
+                Self::check_divzero_stmt(then_body.as_ref());
+                if let Some(eb) = else_body {
+                    Self::check_divzero_stmt(eb.as_ref());
+                }
+            }
+            Stmt::While(cond, body) | Stmt::DoWhile(body, cond) => {
+                Self::check_divzero(cond);
+                Self::check_divzero_stmt(body.as_ref());
+            }
+            Stmt::For(init, cond, update, body) => {
+                if let Some(i) = init {
+                    Self::check_divzero_stmt(i);
+                }
+                if let Some(c) = cond {
+                    Self::check_divzero(c);
+                }
+                if let Some(u) = update {
+                    Self::check_divzero_stmt(u);
+                }
+                Self::check_divzero_stmt(body.as_ref());
+            }
+            Stmt::ForIn(_, _, body) => Self::check_divzero_stmt(body.as_ref()),
+            Stmt::Block(stmts) => Self::check_divzero_stmts(stmts),
+            Stmt::Getline(var, file, _) => {
+                if let Some(v) = var {
+                    Self::check_divzero(v);
+                }
+                if let Some(f) = file {
+                    Self::check_divzero(f);
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub fn run(&mut self, program: &Program, files: &[String]) {
+        // Check for constant division by zero (like gawk does at compile time)
+        for rule in &program.rules {
+            Self::check_divzero_stmts(&rule.action);
+        }
+        for func in &program.functions {
+            Self::check_divzero_stmts(&func.body);
+        }
+
         // Register functions
         for func in &program.functions {
             self.functions.insert(func.name.clone(), func.clone());
@@ -1421,14 +1536,29 @@ impl Interpreter {
                 }
             },
             Expr::PostIncrement(operand) => {
-                let v = self.eval_expr(operand).to_num();
-                self.assign_to(operand, Value::Num(v + 1.0));
-                Value::Num(v)
+                // For FieldRef, cache the index to avoid double evaluation
+                if let Expr::FieldRef(idx_expr) = operand.as_ref() {
+                    let idx = self.eval_expr(idx_expr).to_num() as usize;
+                    let v = self.get_field(idx).to_num();
+                    self.set_field(idx, Value::Num(v + 1.0));
+                    Value::Num(v)
+                } else {
+                    let v = self.eval_expr(operand).to_num();
+                    self.assign_to(operand, Value::Num(v + 1.0));
+                    Value::Num(v)
+                }
             }
             Expr::PostDecrement(operand) => {
-                let v = self.eval_expr(operand).to_num();
-                self.assign_to(operand, Value::Num(v - 1.0));
-                Value::Num(v)
+                if let Expr::FieldRef(idx_expr) = operand.as_ref() {
+                    let idx = self.eval_expr(idx_expr).to_num() as usize;
+                    let v = self.get_field(idx).to_num();
+                    self.set_field(idx, Value::Num(v - 1.0));
+                    Value::Num(v)
+                } else {
+                    let v = self.eval_expr(operand).to_num();
+                    self.assign_to(operand, Value::Num(v - 1.0));
+                    Value::Num(v)
+                }
             }
             Expr::Assign(lhs, rhs) => {
                 let val = self.eval_expr(rhs);
