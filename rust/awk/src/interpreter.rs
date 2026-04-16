@@ -1124,8 +1124,22 @@ impl Interpreter {
                 self.set_field(idx, val);
             }
             Expr::ArrayRef(name, indices) => {
-                // Track parameter used as array
+                // Track parameter used as array and check cross-param conflicts
                 if self.current_params.contains(&name.to_string()) {
+                    // Check if a sibling param (same origin) was used as scalar
+                    if let Some(my_origin) = self.param_origins.get(name).cloned() {
+                        for sp in &self.scalar_params {
+                            if let Some(sp_origin) = self.param_origins.get(sp)
+                                && (*sp_origin == my_origin
+                                    || my_origin.contains(sp_origin.as_str()))
+                            {
+                                eprintln!(
+                                    "awk: fatal: attempt to use scalar parameter `{name}' as an array"
+                                );
+                                std::process::exit(2);
+                            }
+                        }
+                    }
                     self.array_params.insert(name.to_string());
                 }
                 // Check scalar-as-array conflict
