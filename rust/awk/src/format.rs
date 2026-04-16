@@ -124,7 +124,19 @@ pub fn sprintf_impl_with_convfmt(vals: &[Value], convfmt: &str) -> String {
             let conv = chars[i];
             i += 1;
 
-            let val = if let Some(pos) = positional_arg {
+            // Check if conversion is valid before consuming an arg
+            let is_valid_conv = matches!(conv, 'd' | 'i' | 'o' | 'x' | 'X' | 'u' | 'c' | 's'
+                | 'f' | 'F' | 'e' | 'E' | 'g' | 'G' | 'a' | 'A');
+
+            let val = if !is_valid_conv {
+                // Unknown conversion: output literal %, don't consume arg
+                result.push('%');
+                if !flags.is_empty() { result.push_str(&flags); }
+                if !width.is_empty() { result.push_str(&width); }
+                if has_precision { result.push('.'); result.push_str(&precision); }
+                result.push(conv);
+                continue;
+            } else if let Some(pos) = positional_arg {
                 if pos > 0 && pos < vals.len() {
                     &vals[pos]
                 } else {
