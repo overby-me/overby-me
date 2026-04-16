@@ -44,7 +44,7 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 
 ### 23-UNIT-FILE (15 of 20 pass)
 
-- PASS: clean-unit (service sections), exec-command-ex, execreload, execstoppost, joinsnamespace-of, oneshot-restart, percentj-wantedby, runtimedirectory, standardoutput, start-stop-no-reload, statedir, type-exec, upholds, utmp, verify-unit-files
+- PASS: clean-unit (service sections), exec-command-ex, execreload, execstoppost, joinsnamespace-of, oneshot-restart, onsuccess-basic, percentj-wantedby, runtimedirectory, standardoutput, start-stop-no-reload, statedir, type-exec, upholds, utmp, verify-unit-files
 
 ### 81-GENERATORS (4 of 5 pass)
 
