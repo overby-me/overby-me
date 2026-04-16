@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**182/241 tests passing** (76%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
+**183/241 tests passing** (76%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
 
 Note: ~2 tests are flaky due to `for-in` hash iteration order (forref, delarpm2).
 
