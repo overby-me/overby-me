@@ -42,6 +42,11 @@ View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
 - Help output matching GNU sed format, `E-mail` line
 - Temp file check for in-place editing, FIFO/device detection
 - IO error messages: stripped `(os error N)` suffix
+- Q exit code propagation from file-processing mode
+- Multiple `!` detection, `#` with address rejection
+- `+N`/`~N` as first address rejection
+- POSIX `a`/`c`/`i` require `\` after command
+- POSIX one-address command validation (`a`, `i`, `l`, `=`, `q`, `Q`, `r`, `R`)
 
 ---
 
