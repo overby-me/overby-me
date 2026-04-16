@@ -47,7 +47,8 @@ struct Options {
     include_glob: Vec<String>,
     exclude_glob: Vec<String>,
     exclude_dir_glob: Vec<String>,
-    skip_devices: bool, // -D skip
+    skip_devices: bool,      // -D skip
+    skip_directories: bool,  // -d skip / --directories=skip
     // Misc
     label: String, // --label
     color: ColorMode,
@@ -98,6 +99,7 @@ impl Default for Options {
             exclude_glob: Vec::new(),
             exclude_dir_glob: Vec::new(),
             skip_devices: false,
+            skip_directories: false,
             label: "(standard input)".to_string(),
             color: ColorMode::Auto,
             null_data: false,
@@ -188,10 +190,11 @@ fn parse_args() -> Options {
                 }
                 _ if long.starts_with("directories=") => {
                     let val = long.strip_prefix("directories=").unwrap();
-                    if val == "recurse" {
-                        opts.recursive = true;
+                    match val {
+                        "recurse" => opts.recursive = true,
+                        "skip" => opts.skip_directories = true,
+                        _ => {} // "read" is default
                     }
-                    // "skip" and "read" are handled implicitly
                 }
                 "null-data" => opts.null_data = true,
                 "recursive" => opts.recursive = true,
@@ -332,8 +335,10 @@ fn parse_args() -> Options {
                         } else {
                             &rest
                         };
-                        if action == "recurse" {
-                            opts.recursive = true;
+                        match action {
+                            "recurse" => opts.recursive = true,
+                            "skip" => opts.skip_directories = true,
+                            _ => {}
                         }
                         j = chars.len();
                         continue;
@@ -1785,7 +1790,15 @@ fn collect_files(opts: &Options) -> Vec<PathBuf> {
                 // Filter out excluded directories
                 if e.file_type().is_dir() && !opts.exclude_dir_glob.is_empty() {
                     let name = e.file_name().to_string_lossy();
-                    if opts.exclude_dir_glob.iter().any(|g| matches_glob(&name, g)) {
+                    let full_path = e.path().to_string_lossy();
+                    let clean_path = full_path.strip_prefix("./").unwrap_or(&full_path);
+                    if opts.exclude_dir_glob.iter().any(|g| {
+                        let clean_g = g.strip_prefix("./").unwrap_or(g);
+                        matches_glob(&name, g)
+                            || matches_glob(&name, clean_g)
+                            || matches_glob(clean_path, g)
+                            || matches_glob(clean_path, clean_g)
+                    }) {
                         return false;
                     }
                 }
@@ -1798,13 +1811,18 @@ fn collect_files(opts: &Options) -> Vec<PathBuf> {
                 if entry.file_type().is_file() {
                     let name = entry.file_name().to_string_lossy();
 
-                    // Apply include/exclude filters
+                    // Apply include/exclude filters (match against both name and path)
+                    let entry_path_str = entry.path().to_string_lossy();
                     if !opts.include_glob.is_empty()
-                        && !opts.include_glob.iter().any(|g| matches_glob(&name, g))
+                        && !opts.include_glob.iter().any(|g| {
+                            matches_glob(&name, g) || matches_glob(&entry_path_str, g)
+                        })
                     {
                         continue;
                     }
-                    if opts.exclude_glob.iter().any(|g| matches_glob(&name, g)) {
+                    if opts.exclude_glob.iter().any(|g| {
+                        matches_glob(&name, g) || matches_glob(&entry_path_str, g)
+                    }) {
                         continue;
                     }
 
@@ -1901,6 +1919,11 @@ fn grep_file(path: &Path, matcher: &Matcher, opts: &Options) -> (usize, bool, bo
         }
     }
 
+    // Skip directories when --directories=skip is used (non-recursive mode)
+    if opts.skip_directories && path.is_dir() {
+        return (0, false, false);
+    }
+
     let file = match fs::File::open(path) {
         Ok(f) => f,
         Err(e) => {
@@ -1960,13 +1983,14 @@ fn main() {
 
     let matcher = build_matcher(&opts);
 
+    let had_file_args = !opts.files.is_empty();
     let files = collect_files(&opts);
 
     let mut any_match = false;
     let mut had_error = false;
 
-    if files.is_empty() {
-        // Read from stdin
+    if files.is_empty() && !had_file_args {
+        // Read from stdin (only if no file args were given)
         let (count, matched, errored) = grep_file(Path::new("-"), &matcher, &opts);
         if matched {
             any_match = true;
