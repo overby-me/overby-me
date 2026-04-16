@@ -45560,9 +45560,10 @@ fn test_io_read_bandwidth_max_basic() {
 
     assert_eq!(service.srvc.io_read_bandwidth_max.len(), 1);
     assert_eq!(service.srvc.io_read_bandwidth_max[0].device, "/dev/sda");
+    // IO bandwidth uses SI (base 1000), matching systemd's parse_size(rvalue, 1000, ...)
     assert_eq!(
         service.srvc.io_read_bandwidth_max[0].value,
-        10 * 1024 * 1024
+        10 * 1000 * 1000
     );
 }
 
@@ -45583,9 +45584,10 @@ fn test_io_write_bandwidth_max_basic() {
 
     assert_eq!(service.srvc.io_write_bandwidth_max.len(), 1);
     assert_eq!(service.srvc.io_write_bandwidth_max[0].device, "/dev/sda");
+    // IO bandwidth uses SI (base 1000)
     assert_eq!(
         service.srvc.io_write_bandwidth_max[0].value,
-        5 * 1024 * 1024
+        5 * 1000 * 1000
     );
 }
 
@@ -45628,9 +45630,10 @@ fn test_io_write_bandwidth_max_with_g_suffix() {
         service.srvc.io_write_bandwidth_max[0].device,
         "/dev/nvme0n1"
     );
+    // IO bandwidth uses SI (base 1000)
     assert_eq!(
         service.srvc.io_write_bandwidth_max[0].value,
-        1024 * 1024 * 1024
+        1000 * 1000 * 1000
     );
 }
 
@@ -45910,14 +45913,15 @@ fn test_all_resource_control_directives_combined() {
     assert_eq!(service.srvc.io_device_weight[0].device, "/dev/sda");
     assert_eq!(service.srvc.io_device_weight[0].value, 500);
     assert_eq!(service.srvc.io_read_bandwidth_max.len(), 1);
+    // IO bandwidth uses SI (base 1000)
     assert_eq!(
         service.srvc.io_read_bandwidth_max[0].value,
-        10 * 1024 * 1024
+        10 * 1000 * 1000
     );
     assert_eq!(service.srvc.io_write_bandwidth_max.len(), 1);
     assert_eq!(
         service.srvc.io_write_bandwidth_max[0].value,
-        5 * 1024 * 1024
+        5 * 1000 * 1000
     );
     assert_eq!(service.srvc.io_read_iops_max.len(), 1);
     assert_eq!(service.srvc.io_read_iops_max[0].value, 1000);
