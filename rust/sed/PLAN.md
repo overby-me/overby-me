@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**54/61 tests passing** (89%) — shell tests from the GNU sed 4.9 test suite.
+**55/61 tests passing** (90%) — shell tests from the GNU sed 4.9 test suite.
 
 Run a test: `nix build .#checks.x86_64-linux.rust-sed-test-{name}`
 View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
@@ -55,6 +55,8 @@ View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
 - Raw byte preservation for binary file I/O (non-UTF-8 data)
 - Raw byte `l` command output and `write_pattern_space`
 - Lossy UTF-8 conversion for script files (`-f`)
+- Latin-1 byte output encoding for `\d`/`\o`/`\x` escape values
+- `\d`/`\o` byte wrapping (values > 255 mod 256)
 - Unexpected `}` detection at top level
 - `v` version check against 4.9
 - `}` with address rejection
@@ -66,7 +68,7 @@ View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
 
 ---
 
-## Remaining Failures (7 tests)
+## Remaining Failures (6 tests)
 
 ### Category 1: fancy-regex performance (2 tests)
 
@@ -127,7 +129,7 @@ Fix execute-tests $fail issue, bsd-wrapper path layout.
 
 ## Test Inventory
 
-### Passing (54 tests)
+### Passing (55 tests)
 
 bsd, bug32082, bug32271-1, bug32271-2, cmd-0r, cmd-l, cmd-R,
 colon-with-no-label, command-endings, comment-n, distrib, eval,
@@ -139,17 +141,16 @@ normalize-text, nulldata, panic-tests, posix-mode-addr, posix-mode-bad-ref,
 posix-mode-ERE, posix-mode-N, posix-mode-s, range-overlap,
 recursive-escape-c, regex-errors, regex-max-int, sandbox, stdin,
 stdin-prog, subst-mb-incomplete, subst-options, subst-replacement,
-8to7, compile-tests, posix-char-class, temp-file-cleanup, title-case,
+8to7, compile-tests, convert-number, posix-char-class, temp-file-cleanup, title-case,
 unbuffered, uniq, word-delim, xemacs
 
-### Failing (7 tests)
+### Failing (6 tests)
 
 | Test | Primary blocker |
 |-|-|
 | binary | fancy-regex performance |
 | bsd-wrapper | Test infrastructure path |
 | compile-errors | 3 remaining sub-tests (incomplete a/c/i across -e) |
-| convert-number | Byte-mode replacement (`\d`/`\x` produce UTF-8 chars not raw bytes) |
 | dc | fancy-regex performance |
 | mac-mf | Byte-mode script (sed script itself contains non-UTF-8 bytes) |
 | obinary | Platform skip (already works) |
