@@ -2,7 +2,8 @@
 
 ## Current Status
 
-**118/119 tests passing** (99%) — from the GNU grep 3.12 test suite.
+**117/119 tests passing** (98%) — from the GNU grep 3.12 test suite.
+Now using `rust-pcre2` (pure Rust) for `-P` mode instead of `fancy-regex`.
 
 - **PCRE (~1)**: `pcre-abort` — fancy-regex doesn't hit backtrack limit on pathological patterns
 - **I/O (~3)**: `in-eq-out-infloop` (works locally, nix sandbox issue), `max-count-overread` (stdin byte seeking), `write-error-msg` (/dev/full needed)
