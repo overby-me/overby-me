@@ -536,6 +536,36 @@ fn start_service_with_filedescriptors(
                 env.push(("MONITOR_INVOCATION_ID".to_owned(), "0".to_owned()));
             }
 
+            // MEMORY_PRESSURE_WATCH — set the path to the service's cgroup
+            // memory.pressure file if MemoryPressureWatch= is enabled.
+            // See systemd.exec(5) and sd_notify(3).
+            {
+                use crate::units::MemoryPressureWatch;
+                let should_set = match conf.memory_pressure_watch {
+                    MemoryPressureWatch::On => true,
+                    MemoryPressureWatch::Auto => {
+                        // Auto: enable if cgroup path exists and PSI is available
+                        let pressure_file =
+                            conf.platform_specific.cgroup_path.join("memory.pressure");
+                        pressure_file.exists()
+                            || std::path::Path::new("/proc/pressure/memory").exists()
+                    }
+                    MemoryPressureWatch::Off | MemoryPressureWatch::Skip => false,
+                };
+                if should_set {
+                    let pressure_path =
+                        conf.platform_specific.cgroup_path.join("memory.pressure");
+                    env.push((
+                        "MEMORY_PRESSURE_WATCH".to_owned(),
+                        pressure_path.to_string_lossy().into_owned(),
+                    ));
+                } else if matches!(conf.memory_pressure_watch, MemoryPressureWatch::Off) {
+                    // Off: explicitly set to empty string (different from Skip which omits it)
+                    env.push(("MEMORY_PRESSURE_WATCH".to_owned(), String::new()));
+                }
+                // Skip: don't set the variable at all
+            }
+
             // UnsetEnvironment= is applied as the final step (see systemd.exec(5)).
             // It can undo assignments from any source, including Environment=,
             // EnvironmentFile=, PassEnvironment=, and even internal variables.
