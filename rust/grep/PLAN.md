@@ -3,6 +3,7 @@
 ## Current Status
 
 **117/119 tests passing** (98%) — from the GNU grep 3.12 test suite.
+(include-exclude hangs in nix sandbox but passes most subtests locally)
 
 - **PCRE (~1)**: `pcre-abort` — fancy-regex doesn't hit backtrack limit on pathological patterns
 - **I/O (~3)**: `in-eq-out-infloop` (works locally, nix sandbox issue), `max-count-overread` (stdin byte seeking), `write-error-msg` (/dev/full needed)
