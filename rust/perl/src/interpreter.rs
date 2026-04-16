@@ -543,31 +543,58 @@ impl Interpreter {
                 }
             }
             Stmt::PostfixWhile(stmt, cond) => {
-                // Execute at least once (do-while semantics for "stmt while cond")
-                // Actually, postfix while: "print while <>" executes the stmt while cond is true
-                // No, 1 while unlink 'foo' means: while (unlink 'foo') { 1 }
-                loop {
-                    if !self.eval_expr(cond).to_bool() {
-                        break;
+                // Check for do { BLOCK } while COND — always execute once first
+                let is_do_block = matches!(stmt.as_ref(), Stmt::Expr(Expr::DoBlock(_)));
+                if is_do_block {
+                    loop {
+                        match self.exec_stmt(stmt) {
+                            Flow::Last(_) => break,
+                            Flow::Next(_) => {}
+                            Flow::None => {}
+                            other => return other,
+                        }
+                        if !self.eval_expr(cond).to_bool() {
+                            break;
+                        }
                     }
-                    match self.exec_stmt(stmt) {
-                        Flow::Last(_) => break,
-                        Flow::Next(_) => continue,
-                        Flow::None => {}
-                        other => return other,
+                } else {
+                    loop {
+                        if !self.eval_expr(cond).to_bool() {
+                            break;
+                        }
+                        match self.exec_stmt(stmt) {
+                            Flow::Last(_) => break,
+                            Flow::Next(_) => continue,
+                            Flow::None => {}
+                            other => return other,
+                        }
                     }
                 }
                 Flow::None
             }
             Stmt::PostfixUntil(stmt, cond) => {
-                loop {
-                    if self.eval_expr(cond).to_bool() {
-                        break;
+                let is_do_block = matches!(stmt.as_ref(), Stmt::Expr(Expr::DoBlock(_)));
+                if is_do_block {
+                    loop {
+                        match self.exec_stmt(stmt) {
+                            Flow::Last(_) => break,
+                            Flow::None => {}
+                            other => return other,
+                        }
+                        if self.eval_expr(cond).to_bool() {
+                            break;
+                        }
                     }
-                    match self.exec_stmt(stmt) {
-                        Flow::Last(_) => break,
-                        Flow::None => {}
-                        other => return other,
+                } else {
+                    loop {
+                        if self.eval_expr(cond).to_bool() {
+                            break;
+                        }
+                        match self.exec_stmt(stmt) {
+                            Flow::Last(_) => break,
+                            Flow::None => {}
+                            other => return other,
+                        }
                     }
                 }
                 Flow::None
@@ -771,7 +798,6 @@ impl Interpreter {
 
             Expr::DoBlock(stmts) => {
                 self.push_scope();
-                let mut last_val = Value::Undef;
                 for stmt in stmts {
                     match self.exec_stmt(stmt) {
                         Flow::Return(v) => {
@@ -783,15 +809,12 @@ impl Interpreter {
                             self.set_global_var("@", Value::Str(msg));
                             return Value::Undef;
                         }
-                        _ => {
-                            if let Stmt::Expr(e) = stmt {
-                                last_val = self.eval_expr(e);
-                            }
-                        }
+                        _ => {}
                     }
                 }
+                let result = self.last_expr_val.clone();
                 self.pop_scope();
-                last_val
+                result
             }
 
             Expr::Diamond(name) => {
@@ -1585,19 +1608,15 @@ impl Interpreter {
     }
 
     fn set_var(&mut self, name: &str, val: Value) {
-        // Set in the innermost scope that has this variable, or create in current scope
+        // Set in the innermost scope that has this variable, or create in global scope
         for scope in self.scopes.iter_mut().rev() {
             if scope.vars.contains_key(name) {
                 scope.vars.insert(name.to_string(), val);
                 return;
             }
         }
-        // Set in current scope if we have one, otherwise global
-        if let Some(scope) = self.scopes.last_mut() {
-            scope.vars.insert(name.to_string(), val);
-        } else {
-            self.globals.vars.insert(name.to_string(), val);
-        }
+        // Variable not found in any lexical scope — set in globals (package variable)
+        self.globals.vars.insert(name.to_string(), val);
     }
 
     fn set_global_var(&mut self, name: &str, val: Value) {
@@ -1626,11 +1645,8 @@ impl Interpreter {
                 return;
             }
         }
-        if let Some(scope) = self.scopes.last_mut() {
-            scope.arrays.insert(name.to_string(), arr);
-        } else {
-            self.globals.arrays.insert(name.to_string(), arr);
-        }
+        // Not found in lexical scopes — set in globals
+        self.globals.arrays.insert(name.to_string(), arr);
     }
 
     fn get_hash(&self, name: &str) -> HashMap<String, Value> {
@@ -1667,19 +1683,12 @@ impl Interpreter {
                 return;
             }
         }
-        if let Some(scope) = self.scopes.last_mut() {
-            scope
-                .hashes
-                .entry(name.to_string())
-                .or_default()
-                .insert(key.to_string(), val);
-        } else {
-            self.globals
-                .hashes
-                .entry(name.to_string())
-                .or_default()
-                .insert(key.to_string(), val);
-        }
+        // Not found in lexical scopes — set in globals
+        self.globals
+            .hashes
+            .entry(name.to_string())
+            .or_default()
+            .insert(key.to_string(), val);
     }
 
     fn set_hash_from_list(&mut self, name: &str, items: Vec<Value>) {
@@ -1959,29 +1968,26 @@ impl Interpreter {
         self.set_global_var("@", Value::Str(String::new()));
         self.push_scope();
 
-        let mut last_val = Value::Undef;
         for stmt in &stmts {
             match self.exec_stmt(stmt) {
                 Flow::Return(v) => {
-                    last_val = v;
-                    break;
+                    self.pop_scope();
+                    return v;
                 }
                 Flow::Die(msg) => {
                     self.set_global_var("@", Value::Str(msg));
                     self.pop_scope();
                     return Value::Undef;
                 }
-                Flow::None => {
-                    if let Stmt::Expr(e) = stmt {
-                        last_val = self.eval_expr(e);
-                    }
-                }
+                Flow::None => {}
                 _ => {}
             }
         }
 
         self.pop_scope();
-        last_val
+        let result = self.last_expr_val.clone();
+        self.pop_scope();
+        result
     }
 
     // --- sprintf ---
