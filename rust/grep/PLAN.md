@@ -2,9 +2,7 @@
 
 ## Current Status
 
-**114/119 tests passing** (96%) — from the GNU grep 3.12 test suite.
-
-### Remaining failure categories (~5 tests)
+**113/119 tests passing** (95%) — from the GNU grep 3.12 test suite.
 
 - **PCRE (~1)**: `pcre-abort` — fancy-regex doesn't hit backtrack limit on pathological patterns
 - **I/O (~3)**: `in-eq-out-infloop` (works locally, nix sandbox issue), `max-count-overread` (stdin byte seeking), `write-error-msg` (/dev/full needed)
@@ -305,7 +303,7 @@ Fall back to `fancy-regex` when BRE/ERE patterns contain backreferences:
 
 ## Test Inventory
 
-### Passing (114 tests)
+### Passing (113 tests)
 
 100k-entries, backref-alt, backref-multibyte-slow, backref-word, backslash-dot,
 backslash-s-and-repetition-operators, backslash-s-vs-invalid-multibyte, big-hole, big-match,
@@ -331,8 +329,12 @@ word-multibyte, y2038-vs-32-bit, z-anchor-newline
 
 ### Failing (5 tests)
 
-in-eq-out-infloop, include-exclude, max-count-overread, null-byte,
-pcre-abort, posix-bracket, write-error-msg
+in-eq-out-infloop, max-count-overread, null-byte,
+pcre-abort, write-error-msg
+
+### Timing out (1 test)
+
+include-exclude (complex glob/directory interaction causes hang)
 
 ### Not yet tested (5 tests)
 
