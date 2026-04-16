@@ -531,6 +531,7 @@ fn main() {
         process::exit(code);
     } else {
         let mut engine = Engine::new(commands, quiet, posix, opts.sandbox, opts.line_length, opts.null_data);
+        let mut exit_code = 0i32;
         for file in &opts.files {
             let raw_content = if file == "-" {
                 let mut buf = Vec::new();
@@ -561,6 +562,7 @@ fn main() {
                             }
                         }
                         eprintln!("sed: {file}: {}", fmt_io_err(&e));
+                        exit_code = 2;
                         continue;
                     }
                 }
@@ -574,9 +576,15 @@ fn main() {
             let reader = io::BufReader::new(raw_content.as_slice());
             match engine.run(reader, &mut out) {
                 Ok(code) if code != 0 => process::exit(code),
-                Err(e) => eprintln!("sed: {file}: {}", fmt_io_err(&e)),
+                Err(e) => {
+                    eprintln!("sed: {file}: {}", fmt_io_err(&e));
+                    exit_code = 2;
+                }
                 _ => {}
             }
+        }
+        if exit_code != 0 {
+            process::exit(exit_code);
         }
     }
 }

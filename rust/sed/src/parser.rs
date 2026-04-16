@@ -181,11 +181,10 @@ impl<'a> Parser<'a> {
         };
 
         if self.at_end() {
-            return Ok(Some(SedCommand {
-                address,
-                negated,
-                command: Command::Print,
-            }));
+            if !matches!(address, AddressRange::None) || negated {
+                return Err(self.err("missing command"));
+            }
+            return Ok(None);
         }
 
         // Validate: some commands don't accept addresses — check before parsing
@@ -792,13 +791,16 @@ impl<'a> Parser<'a> {
         let mut escaped = false;
         loop {
             match self.peek() {
-                None => break,
+                None => {
+                    return Err(self.err("unterminated `s' command"));
+                }
                 Some(b'\n') => {
                     if escaped {
                         self.advance();
                         result.push('\n');
                         escaped = false;
                     } else {
+                        // Unterminated at end of line — treat as end of replacement
                         break;
                     }
                 }
