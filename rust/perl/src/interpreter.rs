@@ -1595,8 +1595,14 @@ impl Interpreter {
                 Value::Str(items.join(&sep))
             }
             "split" => {
+                // Get the pattern — handle RegexLit specially
                 let pat = if args.is_empty() {
                     " ".to_string()
+                } else if let Expr::RegexMatch(_, pat, _) = &args[0] {
+                    // Bare /regex/ — use the pattern directly
+                    pat.clone()
+                } else if let Expr::RegexLit(pat, _) = &args[0] {
+                    pat.clone()
                 } else {
                     self.eval_expr(&args[0]).to_str()
                 };
@@ -1605,22 +1611,19 @@ impl Interpreter {
                 } else {
                     self.get_var("_").to_str()
                 };
-                let limit = if args.len() > 2 {
-                    self.eval_expr(&args[2]).to_num() as i64
-                } else {
-                    -1
-                };
 
                 let parts: Vec<Value> = if pat == " " {
                     text.split_whitespace()
                         .map(|s| Value::Str(s.to_string()))
                         .collect()
+                } else if let Ok(re) = regex::Regex::new(&pat) {
+                    re.split(&text).map(|s| Value::Str(s.to_string())).collect()
                 } else {
                     text.split(&pat)
                         .map(|s| Value::Str(s.to_string()))
                         .collect()
                 };
-                Value::Str(parts.len().to_string()) // In scalar context
+                Value::Num(parts.len() as f64) // In scalar context
             }
             "sprintf" => {
                 if args.is_empty() {
@@ -2334,6 +2337,10 @@ impl Interpreter {
                     "split" => {
                         let pat = if args.is_empty() {
                             " ".to_string()
+                        } else if let Expr::RegexMatch(_, pat, _) = &args[0] {
+                            pat.clone()
+                        } else if let Expr::RegexLit(pat, _) = &args[0] {
+                            pat.clone()
                         } else {
                             self.eval_expr(&args[0]).to_str()
                         };
@@ -2346,6 +2353,8 @@ impl Interpreter {
                             text.split_whitespace()
                                 .map(|s| Value::Str(s.to_string()))
                                 .collect()
+                        } else if let Ok(re) = regex::Regex::new(&pat) {
+                            re.split(&text).map(|s| Value::Str(s.to_string())).collect()
                         } else {
                             text.split(&pat)
                                 .map(|s| Value::Str(s.to_string()))
