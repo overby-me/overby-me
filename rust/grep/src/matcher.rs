@@ -359,6 +359,7 @@ pub(crate) fn build_matcher(opts: &Options) -> Matcher {
         let mut compile_opts = rust_pcre2::CompileOptions::default();
         compile_opts.caseless = opts.ignore_case;
         compile_opts.multiline = false; // grep handles line-by-line
+        compile_opts.dollar_endonly = opts.null_data; // -z: $ matches only at end of record
         // Remove (?i) prefix since we set it via compile options
         let pcre_pattern = if opts.ignore_case {
             pattern.strip_prefix("(?i)").unwrap_or(&pattern).to_string()

@@ -126,9 +126,10 @@ pub enum NamedClass {
 /// Regex options/flags.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Options {
-    pub caseless: bool,    // (?i)
-    pub multiline: bool,   // (?m)
-    pub dotall: bool,      // (?s)
-    pub extended: bool,    // (?x)
-    pub ungreedy: bool,    // (?U)
+    pub caseless: bool,      // (?i)
+    pub multiline: bool,     // (?m)
+    pub dotall: bool,        // (?s)
+    pub extended: bool,      // (?x)
+    pub ungreedy: bool,      // (?U)
+    pub dollar_endonly: bool, // $ matches only at end of string (for -z mode)
 }

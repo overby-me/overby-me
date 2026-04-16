@@ -51,6 +51,8 @@ pub struct CompileOptions {
     pub ungreedy: bool,
     /// Enable UTF-8 mode.
     pub utf: bool,
+    /// `$` matches only at end of string, not before final newline.
+    pub dollar_endonly: bool,
 }
 
 /// Runtime match context with configurable limits.
@@ -146,6 +148,7 @@ impl Regex {
             dotall: opts.dotall,
             extended: opts.extended,
             ungreedy: opts.ungreedy,
+            dollar_endonly: opts.dollar_endonly,
         };
         let mut parser = Parser::new(pattern, options);
         let ast = parser.parse()?;

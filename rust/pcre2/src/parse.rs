@@ -205,6 +205,8 @@ impl<'a> Parser<'a> {
                 self.advance();
                 if self.options.multiline {
                     Ok(Node::Anchor(AnchorKind::End))
+                } else if self.options.dollar_endonly {
+                    Ok(Node::Anchor(AnchorKind::EndOfString))
                 } else {
                     Ok(Node::Anchor(AnchorKind::EndOfStringBeforeNewline))
                 }
