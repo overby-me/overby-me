@@ -1601,7 +1601,9 @@ impl Interpreter {
                             });
                             r.to_string()
                         };
-                        self.assign_to(&target_expr, Value::Str(result));
+                        if count > 0 {
+                            self.assign_to(&target_expr, Value::Str(result));
+                        }
                         Value::Num(count as f64)
                     }
                     None => Value::Num(0.0),
@@ -2005,7 +2007,6 @@ impl Interpreter {
                     // Save param state BEFORE restoring scope (for copy-back)
                     let mut arr_copyback: Vec<(String, Option<HashMap<String, Value>>)> =
                         Vec::new();
-                    let mut scalar_copyback: Vec<(String, Value)> = Vec::new();
                     for (i, _arg) in args.iter().enumerate() {
                         if let Some(Some(orig_name)) = arg_var_names.get(i)
                             && let Some(param) = func.params.get(i)
@@ -2018,14 +2019,6 @@ impl Interpreter {
                             {
                                 let arr = self.arrays.get(param).cloned();
                                 arr_copyback.push((orig_name.clone(), arr));
-                            }
-                            // Copy back scalar value only if arg was not an array
-                            if !was_array
-                                && !param_has_array
-                                && let Some(val) = self.globals.get(param)
-                                && !matches!(val, Value::Uninitialized)
-                            {
-                                scalar_copyback.push((orig_name.clone(), val.clone()));
                             }
                         }
                     }
@@ -2052,11 +2045,6 @@ impl Interpreter {
                             self.arrays.remove(&orig_name);
                         }
                     }
-                    // Copy back scalar values
-                    for (orig_name, val) in scalar_copyback {
-                        self.globals.insert(orig_name, val);
-                    }
-
                     result
                 } else {
                     eprintln!("awk: error: attempt to use non-function `{name}' in function call");
