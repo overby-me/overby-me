@@ -382,6 +382,8 @@ struct Response {
     headers: Vec<(String, String)>,
     body: Vec<u8>,
     header_bytes: Vec<u8>,
+    /// Collected header bytes from intermediate redirect responses.
+    redirect_headers: Vec<u8>,
 }
 
 fn read_response(conn: &mut Connection) -> Result<Response, String> {
@@ -392,11 +394,12 @@ fn read_response(conn: &mut Connection) -> Result<Response, String> {
     reader
         .read_line(&mut status_line)
         .map_err(|e| format!("failed to read status line: {e}"))?;
-    let status_line = status_line.trim_end().to_string();
 
+    // Preserve original line endings in header_bytes (the server may send \n or \r\n)
     let mut header_bytes = Vec::new();
     header_bytes.extend_from_slice(status_line.as_bytes());
-    header_bytes.extend_from_slice(b"\r\n");
+
+    let status_line = status_line.trim_end().to_string();
 
     let parts: Vec<&str> = status_line.splitn(3, ' ').collect();
     if parts.len() < 2 {
@@ -458,6 +461,7 @@ fn read_response(conn: &mut Connection) -> Result<Response, String> {
         headers,
         body,
         header_bytes,
+        redirect_headers: Vec::new(),
     })
 }
 
@@ -523,6 +527,12 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> Vec<u8> {
         req.push_str(&format!("Host: {}:{}\r\n", url.host, url.port));
     }
 
+    // Basic auth — curl sends Authorization right after Host.
+    if let Some(ref user) = opts.user {
+        let encoded = base64_encode(user.as_bytes());
+        req.push_str(&format!("Authorization: Basic {encoded}\r\n"));
+    }
+
     // User-Agent.
     let ua = opts.user_agent.as_deref().unwrap_or("curl/8.0.0");
     req.push_str(&format!("User-Agent: {ua}\r\n"));
@@ -546,45 +556,36 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> Vec<u8> {
 
     // Cookie.
     if let Some(ref cookie) = opts.cookie {
-        // If it's a file path, read cookies from file.
-        if std::path::Path::new(cookie).is_file() {
+        if cookie.contains('=') {
+            // Raw cookie string (contains name=value)
+            req.push_str(&format!("Cookie: {cookie}\r\n"));
+        } else if std::path::Path::new(cookie).is_file() {
+            // File path — read cookies from Netscape cookie format
             if let Ok(contents) = fs::read_to_string(cookie) {
-                let cookies: Vec<&str> = contents
+                let cookie_pairs: Vec<String> = contents
                     .lines()
                     .filter(|l| !l.starts_with('#') && l.contains('\t'))
+                    .filter_map(|line| {
+                        let fields: Vec<&str> = line.split('\t').collect();
+                        if fields.len() >= 7 {
+                            Some(format!("{}={}", fields[5], fields[6]))
+                        } else {
+                            None
+                        }
+                    })
                     .collect();
-                if !cookies.is_empty() {
-                    // Netscape cookie format: domain, flag, path, secure, expiry, name, value
-                    let cookie_pairs: Vec<String> = cookies
-                        .iter()
-                        .filter_map(|line| {
-                            let fields: Vec<&str> = line.split('\t').collect();
-                            if fields.len() >= 7 {
-                                Some(format!("{}={}", fields[5], fields[6]))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-                    if !cookie_pairs.is_empty() {
-                        req.push_str(&format!("Cookie: {}\r\n", cookie_pairs.join("; ")));
-                    }
+                if !cookie_pairs.is_empty() {
+                    req.push_str(&format!("Cookie: {}\r\n", cookie_pairs.join("; ")));
                 }
             }
-        } else {
-            req.push_str(&format!("Cookie: {cookie}\r\n"));
         }
+        // If it doesn't contain '=' and isn't a file, it just enables
+        // the cookie engine without sending cookies (like real curl).
     }
 
     // Range.
     if let Some(ref range) = opts.range {
         req.push_str(&format!("Range: bytes={range}\r\n"));
-    }
-
-    // Basic auth.
-    if let Some(ref user) = opts.user {
-        let encoded = base64_encode(user.as_bytes());
-        req.push_str(&format!("Authorization: Basic {encoded}\r\n"));
     }
 
     // Custom headers (may override defaults).
@@ -601,17 +602,23 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> Vec<u8> {
             .headers
             .iter()
             .any(|(k, _)| k.eq_ignore_ascii_case("content-type"));
+        let content_len_hdr = format!("Content-Length: {}\r\n", body.len());
         if !has_content_type {
             if !opts.form_fields.is_empty() {
                 let boundary = multipart_boundary(opts);
+                req.push_str(&content_len_hdr);
                 req.push_str(&format!(
                     "Content-Type: multipart/form-data; boundary={boundary}\r\n"
                 ));
-            } else {
+            } else if opts.data.is_some() {
+                req.push_str(&content_len_hdr);
                 req.push_str("Content-Type: application/x-www-form-urlencoded\r\n");
+            } else {
+                req.push_str(&content_len_hdr);
             }
+        } else {
+            req.push_str(&content_len_hdr);
         }
-        req.push_str(&format!("Content-Length: {}\r\n", body.len()));
     }
 
     req.push_str("\r\n");
@@ -729,9 +736,46 @@ fn execute_request(url: &ParsedUrl, opts: &Options) -> Result<Response, String> 
     Ok(resp)
 }
 
+/// Normalize a URL path by resolving `.` and `..` segments.
+fn normalize_url_path(url: &str) -> String {
+    // Find the path portion (after scheme://host:port)
+    if let Some(scheme_end) = url.find("://") {
+        let after_scheme = &url[scheme_end + 3..];
+        let path_start = after_scheme.find('/').map(|i| scheme_end + 3 + i);
+        if let Some(ps) = path_start {
+            let prefix = &url[..ps];
+            let path = &url[ps..];
+            let normalized = normalize_path(path);
+            return format!("{prefix}{normalized}");
+        }
+    }
+    url.to_string()
+}
+
+/// Normalize a path by resolving `.` and `..` segments.
+fn normalize_path(path: &str) -> String {
+    let mut segments: Vec<&str> = Vec::new();
+    for seg in path.split('/') {
+        match seg {
+            "." => {}
+            ".." => {
+                segments.pop();
+            }
+            _ => segments.push(seg),
+        }
+    }
+    let result = segments.join("/");
+    if result.is_empty() {
+        "/".to_string()
+    } else {
+        result
+    }
+}
+
 fn perform(url_str: &str, opts: &Options) -> Result<Response, String> {
     let mut current_url = url_str.to_string();
     let mut redirects = 0;
+    let mut redirect_headers: Vec<u8> = Vec::new();
 
     loop {
         let url = parse_url(&current_url)?;
@@ -745,6 +789,10 @@ fn perform(url_str: &str, opts: &Options) -> Result<Response, String> {
             }
             if let Some((_, location)) = resp.headers.iter().find(|(k, _)| k == "location") {
                 redirects += 1;
+
+                // Collect intermediate response headers for -i output.
+                redirect_headers.extend_from_slice(&resp.header_bytes);
+
                 // Resolve relative URLs.
                 if location.starts_with("http://") || location.starts_with("https://") {
                     current_url = location.clone();
@@ -757,6 +805,9 @@ fn perform(url_str: &str, opts: &Options) -> Result<Response, String> {
                     };
                     current_url = format!("{base}{location}");
                 }
+                // Normalize path (resolve ../  ./ segments)
+                current_url = normalize_url_path(&current_url);
+
                 if opts.verbose {
                     eprintln!("* Following redirect to {current_url}");
                 }
@@ -764,7 +815,9 @@ fn perform(url_str: &str, opts: &Options) -> Result<Response, String> {
             }
         }
 
-        return Ok(resp);
+        let mut final_resp = resp;
+        final_resp.redirect_headers = redirect_headers;
+        return Ok(final_resp);
     }
 }
 
@@ -1496,7 +1549,10 @@ fn main() {
                 // Write output.
                 if let Some(ref path) = output_path {
                     if opts.include_headers || opts.head {
-                        let mut data = resp.header_bytes.clone();
+                        let mut data = Vec::new();
+                        // Include intermediate redirect headers
+                        data.extend_from_slice(&resp.redirect_headers);
+                        data.extend_from_slice(&resp.header_bytes);
                         if !opts.head {
                             data.extend_from_slice(&resp.body);
                         }
@@ -1513,6 +1569,8 @@ fn main() {
                     let mut out = stdout.lock();
 
                     if opts.include_headers || opts.head {
+                        // Include intermediate redirect headers
+                        let _ = out.write_all(&resp.redirect_headers);
                         let _ = out.write_all(&resp.header_bytes);
                     }
                     if !opts.head {
@@ -1524,7 +1582,7 @@ fn main() {
                 // Write-out.
                 if let Some(ref fmt) = opts.write_out {
                     let formatted = format_write_out(fmt, &resp, &url);
-                    eprint!("{formatted}");
+                    print!("{formatted}");
                 }
             }
             Err(e) => {

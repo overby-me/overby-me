@@ -47,4 +47,10 @@ disabled_rules = [
   # Release profile inherits from workspace; overflow checks are a
   # separate decision for an HTTP client binary.
   "rust_release_profile_missing_overflow_checks",
+
+  # normalize_path uses string join, not std::path::Path::join.
+  "rust_path_join_absolute",
+
+  # The redirect loop dereferences opts fields; this is idiomatic.
+  "rust_aos_hot_path",
 ]
