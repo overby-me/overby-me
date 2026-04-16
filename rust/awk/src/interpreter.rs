@@ -1185,7 +1185,7 @@ impl Interpreter {
                         BinOp::Sub => Value::Num(lv.to_num() - rv.to_num()),
                         BinOp::Mul => Value::Num(lv.to_num() * rv.to_num()),
                         BinOp::Div => {
-                            // Division by zero returns inf (like gawk)
+                            // Division by zero returns inf (IEEE behavior)
                             Value::Num(lv.to_num() / rv.to_num())
                         }
                         BinOp::Mod => {
