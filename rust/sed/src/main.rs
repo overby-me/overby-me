@@ -9,7 +9,7 @@ use std::process;
 
 use engine::Engine;
 use parser::Parser;
-use types::Options;
+use types::{Options, ScriptEntry, ScriptSource};
 
 /// Format an IO error like GNU sed (strip Rust's "(os error N)" suffix)
 fn fmt_io_err(e: &io::Error) -> String {
@@ -37,16 +37,19 @@ fn read_script_file(path: &str) -> Result<String, String> {
 
 fn parse_options() -> Options {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut expr_count = 0usize; // tracks -e expression numbering
     let mut opts = Options {
         in_place: None,
         quiet: false,
         extended: false,
-        expressions: Vec::new(),
+        scripts: Vec::new(),
         files: Vec::new(),
         posix: false,
         unbuffered: false,
         null_data: false,
         separate: false,
+        sandbox: false,
+        line_length: 70,
     };
 
     let mut i = 0;
@@ -93,7 +96,11 @@ fn parse_options() -> Options {
             "-e" => {
                 i += 1;
                 if i < args.len() {
-                    opts.expressions.push(args[i].clone());
+                    expr_count += 1;
+                    opts.scripts.push(ScriptEntry {
+                        source: ScriptSource::Expression(expr_count),
+                        content: args[i].clone(),
+                    });
                 }
                 i += 1;
             }
@@ -101,7 +108,10 @@ fn parse_options() -> Options {
                 i += 1;
                 if i < args.len() {
                     match read_script_file(&args[i]) {
-                        Ok(content) => opts.expressions.push(content),
+                        Ok(content) => opts.scripts.push(ScriptEntry {
+                            source: ScriptSource::File(args[i].clone()),
+                            content,
+                        }),
                         Err(e) => {
                             eprintln!("{e}");
                             process::exit(2);
@@ -130,18 +140,40 @@ fn parse_options() -> Options {
                 opts.posix = true;
                 i += 1;
             }
+            "--sandbox" => {
+                opts.sandbox = true;
+                i += 1;
+            }
+            "--follow-symlinks" => {
+                // Accepted but ignored (Linux-only GNU extension)
+                i += 1;
+            }
+            "-l" => {
+                i += 1;
+                if i < args.len() {
+                    opts.line_length = args[i].parse().unwrap_or(70);
+                }
+                i += 1;
+            }
             arg if arg.starts_with("-i") => {
                 opts.in_place = Some(arg[2..].to_string());
                 i += 1;
             }
             arg if arg.starts_with("-e") => {
-                opts.expressions.push(arg[2..].to_string());
+                expr_count += 1;
+                opts.scripts.push(ScriptEntry {
+                    source: ScriptSource::Expression(expr_count),
+                    content: arg[2..].to_string(),
+                });
                 i += 1;
             }
             arg if arg.starts_with("-f") => {
                 let file = &arg[2..];
                 match read_script_file(file) {
-                    Ok(content) => opts.expressions.push(content),
+                    Ok(content) => opts.scripts.push(ScriptEntry {
+                        source: ScriptSource::File(file.to_string()),
+                        content,
+                    }),
                     Err(e) => {
                         eprintln!("{e}");
                         process::exit(2);
@@ -161,13 +193,20 @@ fn parse_options() -> Options {
                         'z' => opts.null_data = true,
                         's' => opts.separate = true,
                         'e' => {
+                            expr_count += 1;
                             let rest: String = chars[j + 1..].iter().collect();
                             if !rest.is_empty() {
-                                opts.expressions.push(rest);
+                                opts.scripts.push(ScriptEntry {
+                                    source: ScriptSource::Expression(expr_count),
+                                    content: rest,
+                                });
                             } else {
                                 i += 1;
                                 if i < args.len() {
-                                    opts.expressions.push(args[i].clone());
+                                    opts.scripts.push(ScriptEntry {
+                                        source: ScriptSource::Expression(expr_count),
+                                        content: args[i].clone(),
+                                    });
                                 }
                             }
                             j = chars.len();
@@ -187,7 +226,10 @@ fn parse_options() -> Options {
                             };
                             if !file.is_empty() {
                                 match read_script_file(&file) {
-                                    Ok(content) => opts.expressions.push(content),
+                                    Ok(content) => opts.scripts.push(ScriptEntry {
+                                        source: ScriptSource::File(file.clone()),
+                                        content,
+                                    }),
                                     Err(e) => {
                                         eprintln!("{e}");
                                         process::exit(2);
@@ -200,6 +242,22 @@ fn parse_options() -> Options {
                         'i' => {
                             let suffix: String = chars[j + 1..].iter().collect();
                             opts.in_place = Some(suffix);
+                            j = chars.len();
+                            continue;
+                        }
+                        'l' => {
+                            let rest: String = chars[j + 1..].iter().collect();
+                            let n = if !rest.is_empty() {
+                                rest.parse().unwrap_or(70)
+                            } else {
+                                i += 1;
+                                if i < args.len() {
+                                    args[i].parse().unwrap_or(70)
+                                } else {
+                                    70
+                                }
+                            };
+                            opts.line_length = n;
                             j = chars.len();
                             continue;
                         }
@@ -217,8 +275,12 @@ fn parse_options() -> Options {
                 process::exit(2);
             }
             _ => {
-                if opts.expressions.is_empty() {
-                    opts.expressions.push(args[i].clone());
+                if opts.scripts.is_empty() {
+                    expr_count += 1;
+                    opts.scripts.push(ScriptEntry {
+                        source: ScriptSource::Expression(expr_count),
+                        content: args[i].clone(),
+                    });
                 } else {
                     opts.files.push(args[i].clone());
                 }
@@ -227,9 +289,23 @@ fn parse_options() -> Options {
         }
     }
 
-    if opts.expressions.is_empty() {
+    if opts.scripts.is_empty() {
         eprintln!("sed: no script command has been given");
         process::exit(2);
+    }
+
+    // COLS env var sets default line width (overridden by -l flag)
+    // GNU sed uses COLS - 1 as the wrap width
+    if opts.line_length == 70 {
+        // Only apply COLS if -l wasn't explicitly set
+        if let Ok(cols) = std::env::var("COLS") {
+            if let Ok(n) = cols.parse::<usize>() {
+                if n > 1 {
+                    opts.line_length = n - 1;
+                }
+                // COLS=0 or COLS=1 → use default
+            }
+        }
     }
 
     opts
@@ -240,8 +316,9 @@ fn main() {
 
     let mut commands = Vec::new();
     let mut hash_n_quiet = false;
-    for (idx, expr) in opts.expressions.iter().enumerate() {
-        let mut parser = Parser::new(expr, opts.extended);
+    for (idx, script) in opts.scripts.iter().enumerate() {
+        let mut parser = Parser::new(&script.content, opts.extended, script.source.clone());
+        parser.sandbox = opts.sandbox;
         match parser.parse_all(idx == 0) {
             Ok(cmds) => {
                 if idx == 0 && parser.hash_n_quiet {
@@ -251,7 +328,7 @@ fn main() {
             }
             Err(e) => {
                 eprintln!("sed: {e}");
-                process::exit(2);
+                process::exit(1); // EXIT_BAD_INPUT — matches GNU sed
             }
         }
     }
@@ -290,7 +367,7 @@ fn main() {
             }
 
             // Each file gets a fresh engine in in-place mode
-            let mut engine = Engine::new(commands.clone(), quiet, posix);
+            let mut engine = Engine::new(commands.clone(), quiet, posix, opts.sandbox, opts.line_length);
             engine.current_filename = Some(file.clone());
             let reader = io::BufReader::new(content.as_bytes());
             let mut output = Vec::new();
@@ -310,14 +387,14 @@ fn main() {
     } else if opts.files.is_empty() || (opts.files.len() == 1 && opts.files[0] == "-") {
         let stdin = io::stdin();
         let reader = stdin.lock();
-        let mut engine = Engine::new(commands, quiet, posix);
+        let mut engine = Engine::new(commands, quiet, posix, opts.sandbox, opts.line_length);
         let code = engine.run(reader, &mut out).unwrap_or_else(|e| {
             eprintln!("sed: {e}");
             1
         });
         process::exit(code);
     } else {
-        let mut engine = Engine::new(commands, quiet, posix);
+        let mut engine = Engine::new(commands, quiet, posix, opts.sandbox, opts.line_length);
         for file in &opts.files {
             let content = if file == "-" {
                 let mut buf = String::new();

@@ -8,16 +8,40 @@ pub struct Parser<'a> {
     input: &'a [u8],
     pos: usize,
     extended: bool,
-    pub hash_n_quiet: bool, // set if #n is found as first line of first script
+    pub hash_n_quiet: bool,
+    source: ScriptSource,
+    cmd_start: usize,
+    pub sandbox: bool,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(input: &'a str, extended: bool) -> Self {
+    pub fn new(input: &'a str, extended: bool, source: ScriptSource) -> Self {
         Parser {
             input: input.as_bytes(),
             pos: 0,
             extended,
             hash_n_quiet: false,
+            source,
+            cmd_start: 0,
+            sandbox: false,
+        }
+    }
+
+    /// Format an error with source location info
+    fn err(&self, msg: &str) -> String {
+        match &self.source {
+            ScriptSource::Expression(n) => {
+                format!("-e expression #{n}, char {}: {msg}", self.pos - self.cmd_start)
+            }
+            ScriptSource::File(name) => {
+                // Count line number from cmd_start position
+                let line = self.input[..self.cmd_start]
+                    .iter()
+                    .filter(|&&b| b == b'\n')
+                    .count()
+                    + 1;
+                format!("file {name} line {line}: {msg}")
+            }
         }
     }
 
@@ -93,6 +117,7 @@ impl<'a> Parser<'a> {
         if self.at_end() {
             return Ok(None);
         }
+        self.cmd_start = self.pos;
 
         let address = self.parse_address_range()?;
         self.skip_whitespace();
@@ -131,7 +156,7 @@ impl<'a> Parser<'a> {
                     let second = self.try_parse_address()?;
                     match second {
                         Some(addr2) => Ok(AddressRange::Range(addr, addr2)),
-                        None => Err("expected address after ','".into()),
+                        None => Err(self.err("expected address after ','")),
                     }
                 } else {
                     Ok(AddressRange::Single(addr))
@@ -165,7 +190,7 @@ impl<'a> Parser<'a> {
             }
             Some(b'\\') => {
                 self.advance();
-                let delim = self.advance().ok_or("expected delimiter after \\")?;
+                let delim = self.advance().ok_or_else(|| self.err("expected delimiter after \\"))?;
                 let pattern = self.parse_regex_delimited(delim)?;
                 let re = self.compile_regex(&pattern)?;
                 Ok(Some(Address::Regex(re)))
@@ -188,11 +213,15 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_regex_delimited(&mut self, delim: u8) -> Result<String, String> {
+        self.parse_regex_delimited_ctx(delim, "unterminated address regex")
+    }
+
+    fn parse_regex_delimited_ctx(&mut self, delim: u8, eof_msg: &str) -> Result<String, String> {
         let mut pattern = String::new();
         let mut escaped = false;
         let mut in_bracket = false;
         loop {
-            let ch = self.advance().ok_or("unterminated regex")?;
+            let ch = self.advance().ok_or_else(|| self.err(eof_msg))?;
             if escaped {
                 if ch == delim {
                     pattern.push(ch as char);
@@ -230,7 +259,7 @@ impl<'a> Parser<'a> {
 
     fn compile_regex(&self, pattern: &str) -> Result<Regex, String> {
         if pattern.is_empty() {
-            return Err("empty regex".into());
+            return Err(self.err("empty regex"));
         }
 
         let pat = if self.extended {
@@ -240,11 +269,11 @@ impl<'a> Parser<'a> {
         };
 
         let pat = fix_posix_char_class(&pat);
-        Regex::new(&pat).map_err(|e| format!("invalid regex: {e}"))
+        Regex::new(&pat).map_err(|e| self.err(&format!("invalid regex: {e}")))
     }
 
     fn parse_command_char(&mut self) -> Result<Command, String> {
-        let ch = self.advance().ok_or("expected command")?;
+        let ch = self.advance().ok_or_else(|| self.err("expected command"))?;
         match ch {
             b'{' => {
                 let mut cmds = Vec::new();
@@ -255,7 +284,7 @@ impl<'a> Parser<'a> {
                         break;
                     }
                     if self.at_end() {
-                        return Err("unterminated '{'".into());
+                        return Err(self.err("unmatched `{'"));
                     }
                     if let Some(cmd) = self.parse_command()? {
                         cmds.push(cmd);
@@ -317,7 +346,7 @@ impl<'a> Parser<'a> {
                 self.skip_whitespace();
                 let label = self.parse_label();
                 if label.is_empty() {
-                    return Err("\":\" lacks a label".into());
+                    return Err(self.err("\":\" lacks a label"));
                 }
                 Ok(Command::Label(label))
             }
@@ -336,27 +365,29 @@ impl<'a> Parser<'a> {
                 let label = self.try_parse_label();
                 Ok(Command::BranchIfNoSub(label))
             }
-            b'r' => {
+            b'r' | b'R' | b'w' | b'W' => {
+                if self.sandbox {
+                    return Err(self.err("e/r/w commands disabled in sandbox mode"));
+                }
                 self.skip_whitespace();
                 let file = self.parse_filename();
-                Ok(Command::ReadFile(file))
-            }
-            b'R' => {
-                self.skip_whitespace();
-                let file = self.parse_filename();
-                Ok(Command::ReadLine(file))
-            }
-            b'w' => {
-                self.skip_whitespace();
-                let file = self.parse_filename();
-                Ok(Command::WriteFile(file))
-            }
-            b'W' => {
-                self.skip_whitespace();
-                let file = self.parse_filename();
-                Ok(Command::WriteFirstLine(file))
+                if file.is_empty() {
+                    return Err(
+                        self.err("missing filename in r/R/w/W commands"),
+                    );
+                }
+                match ch {
+                    b'r' => Ok(Command::ReadFile(file)),
+                    b'R' => Ok(Command::ReadLine(file)),
+                    b'w' => Ok(Command::WriteFile(file)),
+                    b'W' => Ok(Command::WriteFirstLine(file)),
+                    _ => unreachable!(),
+                }
             }
             b'e' => {
+                if self.sandbox {
+                    return Err(self.err("e/r/w commands disabled in sandbox mode"));
+                }
                 if self.peek() == Some(b'\n')
                     || self.peek() == Some(b';')
                     || self.at_end()
@@ -392,17 +423,17 @@ impl<'a> Parser<'a> {
                 Ok(Command::Noop)
             }
             b'\n' | b';' | b'}' => Ok(Command::Noop),
-            _ => Err(format!("unknown command: '{}'", char::from(ch))),
+            _ => Err(self.err(&format!("unknown command: `{}'", char::from(ch)))),
         }
     }
 
     fn parse_substitute(&mut self) -> Result<Command, String> {
-        let delim = self.advance().ok_or("expected delimiter for s command")?;
+        let delim = self.advance().ok_or_else(|| self.err("unterminated `s' command"))?;
         if delim == b'\\' || delim == b'\n' {
-            return Err("invalid delimiter for s command".into());
+            return Err(self.err("delimiter character is not a single-byte character"));
         }
 
-        let pattern_str = self.parse_regex_delimited(delim)?;
+        let pattern_str = self.parse_regex_delimited_ctx(delim, "unterminated `s' command")?;
         let replacement = self.parse_replacement(delim)?;
         let flags = self.parse_sub_flags()?;
 
@@ -425,7 +456,7 @@ impl<'a> Parser<'a> {
         } else {
             Some(
                 Regex::new(&fix_posix_char_class(&re_pattern))
-                    .map_err(|e| format!("invalid regex in s command: {e}"))?,
+                    .map_err(|e| self.err(&format!("invalid regex in s command: {e}")))?,
             )
         };
 
@@ -571,14 +602,24 @@ impl<'a> Parser<'a> {
 
     fn parse_sub_flags(&mut self) -> Result<SubstFlags, String> {
         let mut flags = SubstFlags::default();
+        let mut seen_g = false;
+        let mut seen_p = false;
         loop {
             match self.peek() {
                 Some(b'g') => {
                     self.advance();
+                    if seen_g {
+                        return Err(self.err("multiple `g' options to `s' command"));
+                    }
+                    seen_g = true;
                     flags.global = true;
                 }
                 Some(b'p') => {
                     self.advance();
+                    if seen_p {
+                        return Err(self.err("multiple `p' options to `s' command"));
+                    }
+                    seen_p = true;
                     flags.print = true;
                 }
                 Some(b'i') | Some(b'I') => {
@@ -587,6 +628,9 @@ impl<'a> Parser<'a> {
                 }
                 Some(b'e') => {
                     self.advance();
+                    if self.sandbox {
+                        return Err(self.err("e/r/w commands disabled in sandbox mode"));
+                    }
                     if flags.print && !flags.execute {
                         flags.print_before_exec = true;
                     }
@@ -598,8 +642,17 @@ impl<'a> Parser<'a> {
                 }
                 Some(b'w') => {
                     self.advance();
+                    if self.sandbox {
+                        return Err(self.err("e/r/w commands disabled in sandbox mode"));
+                    }
                     self.skip_whitespace();
-                    flags.write_file = Some(self.parse_filename());
+                    let file = self.parse_filename();
+                    if file.is_empty() {
+                        return Err(
+                            self.err("missing filename in r/R/w/W commands"),
+                        );
+                    }
+                    flags.write_file = Some(file);
                     break;
                 }
                 Some(b'\r') => {
@@ -607,9 +660,12 @@ impl<'a> Parser<'a> {
                 }
                 Some(ch) if ch.is_ascii_digit() => {
                     let n = self.parse_number()?;
-                    if n > 0 {
-                        flags.nth = Some(n);
+                    if n == 0 {
+                        return Err(
+                            self.err("number option to `s' command may not be zero"),
+                        );
                     }
+                    flags.nth = Some(n);
                 }
                 _ => break,
             }
@@ -618,11 +674,11 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_transliterate(&mut self) -> Result<Command, String> {
-        let delim = self.advance().ok_or("expected delimiter for y command")?;
+        let delim = self.advance().ok_or_else(|| self.err("unterminated `y' command"))?;
         let src = self.parse_translit_chars(delim)?;
         let dst = self.parse_translit_chars(delim)?;
         if src.len() != dst.len() {
-            return Err("y command: source and dest must have same length".into());
+            return Err(self.err("strings for `y' command are different lengths"));
         }
         Ok(Command::Transliterate(src, dst))
     }
@@ -631,7 +687,7 @@ impl<'a> Parser<'a> {
         let mut chars = Vec::new();
         let mut escaped = false;
         loop {
-            let ch = self.advance().ok_or("unterminated y command")?;
+            let ch = self.advance().ok_or_else(|| self.err("unterminated `y' command"))?;
             if escaped {
                 match ch {
                     b'n' | b'\n' => chars.push('\n'),

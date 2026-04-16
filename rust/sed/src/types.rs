@@ -84,14 +84,28 @@ pub enum Flow {
     QuitNoprint,
 }
 
+/// Tracks where a script expression came from (for error messages)
+#[derive(Clone)]
+pub enum ScriptSource {
+    Expression(usize), // -e expression #N (1-based)
+    File(String),      // -f filename
+}
+
+pub struct ScriptEntry {
+    pub source: ScriptSource,
+    pub content: String,
+}
+
 pub struct Options {
     pub in_place: Option<String>, // -i[SUFFIX]
     pub quiet: bool,              // -n
     pub extended: bool,           // -E / -r
-    pub expressions: Vec<String>,
+    pub scripts: Vec<ScriptEntry>,
     pub files: Vec<String>,
-    pub posix: bool,      // --posix
-    pub unbuffered: bool, // -u
-    pub null_data: bool,  // -z
-    pub separate: bool,   // -s
+    pub posix: bool,        // --posix
+    pub unbuffered: bool,   // -u
+    pub null_data: bool,    // -z
+    pub separate: bool,     // -s
+    pub sandbox: bool,      // --sandbox
+    pub line_length: usize, // -l N (default line width for `l` command)
 }

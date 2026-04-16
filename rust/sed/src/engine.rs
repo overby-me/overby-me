@@ -23,13 +23,15 @@ pub struct Engine {
     input_lines: Vec<String>,
     input_index: usize,
     pub current_filename: Option<String>,
-    pub line_wrap_width: usize, // default line width for `l` command
+    pub line_wrap_width: usize,
+    #[allow(dead_code)]
+    sandbox: bool,
     range_active: Vec<bool>,
     read_line_positions: HashMap<String, usize>, // for R command: track line offset per file
 }
 
 impl Engine {
-    pub fn new(commands: Vec<SedCommand>, quiet: bool, posix: bool) -> Self {
+    pub fn new(commands: Vec<SedCommand>, quiet: bool, posix: bool, sandbox: bool, line_length: usize) -> Self {
         let num_cmds = count_commands(&commands);
         Engine {
             commands,
@@ -49,7 +51,8 @@ impl Engine {
             input_lines: Vec::new(),
             input_index: 0,
             current_filename: None,
-            line_wrap_width: 70,
+            line_wrap_width: line_length,
+            sandbox,
             range_active: vec![false; num_cmds],
             read_line_positions: HashMap::new(),
         }
@@ -155,7 +158,7 @@ impl Engine {
                     }
                     Flow::QuitNoprint => {
                         self.quit = true;
-                        self.pattern_space.clear();
+                        self.suppress_default_print = true;
                         return Flow::QuitNoprint;
                     }
                 }
@@ -250,7 +253,13 @@ impl Engine {
                 let re = match pattern {
                     None => match &self.last_regex {
                         Some(re) => re.clone(),
-                        None => return Flow::Continue,
+                        None => {
+                            eprintln!(
+                                "sed: -e expression #1, char 0: no previous regular expression"
+                            );
+                            self.exit_code = 1;
+                            return Flow::Quit;
+                        }
                     },
                     Some(re) => {
                         self.last_regex = Some(re.clone());
@@ -530,7 +539,8 @@ impl Engine {
                 Flow::Continue
             }
 
-            Command::Execute(cmd_text) => match cmd_text {
+            Command::Execute(cmd_text) => {
+                match cmd_text {
                 Some(cmd_str) => {
                     if let Ok(output) = std::process::Command::new("sh")
                         .arg("-c")
@@ -562,7 +572,8 @@ impl Engine {
                     }
                     Flow::Continue
                 }
-            },
+            }
+            }
 
             Command::Filename => {
                 let name = self.current_filename.as_deref().unwrap_or("-");
