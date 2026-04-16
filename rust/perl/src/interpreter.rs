@@ -195,11 +195,14 @@ impl Interpreter {
                 else_block,
             } => {
                 let val = self.eval_expr(cond);
+                self.last_expr_val = val.clone();
                 if val.to_bool() {
                     return self.exec_stmts(then);
                 }
                 for (cond, body) in elsifs {
-                    if self.eval_expr(cond).to_bool() {
+                    let val = self.eval_expr(cond);
+                    self.last_expr_val = val.clone();
+                    if val.to_bool() {
                         return self.exec_stmts(body);
                     }
                 }
@@ -214,7 +217,9 @@ impl Interpreter {
                 then,
                 else_block,
             } => {
-                if !self.eval_expr(cond).to_bool() {
+                let val = self.eval_expr(cond);
+                self.last_expr_val = val.clone();
+                if !val.to_bool() {
                     return self.exec_stmts(then);
                 }
                 if let Some(body) = else_block {
@@ -371,13 +376,12 @@ impl Interpreter {
                             .trim_start_matches('@')
                             .trim_start_matches('%');
                         if name.starts_with('@') {
-                            // Array gets remaining items
-                            self.set_array(var_name, items[i..].to_vec());
+                            self.set_my_array(var_name, items[i..].to_vec());
                         } else if name.starts_with('%') {
                             self.set_hash_from_list(var_name, items[i..].to_vec());
                         } else {
                             let val = items.get(i).cloned().unwrap_or(Value::Undef);
-                            self.set_var(var_name, val);
+                            self.set_my_var(var_name, val);
                         }
                     }
                 } else {
@@ -392,7 +396,7 @@ impl Interpreter {
                             } else {
                                 Vec::new()
                             };
-                            self.set_array(var_name, items);
+                            self.set_my_array(var_name, items);
                         } else if name.starts_with('%') {
                             let items = if init.is_some() {
                                 self.eval_list(init.as_ref().unwrap())
@@ -405,7 +409,7 @@ impl Interpreter {
                                 .as_ref()
                                 .map(|e| self.eval_expr(e))
                                 .unwrap_or(Value::Undef);
-                            self.set_var(var_name, val);
+                            self.set_my_var(var_name, val);
                         }
                     }
                 }
@@ -529,14 +533,18 @@ impl Interpreter {
             },
 
             Stmt::PostfixIf(stmt, cond) => {
-                if self.eval_expr(cond).to_bool() {
+                let val = self.eval_expr(cond);
+                self.last_expr_val = val.clone();
+                if val.to_bool() {
                     self.exec_stmt(stmt)
                 } else {
                     Flow::None
                 }
             }
             Stmt::PostfixUnless(stmt, cond) => {
-                if !self.eval_expr(cond).to_bool() {
+                let val = self.eval_expr(cond);
+                self.last_expr_val = val.clone();
+                if !val.to_bool() {
                     self.exec_stmt(stmt)
                 } else {
                     Flow::None
@@ -1617,6 +1625,24 @@ impl Interpreter {
         }
         // Variable not found in any lexical scope — set in globals (package variable)
         self.globals.vars.insert(name.to_string(), val);
+    }
+
+    /// Declare a `my` variable in the current lexical scope
+    fn set_my_var(&mut self, name: &str, val: Value) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.vars.insert(name.to_string(), val);
+        } else {
+            self.globals.vars.insert(name.to_string(), val);
+        }
+    }
+
+    /// Declare a `my` array in the current lexical scope
+    fn set_my_array(&mut self, name: &str, arr: Vec<Value>) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.arrays.insert(name.to_string(), arr);
+        } else {
+            self.globals.arrays.insert(name.to_string(), arr);
+        }
     }
 
     fn set_global_var(&mut self, name: &str, val: Value) {
