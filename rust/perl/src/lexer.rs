@@ -587,9 +587,13 @@ impl Lexer {
                             continue;
                         }
                         tokens.push(Token::ScalarVar(name));
-                    } else if self.ch() == '0' {
-                        self.pos += 1;
-                        tokens.push(Token::ScalarVar("0".to_string()));
+                    } else if self.ch().is_ascii_digit() {
+                        // $0, $1, $2, ... (capture variables and $0 program name)
+                        let mut name = String::new();
+                        while self.pos < self.input.len() && self.ch().is_ascii_digit() {
+                            name.push(self.advance());
+                        }
+                        tokens.push(Token::ScalarVar(name));
                     } else if self.ch() == '/' {
                         self.pos += 1;
                         tokens.push(Token::ScalarVar("/".to_string()));
