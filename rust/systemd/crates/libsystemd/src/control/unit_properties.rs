@@ -1385,6 +1385,16 @@ fn insert_exec_config(props: &mut PropertyMap, conf: &ExecConfig) {
     insert_bool(props, "ProtectKernelTunables", conf.protect_kernel_tunables);
     insert_bool(props, "ProtectKernelLogs", conf.protect_kernel_logs);
     insert_bool(props, "ProtectControlGroups", conf.protect_control_groups);
+    insert(
+        props,
+        "ProtectControlGroupsEx",
+        match conf.protect_control_groups_ex {
+            crate::units::ProtectControlGroupsEx::No => "no",
+            crate::units::ProtectControlGroupsEx::Yes => "yes",
+            crate::units::ProtectControlGroupsEx::Private => "private",
+            crate::units::ProtectControlGroupsEx::Strict => "strict",
+        },
+    );
     insert_bool(props, "ProtectClock", conf.protect_clock);
     insert_bool(props, "ProtectHostname", conf.protect_hostname);
     insert_bool(props, "PrivateTmp", conf.private_tmp);

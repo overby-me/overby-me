@@ -1386,6 +1386,7 @@ pub fn parse_exec_section(
     let system_call_error_number = section.remove("SYSTEMCALLERRORNUMBER");
     let no_new_privileges = section.remove("NONEWPRIVILEGES");
     let protect_control_groups = section.remove("PROTECTCONTROLGROUPS");
+    let protect_control_groups_ex = section.remove("PROTECTCONTROLGROUPSEX");
     let protect_kernel_modules = section.remove("PROTECTKERNELMODULES");
     let restrict_suid_sgid = section.remove("RESTRICTSUIDSGID");
     let protect_kernel_logs = section.remove("PROTECTKERNELLOGS");
@@ -1884,6 +1885,31 @@ pub fn parse_exec_section(
         }
         // systemd default: false
         None => false,
+    };
+
+    let protect_control_groups_ex = match protect_control_groups_ex {
+        Some(vec) => {
+            if vec.len() == 1 {
+                match vec[0].1.to_lowercase().as_str() {
+                    "no" | "false" | "0" => super::ProtectControlGroupsEx::No,
+                    "yes" | "true" | "1" => super::ProtectControlGroupsEx::Yes,
+                    "private" => super::ProtectControlGroupsEx::Private,
+                    "strict" => super::ProtectControlGroupsEx::Strict,
+                    _ => {
+                        return Err(ParsingErrorReason::UnknownSetting(
+                            "ProtectControlGroupsEx".to_owned(),
+                            vec[0].1.clone(),
+                        ));
+                    }
+                }
+            } else {
+                return Err(ParsingErrorReason::SettingTooManyValues(
+                    "ProtectControlGroupsEx".to_owned(),
+                    super::map_tuples_to_second(vec),
+                ));
+            }
+        }
+        None => super::ProtectControlGroupsEx::No,
     };
 
     let stdout_path = match stdout {
@@ -2463,6 +2489,7 @@ pub fn parse_exec_section(
         },
         no_new_privileges,
         protect_control_groups,
+        protect_control_groups_ex,
         protect_kernel_modules,
         restrict_suid_sgid,
         protect_kernel_logs,

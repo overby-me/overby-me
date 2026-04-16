@@ -777,6 +777,13 @@ fn start_service_with_filedescriptors(
         protect_kernel_modules: conf.exec_config.protect_kernel_modules,
         protect_kernel_logs: conf.exec_config.protect_kernel_logs,
         protect_control_groups: conf.exec_config.protect_control_groups,
+        protect_control_groups_ex: match conf.exec_config.protect_control_groups_ex {
+            crate::units::ProtectControlGroupsEx::No => "no",
+            crate::units::ProtectControlGroupsEx::Yes => "yes",
+            crate::units::ProtectControlGroupsEx::Private => "private",
+            crate::units::ProtectControlGroupsEx::Strict => "strict",
+        }
+        .to_owned(),
         protect_clock: conf.exec_config.protect_clock,
         protect_hostname: conf.exec_config.protect_hostname,
         protect_hostname_mode: conf.exec_config.protect_hostname_mode.clone(),

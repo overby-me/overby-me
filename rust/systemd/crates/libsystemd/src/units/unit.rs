@@ -9,7 +9,8 @@ use crate::units::{
     DevicePolicy, EnvVars, ExitType, FileDescriptorStorePreserve, IOSchedulingClass, IoDeviceLimit,
     IoWeight, KeyringMode, KillMode, MemoryLimit, MemoryPressureWatch, NotifyKind, OOMPolicy,
     OnFailureJobMode, ParsedMountSection, ParsedSliceSection, ParsedSwapSection, ProcSubset,
-    ProtectHome, ProtectProc, ProtectSystem, ResourceLimit, RestartMode, RestrictNamespaces,
+    ProtectControlGroupsEx, ProtectHome, ProtectProc, ProtectSystem, ResourceLimit, RestartMode,
+    RestrictNamespaces,
     RuntimeDirectoryPreserve, ServiceRestart, ServiceType, StandardInput, StatusStarted,
     StatusStopped, StdIoOption, TasksMax, Timeout, TimeoutFailureMode, Timestamping, UnitAction,
     UnitCondition, UnitId, UnitIdKind, UnitOperationError, UnitOperationErrorReason, UnitStatus,
@@ -2854,6 +2855,9 @@ pub struct ExecConfig {
     /// no runtime enforcement yet (requires mount namespace support).
     /// See systemd.exec(5).
     pub protect_control_groups: bool,
+    /// ProtectControlGroupsEx= — granular cgroup access control. Replaces
+    /// and extends ProtectControlGroups=. See systemd.exec(5).
+    pub protect_control_groups_ex: ProtectControlGroupsEx,
     /// ProtectKernelModules= — if true, explicit kernel module loading and
     /// unloading is denied. This also makes /usr/lib/modules/ inaccessible.
     /// Defaults to false. Parsed and stored; no runtime enforcement yet

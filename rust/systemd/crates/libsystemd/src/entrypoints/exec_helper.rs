@@ -534,6 +534,11 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub protect_control_groups: bool,
 
+    /// ProtectControlGroupsEx= — granular cgroup access control.
+    /// Values: "no", "yes" (read-only), "private" (new ns, rw), "strict" (new ns, ro).
+    #[serde(default)]
+    pub protect_control_groups_ex: String,
+
     /// ProtectClock= — if true, clock writes are denied.
     /// See systemd.exec(5).
     #[serde(default)]
@@ -2974,12 +2979,44 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
     }
 
     log::trace!(
-        "mount_ns: ProtectControlGroups={}...",
-        config.protect_control_groups
+        "mount_ns: ProtectControlGroups={} ProtectControlGroupsEx={}...",
+        config.protect_control_groups,
+        config.protect_control_groups_ex
     );
-    // ── ProtectControlGroups= ─────────────────────────────────────────
-    if config.protect_control_groups {
-        remount_read_only("/sys/fs/cgroup", config);
+    // ── ProtectControlGroups= / ProtectControlGroupsEx= ──────────────
+    // ProtectControlGroupsEx supersedes ProtectControlGroups when set.
+    match config.protect_control_groups_ex.as_str() {
+        "yes" => {
+            // Read-only cgroups, host namespace
+            remount_read_only("/sys/fs/cgroup", config);
+        }
+        "private" => {
+            // New cgroup namespace, writable
+            let ret = unsafe { libc::unshare(libc::CLONE_NEWCGROUP) };
+            if ret != 0 {
+                log::warn!(
+                    "mount_ns: unshare(CLONE_NEWCGROUP) failed: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
+        }
+        "strict" => {
+            // New cgroup namespace, read-only
+            let ret = unsafe { libc::unshare(libc::CLONE_NEWCGROUP) };
+            if ret != 0 {
+                log::warn!(
+                    "mount_ns: unshare(CLONE_NEWCGROUP) failed: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
+            remount_read_only("/sys/fs/cgroup", config);
+        }
+        _ => {
+            // "no" or unset — fall back to boolean ProtectControlGroups
+            if config.protect_control_groups {
+                remount_read_only("/sys/fs/cgroup", config);
+            }
+        }
     }
 
     log::trace!("mount_ns: ProtectClock={}...", config.protect_clock);

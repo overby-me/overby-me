@@ -2731,6 +2731,7 @@ fn create_transient_unit(
         system_call_error_number: None,
         no_new_privileges: false,
         protect_control_groups: false,
+        protect_control_groups_ex: crate::units::ProtectControlGroupsEx::No,
         protect_kernel_modules: false,
         restrict_suid_sgid: false,
         protect_kernel_logs: false,
@@ -3686,6 +3687,24 @@ fn create_transient_unit(
                 "ProtectControlGroups" => {
                     service_conf.exec_config.protect_control_groups =
                         matches!(value, "yes" | "true" | "1");
+                }
+                "ProtectControlGroupsEx" => {
+                    service_conf.exec_config.protect_control_groups_ex =
+                        match value.to_lowercase().as_str() {
+                            "yes" | "true" | "1" => {
+                                crate::units::ProtectControlGroupsEx::Yes
+                            }
+                            "private" => crate::units::ProtectControlGroupsEx::Private,
+                            "strict" => crate::units::ProtectControlGroupsEx::Strict,
+                            _ => crate::units::ProtectControlGroupsEx::No,
+                        };
+                    // Also set the boolean ProtectControlGroups for compatibility
+                    if !matches!(
+                        service_conf.exec_config.protect_control_groups_ex,
+                        crate::units::ProtectControlGroupsEx::No
+                    ) {
+                        service_conf.exec_config.protect_control_groups = true;
+                    }
                 }
                 "ProtectClock" => {
                     service_conf.exec_config.protect_clock = matches!(value, "yes" | "true" | "1");

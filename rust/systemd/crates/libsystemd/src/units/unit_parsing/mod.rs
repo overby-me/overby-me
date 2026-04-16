@@ -2828,6 +2828,9 @@ pub struct ParsedExecSection {
     /// no runtime enforcement yet (requires mount namespace support).
     /// See systemd.exec(5).
     pub protect_control_groups: bool,
+    /// ProtectControlGroupsEx= — granular cgroup access control. Replaces
+    /// and extends ProtectControlGroups=. See systemd.exec(5).
+    pub protect_control_groups_ex: ProtectControlGroupsEx,
     /// ProtectKernelModules= — if true, explicit kernel module loading and
     /// unloading is denied. This also makes /usr/lib/modules/ inaccessible.
     /// Defaults to false. Parsed and stored; no runtime enforcement yet
@@ -3440,6 +3443,23 @@ pub enum ProtectHome {
     /// service's processes. Files or directories below these may be
     /// created but are not visible to other processes.
     Tmpfs,
+}
+
+/// ProtectControlGroupsEx= — granular control over cgroup hierarchy access.
+/// Replaces and extends the boolean ProtectControlGroups=. See systemd.exec(5).
+#[derive(
+    Clone, Copy, Eq, PartialEq, Hash, Debug, serde::Serialize, serde::Deserialize, Default,
+)]
+pub enum ProtectControlGroupsEx {
+    /// No protection (default). /sys/fs/cgroup is read-write, host namespace.
+    #[default]
+    No,
+    /// /sys/fs/cgroup is read-only, host cgroup namespace.
+    Yes,
+    /// New cgroup namespace, /sys/fs/cgroup is read-write within it.
+    Private,
+    /// New cgroup namespace, /sys/fs/cgroup is read-only within it.
+    Strict,
 }
 
 /// ProtectProc= — controls the `hidepid=` mount option of the procfs instance
