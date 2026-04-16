@@ -116,7 +116,9 @@ fn add_patterns(patterns: &mut Vec<String>, pattern: &str) {
 }
 
 fn parse_args() -> Options {
-    let args: Vec<String> = env::args().collect();
+    let args: Vec<String> = env::args_os()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
     let mut opts = Options::default();
     let mut i = 1;
     let mut pattern_set = false;
