@@ -71,6 +71,35 @@ impl Default for MatchContext {
     }
 }
 
+/// Validate that all backreferences refer to existing capture groups.
+fn validate_backrefs(node: &ast::Node, num_groups: u32) -> Result<(), Error> {
+    match node {
+        ast::Node::Backref(n) => {
+            if *n > num_groups {
+                return Err(Error::Compile {
+                    offset: 0,
+                    message: format!("reference to non-existent subpattern"),
+                });
+            }
+            Ok(())
+        }
+        ast::Node::Concat(nodes) | ast::Node::Alternation(nodes) => {
+            for n in nodes {
+                validate_backrefs(n, num_groups)?;
+            }
+            Ok(())
+        }
+        ast::Node::Group { node, .. }
+        | ast::Node::NonCapGroup(node)
+        | ast::Node::AtomicGroup(node)
+        | ast::Node::Lookahead { node, .. }
+        | ast::Node::Lookbehind { node, .. } => validate_backrefs(node, num_groups),
+        ast::Node::Quantifier { node, .. } => validate_backrefs(node, num_groups),
+        ast::Node::SetOptions { node: Some(n), .. } => validate_backrefs(n, num_groups),
+        _ => Ok(()),
+    }
+}
+
 /// A compiled PCRE2 regular expression.
 pub struct Regex {
     ast: ast::Node,
@@ -121,6 +150,8 @@ impl Regex {
         let mut parser = Parser::new(pattern, options);
         let ast = parser.parse()?;
         let num_captures = parser.group_count();
+        // Validate backreferences
+        validate_backrefs(&ast, num_captures)?;
         Ok(Regex {
             ast,
             num_captures,
