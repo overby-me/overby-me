@@ -2,6 +2,31 @@ use crate::regex_util::{bre_to_ere, fix_posix_char_class};
 use crate::types::*;
 use crate::util::ctrl_char;
 
+/// Count unescaped `(` in an ERE pattern to determine number of capture groups
+fn count_groups(pattern: &str) -> usize {
+    let mut count = 0;
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut i = 0;
+    let mut in_bracket = false;
+    while i < chars.len() {
+        if chars[i] == '\\' {
+            i += 2; // skip escaped char
+        } else if chars[i] == '[' && !in_bracket {
+            in_bracket = true;
+            i += 1;
+        } else if chars[i] == ']' && in_bracket {
+            in_bracket = false;
+            i += 1;
+        } else if chars[i] == '(' && !in_bracket {
+            count += 1;
+            i += 1;
+        } else {
+            i += 1;
+        }
+    }
+    count
+}
+
 pub struct Parser<'a> {
     input: &'a [u8],
     pos: usize,
@@ -155,14 +180,15 @@ impl<'a> Parser<'a> {
             }));
         }
 
-        let cmd = self.parse_command_char()?;
-
-        // Validate: some commands don't accept addresses
+        // Validate: some commands don't accept addresses — check before parsing
         if !matches!(address, AddressRange::None) {
-            if matches!(cmd, Command::Label(_)) {
+            if self.peek() == Some(b':') {
+                self.advance();
                 return Err(self.err(": doesn't want any addresses"));
             }
         }
+
+        let cmd = self.parse_command_char()?;
 
         Ok(Some(SedCommand {
             address,
@@ -360,6 +386,14 @@ impl<'a> Parser<'a> {
 
     fn parse_command_char(&mut self) -> Result<Command, String> {
         let ch = self.advance().ok_or_else(|| self.err("expected command"))?;
+
+        // POSIX mode: reject GNU extension commands
+        if self.posix
+            && matches!(ch, b'e' | b'F' | b'v' | b'Q' | b'T' | b'R' | b'W')
+        {
+            return Err(self.err(&format!("unknown command: `{}'", ch as char)));
+        }
+
         match ch {
             b'{' => {
                 let mut cmds = Vec::new();
@@ -551,6 +585,30 @@ impl<'a> Parser<'a> {
                     .map_err(|e| self.err(&e))?,
             )
         };
+
+        // Validate backreferences in replacement (non-POSIX mode)
+        if !self.posix && !pattern_str.is_empty() {
+            // Count capture groups in the ERE pattern
+            let num_groups = count_groups(&re_pattern);
+            // Check replacement for \1-\9 references
+            let rchars: Vec<char> = replacement.chars().collect();
+            let mut ri = 0;
+            while ri < rchars.len() {
+                if rchars[ri] == '\\' && ri + 1 < rchars.len() {
+                    if let '1'..='9' = rchars[ri + 1] {
+                        let n = (rchars[ri + 1] as u32 - '0' as u32) as usize;
+                        if n > num_groups {
+                            return Err(self.err(&format!(
+                                "invalid reference \\{n} on `s' command's RHS"
+                            )));
+                        }
+                    }
+                    ri += 2;
+                } else {
+                    ri += 1;
+                }
+            }
+        }
 
         Ok(Command::Substitute {
             pattern: re,
@@ -760,6 +818,10 @@ impl<'a> Parser<'a> {
                     self.advance();
                 }
                 Some(ch) if ch.is_ascii_digit() => {
+                    if flags.nth.is_some() {
+                        self.advance();
+                        return Err(self.err("multiple number options to `s' command"));
+                    }
                     let n = self.parse_number()?;
                     if n == 0 {
                         return Err(
@@ -767,6 +829,10 @@ impl<'a> Parser<'a> {
                         );
                     }
                     flags.nth = Some(n);
+                }
+                Some(ch) if ch.is_ascii_alphabetic() => {
+                    self.advance();
+                    return Err(self.err("unknown option to `s'"));
                 }
                 _ => break,
             }
