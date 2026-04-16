@@ -1981,31 +1981,30 @@ impl Interpreter {
                     };
                     self.current_params = saved_params;
 
-                    // Save array state BEFORE restoring scope (for copy-back)
-                    let mut copyback: Vec<(String, Option<HashMap<String, Value>>)> = Vec::new();
+                    // Save param state BEFORE restoring scope (for copy-back)
+                    let mut arr_copyback: Vec<(String, Option<HashMap<String, Value>>)> =
+                        Vec::new();
+                    let mut scalar_copyback: Vec<(String, Value)> = Vec::new();
                     for (i, _arg) in args.iter().enumerate() {
                         if let Some(Some(orig_name)) = arg_var_names.get(i)
                             && let Some(param) = func.params.get(i)
                         {
                             let param_has_array = self.arrays.contains_key(param);
                             let was_array = arg_was_array.get(i).copied().unwrap_or(false);
-                            // Copy back if:
-                            // 1. Arg was already an array (always copy back)
-                            // 2. Param became an array AND the original doesn't
-                            //    have a conflicting global array (no independent modification)
-                            if was_array {
+                            if was_array
+                                || (param_has_array
+                                    && (param == orig_name || !self.arrays.contains_key(orig_name)))
+                            {
                                 let arr = self.arrays.get(param).cloned();
-                                copyback.push((orig_name.clone(), arr));
-                            } else if param_has_array && param == orig_name {
-                                // Same-name param (e.g., test(foo) with param foo):
-                                // always copy back since param and orig share the name
-                                let arr = self.arrays.get(param).cloned();
-                                copyback.push((orig_name.clone(), arr));
-                            } else if param_has_array && !self.arrays.contains_key(orig_name) {
-                                // Different-name param: only copy back if orig doesn't
-                                // currently have an array (avoid overwriting independent changes)
-                                let arr = self.arrays.get(param).cloned();
-                                copyback.push((orig_name.clone(), arr));
+                                arr_copyback.push((orig_name.clone(), arr));
+                            }
+                            // Copy back scalar value only if arg was not an array
+                            if !was_array
+                                && !param_has_array
+                                && let Some(val) = self.globals.get(param)
+                                && !matches!(val, Value::Uninitialized)
+                            {
+                                scalar_copyback.push((orig_name.clone(), val.clone()));
                             }
                         }
                     }
@@ -2025,12 +2024,16 @@ impl Interpreter {
                     }
 
                     // Copy back arrays AFTER restoring scope
-                    for (orig_name, arr_opt) in copyback {
+                    for (orig_name, arr_opt) in arr_copyback {
                         if let Some(arr) = arr_opt {
                             self.arrays.insert(orig_name, arr);
                         } else {
                             self.arrays.remove(&orig_name);
                         }
+                    }
+                    // Copy back scalar values
+                    for (orig_name, val) in scalar_copyback {
+                        self.globals.insert(orig_name, val);
                     }
 
                     result
