@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**51/61 tests passing** (84%) — shell tests from the GNU sed 4.9 test suite.
+**52/61 tests passing** (85%) — shell tests from the GNU sed 4.9 test suite.
 
 Run a test: `nix build .#checks.x86_64-linux.rust-sed-test-{name}`
 View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
@@ -48,10 +48,11 @@ View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
 - POSIX `a`/`c`/`i` require `\` after command
 - POSIX one-address command validation (`a`, `i`, `l`, `=`, `q`, `Q`, `r`, `R`)
 - Unbuffered I/O (`-u`): byte-by-byte stdin reads via raw fd
+- POSIX char class: `\` is literal inside `[]` in POSIX mode
 
 ---
 
-## Remaining Failures (10 tests)
+## Remaining Failures (9 tests)
 
 ### Category 1: fancy-regex performance (2 tests)
 
@@ -82,11 +83,10 @@ These tests require processing non-UTF-8 binary data. Our engine uses `String` (
 
 - `bsd-wrapper` — Test infrastructure expects sed at `../sed/sed` relative path
 
-### Category 5: Edge cases (2 tests)
+### Category 5: Platform-specific (1 test)
 
-**Tests:** posix-char-class, obinary
+**Tests:** obinary
 
-- `posix-char-class` — `\t` inside `[\t]` in `--posix` mode: GNU sed still treats as tab
 - `obinary` — Platform-specific (skips on Linux, already passes)
 
 ---
@@ -113,7 +113,7 @@ Fix execute-tests $fail issue, bsd-wrapper path layout.
 
 ## Test Inventory
 
-### Passing (51 tests)
+### Passing (52 tests)
 
 bsd, bug32082, bug32271-1, bug32271-2, cmd-0r, cmd-l, cmd-R,
 colon-with-no-label, command-endings, comment-n, distrib, eval,
@@ -125,9 +125,10 @@ normalize-text, nulldata, panic-tests, posix-mode-addr, posix-mode-bad-ref,
 posix-mode-ERE, posix-mode-N, posix-mode-s, range-overlap,
 recursive-escape-c, regex-errors, regex-max-int, sandbox, stdin,
 stdin-prog, subst-mb-incomplete, subst-options, subst-replacement,
-temp-file-cleanup, title-case, unbuffered, uniq, word-delim, xemacs
+posix-char-class, temp-file-cleanup, title-case, unbuffered, uniq,
+word-delim, xemacs
 
-### Failing (10 tests)
+### Failing (9 tests)
 
 | Test | Primary blocker |
 |-|-|
@@ -140,7 +141,6 @@ temp-file-cleanup, title-case, unbuffered, uniq, word-delim, xemacs
 | dc | fancy-regex performance |
 | mac-mf | Byte-mode I/O |
 | obinary | Platform skip (already works) |
-| posix-char-class | POSIX `\t` semantics |
 
 ### Tests excluded from harness (6 tests)
 
