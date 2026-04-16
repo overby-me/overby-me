@@ -1,6 +1,10 @@
 use crate::value::Value;
 
 pub fn sprintf_impl(vals: &[Value]) -> String {
+    sprintf_impl_with_convfmt(vals, "%.6g")
+}
+
+pub fn sprintf_impl_with_convfmt(vals: &[Value], convfmt: &str) -> String {
     if vals.is_empty() {
         return String::new();
     }
@@ -216,7 +220,8 @@ pub fn sprintf_impl(vals: &[Value]) -> String {
                     }
                 }
                 's' => {
-                    let s = val.to_string_val();
+                    // For numeric values, use CONVFMT for conversion
+                    let s = val.to_string_with_fmt(convfmt);
                     if has_precision {
                         let chars: Vec<char> = s.chars().collect();
                         chars[..chars.len().min(prec_num)].iter().collect()

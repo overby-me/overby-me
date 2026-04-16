@@ -5,7 +5,7 @@ use std::process::{Command, Stdio};
 use std::fs;
 
 use crate::ast::*;
-use crate::format::{awk_replace, gensub_replace, sprintf_impl};
+use crate::format::{awk_replace, gensub_replace, sprintf_impl_with_convfmt};
 use crate::value::{compare_values, ControlFlow, Value};
 
 pub struct Interpreter {
@@ -459,7 +459,7 @@ impl Interpreter {
                     return ControlFlow::None;
                 }
                 let vals: Vec<Value> = args.iter().map(|a| self.eval_expr(a)).collect();
-                let output = sprintf_impl(&vals);
+                let output = sprintf_impl_with_convfmt(&vals, &self.globals.get("CONVFMT").map(|v| v.to_string_val()).unwrap_or("%.6g".to_string()));
                 self.write_output(&output, dest);
             }
             Stmt::If(cond, then_branch, else_branch) => {
@@ -1345,7 +1345,7 @@ impl Interpreter {
             ),
             Expr::Sprintf(args) => {
                 let vals: Vec<Value> = args.iter().map(|a| self.eval_expr(a)).collect();
-                Value::Str(sprintf_impl(&vals))
+                Value::Str(sprintf_impl_with_convfmt(&vals, &self.globals.get("CONVFMT").map(|v| v.to_string_val()).unwrap_or("%.6g".to_string())))
             }
             Expr::Pipe(cmd, getline_expr) => {
                 // cmd | getline [var]
@@ -1626,7 +1626,7 @@ impl Interpreter {
             }
             "sprintf" => {
                 let vals: Vec<Value> = args.iter().map(|a| self.eval_expr(a)).collect();
-                Value::Str(sprintf_impl(&vals))
+                Value::Str(sprintf_impl_with_convfmt(&vals, &self.globals.get("CONVFMT").map(|v| v.to_string_val()).unwrap_or("%.6g".to_string())))
             }
             "tolower" => {
                 if args.is_empty() {
