@@ -712,10 +712,16 @@ fn build_matcher(opts: &Options) -> Matcher {
         .patterns
         .iter()
         .map(|p| {
-            if is_bre {
+            let pat = if is_bre {
                 convert_bre_to_ere(p)
             } else {
                 p.clone()
+            };
+            // Escape invalid intervals so the regex crate treats them as literals
+            if !opts.perl_regexp {
+                escape_invalid_ere_intervals(&pat)
+            } else {
+                pat
             }
         })
         .collect();
@@ -826,6 +832,168 @@ fn build_matcher(opts: &Options) -> Matcher {
 /// Convert BRE (Basic Regular Expression) to ERE for the regex crate.
 /// In BRE: \( \) \{ \} \| \+ \? are meta, bare versions are literal.
 /// We swap them so the regex crate (which expects ERE) works correctly.
+/// Check if interval content is a valid POSIX interval: n, n,, n,m
+/// where n and m are decimal numbers and n <= 32767.
+/// Escape invalid interval expressions in ERE patterns so the regex crate
+/// treats them as literals. POSIX says invalid intervals like {, {1, {,2}
+/// should be treated as literal characters.
+fn escape_invalid_ere_intervals(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let len = chars.len();
+    let mut result = String::with_capacity(len);
+    let mut i = 0;
+    let mut in_bracket = false;
+    let mut paren_depth: i32 = 0;
+    let mut at_expr_start = true; // track if we're at the start of an expression
+
+    while i < len {
+        // Handle * at start of expression (treat as literal)
+        if chars[i] == '*' && at_expr_start && !in_bracket {
+            result.push_str("\\*");
+            i += 1;
+            continue;
+        }
+
+        if chars[i] == '\\' && i + 1 < len {
+            result.push(chars[i]);
+            result.push(chars[i + 1]);
+            i += 2;
+            at_expr_start = false;
+            continue;
+        }
+        if chars[i] == '[' && !in_bracket {
+            in_bracket = true;
+            result.push('[');
+            i += 1;
+            // Handle negation
+            if i < len && chars[i] == '^' {
+                result.push('^');
+                i += 1;
+            }
+            // Handle ] as first char in bracket
+            if i < len && chars[i] == ']' {
+                result.push(']');
+                i += 1;
+            }
+            // Process bracket content
+            while i < len && chars[i] != ']' {
+                if chars[i] == '\\' {
+                    // In POSIX bracket expressions, \ is literal
+                    result.push_str("\\\\");
+                } else {
+                    result.push(chars[i]);
+                }
+                i += 1;
+            }
+            if i < len {
+                result.push(']');
+                i += 1;
+            }
+            in_bracket = false;
+            at_expr_start = false;
+            continue;
+        }
+        if chars[i] == '{' && !in_bracket {
+            // Try to parse as interval
+            let mut j = i + 1;
+            while j < len && chars[j] != '}' && chars[j] != '{' {
+                j += 1;
+            }
+            if j < len && chars[j] == '}' {
+                let content: String = chars[i + 1..j].iter().collect();
+                if is_valid_interval(&content) {
+                    // Valid interval — pass through
+                    result.push('{');
+                    result.push_str(&content);
+                    result.push('}');
+                    i = j + 1;
+                    continue;
+                }
+                if content.is_empty() || is_interval_too_large(&content) {
+                    eprintln!("grep: Invalid content of \\{{\\}}");
+                    process::exit(2);
+                }
+            }
+            // Invalid or unclosed — escape as literal
+            result.push_str("\\{");
+            i += 1;
+            continue;
+        }
+        if chars[i] == '(' {
+            paren_depth += 1;
+            result.push('(');
+            i += 1;
+            at_expr_start = true;
+            continue;
+        }
+        if chars[i] == ')' {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+                result.push(')');
+            } else {
+                // Unmatched ) — escape as literal
+                result.push_str("\\)");
+            }
+            i += 1;
+            at_expr_start = false;
+            continue;
+        }
+        if chars[i] == '|' {
+            result.push('|');
+            i += 1;
+            at_expr_start = true;
+            continue;
+        }
+        result.push(chars[i]);
+        i += 1;
+        at_expr_start = false;
+    }
+    result
+}
+
+/// Check if interval content is a valid POSIX interval: n, n,, n,m
+/// where n and m are decimal numbers and n <= 32767.
+fn is_valid_interval(content: &str) -> bool {
+    let parts: Vec<&str> = content.splitn(2, ',').collect();
+    match parts.len() {
+        1 => {
+            // {n} — single number
+            parts[0].parse::<u32>().is_ok_and(|n| n <= 32767 && !parts[0].is_empty())
+        }
+        2 => {
+            // {n,} or {n,m}
+            let min_ok = parts[0].parse::<u32>().is_ok_and(|n| n <= 32767);
+            if !min_ok || parts[0].is_empty() {
+                return false;
+            }
+            if parts[1].is_empty() {
+                return true; // {n,}
+            }
+            parts[1].parse::<u32>().is_ok_and(|m| m <= 32767)
+        }
+        _ => false,
+    }
+}
+
+/// Check if an interval has numbers that are too large (> 32767).
+/// Only returns true for well-formed intervals with oversized numbers.
+fn is_interval_too_large(content: &str) -> bool {
+    let parts: Vec<&str> = content.splitn(2, ',').collect();
+    // Must be all digits and commas to be considered an interval attempt
+    let all_valid = content.chars().all(|c| c.is_ascii_digit() || c == ',');
+    if !all_valid {
+        return false; // Contains non-numeric chars — treat as literal, not error
+    }
+    for part in &parts {
+        if let Ok(n) = part.parse::<u64>() {
+            if n > 32767 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 fn convert_bre_to_ere(bre: &str) -> String {
     let mut result = String::with_capacity(bre.len());
     let chars: Vec<char> = bre.chars().collect();
@@ -851,7 +1019,15 @@ fn convert_bre_to_ere(bre: &str) -> String {
                 i += 1;
             }
             while i < len && chars[i] != ']' {
-                result.push(chars[i]);
+                if chars[i] == '\\' {
+                    // In POSIX bracket expressions, \ is literal — double-escape for regex crate
+                    result.push_str("\\\\");
+                } else if chars[i] == '[' && i + 1 < len && chars[i + 1] == ':' {
+                    // POSIX character class like [:alpha:] — pass through
+                    result.push('[');
+                } else {
+                    result.push(chars[i]);
+                }
                 i += 1;
             }
             if i < len {
@@ -871,18 +1047,72 @@ fn convert_bre_to_ere(bre: &str) -> String {
                     i += 2;
                 }
                 ')' => {
+                    if _depth <= 0 {
+                        eprintln!("grep: Unmatched \\)");
+                        process::exit(2);
+                    }
                     result.push(')');
                     _depth -= 1;
                     at_start = false;
                     i += 2;
                 }
                 '{' => {
-                    result.push('{');
-                    i += 2;
+                    // Check if this is a valid BRE interval \{n\}, \{n,\}, \{n,m\}
+                    // Find the closing \}
+                    let interval_start = i + 2;
+                    let mut j = interval_start;
+                    let mut found_close = false;
+                    while j + 1 < len {
+                        if chars[j] == '\\' && j + 1 < len && chars[j + 1] == '}' {
+                            found_close = true;
+                            break;
+                        }
+                        j += 1;
+                    }
+                    if found_close {
+                        let content: String = chars[interval_start..j].iter().collect();
+                        if is_valid_interval(&content) {
+                            result.push('{');
+                            result.push_str(&content);
+                            result.push('}');
+                            i = j + 2; // skip past \}
+                        } else {
+                            // In BRE, \{...\} is interval syntax.
+                            // Check if content looks like a malformed interval (error)
+                            // vs just not a valid interval (literal)
+                            let has_non_interval_chars = content
+                                .chars()
+                                .any(|c| !c.is_ascii_digit() && c != ',');
+                            if content.is_empty()
+                                || has_non_interval_chars
+                                || is_interval_too_large(&content)
+                            {
+                                eprintln!("grep: Invalid content of \\{{\\}}");
+                                process::exit(2);
+                            }
+                            // Content like {,2} or {,} — treat \{...\} as literal
+                            // including the backslashes
+                            result.push_str("\\\\\\{");
+                            result.push_str(&content);
+                            result.push_str("\\\\\\}");
+                            i = j + 2;
+                        }
+                    } else {
+                        // No closing \} — check if it looks like an interval attempt
+                        let remaining: String = chars[interval_start..].iter().collect();
+                        if remaining.chars().next().is_some_and(|c| c.is_ascii_digit() || c == ',')
+                        {
+                            eprintln!("grep: Unmatched \\{{");
+                            process::exit(2);
+                        }
+                        result.push_str("\\{");
+                        i += 2;
+                    }
                     at_start = false;
                 }
                 '}' => {
-                    result.push('}');
+                    // Stray \} — literal
+                    result.push_str("\\}");
                     i += 2;
                     at_start = false;
                 }
@@ -908,6 +1138,11 @@ fn convert_bre_to_ere(bre: &str) -> String {
                     at_start = false;
                 }
             }
+        } else if chars[i] == '*' && at_start {
+            // In BRE, * at start of pattern/group is literal
+            result.push_str("\\*");
+            i += 1;
+            at_start = false;
         } else if chars[i] == '^' {
             if at_start {
                 result.push('^');
