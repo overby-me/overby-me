@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**55/61 tests passing** (90%) — shell tests from the GNU sed 4.9 test suite.
+**56/61 tests passing** (92%) — shell tests from the GNU sed 4.9 test suite.
 
 Run a test: `nix build .#checks.x86_64-linux.rust-sed-test-{name}`
 View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
@@ -57,6 +57,9 @@ View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
 - Lossy UTF-8 conversion for script files (`-f`)
 - Latin-1 byte output encoding for `\d`/`\o`/`\x` escape values
 - `\d`/`\o` byte wrapping (values > 255 mod 256)
+- GNU mode: join `-e` expressions with newlines (enables `a\`/`c\`/`i\` continuation)
+- POSIX mode: detect incomplete `a`/`c`/`i` across `-e` boundaries
+- Address regex modifiers: only uppercase `I`/`M` (not lowercase, which conflicts with `i` insert)
 - Unexpected `}` detection at top level
 - `v` version check against 4.9
 - `}` with address rejection
@@ -68,7 +71,7 @@ View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
 
 ---
 
-## Remaining Failures (6 tests)
+## Remaining Failures (5 tests)
 
 ### Category 1: fancy-regex performance (2 tests)
 
@@ -129,7 +132,7 @@ Fix execute-tests $fail issue, bsd-wrapper path layout.
 
 ## Test Inventory
 
-### Passing (55 tests)
+### Passing (56 tests)
 
 bsd, bug32082, bug32271-1, bug32271-2, cmd-0r, cmd-l, cmd-R,
 colon-with-no-label, command-endings, comment-n, distrib, eval,
@@ -141,18 +144,18 @@ normalize-text, nulldata, panic-tests, posix-mode-addr, posix-mode-bad-ref,
 posix-mode-ERE, posix-mode-N, posix-mode-s, range-overlap,
 recursive-escape-c, regex-errors, regex-max-int, sandbox, stdin,
 stdin-prog, subst-mb-incomplete, subst-options, subst-replacement,
-8to7, compile-tests, convert-number, posix-char-class, temp-file-cleanup, title-case,
+8to7, compile-errors, compile-tests, convert-number, posix-char-class,
+temp-file-cleanup, title-case,
 unbuffered, uniq, word-delim, xemacs
 
-### Failing (6 tests)
+### Failing (5 tests)
 
 | Test | Primary blocker |
 |-|-|
-| binary | fancy-regex performance |
-| bsd-wrapper | Test infrastructure path |
-| compile-errors | 3 remaining sub-tests (incomplete a/c/i across -e) |
-| dc | fancy-regex performance |
-| mac-mf | Byte-mode script (sed script itself contains non-UTF-8 bytes) |
+| binary | fancy-regex performance (catastrophic backtracking) |
+| bsd-wrapper | Test infrastructure (`bsd.sh` expects `../sed/sed` relative path) |
+| dc | fancy-regex performance (catastrophic backtracking) |
+| mac-mf | Sed script contains non-UTF-8 bytes (needs byte-mode parser) |
 | obinary | Platform skip (already works) |
 
 ### Tests excluded from harness (6 tests)
