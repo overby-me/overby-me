@@ -46,6 +46,7 @@ struct Options {
     recursive: bool, // -r/-R
     include_glob: Vec<String>,
     exclude_glob: Vec<String>,
+    include_is_strict: bool, // true if --include should be a strict whitelist
     exclude_dir_glob: Vec<String>,
     skip_devices: bool,      // -D skip
     skip_directories: bool,  // -d skip / --directories=skip
@@ -97,6 +98,7 @@ impl Default for Options {
             recursive: false,
             include_glob: Vec::new(),
             exclude_glob: Vec::new(),
+            include_is_strict: true,
             exclude_dir_glob: Vec::new(),
             skip_devices: false,
             skip_directories: false,
@@ -235,6 +237,11 @@ fn parse_args() -> Options {
                 }
                 "color" | "colour" => opts.color = ColorMode::Always,
                 _ if long.starts_with("include=") => {
+                    // If any --exclude appeared before this --include,
+                    // include is non-strict (files not matching include are still considered)
+                    if !opts.exclude_glob.is_empty() && opts.include_glob.is_empty() {
+                        opts.include_is_strict = false;
+                    }
                     opts.include_glob
                         .push(long.strip_prefix("include=").unwrap().to_string());
                 }
@@ -1828,7 +1835,7 @@ fn glob_match(name: &[char], pat: &[char], mut ni: usize, mut pi: usize) -> bool
     ni == name.len()
 }
 
-fn collect_files(opts: &Options) -> Vec<PathBuf> {
+fn collect_files(opts: &Options, default_dir: bool) -> Vec<PathBuf> {
     let mut files = Vec::new();
 
     if opts.files.is_empty() {
@@ -1845,7 +1852,9 @@ fn collect_files(opts: &Options) -> Vec<PathBuf> {
             let walker = WalkDir::new(path).into_iter();
             for entry in walker.filter_entry(|e| {
                 // Filter out excluded directories
-                if e.file_type().is_dir() && !opts.exclude_dir_glob.is_empty() {
+                // Don't exclude the root directory when it's the implicit default "."
+                let is_default_root = e.depth() == 0 && default_dir;
+                if e.file_type().is_dir() && !opts.exclude_dir_glob.is_empty() && !is_default_root {
                     let name = e.file_name().to_string_lossy();
                     let full_path = e.path().to_string_lossy();
                     let clean_path = full_path.strip_prefix("./").unwrap_or(&full_path);
@@ -1870,18 +1879,24 @@ fn collect_files(opts: &Options) -> Vec<PathBuf> {
 
                     // Apply include/exclude filters (match against both name and path)
                     let entry_path_str = entry.path().to_string_lossy();
-                    if !opts.include_glob.is_empty()
-                        && !opts.include_glob.iter().any(|g| {
-                            matches_glob(&name, g) || matches_glob(&entry_path_str, g)
-                        })
-                    {
-                        continue;
-                    }
-                    if opts.exclude_glob.iter().any(|g| {
+                    let matches_exclude = opts.exclude_glob.iter().any(|g| {
                         matches_glob(&name, g) || matches_glob(&entry_path_str, g)
-                    }) {
+                    });
+
+                    if matches_exclude {
                         continue;
                     }
+
+                    if !opts.include_glob.is_empty() && opts.include_is_strict {
+                        // Strict whitelist: only files matching include are considered
+                        let matches_include = opts.include_glob.iter().any(|g| {
+                            matches_glob(&name, g) || matches_glob(&entry_path_str, g)
+                        });
+                        if !matches_include {
+                            continue;
+                        }
+                    }
+                    // Non-strict: exclude-only mode, include patterns are ignored
 
                     let entry_path = entry.into_path();
                     // Strip leading ./ for cleaner output
@@ -1893,6 +1908,16 @@ fn collect_files(opts: &Options) -> Vec<PathBuf> {
                 }
             }
         } else {
+            // Apply --exclude to non-recursive file arguments too
+            if !opts.exclude_glob.is_empty() {
+                let name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+                let path_str = path.to_string_lossy();
+                if opts.exclude_glob.iter().any(|g| {
+                    matches_glob(&name, g) || matches_glob(&path_str, g)
+                }) {
+                    continue;
+                }
+            }
             files.push(path.clone());
         }
     }
@@ -2071,14 +2096,15 @@ fn main() {
     let mut opts = parse_args();
 
     // With -r and no files, default to current directory
-    if opts.recursive && opts.files.is_empty() {
+    let default_dir = opts.recursive && opts.files.is_empty();
+    if default_dir {
         opts.files.push(PathBuf::from("."));
     }
 
     let matcher = build_matcher(&opts);
 
     let had_file_args = !opts.files.is_empty();
-    let files = collect_files(&opts);
+    let files = collect_files(&opts, default_dir);
 
     let mut any_match = false;
     let mut had_error = false;
