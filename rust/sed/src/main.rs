@@ -575,7 +575,9 @@ fn main() {
     } else {
         let mut engine = Engine::new(commands, quiet, posix, opts.sandbox, opts.line_length, opts.null_data);
         let mut exit_code = 0i32;
-        for file in &opts.files {
+        let num_files = opts.files.len();
+        for (file_idx, file) in opts.files.iter().enumerate() {
+            engine.is_last_file = file_idx == num_files - 1;
             let raw_content = if file == "-" {
                 let mut buf = Vec::new();
                 io::stdin().read_to_end(&mut buf).unwrap_or_default();

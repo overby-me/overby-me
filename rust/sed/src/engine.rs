@@ -43,6 +43,8 @@ pub struct Engine {
     input_index: usize,
     input_had_trailing_newline: bool,
     pub current_filename: Option<String>,
+    pub is_last_file: bool,
+    cumulative_lines: usize, // line offset from previous files
     addr0_active: bool, // true when current command matched via address 0
     pub line_wrap_width: usize,
     #[allow(dead_code)]
@@ -78,6 +80,8 @@ impl Engine {
             input_index: 0,
             input_had_trailing_newline: true,
             current_filename: None,
+            is_last_file: true,
+            cumulative_lines: 0,
             addr0_active: false,
             line_wrap_width: line_length,
             sandbox,
@@ -188,8 +192,8 @@ impl Engine {
         while self.input_index < total {
             let line = self.input_lines[self.input_index].clone();
             self.input_index += 1;
-            self.line_number = self.input_index;
-            self.last_line = self.input_index == total;
+            self.line_number = self.cumulative_lines + self.input_index;
+            self.last_line = self.input_index == total && self.is_last_file;
             self.pattern_space = line;
             self.raw_pattern = self.raw_lines.get(self.input_index - 1).cloned();
             self.sub_happened = false;
@@ -236,6 +240,7 @@ impl Engine {
             self.flush_output(writer)?;
         }
 
+        self.cumulative_lines += total;
         Ok(self.exit_code)
     }
 
@@ -362,6 +367,10 @@ impl Engine {
                             self.line_number >= self.range_start[range_idx]
                                 && self.line_number.is_multiple_of(*n)
                         }
+                        Address::Line(n) => {
+                            // Close range if line number matches OR has been passed
+                            self.line_number >= *n
+                        }
                         _ => self.addr_matches_single(b),
                     };
                     if end_matches {
@@ -373,11 +382,14 @@ impl Engine {
                     // For line,/regex/ ranges: don't check end regex on start line
                     // (GNU sed behavior — end check begins on next line)
                     // Exception: 0,/regex/ does check on line 1
-                    let check_end_on_start = is_addr_0_start;
+                    // Check end on start line if: addr 0, OR end is a line number already passed
+                    let check_end_on_start = is_addr_0_start
+                        || matches!(b, Address::Line(n) if *n <= self.line_number);
                     let end_matches = if check_end_on_start {
                         match b {
                             Address::Relative(n) => self.line_number >= self.line_number + n,
                             Address::Multiple(n) if *n > 0 => self.line_number.is_multiple_of(*n),
+                            Address::Line(n) => self.line_number >= *n,
                             _ => self.addr_matches_single(b),
                         }
                     } else {
