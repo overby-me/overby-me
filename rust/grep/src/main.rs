@@ -781,7 +781,13 @@ fn warn_char_class_misuse(pattern: &str) {
                     // Check if this [: is at the start of a bracket expression
                     // (i.e., the [ that starts [: IS the bracket open)
                     // This means [: is the bracket expression, not inside one
-                    if start == 0 || chars[start - 1] != '[' {
+                    // Check if [: is properly inside a bracket expression
+                    let inside_bracket = start > 0
+                        && (chars[start - 1] == '['
+                            || (start > 1
+                                && chars[start - 1] == '^'
+                                && chars[start - 2] == '['));
+                    if !inside_bracket {
                         eprintln!(
                             "grep: character class syntax is [[:{name}:]], not [:{name}:]"
                         );
@@ -1021,32 +1027,37 @@ fn escape_invalid_ere_intervals(pattern: &str) -> String {
             }
             // Process bracket content
             while i < len && chars[i] != ']' {
-                if chars[i] == '[' && i + 1 < len && chars[i + 1] == ':' {
-                    // POSIX character class [:name:]
+                if chars[i] == '[' && i + 1 < len
+                    && (chars[i + 1] == ':' || chars[i + 1] == '.' || chars[i + 1] == '=')
+                {
+                    let delim = chars[i + 1];
                     let class_start = i;
-                    i += 2; // skip [:
+                    i += 2;
                     let name_start = i;
-                    // Find closing :]
                     let mut found = false;
                     while i + 1 < len {
-                        if chars[i] == ':' && chars[i + 1] == ']' {
+                        if chars[i] == delim && chars[i + 1] == ']' {
                             found = true;
                             break;
                         }
                         i += 1;
                     }
                     if found {
-                        let class_name: String = chars[name_start..i].iter().collect();
-                        validate_posix_class(&class_name);
-                        // Output the class as-is
-                        for c in &chars[class_start..i + 2] {
-                            result.push(*c);
+                        let name: String = chars[name_start..i].iter().collect();
+                        if delim == ':' {
+                            validate_posix_class(&name);
+                            for c in &chars[class_start..i + 2] {
+                                result.push(*c);
+                            }
+                        } else {
+                            // Collating element [.x.] or equivalence class [=x=]
+                            // In C locale, just use the character directly
+                            result.push_str(&name);
                         }
-                        i += 2; // skip :]
+                        i += 2;
                     } else {
-                        // No closing :] — escape [ as literal
                         result.push_str("\\[");
-                        result.push(':');
+                        result.push(delim);
                         i = class_start + 2;
                     }
                 } else if chars[i] == '[' {
@@ -1196,29 +1207,36 @@ fn convert_bre_to_ere(bre: &str) -> String {
                 i += 1;
             }
             while i < len && chars[i] != ']' {
-                if chars[i] == '[' && i + 1 < len && chars[i + 1] == ':' {
-                    // POSIX character class [:name:]
+                if chars[i] == '[' && i + 1 < len
+                    && (chars[i + 1] == ':' || chars[i + 1] == '.' || chars[i + 1] == '=')
+                {
+                    let delim = chars[i + 1];
                     let class_start = i;
                     i += 2;
                     let name_start = i;
                     let mut found_close = false;
                     while i + 1 < len {
-                        if chars[i] == ':' && chars[i + 1] == ']' {
+                        if chars[i] == delim && chars[i + 1] == ']' {
                             found_close = true;
                             break;
                         }
                         i += 1;
                     }
                     if found_close {
-                        let class_name: String = chars[name_start..i].iter().collect();
-                        validate_posix_class(&class_name);
-                        for c in &chars[class_start..i + 2] {
-                            result.push(*c);
+                        let name: String = chars[name_start..i].iter().collect();
+                        if delim == ':' {
+                            validate_posix_class(&name);
+                            for c in &chars[class_start..i + 2] {
+                                result.push(*c);
+                            }
+                        } else {
+                            // Collating/equivalence — use char directly in C locale
+                            result.push_str(&name);
                         }
                         i += 2;
                     } else {
                         result.push_str("\\[");
-                        result.push(':');
+                        result.push(delim);
                         i = class_start + 2;
                     }
                 } else if chars[i] == '[' {
