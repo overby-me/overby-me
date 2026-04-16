@@ -6,6 +6,8 @@ mod util;
 
 #[allow(unused_imports)]
 use std::io::{self, Read, Write};
+#[cfg(unix)]
+use std::os::unix::fs::FileTypeExt;
 use std::process;
 
 use engine::Engine;
@@ -375,10 +377,25 @@ fn main() {
     if opts.in_place.is_some() {
         let suffix = opts.in_place.as_deref().unwrap_or("");
         if opts.files.is_empty() {
-            eprintln!("sed: no input files for in-place editing");
-            process::exit(2);
+            eprintln!("sed: no input files");
+            process::exit(4);
         }
         for file in &opts.files {
+            // Check file type for in-place editing
+            if let Ok(meta) = std::fs::metadata(file) {
+                if !meta.is_file() {
+                    if meta.file_type().is_fifo() || meta.file_type().is_char_device() {
+                        let kind = if meta.file_type().is_char_device() {
+                            "is a terminal"
+                        } else {
+                            "not a regular file"
+                        };
+                        eprintln!("sed: couldn't edit {file}: {kind}");
+                        process::exit(4);
+                    }
+                }
+            }
+
             let actual_read = if opts.follow_symlinks {
                 resolve_symlinks(file)
             } else {
@@ -416,6 +433,27 @@ fn main() {
                 }
             }
 
+            // Check if we can write to the file's directory (for temp file)
+            if let Some(parent) = std::path::Path::new(file).parent() {
+                let parent = if parent.as_os_str().is_empty() {
+                    std::path::Path::new(".")
+                } else {
+                    parent
+                };
+                // Try to create a temp file in the directory to check writeability
+                let tmp_path = parent.join(format!(".sed-tmp-{}", std::process::id()));
+                match std::fs::File::create(&tmp_path) {
+                    Ok(_) => {
+                        let _ = std::fs::remove_file(&tmp_path);
+                    }
+                    Err(e) => {
+                        eprintln!("sed: couldn't open temporary file {}: {}",
+                            tmp_path.display(), fmt_io_err(&e));
+                        process::exit(4);
+                    }
+                }
+            }
+
             // Each file gets a fresh engine in in-place mode
             let mut engine = Engine::new(commands.clone(), quiet, posix, opts.sandbox, opts.line_length);
             engine.current_filename = Some(if opts.follow_symlinks {
@@ -431,7 +469,13 @@ fn main() {
             });
 
             if let Err(e) = std::fs::write(file, &output) {
-                eprintln!("sed: {file}: {}", fmt_io_err(&e));
+                let msg = fmt_io_err(&e);
+                if e.kind() == io::ErrorKind::PermissionDenied {
+                    eprintln!("sed: couldn't open temporary file {file}: {msg}");
+                } else {
+                    eprintln!("sed: {file}: {msg}");
+                }
+                process::exit(4);
             }
 
             if code != 0 {

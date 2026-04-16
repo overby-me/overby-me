@@ -676,13 +676,27 @@ impl<'a> Parser<'a> {
                                     if next == delim {
                                         result.push('\\');
                                     } else if next == b'\\' {
-                                        self.advance();
+                                        // \c\ — check what follows
+                                        let saved = self.pos;
+                                        self.advance(); // consume first \
                                         if let Some(next2) = self.peek() {
                                             if next2 == b'\\' || next2 == delim {
+                                                // \c\\ or \c\<delim> — control char of \
                                                 self.advance();
+                                                result.push(ctrl_char(b'\\') as char);
+                                            } else if b"abcdfnortxvdox".contains(&next2) {
+                                                // \c\d, \c\n, etc — recursive escaping
+                                                return Err(self.err(
+                                                    "recursive escaping after \\c not allowed",
+                                                ));
+                                            } else {
+                                                // \c\ followed by other char
+                                                result.push(ctrl_char(b'\\') as char);
                                             }
+                                        } else {
+                                            self.pos = saved;
+                                            result.push('\\');
                                         }
-                                        result.push(ctrl_char(b'\\') as char);
                                     } else {
                                         self.advance();
                                         result.push(ctrl_char(next) as char);
