@@ -19,7 +19,8 @@
     clippy::needless_range_loop,
     clippy::map_clone,
     clippy::useless_format,
-    clippy::manual_strip
+    clippy::manual_strip,
+    clippy::unnecessary_sort_by
 )]
 
 mod ast;

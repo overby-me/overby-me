@@ -1617,8 +1617,59 @@ impl Parser {
                 Expr::Call(func, args)
             }
 
+            // map/grep with { BLOCK } LIST syntax
+            Token::Grep | Token::Map => {
+                let func = if matches!(self.tok(), Token::Map) {
+                    "map"
+                } else {
+                    "grep"
+                }
+                .to_string();
+                self.pos += 1;
+
+                if self.at(&Token::LBrace) {
+                    // map { BLOCK } LIST
+                    let block = self.parse_brace_block();
+                    // Skip comma if present
+                    self.eat(&Token::Comma);
+                    let list_args = self.parse_list_expr();
+                    // For now, return a call with block as first arg
+                    let block_expr = Expr::DoBlock(block);
+                    let mut args = vec![block_expr];
+                    args.extend(list_args);
+                    Expr::Call(func, args)
+                } else if self.eat(&Token::LParen) {
+                    let args = self.parse_list_expr();
+                    self.expect(&Token::RParen);
+                    Expr::Call(func, args)
+                } else {
+                    let args = self.parse_list_expr();
+                    Expr::Call(func, args)
+                }
+            }
+
+            // sort with optional { BLOCK } or sub name
+            Token::Sort => {
+                self.pos += 1;
+                if self.at(&Token::LBrace) {
+                    let block = self.parse_brace_block();
+                    let list_args = self.parse_list_expr();
+                    let block_expr = Expr::DoBlock(block);
+                    let mut args = vec![block_expr];
+                    args.extend(list_args);
+                    Expr::Call("sort".to_string(), args)
+                } else if self.eat(&Token::LParen) {
+                    let args = self.parse_list_expr();
+                    self.expect(&Token::RParen);
+                    Expr::Call("sort".to_string(), args)
+                } else {
+                    let args = self.parse_list_expr();
+                    Expr::Call("sort".to_string(), args)
+                }
+            }
+
             // List builtins: push, unshift, splice, delete, exists, keys, values, each,
-            // reverse, sort, join, split, grep, map, substr, index, rindex, sprintf,
+            // reverse, join, split, substr, index, rindex, sprintf,
             // open, close, read, binmode, unlink, rename, mkdir, rmdir, chdir, stat
             Token::Push
             | Token::Unshift
@@ -1629,11 +1680,8 @@ impl Parser {
             | Token::Values
             | Token::Each
             | Token::Reverse
-            | Token::Sort
             | Token::Join
             | Token::Split
-            | Token::Grep
-            | Token::Map
             | Token::Substr
             | Token::Index
             | Token::Rindex

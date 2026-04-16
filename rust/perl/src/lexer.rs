@@ -257,6 +257,49 @@ impl Token {
                 | Token::Not
                 | Token::And
                 | Token::Or
+                | Token::Chomp
+                | Token::Chop
+                | Token::Push
+                | Token::Pop
+                | Token::Shift
+                | Token::Unshift
+                | Token::Splice
+                | Token::Delete
+                | Token::Exists
+                | Token::Keys
+                | Token::Values
+                | Token::Each
+                | Token::Reverse
+                | Token::Sort
+                | Token::Join
+                | Token::Split
+                | Token::Grep
+                | Token::Map
+                | Token::Abs
+                | Token::Int
+                | Token::Length
+                | Token::Substr
+                | Token::Index
+                | Token::Rindex
+                | Token::Sprintf
+                | Token::Printf
+                | Token::Chr
+                | Token::Ord
+                | Token::Lc
+                | Token::Uc
+                | Token::Hex
+                | Token::Oct
+                | Token::Ref
+                | Token::Open
+                | Token::Close
+                | Token::Read
+                | Token::Binmode
+                | Token::Unlink
+                | Token::Rename
+                | Token::Mkdir
+                | Token::Rmdir
+                | Token::Chdir
+                | Token::Stat
                 | Token::Newline
                 | Token::EOF
         )

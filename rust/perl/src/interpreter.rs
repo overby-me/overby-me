@@ -385,9 +385,11 @@ impl Interpreter {
                             .trim_start_matches('@')
                             .trim_start_matches('%');
                         if name.starts_with('@') {
-                            self.set_my_array(var_name, items[i..].to_vec());
+                            let start = i.min(items.len());
+                            self.set_my_array(var_name, items[start..].to_vec());
                         } else if name.starts_with('%') {
-                            self.set_hash_from_list(var_name, items[i..].to_vec());
+                            let start = i.min(items.len());
+                            self.set_hash_from_list(var_name, items[start..].to_vec());
                         } else {
                             let val = items.get(i).cloned().unwrap_or(Value::Undef);
                             self.set_my_var(var_name, val);
@@ -1661,8 +1663,62 @@ impl Interpreter {
                 }
             }
             "sort" => {
-                // Simplified sort
-                Value::Undef
+                // Simplified sort — return the list sorted
+                let items: Vec<Value> = args
+                    .iter()
+                    .flat_map(|a| match a {
+                        Expr::ArrayVar(name) => self.get_array(name),
+                        _ => vec![self.eval_expr(a)],
+                    })
+                    .collect();
+                let mut sorted: Vec<String> = items.iter().map(|v| v.to_str()).collect();
+                sorted.sort();
+                // In scalar context return count
+                Value::Num(sorted.len() as f64)
+            }
+            "map" => {
+                // map { BLOCK } LIST — first arg is the block, rest is the list
+                if args.is_empty() {
+                    return Value::Undef;
+                }
+                let block = &args[0];
+                let items: Vec<Value> = args[1..]
+                    .iter()
+                    .flat_map(|a| match a {
+                        Expr::ArrayVar(name) => self.get_array(name),
+                        _ => vec![self.eval_expr(a)],
+                    })
+                    .collect();
+                let mut results = Vec::new();
+                for item in &items {
+                    self.set_var("_", item.clone());
+                    let result = self.eval_expr(block);
+                    results.push(result);
+                }
+                // In scalar context, return count
+                Value::Num(results.len() as f64)
+            }
+            "grep" => {
+                if args.is_empty() {
+                    return Value::Undef;
+                }
+                let block = &args[0];
+                let items: Vec<Value> = args[1..]
+                    .iter()
+                    .flat_map(|a| match a {
+                        Expr::ArrayVar(name) => self.get_array(name),
+                        _ => vec![self.eval_expr(a)],
+                    })
+                    .collect();
+                let mut results = Vec::new();
+                for item in &items {
+                    self.set_var("_", item.clone());
+                    let result = self.eval_expr(block);
+                    if result.to_bool() {
+                        results.push(item.clone());
+                    }
+                }
+                Value::Num(results.len() as f64)
             }
             "require" => {
                 if let Some(arg) = args.first() {
@@ -1973,9 +2029,72 @@ impl Interpreter {
                 (s..=e).map(|n| Value::Num(n as f64)).collect()
             }
             Expr::Call(name, args) => {
-                // In list context, some functions return lists
-                let val = self.eval_call(name, args);
-                vec![val]
+                // In list context, map/grep/sort return lists
+                match name.as_str() {
+                    "map" if !args.is_empty() => {
+                        let block = &args[0];
+                        let items: Vec<Value> =
+                            args[1..].iter().flat_map(|a| self.eval_list(a)).collect();
+                        let mut results = Vec::new();
+                        for item in &items {
+                            self.set_var("_", item.clone());
+                            let result = self.eval_expr(block);
+                            results.push(result);
+                        }
+                        results
+                    }
+                    "grep" if !args.is_empty() => {
+                        let block = &args[0];
+                        let items: Vec<Value> =
+                            args[1..].iter().flat_map(|a| self.eval_list(a)).collect();
+                        let mut results = Vec::new();
+                        for item in &items {
+                            self.set_var("_", item.clone());
+                            let result = self.eval_expr(block);
+                            if result.to_bool() {
+                                results.push(item.clone());
+                            }
+                        }
+                        results
+                    }
+                    "reverse" => {
+                        let mut items: Vec<Value> =
+                            args.iter().flat_map(|a| self.eval_list(a)).collect();
+                        items.reverse();
+                        items
+                    }
+                    "sort" => {
+                        let mut items: Vec<Value> =
+                            args.iter().flat_map(|a| self.eval_list(a)).collect();
+                        items.sort_by(|a, b| a.to_str().cmp(&b.to_str()));
+                        items
+                    }
+                    "split" => {
+                        let pat = if args.is_empty() {
+                            " ".to_string()
+                        } else {
+                            self.eval_expr(&args[0]).to_str()
+                        };
+                        let text = if args.len() > 1 {
+                            self.eval_expr(&args[1]).to_str()
+                        } else {
+                            self.get_var("_").to_str()
+                        };
+                        if pat == " " {
+                            text.split_whitespace()
+                                .map(|s| Value::Str(s.to_string()))
+                                .collect()
+                        } else {
+                            text.split(&pat)
+                                .map(|s| Value::Str(s.to_string()))
+                                .collect()
+                        }
+                    }
+                    _ => {
+                        let val = self.eval_call(name, args);
+                        vec![val]
+                    }
+                }
             }
             _ => vec![self.eval_expr(expr)],
         }
