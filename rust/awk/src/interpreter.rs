@@ -332,6 +332,106 @@ impl Interpreter {
         }
     }
 
+    fn check_func_as_var(
+        stmts: &[Stmt],
+        func_names: &std::collections::HashSet<String>,
+        had_error: &mut bool,
+    ) {
+        for stmt in stmts {
+            Self::check_func_as_var_stmt(stmt, func_names, had_error);
+        }
+    }
+
+    fn check_func_as_var_stmt(
+        stmt: &Stmt,
+        func_names: &std::collections::HashSet<String>,
+        had_error: &mut bool,
+    ) {
+        match stmt {
+            Stmt::Expr(e) | Stmt::Exit(Some(e)) | Stmt::Return(Some(e)) => {
+                Self::check_func_as_var_expr(e, func_names, had_error);
+            }
+            Stmt::Print(args, _) | Stmt::Printf(args, _) => {
+                for a in args {
+                    Self::check_func_as_var_expr(a, func_names, had_error);
+                }
+            }
+            Stmt::If(cond, then_b, else_b) => {
+                Self::check_func_as_var_expr(cond, func_names, had_error);
+                Self::check_func_as_var_stmt(then_b, func_names, had_error);
+                if let Some(eb) = else_b {
+                    Self::check_func_as_var_stmt(eb, func_names, had_error);
+                }
+            }
+            Stmt::While(cond, body) | Stmt::DoWhile(body, cond) => {
+                Self::check_func_as_var_expr(cond, func_names, had_error);
+                Self::check_func_as_var_stmt(body, func_names, had_error);
+            }
+            Stmt::For(init, cond, update, body) => {
+                if let Some(i) = init {
+                    Self::check_func_as_var_stmt(i, func_names, had_error);
+                }
+                if let Some(c) = cond {
+                    Self::check_func_as_var_expr(c, func_names, had_error);
+                }
+                if let Some(u) = update {
+                    Self::check_func_as_var_stmt(u, func_names, had_error);
+                }
+                Self::check_func_as_var_stmt(body, func_names, had_error);
+            }
+            Stmt::Block(stmts) => {
+                Self::check_func_as_var(stmts, func_names, had_error);
+            }
+            Stmt::Delete(_, _) => {}
+            _ => {}
+        }
+    }
+
+    fn check_func_as_var_expr(
+        expr: &Expr,
+        func_names: &std::collections::HashSet<String>,
+        had_error: &mut bool,
+    ) {
+        match expr {
+            // Check gsub/sub with function name as third arg
+            Expr::FuncCall(name, args) if (name == "gsub" || name == "sub") && args.len() >= 3 => {
+                if let Expr::Var(tname) = &args[2]
+                    && func_names.contains(tname)
+                {
+                    eprintln!(
+                        "awk: error: function `{tname}' called with space between name and `(',"
+                    );
+                    eprintln!("or used as a variable or an array");
+                    *had_error = true;
+                }
+                for a in args {
+                    Self::check_func_as_var_expr(a, func_names, had_error);
+                }
+            }
+            Expr::FuncCall(_, args) => {
+                for a in args {
+                    Self::check_func_as_var_expr(a, func_names, had_error);
+                }
+            }
+            Expr::Binop(l, _, r) | Expr::Assign(l, r) | Expr::OpAssign(l, _, r) => {
+                Self::check_func_as_var_expr(l, func_names, had_error);
+                Self::check_func_as_var_expr(r, func_names, had_error);
+            }
+            Expr::Unop(_, e)
+            | Expr::FieldRef(e)
+            | Expr::PostIncrement(e)
+            | Expr::PostDecrement(e) => {
+                Self::check_func_as_var_expr(e, func_names, had_error);
+            }
+            Expr::Ternary(c, t, f) => {
+                Self::check_func_as_var_expr(c, func_names, had_error);
+                Self::check_func_as_var_expr(t, func_names, had_error);
+                Self::check_func_as_var_expr(f, func_names, had_error);
+            }
+            _ => {}
+        }
+    }
+
     pub fn run(&mut self, program: &Program, files: &[String]) {
         // Check for constant division by zero (like gawk does at compile time)
         for rule in &program.rules {
@@ -344,6 +444,17 @@ impl Interpreter {
         // Register functions
         for func in &program.functions {
             self.functions.insert(func.name.clone(), func.clone());
+        }
+
+        // Check for function-name-as-variable errors (pre-execution, like gawk)
+        let func_names: std::collections::HashSet<String> =
+            program.functions.iter().map(|f| f.name.clone()).collect();
+        let mut had_func_var_error = false;
+        for func in &program.functions {
+            Self::check_func_as_var(&func.body, &func_names, &mut had_func_var_error);
+        }
+        if had_func_var_error {
+            std::process::exit(1);
         }
 
         // Run BEGIN blocks
