@@ -757,66 +757,129 @@ fn build_matcher(opts: &Options) -> Matcher {
 fn convert_bre_to_ere(bre: &str) -> String {
     let mut result = String::with_capacity(bre.len());
     let chars: Vec<char> = bre.chars().collect();
+    let len = chars.len();
     let mut i = 0;
+    // Track nesting depth for \( \) to determine anchor context
+    let mut depth = 0;
+    // Track if we're at the "start" of a group or pattern
+    let mut at_start = true;
 
-    while i < chars.len() {
-        if chars[i] == '\\' && i + 1 < chars.len() {
+    while i < len {
+        if chars[i] == '[' {
+            // Pass through bracket expressions unchanged
+            result.push('[');
+            i += 1;
+            // Handle negation and ] as first char
+            if i < len && chars[i] == '^' {
+                result.push('^');
+                i += 1;
+            }
+            if i < len && chars[i] == ']' {
+                result.push(']');
+                i += 1;
+            }
+            while i < len && chars[i] != ']' {
+                result.push(chars[i]);
+                i += 1;
+            }
+            if i < len {
+                result.push(']');
+                i += 1;
+            }
+            at_start = false;
+            continue;
+        }
+
+        if chars[i] == '\\' && i + 1 < len {
             match chars[i + 1] {
                 '(' => {
                     result.push('(');
+                    depth += 1;
+                    at_start = true;
                     i += 2;
                 }
                 ')' => {
                     result.push(')');
+                    depth -= 1;
+                    at_start = false;
                     i += 2;
                 }
                 '{' => {
                     result.push('{');
                     i += 2;
+                    at_start = false;
                 }
                 '}' => {
                     result.push('}');
                     i += 2;
+                    at_start = false;
                 }
                 '|' => {
                     result.push('|');
+                    at_start = true;
                     i += 2;
                 }
                 '+' => {
                     result.push('+');
                     i += 2;
+                    at_start = false;
                 }
                 '?' => {
                     result.push('?');
                     i += 2;
+                    at_start = false;
                 }
                 _ => {
                     result.push('\\');
                     result.push(chars[i + 1]);
                     i += 2;
+                    at_start = false;
                 }
             }
+        } else if chars[i] == '^' {
+            if at_start {
+                result.push('^');
+            } else {
+                result.push_str("\\^");
+            }
+            i += 1;
+            // Don't change at_start — ^ at start is still "at start" for subsequent chars
+        } else if chars[i] == '$' {
+            // $ is anchor only at end of pattern or before \)
+            let at_end = i + 1 == len
+                || (i + 2 < len && chars[i + 1] == '\\' && chars[i + 2] == ')');
+            if at_end {
+                result.push('$');
+            } else {
+                result.push_str("\\$");
+            }
+            i += 1;
+            at_start = false;
         } else if chars[i] == '(' {
             result.push_str("\\(");
             i += 1;
+            at_start = false;
         } else if chars[i] == ')' {
             result.push_str("\\)");
             i += 1;
+            at_start = false;
         } else if chars[i] == '{' {
             result.push_str("\\{");
             i += 1;
+            at_start = false;
         } else if chars[i] == '}' {
             result.push_str("\\}");
             i += 1;
+            at_start = false;
         } else if chars[i] == '|' {
-            // In BRE, bare | is literal — but we already handle \| → |
-            // However, our combined pattern uses | for alternation.
-            // Skip escaping | if it comes from pattern combination.
-            result.push('|');
+            // In BRE, bare | is literal
+            result.push_str("\\|");
             i += 1;
+            at_start = false;
         } else {
             result.push(chars[i]);
             i += 1;
+            at_start = false;
         }
     }
     result
