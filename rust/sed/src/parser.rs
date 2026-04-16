@@ -456,6 +456,29 @@ impl<'a> Parser<'a> {
                     pattern.push(']');
                     self.advance();
                 }
+            } else if ch == b'[' && in_bracket {
+                // Inside bracket: check for POSIX class like [:alpha:]
+                if self.peek() == Some(b':') || self.peek() == Some(b'.') || self.peek() == Some(b'=') {
+                    let kind = self.advance().unwrap();
+                    pattern.push('[');
+                    pattern.push(kind as char);
+                    // Scan for matching :] or .] or =]
+                    loop {
+                        let c = self.advance().ok_or_else(|| self.err(eof_msg))?;
+                        if c == kind && self.peek() == Some(b']') {
+                            pattern.push(c as char);
+                            pattern.push(']');
+                            self.advance();
+                            break;
+                        }
+                        pattern.push(c as char);
+                        // Keep scanning — don't let ] close the bracket
+                        // The POSIX class must be properly terminated
+                    }
+                } else {
+                    // Plain [ inside bracket — literal
+                    pattern.push('[');
+                }
             } else if ch == b']' && in_bracket {
                 in_bracket = false;
                 pattern.push(']');
