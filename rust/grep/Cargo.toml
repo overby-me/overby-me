@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 fancy-regex = "0.17"
+libc = "0.2"
 memmap2 = "0.9"
 regex = "1"
 walkdir = "2"

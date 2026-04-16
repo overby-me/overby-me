@@ -1,6 +1,8 @@
 use std::env;
 use std::fs;
 use std::io::{self, BufRead, Write};
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process;
 
@@ -1583,6 +1585,30 @@ fn collect_files(opts: &Options) -> Vec<PathBuf> {
     files
 }
 
+/// Check if a file path refers to the same file as stdout (inode comparison).
+#[cfg(unix)]
+fn is_input_same_as_stdout(path: &Path) -> bool {
+    use std::os::unix::io::AsRawFd;
+    let stdout = io::stdout();
+    let stdout_fd = stdout.lock().as_raw_fd();
+    let stdout_meta = unsafe {
+        let mut stat: libc::stat = std::mem::zeroed();
+        if libc::fstat(stdout_fd, &mut stat) != 0 {
+            return false;
+        }
+        (stat.st_dev, stat.st_ino)
+    };
+    if let Ok(file_meta) = fs::metadata(path) {
+        return (file_meta.dev(), file_meta.ino()) == stdout_meta;
+    }
+    false
+}
+
+#[cfg(not(unix))]
+fn is_input_same_as_stdout(_path: &Path) -> bool {
+    false
+}
+
 /// Returns (match_count, matched, had_error)
 fn grep_file(path: &Path, matcher: &Matcher, opts: &Options) -> (usize, bool, bool) {
     let filename = if path.as_os_str() == "-" {
@@ -1590,6 +1616,33 @@ fn grep_file(path: &Path, matcher: &Matcher, opts: &Options) -> (usize, bool, bo
     } else {
         path.to_string_lossy().to_string()
     };
+
+    // Check if input file is also the output (would cause infinite loop)
+    let check_same = !opts.quiet && !opts.files_with_matches && !opts.files_without_match;
+    if check_same && path.as_os_str() != "-" && is_input_same_as_stdout(path) {
+        eprintln!("grep: {}: input file is also the output", path.display());
+        return (0, false, true);
+    }
+    #[cfg(unix)]
+    if check_same && path.as_os_str() == "-" {
+        // Check if stdin is the same as stdout
+        use std::os::unix::io::AsRawFd;
+        let stdin_fd = io::stdin().as_raw_fd();
+        let stdout_fd = io::stdout().lock().as_raw_fd();
+        unsafe {
+            let mut stdin_stat: libc::stat = std::mem::zeroed();
+            let mut stdout_stat: libc::stat = std::mem::zeroed();
+            if libc::fstat(stdin_fd, &mut stdin_stat) == 0
+                && libc::fstat(stdout_fd, &mut stdout_stat) == 0
+                && stdin_stat.st_dev == stdout_stat.st_dev
+                && stdin_stat.st_ino == stdout_stat.st_ino
+                && stdin_stat.st_ino != 0
+            {
+                eprintln!("grep: (standard input): input file is also the output");
+                return (0, false, true);
+            }
+        }
+    }
 
     if path.as_os_str() == "-" {
         let stdin = io::stdin();
