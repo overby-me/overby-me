@@ -750,6 +750,48 @@ fn max_backref(pattern: &str) -> usize {
     max
 }
 
+/// Warn if a pattern looks like a misused POSIX character class (e.g., [:space:]).
+/// The correct syntax is [[:space:]] (with outer brackets).
+fn warn_char_class_misuse(pattern: &str) {
+    const VALID_CLASSES: &[&str] = &[
+        "alnum", "alpha", "blank", "cntrl", "digit", "graph", "lower", "print", "punct", "space",
+        "upper", "xdigit",
+    ];
+    // Check if the entire pattern is [:classname:] (a bracket expression that
+    // looks like a POSIX class)
+    let chars: Vec<char> = pattern.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+    while i < len {
+        if chars[i] == '[' && i + 1 < len && chars[i + 1] == ':' {
+            // Found [: — check if this is inside another bracket expr
+            // If the pattern starts with [: (or has [: not preceded by another [),
+            // it might be a misuse
+            let start = i;
+            i += 2;
+            let name_start = i;
+            while i < len && chars[i] != ':' && chars[i] != ']' {
+                i += 1;
+            }
+            if i + 1 < len && chars[i] == ':' && chars[i + 1] == ']' {
+                let name: String = chars[name_start..i].iter().collect();
+                if VALID_CLASSES.contains(&name.as_str()) {
+                    // Check if this [: is at the start of a bracket expression
+                    // (i.e., the [ that starts [: IS the bracket open)
+                    // This means [: is the bracket expression, not inside one
+                    if start == 0 || chars[start - 1] != '[' {
+                        eprintln!(
+                            "grep: character class syntax is [[:{name}:]], not [:{name}:]"
+                        );
+                        process::exit(2);
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+}
+
 fn build_matcher(opts: &Options) -> Matcher {
     if opts.fixed_strings {
         return Matcher {
@@ -757,6 +799,12 @@ fn build_matcher(opts: &Options) -> Matcher {
             word_regexp: opts.word_regexp,
             line_regexp: opts.line_regexp,
         };
+    }
+
+    // Warn about likely misuse of character class syntax like [:space:]
+    // (should be [[:space:]])
+    for p in &opts.patterns {
+        warn_char_class_misuse(p);
     }
 
     // For BRE mode, convert each individual pattern before combining.
@@ -1383,8 +1431,22 @@ fn grep_reader<R: BufRead>(
         && !opts.files_without_match
         && !opts.only_matching
     {
-        // Context mode: collect all lines first
-        let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
+        // Context mode: collect all lines first (read raw bytes for non-UTF-8)
+        let mut lines = Vec::new();
+        let mut buf = Vec::new();
+        loop {
+            buf.clear();
+            match reader.read_until(b'\n', &mut buf) {
+                Ok(0) => break,
+                Ok(_) => {
+                    if buf.last() == Some(&b'\n') {
+                        buf.pop();
+                    }
+                    lines.push(String::from_utf8_lossy(&buf).into_owned());
+                }
+                Err(_) => break,
+            }
+        }
         let mut remaining_after: usize = 0;
         let mut last_printed: Option<usize> = None;
 
@@ -1455,16 +1517,27 @@ fn grep_reader<R: BufRead>(
         return (match_count, match_count > 0);
     }
 
-    // Non-context mode: stream lines
-    for (line_idx, line_result) in reader.lines().enumerate() {
-        let line = match line_result {
-            Ok(l) => l,
-            Err(_) => continue,
+    // Non-context mode: stream lines (read raw bytes for non-UTF-8 support)
+    let mut line_idx = 0;
+    let mut line_buf = Vec::new();
+    loop {
+        line_buf.clear();
+        let bytes_read = match reader.read_until(b'\n', &mut line_buf) {
+            Ok(n) => n,
+            Err(_) => break,
         };
-        let line_len = line.len() + 1; // +1 for newline
+        if bytes_read == 0 {
+            break;
+        }
+        // Strip trailing newline
+        if line_buf.last() == Some(&b'\n') {
+            line_buf.pop();
+        }
+        let line_len = line_buf.len() + 1;
+        let line = String::from_utf8_lossy(&line_buf);
 
         // Check for binary content in this line
-        if !is_binary && !opts.null_data && !opts.text_mode && line.contains('\0') {
+        if !is_binary && !opts.null_data && !opts.text_mode && line_buf.contains(&0) {
             is_binary = true;
         }
 
@@ -1535,13 +1608,16 @@ fn grep_reader<R: BufRead>(
                     if use_color {
                         let _ = writeln!(out, "{}", colorize_line(&line, matcher, &opts.match_color));
                     } else {
-                        let _ = writeln!(out, "{line}");
+                        // Write raw bytes to preserve non-UTF-8 content
+                        let _ = out.write_all(&line_buf);
+                        let _ = out.write_all(b"\n");
                     }
                 }
             }
         }
 
         byte_offset += line_len;
+        line_idx += 1;
     }
 
     (match_count, match_count > 0)
