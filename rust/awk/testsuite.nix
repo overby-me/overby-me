@@ -49,6 +49,9 @@ pkgs.runCommand "rust-awk-test-${name}" {
   sed -i 's|^gawk: |awk: |g' "$TMPDIR/expected"
   sed -i -E 's|^awk: \./[^:]+:[0-9]+: |awk: |g' "$TMPDIR/expected" "$TMPDIR/actual"
 
+  # Normalize ARGV[0] differences: gawk reports "gawk" (4), we report "awk" (3)
+  sed -i 's|ARGV\[0\] is 4|ARGV[0] is 3|g' "$TMPDIR/expected"
+
   # Compare
   if diff --text "$TMPDIR/actual" "$TMPDIR/expected"; then
     touch $out
