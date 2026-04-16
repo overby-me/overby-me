@@ -484,9 +484,20 @@ fn main() {
         }
     } else if opts.files.is_empty() || (opts.files.len() == 1 && opts.files[0] == "-") {
         let stdin = io::stdin();
-        let reader = stdin.lock();
         let mut engine = Engine::new(commands, quiet, posix, opts.sandbox, opts.line_length, opts.null_data);
-        let code = engine.run(reader, &mut out).unwrap_or_else(|e| {
+        let code = if opts.unbuffered {
+            // Read byte-by-byte from raw fd 0 to avoid read-ahead buffering.
+            // This ensures that after sed exits (e.g., via `q`), unconsumed
+            // input remains available for the next process in the pipeline.
+            use std::os::unix::io::FromRawFd;
+            let raw = unsafe { std::fs::File::from_raw_fd(0) };
+            let reader = io::BufReader::with_capacity(1, raw);
+            engine.run_unbuffered(reader, &mut out)
+            // File closes fd 0 on drop, but we're about to exit anyway
+        } else {
+            let reader = stdin.lock();
+            engine.run(reader, &mut out)
+        }.unwrap_or_else(|e| {
             eprintln!("sed: {e}");
             1
         });

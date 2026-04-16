@@ -69,30 +69,25 @@ impl Engine {
 
     pub fn run<R: BufRead, W: Write>(&mut self, mut reader: R, writer: &mut W) -> io::Result<i32> {
         if self.null_data {
-            // Split on NUL bytes instead of newlines
             let mut data = Vec::new();
             reader.read_to_end(&mut data)?;
             self.input_lines = data
                 .split(|&b| b == 0)
                 .map(|chunk| String::from_utf8_lossy(chunk).into_owned())
                 .collect();
-            // Remove trailing empty element if data ended with NUL
             if self.input_lines.last().map_or(false, |s| s.is_empty()) {
                 self.input_lines.pop();
             }
         } else {
-            // Read all input and check for trailing newline
             let mut data = Vec::new();
             reader.read_to_end(&mut data)?;
             self.input_had_trailing_newline = data.last() == Some(&b'\n');
-            // Split on newlines (like BufRead::lines but preserving NUL bytes)
             self.input_lines = if data.is_empty() {
                 Vec::new()
             } else {
                 let s = String::from_utf8_lossy(&data).into_owned();
                 let mut lines: Vec<String> =
                     s.split('\n').map(|l| l.to_string()).collect();
-                // Remove trailing empty element if input ended with \n
                 if self.input_had_trailing_newline
                     && lines.last().map_or(false, |s| s.is_empty())
                 {
@@ -101,6 +96,74 @@ impl Engine {
                 lines
             };
         }
+        self.run_lines(writer)
+    }
+
+    /// Run in unbuffered mode — read one line at a time from reader
+    pub fn run_unbuffered<R: BufRead, W: Write>(&mut self, mut reader: R, writer: &mut W) -> io::Result<i32> {
+        // Read lines one at a time and process immediately
+        loop {
+            let mut line_buf = String::new();
+            let bytes_read = reader.read_line(&mut line_buf)?;
+            if bytes_read == 0 {
+                break; // EOF
+            }
+            let had_newline = line_buf.ends_with('\n');
+            if had_newline {
+                line_buf.pop();
+                if line_buf.ends_with('\r') {
+                    line_buf.pop();
+                }
+            }
+            self.input_had_trailing_newline = had_newline;
+
+            // Store line for N command access
+            self.input_lines.push(line_buf.clone());
+            self.input_index = self.input_lines.len();
+            self.line_number = self.input_index;
+            // Can't know if last line in unbuffered mode
+            self.last_line = false;
+
+            self.pattern_space = line_buf;
+            self.sub_happened = false;
+            self.append_queue.clear();
+            self.suppress_default_print = false;
+
+            let cmds = self.commands.clone();
+            self.execute_commands_with_offset(&cmds, 0);
+
+            if self.quit {
+                if !self.quiet && !self.suppress_default_print {
+                    self.write_pattern_space();
+                }
+                self.flush_output(writer)?;
+                return Ok(self.exit_code);
+            }
+
+            for text in self.prepend_queue.clone() {
+                if text.is_empty() { continue; }
+                self.output.extend_from_slice(text.as_bytes());
+                if !text.ends_with('\n') { self.output.push(b'\n'); }
+            }
+            self.prepend_queue.clear();
+
+            if !self.quiet && !self.suppress_default_print {
+                self.write_pattern_space();
+            }
+
+            for text in self.append_queue.clone() {
+                if text.is_empty() { continue; }
+                self.output.extend_from_slice(text.as_bytes());
+                if !text.ends_with('\n') { self.output.push(b'\n'); }
+            }
+
+            self.flush_output(writer)?;
+        }
+
+        Ok(self.exit_code)
+    }
+
+    fn run_lines<W: Write>(&mut self, writer: &mut W) -> io::Result<i32> {
         self.input_index = 0;
         let total = self.input_lines.len();
 
