@@ -93,7 +93,9 @@ pub struct Lexer {
     pos: usize,
     tokens: Vec<Token>,
     pub token_lines: Vec<usize>,
+    pub token_cols: Vec<usize>,
     line: usize,
+    col: usize,
     warned_escapes: std::collections::HashSet<char>,
 }
 
@@ -104,7 +106,9 @@ impl Lexer {
             pos: 0,
             tokens: Vec::new(),
             token_lines: Vec::new(),
+            token_cols: Vec::new(),
             line: 1,
+            col: 1,
             warned_escapes: std::collections::HashSet::new(),
         }
     }
@@ -115,8 +119,13 @@ impl Lexer {
 
     fn advance(&mut self) -> Option<char> {
         let ch = self.input.get(self.pos).copied();
-        if ch.is_some() {
+        if let Some(c) = ch {
             self.pos += 1;
+            if c == '\n' {
+                self.col = 1;
+            } else {
+                self.col += 1;
+            }
         }
         ch
     }
@@ -171,8 +180,7 @@ impl Lexer {
                             while count < 2 {
                                 if let Some(c) = self.peek() {
                                     if c.is_ascii_hexdigit() {
-                                        hex = hex * 16
-                                            + c.to_digit(16).unwrap();
+                                        hex = hex * 16 + c.to_digit(16).unwrap();
                                         self.advance();
                                         count += 1;
                                     } else {
@@ -197,7 +205,7 @@ impl Lexer {
                             // Read up to 2 more octal digits
                             for _ in 0..2 {
                                 if let Some(c) = self.peek() {
-                                    if c >= '0' && c <= '7' {
+                                    if ('0'..='7').contains(&c) {
                                         oct = oct * 8 + (c as u32 - '0' as u32);
                                         self.advance();
                                     } else {
@@ -212,12 +220,13 @@ impl Lexer {
                         _ => {
                             // Only warn for escapes that are truly unknown
                             // Skip digits, regex metachar escapes, and common chars
-                            if !"0123456789[](){}|.^$*+?&-<>=#;:!~%"
-                                .contains(esc)
+                            if !"0123456789[](){}|.^$*+?&-<>=#;:!~%".contains(esc)
                                 && self.warned_escapes.insert(esc)
                             {
                                 if esc == 'u' || esc == 'U' {
-                                    eprintln!("awk: warning: no hex digits in `\\{esc}' escape sequence");
+                                    eprintln!(
+                                        "awk: warning: no hex digits in `\\{esc}' escape sequence"
+                                    );
                                 } else {
                                     eprintln!(
                                         "awk: warning: regexp escape sequence `\\{esc}' is not a known regexp operator"
@@ -250,8 +259,15 @@ impl Lexer {
                 .to_string();
             let full_line = if !src_line.is_empty() {
                 // Find the full line
-                let line_start = self.input[..self.pos].iter().rposition(|&c| c == '\n').map(|p| p + 1).unwrap_or(0);
-                self.input[line_start..].iter().take_while(|&&c| c != '\n').collect::<String>()
+                let line_start = self.input[..self.pos]
+                    .iter()
+                    .rposition(|&c| c == '\n')
+                    .map(|p| p + 1)
+                    .unwrap_or(0);
+                self.input[line_start..]
+                    .iter()
+                    .take_while(|&&c| c != '\n')
+                    .collect::<String>()
             } else {
                 String::new()
             };
@@ -273,8 +289,7 @@ impl Lexer {
                         s.push('/');
                     } else {
                         // Warn about unknown regex escapes at parse time (like gawk)
-                        if !"dDwWsSbBtbnrfax0123456789.^$*+?()[]{}|\\/&-"
-                            .contains(next)
+                        if !"dDwWsSbBtbnrfax0123456789.^$*+?()[]{}|\\/&-".contains(next)
                             && self.warned_escapes.insert(next)
                         {
                             if next == 'u' {
@@ -323,7 +338,8 @@ impl Lexer {
             } else if ch == '.' && !has_dot && !has_exp {
                 has_dot = true;
                 s.push(self.advance().unwrap());
-            } else if (ch == 'e' || ch == 'E') && !has_exp
+            } else if (ch == 'e' || ch == 'E')
+                && !has_exp
                 && !s.is_empty()
                 && s.chars().last().is_some_and(|c| c.is_ascii_digit())
             {
@@ -404,11 +420,13 @@ impl Lexer {
                 Some(c) => c,
                 None => {
                     self.token_lines.push(self.line);
+                    self.token_cols.push(self.col);
                     self.tokens.push(Token::Eof);
                     break;
                 }
             };
 
+            let tok_col = self.col;
             let tok = match ch {
                 '\n' => {
                     self.advance();
@@ -629,6 +647,7 @@ impl Lexer {
                 self.line += 1;
             }
             self.token_lines.push(self.line);
+            self.token_cols.push(tok_col);
             self.tokens.push(tok);
         }
 

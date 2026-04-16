@@ -7,21 +7,27 @@ pub struct Parser {
     function_names: std::collections::HashSet<String>,
     in_print_context: bool,
     token_lines: Vec<usize>,
+    token_cols: Vec<usize>,
     source_lines: Vec<String>,
 }
 
 const BUILTIN_FUNCTIONS: &[&str] = &[
-    "length", "substr", "index", "split", "sub", "gsub", "gensub", "match", "sprintf",
-    "tolower", "toupper", "sin", "cos", "atan2", "exp", "log", "sqrt", "int", "rand",
-    "srand", "system", "close", "mktime", "systime", "strftime", "typeof", "asort",
-    "asorti", "patsplit",
+    "length", "substr", "index", "split", "sub", "gsub", "gensub", "match", "sprintf", "tolower",
+    "toupper", "sin", "cos", "atan2", "exp", "log", "sqrt", "int", "rand", "srand", "system",
+    "close", "mktime", "systime", "strftime", "typeof", "asort", "asorti", "patsplit",
 ];
 
 impl Parser {
-    pub fn new_with_source(tokens: Vec<Token>, token_lines: Vec<usize>, source: &str) -> Self {
+    pub fn new_with_source(
+        tokens: Vec<Token>,
+        token_lines: Vec<usize>,
+        token_cols: Vec<usize>,
+        source: &str,
+    ) -> Self {
         let source_lines: Vec<String> = source.lines().map(|s| s.to_string()).collect();
         let mut p = Self::new(tokens);
         p.token_lines = token_lines;
+        p.token_cols = token_cols;
         p.source_lines = source_lines;
         p
     }
@@ -45,6 +51,7 @@ impl Parser {
             function_names,
             in_print_context: false,
             token_lines: Vec::new(),
+            token_cols: Vec::new(),
             source_lines: Vec::new(),
         }
     }
@@ -59,10 +66,36 @@ impl Parser {
         tok
     }
 
+    fn syntax_error_at_current(&self) -> ! {
+        let pos = self.pos.min(self.token_lines.len().saturating_sub(1));
+        let line = self.token_lines.get(pos).copied().unwrap_or(1);
+        let col = self.token_cols.get(pos).copied().unwrap_or(1);
+        if let Some(src) = self.source_lines.get(line.saturating_sub(1)) {
+            eprintln!("awk: {src}");
+            eprintln!("awk: {:>width$} syntax error", "^", width = col);
+        } else {
+            eprintln!("awk: syntax error");
+        }
+        std::process::exit(1);
+    }
+
+    fn syntax_error_at(&self, pos: usize, msg: &str) -> ! {
+        let line = self.token_lines.get(pos).copied().unwrap_or(1);
+        let col = self.token_cols.get(pos).copied().unwrap_or(1);
+        if let Some(src) = self.source_lines.get(line.saturating_sub(1)) {
+            eprintln!("awk: {src}");
+            eprintln!("awk: {:>width$} {msg}", "^", width = col);
+        } else {
+            eprintln!("awk: {msg}");
+        }
+        std::process::exit(1);
+    }
+
     fn expect(&mut self, expected: &Token) {
         let tok = self.advance();
         if std::mem::discriminant(&tok) != std::mem::discriminant(expected) {
-            // silently skip for robustness
+            // Point at the unexpected token we just consumed
+            self.syntax_error_at(self.pos.saturating_sub(1), "syntax error");
         }
     }
 
@@ -98,7 +131,11 @@ impl Parser {
         };
         // Check for redefining builtin functions
         if BUILTIN_FUNCTIONS.contains(&name.as_str()) {
-            let line = self.token_lines.get(self.pos.saturating_sub(1)).copied().unwrap_or(1);
+            let line = self
+                .token_lines
+                .get(self.pos.saturating_sub(1))
+                .copied()
+                .unwrap_or(1);
             if let Some(src) = self.source_lines.get(line.saturating_sub(1)) {
                 eprintln!("awk: {src}");
             }
@@ -107,14 +144,21 @@ impl Parser {
         }
         self.expect(&Token::LParen);
         let mut params = Vec::new();
-        let mut seen_params: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut seen_params: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
         let mut has_errors = false;
+        let mut expect_param = false;
         while !matches!(self.peek(), Token::RParen | Token::Eof) {
-            // Skip empty parameter slots (e.g., trailing commas)
             if matches!(self.peek(), Token::Comma) {
+                if expect_param {
+                    // Two commas in a row - syntax error
+                    self.syntax_error_at_current();
+                }
                 self.advance();
+                expect_param = true;
                 continue;
             }
+            expect_param = false;
             if let Token::Ident(s) = self.advance() {
                 // Check for duplicate parameter names
                 if let Some(&first_idx) = seen_params.get(&s) {
@@ -133,9 +177,8 @@ impl Parser {
                 }
                 // Check for special variable used as parameter
                 const SPECIAL_VARS: &[&str] = &[
-                    "FS", "RS", "OFS", "ORS", "NR", "NF", "FNR", "FILENAME",
-                    "SUBSEP", "RSTART", "RLENGTH", "OFMT", "CONVFMT", "ARGC", "ARGV",
-                    "ENVIRON", "ERRNO", "RT",
+                    "FS", "RS", "OFS", "ORS", "NR", "NF", "FNR", "FILENAME", "SUBSEP", "RSTART",
+                    "RLENGTH", "OFMT", "CONVFMT", "ARGC", "ARGV", "ENVIRON", "ERRNO", "RT",
                 ];
                 if SPECIAL_VARS.contains(&s.as_str()) {
                     eprintln!(
@@ -148,6 +191,7 @@ impl Parser {
             }
             if matches!(self.peek(), Token::Comma) {
                 self.advance();
+                expect_param = true;
             }
         }
         self.expect(&Token::RParen);
@@ -234,7 +278,10 @@ impl Parser {
         }
         if matches!(self.peek(), Token::Eof) {
             // Unterminated block — show the last non-empty source line
-            let src = self.source_lines.iter().rev()
+            let src = self
+                .source_lines
+                .iter()
+                .rev()
                 .find(|s| !s.trim().is_empty())
                 .cloned()
                 .unwrap_or_default();
@@ -909,9 +956,7 @@ impl Parser {
             }
             Token::Ident(name) => {
                 self.advance();
-                if matches!(self.peek(), Token::LParen)
-                    && self.function_names.contains(&name)
-                {
+                if matches!(self.peek(), Token::LParen) && self.function_names.contains(&name) {
                     // Function call (only if name is a known function)
                     self.advance();
                     let mut args = Vec::new();
@@ -934,13 +979,15 @@ impl Parser {
                     }
                     self.expect(&Token::RBracket);
                     Expr::ArrayRef(name, indices)
+                } else if BUILTIN_FUNCTIONS.contains(&name.as_str()) {
+                    // Builtin function used without () is a syntax error
+                    self.syntax_error_at_current();
                 } else {
                     Expr::Var(name)
                 }
             }
             _ => {
-                self.advance();
-                Expr::Number(0.0)
+                self.syntax_error_at_current();
             }
         }
     }

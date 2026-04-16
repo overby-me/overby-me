@@ -125,15 +125,38 @@ pub fn sprintf_impl_with_convfmt(vals: &[Value], convfmt: &str) -> String {
             i += 1;
 
             // Check if conversion is valid before consuming an arg
-            let is_valid_conv = matches!(conv, 'd' | 'i' | 'o' | 'x' | 'X' | 'u' | 'c' | 's'
-                | 'f' | 'F' | 'e' | 'E' | 'g' | 'G' | 'a' | 'A');
+            let is_valid_conv = matches!(
+                conv,
+                'd' | 'i'
+                    | 'o'
+                    | 'x'
+                    | 'X'
+                    | 'u'
+                    | 'c'
+                    | 's'
+                    | 'f'
+                    | 'F'
+                    | 'e'
+                    | 'E'
+                    | 'g'
+                    | 'G'
+                    | 'a'
+                    | 'A'
+            );
 
             let val = if !is_valid_conv {
                 // Unknown conversion: output literal %, don't consume arg
                 result.push('%');
-                if !flags.is_empty() { result.push_str(&flags); }
-                if !width.is_empty() { result.push_str(&width); }
-                if has_precision { result.push('.'); result.push_str(&precision); }
+                if !flags.is_empty() {
+                    result.push_str(&flags);
+                }
+                if !width.is_empty() {
+                    result.push_str(&width);
+                }
+                if has_precision {
+                    result.push('.');
+                    result.push_str(&precision);
+                }
                 result.push(conv);
                 continue;
             } else if let Some(pos) = positional_arg {
@@ -206,7 +229,11 @@ pub fn sprintf_impl_with_convfmt(vals: &[Value], convfmt: &str) -> String {
                     let n = val.to_num() as u64;
                     if has_precision && prec_num == 0 && n == 0 {
                         // %.0o with 0: empty, but # flag gives "0"
-                        if alt_form { "0".to_string() } else { String::new() }
+                        if alt_form {
+                            "0".to_string()
+                        } else {
+                            String::new()
+                        }
                     } else {
                         let s = format!("{n:o}");
                         let s = if has_precision && s.len() < prec_num {
@@ -273,9 +300,7 @@ pub fn sprintf_impl_with_convfmt(vals: &[Value], convfmt: &str) -> String {
                 'c' => {
                     // If the value is a string, use first character
                     match val {
-                        Value::Str(s) if !s.is_empty() => {
-                            s.chars().next().unwrap().to_string()
-                        }
+                        Value::Str(s) if !s.is_empty() => s.chars().next().unwrap().to_string(),
                         _ => {
                             let n = val.to_num() as u32;
                             if n == 0 {
@@ -302,10 +327,18 @@ pub fn sprintf_impl_with_convfmt(vals: &[Value], convfmt: &str) -> String {
                     let n = val.to_num();
                     if n.is_nan() {
                         let s = if conv == 'F' { "NAN" } else { "nan" };
-                        if n.is_sign_negative() { format!("-{s}") } else { s.to_string() }
+                        if n.is_sign_negative() {
+                            format!("-{s}")
+                        } else {
+                            s.to_string()
+                        }
                     } else if n.is_infinite() {
                         let s = if conv == 'F' { "INF" } else { "inf" };
-                        if n < 0.0 { format!("-{s}") } else { s.to_string() }
+                        if n < 0.0 {
+                            format!("-{s}")
+                        } else {
+                            s.to_string()
+                        }
                     } else {
                         let p = if has_precision { prec_num } else { 6 };
                         let mut s = format!("{n:.prec$}", prec = p);
@@ -367,10 +400,18 @@ pub fn sprintf_impl_with_convfmt(vals: &[Value], convfmt: &str) -> String {
                     let n = val.to_num();
                     if n.is_nan() {
                         let s = if conv == 'A' { "NAN" } else { "nan" };
-                        if n.is_sign_negative() { format!("-{s}") } else { s.to_string() }
+                        if n.is_sign_negative() {
+                            format!("-{s}")
+                        } else {
+                            s.to_string()
+                        }
                     } else if n.is_infinite() {
                         let s = if conv == 'A' { "INF" } else { "inf" };
-                        if n < 0.0 { format!("-{s}") } else { s.to_string() }
+                        if n < 0.0 {
+                            format!("-{s}")
+                        } else {
+                            s.to_string()
+                        }
                     } else {
                         // Basic hex float (not fully compliant)
                         format!("%{conv}")
@@ -388,7 +429,10 @@ pub fn sprintf_impl_with_convfmt(vals: &[Value], convfmt: &str) -> String {
                         result.push(' ');
                     }
                 } else if zero_pad
-                    && matches!(conv, 'd' | 'i' | 'o' | 'x' | 'X' | 'u' | 'f' | 'e' | 'E' | 'g' | 'G')
+                    && matches!(
+                        conv,
+                        'd' | 'i' | 'o' | 'x' | 'X' | 'u' | 'f' | 'e' | 'E' | 'g' | 'G'
+                    )
                 {
                     // Put sign/prefix before zeros
                     if formatted.starts_with("0x") || formatted.starts_with("0X") {
@@ -397,7 +441,8 @@ pub fn sprintf_impl_with_convfmt(vals: &[Value], convfmt: &str) -> String {
                             result.push('0');
                         }
                         result.push_str(&formatted[2..]);
-                    } else if formatted.starts_with('-') || formatted.starts_with('+')
+                    } else if formatted.starts_with('-')
+                        || formatted.starts_with('+')
                         || formatted.starts_with(' ')
                     {
                         result.push(formatted.chars().next().unwrap());
@@ -494,11 +539,19 @@ pub fn gensub_replace(replacement: &str, caps: &regex::Captures) -> String {
 pub fn format_scientific(n: f64, prec: usize, upper: bool) -> String {
     if n.is_nan() {
         let s = if upper { "NAN" } else { "nan" };
-        return if n.is_sign_negative() { format!("-{s}") } else { s.to_string() };
+        return if n.is_sign_negative() {
+            format!("-{s}")
+        } else {
+            s.to_string()
+        };
     }
     if n.is_infinite() {
         let s = if upper { "INF" } else { "inf" };
-        return if n < 0.0 { format!("-{s}") } else { s.to_string() };
+        return if n < 0.0 {
+            format!("-{s}")
+        } else {
+            s.to_string()
+        };
     }
     if n == 0.0 {
         let e_char = if upper { 'E' } else { 'e' };
@@ -520,11 +573,19 @@ pub fn format_scientific(n: f64, prec: usize, upper: bool) -> String {
 pub fn format_g(n: f64, prec: usize, upper: bool) -> String {
     if n.is_nan() {
         let s = if upper { "NAN" } else { "nan" };
-        return if n.is_sign_negative() { format!("-{s}") } else { s.to_string() };
+        return if n.is_sign_negative() {
+            format!("-{s}")
+        } else {
+            s.to_string()
+        };
     }
     if n.is_infinite() {
         let s = if upper { "INF" } else { "inf" };
-        return if n < 0.0 { format!("-{s}") } else { s.to_string() };
+        return if n < 0.0 {
+            format!("-{s}")
+        } else {
+            s.to_string()
+        };
     }
     if n == 0.0 {
         return "0".to_string();
@@ -557,11 +618,19 @@ pub fn format_g(n: f64, prec: usize, upper: bool) -> String {
 pub fn format_g_alt(n: f64, prec: usize, upper: bool) -> String {
     if n.is_nan() {
         let s = if upper { "NAN" } else { "nan" };
-        return if n.is_sign_negative() { format!("-{s}") } else { s.to_string() };
+        return if n.is_sign_negative() {
+            format!("-{s}")
+        } else {
+            s.to_string()
+        };
     }
     if n.is_infinite() {
         let s = if upper { "INF" } else { "inf" };
-        return if n < 0.0 { format!("-{s}") } else { s.to_string() };
+        return if n < 0.0 {
+            format!("-{s}")
+        } else {
+            s.to_string()
+        };
     }
     if n == 0.0 {
         if prec <= 1 {
@@ -578,11 +647,7 @@ pub fn format_g_alt(n: f64, prec: usize, upper: bool) -> String {
         };
         let s = format!("{n:.prec$}", prec = decimal_places);
         // # flag: keep trailing zeros and decimal point
-        if !s.contains('.') {
-            format!("{s}.")
-        } else {
-            s
-        }
+        if !s.contains('.') { format!("{s}.") } else { s }
     } else {
         let p = if prec > 0 { prec - 1 } else { 0 };
         format_scientific(n, p, upper)

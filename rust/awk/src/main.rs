@@ -118,7 +118,8 @@ fn main() {
     let mut lexer = Lexer::new(&program_text);
     let tokens = lexer.tokenize();
     let token_lines = lexer.token_lines.clone();
-    let mut parser = Parser::new_with_source(tokens, token_lines, &program_text);
+    let token_cols = lexer.token_cols.clone();
+    let mut parser = Parser::new_with_source(tokens, token_lines, token_cols, &program_text);
     let program = parser.parse();
 
     // Set up interpreter
@@ -149,10 +150,7 @@ fn main() {
     for (i, file) in input_files.iter().enumerate() {
         interp.set_array("ARGV", &(i + 1).to_string(), Value::Str(file.clone()));
     }
-    interp.set_var(
-        "ARGC",
-        Value::Num((input_files.len() + 1) as f64),
-    );
+    interp.set_var("ARGC", Value::Num((input_files.len() + 1) as f64));
 
     // Seed RNG
     interp.rng_state = std::time::SystemTime::now()

@@ -1,12 +1,12 @@
 use regex::Regex;
 use std::collections::HashMap;
+use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
-use std::fs;
 
 use crate::ast::*;
 use crate::format::{awk_replace, gensub_replace, sprintf_impl_with_convfmt};
-use crate::value::{compare_values, ControlFlow, Value};
+use crate::value::{ControlFlow, Value, compare_values};
 
 pub struct Interpreter {
     pub globals: HashMap<String, Value>,
@@ -87,8 +87,7 @@ impl Interpreter {
             }
         };
         // Fields from input splitting are StrNum
-        self.fields
-            .extend(parts.into_iter().map(Value::StrNum));
+        self.fields.extend(parts.into_iter().map(Value::StrNum));
         let nf = (self.fields.len() - 1) as f64;
         self.globals.insert("NF".to_string(), Value::Num(nf));
     }
@@ -156,7 +155,6 @@ impl Interpreter {
                 .unwrap_or(Value::Uninitialized),
         }
     }
-
 
     pub fn set_var(&mut self, name: &str, val: Value) {
         match name {
@@ -459,7 +457,14 @@ impl Interpreter {
                     return ControlFlow::None;
                 }
                 let vals: Vec<Value> = args.iter().map(|a| self.eval_expr(a)).collect();
-                let output = sprintf_impl_with_convfmt(&vals, &self.globals.get("CONVFMT").map(|v| v.to_string_val()).unwrap_or("%.6g".to_string()));
+                let output = sprintf_impl_with_convfmt(
+                    &vals,
+                    &self
+                        .globals
+                        .get("CONVFMT")
+                        .map(|v| v.to_string_val())
+                        .unwrap_or("%.6g".to_string()),
+                );
                 self.write_output(&output, dest);
             }
             Stmt::If(cond, then_branch, else_branch) => {
@@ -522,9 +527,7 @@ impl Interpreter {
                     && self.globals.contains_key(array)
                     && !matches!(self.globals.get(array), Some(Value::Uninitialized))
                 {
-                    eprintln!(
-                        "awk: fatal: attempt to use scalar `{array}' as an array"
-                    );
+                    eprintln!("awk: fatal: attempt to use scalar `{array}' as an array");
                     std::process::exit(2);
                 }
                 let mut keys: Vec<String> = self
@@ -556,6 +559,13 @@ impl Interpreter {
                 return ControlFlow::Exit(code);
             }
             Stmt::Delete(name, indices) => {
+                if self.functions.contains_key(name) {
+                    eprintln!(
+                        "awk: error: function `{name}' called with space between name and `(',"
+                    );
+                    eprintln!("or used as a variable or an array");
+                    std::process::exit(1);
+                }
                 if indices.is_empty() {
                     self.arrays.remove(name);
                 } else {
@@ -706,7 +716,9 @@ impl Interpreter {
                     match io::stdin().lock().read_line(&mut line) {
                         Ok(0) => {
                             // Evaluate target side effects even on EOF
-                            if let Some(v) = var { self.eval_side_effects(v); }
+                            if let Some(v) = var {
+                                self.eval_side_effects(v);
+                            }
                             Value::Num(0.0)
                         }
                         Ok(_) => {
@@ -751,7 +763,9 @@ impl Interpreter {
                     match result {
                         Ok(0) => {
                             // Evaluate target side effects even on EOF
-                            if let Some(v) = var { self.eval_side_effects(v); }
+                            if let Some(v) = var {
+                                self.eval_side_effects(v);
+                            }
                             Value::Num(0.0)
                         }
                         Ok(_) => {
@@ -803,7 +817,9 @@ impl Interpreter {
                     match result {
                         Ok(0) => {
                             // Evaluate target side effects even on EOF
-                            if let Some(v) = var { self.eval_side_effects(v); }
+                            if let Some(v) = var {
+                                self.eval_side_effects(v);
+                            }
                             Value::Num(0.0)
                         }
                         Ok(_) => {
@@ -918,9 +934,7 @@ impl Interpreter {
         while i < chars.len() {
             if chars[i] == '\\' && i + 1 < chars.len() {
                 let next = chars[i + 1];
-                if !"dDwWsSbBtbnrfax01234567.^$*+?()[]{}|\\/\""
-                    .contains(next)
-                {
+                if !"dDwWsSbBtbnrfax01234567.^$*+?()[]{}|\\/\"".contains(next) {
                     let key = format!("\\{next}");
                     if warned.insert(key) {
                         if next == '8' || next == '9' {
@@ -928,9 +942,7 @@ impl Interpreter {
                                 "awk: warning: regexp escape sequence `\\{next}' treated as plain `{next}'"
                             );
                         } else if next == 'u' || next == 'U' {
-                            eprintln!(
-                                "awk: warning: no hex digits in `\\{next}' escape sequence"
-                            );
+                            eprintln!("awk: warning: no hex digits in `\\{next}' escape sequence");
                         } else {
                             eprintln!(
                                 "awk: warning: regexp escape sequence `\\{next}' is not a known regexp operator"
@@ -941,13 +953,21 @@ impl Interpreter {
                 i += 2;
             } else if chars[i] == '[' {
                 i += 1;
-                if i < chars.len() && chars[i] == '^' { i += 1; }
-                if i < chars.len() && chars[i] == ']' { i += 1; }
-                while i < chars.len() && chars[i] != ']' {
-                    if chars[i] == '\\' { i += 1; }
+                if i < chars.len() && chars[i] == '^' {
                     i += 1;
                 }
-                if i < chars.len() { i += 1; }
+                if i < chars.len() && chars[i] == ']' {
+                    i += 1;
+                }
+                while i < chars.len() && chars[i] != ']' {
+                    if chars[i] == '\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+                if i < chars.len() {
+                    i += 1;
+                }
             } else {
                 i += 1;
             }
@@ -963,9 +983,7 @@ impl Interpreter {
             if chars[i] == '\\' && i + 1 < chars.len() {
                 let next = chars[i + 1];
                 // Known regex escapes — pass through
-                if "dDwWsSbBtbnrfax01234567.^$*+?()[]{}|\\/"
-                    .contains(next)
-                {
+                if "dDwWsSbBtbnrfax01234567.^$*+?()[]{}|\\/".contains(next) {
                     result.push(chars[i]);
                     i += 1;
                     result.push(chars[i]);
@@ -1081,6 +1099,14 @@ impl Interpreter {
                 self.get_field(idx)
             }
             Expr::ArrayRef(name, indices) => {
+                // Check function-as-array
+                if self.functions.contains_key(name) && !self.arrays.contains_key(name) {
+                    eprintln!(
+                        "awk: error: function `{name}' called with space between name and `(',"
+                    );
+                    eprintln!("or used as a variable or an array");
+                    std::process::exit(1);
+                }
                 // Check scalar-as-array
                 if !self.arrays.contains_key(name)
                     && self.globals.contains_key(name)
@@ -1231,8 +1257,7 @@ impl Interpreter {
                 // it may modify the same variable.
                 let (lv, rv, resolved_target) = match lhs.as_ref() {
                     Expr::ArrayRef(name, indices) => {
-                        let vals: Vec<Value> =
-                            indices.iter().map(|i| self.eval_expr(i)).collect();
+                        let vals: Vec<Value> = indices.iter().map(|i| self.eval_expr(i)).collect();
                         let key = self.array_key(&vals);
                         let cur = self.get_array(name, &key).to_num();
                         let rv = self.eval_expr(rhs).to_num();
@@ -1339,7 +1364,14 @@ impl Interpreter {
             ),
             Expr::Sprintf(args) => {
                 let vals: Vec<Value> = args.iter().map(|a| self.eval_expr(a)).collect();
-                Value::Str(sprintf_impl_with_convfmt(&vals, &self.globals.get("CONVFMT").map(|v| v.to_string_val()).unwrap_or("%.6g".to_string())))
+                Value::Str(sprintf_impl_with_convfmt(
+                    &vals,
+                    &self
+                        .globals
+                        .get("CONVFMT")
+                        .map(|v| v.to_string_val())
+                        .unwrap_or("%.6g".to_string()),
+                ))
             }
             Expr::Pipe(cmd, getline_expr) => {
                 // cmd | getline [var]
@@ -1585,11 +1617,7 @@ impl Interpreter {
                             if let Some(ref arr) = arr_name {
                                 self.arrays.remove(arr);
                                 // arr[0] = entire match
-                                self.set_array(
-                                    arr,
-                                    "0",
-                                    Value::Str(m.as_str().to_string()),
-                                );
+                                self.set_array(arr, "0", Value::Str(m.as_str().to_string()));
                                 // arr[1..n] = capture groups
                                 for i in 1..caps.len() {
                                     if let Some(g) = caps.get(i) {
@@ -1620,7 +1648,14 @@ impl Interpreter {
             }
             "sprintf" => {
                 let vals: Vec<Value> = args.iter().map(|a| self.eval_expr(a)).collect();
-                Value::Str(sprintf_impl_with_convfmt(&vals, &self.globals.get("CONVFMT").map(|v| v.to_string_val()).unwrap_or("%.6g".to_string())))
+                Value::Str(sprintf_impl_with_convfmt(
+                    &vals,
+                    &self
+                        .globals
+                        .get("CONVFMT")
+                        .map(|v| v.to_string_val())
+                        .unwrap_or("%.6g".to_string()),
+                ))
             }
             "tolower" => {
                 if args.is_empty() {
@@ -1746,11 +1781,11 @@ impl Interpreter {
                     found = true;
                 }
                 // Wait for child process and get exit status
-                if let Some(mut child) = self.pipe_children.remove(&name) {
-                    if let Ok(status) = child.wait() {
-                        let code = status.code().unwrap_or(-1);
-                        return Value::Num(code as f64);
-                    }
+                if let Some(mut child) = self.pipe_children.remove(&name)
+                    && let Ok(status) = child.wait()
+                {
+                    let code = status.code().unwrap_or(-1);
+                    return Value::Num(code as f64);
                 }
                 if !found {
                     self.set_var(
@@ -1780,10 +1815,10 @@ impl Interpreter {
                     return Value::Str("uninitialized".to_string());
                 }
                 // Check if arg is an array name
-                if let Expr::Var(name) = &args[0] {
-                    if self.arrays.contains_key(name) {
-                        return Value::Str("array".to_string());
-                    }
+                if let Expr::Var(name) = &args[0]
+                    && self.arrays.contains_key(name)
+                {
+                    return Value::Str("array".to_string());
                 }
                 let val = self.eval_expr(&args[0]);
                 let t = match &val {
@@ -1877,12 +1912,12 @@ impl Interpreter {
 
                         if i < arg_vals.len() {
                             // Check if this arg is a variable with an array
-                            if let Some(Some(var_name)) = arg_var_names.get(i) {
-                                if let Some(arr) = self.arrays.get(var_name).cloned() {
-                                    // Pass array by reference
-                                    self.arrays.insert(param.clone(), arr);
-                                    continue;
-                                }
+                            if let Some(Some(var_name)) = arg_var_names.get(i)
+                                && let Some(arr) = self.arrays.get(var_name).cloned()
+                            {
+                                // Pass array by reference
+                                self.arrays.insert(param.clone(), arr);
+                                continue;
                             }
                             self.set_var(param, arg_vals[i].clone());
                         } else {
@@ -1899,30 +1934,30 @@ impl Interpreter {
                     // Save array state BEFORE restoring scope (for copy-back)
                     let mut copyback: Vec<(String, Option<HashMap<String, Value>>)> = Vec::new();
                     for (i, _arg) in args.iter().enumerate() {
-                        if let Some(Some(orig_name)) = arg_var_names.get(i) {
-                            if let Some(param) = func.params.get(i) {
-                                let param_has_array = self.arrays.contains_key(param);
-                                let was_array = arg_was_array.get(i).copied().unwrap_or(false);
-                                // Copy back if:
-                                // 1. Arg was already an array (always copy back)
-                                // 2. Param became an array AND the original doesn't
-                                //    have a conflicting global array (no independent modification)
-                                if was_array {
-                                    let arr = self.arrays.get(param).cloned();
-                                    copyback.push((orig_name.clone(), arr));
-                                } else if param_has_array && param == orig_name {
-                                    // Same-name param (e.g., test(foo) with param foo):
-                                    // always copy back since param and orig share the name
-                                    let arr = self.arrays.get(param).cloned();
-                                    copyback.push((orig_name.clone(), arr));
-                                } else if param_has_array {
-                                    // Different-name param: only copy back if orig doesn't
-                                    // currently have an array (avoid overwriting independent changes)
-                                    if !self.arrays.contains_key(orig_name) {
-                                        let arr = self.arrays.get(param).cloned();
-                                        copyback.push((orig_name.clone(), arr));
-                                    }
-                                }
+                        if let Some(Some(orig_name)) = arg_var_names.get(i)
+                            && let Some(param) = func.params.get(i)
+                        {
+                            let param_has_array = self.arrays.contains_key(param);
+                            let was_array = arg_was_array.get(i).copied().unwrap_or(false);
+                            // Copy back if:
+                            // 1. Arg was already an array (always copy back)
+                            // 2. Param became an array AND the original doesn't
+                            //    have a conflicting global array (no independent modification)
+                            if was_array {
+                                let arr = self.arrays.get(param).cloned();
+                                copyback.push((orig_name.clone(), arr));
+                            } else if param_has_array && param == orig_name {
+                                // Same-name param (e.g., test(foo) with param foo):
+                                // always copy back since param and orig share the name
+                                let arr = self.arrays.get(param).cloned();
+                                copyback.push((orig_name.clone(), arr));
+                            } else if param_has_array
+                                && !self.arrays.contains_key(orig_name)
+                            {
+                                // Different-name param: only copy back if orig doesn't
+                                // currently have an array (avoid overwriting independent changes)
+                                let arr = self.arrays.get(param).cloned();
+                                copyback.push((orig_name.clone(), arr));
                             }
                         }
                     }

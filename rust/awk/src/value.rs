@@ -75,7 +75,9 @@ impl Value {
                 let trimmed = s.trim();
                 // Only use numeric comparison if the string actually starts with
                 // a digit, sign, or decimal point (i.e., parse_num would find digits)
-                if trimmed.starts_with(|c: char| c.is_ascii_digit() || c == '+' || c == '-' || c == '.') {
+                if trimmed
+                    .starts_with(|c: char| c.is_ascii_digit() || c == '+' || c == '-' || c == '.')
+                {
                     parse_num(s) != 0.0
                 } else {
                     // Non-numeric string: non-empty is true
@@ -157,7 +159,11 @@ pub fn parse_num(s: &str) -> f64 {
 
 pub fn format_number(n: f64) -> String {
     if n.is_nan() {
-        return if n.is_sign_negative() { "-nan".to_string() } else { "nan".to_string() };
+        return if n.is_sign_negative() {
+            "-nan".to_string()
+        } else {
+            "nan".to_string()
+        };
     }
     if n.is_infinite() {
         return if n > 0.0 {
