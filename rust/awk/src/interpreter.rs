@@ -2095,6 +2095,12 @@ impl Interpreter {
                             }
                         }
                     }
+                    // Pre-mark params that received arrays
+                    for (i, param) in func.params.iter().enumerate() {
+                        if arg_was_array.get(i).copied().unwrap_or(false) {
+                            self.array_params.insert(param.clone());
+                        }
+                    }
                     let result = match self.exec_stmts(&func.body) {
                         ControlFlow::Return(val) => val,
                         _ => Value::Uninitialized,
