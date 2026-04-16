@@ -92,6 +92,8 @@ pub struct Lexer {
     input: Vec<char>,
     pos: usize,
     tokens: Vec<Token>,
+    pub token_lines: Vec<usize>,
+    line: usize,
     warned_escapes: std::collections::HashSet<char>,
 }
 
@@ -101,6 +103,8 @@ impl Lexer {
             input: input.chars().collect(),
             pos: 0,
             tokens: Vec::new(),
+            token_lines: Vec::new(),
+            line: 1,
             warned_escapes: std::collections::HashSet::new(),
         }
     }
@@ -377,6 +381,7 @@ impl Lexer {
             let ch = match self.peek() {
                 Some(c) => c,
                 None => {
+                    self.token_lines.push(self.line);
                     self.tokens.push(Token::Eof);
                     break;
                 }
@@ -598,6 +603,10 @@ impl Lexer {
                 }
             };
 
+            if matches!(tok, Token::Newline) {
+                self.line += 1;
+            }
+            self.token_lines.push(self.line);
             self.tokens.push(tok);
         }
 

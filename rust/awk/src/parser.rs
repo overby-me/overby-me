@@ -6,6 +6,8 @@ pub struct Parser {
     pos: usize,
     function_names: std::collections::HashSet<String>,
     in_print_context: bool,
+    token_lines: Vec<usize>,
+    source_lines: Vec<String>,
 }
 
 const BUILTIN_FUNCTIONS: &[&str] = &[
@@ -16,6 +18,14 @@ const BUILTIN_FUNCTIONS: &[&str] = &[
 ];
 
 impl Parser {
+    pub fn new_with_source(tokens: Vec<Token>, token_lines: Vec<usize>, source: &str) -> Self {
+        let source_lines: Vec<String> = source.lines().map(|s| s.to_string()).collect();
+        let mut p = Self::new(tokens);
+        p.token_lines = token_lines;
+        p.source_lines = source_lines;
+        p
+    }
+
     pub fn new(tokens: Vec<Token>) -> Self {
         // Pre-scan for function definitions to enable forward references
         let mut function_names: std::collections::HashSet<String> =
@@ -34,6 +44,8 @@ impl Parser {
             pos: 0,
             function_names,
             in_print_context: false,
+            token_lines: Vec::new(),
+            source_lines: Vec::new(),
         }
     }
 
@@ -215,6 +227,16 @@ impl Parser {
         while !matches!(self.peek(), Token::RBrace | Token::Eof) {
             stmts.push(self.parse_stmt());
             self.skip_terminators();
+        }
+        if matches!(self.peek(), Token::Eof) {
+            // Unterminated block — show the last non-empty source line
+            let src = self.source_lines.iter().rev()
+                .find(|s| !s.trim().is_empty())
+                .cloned()
+                .unwrap_or_default();
+            eprintln!("awk: {src}");
+            eprintln!("awk: ^ unexpected newline or end of string");
+            std::process::exit(1);
         }
         self.expect(&Token::RBrace);
         stmts

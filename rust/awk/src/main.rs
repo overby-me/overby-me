@@ -117,7 +117,8 @@ fn main() {
     // Tokenize and parse
     let mut lexer = Lexer::new(&program_text);
     let tokens = lexer.tokenize();
-    let mut parser = Parser::new(tokens);
+    let token_lines = lexer.token_lines.clone();
+    let mut parser = Parser::new_with_source(tokens, token_lines, &program_text);
     let program = parser.parse();
 
     // Set up interpreter
