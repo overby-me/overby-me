@@ -6,13 +6,10 @@
 
 ### Remaining failure categories (~5 tests)
 
-- **BRE/ERE regex edge cases (~3)**: Spencer test failures (literal `*` at start, bad interval expressions)
-- **PCRE edge cases (~4)**: `-P` with `-w` on non-word patterns, `-P` with `-z`, PCRE backtrack limit, PCRE context with `-z -o`
-- **I/O edge cases (~3)**: Input-equals-output detection, max-count stdin overread, write error on `/dev/full`
-- **Locale/encoding (~2)**: `c-locale` high-byte matching, `high-bit-range` binary panics
-- **Color/env (~1)**: `GREP_COLORS` / `GREP_COLOR` environment variable support
-- **Pattern edge cases (~2)**: `null-byte` NUL in patterns, `posix-bracket` collating elements
-- **Misc (~4)**: Stack overflow handling, `include-exclude` complex glob patterns, `backref` invalid bracket cross-pattern, `warn-char-classes` misuse warnings
+- **PCRE (~1)**: `pcre-abort` — fancy-regex doesn't hit backtrack limit on pathological patterns
+- **I/O (~3)**: `in-eq-out-infloop` (works locally, nix sandbox issue), `max-count-overread` (stdin byte seeking), `write-error-msg` (/dev/full needed)
+- **Pattern (~2)**: `null-byte` (NUL in patterns + late binary detection), `posix-bracket` (collating elements [.a.] unsupported by regex crate)
+- **Glob (~1)**: `include-exclude` (complex test with --exclude-dir=. and --directories=skip interactions)
 
 ### Recent fixes
 
