@@ -42,8 +42,13 @@ where
             .iter()
             .fold(HashMap::new(), |mut map, (id, srvc_unit)| {
                 if let Specific::Service(srvc) = &srvc_unit.specific {
-                    let state = &*srvc.state.read_poisoned();
-                    f(&mut map, &state.srvc, id.clone());
+                    // Use try_read() to avoid blocking when a service's state
+                    // write lock is held (e.g. during activation or deferred
+                    // notify timeout). Skipping a service here is safe — we'll
+                    // pick it up on the next iteration after the eventfd fires.
+                    if let Ok(state) = srvc.state.try_read() {
+                        f(&mut map, &state.srvc, id.clone());
+                    }
                 }
                 map
             }),
