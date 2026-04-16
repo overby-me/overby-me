@@ -217,6 +217,41 @@ impl<'a> Parser<'a> {
 
         let cmd = self.parse_command_char()?;
 
+        // Check for extra characters after zero-argument commands
+        let zero_arg = matches!(
+            cmd,
+            Command::Delete
+                | Command::DeleteFirstLine
+                | Command::Print
+                | Command::PrintFirstLine
+                | Command::PrintLineNum
+                | Command::HoldReplace
+                | Command::HoldAppend
+                | Command::GetReplace
+                | Command::GetAppend
+                | Command::Exchange
+                | Command::Next
+                | Command::NextAppend
+                | Command::Filename
+                | Command::PrintEscaped(_)
+                | Command::Quit(_)
+                | Command::QuitNoprint(_)
+                | Command::Block(_)
+                | Command::Transliterate(_, _)
+        );
+        if zero_arg {
+            if let Some(ch) = self.peek() {
+                if ch != b'\n' && ch != b';' && ch != b'}' && ch != b'#'
+                    && ch != b' ' && ch != b'\t'
+                {
+                    return Err(self.err_at(
+                        self.pos - self.cmd_start + 1,
+                        "extra characters after command",
+                    ));
+                }
+            }
+        }
+
         Ok(Some(SedCommand {
             address,
             negated,
