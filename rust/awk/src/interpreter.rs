@@ -36,6 +36,8 @@ pub struct Interpreter {
     array_params: std::collections::HashSet<String>,
     /// Map from parameter name to origin variable name (for error provenance)
     param_origins: HashMap<String, String>,
+    /// Globals that were passed to functions and used as scalars (for post-call type checking)
+    global_scalar_via_func: std::collections::HashSet<String>,
 }
 
 impl Interpreter {
@@ -76,6 +78,7 @@ impl Interpreter {
             scalar_params: std::collections::HashSet::new(),
             array_params: std::collections::HashSet::new(),
             param_origins: HashMap::new(),
+            global_scalar_via_func: std::collections::HashSet::new(),
         }
     }
 
@@ -1118,6 +1121,10 @@ impl Interpreter {
                     eprintln!("or used as a variable or an array");
                     std::process::exit(1);
                 }
+                // Track parameter used as scalar (via assignment)
+                if self.current_params.contains(&name.to_string()) {
+                    self.scalar_params.insert(name.to_string());
+                }
                 // Check array→scalar conflict for parameters
                 if self.current_params.contains(&name.to_string())
                     && self.array_params.contains(name)
@@ -1252,8 +1259,9 @@ impl Interpreter {
                 // Check scalar-as-array (including params tracked as scalar)
                 if !self.arrays.contains_key(name) {
                     let is_scalar_param = self.scalar_params.contains(name);
-                    let is_scalar_global = self.globals.contains_key(name)
-                        && !matches!(self.globals.get(name), Some(Value::Uninitialized));
+                    let is_scalar_global = (self.globals.contains_key(name)
+                        && !matches!(self.globals.get(name), Some(Value::Uninitialized)))
+                        || self.global_scalar_via_func.contains(name);
                     if is_scalar_param || is_scalar_global {
                         let kind = if self.current_params.contains(&name.to_string()) {
                             "scalar parameter"
@@ -2149,6 +2157,15 @@ impl Interpreter {
                         ControlFlow::Return(val) => val,
                         _ => Value::Uninitialized,
                     };
+                    // Propagate scalar usage to origin globals
+                    for sp in &self.scalar_params {
+                        if let Some(origin) = self.param_origins.get(sp) {
+                            let origin_root =
+                                origin.split(", from ").last().unwrap_or(origin).to_string();
+                            self.global_scalar_via_func.insert(origin_root);
+                        }
+                    }
+
                     self.current_params = saved_params;
                     self.scalar_params = saved_scalar_params;
                     self.array_params = saved_array_params;
