@@ -123,18 +123,12 @@ impl Interpreter {
         while self.fields.len() <= idx {
             self.fields.push(Value::StrNum(String::new()));
         }
-        // Check if value actually changed (avoid unnecessary $0 rebuild)
-        let old_str = self.fields[idx].to_string_val();
-        let new_str = val.to_string_val();
-        let changed = old_str != new_str;
         let is_str = matches!(val, Value::Str(_));
         self.fields[idx] = val;
         let nf = (self.fields.len() - 1) as f64;
         self.globals.insert("NF".to_string(), Value::Num(nf));
         if idx > 0 {
-            if changed {
-                self.rebuild_record();
-            }
+            self.rebuild_record();
         } else {
             // Re-split if $0 was assigned
             let line = self.fields[0].to_string_val();
