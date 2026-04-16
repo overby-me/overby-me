@@ -65,6 +65,8 @@ pub struct Interpreter {
     fh_counter: usize,
     // Tracks files already loaded via require (like %INC)
     required_files: HashSet<String>,
+    // Current source file being executed
+    current_file: String,
 }
 
 impl Interpreter {
@@ -121,7 +123,12 @@ impl Interpreter {
             write_handles: HashMap::new(),
             fh_counter: 0,
             required_files: HashSet::new(),
+            current_file: String::new(),
         }
+    }
+
+    pub fn set_current_file(&mut self, file: &str) {
+        self.current_file = file.to_string();
     }
 
     pub fn set_special_var(&mut self, name: &str, val: &str) {
@@ -1758,7 +1765,13 @@ impl Interpreter {
             "ref" => {
                 Value::Str(String::new()) // simplified
             }
-            "caller" => Value::Undef,
+            "caller" => {
+                let pkg = Value::Str(self.package.clone());
+                let file = Value::Str(self.current_file.clone());
+                let line = Value::Num(0.0);
+                self.last_list_val = Some(vec![pkg.clone(), file, line]);
+                pkg
+            }
             "eof" => {
                 // Check if filehandle is at EOF
                 if let Some(arg) = args.first() {
@@ -2596,10 +2609,14 @@ impl Interpreter {
         let canon = path.to_string_lossy().to_string();
         self.required_files.insert(filename.to_string());
         // Set %INC entry
-        self.set_hash_element("INC", filename, Value::Str(canon));
+        self.set_hash_element("INC", filename, Value::Str(canon.clone()));
 
         // Execute the file using the run method (which handles BEGIN, subs, etc.)
-        self.eval_file_string(&code)
+        let saved_file = self.current_file.clone();
+        self.current_file = canon;
+        let result = self.eval_file_string(&code);
+        self.current_file = saved_file;
+        result
     }
 
     /// Execute code from a required file — like eval_string but uses `run`

@@ -153,6 +153,9 @@ fn main() {
         // and auto-chomp on input
         interp.set_special_var("\\", "\n");
     }
+    if !script_file.is_empty() {
+        interp.set_current_file(&script_file);
+    }
     interp.run(&program);
 
     std::process::exit(interp.exit_code);
