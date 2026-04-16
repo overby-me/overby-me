@@ -44,6 +44,7 @@ struct Options {
     recursive: bool, // -r/-R
     include_glob: Vec<String>,
     exclude_glob: Vec<String>,
+    exclude_dir_glob: Vec<String>,
     // Misc
     label: String, // --label
     color: ColorMode,
@@ -89,6 +90,7 @@ impl Default for Options {
             recursive: false,
             include_glob: Vec::new(),
             exclude_glob: Vec::new(),
+            exclude_dir_glob: Vec::new(),
             label: "(standard input)".to_string(),
             color: ColorMode::Auto,
             null_data: false,
@@ -194,6 +196,10 @@ fn parse_args() -> Options {
                 _ if long.starts_with("exclude=") => {
                     opts.exclude_glob
                         .push(long.strip_prefix("exclude=").unwrap().to_string());
+                }
+                _ if long.starts_with("exclude-dir=") => {
+                    opts.exclude_dir_glob
+                        .push(long.strip_prefix("exclude-dir=").unwrap().to_string());
                 }
                 "version" => {
                     println!("grep (rust-grep) 0.1.0");
@@ -917,7 +923,7 @@ fn colorize_line(line: &str, matcher: &Matcher) -> String {
 }
 
 fn grep_reader<R: BufRead>(
-    reader: R,
+    mut reader: R,
     matcher: &Matcher,
     opts: &Options,
     filename: &str,
@@ -931,6 +937,15 @@ fn grep_reader<R: BufRead>(
     let separator = if opts.null_separator { '\0' } else { ':' };
     let fname_sep = if opts.null_separator { '\0' } else { ':' };
     let use_color = opts.color == ColorMode::Always;
+
+    // Binary file detection: peek at the first chunk for NUL bytes
+    let mut is_binary = false;
+    if !opts.null_data {
+        let buf = reader.fill_buf().unwrap_or(&[]);
+        if buf.contains(&0) {
+            is_binary = true;
+        }
+    }
 
     let has_context = opts.context_requested || opts.before_context > 0 || opts.after_context > 0;
 
@@ -1011,6 +1026,11 @@ fn grep_reader<R: BufRead>(
         };
         let line_len = line.len() + 1; // +1 for newline
 
+        // Check for binary content in this line
+        if !is_binary && !opts.null_data && line.contains('\0') {
+            is_binary = true;
+        }
+
         let matches = matcher.is_match(&line) != opts.invert_match;
 
         if matches {
@@ -1026,6 +1046,11 @@ fn grep_reader<R: BufRead>(
             }
 
             if opts.files_with_matches {
+                return (match_count, true);
+            }
+
+            if is_binary {
+                eprintln!("grep: {filename}: binary file matches");
                 return (match_count, true);
             }
 
@@ -1123,7 +1148,21 @@ fn collect_files(opts: &Options) -> Vec<PathBuf> {
         }
 
         if opts.recursive && path.is_dir() {
-            for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+            let walker = WalkDir::new(path).into_iter();
+            for entry in walker.filter_entry(|e| {
+                // Filter out excluded directories
+                if e.file_type().is_dir() && !opts.exclude_dir_glob.is_empty() {
+                    let name = e.file_name().to_string_lossy();
+                    if opts.exclude_dir_glob.iter().any(|g| matches_glob(&name, g)) {
+                        return false;
+                    }
+                }
+                true
+            }) {
+                let entry = match entry {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
                 if entry.file_type().is_file() {
                     let name = entry.file_name().to_string_lossy();
 
@@ -1137,7 +1176,13 @@ fn collect_files(opts: &Options) -> Vec<PathBuf> {
                         continue;
                     }
 
-                    files.push(entry.into_path());
+                    let entry_path = entry.into_path();
+                    // Strip leading ./ for cleaner output
+                    let clean_path = entry_path
+                        .strip_prefix("./")
+                        .unwrap_or(&entry_path)
+                        .to_path_buf();
+                    files.push(clean_path);
                 }
             }
         } else {
@@ -1213,7 +1258,13 @@ fn print_usage() {
 }
 
 fn main() {
-    let opts = parse_args();
+    let mut opts = parse_args();
+
+    // With -r and no files, default to current directory
+    if opts.recursive && opts.files.is_empty() {
+        opts.files.push(PathBuf::from("."));
+    }
+
     let matcher = build_matcher(&opts);
 
     let files = collect_files(&opts);
