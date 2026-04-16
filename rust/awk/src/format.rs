@@ -27,6 +27,23 @@ pub fn sprintf_impl_with_convfmt(vals: &[Value], convfmt: &str) -> String {
                 continue;
             }
 
+            // Check for positional arg: n$ (e.g., %3$d)
+            let mut positional_arg: Option<usize> = None;
+            {
+                let saved_i = i;
+                let mut num = String::new();
+                while i < chars.len() && chars[i].is_ascii_digit() {
+                    num.push(chars[i]);
+                    i += 1;
+                }
+                if i < chars.len() && chars[i] == '$' && !num.is_empty() {
+                    positional_arg = num.parse::<usize>().ok();
+                    i += 1; // skip $
+                } else {
+                    i = saved_i; // not positional, backtrack
+                }
+            }
+
             // Parse format spec
             let mut flags = String::new();
             while i < chars.len() && "-+ #0".contains(chars[i]) {
@@ -36,11 +53,27 @@ pub fn sprintf_impl_with_convfmt(vals: &[Value], convfmt: &str) -> String {
 
             let mut width = String::new();
             if i < chars.len() && chars[i] == '*' {
-                if arg_idx < vals.len() {
-                    width = format!("{}", vals[arg_idx].to_num() as i64);
-                    arg_idx += 1;
-                }
                 i += 1;
+                // Check for *n$ (positional width)
+                let mut wnum = String::new();
+                let saved_i = i;
+                while i < chars.len() && chars[i].is_ascii_digit() {
+                    wnum.push(chars[i]);
+                    i += 1;
+                }
+                if i < chars.len() && chars[i] == '$' && !wnum.is_empty() {
+                    let widx = wnum.parse::<usize>().unwrap_or(0);
+                    if widx > 0 && widx < vals.len() {
+                        width = format!("{}", vals[widx].to_num() as i64);
+                    }
+                    i += 1;
+                } else {
+                    i = saved_i;
+                    if arg_idx < vals.len() {
+                        width = format!("{}", vals[arg_idx].to_num() as i64);
+                        arg_idx += 1;
+                    }
+                }
             } else {
                 while i < chars.len() && chars[i].is_ascii_digit() {
                     width.push(chars[i]);
@@ -52,11 +85,27 @@ pub fn sprintf_impl_with_convfmt(vals: &[Value], convfmt: &str) -> String {
             let has_precision = if i < chars.len() && chars[i] == '.' {
                 i += 1;
                 if i < chars.len() && chars[i] == '*' {
-                    if arg_idx < vals.len() {
-                        precision = format!("{}", vals[arg_idx].to_num() as i64);
-                        arg_idx += 1;
-                    }
                     i += 1;
+                    // Check for .*n$ (positional precision)
+                    let mut pnum = String::new();
+                    let saved_i = i;
+                    while i < chars.len() && chars[i].is_ascii_digit() {
+                        pnum.push(chars[i]);
+                        i += 1;
+                    }
+                    if i < chars.len() && chars[i] == '$' && !pnum.is_empty() {
+                        let pidx = pnum.parse::<usize>().unwrap_or(0);
+                        if pidx > 0 && pidx < vals.len() {
+                            precision = format!("{}", vals[pidx].to_num() as i64);
+                        }
+                        i += 1;
+                    } else {
+                        i = saved_i;
+                        if arg_idx < vals.len() {
+                            precision = format!("{}", vals[arg_idx].to_num() as i64);
+                            arg_idx += 1;
+                        }
+                    }
                 } else {
                     while i < chars.len() && chars[i].is_ascii_digit() {
                         precision.push(chars[i]);
@@ -75,12 +124,20 @@ pub fn sprintf_impl_with_convfmt(vals: &[Value], convfmt: &str) -> String {
             let conv = chars[i];
             i += 1;
 
-            let val = if arg_idx < vals.len() {
-                &vals[arg_idx]
+            let val = if let Some(pos) = positional_arg {
+                if pos > 0 && pos < vals.len() {
+                    &vals[pos]
+                } else {
+                    &Value::Uninitialized
+                }
+            } else if arg_idx < vals.len() {
+                let v = &vals[arg_idx];
+                arg_idx += 1;
+                v
             } else {
+                arg_idx += 1;
                 &Value::Uninitialized
             };
-            arg_idx += 1;
 
             let width_val: i64 = width.parse().unwrap_or(0);
             let width_num: usize = width_val.unsigned_abs() as usize;
