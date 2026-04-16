@@ -2,26 +2,35 @@
 
 ## Current Status
 
-**74/119 tests passing** (62%) — from the GNU grep 3.12 test suite.
+**96/119 tests passing** (81%) — from the GNU grep 3.12 test suite.
 
-### Remaining failure categories (~45 tests)
+### Remaining failure categories (~23 tests)
 
-- **Backreferences (~5)**: The `regex` crate does not support backreferences; BRE/ERE backrefs need `fancy-regex` fallback
-- **Color output (~3)**: `--color=always` not implemented — no ANSI escape highlighting
-- **Context / separator (~3)**: Missing `--` group separators, context with `-C 0`, context interaction with `-m`
-- **Pattern file / empty pattern (~4)**: `-f /dev/null` (no patterns = no match), `-f` with process substitution, empty pattern edge cases
-- **BRE/ERE regex edge cases (~7)**: Spencer test failures, interval expressions, character class edge cases, inconsistent ranges
-- **PCRE edge cases (~5)**: `-P` with backrefs, `-P` with `-w`, PCRE abort on pathological patterns, `--count` with PCRE
-- **Missing options (~3)**: `-D skip` (devices), `-T` (initial tab), `--binary-files`
-- **Status/exit codes (~2)**: Exit code 2 on error not always correct, `-s` suppression incomplete
-- **I/O edge cases (~5)**: Input-equals-output detection, binary file detection, max-count overread, write error messages
-- **Fixed-string matching (~2)**: `-F` longest match, `-F` with binary files
-- **Locale/encoding (~2)**: `c-locale` edge case, `reversed-range-endpoints`
-- **Misc (~4)**: Stack overflow handling, `include-exclude` in recursive mode, `r-dot` recursive matching, `null-byte` handling
+- **BRE/ERE regex edge cases (~3)**: Spencer test failures (literal `*` at start, bad interval expressions)
+- **PCRE edge cases (~5)**: `-P` with `-w`, `-P` with `-z`, PCRE abort on pathological patterns, `--count` with PCRE
+- **Missing options (~1)**: `-D skip` (devices)
+- **I/O edge cases (~4)**: Input-equals-output detection, max-count overread, write error messages, warn-char-classes
+- **Locale/encoding (~3)**: `c-locale` edge case, `reversed-range-endpoints`, `high-bit-range`
+- **Color/env (~1)**: `GREP_COLORS` / `GREP_COLOR` environment variable support
+- **Pattern edge cases (~3)**: `empty` test (empty pattern with -w), `null-byte` handling, `posix-bracket` collating
+- **Misc (~3)**: Stack overflow handling, `include-exclude` directory exclude paths, `backref` (invalid bracket cross-pattern)
 
 ### Recent fixes
 
-(Initial test integration — no fixes applied yet.)
+- Fixed exit codes: return 2 on file errors, separate `-s` (--no-messages) from `-q`
+- Fixed `-f` pattern file: include empty lines, handle `-f /dev/null`, fix arg parsing bug
+- Added `--color=always` with ANSI escape highlighting
+- Added `-w` with `-F` word boundary checking for fixed strings
+- Added `-NUM` context shorthand (e.g., `-3` for `-C 3`)
+- Prefer longest match at each position for multiple `-e` patterns
+- Added backreference support via automatic `fancy-regex` fallback
+- Cross-pattern backref validation (exit 2 for invalid refs across `-e` patterns)
+- Improved BRE-to-ERE conversion: `^`/`$` anchor position, literal `|`, bracket expressions
+- Added binary file detection ("binary file matches" message)
+- Added `-r` default to current directory when no files given
+- Added `--exclude-dir` option for recursive search
+- Split `-e` patterns on newlines per GNU grep semantics
+- Added `-T` (--initial-tab) option
 
 Tests compare rust-grep output against the GNU grep test suite's expected behavior in a Nix sandbox.
 
@@ -277,34 +286,35 @@ Fall back to `fancy-regex` when BRE/ERE patterns contain backreferences:
 
 ## Test Inventory
 
-### Passing (74 tests)
+### Passing (96 tests)
 
-100k-entries, backref-alt, backref-multibyte-slow, backslash-dot,
+100k-entries, backref-alt, backref-multibyte-slow, backref-word, backslash-dot,
 backslash-s-and-repetition-operators, backslash-s-vs-invalid-multibyte, big-hole, big-match,
-bogus-wctob, case-fold-backslash-w, case-fold-char-class, case-fold-char-range,
-case-fold-char-type, case-fold-titlecase, char-class-multibyte, char-class-multibyte2,
-dfa-coverage, dfa-heap-overrun, dfa-infloop, dfa-invalid-utf8, dfaexec-multibyte,
+binary-file-matches, bogus-wctob, case-fold-backref, case-fold-backslash-w,
+case-fold-char-class, case-fold-char-range, case-fold-char-type, case-fold-titlecase,
+char-class-multibyte, char-class-multibyte2, context-0, count-newline, dfa-coverage,
+dfa-heap-overrun, dfa-infloop, dfa-invalid-utf8, dfaexec-multibyte, empty-line,
 empty-line-mb, encoding-error, epipe, equiv-classes, euc-mb, false-match-mb-non-utf8,
-fgrep-infloop, fillbuf-long-line, fmbtest, grep-dev-null, grep-dev-null-out, grep-dir,
-hangul-syllable, hash-collision-perf, invalid-multibyte-infloop, kwset-abuse,
-long-pattern-perf, many-regex-performance, match-lines, mb-dot-newline,
-mb-non-UTF8-overrun, mb-non-UTF8-word-boundary, multibyte-white-space,
-multiple-begin-or-end-line, no-perl, options, pcre-ascii-digits, pcre-invalid-utf8-infloop,
-pcre-invalid-utf8-input, pcre-jitstack, pcre-o, pcre-utf8, pcre-utf8-bug224, pcre-utf8-w,
-pcre-z, prefix-of-multibyte, proc, repetition-overflow, sjis-mb, surrogate-pair,
-surrogate-search, turkish-eyes, turkish-I, turkish-I-without-dot, two-chars, two-files,
+fedora, fgrep-infloop, fgrep-longest, file, fillbuf-long-line, fmbtest, foad1,
+grep-dev-null, grep-dev-null-out, grep-dir, hangul-syllable, hash-collision-perf,
+inconsistent-range, initial-tab, invalid-multibyte-infloop, khadafy, kwset-abuse,
+long-pattern-perf, many-regex-performance, match-lines, max-count-vs-context,
+mb-dot-newline, mb-non-UTF8-overrun, mb-non-UTF8-word-boundary, multibyte-white-space,
+multiple-begin-or-end-line, no-perl, options, pcre-ascii-digits, pcre-count,
+pcre-infloop, pcre-invalid-utf8-infloop, pcre-invalid-utf8-input, pcre-jitstack, pcre-o,
+pcre-utf8, pcre-utf8-bug224, pcre-utf8-w, pcre-wx-backref, pcre-z, prefix-of-multibyte,
+proc, r-dot, repetition-overflow, sjis-mb, status, surrogate-pair, surrogate-search,
+triple-backref, turkish-eyes, turkish-I, turkish-I-without-dot, two-chars, two-files,
 unibyte-binary, unibyte-bracket-expr, unibyte-negated-circumflex, utf8-bracket,
-word-delim-multibyte, word-multi-file, word-multibyte, y2038-vs-32-bit, z-anchor-newline
+version-pcre, word-delim-multibyte, word-multi-file, word-multibyte, y2038-vs-32-bit,
+z-anchor-newline
 
-### Failing (45 tests)
+### Failing (23 tests)
 
-backref, backref-word, binary-file-matches, bre, c-locale, case-fold-backref,
-color-colors, context-0, count-newline, empty, ere, fedora, fgrep-longest, file,
-foad1, high-bit-range, in-eq-out-infloop, include-exclude, inconsistent-range,
-initial-tab, khadafy, max-count-overread, max-count-vs-context, null-byte, pcre,
-pcre-abort, pcre-context, pcre-count, pcre-w, pcre-wx-backref, posix-bracket, r-dot,
-reversed-range-endpoints, skip-device, spencer1, stack-overflow, status, triple-backref,
-warn-char-classes, write-error-msg
+backref, bre, c-locale, color-colors, empty, ere, high-bit-range,
+in-eq-out-infloop, include-exclude, max-count-overread, null-byte, pcre,
+pcre-abort, pcre-context, pcre-w, posix-bracket, reversed-range-endpoints,
+skip-device, spencer1, stack-overflow, warn-char-classes, write-error-msg
 
 ### Not yet tested (5 tests)
 
