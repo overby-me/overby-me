@@ -1228,7 +1228,7 @@ impl<'a> Parser<'a> {
     fn parse_label(&mut self) -> String {
         let mut label = String::new();
         while let Some(ch) = self.peek() {
-            if ch == b'\n' || ch == b';' || ch == b'}' || ch == b' ' || ch == b'\t' {
+            if ch == b'\n' || ch == b';' || ch == b'}' || ch == b' ' || ch == b'\t' || ch == b'#' {
                 break;
             }
             self.advance();

@@ -66,6 +66,46 @@ fn resolve_symlinks(path: &str) -> String {
     current.to_string_lossy().into_owned()
 }
 
+fn collect_labels(commands: &[types::SedCommand], labels: &mut std::collections::HashSet<String>) {
+    for cmd in commands {
+        if let types::Command::Label(l) = &cmd.command {
+            labels.insert(l.clone());
+        }
+        if let types::Command::Block(inner) = &cmd.command {
+            collect_labels(inner, labels);
+        }
+    }
+}
+
+fn collect_branches(commands: &[types::SedCommand], branches: &mut Vec<String>) {
+    for cmd in commands {
+        match &cmd.command {
+            types::Command::Branch(Some(l))
+            | types::Command::BranchIfSub(Some(l))
+            | types::Command::BranchIfNoSub(Some(l)) => {
+                branches.push(l.clone());
+            }
+            types::Command::Block(inner) => {
+                collect_branches(&inner, branches);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn validate_labels(commands: &[types::SedCommand]) {
+    let mut labels = std::collections::HashSet::new();
+    let mut branches = Vec::new();
+    collect_labels(commands, &mut labels);
+    collect_branches(commands, &mut branches);
+    for label in &branches {
+        if !labels.contains(label) {
+            eprintln!("sed: can't find label for jump to `{label}'");
+            process::exit(1);
+        }
+    }
+}
+
 fn read_script_file(path: &str) -> Result<String, String> {
     if path == "-" {
         let mut buf = Vec::new();
@@ -394,6 +434,9 @@ fn main() {
             }
         }
     }
+
+    // Validate branch targets
+    validate_labels(&commands);
 
     let quiet = opts.quiet || hash_n_quiet;
     let posix = opts.posix || std::env::var("POSIXLY_CORRECT").is_ok();
