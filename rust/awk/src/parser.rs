@@ -555,10 +555,25 @@ impl Parser {
         result
     }
 
+    fn check_lvalue(&self, expr: &Expr) {
+        let is_post_inc = matches!(expr, Expr::PostIncrement(_) | Expr::PostDecrement(_));
+        let is_field_post_inc = matches!(
+            expr,
+            Expr::FieldRef(inner) if matches!(inner.as_ref(), Expr::PostIncrement(_) | Expr::PostDecrement(_))
+        );
+        if is_post_inc || is_field_post_inc {
+            self.syntax_error_at(
+                self.pos,
+                "cannot assign a value to the result of a field post-increment expression",
+            );
+        }
+    }
+
     fn parse_assignment(&mut self) -> Expr {
         let expr = self.parse_ternary();
         match self.peek() {
             Token::Assign => {
+                self.check_lvalue(&expr);
                 self.advance();
                 let rhs = self.parse_assignment();
                 Expr::Assign(Box::new(expr), Box::new(rhs))
