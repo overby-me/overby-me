@@ -54,6 +54,7 @@ struct Options {
     null_data: bool,     // -z
     initial_tab: bool,   // -T
     text_mode: bool,     // -a (treat binary as text)
+    match_color: String, // ANSI color code for matches (from GREP_COLORS/GREP_COLOR)
 }
 
 #[derive(Clone, PartialEq)]
@@ -102,6 +103,7 @@ impl Default for Options {
             null_data: false,
             initial_tab: false,
             text_mode: false,
+            match_color: "01;31".to_string(),
         }
     }
 }
@@ -480,6 +482,33 @@ fn parse_args() -> Options {
         let multi = opts.files.len() > 1 || opts.recursive;
         opts.with_filename = multi;
         opts.no_filename = !multi;
+    }
+
+    // Handle GREP_COLORS and GREP_COLOR environment variables
+    if let Ok(colors) = env::var("GREP_COLORS") {
+        for part in colors.split(':') {
+            if let Some(val) = part.strip_prefix("mt=") {
+                opts.match_color = val.to_string();
+            } else if let Some(val) = part.strip_prefix("ms=") {
+                opts.match_color = val.to_string();
+            }
+        }
+    }
+    if let Ok(color) = env::var("GREP_COLOR") {
+        // GREP_COLOR is deprecated — emit warning and use it if GREP_COLORS
+        // doesn't set mt=
+        eprintln!(
+            "grep: warning: GREP_COLOR='{}' is deprecated; use GREP_COLORS='mt={}'",
+            color, color
+        );
+        // GREP_COLOR sets mt= if not already set by GREP_COLORS
+        if env::var("GREP_COLORS").is_err()
+            || !env::var("GREP_COLORS")
+                .unwrap_or_default()
+                .contains("mt=")
+        {
+            opts.match_color = color;
+        }
     }
 
     opts
@@ -1291,9 +1320,9 @@ fn convert_bre_to_ere(bre: &str) -> String {
 }
 
 /// Apply color highlighting to a line by wrapping matched portions in ANSI escape codes.
-fn colorize_line(line: &str, matcher: &Matcher) -> String {
-    const COLOR_START: &str = "\x1b[01;31m\x1b[K";
-    const COLOR_END: &str = "\x1b[m\x1b[K";
+fn colorize_line(line: &str, matcher: &Matcher, color_code: &str) -> String {
+    let color_start = format!("\x1b[{}m\x1b[K", color_code);
+    let color_end = "\x1b[m\x1b[K";
 
     let matches: Vec<_> = matcher
         .find_matches(line)
@@ -1312,9 +1341,9 @@ fn colorize_line(line: &str, matcher: &Matcher) -> String {
             continue; // skip overlapping matches
         }
         result.push_str(&line[last_end..start]);
-        result.push_str(COLOR_START);
+        result.push_str(&color_start);
         result.push_str(&line[start..end]);
-        result.push_str(COLOR_END);
+        result.push_str(color_end);
         last_end = end;
     }
     result.push_str(&line[last_end..]);
@@ -1405,7 +1434,7 @@ fn grep_reader<R: BufRead>(
                     let _ = write!(out, "\t");
                 }
                 if use_color {
-                    let _ = writeln!(out, "{}", colorize_line(line, matcher));
+                    let _ = writeln!(out, "{}", colorize_line(line, matcher, &opts.match_color));
                 } else {
                     let _ = writeln!(out, "{line}");
                 }
@@ -1481,7 +1510,7 @@ fn grep_reader<R: BufRead>(
                         }
                         if use_color {
                             let _ =
-                                writeln!(out, "\x1b[01;31m\x1b[K{}\x1b[m\x1b[K", &line[start..end]);
+                                writeln!(out, "\x1b[{}m\x1b[K{}\x1b[m\x1b[K", opts.match_color, &line[start..end]);
                         } else {
                             let _ = writeln!(out, "{}", &line[start..end]);
                         }
@@ -1504,7 +1533,7 @@ fn grep_reader<R: BufRead>(
                         let _ = write!(out, "\t");
                     }
                     if use_color {
-                        let _ = writeln!(out, "{}", colorize_line(&line, matcher));
+                        let _ = writeln!(out, "{}", colorize_line(&line, matcher, &opts.match_color));
                     } else {
                         let _ = writeln!(out, "{line}");
                     }
