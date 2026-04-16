@@ -535,8 +535,10 @@ fn main() {
                 file.clone()
             });
             let reader = io::BufReader::new(content.as_bytes());
-            if let Err(e) = engine.run(reader, &mut out) {
-                eprintln!("sed: {file}: {}", fmt_io_err(&e));
+            match engine.run(reader, &mut out) {
+                Ok(code) if code != 0 => process::exit(code),
+                Err(e) => eprintln!("sed: {file}: {}", fmt_io_err(&e)),
+                _ => {}
             }
         }
     }

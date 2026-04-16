@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**48/61 tests passing** (79%) — shell tests from the GNU sed 4.9 test suite.
+**50/61 tests passing** (82%) — shell tests from the GNU sed 4.9 test suite.
 
 Run a test: `nix build .#checks.x86_64-linux.rust-sed-test-{name}`
 View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
@@ -45,7 +45,7 @@ View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
 
 ---
 
-## Remaining Failures (13 tests)
+## Remaining Failures (11 tests)
 
 ### Category 1: fancy-regex performance (2 tests)
 
@@ -69,13 +69,11 @@ These tests require processing non-UTF-8 binary data. Our engine uses `String` (
 
 - `compile-errors` — Needs many validation checks: one-address commands (`a`, `i`, `l`, `=`, `q`, `Q`), `#` with addresses, `}` without `{`, `v` version check, `a`/`c`/`i` require `\` in POSIX mode, incomplete `a`/`c`/`i` across `-e` boundaries, `~N`/`+N` as first address, multiple `!`
 - `compile-tests` — `s/[[:]]//'` (POSIX class `[:]` parsing edge case)
-- `recursive-escape-c` — Error char position off (8 vs 10)
 
 ### Category 4: Test-specific issues (3 tests)
 
 **Tests:** execute-tests, bsd-wrapper, unbuffered
 
-- `execute-tests` — All sub-tests pass locally but test exits with code 1 in Nix sandbox (test framework issue with `$fail` variable or subtle `F` command behavior across multiple files)
 - `bsd-wrapper` — Test infrastructure expects sed at `../sed/sed` relative path
 - `unbuffered` — Needs true line-by-line I/O (currently reads all input into memory)
 
@@ -110,21 +108,21 @@ Fix execute-tests $fail issue, bsd-wrapper path layout.
 
 ## Test Inventory
 
-### Passing (48 tests)
+### Passing (50 tests)
 
 bsd, bug32082, bug32271-1, bug32271-2, cmd-0r, cmd-l, cmd-R,
 colon-with-no-label, command-endings, comment-n, distrib, eval,
-follow-symlinks, follow-symlinks-stdin, help, in-place-hyphen,
-in-place-suffix-backup, inplace-hold, inplace-selinux (skip), madding,
-mb-bad-delim, mb-charclass-non-utf8, mb-match-slash, mb-y-translate,
-missing-filename, newline-dfa-bug, normalize-text, nulldata,
-panic-tests, posix-mode-addr, posix-mode-bad-ref, posix-mode-ERE,
-posix-mode-N, posix-mode-s, range-overlap, regex-errors, regex-max-int,
-sandbox, stdin, stdin-prog, subst-mb-incomplete, subst-options,
-subst-replacement, temp-file-cleanup, title-case, uniq, word-delim,
-xemacs
+execute-tests, follow-symlinks, follow-symlinks-stdin, help,
+in-place-hyphen, in-place-suffix-backup, inplace-hold,
+inplace-selinux (skip), madding, mb-bad-delim, mb-charclass-non-utf8,
+mb-match-slash, mb-y-translate, missing-filename, newline-dfa-bug,
+normalize-text, nulldata, panic-tests, posix-mode-addr, posix-mode-bad-ref,
+posix-mode-ERE, posix-mode-N, posix-mode-s, range-overlap,
+recursive-escape-c, regex-errors, regex-max-int, sandbox, stdin,
+stdin-prog, subst-mb-incomplete, subst-options, subst-replacement,
+temp-file-cleanup, title-case, uniq, word-delim, xemacs
 
-### Failing (13 tests)
+### Failing (11 tests)
 
 | Test | Primary blocker |
 |-|-|
@@ -135,11 +133,9 @@ xemacs
 | compile-tests | `[[:]]` POSIX class edge case |
 | convert-number | Byte-mode output |
 | dc | fancy-regex performance |
-| execute-tests | Test framework $fail issue |
 | mac-mf | Byte-mode I/O |
 | obinary | Platform skip (already works) |
 | posix-char-class | POSIX `\t` semantics |
-| recursive-escape-c | Error char position |
 | unbuffered | Line-by-line I/O |
 
 ### Tests excluded from harness (6 tests)
