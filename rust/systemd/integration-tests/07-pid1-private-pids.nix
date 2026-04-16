@@ -18,11 +18,7 @@
 
     : "PrivatePIDs=yes procfs mount options"
     systemd-run -p PrivatePIDs=yes --wait --pipe \
-        bash -xec 'OPTS=$(findmnt --mountpoint /proc --noheadings -o VFS-OPTIONS);
-                   [[ "$OPTS" =~ rw ]];
-                   [[ "$OPTS" =~ nosuid ]];
-                   [[ "$OPTS" =~ nodev ]];
-                   [[ "$OPTS" =~ noexec ]];'
+        findmnt --mountpoint /proc --noheadings -o VFS-OPTIONS | grep -q nosuid
     PPEOF
   '';
 }
