@@ -351,21 +351,46 @@ fn main() {
 
     let mut commands = Vec::new();
     let mut hash_n_quiet = false;
-    for (idx, script) in opts.scripts.iter().enumerate() {
-        let mut parser = Parser::new(&script.content, opts.extended, script.source.clone());
+
+    if opts.posix {
+        // POSIX mode: parse each expression separately (for incomplete command detection)
+        for (idx, script) in opts.scripts.iter().enumerate() {
+            let mut parser = Parser::new(&script.content, opts.extended, script.source.clone());
+            parser.sandbox = opts.sandbox;
+            parser.posix = true;
+            parser.is_last_script = idx == opts.scripts.len() - 1;
+            match parser.parse_all(idx == 0) {
+                Ok(cmds) => {
+                    if idx == 0 && parser.hash_n_quiet {
+                        hash_n_quiet = true;
+                    }
+                    commands.extend(cmds);
+                }
+                Err(e) => {
+                    eprintln!("sed: {e}");
+                    process::exit(1);
+                }
+            }
+        }
+    } else {
+        // GNU mode: join all expressions with newlines (allows a/c/i continuation)
+        let combined: String = opts.scripts.iter().map(|s| s.content.clone()).collect::<Vec<_>>().join("\n");
+        let source = opts.scripts.first().map(|s| s.source.clone())
+            .unwrap_or(ScriptSource::Expression(1));
+        let mut parser = Parser::new(&combined, opts.extended, source);
         parser.sandbox = opts.sandbox;
-        parser.posix = opts.posix;
-        parser.is_last_script = idx == opts.scripts.len() - 1;
-        match parser.parse_all(idx == 0) {
+        parser.posix = false;
+        parser.is_last_script = true;
+        match parser.parse_all(true) {
             Ok(cmds) => {
-                if idx == 0 && parser.hash_n_quiet {
+                if parser.hash_n_quiet {
                     hash_n_quiet = true;
                 }
                 commands.extend(cmds);
             }
             Err(e) => {
                 eprintln!("sed: {e}");
-                process::exit(1); // EXIT_BAD_INPUT — matches GNU sed
+                process::exit(1);
             }
         }
     }

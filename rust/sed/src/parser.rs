@@ -591,6 +591,10 @@ impl<'a> Parser<'a> {
                 }
                 self.skip_optional_backslash_newline();
                 let text = self.parse_text_arg();
+                // In POSIX mode, a/c/i with no text at end of expression is incomplete
+                if self.posix && text.is_empty() && self.at_end() && !self.is_last_script {
+                    return Err(self.err("incomplete command"));
+                }
                 match ch {
                     b'a' => Ok(Command::Append(text)),
                     b'i' => Ok(Command::Insert(text)),

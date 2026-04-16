@@ -50,7 +50,7 @@ pkgs.runCommand "rust-sed-test-${name}" {
 
   # Run the test script; exit codes: 0=pass, 77=skip, other=fail
   # Initialize fail=0 to avoid "integer expected" in tests that check $fail
-  if fail=0 bash "testsuite/${name}.sh"; then
+  if fail=0 bash ${if name == "compile-errors" then "-x" else ""} "testsuite/${name}.sh"; then
     touch $out
   else
     rc=$?
