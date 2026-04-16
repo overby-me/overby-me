@@ -1,5 +1,3 @@
-use regex::Regex;
-
 use crate::regex_util::{bre_to_ere, fix_posix_char_class};
 use crate::types::*;
 use crate::util::ctrl_char;
@@ -155,7 +153,17 @@ impl<'a> Parser<'a> {
                     self.advance();
                     let second = self.try_parse_address()?;
                     match second {
-                        Some(addr2) => Ok(AddressRange::Range(addr, addr2)),
+                        Some(addr2) => {
+                            // Validate: 0,N (where N is a line number) is invalid
+                            if matches!(addr, Address::Line(0))
+                                && matches!(addr2, Address::Line(_))
+                            {
+                                return Err(
+                                    self.err("invalid usage of line address 0"),
+                                );
+                            }
+                            Ok(AddressRange::Range(addr, addr2))
+                        }
                         None => Err(self.err("expected address after ','")),
                     }
                 } else {
@@ -257,7 +265,7 @@ impl<'a> Parser<'a> {
         Ok(pattern)
     }
 
-    fn compile_regex(&self, pattern: &str) -> Result<Regex, String> {
+    fn compile_regex(&self, pattern: &str) -> Result<SedRegex, String> {
         if pattern.is_empty() {
             return Err(self.err("empty regex"));
         }
@@ -269,7 +277,7 @@ impl<'a> Parser<'a> {
         };
 
         let pat = fix_posix_char_class(&pat);
-        Regex::new(&pat).map_err(|e| self.err(&format!("invalid regex: {e}")))
+        SedRegex::new(&pat).map_err(|e| self.err(&format!("{e}")))
     }
 
     fn parse_command_char(&mut self) -> Result<Command, String> {
@@ -455,8 +463,8 @@ impl<'a> Parser<'a> {
             None
         } else {
             Some(
-                Regex::new(&fix_posix_char_class(&re_pattern))
-                    .map_err(|e| self.err(&format!("invalid regex in s command: {e}")))?,
+                SedRegex::new(&fix_posix_char_class(&re_pattern))
+                    .map_err(|e| self.err(&e))?,
             )
         };
 

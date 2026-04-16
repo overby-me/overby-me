@@ -1,10 +1,104 @@
-use regex::Regex;
+/// Regex wrapper: uses fast `regex` crate when possible, falls back to
+/// `fancy_regex` for patterns with backreferences.
+#[derive(Debug, Clone)]
+pub enum SedRegex {
+    Fast(regex::Regex),
+    Fancy(fancy_regex::Regex),
+}
+
+impl SedRegex {
+    pub fn new(pattern: &str) -> Result<Self, String> {
+        // Try fast regex first
+        match regex::Regex::new(pattern) {
+            Ok(re) => Ok(SedRegex::Fast(re)),
+            Err(_) => {
+                // Fall back to fancy-regex (supports backreferences)
+                fancy_regex::Regex::new(pattern)
+                    .map(SedRegex::Fancy)
+                    .map_err(|e| format!("{e}"))
+            }
+        }
+    }
+
+    pub fn is_match(&self, text: &str) -> bool {
+        match self {
+            SedRegex::Fast(re) => re.is_match(text),
+            SedRegex::Fancy(re) => re.is_match(text).unwrap_or(false),
+        }
+    }
+
+    pub fn captures<'t>(&self, text: &'t str) -> Option<SedCaptures<'t>> {
+        match self {
+            SedRegex::Fast(re) => re.captures(text).map(SedCaptures::Fast),
+            SedRegex::Fancy(re) => re.captures(text).ok().flatten().map(SedCaptures::Fancy),
+        }
+    }
+
+    pub fn find_iter<'r, 't>(&'r self, text: &'t str) -> Vec<(usize, usize)> {
+        match self {
+            SedRegex::Fast(re) => re.find_iter(text).map(|m| (m.start(), m.end())).collect(),
+            SedRegex::Fancy(re) => re
+                .find_iter(text)
+                .filter_map(|m| m.ok())
+                .map(|m| (m.start(), m.end()))
+                .collect(),
+        }
+    }
+
+    pub fn replace_all<'a, F>(&self, text: &'a str, replacer: F) -> std::borrow::Cow<'a, str>
+    where
+        F: Fn(&SedCaptures) -> String,
+    {
+        let mut result = String::new();
+        let mut last_end = 0;
+        let matches = self.find_iter(text);
+        for (start, end) in matches {
+            result.push_str(&text[last_end..start]);
+            if let Some(caps) = self.captures(&text[start..]) {
+                result.push_str(&replacer(&caps));
+            }
+            last_end = end;
+            if start == end {
+                // Zero-width match — advance by one char to avoid infinite loop
+                if last_end < text.len() {
+                    let next = &text[last_end..];
+                    let ch_len = next.chars().next().map_or(1, |c| c.len_utf8());
+                    result.push_str(&text[last_end..last_end + ch_len]);
+                    last_end += ch_len;
+                } else {
+                    break;
+                }
+            }
+        }
+        result.push_str(&text[last_end..]);
+        if result == text {
+            std::borrow::Cow::Borrowed(text)
+        } else {
+            std::borrow::Cow::Owned(result)
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum SedCaptures<'t> {
+    Fast(regex::Captures<'t>),
+    Fancy(fancy_regex::Captures<'t>),
+}
+
+impl<'t> SedCaptures<'t> {
+    pub fn get(&self, i: usize) -> Option<&str> {
+        match self {
+            SedCaptures::Fast(caps) => caps.get(i).map(|m| m.as_str()),
+            SedCaptures::Fancy(caps) => caps.get(i).map(|m| m.as_str()),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum Address {
     Line(usize),
     Last, // $
-    Regex(Regex),
+    Regex(SedRegex),
     Step(usize, usize), // first~step
 }
 
@@ -30,7 +124,7 @@ pub struct SubstFlags {
 #[derive(Debug, Clone)]
 pub enum Command {
     Substitute {
-        pattern: Option<Regex>, // None means reuse last regex
+        pattern: Option<SedRegex>, // None means reuse last regex
         replacement: String,
         flags: SubstFlags,
     },

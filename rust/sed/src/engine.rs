@@ -1,4 +1,3 @@
-use regex::Regex;
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 
@@ -13,7 +12,7 @@ pub struct Engine {
     hold_space: String,
     line_number: usize,
     last_line: bool,
-    last_regex: Option<Regex>,
+    last_regex: Option<SedRegex>,
     sub_happened: bool,
     output: Vec<u8>,
     append_queue: Vec<String>,
@@ -176,6 +175,17 @@ impl Engine {
                 if range_idx >= self.range_active.len() {
                     self.range_active.resize(range_idx + 1, false);
                 }
+                // Handle addr 0 as range start: range is active from the very start
+                let is_addr_0_start = matches!(a, Address::Line(0));
+                if is_addr_0_start && self.line_number == 1 && !self.range_active[range_idx] {
+                    // 0,/regex/ — start active, check end on line 1
+                    if self.addr_matches_single(b) {
+                        // End matches on line 1 — single-line range
+                    } else {
+                        self.range_active[range_idx] = true;
+                    }
+                    return true;
+                }
                 if self.range_active[range_idx] {
                     if self.addr_matches_single(b) {
                         self.range_active[range_idx] = false;
@@ -197,6 +207,7 @@ impl Engine {
 
     fn addr_matches_single(&mut self, addr: &Address) -> bool {
         match addr {
+            Address::Line(0) => self.line_number == 1, // addr 0 matches line 1 as single addr
             Address::Line(n) => self.line_number == *n,
             Address::Last => self.last_line,
             Address::Regex(re) => {
@@ -593,11 +604,11 @@ impl Engine {
         }
     }
 
-    fn do_substitute(&mut self, re: &Regex, replacement: &str, flags: &SubstFlags) -> bool {
+    fn do_substitute(&mut self, re: &SedRegex, replacement: &str, flags: &SubstFlags) -> bool {
         let input = self.pattern_space.clone();
 
         if flags.global {
-            let result = re.replace_all(&input, |caps: &regex::Captures| {
+            let result = re.replace_all(&input, |caps: &SedCaptures| {
                 build_replacement(caps, replacement)
             });
             if result != input {
@@ -610,14 +621,14 @@ impl Engine {
             let mut result = String::new();
             let mut replaced = false;
 
-            for m in re.find_iter(&input) {
+            for (start, end) in re.find_iter(&input) {
                 count += 1;
                 if count == nth {
-                    result.push_str(&input[last_end..m.start()]);
-                    if let Some(caps) = re.captures(&input[m.start()..]) {
+                    result.push_str(&input[last_end..start]);
+                    if let Some(caps) = re.captures(&input[start..]) {
                         result.push_str(&build_replacement(&caps, replacement));
                     }
-                    last_end = m.end();
+                    last_end = end;
                     replaced = true;
                     break;
                 }
@@ -628,14 +639,19 @@ impl Engine {
                 self.pattern_space = result;
                 return true;
             }
-        } else if let Some(caps) = re.captures(&input) {
-            let m = caps.get(0).unwrap();
-            let mut result = String::new();
-            result.push_str(&input[..m.start()]);
-            result.push_str(&build_replacement(&caps, replacement));
-            result.push_str(&input[m.end()..]);
-            self.pattern_space = result;
-            return true;
+        } else {
+            // First match — use find_iter for position, captures for groups
+            let matches = re.find_iter(&input);
+            if let Some((start, end)) = matches.into_iter().next() {
+                if let Some(caps) = re.captures(&input[start..]) {
+                    let mut result = String::new();
+                    result.push_str(&input[..start]);
+                    result.push_str(&build_replacement(&caps, replacement));
+                    result.push_str(&input[end..]);
+                    self.pattern_space = result;
+                    return true;
+                }
+            }
         }
 
         false
@@ -660,7 +676,7 @@ fn count_commands(commands: &[SedCommand]) -> usize {
     n
 }
 
-fn build_replacement(caps: &regex::Captures, replacement: &str) -> String {
+fn build_replacement(caps: &SedCaptures, replacement: &str) -> String {
     let mut result = String::new();
     let chars: Vec<char> = replacement.chars().collect();
     let mut i = 0;
@@ -690,13 +706,13 @@ fn build_replacement(caps: &regex::Captures, replacement: &str) -> String {
 
     while i < chars.len() {
         if chars[i] == '&' {
-            let matched = caps.get(0).map_or("", |m| m.as_str());
+            let matched = caps.get(0).unwrap_or("");
             apply_case(matched, &mut result, &mut case_mode, &mut next_char_mode);
             i += 1;
         } else if chars[i] == '\\' && i + 1 < chars.len() {
             match chars[i + 1] {
                 '0' => {
-                    let matched = caps.get(0).map_or("", |m| m.as_str());
+                    let matched = caps.get(0).unwrap_or("");
                     apply_case(matched, &mut result, &mut case_mode, &mut next_char_mode);
                     i += 2;
                 }
@@ -704,7 +720,7 @@ fn build_replacement(caps: &regex::Captures, replacement: &str) -> String {
                     let n = (chars[i + 1] as u32 - '0' as u32) as usize;
                     if let Some(m) = caps.get(n) {
                         apply_case(
-                            m.as_str(),
+                            m,
                             &mut result,
                             &mut case_mode,
                             &mut next_char_mode,
