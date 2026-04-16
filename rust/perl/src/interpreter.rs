@@ -1859,8 +1859,8 @@ impl Interpreter {
                 let mut results = Vec::new();
                 for item in &items {
                     self.set_var("_", item.clone());
-                    let result = self.eval_expr(block);
-                    results.push(result);
+                    let block_results = self.eval_list(block);
+                    results.extend(block_results);
                 }
                 // In scalar context, return count
                 Value::Num(results.len() as f64)
@@ -2277,8 +2277,9 @@ impl Interpreter {
                         let mut results = Vec::new();
                         for item in &items {
                             self.set_var("_", item.clone());
-                            let result = self.eval_expr(block);
-                            results.push(result);
+                            // Evaluate block in list context so split etc. return lists
+                            let block_results = self.eval_list(block);
+                            results.extend(block_results);
                         }
                         results
                     }
@@ -2348,6 +2349,38 @@ impl Interpreter {
                         }
                     }
                 }
+            }
+            Expr::DoBlock(stmts) => {
+                // Execute block in list context — evaluate all but last stmt,
+                // then evaluate last stmt's expression with eval_list
+                self.push_scope();
+                if stmts.is_empty() {
+                    self.pop_scope();
+                    return vec![];
+                }
+                for stmt in &stmts[..stmts.len() - 1] {
+                    match self.exec_stmt(stmt) {
+                        Flow::Return(v) => {
+                            self.pop_scope();
+                            if let Some(list) = self.last_list_val.take() {
+                                return list;
+                            }
+                            return vec![v];
+                        }
+                        Flow::None => {}
+                        _ => break,
+                    }
+                }
+                // Evaluate last statement in list context
+                let last = &stmts[stmts.len() - 1];
+                let result = if let Stmt::Expr(e) = last {
+                    self.eval_list(e)
+                } else {
+                    self.exec_stmt(last);
+                    vec![self.last_expr_val.clone()]
+                };
+                self.pop_scope();
+                result
             }
             _ => vec![self.eval_expr(expr)],
         }
