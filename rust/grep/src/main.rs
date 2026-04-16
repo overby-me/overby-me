@@ -831,6 +831,26 @@ fn build_matcher(opts: &Options) -> Matcher {
         })
         .collect();
 
+    // Validate each pattern individually for unclosed bracket expressions
+    for p in &converted_patterns {
+        if !p.is_empty() {
+            if let Err(e) = Regex::new(p) {
+                let msg = format!("{e}");
+                if msg.contains("unclosed") || msg.contains("character class") {
+                    let clean = if msg.contains("invalid character class range") {
+                        "Invalid range end".to_string()
+                    } else if p.len() > 1000 {
+                        "stack overflow".to_string()
+                    } else {
+                        msg
+                    };
+                    eprintln!("grep: {clean}");
+                    process::exit(2);
+                }
+            }
+        }
+    }
+
     // Build combined pattern — sort longer patterns first so that alternation
     // prefers the longest match at each position (regex uses leftmost-first).
     let combined = if converted_patterns.len() == 1 {
