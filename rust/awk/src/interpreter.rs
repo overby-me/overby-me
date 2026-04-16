@@ -235,9 +235,13 @@ impl Interpreter {
             .rules
             .iter()
             .any(|r| !matches!(r.pattern, Some(Pattern::Begin) | Some(Pattern::End)));
+        let has_end_rules = program
+            .rules
+            .iter()
+            .any(|r| matches!(r.pattern, Some(Pattern::End)));
 
-        // Process input (skip if only BEGIN/END rules and no files specified)
-        if files.is_empty() && has_input_rules {
+        // Process input — also needed for END rules (to set NR, $0, etc.)
+        if files.is_empty() && (has_input_rules || has_end_rules) {
             self.process_stream(program, &mut io::stdin().lock(), "-");
         } else {
             for file in files {
