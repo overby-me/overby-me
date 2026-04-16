@@ -8,7 +8,7 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| PASS | ~225+ | Tests passing reliably (including 150/151 aux-utils) |
+| PASS | ~228+ | Tests passing reliably (including 150/151 aux-utils) |
 | FAIL (fixable) | ~8 | Failures in rust-systemd code that can be fixed |
 | FAIL (architectural) | ~12 | Missing major features (D-Bus, udev, exec deser) |
 | Boot hang (transient) | ~10 | Non-deterministic QEMU boot failures (~30% rate) |
@@ -21,7 +21,8 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 - 26-systemctl, 30-onclockchange, 31-device-enumeration, 32-oompolicy
 - 38-freezer, 44-log-namespace, 45-timedate, 52-honorfirstshutdown, 54-creds
 - 63-path, 65-analyze, 66-device-isolation, 68-propagate-exit-status, 71-hostname
-- 73-locale, 76-sysctl, 34-dynamicusermigrate, 53-timer, 53-issue-16347
+- 59-reloading-restart, 73-locale, 76-sysctl, 34-dynamicusermigrate, 53-timer, 53-issue-16347
+- 80-notifyaccess
 
 ### 04-JOURNAL (all 14 pass)
 
@@ -75,17 +76,14 @@ Basic Type=notify (READY=1) works. NotifyAccess=all/main/exec/none enforcement w
 
 **Affected tests:**
 
-- 59-reloading-restart (RELOADING=1 notification)
+- 59-reloading-restart — NOW PASSES (all 4 subtests: fail, restart, abort, reload-ok)
 - 80-notifyaccess — NOW PASSES (custom test verifying all/main/exec/none)
 
-**Fix complexity:** Medium — RELOADING=1 state tracking and proper timeout handling.
+**Fix complexity:** Medium — RELOADING=1 state tracking and proper timeout handling. DONE.
 
 ### 3. Missing Service Features
 
-**Upholds= directive:**
-
-- 23-unit-file-upholds
-- Fix: Implement Upholds= unit dependency
+**Upholds= directive:** — DONE (already implemented and passing)
 
 **OpenFile=:**
 
