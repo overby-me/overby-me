@@ -1450,12 +1450,13 @@ fn colorize_line(line: &str, matcher: &Matcher, color_code: &str) -> String {
     result
 }
 
+/// Returns (match_count, matched, bytes_consumed)
 fn grep_reader<R: BufRead>(
     mut reader: R,
     matcher: &Matcher,
     opts: &Options,
     filename: &str,
-) -> (usize, bool) {
+) -> (usize, bool, usize) {
     let stdout = io::stdout();
     let mut out = stdout.lock();
     let mut match_count: usize = 0;
@@ -1567,7 +1568,7 @@ fn grep_reader<R: BufRead>(
             }
         }
 
-        return (match_count, match_count > 0);
+        return (match_count, match_count > 0, 0);
     }
 
     // Non-context mode: stream lines (read raw bytes for non-UTF-8 support)
@@ -1611,16 +1612,16 @@ fn grep_reader<R: BufRead>(
             match_count += 1;
 
             if opts.quiet {
-                return (match_count, true);
+                return (match_count, true, byte_offset);
             }
 
             if opts.files_with_matches {
-                return (match_count, true);
+                return (match_count, true, byte_offset);
             }
 
             if is_binary {
                 eprintln!("grep: {filename}: binary file matches");
-                return (match_count, true);
+                return (match_count, true, byte_offset);
             }
 
             if !opts.count {
@@ -1684,7 +1685,7 @@ fn grep_reader<R: BufRead>(
         line_idx += 1;
     }
 
-    (match_count, match_count > 0)
+    (match_count, match_count > 0, byte_offset)
 }
 
 fn print_context_line<W: Write>(
@@ -1911,7 +1912,17 @@ fn grep_file(path: &Path, matcher: &Matcher, opts: &Options) -> (usize, bool, bo
     if path.as_os_str() == "-" {
         let stdin = io::stdin();
         let reader = stdin.lock();
-        let (count, matched) = grep_reader(reader, matcher, opts, &filename);
+        let (count, matched, bytes_consumed) = grep_reader(reader, matcher, opts, &filename);
+        // If -m was used, seek stdin to allow subsequent processes to read the rest
+        #[cfg(unix)]
+        if opts.max_count.is_some() {
+            use std::os::unix::io::AsRawFd;
+            let fd = io::stdin().as_raw_fd();
+            unsafe {
+                let result = libc::lseek(fd, bytes_consumed as libc::off_t, libc::SEEK_SET);
+                let _ = result; // ignore seek failures (pipes, etc.)
+            }
+        }
         return (count, matched, false);
     }
 
@@ -1941,7 +1952,7 @@ fn grep_file(path: &Path, matcher: &Matcher, opts: &Options) -> (usize, bool, bo
     };
 
     let reader = io::BufReader::new(file);
-    let (count, matched) = grep_reader(reader, matcher, opts, &filename);
+    let (count, matched, _) = grep_reader(reader, matcher, opts, &filename);
     (count, matched, false)
 }
 
