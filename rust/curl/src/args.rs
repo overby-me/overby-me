@@ -225,6 +225,60 @@ pub(crate) fn parse_args() -> Options {
                 i += 1;
                 let _val = next_arg(&args, i, "--proto-redir");
             }
+            "-G" | "--get" => {
+                // Convert POST data to GET query string — ignored for now
+                // TODO: implement -G
+            }
+            "-g" | "--globoff" => {
+                // Disable URL globbing — we don't support globbing anyway
+            }
+            "-j" | "--junk-session-cookies" => {
+                // Ignore session cookies from file — ignored
+            }
+            "-C" | "--continue-at" => {
+                i += 1;
+                let _val = next_arg(&args, i, "-C");
+                // TODO: implement resume transfer
+            }
+            "--form-string" => {
+                i += 1;
+                let val = next_arg(&args, i, "--form-string");
+                // Like -F but don't interpret @ or < in value
+                if let Some((name, rest)) = val.split_once('=') {
+                    opts.form_fields.push(crate::options::FormField {
+                        name: name.to_string(),
+                        value: rest.to_string(),
+                        is_file: false,
+                        content_type: None,
+                        filename: None,
+                    });
+                }
+            }
+            "--no-include" => {
+                opts.include_headers = false;
+            }
+            "-N" | "--no-buffer" => {
+                // Disable output buffering — ignored
+            }
+            "--resolve" => {
+                i += 1;
+                let _val = next_arg(&args, i, "--resolve");
+                // TODO: implement custom DNS resolution
+            }
+            "-K" | "--config" => {
+                i += 1;
+                let _val = next_arg(&args, i, "-K");
+                // TODO: implement config file reading
+            }
+            "-x" | "--proxy" => {
+                i += 1;
+                let _val = next_arg(&args, i, "-x");
+                // TODO: implement proxy support
+            }
+            "--proxy-user" => {
+                i += 1;
+                let _val = next_arg(&args, i, "--proxy-user");
+            }
             _ => {
                 if arg.starts_with('-') && arg.len() > 1 && !arg.starts_with("--") {
                     // Handle combined short flags like -sSL
@@ -243,6 +297,10 @@ pub(crate) fn parse_args() -> Options {
                             'O' => opts.remote_name = true,
                             'n' => {} // --netrc, ignored
                             'q' => {} // disable .curlrc, ignored
+                            'g' => {} // --globoff, ignored
+                            'j' => {} // --junk-session-cookies, ignored
+                            'G' => {} // --get, ignored for now
+                            'N' => {} // --no-buffer, ignored
                             '0' => opts.http_version = Some("1.0".into()),
                             // Flags that consume the rest or next arg.
                             'o' => {

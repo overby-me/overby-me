@@ -291,7 +291,14 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                 redirect_headers.extend_from_slice(&resp.header_bytes);
 
                 // Percent-encode spaces in the Location URL.
-                let location = location.replace(' ', "%20");
+                // In the query string portion, use + for spaces; in the path, use %20.
+                let location = if let Some(qpos) = location.find('?') {
+                    let path_part = location[..qpos].replace(' ', "%20");
+                    let query_part = location[qpos..].replace(' ', "+");
+                    format!("{path_part}{query_part}")
+                } else {
+                    location.replace(' ', "%20")
+                };
 
                 // Resolve relative URLs.
                 if location.starts_with("http://") || location.starts_with("https://") {

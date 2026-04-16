@@ -25,9 +25,22 @@ pub fn parse_url(raw: &str) -> Result<ParsedUrl, String> {
         _ => return Err(format!("unsupported scheme: {scheme}")),
     };
 
-    let (authority, path) = match rest.find('/') {
-        Some(i) => (&rest[..i], &rest[i..]),
-        None => (rest, "/"),
+    // Split at first / or ? (whichever comes first) to separate authority from path.
+    let path_start = rest
+        .find('/')
+        .or_else(|| rest.find('?'))
+        .unwrap_or(rest.len());
+    let authority = &rest[..path_start];
+    let path = if path_start < rest.len() {
+        let p = &rest[path_start..];
+        // If path starts with ?, prepend /
+        if p.starts_with('?') {
+            format!("/{p}")
+        } else {
+            p.to_string()
+        }
+    } else {
+        "/".to_string()
     };
 
     // Handle userinfo@ prefix.
@@ -96,9 +109,12 @@ fn normalize_path(path: &str) -> String {
     let mut segments: Vec<&str> = Vec::new();
     for seg in path.split('/') {
         match seg {
-            "." => {}
+            "." | "" if !segments.is_empty() && seg == "." => {}
             ".." => {
-                segments.pop();
+                // Don't pop above root (keep at least the empty first segment from "/")
+                if segments.len() > 1 {
+                    segments.pop();
+                }
             }
             _ => segments.push(seg),
         }
