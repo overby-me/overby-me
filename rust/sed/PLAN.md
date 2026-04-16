@@ -60,6 +60,11 @@ View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
 - GNU mode: join `-e` expressions with newlines (enables `a\`/`c\`/`i\` continuation)
 - POSIX mode: detect incomplete `a`/`c`/`i` across `-e` boundaries
 - Address regex modifiers: only uppercase `I`/`M` (not lowercase, which conflicts with `i` insert)
+- Undefined branch label validation (compile-time check)
+- `#` as label name terminator
+- Missing command after address at EOF detection
+- Unterminated `s///` replacement detection
+- File read error exit code propagation
 - Unexpected `}` detection at top level
 - `v` version check against 4.9
 - `}` with address rejection
@@ -153,7 +158,7 @@ unbuffered, uniq, word-delim, xemacs
 | Test | Primary blocker |
 |-|-|
 | binary | fancy-regex performance (catastrophic backtracking) |
-| bsd-wrapper | Test infrastructure (`bsd.sh` expects `../sed/sed` relative path) |
+| bsd-wrapper | Multi-file line number accumulation + a few address edge cases |
 | dc | fancy-regex performance (catastrophic backtracking) |
 | mac-mf | Sed script contains non-UTF-8 bytes (needs byte-mode parser) |
 | obinary | Platform skip (already works) |
