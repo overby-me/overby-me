@@ -29,6 +29,7 @@ struct Options {
     max_count: Option<usize>,  // -m
     only_matching: bool,       // -o
     quiet: bool,               // -q
+    no_messages: bool,         // -s
     line_number: bool,         // -n
     with_filename: bool,       // -H
     no_filename: bool,         // -h
@@ -74,6 +75,7 @@ impl Default for Options {
             max_count: None,
             only_matching: false,
             quiet: false,
+            no_messages: false,
             line_number: false,
             with_filename: false,
             no_filename: false,
@@ -133,6 +135,7 @@ fn parse_args() -> Options {
                 "files-without-match" => opts.files_without_match = true,
                 "only-matching" => opts.only_matching = true,
                 "quiet" | "silent" => opts.quiet = true,
+                "no-messages" => opts.no_messages = true,
                 "line-number" => opts.line_number = true,
                 "with-filename" => {
                     opts.with_filename = true;
@@ -221,7 +224,8 @@ fn parse_args() -> Options {
                     'l' => opts.files_with_matches = true,
                     'L' => opts.files_without_match = true,
                     'o' => opts.only_matching = true,
-                    'q' | 's' => opts.quiet = true,
+                    'q' => opts.quiet = true,
+                    's' => opts.no_messages = true,
                     'n' => opts.line_number = true,
                     'H' => {
                         opts.with_filename = true;
@@ -262,15 +266,12 @@ fn parse_args() -> Options {
                                 process::exit(2);
                             }
                         } else {
-                            j = chars.len();
                             &rest
                         };
                         match fs::read_to_string(path) {
                             Ok(content) => {
                                 for line in content.lines() {
-                                    if !line.is_empty() {
-                                        opts.patterns.push(line.to_string());
-                                    }
+                                    opts.patterns.push(line.to_string());
                                 }
                                 pattern_set = true;
                             }
@@ -279,6 +280,7 @@ fn parse_args() -> Options {
                                 process::exit(2);
                             }
                         }
+                        j = chars.len();
                         continue;
                     }
                     'm' => {
@@ -355,6 +357,10 @@ fn parse_args() -> Options {
     }
 
     if opts.patterns.is_empty() {
+        if pattern_set {
+            // -f was used but file was empty (e.g. /dev/null) — match nothing
+            process::exit(1);
+        }
         eprintln!("grep: no pattern specified");
         eprintln!("Try 'grep --help' for more information.");
         process::exit(2);
@@ -800,7 +806,8 @@ fn collect_files(opts: &Options) -> Vec<PathBuf> {
     files
 }
 
-fn grep_file(path: &Path, matcher: &Matcher, opts: &Options) -> (usize, bool) {
+/// Returns (match_count, matched, had_error)
+fn grep_file(path: &Path, matcher: &Matcher, opts: &Options) -> (usize, bool, bool) {
     let filename = if path.as_os_str() == "-" {
         opts.label.clone()
     } else {
@@ -810,21 +817,23 @@ fn grep_file(path: &Path, matcher: &Matcher, opts: &Options) -> (usize, bool) {
     if path.as_os_str() == "-" {
         let stdin = io::stdin();
         let reader = stdin.lock();
-        return grep_reader(reader, matcher, opts, &filename);
+        let (count, matched) = grep_reader(reader, matcher, opts, &filename);
+        return (count, matched, false);
     }
 
     let file = match fs::File::open(path) {
         Ok(f) => f,
         Err(e) => {
-            if !opts.quiet {
+            if !opts.no_messages {
                 eprintln!("grep: {}: {e}", path.display());
             }
-            return (0, false);
+            return (0, false, true);
         }
     };
 
     let reader = io::BufReader::new(file);
-    grep_reader(reader, matcher, opts, &filename)
+    let (count, matched) = grep_reader(reader, matcher, opts, &filename);
+    (count, matched, false)
 }
 
 fn print_usage() {
@@ -868,12 +877,16 @@ fn main() {
     let files = collect_files(&opts);
 
     let mut any_match = false;
+    let mut had_error = false;
 
     if files.is_empty() {
         // Read from stdin
-        let (count, matched) = grep_file(Path::new("-"), &matcher, &opts);
+        let (count, matched, errored) = grep_file(Path::new("-"), &matcher, &opts);
         if matched {
             any_match = true;
+        }
+        if errored {
+            had_error = true;
         }
         if opts.count {
             let stdout = io::stdout();
@@ -882,9 +895,12 @@ fn main() {
         }
     } else {
         for path in &files {
-            let (count, matched) = grep_file(path, &matcher, &opts);
+            let (count, matched, errored) = grep_file(path, &matcher, &opts);
             if matched {
                 any_match = true;
+            }
+            if errored {
+                had_error = true;
             }
 
             let filename = if path.as_os_str() == "-" {
@@ -913,9 +929,11 @@ fn main() {
         }
     }
 
-    if opts.quiet {
-        process::exit(if any_match { 0 } else { 1 });
+    if any_match {
+        process::exit(0);
+    } else if had_error {
+        process::exit(2);
+    } else {
+        process::exit(1);
     }
-
-    process::exit(if any_match { 0 } else { 1 });
 }
