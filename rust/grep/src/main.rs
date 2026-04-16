@@ -6,7 +6,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process;
 
-use fancy_regex::Regex as FancyRegex;
+use fancy_regex::{Regex as FancyRegex, RegexBuilder as FancyRegexBuilder};
 use regex::Regex;
 use walkdir::WalkDir;
 
@@ -588,7 +588,18 @@ impl Matcher {
     fn raw_is_match(&self, text: &str) -> bool {
         match &self.inner {
             MatcherInner::Regex(re) => re.is_match(text),
-            MatcherInner::Fancy(re) => re.is_match(text).unwrap_or(false),
+            MatcherInner::Fancy(re) => match re.is_match(text) {
+                Ok(b) => b,
+                Err(e) => {
+                    let msg = format!("{e}");
+                    if msg.contains("backtrack") {
+                        eprintln!("grep: exceeded PCRE's backtracking limit");
+                    } else {
+                        eprintln!("grep: PCRE error: {e}");
+                    }
+                    process::exit(2);
+                }
+            },
             MatcherInner::Fixed(patterns, ic) => {
                 if *ic {
                     let lower = text.to_lowercase();
@@ -645,7 +656,16 @@ impl Matcher {
                             matches.push((m.start(), m.end()));
                             start = m.end();
                         }
-                        _ => break,
+                        Ok(None) => break,
+                        Err(e) => {
+                            let msg = format!("{e}");
+                            if msg.contains("backtrack") {
+                                eprintln!("grep: exceeded PCRE's backtracking limit");
+                            } else {
+                                eprintln!("grep: PCRE error: {e}");
+                            }
+                            process::exit(2);
+                        }
                     }
                 }
                 matches
@@ -925,7 +945,10 @@ fn build_matcher(opts: &Options) -> Matcher {
     }
 
     let inner = if opts.perl_regexp || has_backrefs {
-        match FancyRegex::new(&pattern) {
+        match FancyRegexBuilder::new(&pattern)
+            .backtrack_limit(10_000)
+            .build()
+        {
             Ok(re) => MatcherInner::Fancy(re),
             Err(e) => {
                 let msg = format!("{e}");
@@ -1468,6 +1491,26 @@ fn grep_reader<R: BufRead>(
     let fname_sep = if opts.null_separator { '\0' } else { ':' };
     let use_color = opts.color == ColorMode::Always;
     let line_delim: u8 = if opts.null_data { b'\0' } else { b'\n' };
+    let mut write_error = false;
+
+    macro_rules! checked_write {
+        ($dst:expr, $($arg:tt)*) => {
+            if !write_error {
+                if write!($dst, $($arg)*).is_err() {
+                    write_error = true;
+                }
+            }
+        }
+    }
+    macro_rules! checked_writeln {
+        ($dst:expr, $($arg:tt)*) => {
+            if !write_error {
+                if writeln!($dst, $($arg)*).is_err() {
+                    write_error = true;
+                }
+            }
+        }
+    }
 
     // Binary file detection: peek at the first chunk for NUL bytes
     let mut is_binary = false;
@@ -1521,7 +1564,7 @@ fn grep_reader<R: BufRead>(
                         continue;
                     }
                     if last_printed.is_some_and(|lp| ctx_idx > lp + 1) {
-                        let _ = writeln!(out, "--");
+                        checked_writeln!(out, "--");
                     }
                     print_context_line(
                         &mut out,
@@ -1536,30 +1579,30 @@ fn grep_reader<R: BufRead>(
 
                 // Print separator if needed
                 if last_printed.is_some_and(|lp| line_idx > lp + 1) {
-                    let _ = writeln!(out, "--");
+                    checked_writeln!(out, "--");
                 }
 
                 // Print matching line
                 let has_prefix = show_filename || opts.line_number;
                 if show_filename {
-                    let _ = write!(out, "{filename}{fname_sep}");
+                    checked_write!(out, "{filename}{fname_sep}");
                 }
                 if opts.line_number {
-                    let _ = write!(out, "{}{separator}", line_idx + 1);
+                    checked_write!(out, "{}{separator}", line_idx + 1);
                 }
                 if opts.initial_tab && has_prefix && !line.is_empty() {
-                    let _ = write!(out, "\t");
+                    checked_write!(out, "\t");
                 }
                 if use_color {
-                    let _ = writeln!(out, "{}", colorize_line(line, matcher, &opts.match_color));
+                    checked_writeln!(out, "{}", colorize_line(line, matcher, &opts.match_color));
                 } else {
-                    let _ = writeln!(out, "{line}");
+                    checked_writeln!(out, "{line}");
                 }
                 last_printed = Some(line_idx);
                 remaining_after = opts.after_context;
             } else if remaining_after > 0 {
                 if last_printed.is_some_and(|lp| line_idx > lp + 1) {
-                    let _ = writeln!(out, "--");
+                    checked_writeln!(out, "--");
                 }
                 print_context_line(&mut out, line, line_idx + 1, filename, show_filename, opts);
                 last_printed = Some(line_idx);
@@ -1634,49 +1677,49 @@ fn grep_reader<R: BufRead>(
                         .collect();
                     for (start, end) in found {
                         if show_filename {
-                            let _ = write!(out, "{filename}{fname_sep}");
+                            checked_write!(out, "{filename}{fname_sep}");
                         }
                         if opts.line_number {
-                            let _ = write!(out, "{}{separator}", line_idx + 1);
+                            checked_write!(out, "{}{separator}", line_idx + 1);
                         }
                         if opts.byte_offset {
-                            let _ = write!(out, "{}{separator}", byte_offset + start);
+                            checked_write!(out, "{}{separator}", byte_offset + start);
                         }
                         let line_end = if opts.null_data { "\0" } else { "\n" };
                         if use_color {
-                            let _ = write!(
+                            checked_write!(
                                 out,
                                 "\x1b[{}m\x1b[K{}\x1b[m\x1b[K{line_end}",
                                 opts.match_color,
                                 &line[start..end]
                             );
                         } else {
-                            let _ = write!(out, "{}{line_end}", &line[start..end]);
+                            checked_write!(out, "{}{line_end}", &line[start..end]);
                         }
                     }
                 } else {
                     let has_prefix = show_filename || opts.line_number || opts.byte_offset;
                     if show_filename {
-                        let _ = write!(out, "{filename}{fname_sep}");
+                        checked_write!(out, "{filename}{fname_sep}");
                     }
                     if opts.line_number {
                         if opts.initial_tab && show_filename {
-                            let _ = write!(out, " ");
+                            checked_write!(out, " ");
                         }
-                        let _ = write!(out, "{}{separator}", line_idx + 1);
+                        checked_write!(out, "{}{separator}", line_idx + 1);
                     }
                     if opts.byte_offset {
-                        let _ = write!(out, "{byte_offset}{separator}");
+                        checked_write!(out, "{byte_offset}{separator}");
                     }
                     if opts.initial_tab && has_prefix && !line.is_empty() {
-                        let _ = write!(out, "\t");
+                        checked_write!(out, "\t");
                     }
                     if use_color {
-                        let _ = writeln!(out, "{}", colorize_line(&line, matcher, &opts.match_color));
+                        checked_writeln!(out, "{}", colorize_line(&line, matcher, &opts.match_color));
                     } else {
                         // Write raw bytes to preserve non-UTF-8 content
-                        let _ = out.write_all(&line_buf);
-                        let _ = out.write_all(if opts.null_data { b"\0" } else { b"\n" });
+                        if !write_error && out.write_all(&line_buf).is_err() { write_error = true; }
+                        if !write_error && out.write_all(if opts.null_data { b"\0" } else { b"\n" }).is_err() { write_error = true; }
                     }
                 }
             }
@@ -1684,6 +1727,12 @@ fn grep_reader<R: BufRead>(
 
         byte_offset += line_len;
         line_idx += 1;
+    }
+
+    if write_error {
+        drop(out);
+        eprintln!("grep: write error: {}", io::Error::last_os_error());
+        process::exit(2);
     }
 
     (match_count, match_count > 0, byte_offset)
@@ -1972,9 +2021,10 @@ fn safe_exit(code: i32) -> ! {
 fn print_usage() {
     let stdout = io::stdout();
     let mut out = stdout.lock();
+    let mut err = false;
     macro_rules! outln {
-        () => { let _ = writeln!(out); };
-        ($($arg:tt)*) => { let _ = writeln!(out, $($arg)*); }
+        () => { if !err && writeln!(out).is_err() { err = true; } };
+        ($($arg:tt)*) => { if !err && writeln!(out, $($arg)*).is_err() { err = true; } }
     }
     outln!("Usage: grep [OPTION]... PATTERN [FILE]...");
     outln!("Search for PATTERN in each FILE or standard input.");
@@ -2007,7 +2057,7 @@ fn print_usage() {
     outln!("  -A, --after-context=NUM   print NUM lines of trailing context");
     outln!("  -B, --before-context=NUM  print NUM lines of leading context");
     outln!("  -C, --context=NUM         print NUM lines of output context");
-    if out.flush().is_err() {
+    if err || out.flush().is_err() {
         drop(out);
         eprintln!("grep: write error: {}", io::Error::last_os_error());
         process::exit(2);
