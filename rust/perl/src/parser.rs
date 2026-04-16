@@ -519,7 +519,6 @@ impl Parser {
         } else {
             String::new()
         };
-
         // Skip prototype if present
         if self.at(&Token::LParen) {
             self.pos += 1;
@@ -1307,8 +1306,11 @@ impl Parser {
                     let saved = self.pos;
                     self.pos += 1;
 
-                    // Simple heuristic: if next token is a string, ident, scalar var, or number, it's a hash subscript
-                    let is_subscript = matches!(
+                    // Improved heuristic: scan ahead for the matching } to check if this
+                    // is a hash subscript expression or a block with statements.
+                    // A block contains statement keywords (if/unless/while/for) or
+                    // semicolons before the closing brace. A subscript does not.
+                    let first_is_value = matches!(
                         self.tok(),
                         Token::StringLit(_)
                             | Token::ScalarVar(_)
@@ -1316,6 +1318,40 @@ impl Parser {
                             | Token::Float(_)
                             | Token::Ident(_)
                     );
+                    let is_subscript = if first_is_value {
+                        // Scan forward to find the matching } and check for block indicators
+                        let mut scan = self.pos;
+                        let mut depth = 1;
+                        let mut has_block_indicator = false;
+                        while scan < self.tokens.len() && depth > 0 {
+                            match &self.tokens[scan] {
+                                Token::LBrace => depth += 1,
+                                Token::RBrace => {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        break;
+                                    }
+                                }
+                                Token::Semi
+                                | Token::If
+                                | Token::Unless
+                                | Token::While
+                                | Token::Until
+                                | Token::For
+                                | Token::Foreach
+                                    if depth == 1 =>
+                                {
+                                    has_block_indicator = true;
+                                    break;
+                                }
+                                _ => {}
+                            }
+                            scan += 1;
+                        }
+                        !has_block_indicator
+                    } else {
+                        false
+                    };
 
                     if is_subscript {
                         let key = self.parse_expr();
