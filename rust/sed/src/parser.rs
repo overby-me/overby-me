@@ -198,7 +198,7 @@ impl<'a> Parser<'a> {
             }
             if self.peek() == Some(b'}') && self.block_depth > 0 {
                 return Err(self.err_at(
-                    self.pos,
+                    self.pos + 1,
                     "`}' doesn't want any addresses",
                 ));
             }
