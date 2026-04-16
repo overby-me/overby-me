@@ -2,21 +2,34 @@
 
 ## Current Status
 
-**190/241 tests passing** (79%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
+**~202/241 tests passing** (84%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
 
-Up from 104 at the start (+86 tests, +36 percentage points).
+Up from 104 at the start (+98 tests, +41 percentage points).
 
-### Remaining failure categories (~77 tests)
+### Remaining failures (~39 tests)
 
-- **Error detection (~27)**: Tests expect gawk-compatible error messages we don't produce (scalar/array conflicts, duplicate params, syntax errors, etc.)
-- **Array aliasing (~14)**: Need true reference semantics for nested function calls with shared arrays
-- **Other (~15)**: CONVFMT caching, operator precedence, ARGV-based file processing, backslash handling, pipe close, etc.
-- **Regex (~7)**: Character class edge cases (`---`, `[^]]`), Rust vs POSIX regex differences
-- **Getline (~4)**: Complex forms (getline with array subscript side effects, pipe getline with expressions)
-- **Printf (~2)**: Comprehensive flag combinations (hsprint), infinity formatting edge cases
+- **Array aliasing (~14)**: Need true reference semantics for nested function calls (arrayparm, arryref2-5, aryprm1-8)
+- **Regex (~5)**: Rust vs POSIX regex character class differences (rebrackloc, rebt8b1, regexpbrack, regrange, range2)
+- **Record separator (~3)**: RS="" paragraph mode edge cases, RT variable (rsnullre, rsnulw, rstest5)
+- **Getline (~3)**: Complex getline forms, EOF in END (getline4, getlnfa, getnr2tm)
+- **Error detection (~3)**: badassign1 column position, gsubasgn multi-error, divzero
+- **Misc (~5)**: parse1 ($$a++++ post-increment), parsefld ($/= regex), rand (PRNG), swaplns (stdin trailing record), trailbs (trailing backslash in regex)
+- **Unicode (~1)**: gsubnulli18n (multibyte gsub)
+- **Function-as-variable (~2)**: fnaryscl (array provenance chain), fnamedat-style (already fixed most)
 
 ### Recent fixes
 
+- Syntax error reporting with source line and column position (parseme, noparms, synerr1-3)
+- Function-as-array/variable detection (delfunc, fnarray, fnarray2, fnamedat, fnasgnm, gsubasgn target)
+- gsub/sub backslash handling: `\\` at end preserved, `\\&` → `\` + matched (backgsub, subback)
+- Print allows assignment expressions (`print b += 1`)
+- `$` field ref works with unary operators (`$+i++`)
+- Adjacent-paren function calls for non-declared functions (callparam)
+- Assignment to post-increment field detection (badassign1)
+- Always rebuild `$0` on field assignment (fscaret)
+- For-loop empty body semicolon handling (forsimp)
+- Regex after `$` in lexer (Dollar → can_be_regex)
+- Scalar parameter error message
 - Split main.rs into modules: lexer, ast, parser, value, format, interpreter
 - Fixed `printf`/`print` with parenthesized args: `printf(fmt, args...)`
 - Fixed `%d`/`%i` with precision (`%8.5d`), `%.0d` with zero, `%#o`/`%#x` prefix
