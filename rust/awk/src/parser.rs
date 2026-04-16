@@ -94,6 +94,11 @@ impl Parser {
         let mut seen_params: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         let mut has_errors = false;
         while !matches!(self.peek(), Token::RParen | Token::Eof) {
+            // Skip empty parameter slots (e.g., trailing commas)
+            if matches!(self.peek(), Token::Comma) {
+                self.advance();
+                continue;
+            }
             if let Token::Ident(s) = self.advance() {
                 // Check for duplicate parameter names
                 if let Some(&first_idx) = seen_params.get(&s) {

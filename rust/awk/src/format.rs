@@ -373,22 +373,16 @@ pub fn awk_replace(replacement: &str, matched: &str) -> String {
     let chars: Vec<char> = replacement.chars().collect();
     let mut i = 0;
     while i < chars.len() {
-        if chars[i] == '\\' {
-            i += 1;
-            if i < chars.len() {
-                if chars[i] == '&' {
-                    result.push('&');
-                } else if chars[i] == '\\' {
-                    result.push('\\');
-                } else {
-                    result.push('\\');
-                    result.push(chars[i]);
-                }
-            } else {
-                result.push('\\');
-            }
-            i += 1;
+        if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '&' {
+            // \& → literal &
+            result.push('&');
+            i += 2;
+        } else if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '\\' {
+            // \\ → single \
+            result.push('\\');
+            i += 2;
         } else if chars[i] == '&' {
+            // & → matched text
             result.push_str(matched);
             i += 1;
         } else {
