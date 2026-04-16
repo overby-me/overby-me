@@ -1394,6 +1394,22 @@ impl Interpreter {
                 }
                 Value::Num(1.0)
             }
+            "_tr_count" | "_tr_apply" => {
+                // tr/from/to/ count or apply — simplified
+                if args.len() >= 3 {
+                    let text = self.eval_expr(&args[0]).to_str();
+                    let from = self.eval_expr(&args[1]).to_str();
+                    let count = text.chars().filter(|c| from.contains(*c)).count();
+                    if name == "_tr_count" {
+                        // !~ tr/...// — return negation: 0 if count > 0
+                        Value::Num(if count > 0 { 0.0 } else { 1.0 })
+                    } else {
+                        Value::Num(count as f64)
+                    }
+                } else {
+                    Value::Num(0.0)
+                }
+            }
             "_list_index" => {
                 // Internal: (expr)[idx] — index into list result
                 if args.len() >= 2 {

@@ -1152,6 +1152,20 @@ impl Parser {
                     let f = flags.clone();
                     self.pos += 1;
                     Expr::RegexMatch(Box::new(left), p, f)
+                } else if let Token::Transliterate(from, to, flags) = self.tok() {
+                    let f = from.clone();
+                    let t = to.clone();
+                    let fl = flags.clone();
+                    self.pos += 1;
+                    Expr::Call(
+                        "_tr_apply".to_string(),
+                        vec![
+                            left,
+                            Expr::StringLit(f),
+                            Expr::StringLit(t),
+                            Expr::StringLit(fl),
+                        ],
+                    )
                 } else {
                     left
                 }
@@ -1163,6 +1177,22 @@ impl Parser {
                     let f = flags.clone();
                     self.pos += 1;
                     Expr::RegexNotMatch(Box::new(left), p, f)
+                } else if let Token::Transliterate(from, to, flags) = self.tok() {
+                    // !~ tr/from/to/ — apply transliteration, negate count
+                    let f = from.clone();
+                    let t = to.clone();
+                    let fl = flags.clone();
+                    self.pos += 1;
+                    // For now, treat as the tr count expression
+                    Expr::Call(
+                        "_tr_count".to_string(),
+                        vec![
+                            left,
+                            Expr::StringLit(f),
+                            Expr::StringLit(t),
+                            Expr::StringLit(fl),
+                        ],
+                    )
                 } else {
                     left
                 }
