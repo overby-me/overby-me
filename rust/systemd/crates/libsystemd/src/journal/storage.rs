@@ -602,6 +602,8 @@ impl JournalStorage {
             && file.size() >= self.config.max_file_size
         {
             self.rotate()?;
+            // Clean up old files after rotation to enforce max_files / max_disk_usage.
+            self.vacuum()?;
         }
 
         // Ensure we have an active file
