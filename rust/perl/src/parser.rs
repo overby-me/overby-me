@@ -593,6 +593,11 @@ impl Parser {
                         names.push(format!("%{}", name));
                         self.pos += 1;
                     }
+                    Token::UndefKw => {
+                        // undef as placeholder in list destructuring
+                        names.push("$_undef_placeholder".to_string());
+                        self.pos += 1;
+                    }
                     _ => break,
                 }
                 if !self.eat(&Token::Comma) {
@@ -1958,7 +1963,9 @@ fn parse_interp_string(s: &str) -> Expr {
                         let idx_expr = if let Ok(n) = idx_str.parse::<i64>() {
                             Box::new(Expr::IntLit(n))
                         } else {
-                            Box::new(Expr::ScalarVar(idx_str))
+                            // Strip $ sigil if present
+                            let var_name = idx_str.strip_prefix('$').unwrap_or(&idx_str);
+                            Box::new(Expr::ScalarVar(var_name.to_string()))
                         };
                         parts.push(InterpPart::ArrayElement(name, idx_expr));
                     } else if i < chars.len() && chars[i] == '{' {
