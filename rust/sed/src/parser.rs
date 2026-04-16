@@ -194,6 +194,10 @@ impl<'a> Parser<'a> {
                 self.advance();
                 return Err(self.err("comments don't accept any addresses"));
             }
+            if self.peek() == Some(b'}') {
+                self.advance();
+                return Err(self.err("`}' doesn't want any addresses"));
+            }
         }
 
         // POSIX mode: one-address commands with range address — check before parsing
@@ -592,11 +596,26 @@ impl<'a> Parser<'a> {
             b'F' => Ok(Command::Filename),
             b'v' => {
                 self.skip_whitespace();
+                let mut ver = String::new();
                 while let Some(ch) = self.peek() {
                     if ch == b'\n' || ch == b';' {
                         break;
                     }
+                    ver.push(ch as char);
                     self.advance();
+                }
+                // Check version: if specified version > our version, error
+                let ver = ver.trim();
+                if !ver.is_empty() {
+                    // Our version is 4.9 (matching GNU sed test suite)
+                    let our_major = 4u32;
+                    let our_minor = 9u32;
+                    let parts: Vec<&str> = ver.split('.').collect();
+                    let req_major = parts.first().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+                    let req_minor = parts.get(1).and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+                    if (req_major, req_minor) > (our_major, our_minor) {
+                        return Err(self.err("expected newer version of sed"));
+                    }
                 }
                 Ok(Command::Noop)
             }
@@ -608,7 +627,8 @@ impl<'a> Parser<'a> {
                 }
                 Ok(Command::Noop)
             }
-            b'\n' | b';' | b'}' => Ok(Command::Noop),
+            b'}' => Err(self.err("unexpected `}'")),
+            b'\n' | b';' => Ok(Command::Noop),
             _ => Err(self.err(&format!("unknown command: `{}'", char::from(ch)))),
         }
     }
