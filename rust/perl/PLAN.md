@@ -6,12 +6,31 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**0/68 tests passing** (0%) — selected tests from the upstream Perl test suite.
+**9/68 tests passing** (13%) — selected tests from the upstream Perl test suite.
+
+Passing: base/if, base/cond, base/while, base/pat, base/num (56 tests),
+base/translate (257 tests), base/term (7 tests), cmd/elsif (4 tests),
+cmd/mod (15 tests).
 
 Tests compare rust-perl output against reference perl output in a Nix sandbox.
 
 Run a test: `nix build .#checks.x86_64-linux.rust-perl-test-{category}-{name}`
 View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{name}`
+
+### Recent fixes
+
+- Lexer, parser, AST, and tree-walking interpreter for Perl 5
+- Scalar variables, arrays, hashes, string interpolation
+- if/else/elsif, unless, while/until, for/foreach, do-while
+- Subroutines with my/local, implicit return (last expression value)
+- Regex matching, range operator (..), ternary operator
+- Number formatting (%.15g), binary/octal/hex literals
+- File I/O (open/close/readline), backtick command execution
+- String operators (eq/ne/lt/gt/le/ge/cmp), numeric comparison
+- Logical operators (&&/||/!/not/and/or//), bitwise operators
+- Postfix modifiers (if/unless/while/until/for), die/warn with postfix
+- BEGIN/END blocks, eval string, &func() call syntax
+- Variable scoping fix: non-my variables default to global scope
 
 ---
 
@@ -38,7 +57,7 @@ Total tracked: **68 tests** (expandable as the interpreter matures).
 
 ### Module plan
 
-```
+```text
 src/
   main.rs          CLI argument parsing, script loading, entry point
   lexer.rs         Tokenization of Perl source
@@ -90,6 +109,7 @@ Every expression in Perl evaluates in either scalar or list context. This affect
 Get the most trivial test passing. `t/base/if.t` tests `if`/`else` with `eq`/`ne` and simple `print`.
 
 **Required features:**
+
 - Lexer: string literals, barewords, operators (`eq`, `ne`), semicolons, braces, parens
 - Parser: `print` statement, `if`/`else`, string comparison
 - Interpreter: execute print, evaluate string equality
@@ -130,12 +150,14 @@ Get the most trivial test passing. `t/base/if.t` tests `if`/`else` with `eq`/`ne
 This is the largest phase. Key clusters:
 
 **Data structures:**
+
 - `array.t`: push/pop/shift/unshift, splice, slices, $#arr, wantarray
 - `hash.t`: keys/values/each/exists/delete, hash slices, hash in boolean context
 - `list.t`: list assignment, list in scalar context
 - `ref.t`: references, dereferencing, `ref()`, anonymous constructors `[]`/`{}`/`sub{}`
 
 **String operations:**
+
 - `chop.t` / `chr.t` / `ord.t`: character manipulation
 - `substr.t` / `index.t`: substring extraction and search
 - `join.t` / `split.t`: string joining and splitting
@@ -146,6 +168,7 @@ This is the largest phase. Key clusters:
 - `tr.t`: transliteration (more thorough than `t/base/translate.t`)
 
 **Numeric operations:**
+
 - `arith2.t`: extended arithmetic tests
 - `auto.t`: `++`/`--` auto-increment (including magical string increment `"aa"`→`"ab"`)
 - `bop.t`: bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`)
@@ -156,6 +179,7 @@ This is the largest phase. Key clusters:
 - `vec.t`: `vec()` bit-vector operations
 
 **Control & evaluation:**
+
 - `cond.t`: ternary `?:`, short-circuit `&&`/`||`/`//`
 - `eval.t`: `eval BLOCK`, `eval STRING`, `$@` error variable
 - `die.t`: `die`, `warn`, exception objects
@@ -168,6 +192,7 @@ This is the largest phase. Key clusters:
 - `wantarray.t`: `wantarray()` detection
 
 **Misc:**
+
 - `defined.t` / `undef.t`: `defined()`, `undef`
 - `delete.t`: `delete` on arrays/hashes
 - `not.t`: `not`, `!`, `unless`
@@ -244,10 +269,20 @@ This is the largest phase. Key clusters:
 
 **re (3):** pat, regexp, subst
 
-### Passing (0)
+### Passing (9)
 
-(none yet)
+base/cond, base/if, base/num, base/pat, base/term, base/translate, base/while,
+cmd/elsif, cmd/mod
 
-### Failing (68)
+### Failing (59)
 
-All tests — implementation not yet started.
+base/lex, base/rs, cmd/for, cmd/subval, cmd/switch,
+opbasic/arith, opbasic/cmp, opbasic/concat, opbasic/magic_phase, opbasic/qq,
+op/arith2, op/array, op/auto, op/bop, op/chop, op/chr, op/closure, op/cond,
+op/context, op/defined, op/delete, op/die, op/do, op/each, op/eval, op/grep,
+op/hash, op/heredoc, op/inc, op/index, op/join, op/lc, op/length, op/list,
+op/local, op/my, op/not, op/oct, op/ord, op/pack, op/pos, op/print, op/push,
+op/quotemeta, op/range, op/ref, op/repeat, op/reverse, op/sort, op/splice,
+op/split, op/sprintf, op/sub, op/substr, op/tr, op/undef, op/unshift, op/vec,
+op/wantarray, io/argv, io/fs, io/open, io/print, io/read, io/tell,
+re/pat, re/regexp, re/subst, run/exit, run/switches
