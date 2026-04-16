@@ -6,15 +6,21 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**9/68 tests passing** (13%) — selected tests from the upstream Perl test suite.
+**9/68 Nix tests passing** (13%) — selected tests from the upstream Perl test suite.
 
 Passing: base/if, base/cond, base/while, base/pat, base/num (56 tests),
 base/translate (257 tests), base/term (7 tests), cmd/elsif (4 tests),
 cmd/mod (15 tests).
 
-test.pl integration working: plan/ok/is produce TAP output. op/ tests
-partially running but need fixes for: $1 capture variables, `\o{}`
-octal escapes, `_diag` output leaking, caller() function.
+Near-passing (local test counts):
+
+- opbasic/arith: 174/183 (integer overflow edge cases)
+- opbasic/concat: 228/254 (Unicode concat)
+- opbasic/qq: 15/30 (\\o{} octal escapes)
+- cmd/for: 14/16 (Internals::stack_refcounted)
+- cmd/subval: 19/36 (caller, wantarray, file I/O)
+
+test.pl integration working: plan/ok/is/printf produce TAP output.
 
 Tests compare rust-perl output against reference perl output in a Nix sandbox.
 
