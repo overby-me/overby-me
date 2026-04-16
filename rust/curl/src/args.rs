@@ -107,7 +107,17 @@ pub(crate) fn parse_args() -> Options {
             }
             "-b" | "--cookie" => {
                 i += 1;
-                opts.cookie = Some(next_arg(&args, i, "-b"));
+                let val = next_arg(&args, i, "-b");
+                // Multiple -b flags accumulate cookies with "; " separator
+                match opts.cookie {
+                    Some(ref mut existing) if val.contains('=') && existing.contains('=') => {
+                        existing.push_str("; ");
+                        existing.push_str(&val);
+                    }
+                    _ => {
+                        opts.cookie = Some(val);
+                    }
+                }
             }
             "-c" | "--cookie-jar" => {
                 i += 1;
@@ -356,7 +366,18 @@ pub(crate) fn parse_args() -> Options {
                             }
                             'b' => {
                                 i += 1;
-                                opts.cookie = Some(next_arg(&args, i, "-b"));
+                                let val = next_arg(&args, i, "-b");
+                                match opts.cookie {
+                                    Some(ref mut existing)
+                                        if val.contains('=') && existing.contains('=') =>
+                                    {
+                                        existing.push_str("; ");
+                                        existing.push_str(&val);
+                                    }
+                                    _ => {
+                                        opts.cookie = Some(val);
+                                    }
+                                }
                                 j = chars.len();
                                 continue;
                             }

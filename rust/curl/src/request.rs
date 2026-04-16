@@ -248,12 +248,12 @@ fn guess_content_type(filename: &str) -> &'static str {
 }
 
 fn multipart_boundary(_opts: &Options) -> String {
-    // Generate a stable but unique-ish boundary.
+    // Match curl's boundary format: 24 dashes + 16 hex chars
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    format!("------------------------{ts:032x}")
+    format!("------------------------{:016x}", ts & 0xFFFFFFFFFFFFFFFF)
 }
 
 fn execute_request(url: &ParsedUrl, opts: &Options) -> Result<Response, String> {
