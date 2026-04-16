@@ -911,10 +911,12 @@ impl Parser {
                     // Function call (only if name is a known function)
                     self.advance();
                     let mut args = Vec::new();
+                    self.skip_terminators(); // skip newlines before first arg
                     while !matches!(self.peek(), Token::RParen | Token::Eof) {
                         args.push(self.parse_expr());
                         if matches!(self.peek(), Token::Comma) {
                             self.advance();
+                            self.skip_terminators(); // skip newlines between args
                         }
                     }
                     self.expect(&Token::RParen);
