@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**50/61 tests passing** (82%) — shell tests from the GNU sed 4.9 test suite.
+**51/61 tests passing** (84%) — shell tests from the GNU sed 4.9 test suite.
 
 Run a test: `nix build .#checks.x86_64-linux.rust-sed-test-{name}`
 View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
@@ -47,10 +47,11 @@ View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
 - `+N`/`~N` as first address rejection
 - POSIX `a`/`c`/`i` require `\` after command
 - POSIX one-address command validation (`a`, `i`, `l`, `=`, `q`, `Q`, `r`, `R`)
+- Unbuffered I/O (`-u`): byte-by-byte stdin reads via raw fd
 
 ---
 
-## Remaining Failures (11 tests)
+## Remaining Failures (10 tests)
 
 ### Category 1: fancy-regex performance (2 tests)
 
@@ -75,12 +76,11 @@ These tests require processing non-UTF-8 binary data. Our engine uses `String` (
 - `compile-errors` — Needs many validation checks: one-address commands (`a`, `i`, `l`, `=`, `q`, `Q`), `#` with addresses, `}` without `{`, `v` version check, `a`/`c`/`i` require `\` in POSIX mode, incomplete `a`/`c`/`i` across `-e` boundaries, `~N`/`+N` as first address, multiple `!`
 - `compile-tests` — `s/[[:]]//'` (POSIX class `[:]` parsing edge case)
 
-### Category 4: Test-specific issues (3 tests)
+### Category 4: Test-specific issues (1 test)
 
-**Tests:** execute-tests, bsd-wrapper, unbuffered
+**Tests:** bsd-wrapper
 
 - `bsd-wrapper` — Test infrastructure expects sed at `../sed/sed` relative path
-- `unbuffered` — Needs true line-by-line I/O (currently reads all input into memory)
 
 ### Category 5: Edge cases (2 tests)
 
@@ -113,7 +113,7 @@ Fix execute-tests $fail issue, bsd-wrapper path layout.
 
 ## Test Inventory
 
-### Passing (50 tests)
+### Passing (51 tests)
 
 bsd, bug32082, bug32271-1, bug32271-2, cmd-0r, cmd-l, cmd-R,
 colon-with-no-label, command-endings, comment-n, distrib, eval,
@@ -125,9 +125,9 @@ normalize-text, nulldata, panic-tests, posix-mode-addr, posix-mode-bad-ref,
 posix-mode-ERE, posix-mode-N, posix-mode-s, range-overlap,
 recursive-escape-c, regex-errors, regex-max-int, sandbox, stdin,
 stdin-prog, subst-mb-incomplete, subst-options, subst-replacement,
-temp-file-cleanup, title-case, uniq, word-delim, xemacs
+temp-file-cleanup, title-case, unbuffered, uniq, word-delim, xemacs
 
-### Failing (11 tests)
+### Failing (10 tests)
 
 | Test | Primary blocker |
 |-|-|
@@ -141,7 +141,6 @@ temp-file-cleanup, title-case, uniq, word-delim, xemacs
 | mac-mf | Byte-mode I/O |
 | obinary | Platform skip (already works) |
 | posix-char-class | POSIX `\t` semantics |
-| unbuffered | Line-by-line I/O |
 
 ### Tests excluded from harness (6 tests)
 
