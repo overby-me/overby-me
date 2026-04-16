@@ -2,13 +2,13 @@
 
 ## Current Status
 
-**216/242 tests passing** (89%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
+**220/242 tests passing** (91%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
 
-Up from 104 at the start (+112 tests, +46 percentage points).
+Up from 104 at the start (+116 tests, +48 percentage points).
 
-### Remaining failures (26 tests)
+### Remaining failures (22 tests)
 
-- **Array aliasing (~8)**: Need true reference semantics (arryref2-5, aryprm4/6/8, fnaryscl)
+- **Array aliasing (~4)**: Need true reference semantics (arryref2, aryprm4/6/8)
 - **Regex (~5)**: Rust vs POSIX regex differences (rebrackloc, rebt8b1, regexpbrack, regrange, range2)
 - **Record separator (~3)**: RS="" paragraph mode, RT variable (rsnullre, rsnulw, rstest5)
 - **Error format (~3)**: Column position mismatches (badassign1, getlnfa), multi-error (gsubasgn)
