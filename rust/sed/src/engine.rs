@@ -2,13 +2,14 @@ use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 
 use crate::types::*;
-use crate::util::escape_string;
+use crate::util::escape_string_bytes;
 
 pub struct Engine {
     commands: Vec<SedCommand>,
     quiet: bool,
     posix: bool,
     pattern_space: String,
+    raw_pattern: Option<Vec<u8>>, // raw bytes for unmodified lines
     hold_space: String,
     line_number: usize,
     last_line: bool,
@@ -21,6 +22,7 @@ pub struct Engine {
     exit_code: i32,
     suppress_default_print: bool,
     input_lines: Vec<String>,
+    raw_lines: Vec<Vec<u8>>, // original bytes (before lossy conversion)
     input_index: usize,
     input_had_trailing_newline: bool,
     pub current_filename: Option<String>,
@@ -42,6 +44,7 @@ impl Engine {
             quiet,
             posix,
             pattern_space: String::new(),
+            raw_pattern: None,
             hold_space: String::new(),
             line_number: 0,
             last_line: false,
@@ -54,6 +57,7 @@ impl Engine {
             exit_code: 0,
             suppress_default_print: false,
             input_lines: Vec::new(),
+            raw_lines: Vec::new(),
             input_index: 0,
             input_had_trailing_newline: true,
             current_filename: None,
@@ -68,9 +72,10 @@ impl Engine {
     }
 
     pub fn run<R: BufRead, W: Write>(&mut self, mut reader: R, writer: &mut W) -> io::Result<i32> {
+        let mut data = Vec::new();
+        reader.read_to_end(&mut data)?;
+
         if self.null_data {
-            let mut data = Vec::new();
-            reader.read_to_end(&mut data)?;
             self.input_lines = data
                 .split(|&b| b == 0)
                 .map(|chunk| String::from_utf8_lossy(chunk).into_owned())
@@ -79,22 +84,20 @@ impl Engine {
                 self.input_lines.pop();
             }
         } else {
-            let mut data = Vec::new();
-            reader.read_to_end(&mut data)?;
             self.input_had_trailing_newline = data.last() == Some(&b'\n');
-            self.input_lines = if data.is_empty() {
-                Vec::new()
+            if data.is_empty() {
+                self.input_lines = Vec::new();
+                self.raw_lines = Vec::new();
             } else {
-                let s = String::from_utf8_lossy(&data).into_owned();
-                let mut lines: Vec<String> =
-                    s.split('\n').map(|l| l.to_string()).collect();
-                if self.input_had_trailing_newline
-                    && lines.last().map_or(false, |s| s.is_empty())
-                {
-                    lines.pop();
+                // Split raw bytes on newlines
+                let mut raw: Vec<Vec<u8>> = data.split(|&b| b == b'\n').map(|l| l.to_vec()).collect();
+                if self.input_had_trailing_newline && raw.last().map_or(false, |s| s.is_empty()) {
+                    raw.pop();
                 }
-                lines
-            };
+                // Create lossy string versions for regex matching
+                self.input_lines = raw.iter().map(|r| String::from_utf8_lossy(r).into_owned()).collect();
+                self.raw_lines = raw;
+            }
         }
         self.run_lines(writer)
     }
@@ -117,11 +120,9 @@ impl Engine {
             }
             self.input_had_trailing_newline = had_newline;
 
-            // Store line for N command access
             self.input_lines.push(line_buf.clone());
             self.input_index = self.input_lines.len();
             self.line_number = self.input_index;
-            // Can't know if last line in unbuffered mode
             self.last_line = false;
 
             self.pattern_space = line_buf;
@@ -173,6 +174,7 @@ impl Engine {
             self.line_number = self.input_index;
             self.last_line = self.input_index == total;
             self.pattern_space = line;
+            self.raw_pattern = self.raw_lines.get(self.input_index - 1).cloned();
             self.sub_happened = false;
             self.append_queue.clear();
             self.suppress_default_print = false;
@@ -221,8 +223,17 @@ impl Engine {
     }
 
     fn write_pattern_space(&mut self) {
-        self.output
-            .extend_from_slice(self.pattern_space.as_bytes());
+        // Use raw bytes if available AND pattern space hasn't been modified
+        if let Some(ref raw) = self.raw_pattern {
+            let lossy = String::from_utf8_lossy(raw);
+            if *lossy == self.pattern_space {
+                self.output.extend_from_slice(raw);
+            } else {
+                self.output.extend_from_slice(self.pattern_space.as_bytes());
+            }
+        } else {
+            self.output.extend_from_slice(self.pattern_space.as_bytes());
+        }
         let sep = if self.null_data { b'\0' } else { b'\n' };
         // Don't add separator after last line if input didn't end with one
         if self.last_line && !self.input_had_trailing_newline {
@@ -512,7 +523,18 @@ impl Engine {
             }
 
             Command::PrintEscaped(width) => {
-                let escaped = escape_string(&self.pattern_space);
+                // Use raw bytes for l command to preserve non-UTF-8 byte values
+                let data: Vec<u8> = if let Some(ref raw) = self.raw_pattern {
+                    let lossy = String::from_utf8_lossy(raw);
+                    if *lossy == self.pattern_space {
+                        raw.clone()
+                    } else {
+                        self.pattern_space.as_bytes().to_vec()
+                    }
+                } else {
+                    self.pattern_space.as_bytes().to_vec()
+                };
+                let escaped = escape_string_bytes(&data);
                 let line_width = width.unwrap_or(self.line_wrap_width);
                 let full = format!("{escaped}$");
                 if line_width == 0 {

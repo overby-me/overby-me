@@ -402,8 +402,8 @@ fn main() {
             } else {
                 file.clone()
             };
-            let content = match std::fs::read_to_string(&actual_read) {
-                Ok(c) => c,
+            let content = match std::fs::read(&actual_read) {
+                Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
                 Err(e) => {
                     if opts.follow_symlinks
                         && (!std::path::Path::new(file).exists()
@@ -507,18 +507,17 @@ fn main() {
         let mut engine = Engine::new(commands, quiet, posix, opts.sandbox, opts.line_length, opts.null_data);
         for file in &opts.files {
             let content = if file == "-" {
-                let mut buf = String::new();
-                io::stdin().read_to_string(&mut buf).unwrap_or_default();
-                buf
+                let mut buf = Vec::new();
+                io::stdin().read_to_end(&mut buf).unwrap_or_default();
+                String::from_utf8_lossy(&buf).into_owned()
             } else {
-                // With --follow-symlinks, resolve before reading
                 let actual_file = if opts.follow_symlinks {
                     resolve_symlinks(file)
                 } else {
                     file.clone()
                 };
-                match std::fs::read_to_string(&actual_file) {
-                    Ok(c) => c,
+                match std::fs::read(&actual_file) {
+                    Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
                     Err(e) => {
                         if opts.follow_symlinks {
                             let msg = fmt_io_err(&e);
