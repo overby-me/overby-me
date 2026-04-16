@@ -2,18 +2,17 @@
 
 ## Current Status
 
-**96/119 tests passing** (81%) — from the GNU grep 3.12 test suite.
+**99/119 tests passing** (83%) — from the GNU grep 3.12 test suite.
 
-### Remaining failure categories (~23 tests)
+### Remaining failure categories (~20 tests)
 
 - **BRE/ERE regex edge cases (~3)**: Spencer test failures (literal `*` at start, bad interval expressions)
-- **PCRE edge cases (~5)**: `-P` with `-w`, `-P` with `-z`, PCRE abort on pathological patterns, `--count` with PCRE
-- **Missing options (~1)**: `-D skip` (devices)
-- **I/O edge cases (~4)**: Input-equals-output detection, max-count overread, write error messages, warn-char-classes
+- **PCRE edge cases (~4)**: `-P` with `-w`, `-P` with `-z`, PCRE abort on pathological patterns, PCRE context
+- **I/O edge cases (~3)**: Input-equals-output detection, max-count overread, write error messages
 - **Locale/encoding (~3)**: `c-locale` edge case, `reversed-range-endpoints`, `high-bit-range`
 - **Color/env (~1)**: `GREP_COLORS` / `GREP_COLOR` environment variable support
-- **Pattern edge cases (~3)**: `empty` test (empty pattern with -w), `null-byte` handling, `posix-bracket` collating
-- **Misc (~3)**: Stack overflow handling, `include-exclude` directory exclude paths, `backref` (invalid bracket cross-pattern)
+- **Pattern edge cases (~2)**: `null-byte` handling, `posix-bracket` collating elements
+- **Misc (~4)**: Stack overflow handling, `include-exclude` directory exclude paths, `backref` (invalid bracket cross-pattern), `warn-char-classes`
 
 ### Recent fixes
 
@@ -31,6 +30,11 @@
 - Added `--exclude-dir` option for recursive search
 - Split `-e` patterns on newlines per GNU grep semantics
 - Added `-T` (--initial-tab) option
+- Added `-a` (--text) and `--binary-files=text` options
+- Implemented `-D skip` (--devices=skip) to skip device files
+- Fixed empty pattern with `-w` and `-x` (match only empty lines)
+- Split `-e` patterns on newlines
+- Fixed `-x` line matching for regex mode
 
 Tests compare rust-grep output against the GNU grep test suite's expected behavior in a Nix sandbox.
 
@@ -286,14 +290,14 @@ Fall back to `fancy-regex` when BRE/ERE patterns contain backreferences:
 
 ## Test Inventory
 
-### Passing (96 tests)
+### Passing (99 tests)
 
 100k-entries, backref-alt, backref-multibyte-slow, backref-word, backslash-dot,
 backslash-s-and-repetition-operators, backslash-s-vs-invalid-multibyte, big-hole, big-match,
 binary-file-matches, bogus-wctob, case-fold-backref, case-fold-backslash-w,
 case-fold-char-class, case-fold-char-range, case-fold-char-type, case-fold-titlecase,
 char-class-multibyte, char-class-multibyte2, context-0, count-newline, dfa-coverage,
-dfa-heap-overrun, dfa-infloop, dfa-invalid-utf8, dfaexec-multibyte, empty-line,
+dfa-heap-overrun, dfa-infloop, dfa-invalid-utf8, dfaexec-multibyte, empty, empty-line,
 empty-line-mb, encoding-error, epipe, equiv-classes, euc-mb, false-match-mb-non-utf8,
 fedora, fgrep-infloop, fgrep-longest, file, fillbuf-long-line, fmbtest, foad1,
 grep-dev-null, grep-dev-null-out, grep-dir, hangul-syllable, hash-collision-perf,
@@ -303,18 +307,18 @@ mb-dot-newline, mb-non-UTF8-overrun, mb-non-UTF8-word-boundary, multibyte-white-
 multiple-begin-or-end-line, no-perl, options, pcre-ascii-digits, pcre-count,
 pcre-infloop, pcre-invalid-utf8-infloop, pcre-invalid-utf8-input, pcre-jitstack, pcre-o,
 pcre-utf8, pcre-utf8-bug224, pcre-utf8-w, pcre-wx-backref, pcre-z, prefix-of-multibyte,
-proc, r-dot, repetition-overflow, sjis-mb, status, surrogate-pair, surrogate-search,
-triple-backref, turkish-eyes, turkish-I, turkish-I-without-dot, two-chars, two-files,
-unibyte-binary, unibyte-bracket-expr, unibyte-negated-circumflex, utf8-bracket,
-version-pcre, word-delim-multibyte, word-multi-file, word-multibyte, y2038-vs-32-bit,
-z-anchor-newline
+proc, r-dot, repetition-overflow, sjis-mb, skip-device, status, surrogate-pair,
+surrogate-search, triple-backref, turkish-eyes, turkish-I, turkish-I-without-dot,
+two-chars, two-files, unibyte-binary, unibyte-bracket-expr, unibyte-negated-circumflex,
+utf8-bracket, version-pcre, word-delim-multibyte, word-multi-file, word-multibyte,
+y2038-vs-32-bit, z-anchor-newline
 
-### Failing (23 tests)
+### Failing (20 tests)
 
-backref, bre, c-locale, color-colors, empty, ere, high-bit-range,
+backref, bre, c-locale, color-colors, ere, high-bit-range,
 in-eq-out-infloop, include-exclude, max-count-overread, null-byte, pcre,
 pcre-abort, pcre-context, pcre-w, posix-bracket, reversed-range-endpoints,
-skip-device, spencer1, stack-overflow, warn-char-classes, write-error-msg
+spencer1, stack-overflow, warn-char-classes, write-error-msg
 
 ### Not yet tested (5 tests)
 
