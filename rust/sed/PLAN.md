@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**52/61 tests passing** (85%) — shell tests from the GNU sed 4.9 test suite.
+**53/61 tests passing** (87%) — shell tests from the GNU sed 4.9 test suite.
 
 Run a test: `nix build .#checks.x86_64-linux.rust-sed-test-{name}`
 View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
@@ -49,6 +49,9 @@ View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
 - POSIX one-address command validation (`a`, `i`, `l`, `=`, `q`, `Q`, `r`, `R`)
 - Unbuffered I/O (`-u`): byte-by-byte stdin reads via raw fd
 - POSIX char class: `\` is literal inside `[]` in POSIX mode
+- POSIX class validation in brackets (`[[:]]` unterminated class detection)
+- q/Q unconditional one-address rejection
+- Incomplete `a`/`c`/`i` detection across `-e` boundaries
 - Unexpected `}` detection at top level
 - `v` version check against 4.9
 - `}` with address rejection
@@ -60,7 +63,7 @@ View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
 
 ---
 
-## Remaining Failures (9 tests)
+## Remaining Failures (8 tests)
 
 ### Category 1: fancy-regex performance (2 tests)
 
@@ -121,7 +124,7 @@ Fix execute-tests $fail issue, bsd-wrapper path layout.
 
 ## Test Inventory
 
-### Passing (52 tests)
+### Passing (53 tests)
 
 bsd, bug32082, bug32271-1, bug32271-2, cmd-0r, cmd-l, cmd-R,
 colon-with-no-label, command-endings, comment-n, distrib, eval,
@@ -133,18 +136,17 @@ normalize-text, nulldata, panic-tests, posix-mode-addr, posix-mode-bad-ref,
 posix-mode-ERE, posix-mode-N, posix-mode-s, range-overlap,
 recursive-escape-c, regex-errors, regex-max-int, sandbox, stdin,
 stdin-prog, subst-mb-incomplete, subst-options, subst-replacement,
-posix-char-class, temp-file-cleanup, title-case, unbuffered, uniq,
-word-delim, xemacs
+compile-tests, posix-char-class, temp-file-cleanup, title-case,
+unbuffered, uniq, word-delim, xemacs
 
-### Failing (9 tests)
+### Failing (8 tests)
 
 | Test | Primary blocker |
 |-|-|
 | 8to7 | Byte-mode I/O |
 | binary | fancy-regex performance |
 | bsd-wrapper | Test infrastructure path |
-| compile-errors | Many validation sub-tests |
-| compile-tests | `[[:]]` POSIX class edge case |
+| compile-errors | 3 remaining sub-tests (incomplete a/c/i across -e) |
 | convert-number | Byte-mode output |
 | dc | fancy-regex performance |
 | mac-mf | Byte-mode I/O |
