@@ -494,10 +494,22 @@ impl Matcher {
             return self.find_line_match(text);
         }
         if self.word_regexp {
+            // Empty pattern with -w: match only empty lines
+            if self.has_empty_pattern() && text.is_empty() {
+                return true;
+            }
             // For word regexp, find matches at word boundaries
             return !self.find_matches(text).is_empty();
         }
         self.raw_is_match(text)
+    }
+
+    fn has_empty_pattern(&self) -> bool {
+        match &self.inner {
+            MatcherInner::Fixed(patterns, _) => patterns.iter().any(|p| p.is_empty()),
+            MatcherInner::Regex(re) => re.is_match(""),
+            MatcherInner::Fancy(re) => re.is_match("").unwrap_or(false),
+        }
     }
 
     fn raw_is_match(&self, text: &str) -> bool {
@@ -525,7 +537,11 @@ impl Matcher {
                     patterns.iter().any(|p| text == p.as_str())
                 }
             }
-            _ => self.raw_is_match(text),
+            _ => {
+                // For regex, check if there's a match that covers the entire line
+                let matches = self.raw_find_matches(text);
+                matches.iter().any(|(s, e)| *s == 0 && *e == text.len())
+            }
         }
     }
 
@@ -710,12 +726,18 @@ fn build_matcher(opts: &Options) -> Matcher {
 
     // Wrap with word/line anchors
     let mut pattern = combined;
-    if opts.word_regexp {
+    let has_empty = converted_patterns.iter().any(|p| p.is_empty());
+    if opts.word_regexp && !has_empty {
         pattern = format!(r"\b(?:{pattern})\b");
     }
-    if opts.line_regexp {
+    if opts.line_regexp && !has_empty {
         pattern = format!("^(?:{pattern})$");
     }
+
+    // Track if word/line matching should be done by the Matcher
+    // (needed when empty patterns are present, since \b doesn't match empty/empty)
+    let matcher_word = opts.word_regexp && has_empty;
+    let matcher_line = opts.line_regexp && has_empty;
 
     // Case insensitive prefix
     if opts.ignore_case {
@@ -782,9 +804,10 @@ fn build_matcher(opts: &Options) -> Matcher {
 
     Matcher {
         inner,
-        // For regex mode, word/line matching is already in the pattern
-        word_regexp: false,
-        line_regexp: false,
+        // For regex mode, word/line matching is usually in the pattern,
+        // except when empty patterns need Matcher-level handling
+        word_regexp: matcher_word,
+        line_regexp: matcher_line,
     }
 }
 
