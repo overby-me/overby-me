@@ -1177,12 +1177,40 @@ fn deferred_notify_wait_and_dispatch(
             && start_time.elapsed() > timeout
         {
             warn!(
-                "deferred_notify_wait: {} timed out after {:?}",
+                "deferred_notify_wait: {} timed out after {:?} waiting for READY=1",
                 name, timeout
             );
-            // The exit handler / watchdog will handle the timeout kill.
-            // Just stop polling — the unit stays in Starting state and
-            // the normal timeout machinery will transition it to failed.
+            // Kill the service process and clean up properly — matching the
+            // cleanup in Service::deactivate_service (PID, process_group,
+            // notification socket, stdout/stderr).
+            if let Ok(ri) = run_info.try_read()
+                && let Some(unit) = ri.unit_table.get(&id)
+            {
+                if let Specific::Service(svc) = &unit.specific {
+                    let mut state = svc.state.write_poisoned();
+                    state.srvc.kill_all_remaining_processes(&svc.conf, &name);
+                    state.srvc.pid = None;
+                    state.srvc.process_group = None;
+                    if let Some(path) = state.srvc.notifications_path.take() {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                    state.srvc.notifications = None;
+                    state.srvc.stdout = None;
+                    state.srvc.stderr = None;
+                    drop(state);
+                }
+                // Transition to Stopped/Failed
+                let mut status = unit.common.status.write_poisoned();
+                if matches!(&*status, UnitStatus::Starting) {
+                    *status = UnitStatus::Stopped(
+                        crate::units::status::StatusStopped::StoppedUnexpected,
+                        vec![UnitOperationErrorReason::GenericStartError(format!(
+                            "Timed out waiting for READY=1 ({:?})",
+                            timeout
+                        ))],
+                    );
+                }
+            }
             return;
         }
 

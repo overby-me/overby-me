@@ -5897,6 +5897,11 @@ pub fn execute_command(
                 }
             }
 
+            // Helper: check if a path exists as a symlink (including dangling
+            // symlinks).  Path::exists() follows symlinks and returns false for
+            // dangling ones, so we must use symlink_metadata() instead.
+            let link_exists = |p: &str| std::fs::symlink_metadata(p).is_ok();
+
             if remove_runtime {
                 for dir_name in &exec_config.runtime_directory {
                     if dynamic_user {
@@ -5906,7 +5911,7 @@ pub fn execute_command(
                             let _ = std::fs::remove_dir_all(&private);
                             removed.push(private);
                         }
-                        if std::path::Path::new(&link).exists() {
+                        if link_exists(&link) {
                             let _ = std::fs::remove_file(&link);
                             removed.push(link);
                         }
@@ -5929,7 +5934,7 @@ pub fn execute_command(
                             let _ = std::fs::remove_dir_all(&private);
                             removed.push(private);
                         }
-                        if std::path::Path::new(&link).exists() {
+                        if link_exists(&link) {
                             let _ = std::fs::remove_file(&link);
                             removed.push(link);
                         }
@@ -5952,7 +5957,7 @@ pub fn execute_command(
                             let _ = std::fs::remove_dir_all(&private);
                             removed.push(private);
                         }
-                        if std::path::Path::new(&link).exists() {
+                        if link_exists(&link) {
                             let _ = std::fs::remove_file(&link);
                             removed.push(link);
                         }
@@ -5975,7 +5980,7 @@ pub fn execute_command(
                             let _ = std::fs::remove_dir_all(&private);
                             removed.push(private);
                         }
-                        if std::path::Path::new(&link).exists() {
+                        if link_exists(&link) {
                             let _ = std::fs::remove_file(&link);
                             removed.push(link);
                         }
@@ -7999,8 +8004,8 @@ pub fn execute_command(
                             })
                             .unwrap_or(90)
                     };
-                    let deadline = std::time::Instant::now()
-                        + std::time::Duration::from_secs(timeout_secs);
+                    let deadline =
+                        std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
                     loop {
                         let still_starting = {
                             let ri = run_info.read_poisoned();
@@ -8036,6 +8041,14 @@ pub fn execute_command(
                             UnitStatus::Restarting => {
                                 return Err(format!(
                                     "Unit {} failed to start (restarting)",
+                                    id.name
+                                ));
+                            }
+                            UnitStatus::Starting => {
+                                // Service still in Starting after polling timeout —
+                                // READY=1 was never received (e.g. NotifyAccess=none).
+                                return Err(format!(
+                                    "Unit {} failed to start (timeout waiting for READY=1)",
                                     id.name
                                 ));
                             }

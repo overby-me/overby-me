@@ -1657,57 +1657,57 @@ pub fn run_exec_helper() {
     // symlink <base>/<name> → private/<name> (matching real systemd).
     // Returns the path the service should use (the symlink for dynamic,
     // the direct path otherwise).
-    let create_managed_dir =
-        |base: &Path, dir_name: &str, mode: u32, dynamic: bool| -> String {
-            let uid = nix::unistd::Uid::from_raw(config.user);
-            let gid = nix::unistd::Gid::from_raw(config.group);
-            if dynamic {
-                let private_dir = base.join("private");
-                let _ = std::fs::create_dir_all(&private_dir);
-                let full_path = private_dir.join(dir_name);
-                if let Err(e) = std::fs::create_dir_all(&full_path) {
-                    log::error!(
-                        "Failed to create private directory {:?}: {}",
-                        full_path,
-                        e
-                    );
-                    std::process::exit(1);
-                }
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let perms = std::fs::Permissions::from_mode(mode);
-                    let _ = std::fs::set_permissions(&full_path, perms);
-                }
-                if let Err(e) = nix::unistd::chown(&full_path, Some(uid), Some(gid)) {
-                    log::error!("Failed to chown directory {:?}: {}", full_path, e);
-                    std::process::exit(1);
-                }
-                // Create symlink: <base>/<name> → private/<name>
-                let link_path = base.join(dir_name);
-                let _ = std::fs::remove_file(&link_path); // remove stale symlink
-                let target = Path::new("private").join(dir_name);
-                if let Err(e) = std::os::unix::fs::symlink(&target, &link_path) {
-                    log::warn!("Failed to create symlink {:?} → {:?}: {}", link_path, target, e);
-                }
-                full_path.to_string_lossy().into_owned()
-            } else {
-                let full_path = base.join(dir_name);
-                if let Err(e) = std::fs::create_dir_all(&full_path) {
-                    log::error!("Failed to create directory {:?}: {}", full_path, e);
-                    std::process::exit(1);
-                }
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let perms = std::fs::Permissions::from_mode(mode);
-                    let _ = std::fs::set_permissions(&full_path, perms);
-                }
-                if let Err(e) = nix::unistd::chown(&full_path, Some(uid), Some(gid)) {
-                    log::error!("Failed to chown directory {:?}: {}", full_path, e);
-                    std::process::exit(1);
-                }
-                full_path.to_string_lossy().into_owned()
+    let create_managed_dir = |base: &Path, dir_name: &str, mode: u32, dynamic: bool| -> String {
+        let uid = nix::unistd::Uid::from_raw(config.user);
+        let gid = nix::unistd::Gid::from_raw(config.group);
+        if dynamic {
+            let private_dir = base.join("private");
+            let _ = std::fs::create_dir_all(&private_dir);
+            let full_path = private_dir.join(dir_name);
+            if let Err(e) = std::fs::create_dir_all(&full_path) {
+                log::error!("Failed to create private directory {:?}: {}", full_path, e);
+                std::process::exit(1);
             }
-        };
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let perms = std::fs::Permissions::from_mode(mode);
+                let _ = std::fs::set_permissions(&full_path, perms);
+            }
+            if let Err(e) = nix::unistd::chown(&full_path, Some(uid), Some(gid)) {
+                log::error!("Failed to chown directory {:?}: {}", full_path, e);
+                std::process::exit(1);
+            }
+            // Create symlink: <base>/<name> → private/<name>
+            let link_path = base.join(dir_name);
+            let _ = std::fs::remove_file(&link_path); // remove stale symlink
+            let target = Path::new("private").join(dir_name);
+            if let Err(e) = std::os::unix::fs::symlink(&target, &link_path) {
+                log::warn!(
+                    "Failed to create symlink {:?} → {:?}: {}",
+                    link_path,
+                    target,
+                    e
+                );
+            }
+            full_path.to_string_lossy().into_owned()
+        } else {
+            let full_path = base.join(dir_name);
+            if let Err(e) = std::fs::create_dir_all(&full_path) {
+                log::error!("Failed to create directory {:?}: {}", full_path, e);
+                std::process::exit(1);
+            }
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let perms = std::fs::Permissions::from_mode(mode);
+                let _ = std::fs::set_permissions(&full_path, perms);
+            }
+            if let Err(e) = nix::unistd::chown(&full_path, Some(uid), Some(gid)) {
+                log::error!("Failed to chown directory {:?}: {}", full_path, e);
+                std::process::exit(1);
+            }
+            full_path.to_string_lossy().into_owned()
+        }
+    };
 
     let dynamic = config.dynamic_user;
 

@@ -426,6 +426,9 @@ impl ServiceState {
                 // Process started but READY=1 wait deferred.  Status stays as
                 // Starting (set by state_transition_starting).  A background
                 // thread will poll signaled_ready and transition to Started.
+                // Signal the notification handler so it re-collects FDs and
+                // picks up the new service's notification socket.
+                run_info.notify_eventfds();
                 Ok(UnitStatus::Starting)
             }
             Err(e) => {
@@ -686,6 +689,7 @@ impl ServiceState {
             }
             Ok(crate::services::StartResult::DeferredNotifyWait) => {
                 // Reactivation with deferred notify wait — keep Starting status.
+                run_info.notify_eventfds();
                 Ok(())
             }
             Err(e) => {

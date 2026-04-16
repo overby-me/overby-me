@@ -566,7 +566,10 @@ fn start_service_with_filedescriptors(
                 Err(e) => {
                     // For Type=simple/idle, defer the error to the child process
                     // so the parent returns success (matching real systemd).
-                    if matches!(conf.srcv_type, crate::units::ServiceType::Simple | crate::units::ServiceType::Idle) {
+                    if matches!(
+                        conf.srcv_type,
+                        crate::units::ServiceType::Simple | crate::units::ServiceType::Idle
+                    ) {
                         deferred_exec_error = Some(216); // EXIT_GROUP
                         0
                     } else {
@@ -583,7 +586,10 @@ fn start_service_with_filedescriptors(
             match resolve_uid(&conf.exec_config.user) {
                 Ok(uid) => uid,
                 Err(e) => {
-                    if matches!(conf.srcv_type, crate::units::ServiceType::Simple | crate::units::ServiceType::Idle) {
+                    if matches!(
+                        conf.srcv_type,
+                        crate::units::ServiceType::Simple | crate::units::ServiceType::Idle
+                    ) {
                         deferred_exec_error = Some(217); // EXIT_USER
                         0
                     } else {
