@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 
@@ -61,6 +61,8 @@ pub struct Interpreter {
     write_handles: HashMap<String, BufWriter<File>>,
     // Counter for generating anonymous filehandle names
     fh_counter: usize,
+    // Tracks files already loaded via require (like %INC)
+    required_files: HashSet<String>,
 }
 
 impl Interpreter {
@@ -73,6 +75,12 @@ impl Interpreter {
         globals.vars.insert("\\".to_string(), Value::Undef);
         globals.vars.insert(",".to_string(), Value::Undef);
         globals.vars.insert("_".to_string(), Value::Undef);
+        // $" — list separator (default space)
+        globals
+            .vars
+            .insert("\"".to_string(), Value::Str(" ".to_string()));
+        // $| — autoflush (default 0)
+        globals.vars.insert("|".to_string(), Value::Num(0.0));
         globals
             .vars
             .insert("^O".to_string(), Value::Str("linux".to_string()));
@@ -109,6 +117,7 @@ impl Interpreter {
             read_handles: HashMap::new(),
             write_handles: HashMap::new(),
             fh_counter: 0,
+            required_files: HashSet::new(),
         }
     }
 
@@ -472,7 +481,18 @@ impl Interpreter {
                 Flow::None
             }
 
-            Stmt::Require(_) => Flow::None,
+            Stmt::Require(expr) => {
+                let filename = self.eval_expr(expr).to_str();
+                let result = self.do_require(&filename);
+                if result.is_undef() {
+                    // require failed — die
+                    let err = self.get_var("@").to_str();
+                    if !err.is_empty() {
+                        return Flow::Die(err);
+                    }
+                }
+                Flow::None
+            }
 
             Stmt::Begin(body) => {
                 self.exec_stmts(body);
@@ -737,6 +757,23 @@ impl Interpreter {
             }
 
             Expr::Assign(target, value) => {
+                // Check if target is an array — need list context for RHS
+                if matches!(target.as_ref(), Expr::ArrayVar(_)) {
+                    let items = self.eval_list(value);
+                    if let Expr::ArrayVar(name) = target.as_ref() {
+                        let len = items.len();
+                        self.set_array(name, items);
+                        return Value::Num(len as f64);
+                    }
+                }
+                // Check if target is a hash — need list context for RHS
+                if matches!(target.as_ref(), Expr::HashVar(_)) {
+                    let items = self.eval_list(value);
+                    if let Expr::HashVar(name) = target.as_ref() {
+                        self.set_hash_from_list(name, items);
+                        return Value::Num(0.0); // hash in scalar context
+                    }
+                }
                 let val = self.eval_expr(value);
                 self.assign_to(target, val.clone());
                 val
@@ -1123,6 +1160,14 @@ impl Interpreter {
                     eprintln!();
                 }
                 Value::Num(1.0)
+            }
+            "scalar" => {
+                // scalar() forces scalar context
+                if let Some(arg) = args.first() {
+                    self.eval_expr(arg)
+                } else {
+                    Value::Undef
+                }
             }
             "abs" => {
                 let val = if args.is_empty() {
@@ -1532,6 +1577,44 @@ impl Interpreter {
             "sort" => {
                 // Simplified sort
                 Value::Undef
+            }
+            "require" => {
+                if let Some(arg) = args.first() {
+                    let filename = self.eval_expr(arg).to_str();
+                    self.do_require(&filename)
+                } else {
+                    Value::Undef
+                }
+            }
+            "chdir" => {
+                if let Some(arg) = args.first() {
+                    let dir = self.eval_expr(arg).to_str();
+                    let path = std::path::Path::new(&dir);
+                    if std::env::set_current_dir(path).is_ok() {
+                        Value::Num(1.0)
+                    } else {
+                        self.set_global_var("!", Value::Str(format!("No such file or directory")));
+                        Value::Num(0.0)
+                    }
+                } else {
+                    Value::Num(0.0)
+                }
+            }
+            "set_up_inc" | "File::Spec::Functions::catdir" => {
+                // No-op / stub for test harness helpers
+                Value::Undef
+            }
+            "mkdir" => {
+                if let Some(arg) = args.first() {
+                    let dir = self.eval_expr(arg).to_str();
+                    Value::Num(if std::fs::create_dir_all(&dir).is_ok() {
+                        1.0
+                    } else {
+                        0.0
+                    })
+                } else {
+                    Value::Num(0.0)
+                }
             }
             _ => {
                 // Check user-defined subs
@@ -1980,6 +2063,109 @@ impl Interpreter {
         }
     }
 
+    // --- Require ---
+
+    fn do_require(&mut self, filename: &str) -> Value {
+        // Check if already loaded
+        if self.required_files.contains(filename) {
+            return Value::Num(1.0);
+        }
+
+        // Resolve the file path
+        let path = if filename.starts_with('/')
+            || filename.starts_with("./")
+            || filename.starts_with("../")
+        {
+            std::path::PathBuf::from(filename)
+        } else {
+            // Search @INC
+            let inc = self.get_array("INC");
+            let mut found = None;
+            for dir in &inc {
+                let candidate = std::path::PathBuf::from(dir.to_str()).join(filename);
+                if candidate.is_file() {
+                    found = Some(candidate);
+                    break;
+                }
+            }
+            found.unwrap_or_else(|| std::path::PathBuf::from(filename))
+        };
+
+        // Read the file
+        let code = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => {
+                let msg = format!("Can't locate {} in @INC (@INC contains: .)\n", filename);
+                self.set_global_var("@", Value::Str(msg));
+                return Value::Undef;
+            }
+        };
+
+        // Mark as loaded
+        let canon = path.to_string_lossy().to_string();
+        self.required_files.insert(filename.to_string());
+        // Set %INC entry
+        self.set_hash_element("INC", filename, Value::Str(canon));
+
+        // Execute the file using the run method (which handles BEGIN, subs, etc.)
+        self.eval_file_string(&code)
+    }
+
+    /// Execute code from a required file — like eval_string but uses `run`
+    /// semantics (collects subs/BEGIN/END, then executes main statements).
+    fn eval_file_string(&mut self, code: &str) -> Value {
+        use crate::lexer::Lexer;
+        use crate::parser::Parser;
+
+        let mut lexer = Lexer::new(code);
+        let tokens = lexer.tokenize();
+        let mut parser = Parser::new(tokens);
+        let stmts = parser.parse_program();
+
+        self.set_global_var("@", Value::Str(String::new()));
+
+        // Process like run(): collect subs and BEGIN blocks first
+        let mut main_stmts = Vec::new();
+        for stmt in &stmts {
+            match stmt {
+                Stmt::Sub { name, params, body } if !name.is_empty() => {
+                    self.subs
+                        .insert(name.clone(), (params.clone(), body.clone()));
+                }
+                Stmt::Begin(body) => {
+                    let _flow = self.exec_stmts(body);
+                }
+                Stmt::End(body) => {
+                    self.end_blocks.push(body.clone());
+                }
+                _ => main_stmts.push(stmt.clone()),
+            }
+        }
+
+        // Execute main statements
+        for stmt in &main_stmts {
+            match self.exec_stmt(stmt) {
+                Flow::Return(v) => {
+                    return v;
+                }
+                Flow::Die(msg) => {
+                    self.set_global_var("@", Value::Str(msg));
+                    return Value::Undef;
+                }
+                Flow::None => {}
+                _ => {}
+            }
+        }
+
+        // Return last expression value (Perl require expects file to return true)
+        let result = self.last_expr_val.clone();
+        if result.to_bool() {
+            result
+        } else {
+            Value::Num(1.0)
+        }
+    }
+
     // --- Eval string ---
 
     fn eval_string(&mut self, code: &str) -> Value {
@@ -2010,7 +2196,6 @@ impl Interpreter {
             }
         }
 
-        self.pop_scope();
         let result = self.last_expr_val.clone();
         self.pop_scope();
         result
