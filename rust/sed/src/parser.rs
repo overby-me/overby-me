@@ -215,6 +215,12 @@ impl<'a> Parser<'a> {
                                     self.err_at(self.pos + 1, "invalid usage of line address 0"),
                                 );
                             }
+                            // POSIX rejects address 0
+                            if self.posix && matches!(addr, Address::Line(0)) {
+                                return Err(
+                                    self.err_at(self.pos + 1, "invalid usage of line address 0"),
+                                );
+                            }
                             Ok(AddressRange::Range(addr, addr2))
                         }
                         None => Err(self.err("expected address after ','")),
@@ -229,6 +235,28 @@ impl<'a> Parser<'a> {
     fn try_parse_address(&mut self) -> Result<Option<Address>, String> {
         self.skip_whitespace();
         match self.peek() {
+            Some(b'+') => {
+                if self.posix {
+                    return Err(self.err_at(
+                        self.pos - self.cmd_start + 1,
+                        "unexpected `,'",
+                    ));
+                }
+                self.advance();
+                let n = self.parse_number()?;
+                Ok(Some(Address::Relative(n)))
+            }
+            Some(b'~') => {
+                if self.posix {
+                    return Err(self.err_at(
+                        self.pos - self.cmd_start + 1,
+                        "unexpected `,'",
+                    ));
+                }
+                self.advance();
+                let n = self.parse_number()?;
+                Ok(Some(Address::Multiple(n)))
+            }
             Some(b'$') => {
                 self.advance();
                 Ok(Some(Address::Last))

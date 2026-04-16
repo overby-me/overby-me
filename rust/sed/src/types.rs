@@ -109,10 +109,12 @@ impl<'t> SedCaptures<'t> {
 #[derive(Debug, Clone)]
 pub enum Address {
     Line(usize),
-    Last,        // $
+    Last,                // $
     Regex(SedRegex),
-    LastRegex,   // // — reuse last regex
-    Step(usize, usize), // first~step
+    LastRegex,           // // — reuse last regex
+    Step(usize, usize),  // first~step
+    Relative(usize),     // +N (only as second address in range)
+    Multiple(usize),     // ~N (only as second address in range)
 }
 
 #[derive(Debug, Clone)]

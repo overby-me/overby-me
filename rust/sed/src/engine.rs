@@ -28,6 +28,7 @@ pub struct Engine {
     #[allow(dead_code)]
     sandbox: bool,
     range_active: Vec<bool>,
+    range_start: Vec<usize>, // line number when range became active
     read_line_positions: HashMap<String, usize>, // for R command: track line offset per file
 }
 
@@ -57,6 +58,7 @@ impl Engine {
             line_wrap_width: line_length,
             sandbox,
             range_active: vec![false; num_cmds],
+            range_start: vec![0; num_cmds],
             read_line_positions: HashMap::new(),
         }
     }
@@ -188,6 +190,7 @@ impl Engine {
             AddressRange::Range(a, b) => {
                 if range_idx >= self.range_active.len() {
                     self.range_active.resize(range_idx + 1, false);
+                    self.range_start.resize(range_idx + 1, 0);
                 }
                 // Handle addr 0 as range start: range is active from the very start
                 let is_addr_0_start = matches!(a, Address::Line(0));
@@ -201,12 +204,37 @@ impl Engine {
                     return true;
                 }
                 if self.range_active[range_idx] {
-                    if self.addr_matches_single(b) {
+                    // Check end condition based on address type
+                    let end_matches = match b {
+                        Address::Relative(n) => {
+                            self.line_number >= self.range_start[range_idx] + n
+                        }
+                        Address::Multiple(n) if *n > 0 => {
+                            self.line_number >= self.range_start[range_idx]
+                                && self.line_number.is_multiple_of(*n)
+                        }
+                        _ => self.addr_matches_single(b),
+                    };
+                    if end_matches {
                         self.range_active[range_idx] = false;
                     }
                     true
                 } else if self.addr_matches_single(a) {
-                    if self.addr_matches_single(b) {
+                    self.range_start[range_idx] = self.line_number;
+                    // For line,/regex/ ranges: don't check end regex on start line
+                    // (GNU sed behavior — end check begins on next line)
+                    // Exception: 0,/regex/ does check on line 1
+                    let check_end_on_start = is_addr_0_start;
+                    let end_matches = if check_end_on_start {
+                        match b {
+                            Address::Relative(n) => self.line_number >= self.line_number + n,
+                            Address::Multiple(n) if *n > 0 => self.line_number.is_multiple_of(*n),
+                            _ => self.addr_matches_single(b),
+                        }
+                    } else {
+                        false // don't check end on start line
+                    };
+                    if end_matches {
                         // Single-line range
                     } else {
                         self.range_active[range_idx] = true;
@@ -261,6 +289,9 @@ impl Engine {
                         && (self.line_number - *first).is_multiple_of(*step)
                 }
             }
+            // Relative and Multiple are only used as range end addresses
+            // They should not appear as single addresses
+            Address::Relative(_) | Address::Multiple(_) => false,
         }
     }
 
