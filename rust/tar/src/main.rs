@@ -235,6 +235,91 @@ fn eq_opt_ci_prefix(a: &str, b: &str, ignore_case: bool) -> bool {
     }
 }
 
+struct ExcludeFilter<'a> {
+    /// Literal patterns that match the full path (anchored or trivially
+    /// so because the pattern has no wildcards).
+    exact_paths: std::collections::HashSet<String>,
+    /// Literal patterns that match any basename (unanchored only).
+    exact_basenames: std::collections::HashSet<String>,
+    /// Remaining entries (wildcards, case-insensitive, …) scanned
+    /// linearly.
+    rest: Vec<&'a ExcludeEntry>,
+}
+
+impl<'a> ExcludeFilter<'a> {
+    fn new(excludes: &'a [ExcludeEntry]) -> Self {
+        let mut exact_paths = std::collections::HashSet::new();
+        let mut exact_basenames = std::collections::HashSet::new();
+        let mut rest = Vec::new();
+        for e in excludes {
+            let is_literal = !e.pattern.contains(['*', '?', '[']);
+            if is_literal && !e.ignore_case {
+                exact_paths.insert(e.pattern.trim_end_matches('/').to_string());
+                if !e.anchored {
+                    exact_basenames.insert(e.pattern.trim_end_matches('/').to_string());
+                }
+            } else {
+                rest.push(e);
+            }
+        }
+        ExcludeFilter {
+            exact_paths,
+            exact_basenames,
+            rest,
+        }
+    }
+
+    fn matches(&self, path: &str) -> bool {
+        let trimmed = path.trim_end_matches('/');
+        if self.exact_paths.contains(trimmed) {
+            return true;
+        }
+        if !self.exact_basenames.is_empty()
+            && let Some(base) = Path::new(trimmed).file_name().and_then(|n| n.to_str())
+            && self.exact_basenames.contains(base)
+        {
+            return true;
+        }
+        for exc in &self.rest {
+            if exclude_entry_matches(exc, path) {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+fn exclude_entry_matches(exc: &ExcludeEntry, path: &str) -> bool {
+    if exc.anchored {
+        if exc.wildcards {
+            matches_exclude(path, &exc.pattern, exc.match_slash, exc.ignore_case)
+                || matches_exclude(
+                    path.trim_end_matches('/'),
+                    &exc.pattern,
+                    exc.match_slash,
+                    exc.ignore_case,
+                )
+        } else {
+            eq_opt_ci(path, &exc.pattern, exc.ignore_case)
+                || eq_opt_ci(path.trim_end_matches('/'), &exc.pattern, exc.ignore_case)
+        }
+    } else if exc.wildcards {
+        matches_exclude(path, &exc.pattern, exc.match_slash, exc.ignore_case)
+            || Path::new(path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|name| {
+                    matches_exclude(name, &exc.pattern, exc.match_slash, exc.ignore_case)
+                })
+    } else {
+        eq_opt_ci(path, &exc.pattern, exc.ignore_case)
+            || Path::new(path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| eq_opt_ci(n, &exc.pattern, exc.ignore_case))
+    }
+}
+
 fn is_excluded(path: &str, excludes: &[ExcludeEntry]) -> bool {
     for exc in excludes {
         // Anchored matches require the pattern to cover the whole path;
@@ -1638,11 +1723,12 @@ fn add_paths_to_builder_filter<W: Write>(
             entries.sort();
         }
 
+        let exclude_filter = ExcludeFilter::new(&args.excludes);
         let mut reported_tag_dirs: std::collections::HashSet<PathBuf> = Default::default();
         for path in &entries {
             let path_str = path.to_string_lossy();
 
-            if is_excluded(&path_str, &args.excludes) {
+            if exclude_filter.matches(&path_str) {
                 continue;
             }
 
