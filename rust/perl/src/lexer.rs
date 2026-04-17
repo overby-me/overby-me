@@ -589,8 +589,11 @@ impl Lexer {
                         let pending = std::mem::take(&mut self.pending_heredocs);
                         for ph in pending {
                             let body = self.read_heredoc_body(&ph);
-                            if let Some(Token::StringLit(s)) = tokens.get_mut(ph.placeholder_idx) {
-                                *s = body;
+                            match tokens.get_mut(ph.placeholder_idx) {
+                                Some(Token::StringLit(s)) | Some(Token::InterpString(s)) => {
+                                    *s = body;
+                                }
+                                _ => {}
                             }
                         }
                     }
@@ -1217,8 +1220,16 @@ impl Lexer {
                                 || next == '_';
                             if is_heredoc {
                                 let idx = tokens.len();
-                                self.read_heredoc_header(idx);
-                                tokens.push(Token::StringLit(String::new()));
+                                let interp = self.read_heredoc_header(idx);
+                                // Provisional placeholder — replaced at
+                                // newline-drain. Type depends on whether
+                                // the tag was quoted: `<<'EOF'` → literal,
+                                // `<<"EOF"` / `<<EOF` → interpolated.
+                                tokens.push(if interp {
+                                    Token::InterpString(String::new())
+                                } else {
+                                    Token::StringLit(String::new())
+                                });
                             } else {
                                 tokens.push(Token::ShiftLeft);
                             }
@@ -1875,12 +1886,10 @@ impl Lexer {
     }
 
     /// Parse the `<<TAG` header: read the tag + flags, register a pending
-    /// heredoc (to be filled in after the current line ends), and return an
-    /// empty placeholder string that the caller emits as a StringLit. The
-    /// real body is spliced in when the next newline is encountered.
-    /// `placeholder_idx` is the index into the tokens vector that the
-    /// StringLit token will occupy.
-    fn read_heredoc_header(&mut self, placeholder_idx: usize) {
+    /// heredoc (to be filled in after the current line ends). The real body
+    /// is spliced in when the next newline is encountered. Returns whether
+    /// the heredoc interpolates so the caller can pick the right token type.
+    fn read_heredoc_header(&mut self, placeholder_idx: usize) -> bool {
         let mut indent = false;
         let mut interpolate = true;
 
@@ -1932,6 +1941,7 @@ impl Lexer {
             interpolate,
             placeholder_idx,
         });
+        interpolate
     }
 
     fn read_heredoc_body(&mut self, ph: &PendingHeredoc) -> String {

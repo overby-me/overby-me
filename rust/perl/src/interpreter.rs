@@ -63,6 +63,9 @@ pub struct Interpreter {
     local_fh_alias_saves: Vec<Vec<(String, Option<String>)>>,
     // File handles for reading
     read_handles: HashMap<String, BufReader<File>>,
+    /// Last filehandle a readline was issued against — `eof` (no arg)
+    /// inside `while (<FH>)` loops needs to check this one.
+    last_read_fh: Option<String>,
     // File handles for writing
     write_handles: HashMap<String, BufWriter<File>>,
     // Typeglob aliases: when `local(*F) = *G` is in effect, any code that
@@ -162,6 +165,7 @@ impl Interpreter {
             local_array_saves: Vec::new(),
             local_fh_alias_saves: Vec::new(),
             read_handles: HashMap::new(),
+            last_read_fh: None,
             write_handles: HashMap::new(),
             fh_aliases: HashMap::new(),
             fh_counter: 0,
@@ -1763,11 +1767,8 @@ impl Interpreter {
                             ) {
                                 let list = self.eval_list(expr);
                                 let sep = self.get_var(" ").to_str();
-                                let s: Vec<String> =
-                                    list.iter().map(|v| v.to_str()).collect();
-                                result.push_str(
-                                    &s.join(if sep.is_empty() { " " } else { &sep }),
-                                );
+                                let s: Vec<String> = list.iter().map(|v| v.to_str()).collect();
+                                result.push_str(&s.join(if sep.is_empty() { " " } else { &sep }));
                             } else {
                                 result.push_str(&self.eval_expr(expr).to_str());
                             }
@@ -2321,9 +2322,8 @@ impl Interpreter {
                         self.set_var(name, Value::ArrayRef(r.clone()));
                         r
                     } else {
-                        self.pending_flow = Some(Flow::Die(
-                            "Type of arg 1 to push must be array".to_string(),
-                        ));
+                        self.pending_flow =
+                            Some(Flow::Die("Type of arg 1 to push must be array".to_string()));
                         return Value::Undef;
                     };
                     for arg in &args[1..] {
@@ -2338,9 +2338,7 @@ impl Interpreter {
                     let arg0 = args.first();
                     let is_literal = matches!(
                         arg0,
-                        Some(Expr::IntLit(_))
-                            | Some(Expr::FloatLit(_))
-                            | Some(Expr::StringLit(_))
+                        Some(Expr::IntLit(_)) | Some(Expr::FloatLit(_)) | Some(Expr::StringLit(_))
                     );
                     let msg = if is_literal {
                         "Type of arg 1 to push must be array (not literal)".to_string()
@@ -2644,11 +2642,17 @@ impl Interpreter {
                 }
             }
             "eof" => {
-                // Check if filehandle is at EOF
-                if let Some(arg) = args.first() {
+                // `eof FH` checks FH; `eof` without an arg checks the last
+                // filehandle a readline was issued against (the one driving
+                // a `while (<FH>)` loop).
+                let name = if let Some(arg) = args.first() {
                     let raw = self.eval_expr(arg).to_str();
-                    let name = self.resolve_fh(&raw);
-                    if let Some(reader) = self.read_handles.get_mut(&name) {
+                    Some(self.resolve_fh(&raw))
+                } else {
+                    self.last_read_fh.clone()
+                };
+                if let Some(fh) = name {
+                    if let Some(reader) = self.read_handles.get_mut(&fh) {
                         let buf = reader.fill_buf().unwrap_or(&[]);
                         Value::Num(if buf.is_empty() { 1.0 } else { 0.0 })
                     } else {
@@ -3748,6 +3752,7 @@ impl Interpreter {
             handle.to_string()
         };
         let effective_handle = self.resolve_fh(&effective_handle);
+        self.last_read_fh = Some(effective_handle.clone());
 
         // <> or <STDIN> reads from stdin
         if effective_handle.is_empty() || effective_handle == "STDIN" {
