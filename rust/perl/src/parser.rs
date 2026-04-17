@@ -1262,11 +1262,17 @@ impl Parser {
             }
             Token::Defined => {
                 self.pos += 1;
-                let has_paren = self.eat(&Token::LParen);
-                let expr = self.parse_primary();
-                if has_paren {
+                // `defined` has prototype `$`. With parens, accept any
+                // expression (so `defined($false ? $x : @arr)` works). Without
+                // parens, parse a single unary so it binds like other
+                // prototype-$ builtins.
+                let expr = if self.eat(&Token::LParen) {
+                    let e = self.parse_expr();
                     self.eat(&Token::RParen);
-                }
+                    e
+                } else {
+                    self.parse_unary()
+                };
                 Expr::Defined(Box::new(expr))
             }
             Token::My => {
@@ -1910,9 +1916,13 @@ impl Parser {
                         | Token::Float(_)
                         | Token::ScalarVar(_)
                         | Token::ArrayVar(_)
+                        | Token::HashVar(_)
                         | Token::Minus
                         | Token::LogNot
                         | Token::Backslash
+                        | Token::Defined
+                        | Token::UndefKw
+                        | Token::Not
                 ) {
                     // Function call without parentheses: func arg, ...
                     // Perl prototype-`$` builtins only take a single scalar arg.

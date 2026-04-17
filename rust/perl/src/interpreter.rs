@@ -1519,12 +1519,16 @@ impl Interpreter {
                 }
             }
             "scalar" => {
-                // scalar() forces scalar context
-                if let Some(arg) = args.first() {
-                    self.eval_expr(arg)
-                } else {
-                    Value::Undef
+                // scalar() forces scalar context. Perl's `scalar(a, b, c)` is
+                // really `scalar((a, b, c))` — the comma operator inside the
+                // parens evaluates a and b for side effects, then the result
+                // of c is passed to scalar. Mirror that: evaluate every arg,
+                // take the value of the last.
+                let mut result = Value::Undef;
+                for arg in args {
+                    result = self.eval_expr(arg);
                 }
+                result
             }
             "undef" => {
                 // undef EXPR — clear the lvalue and return undef

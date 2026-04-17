@@ -6,11 +6,12 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**11/68 Nix tests passing** (16.2%) — selected tests from the upstream Perl test suite.
+**12/68 Nix tests passing** (17.6%) — selected tests from the upstream Perl test suite.
 
 Passing: base/if, base/cond, base/while, base/pat, base/num (56 tests),
 base/translate (257 tests), base/term (7 tests), cmd/elsif (4 tests),
-cmd/mod (15 tests), opbasic/arith (183 tests), opbasic/qq (30 tests).
+cmd/mod (15 tests), opbasic/arith (183 tests), opbasic/qq (30 tests),
+op/defined (5 tests).
 
 Near-passing (local test counts):
 
@@ -298,17 +299,17 @@ This is the largest phase. Key clusters:
 
 **re (3):** pat, regexp, subst
 
-### Passing (11)
+### Passing (12)
 
 base/cond, base/if, base/num, base/pat, base/term, base/translate, base/while,
-cmd/elsif, cmd/mod, opbasic/arith, opbasic/qq
+cmd/elsif, cmd/mod, opbasic/arith, opbasic/qq, op/defined
 
-### Failing (57)
+### Failing (56)
 
 base/lex, base/rs, cmd/for, cmd/subval, cmd/switch,
 opbasic/cmp, opbasic/concat, opbasic/magic_phase,
 op/arith2, op/array, op/auto, op/bop, op/chop, op/chr, op/closure, op/cond,
-op/context, op/defined, op/delete, op/die, op/do, op/each, op/eval, op/grep,
+op/context, op/delete, op/die, op/do, op/each, op/eval, op/grep,
 op/hash, op/heredoc, op/inc, op/index, op/join, op/lc, op/length, op/list,
 op/local, op/my, op/not, op/oct, op/ord, op/pack, op/pos, op/print, op/push,
 op/quotemeta, op/range, op/ref, op/repeat, op/reverse, op/sort, op/splice,
