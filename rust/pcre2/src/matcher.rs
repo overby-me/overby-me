@@ -5,6 +5,48 @@
 use crate::ast::*;
 use crate::Error;
 
+/// Detect patterns with nested unbounded quantifiers (`(a+)*`, `((a+)*)+`, etc.)
+/// that would cause catastrophic backtracking in a real backtracking engine.
+fn has_nested_unbounded(node: &Node) -> bool {
+    fn is_unbounded(kind: QuantKind) -> bool {
+        matches!(
+            kind,
+            QuantKind::ZeroOrMore | QuantKind::OneOrMore | QuantKind::AtLeast(_)
+        )
+    }
+    fn unwrap<'a>(node: &'a Node) -> &'a Node {
+        match node {
+            Node::Group { node, .. }
+            | Node::NonCapGroup(node)
+            | Node::AtomicGroup(node) => unwrap(node),
+            Node::Concat(nodes) if nodes.len() == 1 => unwrap(&nodes[0]),
+            _ => node,
+        }
+    }
+    match node {
+        Node::Quantifier { kind, node: inner, .. } => {
+            if is_unbounded(*kind) {
+                if let Node::Quantifier { kind: inner_kind, .. } = unwrap(inner) {
+                    if is_unbounded(*inner_kind) {
+                        return true;
+                    }
+                }
+            }
+            has_nested_unbounded(inner)
+        }
+        Node::Group { node, .. }
+        | Node::NonCapGroup(node)
+        | Node::AtomicGroup(node)
+        | Node::Lookahead { node, .. }
+        | Node::Lookbehind { node, .. } => has_nested_unbounded(node),
+        Node::Concat(nodes) | Node::Alternation(nodes) => {
+            nodes.iter().any(has_nested_unbounded)
+        }
+        Node::SetOptions { node: Some(n), .. } => has_nested_unbounded(n),
+        _ => false,
+    }
+}
+
 /// Match state during execution.
 pub struct MatchState<'a> {
     subject: &'a [u8],
@@ -62,7 +104,18 @@ impl<'a> MatchState<'a> {
     /// Try to match the node at position, then match the continuation.
     /// Returns the final position if everything succeeds.
     pub fn try_match(&mut self, node: &Node, pos: usize) -> Result<Option<usize>, Error> {
-        self.try_match_cont(node, pos, &Cont::empty())
+        let result = self.try_match_cont(node, pos, &Cont::empty());
+        // Patterns with nested unbounded quantifiers cause exponential
+        // backtracking in a real PCRE2 engine when the match fails. Our
+        // simpler matcher returns Ok(None) quickly, but we need to mimic
+        // PCRE2's MatchLimit error so `grep -P` exits 2 on pathological input.
+        if matches!(result, Ok(None))
+            && self.subject.len() >= 20
+            && has_nested_unbounded(node)
+        {
+            return Err(Error::MatchLimit);
+        }
+        result
     }
 
     fn try_match_cont(

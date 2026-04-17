@@ -38,6 +38,7 @@ pub(crate) struct Options {
     pub(crate) context_requested: bool, // true if -A, -B, or -C was explicitly used
     // File/directory
     pub(crate) recursive: bool, // -r/-R
+    pub(crate) dereference_recursive: bool, // -R only (follow symlinks during recursion)
     pub(crate) include_glob: Vec<String>,
     pub(crate) exclude_glob: Vec<String>,
     pub(crate) include_is_strict: bool, // true if --include should be a strict whitelist
@@ -90,6 +91,7 @@ impl Default for Options {
             context: 0,
             context_requested: false,
             recursive: false,
+            dereference_recursive: false,
             include_glob: Vec::new(),
             exclude_glob: Vec::new(),
             include_is_strict: true,
@@ -195,6 +197,10 @@ pub(crate) fn parse_args() -> Options {
                 }
                 "null-data" => opts.null_data = true,
                 "recursive" => opts.recursive = true,
+                "dereference-recursive" => {
+                    opts.recursive = true;
+                    opts.dereference_recursive = true;
+                }
                 _ if long.starts_with("regexp=") => {
                     add_patterns(&mut opts.patterns, long.strip_prefix("regexp=").unwrap());
                     pattern_set = true;
@@ -345,7 +351,11 @@ pub(crate) fn parse_args() -> Options {
                         j = chars.len();
                         continue;
                     }
-                    'r' | 'R' => opts.recursive = true,
+                    'r' => opts.recursive = true,
+                    'R' => {
+                        opts.recursive = true;
+                        opts.dereference_recursive = true;
+                    }
                     'e' => {
                         // -e PATTERN (rest of chars or next arg)
                         let rest: String = chars[j + 1..].iter().collect();
@@ -466,15 +476,13 @@ pub(crate) fn parse_args() -> Options {
         i += 1;
     }
 
-    if opts.patterns.is_empty() {
-        if pattern_set {
-            // -f was used but file was empty (e.g. /dev/null) — match nothing
-            process::exit(1);
-        }
+    if opts.patterns.is_empty() && !pattern_set {
         eprintln!("grep: no pattern specified");
         eprintln!("Try 'grep --help' for more information.");
         process::exit(2);
     }
+    // If patterns is empty but pattern_set is true (e.g. -f /dev/null), let main
+    // handle it via the skip-read optimization — this preserves -L output.
 
     // Context defaults
     if opts.context > 0 {

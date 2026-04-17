@@ -37,19 +37,25 @@ fn main() {
     let matcher = build_matcher(&opts);
 
     let had_file_args = !opts.files.is_empty();
-    let files = collect_files(&opts, default_dir);
+    let (files, files_had_error) = collect_files(&opts, default_dir);
+
+    // Skip-read optimization: when no line can possibly match, don't open files.
+    // This matches GNU grep's behavior for -m0, empty pattern list, and -v "".
+    let skip_read = opts.max_count == Some(0)
+        || opts.patterns.is_empty()
+        || (opts.invert_match && opts.patterns.iter().any(|p| p.is_empty()));
 
     let mut any_match = false;
-    let mut had_error = false;
+    let mut had_error = files_had_error;
 
     if files.is_empty() && !had_file_args {
         // Read from stdin (only if no file args were given)
-        let (count, matched, errored) = grep_file(Path::new("-"), &matcher, &opts);
-        if opts.files_without_match {
-            if !matched {
-                any_match = true;
-            }
-        } else if matched {
+        let (count, matched, errored) = if skip_read {
+            (0, false, false)
+        } else {
+            grep_file(Path::new("-"), &matcher, &opts)
+        };
+        if matched {
             any_match = true;
         }
         if errored {
@@ -59,16 +65,23 @@ fn main() {
             let stdout = io::stdout();
             let mut out = stdout.lock();
             let _ = writeln!(out, "{count}");
+        } else if opts.files_without_match && !matched {
+            let stdout = io::stdout();
+            let mut out = stdout.lock();
+            if opts.null_separator {
+                let _ = write!(out, "{}\0", opts.label);
+            } else {
+                let _ = writeln!(out, "{}", opts.label);
+            }
         }
     } else {
         for path in &files {
-            let (count, matched, errored) = grep_file(path, &matcher, &opts);
-            if opts.files_without_match {
-                // For -L, "success" means finding a file WITHOUT matches
-                if !matched {
-                    any_match = true;
-                }
-            } else if matched {
+            let (count, matched, errored) = if skip_read {
+                (0, false, false)
+            } else {
+                grep_file(path, &matcher, &opts)
+            };
+            if matched {
                 any_match = true;
             }
             if errored {
@@ -98,13 +111,22 @@ fn main() {
                     let _ = writeln!(out, "{filename}");
                 }
             }
+
+            // -q short-circuits on first match, ignoring any errors encountered
+            if opts.quiet && any_match {
+                safe_exit(0);
+            }
         }
     }
 
-    if any_match {
+    // -q with match always wins over errors (matches GNU grep)
+    if opts.quiet && any_match {
         safe_exit(0);
-    } else if had_error {
+    }
+    if had_error {
         safe_exit(2);
+    } else if any_match {
+        safe_exit(0);
     } else {
         safe_exit(1);
     }

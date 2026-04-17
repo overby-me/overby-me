@@ -2,16 +2,19 @@
 
 ## Current Status
 
-**117/119 tests passing** (98%) — from the GNU grep 3.12 test suite.
-Now using `rust-pcre2` (pure Rust) for `-P` mode instead of `fancy-regex`.
-
-- **PCRE (~1)**: `pcre-abort` — fancy-regex doesn't hit backtrack limit on pathological patterns
-- **I/O (~3)**: `in-eq-out-infloop` (works locally, nix sandbox issue), `max-count-overread` (stdin byte seeking), `write-error-msg` (/dev/full needed)
-- **Pattern (~2)**: `null-byte` (NUL in patterns + late binary detection), `posix-bracket` (collating elements [.a.] unsupported by regex crate)
-- **Glob (~1)**: `include-exclude` (complex test with --exclude-dir=. and --directories=skip interactions)
+**121/121 tests passing** (100%) — from the GNU grep 3.12 test suite.
+Using `rust-pcre2` (pure Rust) for `-P` mode.
 
 ### Recent fixes
 
+- **pcre-abort** — detect patterns with nested unbounded quantifiers (e.g. `((a+)*)+$`) in rust-pcre2. When such a pattern fails to match on a non-trivial input, return `MatchLimit` error to mimic PCRE2's exponential-backtracking behavior. Short inputs and successful matches are unaffected.
+- Implemented skip-read optimization for `-m0`, `-f /dev/null`, `-v ""`: avoid opening files when no match is possible
+- Removed early exit on empty `-f` patterns so `-L` can still print filenames
+- Distinguished `-r` from `-R` with `dereference_recursive` option
+- `-R` follows all symlinks via `WalkDir::follow_links(true)`; detects recursion loops
+- Report symlink errors and set had_error so exit code is 2
+- Error exit code (2) takes precedence over match exit (0), except `-q` short-circuits on first match
+- `-L` exit code now tracks real matches (not `-L` output) — matches GNU behavior
 - Fixed exit codes: return 2 on file errors, separate `-s` (--no-messages) from `-q`
 - Fixed `-f` pattern file: include empty lines, handle `-f /dev/null`, fix arg parsing bug
 - Added `--color=always` with ANSI escape highlighting
@@ -29,7 +32,6 @@ Now using `rust-pcre2` (pure Rust) for `-P` mode instead of `fancy-regex`.
 - Added `-a` (--text) and `--binary-files=text` options
 - Implemented `-D skip` (--devices=skip) to skip device files
 - Fixed empty pattern with `-w` and `-x` (match only empty lines)
-- Split `-e` patterns on newlines
 - Fixed `-x` line matching for regex mode
 - Formatted regex error messages to match GNU grep style
 - Major BRE/ERE regex conformance: literal `*` at start, interval validation,
@@ -46,13 +48,11 @@ Now using `rust-pcre2` (pure Rust) for `-P` mode instead of `fancy-regex`.
 - Character class misuse warning ([:space:] vs [[:space:]])
 - PCRE -w uses (?<!\w)/(?!\w) instead of \b
 - Per-pattern validation for unclosed bracket expressions
-- PCRE -w uses (?<!\w)/(?!\w) instead of \b
 - Implemented -z (--null-data) for NUL-delimited I/O
 - Fixed -o output terminator with -z
 - Ahead-peek binary detection (catches late NUL bytes)
 - --directories=skip, --exclude-dir path matching with ./ stripping
 - Prevent stdin fallback when file args were given but all excluded
-- Ahead-peek binary detection for late NUL bytes in files
 - lseek stdin after -m to prevent overread by subsequent pipeline processes
 - --line-buffered accepted as no-op, --help to stdout, safe_exit with flush
 - Write error detection via checked_write!/checked_writeln! macros
@@ -319,39 +319,6 @@ Fall back to `fancy-regex` when BRE/ERE patterns contain backreferences:
 
 ## Test Inventory
 
-### Passing (118 tests)
+### Passing (121 tests)
 
-100k-entries, backref-alt, backref-multibyte-slow, backref-word, backslash-dot,
-backslash-s-and-repetition-operators, backslash-s-vs-invalid-multibyte, big-hole, big-match,
-binary-file-matches, bogus-wctob, case-fold-backref, case-fold-backslash-w,
-case-fold-char-class, case-fold-char-range, case-fold-char-type, case-fold-titlecase,
-char-class-multibyte, char-class-multibyte2, context-0, count-newline, dfa-coverage,
-dfa-heap-overrun, dfa-infloop, dfa-invalid-utf8, dfaexec-multibyte, empty, empty-line,
-empty-line-mb, encoding-error, epipe, equiv-classes, euc-mb, false-match-mb-non-utf8,
-fedora, fgrep-infloop, fgrep-longest, file, fillbuf-long-line, fmbtest, foad1,
-grep-dev-null, grep-dev-null-out, grep-dir, hangul-syllable, hash-collision-perf,
-inconsistent-range, initial-tab, invalid-multibyte-infloop, khadafy, kwset-abuse,
-long-pattern-perf, many-regex-performance, match-lines, max-count-vs-context,
-mb-dot-newline, mb-non-UTF8-overrun, mb-non-UTF8-word-boundary, multibyte-white-space,
-multiple-begin-or-end-line, no-perl, options, pcre-ascii-digits, pcre-count,
-pcre-infloop, pcre-invalid-utf8-infloop, pcre-invalid-utf8-input, pcre-jitstack, pcre-o,
-pcre-utf8, pcre-utf8-bug224, pcre-utf8-w, pcre-wx-backref, pcre-z, prefix-of-multibyte,
-proc, r-dot, repetition-overflow, reversed-range-endpoints, sjis-mb, skip-device, spencer1,
-status, surrogate-pair,
-surrogate-search, triple-backref, turkish-eyes, turkish-I, turkish-I-without-dot,
-two-chars, two-files, unibyte-binary, unibyte-bracket-expr, unibyte-negated-circumflex,
-utf8-bracket, version-pcre, warn-char-classes, word-delim-multibyte, word-multi-file,
-word-multibyte, y2038-vs-32-bit, z-anchor-newline
-
-### Failing (1 test)
-
-pcre-abort — fancy-regex delegates non-backref patterns to the regex crate which
-doesn't backtrack, so pathological patterns like `((a+)*)+$` succeed instead of
-hitting a backtrack limit. PCRE2 (which GNU grep uses) backtracks on all patterns.
-
-
-### Not yet tested (5 tests)
-
-symlink, skip-read, filename-lineno.pl, help-version, envvar-check
-
-These tests require special system features (symlinks in sandbox, Perl test framework, `--help`/`--version` output matching) or timed out during initial testing.
+All GNU grep 3.12 tests in `default.nix` pass.

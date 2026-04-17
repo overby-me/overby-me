@@ -73,11 +73,12 @@ fn glob_match(name: &[char], pat: &[char], mut ni: usize, mut pi: usize) -> bool
     ni == name.len()
 }
 
-pub(crate) fn collect_files(opts: &Options, default_dir: bool) -> Vec<PathBuf> {
+pub(crate) fn collect_files(opts: &Options, default_dir: bool) -> (Vec<PathBuf>, bool) {
     let mut files = Vec::new();
+    let mut had_error = false;
 
     if opts.files.is_empty() {
-        return files; // stdin mode
+        return (files, had_error); // stdin mode
     }
 
     for path in &opts.files {
@@ -87,7 +88,9 @@ pub(crate) fn collect_files(opts: &Options, default_dir: bool) -> Vec<PathBuf> {
         }
 
         if opts.recursive && path.is_dir() {
-            let walker = WalkDir::new(path).into_iter();
+            let walker = WalkDir::new(path)
+                .follow_links(opts.dereference_recursive)
+                .into_iter();
             for entry in walker.filter_entry(|e| {
                 // Filter out excluded directories
                 // Don't exclude the root directory when it's the implicit default "."
@@ -110,7 +113,24 @@ pub(crate) fn collect_files(opts: &Options, default_dir: bool) -> Vec<PathBuf> {
             }) {
                 let entry = match entry {
                     Ok(e) => e,
-                    Err(_) => continue,
+                    Err(e) => {
+                        if !opts.no_messages {
+                            let path_display = e.path()
+                                .map(|p| p.display().to_string())
+                                .unwrap_or_else(|| "(unknown)".to_string());
+                            if e.loop_ancestor().is_some() {
+                                eprintln!(
+                                    "grep: {path_display}: warning: recursive directory loop"
+                                );
+                            } else if let Some(io) = e.io_error() {
+                                eprintln!("grep: {path_display}: {io}");
+                            } else {
+                                eprintln!("grep: {path_display}: {e}");
+                            }
+                        }
+                        had_error = true;
+                        continue;
+                    }
                 };
                 if entry.file_type().is_file() {
                     let name = entry.file_name().to_string_lossy();
@@ -174,5 +194,5 @@ pub(crate) fn collect_files(opts: &Options, default_dir: bool) -> Vec<PathBuf> {
         }
     }
 
-    files
+    (files, had_error)
 }
