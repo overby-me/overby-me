@@ -1162,11 +1162,20 @@ impl Lexer {
                             self.pos += 1;
                             tokens.push(Token::ShiftLeftAssign);
                         } else {
-                            // Could be heredoc <<EOF or shift <<
-                            let last_expects =
-                                tokens.last().map(|t| t.expects_operand()).unwrap_or(true);
-                            if last_expects {
-                                // Heredoc
+                            // `<<` — heredoc or left-shift. Perl disambiguates
+                            // by what immediately follows: a quote (`'` or `"`),
+                            // a tilde (for indented heredocs), or a word char
+                            // that continues into a label unambiguously starts
+                            // a heredoc. Otherwise (whitespace, digit, paren,
+                            // operator) it's left-shift.
+                            let next = self.ch();
+                            let is_heredoc = next == '\''
+                                || next == '"'
+                                || next == '~'
+                                || next == '\\'
+                                || next.is_ascii_alphabetic()
+                                || next == '_';
+                            if is_heredoc {
                                 let s = self.read_heredoc();
                                 tokens.push(Token::StringLit(s));
                             } else {

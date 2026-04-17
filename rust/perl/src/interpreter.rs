@@ -77,6 +77,14 @@ pub struct Interpreter {
     call_stack: Vec<(String, String, usize)>,
     // Pending sub return triggered inside eval_expr (e.g., `return` in a do-block)
     pending_return: Option<Value>,
+    // Pending flow (Last/Next/Die/Exit) raised from inside a sub call that
+    // has to propagate past the sub's return-value handshake. Consumed by
+    // the caller's statement-execution loop.
+    pending_flow: Option<Flow>,
+    // Depth of enclosing `eval` blocks. When > 0, use/require compile errors
+    // should NOT print to STDERR and exit — they should die, so the eval
+    // catches them into `$@` like reference perl.
+    eval_depth: usize,
 }
 
 impl Interpreter {
@@ -137,6 +145,8 @@ impl Interpreter {
             current_line: 0,
             call_stack: Vec::new(),
             pending_return: None,
+            pending_flow: None,
+            eval_depth: 0,
         }
     }
 
@@ -297,6 +307,11 @@ impl Interpreter {
                 // Propagate `return` from within a do-block or eval expression
                 if let Some(v) = self.pending_return.take() {
                     return Flow::Return(v);
+                }
+                // Propagate flow raised from inside a called sub (e.g. `last
+                // LABEL` or `die` that needs to unwind past the sub call).
+                if let Some(flow) = self.pending_flow.take() {
+                    return flow;
                 }
                 Flow::None
             }
@@ -820,6 +835,11 @@ impl Interpreter {
                 let msg = format!(
                     "Can't locate {filename} in @INC (you may need to install the {module} module) (@INC entries checked: {inc_str}) at {file} line {line}.\nBEGIN failed--compilation aborted at {file} line {line}.\n"
                 );
+                if self.eval_depth > 0 {
+                    // Inside eval — return as a die so $@ is set and
+                    // execution continues after the eval.
+                    return Flow::Die(msg);
+                }
                 eprint!("{msg}");
                 Flow::Exit(2)
             }
@@ -872,6 +892,9 @@ impl Interpreter {
                     let msg = format!(
                         "Can't locate {filename} in @INC (you may need to install the {module} module) (@INC entries checked: {inc_str}) at {file} line {line}.\n"
                     );
+                    if self.eval_depth > 0 {
+                        return Flow::Die(msg);
+                    }
                     eprint!("{msg}");
                     return Flow::Exit(2);
                 }
@@ -926,7 +949,9 @@ impl Interpreter {
                 EvalArg::Block(body) => {
                     self.set_global_var("@", Value::Str(String::new()));
                     self.push_scope();
+                    self.eval_depth += 1;
                     let flow = self.exec_stmts(body);
+                    self.eval_depth -= 1;
                     self.pop_scope();
                     match flow {
                         Flow::Die(msg) => {
@@ -938,7 +963,9 @@ impl Interpreter {
                 }
                 EvalArg::Expr(expr) => {
                     let code = self.eval_expr(expr).to_str();
+                    self.eval_depth += 1;
                     self.eval_string(&code);
+                    self.eval_depth -= 1;
                     Flow::None
                 }
             },
@@ -2507,6 +2534,7 @@ impl Interpreter {
         let saved_list = std::mem::take(&mut self.last_list_val);
 
         let mut return_val = None;
+        let mut propagate: Option<Flow> = None;
         for stmt in body {
             match self.exec_stmt(stmt) {
                 Flow::Return(v) => {
@@ -2518,10 +2546,29 @@ impl Interpreter {
                     self.last_list_val = saved_list;
                     self.restore_locals();
                     self.pop_scope();
+                    self.call_stack.pop();
                     self.set_global_var("@", Value::Str(msg.clone()));
+                    if self.eval_depth > 0 {
+                        // Inside eval — re-raise so eval sets $@.
+                        return Value::Undef;
+                    }
+                    self.pending_return = None;
+                    // Bubble up as a die from the caller.
+                    self.pending_flow = Some(Flow::Die(msg));
                     return Value::Undef;
                 }
-                Flow::None => {}
+                Flow::Last(lbl @ Some(_)) => {
+                    propagate = Some(Flow::Last(lbl));
+                    break;
+                }
+                Flow::Next(lbl @ Some(_)) => {
+                    propagate = Some(Flow::Next(lbl));
+                    break;
+                }
+                Flow::Exit(code) => {
+                    propagate = Some(Flow::Exit(code));
+                    break;
+                }
                 _ => {}
             }
         }
@@ -2532,6 +2579,9 @@ impl Interpreter {
         self.restore_locals();
         self.pop_scope();
         self.call_stack.pop();
+        if let Some(flow) = propagate {
+            self.pending_flow = Some(flow);
+        }
         result
     }
 

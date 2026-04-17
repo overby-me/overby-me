@@ -2116,6 +2116,11 @@ impl Parser {
                         | Token::Defined
                         | Token::UndefKw
                         | Token::Not
+                        | Token::Eval
+                        | Token::ArrayDeref(_)
+                        | Token::HashDeref(_)
+                        | Token::ScalarDeref(_)
+                        | Token::QrLit(_, _)
                 ) {
                     // Function call without parentheses: func arg, ...
                     // Perl prototype-`$` builtins only take a single scalar arg.

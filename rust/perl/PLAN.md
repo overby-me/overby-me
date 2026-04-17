@@ -6,18 +6,21 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**21/68 Nix tests passing** (30.9%) — selected tests from the upstream Perl test suite.
+**28/68 Nix tests passing** (41.2%) — selected tests from the upstream Perl test suite.
 
 Passing: base/if, base/cond, base/while, base/pat, base/num (56 tests),
 base/translate (257 tests), base/term (7 tests), cmd/elsif (4 tests),
 cmd/mod (15 tests), cmd/switch (18 tests), opbasic/arith (183 tests),
-opbasic/qq (30 tests), op/arith2, op/closure, op/defined (5 tests),
-op/do, op/hash, op/inc, op/vec, io/fs, io/open.
+opbasic/qq (30 tests), op/arith2, op/bop, op/chop, op/closure,
+op/defined (5 tests), op/do, op/hash, op/inc, op/index, op/split,
+op/sub, op/vec, io/fs, io/open, re/subst, run/switches.
 
-The jump from 13 to 21 came from emitting Perl's exact `Can't locate
-MODULE.pm in @INC ...` error for unknown `use` statements — many tests
-bail out of reference perl at `use Config;` / `use constant;` etc. under
-the sandbox's minimal @INC, and we now match byte-for-byte.
+Major unlock in this cycle: compile-time `use` check that mirrors Perl —
+when a module isn't on disk under @INC we emit the exact
+`Can't locate MODULE.pm … / BEGIN failed--compilation aborted` error
+and exit before running any run-time code. That matches reference perl
+byte-for-byte on the many tests that guard their body behind
+`use Config;` / `use constant;` / etc. under the sandbox's minimal @INC.
 
 Near-passing (local test counts):
 
@@ -341,13 +344,14 @@ This is the largest phase. Key clusters:
 
 **re (3):** pat, regexp, subst
 
-### Passing (21)
+### Passing (28)
 
 base/cond, base/if, base/num, base/pat, base/term, base/translate, base/while,
 cmd/elsif, cmd/mod, cmd/switch, opbasic/arith, opbasic/qq, op/arith2,
-op/closure, op/defined, op/do, op/hash, op/inc, op/vec, io/fs, io/open
+op/bop, op/chop, op/closure, op/defined, op/do, op/hash, op/inc, op/index,
+op/split, op/sub, op/vec, io/fs, io/open, re/subst, run/switches
 
-### Failing (47)
+### Failing (40)
 
 base/lex, base/rs, cmd/for, cmd/subval, cmd/switch,
 opbasic/cmp, opbasic/concat, opbasic/magic_phase,
