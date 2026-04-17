@@ -17,6 +17,7 @@ rustls = { version = "0.23", default-features = false, features = [
 rustls-native-certs = "0.8"
 rustls-pemfile = "2"
 webpki-roots = "0.26"
+flate2 = "1"
 
 [profile.release]
 lto = true

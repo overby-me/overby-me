@@ -25,7 +25,14 @@ pub(crate) fn base64_encode(input: &[u8]) -> String {
     out
 }
 
-pub(crate) fn format_write_out(fmt: &str, resp: &Response, url: &ParsedUrl) -> String {
+pub(crate) fn format_write_out(
+    fmt: &str,
+    resp: &Response,
+    url: &ParsedUrl,
+    num_connects: usize,
+    num_redirects: usize,
+    method: &str,
+) -> String {
     let mut result = fmt.to_string();
     result = result.replace("%{http_code}", &resp.status.to_string());
     result = result.replace("%{response_code}", &resp.status.to_string());
@@ -40,6 +47,38 @@ pub(crate) fn format_write_out(fmt: &str, resp: &Response, url: &ParsedUrl) -> S
     result = result.replace("%{size_download}", &resp.body.len().to_string());
     result = result.replace("%{size_header}", &resp.header_bytes.len().to_string());
     result = result.replace("%{url_effective}", &url.raw);
+    result = result.replace("%{url}", &url.raw);
+    result = result.replace(
+        "%{redirect_url}",
+        resp.redirect_url.as_deref().unwrap_or(""),
+    );
+    result = result.replace("%{exitcode}", "0");
+    result = result.replace("%{errormsg}", "");
+    result = result.replace("%{num_connects}", &num_connects.to_string());
+    result = result.replace("%{num_redirects}", &num_redirects.to_string());
+    result = result.replace("%{num_retries}", "0");
+    result = result.replace("%{method}", method);
+    result = result.replace("%{remote_ip}", &url.host);
+    result = result.replace("%{remote_port}", &url.port.to_string());
+    result = result.replace("%{url.scheme}", &url.scheme);
+    result = result.replace("%{url.host}", &url.host);
+    result = result.replace("%{url.port}", &url.port.to_string());
+    result = result.replace("%{scheme}", &url.scheme);
+    result = result.replace("%{http_version}", "1.1");
+    let (path_only, query) = url
+        .path
+        .split_once('?')
+        .map(|(p, q)| (p.to_string(), q.to_string()))
+        .unwrap_or((url.path.clone(), String::new()));
+    result = result.replace("%{url.path}", &path_only);
+    result = result.replace("%{url.query}", &query);
+    result = result.replace("%{url.fragment}", "");
+    let (u, p) = match url.userinfo.as_deref() {
+        Some(ui) => ui.split_once(':').unwrap_or((ui, "")),
+        None => ("", ""),
+    };
+    result = result.replace("%{url.user}", u);
+    result = result.replace("%{url.password}", p);
     result = result.replace("\\n", "\n");
     result = result.replace("\\t", "\t");
     result

@@ -122,5 +122,18 @@ in
       }
 
     cat "$TMPDIR/output"
+
+    # runtests.pl exits 0 when a test number doesn't exist ("No existing test
+    # cases were specified"), and 0 when the test is skipped for a missing
+    # feature. Neither counts as a passing test — fail the derivation so the
+    # check list only contains tests that actually ran and passed.
+    if grep -qE "No existing test cases were specified|TESTFAIL|No tests were performed" "$TMPDIR/output"; then
+      echo "Test ${testNumStr} did not run or did not pass." >&2
+      exit 1
+    fi
+    if ! grep -q "reported OK: 100%" "$TMPDIR/output"; then
+      echo "Test ${testNumStr} did not complete with 100% pass." >&2
+      exit 1
+    fi
     touch $out
   ''

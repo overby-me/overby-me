@@ -53,4 +53,7 @@ disabled_rules = [
 
   # The redirect loop dereferences opts fields; this is idiomatic.
   "rust_aos_hot_path",
+
+  # dup2 is declared via inline `unsafe extern "C"` — not a hallucinated call.
+  "hallucinated_local_call",
 ]
