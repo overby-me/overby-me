@@ -763,7 +763,7 @@ fn parse_args() -> Args {
             && first
                 .trim_start_matches('-')
                 .chars()
-                .all(|c| "cxtrudvzjJfphoWkSUPTXbLIVHgGlO".contains(c))
+                .all(|c| "cxtrudvzjJfphoWkSUPTXbLIVHgGlOC".contains(c))
         {
             argv_queue.pop_front();
             let flags: Vec<char> = first.trim_start_matches('-').chars().collect();
