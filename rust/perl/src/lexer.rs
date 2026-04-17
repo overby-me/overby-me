@@ -6,7 +6,8 @@ pub enum Token {
     Integer(i64),
     Float(f64),
     StringLit(String),
-    RegexLit(String, String), // pattern, flags
+    RegexLit(String, String), // pattern, flags (from m// or bare /pat/)
+    QrLit(String, String),    // pattern, flags (from qr// — produces a regex *value*)
     QW(Vec<String>),
     InterpString(String), // double-quoted string needing variable interpolation
 
@@ -732,7 +733,7 @@ impl Lexer {
                         }
                         "qr" if !self.ch().is_alphanumeric() && self.ch() != '_' => {
                             let (pat, flags) = self.read_qr();
-                            tokens.push(Token::RegexLit(pat, flags));
+                            tokens.push(Token::QrLit(pat, flags));
                             continue;
                         }
                         "s" if !self.ch().is_alphanumeric() && self.ch() != '_' => {

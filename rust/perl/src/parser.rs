@@ -244,8 +244,7 @@ impl Parser {
                     let expr = self.parse_expr();
                     Stmt::Eval(Box::new(EvalArg::Expr(expr)))
                 };
-                self.eat(&Token::Semi);
-                return Some(stmt);
+                return Some(self.maybe_postfix(stmt));
             }
             _ => {
                 // Expression statement
@@ -1149,7 +1148,7 @@ impl Parser {
                     let f = flags.clone();
                     self.pos += 1;
                     Expr::Substitution(Box::new(left), p, r, f)
-                } else if let Token::RegexLit(pat, flags) = self.tok() {
+                } else if let Token::RegexLit(pat, flags) | Token::QrLit(pat, flags) = self.tok() {
                     let p = pat.clone();
                     let f = flags.clone();
                     self.pos += 1;
@@ -1168,13 +1167,17 @@ impl Parser {
                             Expr::StringLit(fl),
                         ],
                     )
+                } else if matches!(self.tok(), Token::ScalarVar(_) | Token::LParen) {
+                    // `$str =~ $pat` or `$str =~ (expr)` — dynamic pattern.
+                    let pat_expr = self.parse_unary();
+                    Expr::Call("_regex_match_dyn".to_string(), vec![left, pat_expr])
                 } else {
                     left
                 }
             }
             Token::NotMatch => {
                 self.pos += 1;
-                if let Token::RegexLit(pat, flags) = self.tok() {
+                if let Token::RegexLit(pat, flags) | Token::QrLit(pat, flags) = self.tok() {
                     let p = pat.clone();
                     let f = flags.clone();
                     self.pos += 1;
@@ -1491,6 +1494,11 @@ impl Parser {
                 self.pos += 1;
                 // Bare /regex/ matches against $_
                 Expr::RegexMatch(Box::new(Expr::ScalarVar("_".to_string())), pat, flags)
+            }
+            Token::QrLit(pat, flags) => {
+                self.pos += 1;
+                // qr// yields a regex *value*, not a match.
+                Expr::RegexLit(pat, flags)
             }
             Token::Substitution(pat, repl, flags) => {
                 self.pos += 1;
