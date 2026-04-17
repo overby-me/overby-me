@@ -277,8 +277,10 @@ impl Parser {
             return Ok(Some(Directive::Vpath(None)));
         }
 
-        // Try assignment
-        if let Some(assign) = try_parse_assignment(trimmed) {
+        // Try assignment. Pass the original (possibly
+        // trailing-whitespace-bearing) line so we preserve the value
+        // exactly as written — `VAR := foo ` retains the trailing space.
+        if let Some(assign) = try_parse_assignment(&line) {
             self.advance();
             // Track `.RECIPEPREFIX := X` so subsequent rules use X as the
             // recipe-line marker. Empty resets to default tab.
@@ -611,7 +613,8 @@ impl Parser {
 
 /// Try to parse an assignment from a line.
 pub fn try_parse_assignment(line: &str) -> Option<Assignment> {
-    let line = line.trim();
+    // Preserve trailing whitespace on the value (only strip leading).
+    let line = line.trim_start();
 
     // Try each operator (longest first to avoid partial matches)
     for (suffix, op) in [
@@ -624,7 +627,10 @@ pub fn try_parse_assignment(line: &str) -> Option<Assignment> {
     ] {
         if let Some(eq_pos) = find_assignment_op(line, suffix) {
             let name = line[..eq_pos].trim().to_string();
-            let value = line[eq_pos + suffix.len()..].trim().to_string();
+            // GNU make: strip leading whitespace from the value, but
+            // preserve trailing whitespace — `VAR := foo ` stores "foo ".
+            let raw_value = &line[eq_pos + suffix.len()..];
+            let value = raw_value.trim_start().to_string();
             if is_valid_varname(&name) {
                 return Some(Assignment { name, op, value });
             }
