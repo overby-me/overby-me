@@ -295,6 +295,16 @@ fn execute_request(url: &ParsedUrl, opts: &Options) -> Result<Response, String> 
 }
 
 pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String> {
+    // Check that all form file uploads exist before connecting
+    for field in &opts.form_fields {
+        if field.is_file && !std::path::Path::new(&field.value).exists() {
+            return Err(format!(
+                "read form file: couldn't open file \"{}\"",
+                field.value
+            ));
+        }
+    }
+
     let mut current_url = url_str.to_string();
     let mut redirects = 0;
     let mut redirect_headers: Vec<u8> = Vec::new();

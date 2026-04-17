@@ -26,10 +26,14 @@ pub fn parse_url(raw: &str) -> Result<ParsedUrl, String> {
     };
 
     // Split at first / or ? (whichever comes first) to separate authority from path.
-    let path_start = rest
-        .find('/')
-        .or_else(|| rest.find('?'))
-        .unwrap_or(rest.len());
+    let slash_pos = rest.find('/');
+    let query_pos = rest.find('?');
+    let path_start = match (slash_pos, query_pos) {
+        (Some(s), Some(q)) => s.min(q),
+        (Some(s), None) => s,
+        (None, Some(q)) => q,
+        (None, None) => rest.len(),
+    };
     let authority = &rest[..path_start];
     let path = if path_start < rest.len() {
         let p = &rest[path_start..];

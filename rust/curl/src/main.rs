@@ -88,6 +88,7 @@ fn main() {
                 }
 
                 // Determine output destination.
+                // -o - means stdout (not a file called "-")
                 let output_path = if opts.remote_name {
                     // Derive filename from URL path.
                     let name = url
@@ -98,7 +99,7 @@ fn main() {
                         .unwrap_or("index.html");
                     Some(PathBuf::from(name))
                 } else {
-                    opts.output.clone()
+                    opts.output.clone().filter(|p| p.to_str() != Some("-"))
                 };
 
                 // Write output.
@@ -147,12 +148,21 @@ fn main() {
                 // Map error messages to curl exit codes.
                 if e.contains("unsupported scheme") || e.contains("unsupported protocol") {
                     exit_code = 1; // Unsupported protocol
+                } else if e.contains("DNS resolution failed") {
+                    exit_code = 6; // Could not resolve host
                 } else if e.contains("connection failed") || e.contains("Connection refused") {
                     exit_code = 7; // Failed to connect
-                } else if e.contains("DNS resolution failed") || e.contains("resolve") {
-                    exit_code = 6; // Could not resolve host
+                } else if e.contains("timed out") || e.contains("operation timed out") {
+                    exit_code = 28; // Operation timeout
                 } else if e.contains("maximum redirects") {
                     exit_code = 47; // Too many redirects
+                } else if e.contains("empty reply")
+                    || e.contains("failed to read status line")
+                    || e.contains("malformed status line")
+                {
+                    exit_code = 52; // Empty reply from server
+                } else if e.contains("read form file") || e.contains("form file not found") {
+                    exit_code = 26; // Read error (form file)
                 } else {
                     exit_code = 6;
                 }
