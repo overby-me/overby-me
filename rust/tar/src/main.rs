@@ -441,6 +441,10 @@ struct Args {
     /// each member. GNU tar actually re-reads the archive; we only emit
     /// the expected stderr/stdout lines.
     verify: bool,
+    /// --keep-old-files / -k: refuse to overwrite existing files.
+    keep_old_files: bool,
+    /// --skip-old-files: silently skip existing files.
+    skip_old_files: bool,
     no_recursion: bool,
     dereference: bool,
     absolute_names: bool,
@@ -727,6 +731,8 @@ fn parse_args() -> Args {
             "--no-ignore-case" => args.ignore_case_default = false,
             "--clamp-mtime" => args.clamp_mtime = true,
             "--verify" | "-W" => args.verify = true,
+            "-k" | "--keep-old-files" => args.keep_old_files = true,
+            "--skip-old-files" => args.skip_old_files = true,
             "--transform" | "--xform" => {
                 if let Some(v) = queue.pop_front() {
                     match parse_transform(&v) {
@@ -1055,8 +1061,6 @@ fn parse_args() -> Args {
                     || other == "--sparse"
                     || other == "-S"
                     || other == "--show-omitted-dirs"
-                    || other == "--keep-old-files"
-                    || other == "-k"
                     || other == "--keep-newer-files"
                     || other == "--keep-directory-symlink"
                     || other == "--overwrite"
@@ -1066,7 +1070,6 @@ fn parse_args() -> Args {
                     || other == "-U"
                     || other == "--recursive-unlink"
                     || other == "--remove-files"
-                    || other == "--skip-old-files"
                     || other == "--delay-directory-restore"
                     || other == "--delay-directory-restore"
                     || other == "--no-delay-directory-restore"
@@ -1124,7 +1127,8 @@ fn parse_args() -> Args {
                             'h' => args.dereference = true,
                             'o' => args.no_same_owner = true,
                             'P' => args.absolute_names = true,
-                            'W' | 'k' | 'S' | 'U' | 'l' => {
+                            'k' => args.keep_old_files = true,
+                            'W' | 'S' | 'U' | 'l' => {
                                 // accepted, no-op for now
                             }
                             'f' => {
@@ -2364,6 +2368,7 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
     let mut deferred_dir_modes: Vec<(PathBuf, u32)> = Vec::new();
 
     let mut label_checked = args.label.is_none();
+    let mut extract_had_error = false;
 
     for entry in entries {
         let mut entry = entry?;
@@ -2437,37 +2442,43 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
         // paths LITERALLY and ANCHORED by default; globbing kicks in only
         // when `--wildcards` is set and unanchored matching only when
         // `--no-anchored` is set.
-        if !args.paths.is_empty()
-            && !args.paths.iter().any(|p| {
+        if !args.paths.is_empty() {
+            // GNU matches user paths against the ORIGINAL archive path,
+            // not the post-strip/transform path. Fall back to the
+            // final_path too in case the user specified the transformed
+            // form.
+            let matches_any = args.paths.iter().any(|p| {
+                if p.starts_with('\0') {
+                    return false;
+                }
                 let p_trim = p.trim_end_matches('/');
                 let unanchored = args.explicit_anchored == Some(false);
-                let basename = Path::new(&final_path)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("");
-                if args.explicit_wildcards && (p.contains('*') || p.contains('?')) {
-                    if final_path.ends_with('/') && !p.ends_with('/') {
-                        return false;
+                let candidates = [path_str.as_str(), final_path.as_str()];
+                candidates.iter().any(|cand| {
+                    let basename = Path::new(cand)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("");
+                    if args.explicit_wildcards && (p.contains('*') || p.contains('?')) {
+                        if cand.ends_with('/') && !p.ends_with('/') {
+                            return false;
+                        }
+                        let match_slash = args.match_slash_default;
+                        let ignore_case = args.ignore_case_default;
+                        glob_match(p, cand, match_slash, ignore_case)
+                            || glob_match(p, cand.trim_end_matches('/'), match_slash, ignore_case)
+                            || (unanchored && glob_match(p, basename, match_slash, ignore_case))
+                    } else {
+                        let ignore_case = args.ignore_case_default;
+                        eq_opt_ci_prefix(cand, p.as_str(), ignore_case)
+                            || eq_opt_ci(cand.trim_end_matches('/'), p_trim, ignore_case)
+                            || (unanchored && eq_opt_ci(basename, p.as_str(), ignore_case))
                     }
-                    let match_slash = args.match_slash_default;
-                    let ignore_case = args.ignore_case_default;
-                    glob_match(p, &final_path, match_slash, ignore_case)
-                        || glob_match(
-                            p,
-                            final_path.trim_end_matches('/'),
-                            match_slash,
-                            ignore_case,
-                        )
-                        || (unanchored && glob_match(p, basename, match_slash, ignore_case))
-                } else {
-                    let ignore_case = args.ignore_case_default;
-                    eq_opt_ci_prefix(&final_path, p.as_str(), ignore_case)
-                        || eq_opt_ci(final_path.trim_end_matches('/'), p_trim, ignore_case)
-                        || (unanchored && eq_opt_ci(basename, p.as_str(), ignore_case))
-                }
-            })
-        {
-            continue;
+                })
+            });
+            if !matches_any {
+                continue;
+            }
         }
 
         if args.list {
@@ -2484,13 +2495,12 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
 
         // Extract
         if args.verbose {
+            // GNU tar prints the ORIGINAL archive path in verbose output
+            // during extract, regardless of --strip-components / --xform.
             if args.verbose_level >= 2 {
-                println!(
-                    "{}",
-                    format_verbose_entry(entry.header(), &final_path, args)
-                );
+                println!("{}", format_verbose_entry(entry.header(), &path_str, args));
             } else {
-                println!("{final_path}");
+                println!("{path_str}");
             }
         }
 
@@ -2527,6 +2537,26 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
             EntryType::Regular | EntryType::GNUSparse => {
                 if let Some(parent) = dest.parent() {
                     fs::create_dir_all(parent)?;
+                }
+                if dest.exists() {
+                    if args.skip_old_files {
+                        continue;
+                    }
+                    if args.keep_old_files {
+                        eprintln!("tar: {}: Cannot open: File exists", dest.display());
+                        extract_had_error = true;
+                        continue;
+                    }
+                }
+                // If an existing symlink is in the way and the user has
+                // NOT passed -h (dereference), replace the link itself
+                // rather than writing through to its target.
+                if !args.dereference
+                    && fs::symlink_metadata(&dest)
+                        .map(|m| m.file_type().is_symlink())
+                        .unwrap_or(false)
+                {
+                    let _ = fs::remove_file(&dest);
                 }
                 let mut file = File::create(&dest)?;
                 io::copy(&mut entry, &mut file)?;
@@ -2591,6 +2621,11 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
         for (path, mode) in deferred_dir_modes.into_iter().rev() {
             let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
         }
+    }
+
+    if extract_had_error {
+        eprintln!("tar: Exiting with failure status due to previous errors");
+        process::exit(2);
     }
 
     Ok(())
