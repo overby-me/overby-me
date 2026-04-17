@@ -3020,6 +3020,13 @@ fn create_transient_unit(
                 "DynamicUser" => {
                     service_conf.exec_config.dynamic_user = matches!(value, "yes" | "true" | "1");
                 }
+                "OpenFile" => {
+                    if value.is_empty() {
+                        service_conf.open_file.clear();
+                    } else {
+                        service_conf.open_file.push(value.to_string());
+                    }
+                }
                 "NotifyAccess" => {
                     notify_access_explicitly_set = true;
                     service_conf.notifyaccess = match value {
@@ -3691,9 +3698,7 @@ fn create_transient_unit(
                 "ProtectControlGroupsEx" => {
                     service_conf.exec_config.protect_control_groups_ex =
                         match value.to_lowercase().as_str() {
-                            "yes" | "true" | "1" => {
-                                crate::units::ProtectControlGroupsEx::Yes
-                            }
+                            "yes" | "true" | "1" => crate::units::ProtectControlGroupsEx::Yes,
                             "private" => crate::units::ProtectControlGroupsEx::Private,
                             "strict" => crate::units::ProtectControlGroupsEx::Strict,
                             _ => crate::units::ProtectControlGroupsEx::No,

@@ -8,8 +8,8 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| PASS | ~235+ | Tests passing reliably (including 150/151 aux-utils) |
-| FAIL (fixable) | ~4 | Failures in rust-systemd code that can be fixed |
+| PASS | ~236+ | Tests passing reliably (including 150/151 aux-utils) |
+| FAIL (fixable) | ~3 | Failures in rust-systemd code that can be fixed |
 | FAIL (architectural) | ~12 | Missing major features (D-Bus, udev, exec deser) |
 | Boot hang (transient) | ~10 | Non-deterministic QEMU boot failures (~30% rate) |
 
@@ -42,9 +42,9 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 - 01-05, 07-21 all pass
 - 06: persistent boot hang (transient)
 
-### 23-UNIT-FILE (15 of 20 pass)
+### 23-UNIT-FILE (16 of 20 pass)
 
-- PASS: clean-unit (service sections), exec-command-ex, execreload, execstoppost, joinsnamespace-of, oneshot-restart, onsuccess-basic, percentj-wantedby, runtimedirectory, standardoutput, start-stop-no-reload, statedir, type-exec, upholds, utmp, verify-unit-files
+- PASS: clean-unit (service sections), exec-command-ex, execreload, execstoppost, joinsnamespace-of, oneshot-restart, onsuccess-basic, percentj-wantedby, runtimedirectory, standardoutput, start-stop-no-reload, statedir, success-failure, type-exec, upholds, utmp, verify-unit-files
 
 ### 81-GENERATORS (4 of 5 pass)
 
@@ -190,8 +190,8 @@ All 23 udev tests fail because the C `udevadm` binary in the overlay lacks featu
 - [x] RELOADING=1 notification handling (deferred_notify_wait recognizes reload as started)
 - [x] MEMORY_PRESSURE_WATCH env var for MemoryPressureWatch= directive
 - [x] ProtectControlGroupsEx= directive (no/yes/private/strict with cgroup namespace + mount)
-- [ ] Fix systemctl start job tracking across restarts (success-failure test: initial failure masked by restart success)
-- [ ] Complete Type=notify lifecycle (STOPPING notification, Restart=on-abort after SIGABRT)
+- [x] Fix systemctl start job tracking across restarts (success-failure test now passes — RestartMode default fixed to Normal, stop propagation limited to bound_by)
+- [x] Complete Type=notify lifecycle (STOPPING=1 parsed, Restart=on-abort passing in 59-reloading-restart)
 - [x] PrivatePIDs= — PID namespace with /proc remount (already implemented, fixed stacked mount)
 - [ ] Implement OpenFile= directive
 - [ ] Implement ExtraFileDescriptors= directive

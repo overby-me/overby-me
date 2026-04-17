@@ -3898,11 +3898,11 @@ pub enum RestartMode {
     /// Restart without going through the full deactivation path.
     /// OnFailure= units are not triggered and dependent units (BindsTo=,
     /// required_by) are not stopped during the restart.
-    #[default]
     Direct,
     /// Go through the full deactivation path on restart. OnFailure= units
     /// are triggered and dependent units (BindsTo=, required_by) are stopped
     /// then re-activated after the service restarts.
+    #[default]
     Normal,
 }
 

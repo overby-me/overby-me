@@ -279,6 +279,9 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
             let state_ref = state_guard.as_ref().ok();
 
             if let Some(state) = state_ref {
+                if !svc.conf.open_file.is_empty() {
+                    insert(&mut props, "OpenFile", &svc.conf.open_file.join("\n"));
+                }
                 insert(
                     &mut props,
                     "NotifyAccess",

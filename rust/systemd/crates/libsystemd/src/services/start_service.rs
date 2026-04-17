@@ -19,6 +19,135 @@ const DYNAMIC_UID_MAX: u32 = 65519;
 /// Next dynamic UID to allocate. Wraps around within the valid range.
 static NEXT_DYNAMIC_UID: AtomicU32 = AtomicU32::new(DYNAMIC_UID_MIN);
 
+/// Decode `\xHH` hex escapes in an OpenFile= path segment.
+fn openfile_unescape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\'
+            && i + 3 < bytes.len()
+            && (bytes[i + 1] == b'x' || bytes[i + 1] == b'X')
+            && let (Some(h), Some(l)) = (
+                (bytes[i + 2] as char).to_digit(16),
+                (bytes[i + 3] as char).to_digit(16),
+            )
+        {
+            out.push((h * 16 + l) as u8 as char);
+            i += 4;
+            continue;
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// Open an OpenFile= entry and return (FD, FDNAME). Format: "PATH:IDENTIFIER:OPTIONS".
+/// Returns Ok(None) if file is missing and "graceful" option is set.
+fn open_openfile_entry(entry: &str) -> Result<Option<(std::os::fd::OwnedFd, String)>, String> {
+    // Split on unescaped ':' into three fields.
+    let mut fields: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let bytes = entry.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\'
+            && i + 3 < bytes.len()
+            && (bytes[i + 1] == b'x' || bytes[i + 1] == b'X')
+        {
+            current.push(bytes[i] as char);
+            current.push(bytes[i + 1] as char);
+            current.push(bytes[i + 2] as char);
+            current.push(bytes[i + 3] as char);
+            i += 4;
+            continue;
+        }
+        if bytes[i] == b':' {
+            fields.push(std::mem::take(&mut current));
+            i += 1;
+            continue;
+        }
+        current.push(bytes[i] as char);
+        i += 1;
+    }
+    fields.push(current);
+    if fields.is_empty() || fields.len() > 3 {
+        return Err("invalid OpenFile syntax (expected PATH[:IDENT[:OPTS]])".to_owned());
+    }
+    let path_raw = fields.first().cloned().unwrap_or_default();
+    let ident_raw = fields.get(1).cloned().unwrap_or_default();
+    let opts_raw = fields.get(2).cloned().unwrap_or_default();
+    let path = openfile_unescape(&path_raw);
+
+    let mut is_socket = false;
+    let mut read_only = false;
+    let mut append = false;
+    let mut truncate = false;
+    let mut graceful = false;
+    for opt in opts_raw.split(',').filter(|s| !s.is_empty()) {
+        match opt {
+            "read-only" => read_only = true,
+            "append" => append = true,
+            "truncate" => truncate = true,
+            "graceful" => graceful = true,
+            "socket" => is_socket = true,
+            other => return Err(format!("unknown OpenFile option: {other}")),
+        }
+    }
+
+    let identifier = if ident_raw.is_empty() {
+        std::path::Path::new(&path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&path)
+            .to_owned()
+    } else {
+        openfile_unescape(&ident_raw)
+    };
+
+    if is_socket {
+        // Connect to a UNIX stream socket at `path`.
+        use std::os::unix::net::UnixStream;
+        match UnixStream::connect(&path) {
+            Ok(stream) => {
+                use std::os::fd::{FromRawFd, IntoRawFd};
+                let fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(stream.into_raw_fd()) };
+                return Ok(Some((fd, identifier)));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && graceful => {
+                return Ok(None);
+            }
+            Err(e) => return Err(format!("connect {path}: {e}")),
+        }
+    }
+
+    // Regular file. Default is O_RDWR unless read-only is set.
+    use std::os::fd::{FromRawFd, OwnedFd};
+    let mut flags = libc::O_CLOEXEC;
+    if read_only {
+        flags |= libc::O_RDONLY;
+    } else {
+        flags |= libc::O_RDWR;
+    }
+    if append {
+        flags |= libc::O_APPEND;
+    }
+    if truncate {
+        flags |= libc::O_TRUNC;
+    }
+    let cpath = std::ffi::CString::new(path.as_str()).map_err(|e| format!("path nul: {e}"))?;
+    let fd = unsafe { libc::open(cpath.as_ptr(), flags) };
+    if fd < 0 {
+        let errno = std::io::Error::last_os_error();
+        if errno.kind() == std::io::ErrorKind::NotFound && graceful {
+            return Ok(None);
+        }
+        return Err(format!("open {path}: {errno}"));
+    }
+    Ok(Some((unsafe { OwnedFd::from_raw_fd(fd) }, identifier)))
+}
+
 /// Allocate a dynamic UID from the systemd dynamic range (61184-65519).
 /// Returns both UID and GID (they are the same value for dynamic users).
 fn allocate_dynamic_uid() -> u32 {
@@ -373,6 +502,33 @@ fn start_service_with_filedescriptors(
         for (fd_name, raw_fd) in &srvc.stored_fds {
             fds.push(*raw_fd);
             names.push(fd_name.clone());
+        }
+    }
+
+    // Process OpenFile= entries. Each entry is "PATH:IDENTIFIER:OPTIONS".
+    // Path may contain \x3A for escaped colons. Identifier defaults to basename.
+    // Options (comma-separated): read-only, append, truncate, graceful, socket.
+    // Socket option connects to a UNIX socket instead of opening a file.
+    // Graceful option skips if the file is missing.
+    let mut openfile_fds: Vec<std::os::fd::OwnedFd> = Vec::new();
+    for entry in &conf.open_file {
+        match open_openfile_entry(entry) {
+            Ok(Some((fd, identifier))) => {
+                use std::os::fd::AsRawFd;
+                fds.push(fd.as_raw_fd());
+                names.push(identifier);
+                openfile_fds.push(fd);
+            }
+            Ok(None) => {
+                // graceful + missing file — skip silently
+                trace!("Service {name}: OpenFile={entry} — file missing, skipping (graceful)");
+            }
+            Err(e) => {
+                return Err(RunCmdError::SpawnError(
+                    name.to_owned(),
+                    format!("OpenFile={entry}: {e}"),
+                ));
+            }
         }
     }
 

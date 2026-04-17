@@ -3004,8 +3004,7 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
             // For yes: host namespace, but cgroup hierarchy becomes read-only.
             let cgroup_path = std::ffi::CString::new("/sys/fs/cgroup").unwrap();
             let cgroup2 = std::ffi::CString::new("cgroup2").unwrap();
-            let mount_data =
-                std::ffi::CString::new("nsdelegate,memory_recursiveprot").unwrap();
+            let mount_data = std::ffi::CString::new("nsdelegate,memory_recursiveprot").unwrap();
             // Unmount the old cgroup mount
             unsafe { libc::umount2(cgroup_path.as_ptr(), libc::MNT_DETACH) };
             // Mount fresh cgroup2 with appropriate flags
