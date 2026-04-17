@@ -190,6 +190,7 @@ All 23 udev tests fail because the C `udevadm` binary in the overlay lacks featu
 - [x] RELOADING=1 notification handling (deferred_notify_wait recognizes reload as started)
 - [x] MEMORY_PRESSURE_WATCH env var for MemoryPressureWatch= directive
 - [x] ProtectControlGroupsEx= directive (no/yes/private/strict with cgroup namespace + mount)
+- [ ] Fix systemctl start job tracking across restarts (success-failure test: initial failure masked by restart success)
 - [ ] Complete Type=notify lifecycle (STOPPING notification, Restart=on-abort after SIGABRT)
 - [x] PrivatePIDs= — PID namespace with /proc remount (already implemented, fixed stacked mount)
 - [ ] Implement OpenFile= directive
