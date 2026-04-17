@@ -400,6 +400,9 @@ impl Engine {
             names.sort();
             return names.join(" ");
         }
+        if name == ".INCLUDE_DIRS" {
+            return self.include_dirs.borrow().join(" ");
+        }
         let vars = self.vars.borrow();
         if let Some(var) = vars.get(name) {
             let value = var.value.clone();

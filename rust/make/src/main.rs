@@ -86,7 +86,30 @@ fn run() -> i32 {
             "-I" | "--include-dir" => {
                 i += 1;
                 if i < args.len() {
-                    engine.include_dirs.borrow_mut().push(args[i].clone());
+                    // `-I -` (with the literal `-` as argument) clears
+                    // any include dirs accumulated so far — matching
+                    // GNU make's convention for removing the defaults.
+                    if args[i] == "-" {
+                        engine.include_dirs.borrow_mut().clear();
+                    } else {
+                        engine.include_dirs.borrow_mut().push(args[i].clone());
+                    }
+                }
+            }
+            arg if arg.starts_with("-I") && arg.len() > 2 => {
+                let rest = &arg[2..];
+                if rest == "-" {
+                    engine.include_dirs.borrow_mut().clear();
+                } else {
+                    engine.include_dirs.borrow_mut().push(rest.to_string());
+                }
+            }
+            arg if arg.starts_with("--include-dir=") => {
+                let rest = &arg["--include-dir=".len()..];
+                if rest == "-" {
+                    engine.include_dirs.borrow_mut().clear();
+                } else {
+                    engine.include_dirs.borrow_mut().push(rest.to_string());
                 }
             }
             "-W" | "--what-if" | "--new-file" | "--assume-new" => {
