@@ -2405,19 +2405,33 @@ fn parse_interp_string(s: &str) -> Expr {
             }
         } else if chars[i] == '@'
             && i + 1 < chars.len()
-            && (chars[i + 1].is_ascii_alphabetic() || chars[i + 1] == '_' || chars[i + 1] == '{')
+            && (chars[i + 1].is_ascii_alphabetic()
+                || chars[i + 1] == '_'
+                || chars[i + 1] == '{'
+                || chars[i + 1] == '$')
         {
             // Array interpolation
             if !lit.is_empty() {
                 parts.push(InterpPart::Lit(std::mem::take(&mut lit)));
             }
             i += 1; // skip @
-            let mut name = String::new();
-            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
-                name.push(chars[i]);
+            if chars[i] == '$' {
+                // @$name — dereference array ref
                 i += 1;
+                let mut name = String::new();
+                while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                    name.push(chars[i]);
+                    i += 1;
+                }
+                parts.push(InterpPart::Expr(Box::new(Expr::ArrayDerefVar(name))));
+            } else {
+                let mut name = String::new();
+                while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                    name.push(chars[i]);
+                    i += 1;
+                }
+                parts.push(InterpPart::ArrayVar(name));
             }
-            parts.push(InterpPart::ArrayVar(name));
         } else if chars[i] == '\x01' {
             // Escaped $ placeholder
             lit.push('$');

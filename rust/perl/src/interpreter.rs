@@ -1751,7 +1751,26 @@ impl Interpreter {
                             result.push_str(&self.get_hash_element(name, &key_str).to_str());
                         }
                         InterpPart::Expr(expr) => {
-                            result.push_str(&self.eval_expr(expr).to_str());
+                            // Array-like expressions (e.g. `@$ref`) need list
+                            // context + `$"` joining, otherwise scalar-stringify.
+                            if matches!(
+                                expr.as_ref(),
+                                Expr::ArrayDerefVar(_)
+                                    | Expr::ArrayVar(_)
+                                    | Expr::HashDerefVar(_)
+                                    | Expr::HashSlice(_, _)
+                                    | Expr::ArraySlice(_, _)
+                            ) {
+                                let list = self.eval_list(expr);
+                                let sep = self.get_var(" ").to_str();
+                                let s: Vec<String> =
+                                    list.iter().map(|v| v.to_str()).collect();
+                                result.push_str(
+                                    &s.join(if sep.is_empty() { " " } else { &sep }),
+                                );
+                            } else {
+                                result.push_str(&self.eval_expr(expr).to_str());
+                            }
                         }
                     }
                 }
@@ -2291,7 +2310,44 @@ impl Interpreter {
                     let len = arr.len();
                     self.set_array(name, arr);
                     Value::Num(len as f64)
+                } else if let Some(Expr::ArrayDerefVar(name)) = args.first() {
+                    // `push @$ref, ...` — autovivifies an array ref if $ref
+                    // is undef (Perl semantics).
+                    let existing = self.get_var(name);
+                    let arr_ref = if let Value::ArrayRef(r) = existing {
+                        r
+                    } else if matches!(existing, Value::Undef) {
+                        let r = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+                        self.set_var(name, Value::ArrayRef(r.clone()));
+                        r
+                    } else {
+                        self.pending_flow = Some(Flow::Die(
+                            "Type of arg 1 to push must be array".to_string(),
+                        ));
+                        return Value::Undef;
+                    };
+                    for arg in &args[1..] {
+                        arr_ref.borrow_mut().extend(self.eval_list(arg));
+                    }
+                    let len = arr_ref.borrow().len();
+                    Value::Num(len as f64)
                 } else {
+                    // `push` onto anything that isn't an array / array ref is
+                    // an error. Literals → "must be array"; bare scalars /
+                    // arbitrary call results → "Experimental push on scalar".
+                    let arg0 = args.first();
+                    let is_literal = matches!(
+                        arg0,
+                        Some(Expr::IntLit(_))
+                            | Some(Expr::FloatLit(_))
+                            | Some(Expr::StringLit(_))
+                    );
+                    let msg = if is_literal {
+                        "Type of arg 1 to push must be array (not literal)".to_string()
+                    } else {
+                        "Experimental push on scalar is now forbidden".to_string()
+                    };
+                    self.pending_flow = Some(Flow::Die(msg));
                     Value::Undef
                 }
             }
