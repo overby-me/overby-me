@@ -265,8 +265,10 @@ impl Parser {
             return Ok(Some(Directive::Undefine(rest.trim().to_string())));
         }
 
-        // Define (multi-line variable)
-        if trimmed.starts_with("define ") {
+        // Define (multi-line variable). Skip when the line also parses
+        // as an assignment — `define = value` is a variable named
+        // `define`, not a define directive.
+        if trimmed.starts_with("define ") && try_parse_assignment(trimmed).is_none() {
             return self.parse_define().map(Some);
         }
 
