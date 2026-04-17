@@ -7997,6 +7997,21 @@ pub fn execute_command(
                 // still be in Starting state.  Poll until it leaves Starting
                 // (either becomes Started after READY=1 or fails/stops).
                 if is_notify {
+                    // Capture restart counter at the start of polling.
+                    // If it increases during polling, the initial start
+                    // attempt failed and was restarted — report failure
+                    // to match C systemd's job tracking behavior.
+                    let initial_restarts = {
+                        let ri = run_info.read_poisoned();
+                        ri.unit_table
+                            .get(&id)
+                            .map(|u| {
+                                u.common
+                                    .n_restarts
+                                    .load(std::sync::atomic::Ordering::Relaxed)
+                            })
+                            .unwrap_or(0)
+                    };
                     // Use the service's TimeoutStartSec (default 90s) for
                     // the polling deadline.  This ensures `systemctl start`
                     // returns promptly when a short timeout is configured
@@ -8053,7 +8068,21 @@ pub fn execute_command(
                                 })
                                 .unwrap_or(false)
                         };
-                        if !still_starting || std::time::Instant::now() > deadline {
+                        // Also check if a restart happened — if the restart
+                        // counter increased, the initial start attempt failed.
+                        let restarted = {
+                            let ri = run_info.read_poisoned();
+                            ri.unit_table
+                                .get(&id)
+                                .map(|u| {
+                                    u.common
+                                        .n_restarts
+                                        .load(std::sync::atomic::Ordering::Relaxed)
+                                        > initial_restarts
+                                })
+                                .unwrap_or(false)
+                        };
+                        if restarted || !still_starting || std::time::Instant::now() > deadline {
                             break;
                         }
                         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -8086,7 +8115,21 @@ pub fn execute_command(
                                     id.name
                                 ));
                             }
-                            _ => {}
+                            _ => {
+                                // Service is Started/active, but check if a restart
+                                // happened during polling. If so, the initial start
+                                // attempt failed even though the service recovered.
+                                let current_restarts = unit
+                                    .common
+                                    .n_restarts
+                                    .load(std::sync::atomic::Ordering::Relaxed);
+                                if current_restarts > initial_restarts {
+                                    return Err(format!(
+                                        "Unit {} failed to start (restarting)",
+                                        id.name
+                                    ));
+                                }
+                            }
                         }
                     }
                 }
