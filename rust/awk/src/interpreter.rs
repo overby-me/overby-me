@@ -8,6 +8,12 @@ use crate::ast::*;
 use crate::format::{awk_replace, gensub_replace, sprintf_impl_with_convfmt};
 use crate::value::{ControlFlow, Value, compare_values};
 
+struct PipeRecordState {
+    records: Vec<String>,
+    terminators: Vec<String>,
+    pos: usize,
+}
+
 pub struct Interpreter {
     pub globals: HashMap<String, Value>,
     pub arrays: HashMap<String, HashMap<String, Value>>,
@@ -17,6 +23,10 @@ pub struct Interpreter {
     open_read_files: HashMap<String, Box<dyn BufRead>>,
     open_pipes: HashMap<String, Box<dyn Write>>,
     open_read_pipes: HashMap<String, Box<dyn BufRead>>,
+    /// Pipe output that's been fully read and split by RS. Keyed by the
+    /// command string. Used for `cmd | getline` when RS isn't "\n", since
+    /// line-at-a-time reading can't honor arbitrary record separators.
+    pipe_records: HashMap<String, PipeRecordState>,
     /// Child processes for pipes, keyed by command string
     pipe_children: HashMap<String, std::process::Child>,
     pub rng_state: u64,
@@ -26,6 +36,10 @@ pub struct Interpreter {
     pub exit_code: i32,
     /// Lines from current input stream for bare getline
     input_lines: Vec<String>,
+    /// Record terminators matched while splitting input. One entry per record
+    /// in `input_lines` (may be empty if no RS match followed the last
+    /// record). Used to populate the `RT` variable.
+    input_terminators: Vec<String>,
     /// Current position in input_lines (next line to process)
     input_line_idx: usize,
     /// Currently active function parameter names (for error messages)
@@ -38,6 +52,12 @@ pub struct Interpreter {
     param_origins: HashMap<String, String>,
     /// Globals that were passed to functions and used as scalars (for post-call type checking)
     global_scalar_via_func: std::collections::HashSet<String>,
+    /// Array reference aliases for the current function frame. Maps a local
+    /// array parameter name to the canonical (caller-side) array name that it
+    /// shares storage with. Enables awk's reference semantics for arrays
+    /// passed as function arguments — multiple params sharing the same caller
+    /// array all see each other's writes.
+    array_aliases: HashMap<String, String>,
 }
 
 impl Interpreter {
@@ -56,6 +76,7 @@ impl Interpreter {
         globals.insert("RLENGTH".to_string(), Value::Num(-1.0));
         globals.insert("OFMT".to_string(), Value::Str("%.6g".to_string()));
         globals.insert("CONVFMT".to_string(), Value::Str("%.6g".to_string()));
+        globals.insert("RT".to_string(), Value::Str(String::new()));
 
         Interpreter {
             globals,
@@ -66,6 +87,7 @@ impl Interpreter {
             open_read_files: HashMap::new(),
             open_pipes: HashMap::new(),
             open_read_pipes: HashMap::new(),
+            pipe_records: HashMap::new(),
             rng_state: 0,
             range_active: HashMap::new(),
             nr: 0,
@@ -73,13 +95,24 @@ impl Interpreter {
             exit_code: 0,
             pipe_children: HashMap::new(),
             input_lines: Vec::new(),
+            input_terminators: Vec::new(),
             input_line_idx: 0,
             current_params: Vec::new(),
             scalar_params: std::collections::HashSet::new(),
             array_params: std::collections::HashSet::new(),
             param_origins: HashMap::new(),
             global_scalar_via_func: std::collections::HashSet::new(),
+            array_aliases: HashMap::new(),
         }
+    }
+
+    /// Resolve an array name through the current frame's alias map. Returns
+    /// the canonical name to use for actual storage access.
+    fn resolve_array_name(&self, name: &str) -> String {
+        self.array_aliases
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.to_string())
     }
 
     fn set_record(&mut self, line: &str) {
@@ -193,16 +226,18 @@ impl Interpreter {
     }
 
     fn get_array(&self, name: &str, key: &str) -> Value {
+        let resolved = self.resolve_array_name(name);
         self.arrays
-            .get(name)
+            .get(&resolved)
             .and_then(|a| a.get(key))
             .cloned()
             .unwrap_or(Value::Uninitialized)
     }
 
     pub fn set_array(&mut self, name: &str, key: &str, val: Value) {
+        let resolved = self.resolve_array_name(name);
         self.arrays
-            .entry(name.to_string())
+            .entry(resolved)
             .or_default()
             .insert(key.to_string(), val);
     }
@@ -524,6 +559,104 @@ impl Interpreter {
         }
     }
 
+    /// Split an input buffer into records and matching terminators according
+    /// to the current value of the awk RS variable. Mirrors gawk semantics:
+    /// `"\n"` splits on LF (stripping CR), single-char RS splits on that
+    /// character, empty RS is paragraph mode (splits on blank lines, strips
+    /// leading newlines), longer RS is treated as a regex.
+    fn split_by_rs(all: &str, rs: &str) -> (Vec<String>, Vec<String>) {
+        let mut pairs: Vec<(String, String)> = Vec::new();
+        let mut all_buf = all.to_string();
+        if rs == "\n" {
+            let mut start = 0usize;
+            let bytes = all_buf.as_bytes();
+            for (i, &b) in bytes.iter().enumerate() {
+                if b == b'\n' {
+                    let mut rec_end = i;
+                    if rec_end > start && bytes[rec_end - 1] == b'\r' {
+                        rec_end -= 1;
+                    }
+                    pairs.push((all_buf[start..rec_end].to_string(), "\n".to_string()));
+                    start = i + 1;
+                }
+            }
+            if start < all_buf.len() {
+                pairs.push((all_buf[start..].to_string(), String::new()));
+            }
+        } else if rs.len() == 1 {
+            let sep = rs.chars().next().unwrap();
+            if all_buf.ends_with('\n') {
+                all_buf.pop();
+            }
+            let mut start = 0usize;
+            for (i, c) in all_buf.char_indices() {
+                if c == sep {
+                    pairs.push((all_buf[start..i].to_string(), c.to_string()));
+                    start = i + c.len_utf8();
+                }
+            }
+            if start < all_buf.len() {
+                pairs.push((all_buf[start..].to_string(), String::new()));
+            }
+        } else if rs.is_empty() {
+            let blank = Regex::new(r"\n\n+").unwrap();
+            let leading_nl = all_buf.bytes().take_while(|&b| b == b'\n').count();
+            let mut last_end = leading_nl;
+            for m in blank.find_iter(&all_buf[leading_nl..]) {
+                let abs_start = leading_nl + m.start();
+                let abs_end = leading_nl + m.end();
+                let para = &all_buf[last_end..abs_start];
+                if !para.is_empty() {
+                    pairs.push((para.to_string(), m.as_str().to_string()));
+                }
+                last_end = abs_end;
+            }
+            if last_end < all_buf.len() {
+                let rest = &all_buf[last_end..];
+                let trimmed_end = rest.trim_end_matches('\n');
+                if !trimmed_end.is_empty() {
+                    let rt = rest[trimmed_end.len()..].to_string();
+                    pairs.push((trimmed_end.to_string(), rt));
+                }
+            }
+        } else {
+            match Regex::new(rs) {
+                Ok(re) => {
+                    let mut last_end = 0usize;
+                    let mut any_non_empty = false;
+                    for m in re.find_iter(&all_buf) {
+                        if m.end() == m.start() {
+                            continue;
+                        }
+                        any_non_empty = true;
+                        pairs.push((
+                            all_buf[last_end..m.start()].to_string(),
+                            m.as_str().to_string(),
+                        ));
+                        last_end = m.end();
+                    }
+                    if any_non_empty {
+                        if last_end < all_buf.len() {
+                            pairs.push((all_buf[last_end..].to_string(), String::new()));
+                        }
+                    } else {
+                        pairs.push((all_buf.clone(), String::new()));
+                    }
+                }
+                Err(_) => {
+                    let mut start = 0usize;
+                    while let Some(pos) = all_buf[start..].find(rs) {
+                        let abs = start + pos;
+                        pairs.push((all_buf[start..abs].to_string(), rs.to_string()));
+                        start = abs + rs.len();
+                    }
+                    pairs.push((all_buf[start..].to_string(), String::new()));
+                }
+            }
+        }
+        pairs.into_iter().unzip()
+    }
+
     fn process_stream(&mut self, program: &Program, reader: &mut dyn BufRead, filename: &str) {
         self.globals
             .insert("FILENAME".to_string(), Value::Str(filename.to_string()));
@@ -538,51 +671,20 @@ impl Interpreter {
         let mut all = String::new();
         reader.read_to_string(&mut all).ok();
 
-        let records: Vec<String> = if rs == "\n" {
-            all.split('\n')
-                .map(|s| {
-                    let s = s.strip_suffix('\r').unwrap_or(s);
-                    s.to_string()
-                })
-                .collect()
-        } else if rs.len() == 1 {
-            let sep = rs.chars().next().unwrap();
-            // Remove trailing newline before splitting
-            if all.ends_with('\n') {
-                all.pop();
-            }
-            all.split(sep).map(|s| s.to_string()).collect()
-        } else if rs.is_empty() {
-            // Paragraph mode
-            let mut result = Vec::new();
-            for para in all.split("\n\n") {
-                let para = para.trim_matches('\n');
-                if !para.is_empty() {
-                    result.push(para.to_string());
-                }
-            }
-            result
-        } else {
-            // Multi-char RS as regex
-            match Regex::new(&rs) {
-                Ok(re) => re.split(&all).map(|s| s.to_string()).collect(),
-                Err(_) => all.split(&rs).map(|s| s.to_string()).collect(),
-            }
-        };
-
-        // Remove trailing empty record (artifact of splitting with trailing separator)
-        let records: Vec<String> = if records.last().is_some_and(|s| s.is_empty()) {
-            records[..records.len() - 1].to_vec()
-        } else {
-            records
-        };
+        let (records, terminators) = Self::split_by_rs(&all, &rs);
 
         // Store for bare getline access
         self.input_lines = records;
+        self.input_terminators = terminators;
         self.input_line_idx = 0;
 
         while self.input_line_idx < self.input_lines.len() {
             let rec = self.input_lines[self.input_line_idx].clone();
+            let rt = self
+                .input_terminators
+                .get(self.input_line_idx)
+                .cloned()
+                .unwrap_or_default();
             self.input_line_idx += 1;
 
             self.nr += 1;
@@ -591,6 +693,7 @@ impl Interpreter {
                 .insert("NR".to_string(), Value::Num(self.nr as f64));
             self.globals
                 .insert("FNR".to_string(), Value::Num(self.fnr as f64));
+            self.globals.insert("RT".to_string(), Value::Str(rt));
             self.set_record(&rec);
 
             if let ControlFlow::Exit(code) = self.process_rules(program) {
@@ -767,7 +870,8 @@ impl Interpreter {
                 }
                 // The loop variable is used as scalar — check array→scalar conflict
                 if self.current_params.contains(&var.to_string()) {
-                    if self.arrays.contains_key(var) || self.array_params.contains(var) {
+                    let var_resolved = self.resolve_array_name(var);
+                    if self.arrays.contains_key(&var_resolved) || self.array_params.contains(var) {
                         let prov = if let Some(origin) = self.param_origins.get(var) {
                             format!("`{var} (from {origin})'")
                         } else {
@@ -778,8 +882,9 @@ impl Interpreter {
                     }
                     self.scalar_params.insert(var.to_string());
                 }
+                let array_resolved = self.resolve_array_name(array);
                 // Check if the variable is a scalar (not an array)
-                if !self.arrays.contains_key(array)
+                if !self.arrays.contains_key(&array_resolved)
                     && self.globals.contains_key(array)
                     && !matches!(self.globals.get(array), Some(Value::Uninitialized))
                 {
@@ -788,7 +893,7 @@ impl Interpreter {
                 }
                 let mut keys: Vec<String> = self
                     .arrays
-                    .get(array)
+                    .get(&array_resolved)
                     .map(|a| a.keys().cloned().collect())
                     .unwrap_or_default();
                 // Sort keys for deterministic for-in ordering
@@ -826,12 +931,13 @@ impl Interpreter {
                     eprintln!("or used as a variable or an array");
                     std::process::exit(1);
                 }
+                let resolved = self.resolve_array_name(name);
                 if indices.is_empty() {
-                    self.arrays.remove(name);
+                    self.arrays.remove(&resolved);
                 } else {
                     let vals: Vec<Value> = indices.iter().map(|i| self.eval_expr(i)).collect();
                     let key = self.array_key(&vals);
-                    if let Some(arr) = self.arrays.get_mut(name) {
+                    if let Some(arr) = self.arrays.get_mut(&resolved) {
                         arr.remove(&key);
                     }
                 }
@@ -1057,6 +1163,71 @@ impl Interpreter {
             GetlineSource::Pipe => {
                 if let Some(cmd_expr) = file {
                     let cmd = self.eval_expr(cmd_expr).to_string_val();
+                    let rs = self
+                        .globals
+                        .get("RS")
+                        .map(|v| v.to_string_val())
+                        .unwrap_or_else(|| "\n".to_string());
+
+                    // For non-default RS (multi-char regex, paragraph mode, or
+                    // any separator other than "\n"), line-at-a-time reading
+                    // can't honor the separator. Read the full pipe output on
+                    // first access, split by current RS, and serve subsequent
+                    // getlines from the cached records.
+                    if rs != "\n" {
+                        if !self.pipe_records.contains_key(&cmd) {
+                            let mut output = String::new();
+                            match Command::new("sh")
+                                .arg("-c")
+                                .arg(&cmd)
+                                .stdout(Stdio::piped())
+                                .spawn()
+                            {
+                                Ok(mut child) => {
+                                    if let Some(mut stdout) = child.stdout.take() {
+                                        use std::io::Read;
+                                        stdout.read_to_string(&mut output).ok();
+                                    }
+                                    self.pipe_children.insert(cmd.clone(), child);
+                                }
+                                Err(_) => return Value::Num(-1.0),
+                            }
+                            let (records, terminators) = Self::split_by_rs(&output, &rs);
+                            self.pipe_records.insert(
+                                cmd.clone(),
+                                PipeRecordState {
+                                    records,
+                                    terminators,
+                                    pos: 0,
+                                },
+                            );
+                        }
+                        let state = self.pipe_records.get_mut(&cmd).unwrap();
+                        if state.pos >= state.records.len() {
+                            if let Some(v) = var {
+                                self.eval_side_effects(v);
+                            }
+                            return Value::Num(0.0);
+                        }
+                        let rec = state.records[state.pos].clone();
+                        let rt = state
+                            .terminators
+                            .get(state.pos)
+                            .cloned()
+                            .unwrap_or_default();
+                        state.pos += 1;
+                        self.globals.insert("RT".to_string(), Value::Str(rt));
+                        if let Some(var_expr) = var {
+                            self.assign_to(var_expr, Value::StrNum(rec));
+                        } else {
+                            self.set_record(&rec);
+                            self.nr += 1;
+                            self.globals
+                                .insert("NR".to_string(), Value::Num(self.nr as f64));
+                        }
+                        return Value::Num(1.0);
+                    }
+
                     if !self.open_read_pipes.contains_key(&cmd) {
                         match Command::new("sh")
                             .arg("-c")
@@ -1117,7 +1288,13 @@ impl Interpreter {
     /// Compile a regex, handling awk-specific patterns that Rust's regex crate
     /// might reject (e.g., leading +, *, ? which awk treats as literals).
     fn compile_regex(pattern: &str) -> Option<Regex> {
-        let fixed = Self::fix_awk_regex_warn(pattern);
+        // Expand `\xHH` hex escapes to the literal character up front. gawk
+        // substitutes them before bracket-expression parsing, so e.g.
+        // `[^[]\x5b` becomes `[^[][` — an unbalanced class that gawk rejects.
+        // Doing the same here preserves that error path.
+        let expanded = Self::expand_hex_escapes(pattern);
+        let expanded = Self::expand_collating_elements(&expanded);
+        let fixed = Self::fix_awk_regex_warn(&expanded);
         if let Ok(re) = Regex::new(&fixed) {
             return Some(re);
         }
@@ -1130,6 +1307,66 @@ impl Interpreter {
                 std::process::exit(2);
             }
         }
+    }
+
+    /// Rewrite POSIX single-character collating elements `[.c.]` as the bare
+    /// character `c`. Rust's regex crate rejects the collating syntax, but
+    /// most real-world patterns that reach us only use single-char elements,
+    /// where the substitution is equivalent. Multi-character collations fall
+    /// through unchanged and will surface as a regex error later.
+    fn expand_collating_elements(pattern: &str) -> String {
+        let chars: Vec<char> = pattern.chars().collect();
+        let mut result = String::new();
+        let mut i = 0;
+        while i < chars.len() {
+            if i + 4 < chars.len()
+                && chars[i] == '['
+                && chars[i + 1] == '.'
+                && chars[i + 3] == '.'
+                && chars[i + 4] == ']'
+            {
+                result.push(chars[i + 2]);
+                i += 5;
+            } else {
+                result.push(chars[i]);
+                i += 1;
+            }
+        }
+        result
+    }
+
+    /// Replace `\xHH` (1-2 hex digits) with the literal character. Matches
+    /// gawk's pre-parsing behavior, where hex escapes are expanded before
+    /// bracket-class parsing so any resulting special characters affect the
+    /// structural interpretation of the pattern.
+    fn expand_hex_escapes(pattern: &str) -> String {
+        let chars: Vec<char> = pattern.chars().collect();
+        let mut result = String::new();
+        let mut i = 0;
+        while i < chars.len() {
+            if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == 'x' {
+                let mut j = i + 2;
+                let mut val = 0u32;
+                let mut count = 0;
+                while j < chars.len() && count < 2 && chars[j].is_ascii_hexdigit() {
+                    val = val * 16 + chars[j].to_digit(16).unwrap();
+                    j += 1;
+                    count += 1;
+                }
+                if count > 0 {
+                    if let Some(c) = char::from_u32(val) {
+                        result.push(c);
+                    } else {
+                        result.push_str(&format!("\\x{{{val:X}}}"));
+                    }
+                    i = j;
+                    continue;
+                }
+            }
+            result.push(chars[i]);
+            i += 1;
+        }
+        result
     }
 
     /// Fix problematic character class patterns (e.g., [---] → [\-])
@@ -1248,8 +1485,26 @@ impl Interpreter {
         while i < chars.len() {
             if chars[i] == '\\' && i + 1 < chars.len() {
                 let next = chars[i + 1];
+                // Octal escape: \d, \dd, \ddd where each d is 0..=7. Rust's
+                // regex crate doesn't parse these; emit \x{HEX} instead so the
+                // same byte/char is matched.
+                if next.is_ascii_digit() && next <= '7' {
+                    let mut j = i + 1;
+                    let mut octal = 0u32;
+                    while j < chars.len()
+                        && j - i <= 3
+                        && chars[j].is_ascii_digit()
+                        && chars[j] <= '7'
+                    {
+                        octal = octal * 8 + (chars[j] as u32 - '0' as u32);
+                        j += 1;
+                    }
+                    result.push_str(&format!("\\x{{{octal:X}}}"));
+                    i = j;
+                    continue;
+                }
                 // Known regex escapes — pass through
-                if "dDwWsSbBtbnrfax01234567.^$*+?()[]{}|\\/".contains(next) {
+                if "dDwWsSbBtbnrfax.^$*+?()[]{}|\\/".contains(next) {
                     result.push(chars[i]);
                     i += 1;
                     result.push(chars[i]);
@@ -1264,18 +1519,43 @@ impl Interpreter {
                 // Character class — pass through until closing ]
                 result.push(chars[i]);
                 i += 1;
-                // Handle ] as first char in class
                 if i < chars.len() && chars[i] == '^' {
                     result.push(chars[i]);
                     i += 1;
                 }
+                // Record class_start now (position right after `[` or `[^`)
+                // so the at-start check used by dash handling reflects logical
+                // class content, not the escaped form of a leading `]`.
+                let class_start = result.len();
+                // `]` as the first character in a bracket class is literal in
+                // POSIX/awk (the class isn't empty, it matches `]`). Rust's
+                // regex crate reads `[]` as an empty class and errors, so
+                // escape the `]` explicitly.
                 if i < chars.len() && chars[i] == ']' {
-                    result.push(chars[i]);
+                    result.push('\\');
+                    result.push(']');
                     i += 1;
                 }
-                let class_start = result.len();
                 while i < chars.len() && chars[i] != ']' {
                     if chars[i] == '\\' && i + 1 < chars.len() {
+                        let next = chars[i + 1];
+                        // Octal escape inside a character class: convert to
+                        // \x{HEX} so the Rust regex crate accepts the class.
+                        if next.is_ascii_digit() && next <= '7' {
+                            let mut j = i + 1;
+                            let mut octal = 0u32;
+                            while j < chars.len()
+                                && j - i <= 3
+                                && chars[j].is_ascii_digit()
+                                && chars[j] <= '7'
+                            {
+                                octal = octal * 8 + (chars[j] as u32 - '0' as u32);
+                                j += 1;
+                            }
+                            result.push_str(&format!("\\x{{{octal:X}}}"));
+                            i = j;
+                            continue;
+                        }
                         result.push(chars[i]);
                         i += 1;
                         result.push(chars[i]);
@@ -1286,12 +1566,46 @@ impl Interpreter {
                         let at_end = i + 1 < chars.len() && chars[i + 1] == ']';
                         let after_dash = result.ends_with('-') || result.ends_with("\\-");
                         let before_dash = i + 1 < chars.len() && chars[i + 1] == '-';
-                        if at_start || at_end || after_dash || before_dash {
+                        // `[-X...]` or `[--X...]`: gawk treats a leading `-`
+                        // followed by another `-` and a non-`]` as the start
+                        // of a range whose low endpoint is `-` itself. Emit
+                        // the hex form so Rust's regex crate sees a plain
+                        // character (not an ambiguous/escaped `-`) and can
+                        // interpret the following `-X` as a range.
+                        if at_start && before_dash && i + 2 < chars.len() && chars[i + 2] != ']' {
+                            result.push_str("\\x{2D}");
+                            i += 1;
+                        } else if at_start || at_end || after_dash || before_dash {
                             result.push('\\');
                             result.push('-');
                             i += 1;
                         } else {
                             result.push(chars[i]);
+                            i += 1;
+                        }
+                    } else if chars[i] == '[' {
+                        // `[` inside a bracket class: literal in awk/POSIX.
+                        // Rust's regex crate requires it escaped — except when
+                        // it introduces a POSIX named class like `[:upper:]`,
+                        // in which case pass the whole class through verbatim.
+                        if chars.get(i + 1) == Some(&':') {
+                            // POSIX class: copy until `:]`
+                            result.push('[');
+                            i += 1;
+                            while i < chars.len() {
+                                result.push(chars[i]);
+                                if chars[i] == ']'
+                                    && result.len() >= 2
+                                    && result.as_bytes()[result.len() - 2] == b':'
+                                {
+                                    i += 1;
+                                    break;
+                                }
+                                i += 1;
+                            }
+                        } else {
+                            result.push('\\');
+                            result.push('[');
                             i += 1;
                         }
                     } else {
@@ -1417,7 +1731,8 @@ impl Interpreter {
                     self.array_params.insert(name.to_string());
                 }
                 // Check scalar-as-array conflict
-                if !self.arrays.contains_key(name) && self.scalar_params.contains(name) {
+                let name_resolved = self.resolve_array_name(name);
+                if !self.arrays.contains_key(&name_resolved) && self.scalar_params.contains(name) {
                     let kind = if self.current_params.contains(&name.to_string()) {
                         "scalar parameter"
                     } else {
@@ -1482,8 +1797,9 @@ impl Interpreter {
                 self.get_field(idx)
             }
             Expr::ArrayRef(name, indices) => {
+                let name_resolved = self.resolve_array_name(name);
                 // Check function-as-array
-                if self.functions.contains_key(name) && !self.arrays.contains_key(name) {
+                if self.functions.contains_key(name) && !self.arrays.contains_key(&name_resolved) {
                     eprintln!(
                         "awk: error: function `{name}' called with space between name and `(',"
                     );
@@ -1491,7 +1807,7 @@ impl Interpreter {
                     std::process::exit(1);
                 }
                 // Check scalar-as-array (including params tracked as scalar)
-                if !self.arrays.contains_key(name) {
+                if !self.arrays.contains_key(&name_resolved) {
                     let is_scalar_param = self.scalar_params.contains(name);
                     let is_scalar_global = (self.globals.contains_key(name)
                         && !matches!(self.globals.get(name), Some(Value::Uninitialized)))
@@ -1530,7 +1846,11 @@ impl Interpreter {
                 let key = self.array_key(&vals);
                 // Auto-vivify: reading an array element creates it
                 let val = self.get_array(name, &key);
-                if !self.arrays.get(name).is_some_and(|a| a.contains_key(&key)) {
+                if !self
+                    .arrays
+                    .get(&name_resolved)
+                    .is_some_and(|a| a.contains_key(&key))
+                {
                     self.set_array(name, &key, Value::Uninitialized);
                 }
                 val
@@ -1774,8 +2094,9 @@ impl Interpreter {
                     }
                     self.array_params.insert(array.to_string());
                 }
+                let array_resolved = self.resolve_array_name(array);
                 // Check scalar-as-array
-                if !self.arrays.contains_key(array)
+                if !self.arrays.contains_key(&array_resolved)
                     && self.globals.contains_key(array)
                     && !matches!(self.globals.get(array), Some(Value::Uninitialized))
                 {
@@ -1783,13 +2104,20 @@ impl Interpreter {
                     std::process::exit(2);
                 }
                 let key = self.eval_expr(expr).to_string_val();
-                let exists = self.arrays.get(array).is_some_and(|a| a.contains_key(&key));
+                let exists = self
+                    .arrays
+                    .get(&array_resolved)
+                    .is_some_and(|a| a.contains_key(&key));
                 Value::Num(if exists { 1.0 } else { 0.0 })
             }
             Expr::MultiIn(indices, array) => {
                 let vals: Vec<Value> = indices.iter().map(|i| self.eval_expr(i)).collect();
                 let key = self.array_key(&vals);
-                let exists = self.arrays.get(array).is_some_and(|a| a.contains_key(&key));
+                let array_resolved = self.resolve_array_name(array);
+                let exists = self
+                    .arrays
+                    .get(&array_resolved)
+                    .is_some_and(|a| a.contains_key(&key));
                 Value::Num(if exists { 1.0 } else { 0.0 })
             }
             Expr::FuncCall(name, args) => self.call_function(name, args),
@@ -1830,10 +2158,11 @@ impl Interpreter {
                     return Value::Num(self.get_field(0).to_string_val().len() as f64);
                 }
                 // Check if argument is an array name
-                if let Some(Expr::Var(arr_name)) = args.first()
-                    && self.arrays.contains_key(arr_name)
-                {
-                    return Value::Num(self.arrays[arr_name].len() as f64);
+                if let Some(Expr::Var(arr_name)) = args.first() {
+                    let resolved = self.resolve_array_name(arr_name);
+                    if self.arrays.contains_key(&resolved) {
+                        return Value::Num(self.arrays[&resolved].len() as f64);
+                    }
                 }
                 let v = self.eval_expr(&args[0]);
                 Value::Num(v.to_string_val().len() as f64)
@@ -1899,8 +2228,10 @@ impl Interpreter {
                     )
                 };
 
-                // Clear the array
-                self.arrays.remove(&arr_name);
+                // Clear the array (resolve alias so split() on a passed-by-ref
+                // array param clears the caller's storage, not a stale slot)
+                let arr_resolved = self.resolve_array_name(&arr_name);
+                self.arrays.remove(&arr_resolved);
 
                 let parts: Vec<String> = if !is_regex && fs == " " {
                     s.split_whitespace().map(|p| p.to_string()).collect()
@@ -2066,7 +2397,8 @@ impl Interpreter {
                             self.set_var("RLENGTH", Value::Num(length as f64));
                             // Populate capture array if provided
                             if let Some(ref arr) = arr_name {
-                                self.arrays.remove(arr);
+                                let arr_resolved = self.resolve_array_name(arr);
+                                self.arrays.remove(&arr_resolved);
                                 // arr[0] = entire match
                                 self.set_array(arr, "0", Value::Str(m.as_str().to_string()));
                                 // arr[1..n] = capture groups
@@ -2085,7 +2417,8 @@ impl Interpreter {
                             self.set_var("RSTART", Value::Num(0.0));
                             self.set_var("RLENGTH", Value::Num(-1.0));
                             if let Some(ref arr) = arr_name {
-                                self.arrays.remove(arr);
+                                let arr_resolved = self.resolve_array_name(arr);
+                                self.arrays.remove(&arr_resolved);
                             }
                             Value::Num(0.0)
                         }
@@ -2266,10 +2599,11 @@ impl Interpreter {
                     return Value::Str("uninitialized".to_string());
                 }
                 // Check if arg is an array name
-                if let Expr::Var(name) = &args[0]
-                    && self.arrays.contains_key(name)
-                {
-                    return Value::Str("array".to_string());
+                if let Expr::Var(name) = &args[0] {
+                    let resolved = self.resolve_array_name(name);
+                    if self.arrays.contains_key(&resolved) {
+                        return Value::Str("array".to_string());
+                    }
                 }
                 let val = self.eval_expr(&args[0]);
                 let t = match &val {
@@ -2297,7 +2631,8 @@ impl Interpreter {
                     arr_name.clone()
                 };
 
-                let arr = match self.arrays.get(&arr_name) {
+                let arr_resolved = self.resolve_array_name(&arr_name);
+                let arr = match self.arrays.get(&arr_resolved) {
                     Some(a) => a.clone(),
                     None => return Value::Num(0.0),
                 };
@@ -2323,59 +2658,106 @@ impl Interpreter {
                         new_arr.insert((i + 1).to_string(), Value::Str(key));
                     }
                 }
-                self.arrays.insert(dest_name, new_arr);
+                let dest_resolved = self.resolve_array_name(&dest_name);
+                self.arrays.insert(dest_resolved, new_arr);
                 Value::Num(count as f64)
             }
             _ => {
                 // User-defined function
                 let func = self.functions.get(name).cloned();
                 if let Some(func) = func {
-                    // Save and set up local scope
                     let mut saved_vars: Vec<(String, Option<Value>)> = Vec::new();
                     let mut saved_arrays: Vec<(String, Option<HashMap<String, Value>>)> =
                         Vec::new();
 
-                    // Collect argument info
+                    // Collect argument info. Resolve each Var arg through the
+                    // current frame's alias map so array args arriving as
+                    // already-aliased params are detected and their canonical
+                    // storage name is recorded.
                     let mut arg_vals: Vec<Value> = Vec::new();
                     let mut arg_var_names: Vec<Option<String>> = Vec::new();
+                    let mut arg_canonical: Vec<Option<String>> = Vec::new();
                     let mut arg_was_array: Vec<bool> = Vec::new();
                     for arg in args {
                         if let Expr::Var(var_name) = arg {
-                            let is_array = self.arrays.contains_key(var_name);
-                            if is_array {
+                            let canonical = self.resolve_array_name(var_name);
+                            let is_array = self.arrays.contains_key(&canonical);
+                            // Uninitialized variables also pass by reference:
+                            // if the callee uses the param as an array, the
+                            // caller's variable must be promoted to an array,
+                            // which requires shared storage (awk semantics).
+                            let is_definite_scalar = self
+                                .globals
+                                .get(var_name)
+                                .is_some_and(|v| !matches!(v, Value::Uninitialized));
+                            let passes_by_ref = is_array || !is_definite_scalar;
+                            if passes_by_ref {
                                 arg_vals.push(Value::Uninitialized);
+                                arg_canonical.push(Some(canonical));
                             } else {
                                 arg_vals.push(self.get_var(var_name));
+                                arg_canonical.push(None);
                             }
                             arg_var_names.push(Some(var_name.clone()));
-                            arg_was_array.push(is_array);
+                            arg_was_array.push(passes_by_ref);
                         } else {
                             arg_vals.push(self.eval_expr(arg));
                             arg_var_names.push(None);
+                            arg_canonical.push(None);
                             arg_was_array.push(false);
                         }
                     }
 
-                    for (i, param) in func.params.iter().enumerate() {
-                        // Save old value
-                        saved_vars.push((param.clone(), self.globals.remove(param)));
-                        saved_arrays.push((param.clone(), self.arrays.remove(param)));
+                    // Swap in a fresh alias map for this frame. Multiple params
+                    // sharing the same caller-side array all alias to the same
+                    // canonical name, so writes via any param are seen by all.
+                    let saved_aliases = std::mem::take(&mut self.array_aliases);
+                    let mut new_aliases: HashMap<String, String> = HashMap::new();
 
+                    // First pass: decide aliases, so the scalar-slot handling
+                    // in the second pass can tell when a param name is a
+                    // canonical alias target that must not be shadowed in
+                    // `self.arrays`.
+                    for (i, param) in func.params.iter().enumerate() {
+                        if arg_was_array.get(i).copied().unwrap_or(false)
+                            && let Some(canonical) = arg_canonical.get(i).and_then(|c| c.as_ref())
+                            && param != canonical
+                        {
+                            new_aliases.insert(param.clone(), canonical.clone());
+                        }
+                    }
+                    let alias_targets: std::collections::HashSet<String> =
+                        new_aliases.values().cloned().collect();
+
+                    for (i, param) in func.params.iter().enumerate() {
+                        // Always save the scalar slot — the param shadows any
+                        // global with the same name.
+                        saved_vars.push((param.clone(), self.globals.remove(param)));
+
+                        if arg_was_array.get(i).copied().unwrap_or(false) {
+                            // Array by reference: alias already recorded (or
+                            // skipped as a self-alias). No scratch storage to
+                            // allocate — the canonical slot is the caller's.
+                            continue;
+                        }
+
+                        // Scalar param: save the array slot too so any local
+                        // array vivification (`param[k] = v`) is cleared on
+                        // return instead of leaking into the caller's scope.
+                        // Skip this when the param's name coincides with a
+                        // canonical alias target (a sibling array param aliases
+                        // to it), since removing that storage would orphan the
+                        // alias.
+                        if !alias_targets.contains(param) {
+                            saved_arrays.push((param.clone(), self.arrays.remove(param)));
+                        }
                         if i < arg_vals.len() {
-                            // Check if this arg is a variable with an array
-                            if let Some(Some(var_name)) = arg_var_names.get(i)
-                                && let Some(arr) = self.arrays.get(var_name).cloned()
-                            {
-                                // Pass array by reference
-                                self.arrays.insert(param.clone(), arr);
-                                continue;
-                            }
                             self.set_var(param, arg_vals[i].clone());
                         } else {
-                            // Extra params are local variables, initialized to 0/""
                             self.set_var(param, Value::Uninitialized);
                         }
                     }
+                    self.array_aliases = new_aliases;
 
                     let saved_params =
                         std::mem::replace(&mut self.current_params, func.params.clone());
@@ -2396,9 +2778,15 @@ impl Interpreter {
                             }
                         }
                     }
-                    // Pre-mark params that received arrays
+                    // Pre-mark params that received actual arrays. Uninit
+                    // vars pass by reference too but haven't committed to
+                    // being arrays — only mark when the caller's storage
+                    // already exists, so scalar usage of the param inside
+                    // the function isn't spuriously flagged as a conflict.
                     for (i, param) in func.params.iter().enumerate() {
-                        if arg_was_array.get(i).copied().unwrap_or(false) {
+                        if let Some(Some(canonical)) = arg_canonical.get(i)
+                            && self.arrays.contains_key(canonical)
+                        {
                             self.array_params.insert(param.clone());
                         }
                     }
@@ -2419,25 +2807,7 @@ impl Interpreter {
                     self.scalar_params = saved_scalar_params;
                     self.array_params = saved_array_params;
                     self.param_origins = saved_param_origins;
-
-                    // Save param state BEFORE restoring scope (for copy-back)
-                    let mut arr_copyback: Vec<(String, Option<HashMap<String, Value>>)> =
-                        Vec::new();
-                    for (i, _arg) in args.iter().enumerate() {
-                        if let Some(Some(orig_name)) = arg_var_names.get(i)
-                            && let Some(param) = func.params.get(i)
-                        {
-                            let param_has_array = self.arrays.contains_key(param);
-                            let was_array = arg_was_array.get(i).copied().unwrap_or(false);
-                            if was_array
-                                || (param_has_array
-                                    && (param == orig_name || !self.arrays.contains_key(orig_name)))
-                            {
-                                let arr = self.arrays.get(param).cloned();
-                                arr_copyback.push((orig_name.clone(), arr));
-                            }
-                        }
-                    }
+                    self.array_aliases = saved_aliases;
 
                     // Restore scope
                     for (name, old_val) in saved_vars {
@@ -2450,15 +2820,6 @@ impl Interpreter {
                         self.arrays.remove(&name);
                         if let Some(arr) = old_arr {
                             self.arrays.insert(name, arr);
-                        }
-                    }
-
-                    // Copy back arrays AFTER restoring scope
-                    for (orig_name, arr_opt) in arr_copyback {
-                        if let Some(arr) = arr_opt {
-                            self.arrays.insert(orig_name, arr);
-                        } else {
-                            self.arrays.remove(&orig_name);
                         }
                     }
                     result

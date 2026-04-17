@@ -593,9 +593,11 @@ impl Parser {
         let expr = self.parse_ternary();
         match self.peek() {
             Token::Assign => {
-                self.check_lvalue(&expr);
                 self.advance();
                 let rhs = self.parse_assignment();
+                // Report lvalue errors at the token following the rhs (e.g. `;`
+                // or newline) to match gawk's caret position.
+                self.check_lvalue(&expr);
                 Expr::Assign(Box::new(expr), Box::new(rhs))
             }
             Token::PlusAssign => {

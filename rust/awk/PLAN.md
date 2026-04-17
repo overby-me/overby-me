@@ -2,22 +2,27 @@
 
 ## Current Status
 
-**222/242 tests passing** (92%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
+**235/242 tests passing** (97%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
 
-Up from 104 at the start (+118 tests, +49 percentage points).
+Up from 104 at the start (+131 tests, +54 percentage points).
 
-### Remaining failures (20 tests)
+### Remaining failures (7 tests)
 
-- **Array aliasing (~2)**: Need true reference semantics (arryref2, aryprm8)
-- **Regex (~5)**: Rust vs POSIX regex differences (rebrackloc, rebt8b1, regexpbrack, regrange, range2)
-- **Record separator (~3)**: RS="" paragraph mode, RT variable (rsnullre, rsnulw, rstest5)
-- **Error format (~3)**: Column position mismatches (badassign1, getlnfa), multi-error (gsubasgn)
-- **I/O (~3)**: UTF-8 source (getnr2tm), binary input (trailbs), locale-dependent (gsubnulli18n)
-- **Parser (~2)**: $$a++++ double-eval (parse1), $/= regex ambiguity (parsefld)
-- **Other (~2)**: Compile-time div-by-zero (divzero), different PRNG (rand)
+- **Regex (1)**: Non-UTF-8 source file (rebt8b1)
+- **Error format (1)**: Column position mismatch (getlnfa)
+- **I/O (3)**: UTF-8 source (getnr2tm), binary input (trailbs), locale-dependent (gsubnulli18n)
+- **Parser (1)**: $/= regex ambiguity (parsefld)
+- **Other (1)**: different PRNG (rand)
 
 ### Recent fixes
 
+- `cmd | getline` honors non-default RS by caching the full pipe output on first access and splitting it by the current RS. Subsequent getlines on the same command advance through the cached records, so paragraph-mode reads see every paragraph instead of just the first line (rstest5)
+- Shared record-splitter `split_by_rs()` extracted from `process_stream`, now reused by the pipe-getline path
+- RS splitting tracks the matched separator per record and populates `RT`. Paragraph mode (`RS=""`) skips leading newlines, keeps trailing newline as the last record's `RT`, and uses a `\n\n+` regex for separator detection. Zero-width regex RS (e.g. `RS="()"`) is treated as no-split — whole input becomes one record with `RT=""`. The old trailing-empty-record drop was dead-ended; it was also discarding legitimate empty final records on inputs that end with a blank line (rsnullre, rsnulw, rsnul1nl; no regression on swaplns)
+- Bracket/class regex compatibility: `\` followed by 1–3 octal digits expands to `\x{HEX}` (accepts `[\300-\337]`); `\xHH` hex escapes expand to the literal char *before* bracket parsing (preserves gawk's rejection of patterns like `/[^[]\x5b/`); `[` inside a class is auto-escaped except when it introduces a POSIX named class like `[[:upper:]]`; leading `]` in a class becomes `\]` (POSIX literal-first); leading `-` followed by `-X` emits `\x{2D}` so the range interpretation survives; POSIX single-char collating elements `[.c.]` rewrite to `c` (range2, rebrackloc, regexpbad, regexpbrack, regrange)
+- Lexer regex literal tracks bracket-class state — `/` inside `[…]` no longer terminates the regex, and a leading `]` (or `]` after `^`) stays literal (regexpbrack)
+- Array reference semantics via per-frame alias map — multiple function parameters sharing a caller's array now see each other's writes, and uninitialized vars passed by reference promote to arrays in the caller (aryprm8, arryref2, plus siblings)
+- Lvalue check for field post-increment assignment reports caret at the end of the rhs expression (badassign1)
 - Syntax error reporting with source line and column position (parseme, noparms, synerr1-3)
 - Function-as-array/variable detection (delfunc, fnarray, fnarray2, fnamedat, fnasgnm, gsubasgn target)
 - gsub/sub backslash handling: `\\` at end preserved, `\\&` → `\` + matched (backgsub, subback)

@@ -282,10 +282,17 @@ impl Lexer {
         let mut s = String::new();
         // skip opening /
         self.advance();
+        // Track whether we're inside a bracket character class. A `/` inside
+        // `[...]` is a literal, not the regex terminator. POSIX treats `]` as
+        // literal when it appears as the first character (or immediately
+        // after `^`), so we count content characters and only let `]` close
+        // the class after at least one character has been seen inside.
+        let mut in_class = false;
+        let mut class_chars = 0usize;
         while let Some(ch) = self.advance() {
             if ch == '\\' {
                 if let Some(next) = self.advance() {
-                    if next == '/' {
+                    if next == '/' && !in_class {
                         s.push('/');
                     } else {
                         // Warn about unknown regex escapes at parse time (like gawk)
@@ -302,12 +309,31 @@ impl Lexer {
                         }
                         s.push('\\');
                         s.push(next);
+                        if in_class {
+                            class_chars += 1;
+                        }
                     }
                 }
-            } else if ch == '/' {
+            } else if ch == '[' && !in_class {
+                in_class = true;
+                class_chars = 0;
+                s.push(ch);
+                // Allow leading `^` without counting toward class_chars, so a
+                // following `]` stays literal.
+                if let Some('^') = self.peek() {
+                    s.push('^');
+                    self.advance();
+                }
+            } else if ch == ']' && in_class && class_chars > 0 {
+                in_class = false;
+                s.push(ch);
+            } else if ch == '/' && !in_class {
                 break;
             } else {
                 s.push(ch);
+                if in_class {
+                    class_chars += 1;
+                }
             }
         }
         s
