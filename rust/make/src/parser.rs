@@ -361,7 +361,6 @@ impl Parser {
         let else_body = if self.peek().map(|l| l.trim().starts_with("else")) == Some(true) {
             let else_line = self.advance().unwrap();
             let else_trimmed = else_line.trim();
-            // Check for else ifeq / else ifdef etc.
             let rest = else_trimmed.strip_prefix("else").unwrap().trim();
             if rest.starts_with("ifdef ")
                 || rest.starts_with("ifndef ")
@@ -370,22 +369,24 @@ impl Parser {
                 || rest.starts_with("ifneq ")
                 || rest.starts_with("ifneq(")
             {
-                // Nested conditional in else branch — re-parse as a conditional
-                let nested_kind = parse_cond_kind(rest)?;
-                let nested_then = self.parse_body(&["else", "endif"])?;
-                let nested_else = if self.peek().map(|l| l.trim().starts_with("else")) == Some(true)
-                {
-                    self.advance();
-                    Some(self.parse_body(&["endif"])?)
-                } else {
-                    None
-                };
-                self.expect_line("endif")?;
-                Some(vec![Directive::Conditional(Conditional {
-                    kind: nested_kind,
-                    then_body: nested_then,
-                    else_body: nested_else,
-                })])
+                // `else ifX …` chains to another conditional. Re-feed
+                // the line (sans the `else ` prefix) into
+                // `parse_conditional` which handles the remainder
+                // including any further `else if…` / `else` branches
+                // and the terminating `endif`.
+                let reparsed = rest.to_string();
+                // Replace the consumed line with the rewritten form so
+                // parse_conditional sees it via peek/advance.
+                self.lines.insert(self.pos, reparsed);
+                self.line_nos.insert(
+                    self.pos,
+                    self.line_nos
+                        .get(self.pos.saturating_sub(1))
+                        .copied()
+                        .unwrap_or(0),
+                );
+                let nested = self.parse_conditional()?;
+                Some(vec![nested])
             } else {
                 let body = self.parse_body(&["endif"])?;
                 self.expect_line("endif")?;
