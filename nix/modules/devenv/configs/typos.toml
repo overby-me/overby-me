@@ -47,7 +47,38 @@ extend-ignore-re = [
   "oif",
   "GOST",
   "Gost",
+  # GNU tar upstream test names (tests/extrac*.at in tar-1.35)
+  "extrac[0-9]+",
+  "extrac\\*",
 ]
+
+[default.extend-identifiers]
+# GNU tar upstream test names (tests/extrac*.at in tar-1.35) — not typos.
+extrac01 = "extrac01"
+extrac02 = "extrac02"
+extrac03 = "extrac03"
+extrac04 = "extrac04"
+extrac05 = "extrac05"
+extrac06 = "extrac06"
+extrac07 = "extrac07"
+extrac08 = "extrac08"
+extrac09 = "extrac09"
+extrac10 = "extrac10"
+extrac11 = "extrac11"
+extrac12 = "extrac12"
+extrac13 = "extrac13"
+extrac14 = "extrac14"
+extrac15 = "extrac15"
+extrac16 = "extrac16"
+extrac17 = "extrac17"
+extrac18 = "extrac18"
+extrac19 = "extrac19"
+extrac20 = "extrac20"
+extrac21 = "extrac21"
+extrac22 = "extrac22"
+extrac23 = "extrac23"
+extrac24 = "extrac24"
+extrac25 = "extrac25"
 
 [files]
 extend-exclude = [
