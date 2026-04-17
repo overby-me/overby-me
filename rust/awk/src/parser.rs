@@ -715,6 +715,16 @@ impl Parser {
         Expr::Binop(Box::new(left), op, Box::new(right))
     }
 
+    fn contains_getline(expr: &Expr) -> bool {
+        match expr {
+            Expr::Getline(..) => true,
+            Expr::PostIncrement(inner) | Expr::PostDecrement(inner) => {
+                Self::contains_getline(inner)
+            }
+            _ => false,
+        }
+    }
+
     fn parse_concatenation(&mut self) -> Expr {
         let mut left = self.parse_addition();
 
@@ -727,8 +737,23 @@ impl Parser {
         | Token::LParen
         | Token::Not
         | Token::Increment
-        | Token::Decrement = self.peek()
+        | Token::Decrement
+        | Token::Regex(_) = self.peek()
         {
+            // A third `++`/`--` after a `getline <target>++` has no valid
+            // parse in gawk. Error immediately so the caret lands on the
+            // offending token.
+            if matches!(self.peek(), Token::Increment | Token::Decrement)
+                && matches!(
+                    &left,
+                    Expr::Getline(..)
+                        | Expr::PostIncrement(_)
+                        | Expr::PostDecrement(_)
+                )
+                && Self::contains_getline(&left)
+            {
+                self.syntax_error_at_current();
+            }
             let right = self.parse_addition();
             left = Expr::Concat(Box::new(left), Box::new(right));
         }
@@ -786,10 +811,24 @@ impl Parser {
 
     fn parse_getline_var(&mut self) -> Option<Box<Expr>> {
         if matches!(self.peek(), Token::Dollar) {
-            // $expr as getline target
+            // $expr as getline target. gawk's grammar allows one optional
+            // post-increment/decrement on this target (`opt_incdec` in the
+            // `$ non_post_simp_exp opt_incdec` production).
             self.advance(); // $
             let expr = self.parse_primary();
-            return Some(Box::new(Expr::FieldRef(Box::new(expr))));
+            let mut target: Expr = Expr::FieldRef(Box::new(expr));
+            match self.peek() {
+                Token::Increment => {
+                    self.advance();
+                    target = Expr::PostIncrement(Box::new(target));
+                }
+                Token::Decrement => {
+                    self.advance();
+                    target = Expr::PostDecrement(Box::new(target));
+                }
+                _ => {}
+            }
+            return Some(Box::new(target));
         }
         if matches!(self.peek(), Token::Ident(_)) {
             let saved = self.pos;
@@ -905,15 +944,30 @@ impl Parser {
 
     fn parse_postfix(&mut self) -> Expr {
         let mut expr = self.parse_primary();
+        let mut getline_postinc_done = matches!(&expr, Expr::Getline(_, _, _));
         loop {
             match self.peek() {
                 Token::Increment => {
+                    if getline_postinc_done
+                        && matches!(&expr, Expr::PostIncrement(inner)
+                            if matches!(inner.as_ref(), Expr::Getline(_, _, _)))
+                    {
+                        break;
+                    }
                     self.advance();
                     expr = Expr::PostIncrement(Box::new(expr));
+                    getline_postinc_done = true;
                 }
                 Token::Decrement => {
+                    if getline_postinc_done
+                        && matches!(&expr, Expr::PostDecrement(inner)
+                            if matches!(inner.as_ref(), Expr::Getline(_, _, _)))
+                    {
+                        break;
+                    }
                     self.advance();
                     expr = Expr::PostDecrement(Box::new(expr));
+                    getline_postinc_done = true;
                 }
                 Token::LBracket => {
                     if let Expr::Var(name) = expr {

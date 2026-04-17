@@ -59,8 +59,12 @@ fn main() {
             "-f" => {
                 i += 1;
                 if i < args.len() {
-                    match fs::read_to_string(&args[i]) {
-                        Ok(content) => {
+                    // Read as bytes and map to a Latin-1-style Rust string so
+                    // non-UTF-8 source files round-trip byte-for-byte through
+                    // the lexer/parser and back out via `write_awk`.
+                    match fs::read(&args[i]) {
+                        Ok(bytes) => {
+                            let content = interpreter::bytes_to_string(&bytes);
                             if !program_text.is_empty() {
                                 program_text.push('\n');
                             }

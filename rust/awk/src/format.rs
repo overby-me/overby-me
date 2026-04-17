@@ -420,9 +420,17 @@ pub fn sprintf_impl_with_convfmt(vals: &[Value], convfmt: &str) -> String {
                 _ => format!("%{conv}"),
             };
 
-            // Apply width padding
-            if width_num > 0 && formatted.len() < width_num {
-                let pad = width_num - formatted.len();
+            // Apply width padding. For %s, count characters rather than
+            // bytes so non-ASCII input (e.g. a U+FFFD from lossy-decoded
+            // source) pads to the same visual width as gawk's byte count
+            // on the original bytes.
+            let formatted_width = if conv == 's' || conv == 'c' {
+                formatted.chars().count()
+            } else {
+                formatted.len()
+            };
+            if width_num > 0 && formatted_width < width_num {
+                let pad = width_num - formatted_width;
                 if left_align {
                     result.push_str(&formatted);
                     for _ in 0..pad {

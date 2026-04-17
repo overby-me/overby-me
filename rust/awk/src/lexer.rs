@@ -279,14 +279,93 @@ impl Lexer {
     }
 
     fn read_regex(&mut self) -> String {
-        let mut s = String::new();
         // skip opening /
         self.advance();
-        // Track whether we're inside a bracket character class. A `/` inside
-        // `[...]` is a literal, not the regex terminator. POSIX treats `]` as
-        // literal when it appears as the first character (or immediately
-        // after `^`), so we count content characters and only let `]` close
-        // the class after at least one character has been seen inside.
+        self.read_regex_body()
+    }
+
+    /// Look-ahead heuristic for the ambiguous `/=` case: at the current
+    /// position we've just consumed a `/` and the next char is `=`. Return
+    /// true if we think this is actually a regex literal like `/=…/` rather
+    /// than a compound-assignment operator. Heuristic: the previous token
+    /// must be one that can plausibly be concatenated with a regex (an
+    /// identifier/number/etc.), *and* a closing `/` must appear before any
+    /// statement terminator (`;`, `}`, newline, EOF). Otherwise treat as
+    /// `/=`. This mirrors gawk's want_regexp disambiguation just narrowly
+    /// enough to handle patterns like `print c /= d/`.
+    fn slash_eq_looks_like_regex(&self) -> bool {
+        // Only kick in for tokens where concatenation with a regex is the
+        // plausible reading — otherwise normal `/=` compound assignment wins.
+        fn is_value_token(t: &Token) -> bool {
+            matches!(
+                t,
+                Token::Ident(_)
+                    | Token::RParen
+                    | Token::RBracket
+                    | Token::Number(_)
+                    | Token::StringLit(_)
+                    | Token::Regex(_)
+            )
+        }
+        // Need the previous token to be a value…
+        let n = self.tokens.len();
+        if n == 0 || !is_value_token(&self.tokens[n - 1]) {
+            return false;
+        }
+        // …and the token before that to also be a value, so we're clearly
+        // inside a concatenation chain (e.g. `print $re c /= d/`) rather
+        // than the start of a compound assignment (e.g. `print c /= d`).
+        if n < 2 || !is_value_token(&self.tokens[n - 2]) {
+            return false;
+        }
+        // Scan forward for a closing `/` before any statement terminator.
+        // Respect bracket classes (a `/` inside `[...]` is literal).
+        let mut i = self.pos; // currently pointing at `=`
+        if self.input.get(i) != Some(&'=') {
+            return false;
+        }
+        i += 1;
+        let mut in_class = false;
+        let mut class_chars = 0usize;
+        while i < self.input.len() {
+            let ch = self.input[i];
+            match ch {
+                '\\' => {
+                    i += 2;
+                    if in_class {
+                        class_chars += 1;
+                    }
+                    continue;
+                }
+                '[' if !in_class => {
+                    in_class = true;
+                    class_chars = 0;
+                    if self.input.get(i + 1) == Some(&'^') {
+                        i += 1;
+                    }
+                }
+                ']' if in_class && class_chars > 0 => {
+                    in_class = false;
+                }
+                '/' if !in_class => return true,
+                '\n' | ';' | '}' if !in_class => return false,
+                _ => {
+                    if in_class {
+                        class_chars += 1;
+                    }
+                }
+            }
+            i += 1;
+        }
+        false
+    }
+
+    /// Read the body of a regex literal up to (and including) the closing
+    /// `/`, starting from the current position (i.e. the opening `/` must
+    /// have been consumed already). Handles bracket classes so `/` inside
+    /// `[...]` is literal, and `]` as the first char of a class is literal.
+    fn read_regex_body(&mut self) -> String {
+        let mut s = String::new();
         let mut in_class = false;
         let mut class_chars = 0usize;
         while let Some(ch) = self.advance() {
@@ -434,6 +513,10 @@ impl Lexer {
                     | Token::Colon
                     | Token::Question
                     | Token::Dollar
+                    | Token::Plus
+                    | Token::Minus
+                    | Token::Star
+                    | Token::Percent
             )
         } else {
             true // beginning of input
@@ -528,8 +611,25 @@ impl Lexer {
                 '/' => {
                     self.advance();
                     if self.peek() == Some('=') {
-                        self.advance();
-                        Token::SlashAssign
+                        // `/=` after an expression-like token is ambiguous:
+                        // it could be a compound `/= b` assignment, or the
+                        // start of a regex literal like `/= b/` whose first
+                        // content character happens to be `=`. gawk
+                        // disambiguates via parser look-ahead (want_regexp).
+                        // We approximate: if the previous token was an
+                        // identifier/close-paren/… and there's a matching `/`
+                        // before any statement terminator, treat this as a
+                        // regex whose content starts with `=`. Otherwise
+                        // emit SlashAssign.
+                        if self.slash_eq_looks_like_regex() {
+                            self.advance(); // consume '='
+                            let mut content = String::from("=");
+                            content.push_str(&self.read_regex_body());
+                            Token::Regex(content)
+                        } else {
+                            self.advance();
+                            Token::SlashAssign
+                        }
                     } else {
                         Token::Slash
                     }

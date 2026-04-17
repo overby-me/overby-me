@@ -8,6 +8,139 @@ use crate::ast::*;
 use crate::format::{awk_replace, gensub_replace, sprintf_impl_with_convfmt};
 use crate::value::{ControlFlow, Value, compare_values};
 
+/// Port of gawk's bundled BSD random() (support/random.c). Produces the same
+/// sequence gawk does for a given `srand(seed)`, so awk programs whose output
+/// depends on `rand()` match bit-for-bit. TYPE_4 only (the variant gawk uses
+/// via its 256-byte state buffer).
+struct GawkRng {
+    state: Vec<u32>, // size = DEG + 1; `state[0..DEG]` is active, extra slot is unused but keeps indexing with end_ptr simple
+    fptr: usize,
+    rptr: usize,
+    end: usize,
+    shuffle_buffer: Vec<i64>,
+    shuffle_init: bool,
+    shuffle_s: i64,
+}
+
+impl GawkRng {
+    const DEG: usize = 63;
+    const SEP: usize = 1;
+    const SHUFFLE_MAX: usize = 512;
+    const SHUFFLE_MASK: i64 = 511;
+
+    fn new() -> Self {
+        let mut rng = GawkRng {
+            state: vec![0u32; Self::DEG + 1],
+            fptr: Self::SEP,
+            rptr: 0,
+            end: Self::DEG,
+            shuffle_buffer: vec![0i64; Self::SHUFFLE_MAX],
+            shuffle_init: true,
+            shuffle_s: 0xcafefeed_i64,
+        };
+        // gawk initializes with srand(1) on first use.
+        rng.srand(1);
+        rng
+    }
+
+    fn good_rand(x: i32) -> u32 {
+        let mut x = if x == 0 { 123_459_876 } else { x };
+        let hi = x / 127_773;
+        let lo = x % 127_773;
+        x = 16807_i32.wrapping_mul(lo).wrapping_sub(2836_i32.wrapping_mul(hi));
+        if x < 0 {
+            x = x.wrapping_add(0x7fff_ffff);
+        }
+        x as u32
+    }
+
+    fn random_old(&mut self) -> i64 {
+        self.state[self.fptr] = self.state[self.fptr].wrapping_add(self.state[self.rptr]);
+        let i = ((self.state[self.fptr] >> 1) & 0x7fff_ffff) as i64;
+        self.fptr += 1;
+        if self.fptr >= self.end {
+            self.fptr = 0;
+            self.rptr += 1;
+        } else {
+            self.rptr += 1;
+            if self.rptr >= self.end {
+                self.rptr = 0;
+            }
+        }
+        i
+    }
+
+    fn random(&mut self) -> i64 {
+        if self.shuffle_init {
+            for k in 0..Self::SHUFFLE_MAX {
+                self.shuffle_buffer[k] = self.random_old();
+            }
+            self.shuffle_s = self.random_old();
+            self.shuffle_init = false;
+        }
+        let r = self.random_old();
+        let k = (self.shuffle_s & Self::SHUFFLE_MASK) as usize;
+        let result = self.shuffle_buffer[k];
+        self.shuffle_buffer[k] = r;
+        self.shuffle_s = result;
+        result
+    }
+
+    fn srand(&mut self, seed: u64) {
+        self.shuffle_init = true;
+        self.state[0] = seed as u32;
+        for i in 1..Self::DEG {
+            self.state[i] = Self::good_rand(self.state[i - 1] as i32);
+        }
+        self.fptr = Self::SEP;
+        self.rptr = 0;
+        let lim = 10 * Self::DEG;
+        for _ in 0..lim {
+            let _ = self.random();
+        }
+    }
+
+    /// Draws a number in `[0, 1)` the same way gawk's `rand()` does: two
+    /// successive `random()` values combined to fill more mantissa bits.
+    fn next_f64(&mut self) -> f64 {
+        const DIVISOR: f64 = 2_147_483_648.0; // 2^31
+        loop {
+            let d1 = self.random() as f64;
+            let d2 = self.random() as f64;
+            let mut t = 0.5 + (d1 / DIVISOR + d2) / DIVISOR;
+            t -= 0.5;
+            if t != 1.0 {
+                return t;
+            }
+        }
+    }
+}
+
+/// Write an awk string to a byte sink. Each Unicode scalar U+0000..=U+00FF is
+/// emitted as a single byte so data that entered the interpreter as raw bytes
+/// (via [`bytes_to_string`]) round-trips byte-for-byte. Higher code points are
+/// emitted as UTF-8 so intentionally-Unicode strings still render correctly.
+fn write_awk<W: Write>(w: &mut W, s: &str) -> io::Result<()> {
+    for c in s.chars() {
+        let code = c as u32;
+        if code < 0x100 {
+            w.write_all(&[code as u8])?;
+        } else {
+            let mut buf = [0u8; 4];
+            let encoded = c.encode_utf8(&mut buf);
+            w.write_all(encoded.as_bytes())?;
+        }
+    }
+    Ok(())
+}
+
+/// Decode raw input bytes to a Rust string using Latin-1 mapping (byte `b` →
+/// char `U+00xx`). This is the inverse of [`write_awk`] and ensures that
+/// non-UTF-8 sources and input can flow through the interpreter without loss.
+pub fn bytes_to_string(bytes: &[u8]) -> String {
+    bytes.iter().map(|&b| b as char).collect()
+}
+
 struct PipeRecordState {
     records: Vec<String>,
     terminators: Vec<String>,
@@ -30,6 +163,10 @@ pub struct Interpreter {
     /// Child processes for pipes, keyed by command string
     pipe_children: HashMap<String, std::process::Child>,
     pub rng_state: u64,
+    /// gawk-compatible RNG (port of `support/random.c`). Used so rand/srand
+    /// produce the same sequence as gawk for a given seed. Lazily
+    /// initialized on first use.
+    rng: GawkRng,
     range_active: HashMap<usize, bool>,
     pub nr: i64,
     pub fnr: i64,
@@ -89,6 +226,7 @@ impl Interpreter {
             open_read_pipes: HashMap::new(),
             pipe_records: HashMap::new(),
             rng_state: 0,
+            rng: GawkRng::new(),
             range_active: HashMap::new(),
             nr: 0,
             fnr: 0,
@@ -667,9 +805,14 @@ impl Interpreter {
             .map(|v| v.to_string_val())
             .unwrap_or("\n".to_string());
 
-        // Read all input and split into records
-        let mut all = String::new();
-        reader.read_to_string(&mut all).ok();
+        // Read all input as bytes and map to a Latin-1-style Rust string so
+        // every byte round-trips exactly (paired with `write_awk` on output).
+        // This matches gawk's byte-level handling in the C locale, which the
+        // test sandbox uses.
+        let mut raw: Vec<u8> = Vec::new();
+        use std::io::Read;
+        reader.read_to_end(&mut raw).ok();
+        let all = bytes_to_string(&raw);
 
         let (records, terminators) = Self::split_by_rs(&all, &rs);
 
@@ -965,8 +1108,9 @@ impl Interpreter {
     fn write_output(&mut self, output: &str, dest: &Option<OutputDest>) {
         match dest {
             None => {
-                print!("{output}");
-                io::stdout().flush().ok();
+                let mut out = io::stdout().lock();
+                write_awk(&mut out, output).ok();
+                out.flush().ok();
             }
             Some(OutputDest::File(expr)) => {
                 let filename = self.eval_expr(expr).to_string_val();
@@ -982,7 +1126,7 @@ impl Interpreter {
                     }
                 }
                 if let Some(f) = self.open_files.get_mut(&filename) {
-                    f.write_all(output.as_bytes()).ok();
+                    write_awk(f, output).ok();
                     f.flush().ok();
                 }
             }
@@ -1004,7 +1148,7 @@ impl Interpreter {
                     }
                 }
                 if let Some(f) = self.open_files.get_mut(&filename) {
-                    f.write_all(output.as_bytes()).ok();
+                    write_awk(f, output).ok();
                     f.flush().ok();
                 }
             }
@@ -1030,7 +1174,7 @@ impl Interpreter {
                     }
                 }
                 if let Some(p) = self.open_pipes.get_mut(&cmd) {
-                    p.write_all(output.as_bytes()).ok();
+                    write_awk(p, output).ok();
                     p.flush().ok();
                 }
             }
@@ -1287,6 +1431,44 @@ impl Interpreter {
 
     /// Compile a regex, handling awk-specific patterns that Rust's regex crate
     /// might reject (e.g., leading +, *, ? which awk treats as literals).
+    /// True if the pattern ends in an unescaped backslash — the specific
+    /// condition gawk reports as "Trailing backslash" at regex-compile time.
+    fn has_trailing_backslash(s: &str) -> bool {
+        let mut count = 0usize;
+        for c in s.chars().rev() {
+            if c == '\\' {
+                count += 1;
+            } else {
+                break;
+            }
+        }
+        count % 2 == 1
+    }
+
+    /// Emit a gawk-style runtime regex error with the current FILENAME/FNR
+    /// context. Used when the regex source is dynamic (not a compile-time
+    /// literal) so the wording matches gawk's per-record error reporting.
+    fn runtime_regex_error(&self, cause: &str, pattern: &str) -> ! {
+        let fname = self
+            .globals
+            .get("FILENAME")
+            .map(|v| v.to_string_val())
+            .unwrap_or_default();
+        let fname_display = if fname.is_empty() {
+            "-".to_string()
+        } else {
+            fname
+        };
+        let msg = format!(
+            "awk: (FILENAME={} FNR={}) fatal: invalid regexp: {}: /{}/\n",
+            fname_display, self.fnr, cause, pattern,
+        );
+        let mut err = io::stderr().lock();
+        write_awk(&mut err, &msg).ok();
+        err.flush().ok();
+        std::process::exit(2);
+    }
+
     fn compile_regex(pattern: &str) -> Option<Regex> {
         // Expand `\xHH` hex escapes to the literal character up front. gawk
         // substitutes them before bracket-expression parsing, so e.g.
@@ -2041,11 +2223,15 @@ impl Interpreter {
             }
             Expr::Match(left, right) => {
                 let s = self.eval_expr(left).to_string_val();
-                let pattern = if let Some(r) = self.extract_regex_pattern(right) {
-                    r
-                } else {
-                    self.eval_expr(right).to_string_val()
-                };
+                let (pattern, is_literal) =
+                    if let Some(r) = self.extract_regex_pattern(right) {
+                        (r, true)
+                    } else {
+                        (self.eval_expr(right).to_string_val(), false)
+                    };
+                if !is_literal && Self::has_trailing_backslash(&pattern) {
+                    self.runtime_regex_error("Trailing backslash", &pattern);
+                }
                 match Self::compile_regex(&pattern) {
                     Some(re) => Value::Num(if re.is_match(&s) { 1.0 } else { 0.0 }),
                     None => Value::Num(0.0),
@@ -2053,11 +2239,15 @@ impl Interpreter {
             }
             Expr::NotMatch(left, right) => {
                 let s = self.eval_expr(left).to_string_val();
-                let pattern = if let Some(r) = self.extract_regex_pattern(right) {
-                    r
-                } else {
-                    self.eval_expr(right).to_string_val()
-                };
+                let (pattern, is_literal) =
+                    if let Some(r) = self.extract_regex_pattern(right) {
+                        (r, true)
+                    } else {
+                        (self.eval_expr(right).to_string_val(), false)
+                    };
+                if !is_literal && Self::has_trailing_backslash(&pattern) {
+                    self.runtime_regex_error("Trailing backslash", &pattern);
+                }
                 match Self::compile_regex(&pattern) {
                     Some(re) => Value::Num(if re.is_match(&s) { 0.0 } else { 1.0 }),
                     None => Value::Num(1.0),
@@ -2512,25 +2702,19 @@ impl Interpreter {
                 };
                 Value::Num(n.trunc())
             }
-            "rand" => {
-                // Simple LCG random
-                self.rng_state = self
-                    .rng_state
-                    .wrapping_mul(6_364_136_223_846_793_005)
-                    .wrapping_add(1_442_695_040_888_963_407);
-                let val = (self.rng_state >> 33) as f64 / (1u64 << 31) as f64;
-                Value::Num(val)
-            }
+            "rand" => Value::Num(self.rng.next_f64()),
             "srand" => {
                 let old = self.rng_state;
-                if args.is_empty() {
-                    self.rng_state = std::time::SystemTime::now()
+                let new_seed = if args.is_empty() {
+                    std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_nanos() as u64)
-                        .unwrap_or(0);
+                        .unwrap_or(0)
                 } else {
-                    self.rng_state = self.eval_expr(&args[0]).to_num() as u64;
-                }
+                    self.eval_expr(&args[0]).to_num() as u64
+                };
+                self.rng_state = new_seed;
+                self.rng.srand(new_seed);
                 Value::Num(old as f64)
             }
             "system" => {
