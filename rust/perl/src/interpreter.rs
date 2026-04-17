@@ -2371,8 +2371,11 @@ impl Interpreter {
                     } else {
                         arr.len() - offset
                     };
-                    let replacement: Vec<Value> =
-                        args[3..].iter().flat_map(|a| self.eval_list(a)).collect();
+                    let replacement: Vec<Value> = if args.len() > 3 {
+                        args[3..].iter().flat_map(|a| self.eval_list(a)).collect()
+                    } else {
+                        Vec::new()
+                    };
                     let removed: Vec<Value> = arr
                         .splice(offset..offset + remove_len, replacement)
                         .collect();
@@ -3378,10 +3381,62 @@ impl Interpreter {
                 }
             }
             Expr::QW(words) => words.iter().map(|w| Value::Str(w.clone())).collect(),
+            Expr::HashVar(name) => {
+                // Flatten the hash into (k1, v1, k2, v2, ...) — this is what
+                // Perl hands back when a hash appears in list context, so
+                // `%copy = %orig` / `@pairs = %h` work.
+                let h = self.get_hash(name);
+                h.into_iter()
+                    .flat_map(|(k, v)| vec![Value::Str(k), v])
+                    .collect()
+            }
             Expr::Range(start, end) => {
                 let s = self.eval_expr(start).to_num() as i64;
                 let e = self.eval_expr(end).to_num() as i64;
                 (s..=e).map(|n| Value::Num(n as f64)).collect()
+            }
+            Expr::RegexMatch(expr, pat, flags) => {
+                // In list context, a successful match returns its capture
+                // groups ($1, $2, ...); with no groups it returns (1). A
+                // failed match returns ().
+                let text = self.eval_expr(expr).to_str();
+                let pat = self.interp_regex_pattern(pat);
+                let (pat, flags) = unwrap_qr(&pat, flags);
+                let case_i = flags.contains('i');
+                let compile_pat = if case_i {
+                    format!("(?i){pat}")
+                } else {
+                    pat.clone()
+                };
+                match regex::Regex::new(&compile_pat) {
+                    Ok(re) => {
+                        if let Some(caps) = re.captures(&text) {
+                            // Populate $1..$N so scalar-context side-effects
+                            // are the same as the scalar path.
+                            for i in 1..caps.len() {
+                                let v = caps
+                                    .get(i)
+                                    .map(|m| Value::Str(m.as_str().to_string()))
+                                    .unwrap_or(Value::Undef);
+                                self.set_global_var(&i.to_string(), v);
+                            }
+                            if caps.len() > 1 {
+                                (1..caps.len())
+                                    .map(|i| {
+                                        caps.get(i)
+                                            .map(|m| Value::Str(m.as_str().to_string()))
+                                            .unwrap_or(Value::Undef)
+                                    })
+                                    .collect()
+                            } else {
+                                vec![Value::Num(1.0)]
+                            }
+                        } else {
+                            Vec::new()
+                        }
+                    }
+                    Err(_) => Vec::new(),
+                }
             }
             Expr::Call(name, args) => {
                 // In list context, map/grep/sort return lists
@@ -3442,8 +3497,11 @@ impl Interpreter {
                             } else {
                                 arr.len() - offset
                             };
-                            let replacement: Vec<Value> =
-                                args[3..].iter().flat_map(|a| self.eval_list(a)).collect();
+                            let replacement: Vec<Value> = if args.len() > 3 {
+                                args[3..].iter().flat_map(|a| self.eval_list(a)).collect()
+                            } else {
+                                Vec::new()
+                            };
                             let removed: Vec<Value> = arr
                                 .splice(offset..offset + remove_len, replacement)
                                 .collect();
@@ -3932,7 +3990,7 @@ impl Interpreter {
 
         self.set_global_var("@", Value::Str(String::new()));
 
-        // Process like run(): collect subs and BEGIN blocks first
+        // Process like run(): collect subs and BEGIN blocks first.
         let mut main_stmts = Vec::new();
         for stmt in &stmts {
             match stmt {
