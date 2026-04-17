@@ -12,10 +12,13 @@ pub enum Token {
     InterpString(String), // double-quoted string needing variable interpolation
 
     // Variables
-    ScalarVar(String), // $name
-    ArrayVar(String),  // @name
-    HashVar(String),   // %name
-    ArrayLen(String),  // $#name
+    ScalarVar(String),   // $name
+    ArrayVar(String),    // @name
+    HashVar(String),     // %name
+    ArrayDeref(String),  // @$name or @{$name} — dereference a scalar ref as array
+    HashDeref(String),   // %$name or %{$name} — dereference a scalar ref as hash
+    ScalarDeref(String), // $$name or ${$name} — dereference a scalar ref as scalar
+    ArrayLen(String),    // $#name
 
     // Keywords
     If,
@@ -34,6 +37,7 @@ pub enum Token {
     Last,
     Next,
     Redo,
+    Continue,
     Print,
     Say,
     Die,
@@ -338,6 +342,7 @@ impl Lexer {
             "last",
             "next",
             "redo",
+            "continue",
             "print",
             "say",
             "die",
@@ -593,8 +598,13 @@ impl Lexer {
                         self.pos += 1;
                         let name = self.read_ident();
                         tokens.push(Token::ArrayLen(name));
+                    } else if self.ch() == '$' {
+                        // $$name — scalar dereference of a scalar ref.
+                        self.pos += 1;
+                        let name = self.read_ident();
+                        tokens.push(Token::ScalarDeref(name));
                     } else if self.ch() == '{' {
-                        // ${expr} or ${^NAME}
+                        // ${expr} or ${^NAME} or ${$ref}
                         self.pos += 1;
                         if self.ch() == '^' {
                             self.pos += 1;
@@ -604,6 +614,14 @@ impl Lexer {
                                 self.pos += 1;
                             }
                             tokens.push(Token::ScalarVar(format!("^{name}")));
+                        } else if self.ch() == '$' {
+                            // ${$ref} — same as $$ref
+                            self.pos += 1;
+                            let n = self.read_ident();
+                            if self.ch() == '}' {
+                                self.pos += 1;
+                            }
+                            tokens.push(Token::ScalarDeref(n));
                         } else {
                             let name = self.read_ident();
                             if self.ch() == '}' {
@@ -678,6 +696,20 @@ impl Lexer {
                             break;
                         }
                         tokens.push(Token::ArrayVar(name));
+                    } else if self.ch() == '$' {
+                        // @$name — array dereference of a scalar reference.
+                        self.pos += 1;
+                        let name = if self.ch() == '{' {
+                            self.pos += 1;
+                            let n = self.read_ident();
+                            if self.ch() == '}' {
+                                self.pos += 1;
+                            }
+                            n
+                        } else {
+                            self.read_ident()
+                        };
+                        tokens.push(Token::ArrayDeref(name));
                     } else if self.ch() == '{' {
                         self.pos += 1;
                         if self.ch() == '^' {
@@ -687,6 +719,14 @@ impl Lexer {
                                 self.pos += 1;
                             }
                             tokens.push(Token::ArrayVar(format!("^{name}")));
+                        } else if self.ch() == '$' {
+                            // @{$ref} — same as @$ref
+                            self.pos += 1;
+                            let n = self.read_ident();
+                            if self.ch() == '}' {
+                                self.pos += 1;
+                            }
+                            tokens.push(Token::ArrayDeref(n));
                         } else {
                             let name = self.read_ident();
                             if self.ch() == '}' {
@@ -704,6 +744,22 @@ impl Lexer {
                     if self.ch() == '=' {
                         self.pos += 1;
                         tokens.push(Token::PercentAssign);
+                    } else if self.ch() == '$'
+                        && tokens.last().map(|t| t.expects_operand()).unwrap_or(true)
+                    {
+                        // %$name or %{$name} — hash dereference.
+                        self.pos += 1;
+                        let name = if self.ch() == '{' {
+                            self.pos += 1;
+                            let n = self.read_ident();
+                            if self.ch() == '}' {
+                                self.pos += 1;
+                            }
+                            n
+                        } else {
+                            self.read_ident()
+                        };
+                        tokens.push(Token::HashDeref(name));
                     } else if self.ch() == '{'
                         || self.ch() == '_'
                         || self.ch().is_ascii_alphabetic()
@@ -744,6 +800,18 @@ impl Lexer {
                 }
 
                 'a'..='z' | 'A'..='Z' | '_' => {
+                    // Special case: `x` immediately after an expression-value
+                    // token and followed by a digit is the repeat operator, not
+                    // the start of an identifier like `x10`.
+                    if self.ch() == 'x'
+                        && self.peek(1).is_ascii_digit()
+                        && !tokens.is_empty()
+                        && !tokens.last().unwrap().expects_operand()
+                    {
+                        self.pos += 1;
+                        tokens.push(Token::StringRepeat);
+                        continue;
+                    }
                     let ident = self.read_ident();
 
                     // Check for => (fat comma) - the ident is auto-quoted
@@ -808,6 +876,7 @@ impl Lexer {
                         "last" => Token::Last,
                         "next" => Token::Next,
                         "redo" => Token::Redo,
+                        "continue" => Token::Continue,
                         "print" => Token::Print,
                         "say" => Token::Say,
                         "die" => Token::Die,
@@ -1301,8 +1370,10 @@ impl Lexer {
                     let v = i64::from_str_radix(&s, 8).unwrap_or(0);
                     return Token::Integer(v);
                 }
-                '0'..='7' => {
-                    // Octal without 'o' prefix: 0777
+                '0'..='7' | '_' => {
+                    // Octal without 'o' prefix: 0777, 0_7_7_7
+                    // The leading `0` followed by (digits|underscore) means
+                    // octal; underscores between digits are allowed.
                     self.pos += 1;
                     let oct_start = self.pos - 1;
                     while self.pos < self.input.len()

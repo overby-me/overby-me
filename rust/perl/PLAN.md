@@ -6,22 +6,26 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**12/68 Nix tests passing** (17.6%) — selected tests from the upstream Perl test suite.
+**13/68 Nix tests passing** (19.1%) — selected tests from the upstream Perl test suite.
 
 Passing: base/if, base/cond, base/while, base/pat, base/num (56 tests),
 base/translate (257 tests), base/term (7 tests), cmd/elsif (4 tests),
-cmd/mod (15 tests), opbasic/arith (183 tests), opbasic/qq (30 tests),
-op/defined (5 tests).
+cmd/mod (15 tests), cmd/switch (18 tests), opbasic/arith (183 tests),
+opbasic/qq (30 tests), op/defined (5 tests).
 
 Near-passing (local test counts):
 
 - opbasic/concat: 230/254 (Unicode concat)
-- cmd/for: 14/16 (Internals::stack_refcounted, DESTROY method)
-- cmd/subval: 28/36 (caller, typeglob filehandles)
+- cmd/for: 15/16 (DESTROY method)
+- cmd/subval: 28/36 (typeglob filehandles)
 - op/auto: 43/47 (typeglob handling in ++/--)
-- op/my: 42/59 (array/hash scoping edge cases)
-- op/array: 94/195
-- op/not: 16/22 running (Scalar::Util dualvar, typeglob assignment)
+- op/my: 43/59 (continue blocks, complex scoping edge cases)
+- op/array: 96/195 ($#ary as lvalue, references)
+- op/not: 18/22 running (Scalar::Util dualvar, typeglob assignment)
+- op/oct: 77/79 (array-ref deref in `my ($s,$v) = @$_;`)
+- op/grep: 37/77 (references, complex map/grep)
+- op/list: 38/73
+- op/delete: 28/56
 
 test.pl integration fully working: plan/ok/is/pass/note/printf produce correct
 TAP output with test names. Function calls in argument lists fixed.
@@ -61,6 +65,26 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
 - Prototype-`$` builtins (scalar, defined, ref, lc, uc, chop, chomp, int, abs,
   sqrt, chr, ord, hex, oct, etc.) take exactly one arg when called without
   parens, fixing `is(scalar @arr, N, $name)` parsing.
+- `defined(EXPR)` parses EXPR as a full expression when parens are present,
+  so `defined($x ? $y : @z)` no longer drops the ternary branches.
+- `scalar(a, b, c)` treats the comma as Perl's list operator: evaluates all
+  args, returns the value of the last (matches `scalar((a, b, c))`).
+- `qr//` produces a regex *value* (string `(?^flags:pat)`), distinct from
+  bare `/pat/` which matches against `$_`. `$str =~ $rx_var` now works.
+- `eval EXPR if COND` honours the postfix modifier — previously dropped,
+  which made `eval '...' if !defined &re::is_regexp;` in test.pl swallow
+  every subsequent statement (hiding `is`, `cmp_ok`, etc. from the suite).
+- Line-number tracking: lexer records a line per token, parser emits
+  `Stmt::LineMark(N)`, interpreter maintains `current_line` + a
+  `call_stack` of frames. `caller(N)` now returns the real call-site
+  file/line — test.pl's `_where()` output now matches reference perl.
+- `(a => 1, b => 2)` and `[a => 1]` recognise `=>` as a list separator.
+  Previously hash initialisers collapsed to a single element.
+- `keys %h` / `values %h` return the actual keys/values in list context.
+- `f(), last unless COND` now gates `f()` AND `last` under the postfix
+  modifier (was running `f()` regardless).
+- Stubs: `Internals::stack_refcounted()`, minimal `pack`/`unpack` for
+  `W*`, `U*`, `C*` formats (enough for test.pl's `display()` helper).
 
 ---
 

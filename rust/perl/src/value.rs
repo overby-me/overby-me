@@ -3,12 +3,23 @@
 /// Perl scalars have "dual-var" nature: they can be viewed as both strings
 /// and numbers, with conversion on demand. We keep it simple: store one
 /// representation and convert lazily.
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 #[derive(Clone, Debug)]
 pub enum Value {
     Undef,
     Str(String),
     Num(f64),
+    /// Reference to an array — stringifies as `ARRAY(0x...)`.
+    ArrayRef(Rc<RefCell<Vec<Value>>>),
+    /// Reference to a hash — stringifies as `HASH(0x...)`.
+    HashRef(Rc<RefCell<HashMap<String, Value>>>),
+    /// Reference to a scalar — stringifies as `SCALAR(0x...)`.
+    ScalarRef(Rc<RefCell<Value>>),
+    /// Reference to a subroutine (by name for now) — `CODE(0x...)`.
+    CodeRef(String),
 }
 
 impl Value {
@@ -17,6 +28,10 @@ impl Value {
             Value::Undef => String::new(),
             Value::Str(s) => s.clone(),
             Value::Num(n) => format_number(*n),
+            Value::ArrayRef(r) => format!("ARRAY(0x{:x})", Rc::as_ptr(r) as usize),
+            Value::HashRef(r) => format!("HASH(0x{:x})", Rc::as_ptr(r) as usize),
+            Value::ScalarRef(r) => format!("SCALAR(0x{:x})", Rc::as_ptr(r) as usize),
+            Value::CodeRef(name) => format!("CODE({name})"),
         }
     }
 
@@ -25,6 +40,9 @@ impl Value {
             Value::Undef => 0.0,
             Value::Num(n) => *n,
             Value::Str(s) => parse_number(s),
+            // References stringify then parse as "ARRAY(0x..)" etc. — the
+            // numeric coercion returns 0 since there are no leading digits.
+            Value::ArrayRef(_) | Value::HashRef(_) | Value::ScalarRef(_) | Value::CodeRef(_) => 0.0,
         }
     }
 
@@ -33,11 +51,26 @@ impl Value {
             Value::Undef => false,
             Value::Num(n) => *n != 0.0 && !n.is_nan(),
             Value::Str(s) => !s.is_empty() && s != "0",
+            // References are always true (they stringify to non-"" non-"0").
+            Value::ArrayRef(_) | Value::HashRef(_) | Value::ScalarRef(_) | Value::CodeRef(_) => {
+                true
+            }
         }
     }
 
     pub fn is_undef(&self) -> bool {
         matches!(self, Value::Undef)
+    }
+
+    /// Returns the reference type name for `ref()` — `""` for non-refs.
+    pub fn ref_type(&self) -> &'static str {
+        match self {
+            Value::ArrayRef(_) => "ARRAY",
+            Value::HashRef(_) => "HASH",
+            Value::ScalarRef(_) => "SCALAR",
+            Value::CodeRef(_) => "CODE",
+            _ => "",
+        }
     }
 }
 

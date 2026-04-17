@@ -52,6 +52,15 @@ pub enum Expr {
     Deref(Box<Expr>),           // $$ref, @$ref, %$ref
     ArrayRef(Vec<Expr>),        // [expr, ...]
     HashRef(Vec<(Expr, Expr)>), // {key => val, ...}
+    /// Array dereference of a scalar reference: `@$name` / `@{$name}`.
+    /// In list context yields the array's elements; in scalar context the length.
+    ArrayDerefVar(String),
+    /// Hash dereference of a scalar reference: `%$name` / `%{$name}`.
+    HashDerefVar(String),
+    /// Scalar dereference of a scalar reference: `$$name` / `${$name}`.
+    ScalarDerefVar(String),
+    /// Arrow-element: `$ref->[i]` or `$ref->{k}`.
+    ArrowElement(Box<Expr>, Box<Expr>, ArrowKind),
 
     // Range
     Range(Box<Expr>, Box<Expr>), // expr..expr
@@ -72,6 +81,12 @@ pub enum Expr {
 
     // File test operators (-e, -f, -d, etc.)
     FileTest(String, Box<Expr>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ArrowKind {
+    Array, // $ref->[i]
+    Hash,  // $ref->{k}
 }
 
 #[derive(Clone, Debug)]
@@ -177,11 +192,13 @@ pub enum Stmt {
     While {
         cond: Expr,
         body: Vec<Stmt>,
+        continue_body: Option<Vec<Stmt>>,
         label: Option<String>,
     },
     Until {
         cond: Expr,
         body: Vec<Stmt>,
+        continue_body: Option<Vec<Stmt>>,
         label: Option<String>,
     },
     DoWhile {
@@ -200,6 +217,15 @@ pub enum Stmt {
         is_my: bool,
         list: Expr,
         body: Vec<Stmt>,
+        continue_body: Option<Vec<Stmt>>,
+        label: Option<String>,
+    },
+    /// A bare `{ BLOCK } continue { BLOCK }` construct — runs body once, then
+    /// continue_body, unless `last` exits. `last`/`next`/`redo` here behave as
+    /// in a one-shot loop.
+    BlockWithContinue {
+        body: Vec<Stmt>,
+        continue_body: Vec<Stmt>,
         label: Option<String>,
     },
     Loop {

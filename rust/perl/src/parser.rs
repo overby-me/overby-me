@@ -109,6 +109,15 @@ impl Parser {
                 self.pos += 1;
                 let body = self.parse_block_body();
                 self.eat(&Token::RBrace);
+                // A trailing `continue { ... }` turns the bare block into a
+                // one-shot loop with a continue block (matches Perl).
+                if let Some(continue_body) = self.try_parse_continue() {
+                    return Some(Stmt::BlockWithContinue {
+                        body,
+                        continue_body,
+                        label,
+                    });
+                }
                 if let Some(label) = label {
                     return Some(Stmt::NamedBlock(label, body));
                 }
@@ -139,7 +148,13 @@ impl Parser {
                 self.pos += 1;
                 let cond = self.parse_paren_expr();
                 let body = self.parse_brace_block();
-                return Some(Stmt::Until { cond, body, label });
+                let continue_body = self.try_parse_continue();
+                return Some(Stmt::Until {
+                    cond,
+                    body,
+                    continue_body,
+                    label,
+                });
             }
             Token::For | Token::Foreach => {
                 self.pos += 1;
@@ -450,10 +465,22 @@ impl Parser {
     fn parse_while(&mut self) -> Stmt {
         let cond = self.parse_paren_expr();
         let body = self.parse_brace_block();
+        let continue_body = self.try_parse_continue();
         Stmt::While {
             cond,
             body,
+            continue_body,
             label: None,
+        }
+    }
+
+    /// `continue { ... }` follows a loop body. Returns `Some(body)` if
+    /// present, `None` otherwise.
+    fn try_parse_continue(&mut self) -> Option<Vec<Stmt>> {
+        if self.eat(&Token::Continue) {
+            Some(self.parse_brace_block())
+        } else {
+            None
         }
     }
 
@@ -481,11 +508,13 @@ impl Parser {
             };
             self.expect(&Token::RParen);
             let body = self.parse_brace_block();
+            let continue_body = self.try_parse_continue();
             return Stmt::Foreach {
                 var,
                 is_my,
                 list,
                 body,
+                continue_body,
                 label,
             };
         }
@@ -565,11 +594,13 @@ impl Parser {
                 };
                 self.expect(&Token::RParen);
                 let body = self.parse_brace_block();
+                let continue_body = self.try_parse_continue();
                 return Stmt::Foreach {
                     var: "_".to_string(),
                     is_my: false,
                     list,
                     body,
+                    continue_body,
                     label,
                 };
             }
@@ -583,11 +614,13 @@ impl Parser {
         // Default: treat as foreach
         let list = self.parse_expr();
         let body = self.parse_brace_block();
+        let continue_body = self.try_parse_continue();
         Stmt::Foreach {
             var: "_".to_string(),
             is_my: false,
             list,
             body,
+            continue_body,
             label,
         }
     }
@@ -1547,13 +1580,18 @@ impl Parser {
                             self.pos += 1;
                             let index = self.parse_expr();
                             self.expect(&Token::RBracket);
-                            expr = Expr::ArrayElement("_deref_".to_string(), Box::new(index));
+                            expr = Expr::ArrowElement(
+                                Box::new(expr),
+                                Box::new(index),
+                                ArrowKind::Array,
+                            );
                         }
                         Token::LBrace => {
                             self.pos += 1;
                             let key = self.parse_expr();
                             self.expect(&Token::RBrace);
-                            expr = Expr::HashElement("_deref_".to_string(), Box::new(key));
+                            expr =
+                                Expr::ArrowElement(Box::new(expr), Box::new(key), ArrowKind::Hash);
                         }
                         Token::Ident(name) => {
                             let method = name.clone();
@@ -1627,6 +1665,18 @@ impl Parser {
             Token::HashVar(name) => {
                 self.pos += 1;
                 Expr::HashVar(name)
+            }
+            Token::ArrayDeref(name) => {
+                self.pos += 1;
+                Expr::ArrayDerefVar(name)
+            }
+            Token::HashDeref(name) => {
+                self.pos += 1;
+                Expr::HashDerefVar(name)
+            }
+            Token::ScalarDeref(name) => {
+                self.pos += 1;
+                Expr::ScalarDerefVar(name)
             }
             Token::ArrayLen(name) => {
                 self.pos += 1;

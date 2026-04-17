@@ -298,36 +298,73 @@ impl Interpreter {
                 Flow::None
             }
 
-            Stmt::While { cond, body, label } => {
+            Stmt::While {
+                cond,
+                body,
+                continue_body,
+                label,
+            } => {
                 loop {
                     if !self.eval_expr(cond).to_bool() {
                         break;
                     }
-                    match self.exec_stmts(body) {
+                    let flow = self.exec_stmts(body);
+                    let ran_continue = match flow {
                         Flow::Last(l) if l.is_none() || l == *label => break,
-                        Flow::Next(l) if l.is_none() || l == *label => continue,
-                        Flow::Last(_) | Flow::Next(_) => {} // Different label
+                        Flow::Last(_) => continue,
                         Flow::Return(v) => return Flow::Return(v),
                         Flow::Die(msg) => return Flow::Die(msg),
                         Flow::Exit(code) => return Flow::Exit(code),
-                        Flow::None => {}
+                        Flow::Next(l) if l.is_none() || l == *label => true,
+                        Flow::Next(_) => false,
+                        Flow::None => true,
+                    };
+                    if ran_continue {
+                        if let Some(cont) = continue_body {
+                            match self.exec_stmts(cont) {
+                                Flow::Last(l) if l.is_none() || l == *label => break,
+                                Flow::Return(v) => return Flow::Return(v),
+                                Flow::Die(msg) => return Flow::Die(msg),
+                                Flow::Exit(code) => return Flow::Exit(code),
+                                _ => {}
+                            }
+                        }
                     }
                 }
                 Flow::None
             }
 
-            Stmt::Until { cond, body, label } => {
+            Stmt::Until {
+                cond,
+                body,
+                continue_body,
+                label,
+            } => {
                 loop {
                     if self.eval_expr(cond).to_bool() {
                         break;
                     }
-                    match self.exec_stmts(body) {
+                    let flow = self.exec_stmts(body);
+                    let ran_continue = match flow {
                         Flow::Last(l) if l.is_none() || l == *label => break,
-                        Flow::Next(l) if l.is_none() || l == *label => continue,
+                        Flow::Last(_) => continue,
                         Flow::Return(v) => return Flow::Return(v),
                         Flow::Die(msg) => return Flow::Die(msg),
                         Flow::Exit(code) => return Flow::Exit(code),
-                        _ => {}
+                        Flow::Next(l) if l.is_none() || l == *label => true,
+                        Flow::Next(_) => false,
+                        Flow::None => true,
+                    };
+                    if ran_continue {
+                        if let Some(cont) = continue_body {
+                            match self.exec_stmts(cont) {
+                                Flow::Last(l) if l.is_none() || l == *label => break,
+                                Flow::Return(v) => return Flow::Return(v),
+                                Flow::Die(msg) => return Flow::Die(msg),
+                                Flow::Exit(code) => return Flow::Exit(code),
+                                _ => {}
+                            }
+                        }
                     }
                 }
                 Flow::None
@@ -369,6 +406,7 @@ impl Interpreter {
                 is_my,
                 list,
                 body,
+                continue_body,
                 label,
             } => {
                 // Detect if iterating over an array variable (for aliasing)
@@ -396,9 +434,11 @@ impl Interpreter {
                         }
                     }
 
-                    match flow {
+                    let ran_continue = match flow {
                         Flow::Last(l) if l.is_none() || l == *label => break,
-                        Flow::Next(l) if l.is_none() || l == *label => continue,
+                        Flow::Last(_) => false,
+                        Flow::Next(l) if l.is_none() || l == *label => true,
+                        Flow::Next(_) => false,
                         Flow::Return(v) => {
                             self.pop_scope();
                             self.set_var(var, saved_var);
@@ -414,7 +454,30 @@ impl Interpreter {
                             self.set_var(var, saved_var);
                             return Flow::Exit(code);
                         }
-                        _ => {}
+                        Flow::None => true,
+                    };
+                    if ran_continue {
+                        if let Some(cont) = continue_body {
+                            match self.exec_stmts(cont) {
+                                Flow::Last(l) if l.is_none() || l == *label => break,
+                                Flow::Return(v) => {
+                                    self.pop_scope();
+                                    self.set_var(var, saved_var);
+                                    return Flow::Return(v);
+                                }
+                                Flow::Die(msg) => {
+                                    self.pop_scope();
+                                    self.set_var(var, saved_var);
+                                    return Flow::Die(msg);
+                                }
+                                Flow::Exit(code) => {
+                                    self.pop_scope();
+                                    self.set_var(var, saved_var);
+                                    return Flow::Exit(code);
+                                }
+                                _ => {}
+                            }
+                        }
                     }
                 }
                 self.pop_scope();
@@ -444,6 +507,50 @@ impl Interpreter {
                 let flow = self.exec_stmts(stmts);
                 self.pop_scope();
                 flow
+            }
+
+            Stmt::BlockWithContinue {
+                body,
+                continue_body,
+                label,
+            } => {
+                // One-shot loop: body runs once. `last` exits without
+                // running the continue block; normal fall-through runs it.
+                self.push_scope();
+                let flow = self.exec_stmts(body);
+                let ran_continue = match flow {
+                    Flow::Last(l) if l.is_none() || l == *label => {
+                        self.pop_scope();
+                        return Flow::None;
+                    }
+                    Flow::Last(_) => false,
+                    Flow::Next(l) if l.is_none() || l == *label => true,
+                    Flow::Next(_) => false,
+                    Flow::Return(v) => {
+                        self.pop_scope();
+                        return Flow::Return(v);
+                    }
+                    Flow::Die(msg) => {
+                        self.pop_scope();
+                        return Flow::Die(msg);
+                    }
+                    Flow::Exit(code) => {
+                        self.pop_scope();
+                        return Flow::Exit(code);
+                    }
+                    Flow::None => true,
+                };
+                if ran_continue {
+                    let cflow = self.exec_stmts(continue_body);
+                    self.pop_scope();
+                    match cflow {
+                        Flow::Last(l) if l.is_none() || l == *label => Flow::None,
+                        other => other,
+                    }
+                } else {
+                    self.pop_scope();
+                    Flow::None
+                }
             }
 
             Stmt::NamedBlock(label, stmts) => {
@@ -1127,17 +1234,88 @@ impl Interpreter {
             }
 
             Expr::Ref(expr) => {
-                // Simplified reference implementation
-                Value::Str("REF".to_string())
+                // Produce a reference appropriate to the referent.
+                match expr.as_ref() {
+                    Expr::ArrayVar(name) => {
+                        let arr = self.get_array(name);
+                        Value::ArrayRef(std::rc::Rc::new(std::cell::RefCell::new(arr)))
+                    }
+                    Expr::HashVar(name) => {
+                        let hash = self.get_hash(name);
+                        Value::HashRef(std::rc::Rc::new(std::cell::RefCell::new(hash)))
+                    }
+                    Expr::ScalarVar(name) => {
+                        let v = self.get_var(name);
+                        Value::ScalarRef(std::rc::Rc::new(std::cell::RefCell::new(v)))
+                    }
+                    _ => {
+                        let v = self.eval_expr(expr);
+                        Value::ScalarRef(std::rc::Rc::new(std::cell::RefCell::new(v)))
+                    }
+                }
             }
 
             Expr::ArrayRef(items) => {
-                let vals: Vec<Value> = items.iter().map(|e| self.eval_expr(e)).collect();
-                // Store and return ref
-                Value::Str("ARRAY_REF".to_string())
+                let vals: Vec<Value> = items.iter().flat_map(|e| self.eval_list(e)).collect();
+                Value::ArrayRef(std::rc::Rc::new(std::cell::RefCell::new(vals)))
             }
 
-            Expr::HashRef(pairs) => Value::Str("HASH_REF".to_string()),
+            Expr::HashRef(pairs) => {
+                let mut h = std::collections::HashMap::new();
+                for (k, v) in pairs {
+                    let key = self.eval_expr(k).to_str();
+                    let val = self.eval_expr(v);
+                    h.insert(key, val);
+                }
+                Value::HashRef(std::rc::Rc::new(std::cell::RefCell::new(h)))
+            }
+
+            Expr::ArrayDerefVar(name) => {
+                // @$ref in scalar context → length of the referenced array.
+                let v = self.get_var(name);
+                if let Value::ArrayRef(r) = v {
+                    Value::Num(r.borrow().len() as f64)
+                } else {
+                    Value::Num(0.0)
+                }
+            }
+            Expr::HashDerefVar(name) => {
+                // %$ref in scalar context → empty string (approx; Perl says N/M).
+                let v = self.get_var(name);
+                if let Value::HashRef(r) = v {
+                    Value::Num(r.borrow().len() as f64)
+                } else {
+                    Value::Num(0.0)
+                }
+            }
+            Expr::ScalarDerefVar(name) => {
+                let v = self.get_var(name);
+                if let Value::ScalarRef(r) = v {
+                    r.borrow().clone()
+                } else {
+                    Value::Undef
+                }
+            }
+            Expr::ArrowElement(lhs, idx, kind) => {
+                let lhs_val = self.eval_expr(lhs);
+                match (&lhs_val, kind) {
+                    (Value::ArrayRef(r), ArrowKind::Array) => {
+                        let i = self.eval_expr(idx).to_num() as i64;
+                        let arr = r.borrow();
+                        let i = if i < 0 {
+                            (arr.len() as i64 + i).max(0) as usize
+                        } else {
+                            i as usize
+                        };
+                        arr.get(i).cloned().unwrap_or(Value::Undef)
+                    }
+                    (Value::HashRef(r), ArrowKind::Hash) => {
+                        let k = self.eval_expr(idx).to_str();
+                        r.borrow().get(&k).cloned().unwrap_or(Value::Undef)
+                    }
+                    _ => Value::Undef,
+                }
+            }
 
             Expr::ArrayLit(items) => {
                 // In scalar context, return last element
@@ -1879,12 +2057,7 @@ impl Interpreter {
                     self.eval_expr(&args[0])
                 };
                 let s = val.to_str();
-                let s = s.trim();
-                let s = s
-                    .strip_prefix("0x")
-                    .or_else(|| s.strip_prefix("0X"))
-                    .unwrap_or(s);
-                Value::Num(i64::from_str_radix(s, 16).unwrap_or(0) as f64)
+                Value::Num(perl_hex(&s) as f64)
             }
             "oct" => {
                 let val = if args.is_empty() {
@@ -1893,21 +2066,15 @@ impl Interpreter {
                     self.eval_expr(&args[0])
                 };
                 let s = val.to_str();
-                let s = s.trim();
-                if s.starts_with("0x") || s.starts_with("0X") {
-                    Value::Num(i64::from_str_radix(&s[2..], 16).unwrap_or(0) as f64)
-                } else if s.starts_with("0b") || s.starts_with("0B") {
-                    Value::Num(i64::from_str_radix(&s[2..], 2).unwrap_or(0) as f64)
-                } else if s.starts_with('0') {
-                    Value::Num(
-                        i64::from_str_radix(s.trim_start_matches('0'), 8).unwrap_or(0) as f64,
-                    )
-                } else {
-                    Value::Num(s.parse::<f64>().unwrap_or(0.0))
-                }
+                Value::Num(perl_oct(&s) as f64)
             }
             "ref" => {
-                Value::Str(String::new()) // simplified
+                let val = if args.is_empty() {
+                    self.get_var("_")
+                } else {
+                    self.eval_expr(&args[0])
+                };
+                Value::Str(val.ref_type().to_string())
             }
             "caller" => {
                 // caller([N]) — in list context returns (package, file, line)
@@ -2491,6 +2658,25 @@ impl Interpreter {
         match expr {
             Expr::ArrayLit(items) => items.iter().flat_map(|item| self.eval_list(item)).collect(),
             Expr::ArrayVar(name) => self.get_array(name),
+            Expr::ArrayDerefVar(name) => {
+                let v = self.get_var(name);
+                if let Value::ArrayRef(r) = v {
+                    r.borrow().clone()
+                } else {
+                    Vec::new()
+                }
+            }
+            Expr::HashDerefVar(name) => {
+                let v = self.get_var(name);
+                if let Value::HashRef(r) = v {
+                    r.borrow()
+                        .iter()
+                        .flat_map(|(k, v)| vec![Value::Str(k.clone()), v.clone()])
+                        .collect()
+                } else {
+                    Vec::new()
+                }
+            }
             Expr::QW(words) => words.iter().map(|w| Value::Str(w.clone())).collect(),
             Expr::Range(start, end) => {
                 let s = self.eval_expr(start).to_num() as i64;
@@ -3102,6 +3288,64 @@ impl Interpreter {
         }
         result
     }
+}
+
+/// Perl's `oct()` — interpret a string as octal by default, or as the base
+/// indicated by `0x`/`0b`/`0o` prefix. Underscores between digits are allowed
+/// (and ignored), matching Perl's numeric literal syntax.
+fn perl_oct(s: &str) -> i64 {
+    let s = s.trim_start();
+    let (radix, digits) = if let Some(r) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        (16, r)
+    } else if let Some(r) = s.strip_prefix("x").or_else(|| s.strip_prefix("X")) {
+        (16, r)
+    } else if let Some(r) = s.strip_prefix("0b").or_else(|| s.strip_prefix("0B")) {
+        (2, r)
+    } else if let Some(r) = s.strip_prefix("b").or_else(|| s.strip_prefix("B")) {
+        (2, r)
+    } else if let Some(r) = s.strip_prefix("0o").or_else(|| s.strip_prefix("0O")) {
+        (8, r)
+    } else if let Some(r) = s.strip_prefix("o").or_else(|| s.strip_prefix("O")) {
+        (8, r)
+    } else {
+        (8, s)
+    };
+    // Consume valid digits only, stopping at the first invalid char.
+    let mut v: i64 = 0;
+    for c in digits.chars() {
+        if c == '_' {
+            continue;
+        }
+        let d = match c.to_digit(radix) {
+            Some(d) => d,
+            None => break,
+        };
+        v = v.saturating_mul(radix as i64).saturating_add(d as i64);
+    }
+    v
+}
+
+/// Perl's `hex()` — accepts leading `0x`/`0X` (optional) and allows underscores.
+fn perl_hex(s: &str) -> i64 {
+    let s = s.trim_start();
+    let digits = s
+        .strip_prefix("0x")
+        .or_else(|| s.strip_prefix("0X"))
+        .or_else(|| s.strip_prefix("x"))
+        .or_else(|| s.strip_prefix("X"))
+        .unwrap_or(s);
+    let mut v: i64 = 0;
+    for c in digits.chars() {
+        if c == '_' {
+            continue;
+        }
+        let d = match c.to_digit(16) {
+            Some(d) => d,
+            None => break,
+        };
+        v = v.saturating_mul(16).saturating_add(d as i64);
+    }
+    v
 }
 
 /// If `pattern` is a stringified qr// (`(?^flags:inner)`), return `(inner, flags+outer_flags)`.
