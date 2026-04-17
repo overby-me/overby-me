@@ -65,7 +65,7 @@ fn run() -> i32 {
     let mut eval_strings: Vec<String> = Vec::new();
 
     let mut targets = Vec::new();
-    let mut makefile: Option<String> = None;
+    let mut makefiles: Vec<String> = Vec::new();
     let mut directory: Option<String> = None;
 
     let mut i = 1;
@@ -74,7 +74,7 @@ fn run() -> i32 {
             "-f" | "--file" | "--makefile" => {
                 i += 1;
                 if i < args.len() {
-                    makefile = Some(args[i].clone());
+                    makefiles.push(args[i].clone());
                 }
             }
             "-C" | "--directory" => {
@@ -246,7 +246,13 @@ fn run() -> i32 {
                 engine.jobs = arg[2..].parse().unwrap_or(1);
             }
             arg if arg.starts_with("-f") => {
-                makefile = Some(arg[2..].to_string());
+                makefiles.push(arg[2..].to_string());
+            }
+            arg if arg.starts_with("--file=") => {
+                makefiles.push(arg["--file=".len()..].to_string());
+            }
+            arg if arg.starts_with("--makefile=") => {
+                makefiles.push(arg["--makefile=".len()..].to_string());
             }
             arg if arg.starts_with("-C") => {
                 directory = Some(arg[2..].to_string());
@@ -334,7 +340,7 @@ fn run() -> i32 {
                         'r' | 'R' => {} // disable built-ins: no-ops for now
                         'f' => {
                             if let Some(v) = take_arg(&flags, idx, &mut i) {
-                                makefile = Some(v);
+                                makefiles.push(v);
                             }
                             break;
                         }
@@ -389,15 +395,16 @@ fn run() -> i32 {
         return 2;
     }
 
-    // Find and load makefile
-    let makefile_path = if let Some(f) = makefile {
-        f
+    // Find and load makefiles. If -f was given (potentially multiple
+    // times), load each. Otherwise pick the first default that exists.
+    let makefile_paths: Vec<String> = if !makefiles.is_empty() {
+        makefiles
     } else if std::path::Path::new("GNUmakefile").exists() {
-        "GNUmakefile".to_string()
+        vec!["GNUmakefile".to_string()]
     } else if std::path::Path::new("makefile").exists() {
-        "makefile".to_string()
+        vec!["makefile".to_string()]
     } else if std::path::Path::new("Makefile").exists() {
-        "Makefile".to_string()
+        vec!["Makefile".to_string()]
     } else {
         eprintln!("make: *** No makefile found.  Stop.");
         return 2;
@@ -467,17 +474,24 @@ fn run() -> i32 {
         engine.load_string(text);
     }
 
-    if makefile_path == "-" {
-        // Read from stdin
-        use std::io::Read;
-        let mut content = String::new();
-        if let Err(e) = std::io::stdin().read_to_string(&mut content) {
-            eprintln!("make: stdin: {e}");
-            return 2;
+    let mut stdin_read = false;
+    for path in &makefile_paths {
+        if path == "-" {
+            if stdin_read {
+                eprintln!("make: *** Makefile from standard input specified twice.  Stop.");
+                return 2;
+            }
+            stdin_read = true;
+            use std::io::Read;
+            let mut content = String::new();
+            if let Err(e) = std::io::stdin().read_to_string(&mut content) {
+                eprintln!("make: stdin: {e}");
+                return 2;
+            }
+            engine.load_string(&content);
+        } else {
+            engine.load_file(path, false);
         }
-        engine.load_string(&content);
-    } else {
-        engine.load_file(&makefile_path, false);
     }
 
     engine.build(&targets)
