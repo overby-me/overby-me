@@ -284,10 +284,8 @@ fn call_function(
         }
         "word" => {
             if args.len() >= 2 {
-                let n: usize = expand_with_auto(&args[0], engine, auto_vars)
-                    .trim()
-                    .parse()
-                    .unwrap_or(0);
+                let raw = expand_with_auto(&args[0], engine, auto_vars);
+                let n = parse_numeric_arg(engine, "word", "first", &raw, true);
                 let text = expand_with_auto(&args[1], engine, auto_vars);
                 let words: Vec<&str> = text.split_whitespace().collect();
                 Some(words.get(n.wrapping_sub(1)).unwrap_or(&"").to_string())
@@ -297,14 +295,10 @@ fn call_function(
         }
         "wordlist" => {
             if args.len() >= 3 {
-                let s: usize = expand_with_auto(&args[0], engine, auto_vars)
-                    .trim()
-                    .parse()
-                    .unwrap_or(0);
-                let e: usize = expand_with_auto(&args[1], engine, auto_vars)
-                    .trim()
-                    .parse()
-                    .unwrap_or(0);
+                let raw_s = expand_with_auto(&args[0], engine, auto_vars);
+                let s = parse_numeric_arg(engine, "wordlist", "first", &raw_s, false);
+                let raw_e = expand_with_auto(&args[1], engine, auto_vars);
+                let e = parse_numeric_arg(engine, "wordlist", "second", &raw_e, false);
                 let text = expand_with_auto(&args[2], engine, auto_vars);
                 let words: Vec<&str> = text.split_whitespace().collect();
                 if s == 0 || e == 0 || s > e {
@@ -689,6 +683,27 @@ fn call_function(
                 let rhs = expand_with_auto(&args[1], engine, auto_vars);
                 let lhs_n: Option<i64> = lhs.trim().parse().ok();
                 let rhs_n: Option<i64> = rhs.trim().parse().ok();
+                let check_nonnumeric = |val: &str, which: &str| {
+                    if lhs_n.is_none() && which == "first" || rhs_n.is_none() && which == "second" {
+                        let prefix = match engine.current_source.borrow().as_ref() {
+                            Some((file, line)) => format!("{file}:{line}: "),
+                            None => String::new(),
+                        };
+                        if val.trim().is_empty() {
+                            eprintln!(
+                                "{prefix}*** non-numeric {which} argument to 'intcmp' function: empty value.  Stop."
+                            );
+                        } else {
+                            eprintln!(
+                                "{prefix}*** non-numeric {which} argument to 'intcmp' function: '{}'.  Stop.",
+                                val.trim()
+                            );
+                        }
+                        std::process::exit(2);
+                    }
+                };
+                check_nonnumeric(&lhs, "first");
+                check_nonnumeric(&rhs, "second");
                 match (lhs_n, rhs_n) {
                     (Some(l), Some(r)) => {
                         let ord = l.cmp(&r);
@@ -1005,6 +1020,54 @@ pub fn pattern_match(word: &str, pattern: &str) -> bool {
 }
 
 /// Extract the stem from a pattern match.
+/// Parse a numeric argument for `word`/`wordlist`. On invalid input,
+/// emit GNU make's diagnostic (with the current source location) and
+/// exit. `strict_nonzero` means zero is also rejected ("must be
+/// greater than 0"), used for `word`'s first argument.
+fn parse_numeric_arg(
+    engine: &Engine,
+    func: &str,
+    which: &str,
+    raw: &str,
+    strict_nonzero: bool,
+) -> usize {
+    let prefix = match engine.current_source.borrow().as_ref() {
+        Some((file, line)) => format!("{file}:{line}: "),
+        None => String::new(),
+    };
+    if raw.trim().is_empty() {
+        eprintln!("{prefix}*** invalid {which} argument to '{func}' function: empty value.  Stop.");
+        std::process::exit(2);
+    }
+    match raw.trim().parse::<usize>() {
+        Ok(n) => {
+            if strict_nonzero && n == 0 {
+                eprintln!(
+                    "{prefix}*** first argument to '{func}' function must be greater than 0.  Stop."
+                );
+                std::process::exit(2);
+            }
+            n
+        }
+        Err(_) => {
+            // Disambiguate "out of range" from "not a number" the way
+            // GNU make does.
+            if raw.trim().chars().all(|c| c.is_ascii_digit()) {
+                eprintln!(
+                    "{prefix}*** invalid {which} argument to '{func}' function: '{}' out of range.  Stop.",
+                    raw.trim()
+                );
+            } else {
+                eprintln!(
+                    "{prefix}*** invalid {which} argument to '{func}' function: '{}'.  Stop.",
+                    raw
+                );
+            }
+            std::process::exit(2);
+        }
+    }
+}
+
 /// Normalize a path by collapsing redundant separators and resolving
 /// `.` and `..` segments, matching GNU make's `$(abspath)` behavior.
 /// Assumes `path` is already absolute; otherwise preserves the input.
