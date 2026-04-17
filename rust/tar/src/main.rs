@@ -1666,6 +1666,7 @@ fn add_paths_to_builder_filter<W: Write>(
     let mut hardlink_map: std::collections::HashMap<(u64, u64), String> =
         std::collections::HashMap::new();
     let mut had_read_error = false;
+    let mut file_changed = false;
 
     for src in &args.paths {
         if let Some(dir) = src.strip_prefix("\0-C\0") {
@@ -2075,7 +2076,16 @@ fn add_paths_to_builder_filter<W: Write>(
                         continue;
                     }
                 };
+                let orig_size = metadata.len();
                 append_entry_raw(&mut *builder, &mut header, archive_name, &mut file, None)?;
+                // Detect a size-change-during-read and warn. GNU tar
+                // exits 1 (not 2) in this situation.
+                if let Ok(after) = fs::metadata(path)
+                    && after.len() != orig_size
+                {
+                    eprintln!("tar: {archive_name}: file changed as we read it");
+                    file_changed = true;
+                }
             }
 
             if args.verify && args.verbose {
@@ -2084,11 +2094,16 @@ fn add_paths_to_builder_filter<W: Write>(
         }
 
         // --remove-files: delete each archived entry in reverse so
-        // children get removed before their parents.
+        // children get removed before their parents. Skip '.' since we
+        // can't rmdir the current working directory — GNU tar also
+        // leaves it alone.
         if args.remove_files {
             let mut sorted: Vec<&PathBuf> = entries.iter().collect();
             sorted.sort_by(|a, b| b.as_path().cmp(a.as_path()));
             for p in sorted {
+                if p.as_os_str() == "." || p.as_os_str() == "./" {
+                    continue;
+                }
                 let meta = fs::symlink_metadata(p);
                 let (res, verb) = match meta {
                     Ok(m) if m.file_type().is_dir() => (fs::remove_dir(p), "rmdir"),
@@ -2104,6 +2119,9 @@ fn add_paths_to_builder_filter<W: Write>(
     if had_read_error {
         eprintln!("tar: Exiting with failure status due to previous errors");
         return Err(io::Error::other("read-error-exit"));
+    }
+    if file_changed {
+        return Err(io::Error::other("file-changed-exit"));
     }
     Ok(())
 }
@@ -3152,6 +3170,9 @@ fn main() {
         }
         if msg == "read-error-exit" {
             process::exit(2);
+        }
+        if msg == "file-changed-exit" {
+            process::exit(1);
         }
         // gzip/bzip2/xz decode errors from an empty compressed stream
         // surface as "unexpected end of file". GNU tar presents them as
