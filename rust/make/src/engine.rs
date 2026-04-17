@@ -262,6 +262,32 @@ impl Engine {
         engine
     }
 
+    /// Disable the built-in pattern rules (what `-r` does) — removes
+    /// the rules added by `setup_default_rules`.
+    pub fn disable_builtin_rules(&self) {
+        self.pattern_rules
+            .borrow_mut()
+            .retain(|r| r.source_name != "<built-in>");
+        *self.suffixes_cleared.borrow_mut() = true;
+    }
+
+    /// Drop the built-in variables (`CC`, `CXX`, ...). Used by `-R`,
+    /// which disables both rules and variables.
+    pub fn disable_builtin_vars(&self) {
+        let names = [
+            "CC", "CXX", "AS", "AR", "RM", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "LDLIBS",
+            "ARFLAGS",
+        ];
+        let mut vars = self.vars.borrow_mut();
+        for n in names {
+            if let Some(var) = vars.get(n)
+                && var.origin == VarOrigin::Default
+            {
+                vars.remove(n);
+            }
+        }
+    }
+
     fn setup_default_rules(&self) {
         // C compilation
         self.add_pattern_rule(

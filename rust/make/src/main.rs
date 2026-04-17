@@ -25,12 +25,16 @@ fn run() -> i32 {
     }
     if let Ok(flags) = std::env::var("MAKEFLAGS") {
         // MAKEFLAGS entries without a leading `-` are either short-flag
-        // clusters (e.g. `erR`) or `VAR=value` assignments.
+        // clusters (e.g. `erR`) or `VAR=value` assignments. The token
+        // `--` is a separator GNU make inserts between flags and
+        // command-line variable assignments — skip it.
         for tok in flags.split_whitespace() {
+            if tok == "--" {
+                continue;
+            }
             if tok.starts_with('-') || tok.contains('=') {
                 prepend.push(tok.to_string());
             } else {
-                // Bare `erR` → expand to `-e -r -R`.
                 prepend.push(format!("-{tok}"));
             }
         }
@@ -199,9 +203,12 @@ fn run() -> i32 {
                 mflags_short.push('e');
             }
             "-r" | "--no-builtin-rules" => {
+                engine.disable_builtin_rules();
                 mflags_short.push('r');
             }
             "-R" | "--no-builtin-variables" => {
+                engine.disable_builtin_rules();
+                engine.disable_builtin_vars();
                 mflags_short.push('R');
             }
             "-w" | "--print-directory" => {
@@ -365,7 +372,11 @@ fn run() -> i32 {
                         'i' => engine.ignore_errors = true,
                         'e' => engine.env_overrides = true,
                         'w' => {}
-                        'r' | 'R' => {} // disable built-ins: no-ops for now
+                        'r' => engine.disable_builtin_rules(),
+                        'R' => {
+                            engine.disable_builtin_rules();
+                            engine.disable_builtin_vars();
+                        }
                         'f' => {
                             if let Some(v) = take_arg(&flags, idx, &mut i) {
                                 makefiles.push(v);
