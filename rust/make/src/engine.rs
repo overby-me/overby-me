@@ -1955,9 +1955,30 @@ impl Engine {
                 }
             }
             let expanded_raw = expand::expand_with_auto(raw, self, &auto_vars);
-            for sub in expanded_raw.split('\n') {
+            // Split on newline, but keep `\<newline>` joined — the
+            // backslash is an intentional shell line continuation that
+            // was preserved from the makefile (so the shell itself sees
+            // the joined command).
+            let mut pieces: Vec<String> = Vec::new();
+            let mut buf = String::new();
+            let mut chars = expanded_raw.chars().peekable();
+            while let Some(c) = chars.next() {
+                if c == '\\' && chars.peek() == Some(&'\n') {
+                    chars.next();
+                    buf.push('\\');
+                    buf.push('\n');
+                } else if c == '\n' {
+                    pieces.push(std::mem::take(&mut buf));
+                } else {
+                    buf.push(c);
+                }
+            }
+            if !buf.is_empty() {
+                pieces.push(buf);
+            }
+            for sub in pieces {
                 if !sub.is_empty() {
-                    expanded_lines.push((sub.to_string(), line_no, outer_silent, outer_ignore));
+                    expanded_lines.push((sub, line_no, outer_silent, outer_ignore));
                 }
             }
         }

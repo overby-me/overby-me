@@ -61,6 +61,12 @@ impl Parser {
             // shell interprets continuations.
             let effective = if in_continuation && !logical_is_recipe {
                 line.trim_start()
+            } else if in_continuation && logical_is_recipe {
+                // Recipe continuation physical line: strip one leading
+                // recipe-prefix (tab) to match GNU make's trace output,
+                // where only the first physical line of a recipe is
+                // tab-indented.
+                line.strip_prefix('\t').unwrap_or(line)
             } else {
                 line
             };
