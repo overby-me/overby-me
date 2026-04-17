@@ -466,6 +466,8 @@ fn run() -> i32 {
         mflags.push_str(long);
     }
     // Append command-line var assignments (so sub-makes inherit them).
+    // GNU make separates flags from assignments with ` -- ` — this lets
+    // it know where variable assignments begin when re-parsing MAKEFLAGS.
     let cmdline_vars: Vec<String> = {
         let vars = engine.vars.borrow();
         let mut v: Vec<String> = vars
@@ -476,11 +478,12 @@ fn run() -> i32 {
         v.sort();
         v
     };
-    for assign in &cmdline_vars {
-        if !mflags.is_empty() {
+    if !cmdline_vars.is_empty() {
+        mflags.push_str(" --");
+        for assign in &cmdline_vars {
             mflags.push(' ');
+            mflags.push_str(assign);
         }
-        mflags.push_str(assign);
     }
     engine.set_var_with_origin(
         "MAKEFLAGS",

@@ -1502,8 +1502,25 @@ impl Engine {
         let assume_new = self.assume_new.borrow();
         let has_assume_new_prereq = all_prereqs.iter().any(|p| assume_new.contains(p));
         drop(assume_new);
+        let mut first_err: Option<String> = None;
         for prereq in &all_prereqs {
             if let Err(e) = self.build_target_for(prereq, Some(target)) {
+                if self.keep_going {
+                    // Emit each diagnostic now so -k runs can see all
+                    // of them, then remember the first error to bubble
+                    // up after the loop.
+                    if !e.is_empty() {
+                        if e.starts_with('[') {
+                            eprintln!("make: *** {e}");
+                        } else {
+                            eprintln!("make: *** {e}.");
+                        }
+                    }
+                    if first_err.is_none() {
+                        first_err = Some(String::new());
+                    }
+                    continue;
+                }
                 pop_scope(self);
                 return Err(e);
             }
@@ -1526,11 +1543,37 @@ impl Engine {
             }
         }
 
+        // If -k mode collected any prereq failures above, surface an
+        // empty error now so the outer driver knows this target didn't
+        // remake. Skip the remaining prereq work for this target.
+        if first_err.is_some() {
+            pop_scope(self);
+            return Err(String::new());
+        }
+
         // Build .EXTRA_PREREQS after normal prereqs but before
         // order-only, and keep them out of `$^`/`$<`.
         if !in_extras {
             for prereq in &extra_prereqs {
-                self.build_target_for(prereq, Some(target))?;
+                if let Err(e) = self.build_target_for(prereq, Some(target)) {
+                    if self.keep_going {
+                        if !e.is_empty() {
+                            if e.starts_with('[') {
+                                eprintln!("make: *** {e}");
+                            } else {
+                                eprintln!("make: *** {e}.");
+                            }
+                        }
+                        first_err = Some(String::new());
+                        continue;
+                    }
+                    pop_scope(self);
+                    return Err(e);
+                }
+            }
+            if first_err.is_some() {
+                pop_scope(self);
+                return Err(String::new());
             }
         }
 
