@@ -504,12 +504,12 @@ fn call_function(
             let result: Vec<String> = text
                 .split_whitespace()
                 .map(|name| {
-                    let p = std::path::Path::new(name);
-                    if p.is_absolute() {
+                    let joined = if std::path::Path::new(name).is_absolute() {
                         name.to_string()
                     } else {
                         cwd.join(name).to_string_lossy().to_string()
-                    }
+                    };
+                    normalize_path(&joined)
                 })
                 .collect();
             Some(result.join(" "))
@@ -1005,6 +1005,30 @@ pub fn pattern_match(word: &str, pattern: &str) -> bool {
 }
 
 /// Extract the stem from a pattern match.
+/// Normalize a path by collapsing redundant separators and resolving
+/// `.` and `..` segments, matching GNU make's `$(abspath)` behavior.
+/// Assumes `path` is already absolute; otherwise preserves the input.
+fn normalize_path(path: &str) -> String {
+    if !path.starts_with('/') {
+        return path.to_string();
+    }
+    let mut stack: Vec<&str> = Vec::new();
+    for seg in path.split('/') {
+        match seg {
+            "" | "." => continue,
+            ".." => {
+                stack.pop();
+            }
+            other => stack.push(other),
+        }
+    }
+    if stack.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{}", stack.join("/"))
+    }
+}
+
 pub fn pattern_stem(word: &str, pattern: &str) -> Option<String> {
     if let Some(percent_pos) = pattern.find('%') {
         let prefix = &pattern[..percent_pos];

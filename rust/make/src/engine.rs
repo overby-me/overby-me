@@ -1081,6 +1081,7 @@ impl Engine {
             targets.to_vec()
         };
 
+        let mut had_error = false;
         for target in &targets {
             let target_expanded = expand::expand(target, self);
             *self.recipe_executed.borrow_mut() = false;
@@ -1094,6 +1095,7 @@ impl Engine {
                         && !before_built
                         && !self.question
                         && !self.silent
+                        && !had_error
                     {
                         if *self.target_had_recipe.borrow() {
                             println!("{make_tag}: '{target_expanded}' is up to date.");
@@ -1103,6 +1105,7 @@ impl Engine {
                     }
                 }
                 Err(e) => {
+                    had_error = true;
                     // Recipe errors (formatted as `[file:line: target] Error N`)
                     // don't get the trailing "Stop." diagnostic; dependency
                     // errors do. Empty string = already reported.
@@ -1119,6 +1122,11 @@ impl Engine {
                         }
                         return 2;
                     }
+                    // -k mode: report which target couldn't be remade
+                    // and keep going with later goals.
+                    eprintln!(
+                        "{make_tag}: Target '{target_expanded}' not remade because of errors."
+                    );
                 }
             }
         }
@@ -1136,7 +1144,7 @@ impl Engine {
             };
         }
 
-        0
+        if had_error { 2 } else { 0 }
     }
 
     fn build_target(&self, target: &str) -> Result<(), String> {
