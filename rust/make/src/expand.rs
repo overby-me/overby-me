@@ -1,6 +1,6 @@
 //! Variable and function expansion for Make expressions.
 
-use crate::engine::Engine;
+use crate::engine::{Engine, VarFlavor, VarOrigin, Variable};
 use std::collections::HashMap;
 
 /// Expand all variable references and function calls in a string.
@@ -50,8 +50,12 @@ pub fn expand_with_auto(s: &str, engine: &Engine, auto_vars: &HashMap<&str, Stri
                         result.push_str(&engine.lookup_var(&var));
                     }
                 }
-                c if c.is_alphanumeric() || c == '_' => {
-                    // Single character variable
+                c => {
+                    // Any other single character is a single-char variable
+                    // reference. `$a`, `$ `, `$,`, `$:` — each looks up a
+                    // one-character variable (usually undefined → empty,
+                    // which is exactly what idioms like `$\`-continuation
+                    // rely on).
                     let var = c.to_string();
                     i += 1;
                     if let Some(val) = auto_vars.get(var.as_str()) {
@@ -59,10 +63,6 @@ pub fn expand_with_auto(s: &str, engine: &Engine, auto_vars: &HashMap<&str, Stri
                     } else {
                         result.push_str(&engine.lookup_var(&var));
                     }
-                }
-                _ => {
-                    result.push('$');
-                    // Don't advance - let the outer loop handle this char
                 }
             }
         } else {
@@ -96,6 +96,24 @@ fn read_balanced(chars: &[char], i: &mut usize, open: char, close: char) -> Stri
 
 /// Expand a $(expr) or ${expr} — either a variable reference or function call.
 fn expand_expr(expr: &str, engine: &Engine, auto_vars: &HashMap<&str, String>) -> String {
+    // GNU make splits function args on raw commas *before* expansion, so a
+    // comma inside a variable value doesn't split the arg list. For
+    // substitution refs and plain variable lookups we still need the
+    // variable name expanded (to support `$($(x)...)`).
+
+    // First, check if the RAW expr looks like a function call: `<name>
+    // <args>` where <name> is a known built-in (no space-containing names).
+    if let Some(space_pos) = expr.find([' ', '\t']) {
+        let func_name_raw = &expr[..space_pos];
+        let func_name = func_name_raw.trim();
+        if is_builtin_function(func_name) {
+            let args_str = expr[space_pos + 1..].trim_start();
+            if let Some(result) = call_function(func_name, args_str, engine, auto_vars) {
+                return result;
+            }
+        }
+    }
+
     let expr_expanded = expand_with_auto(expr, engine, auto_vars);
 
     // Check for substitution reference: $(VAR:a=b)
@@ -114,7 +132,9 @@ fn expand_expr(expr: &str, engine: &Engine, auto_vars: &HashMap<&str, String>) -
         }
     }
 
-    // Check for function call: $(func args)
+    // Check for function call: $(func args). If the function name itself
+    // contained a variable reference (now expanded), we still need this
+    // path so that `$($(fn-name) args)` dispatches.
     if let Some(space_pos) = expr_expanded.find([' ', '\t']) {
         let func_name = &expr_expanded[..space_pos];
         let args_str = expr_expanded[space_pos + 1..].trim_start();
@@ -149,6 +169,11 @@ fn find_subst_colon(s: &str) -> Option<usize> {
 }
 
 fn substitute_ref(value: &str, from: &str, to: &str) -> String {
+    // `$(VAR:from=to)` is equivalent to `$(patsubst from,to,$(VAR))` when
+    // `from` contains `%`; otherwise it's a plain suffix substitution.
+    if from.contains('%') || to.contains('%') {
+        return patsubst(value, from, to);
+    }
     value
         .split_whitespace()
         .map(|word| {
@@ -282,9 +307,13 @@ fn call_function(
                     .unwrap_or(0);
                 let text = expand_with_auto(&args[2], engine, auto_vars);
                 let words: Vec<&str> = text.split_whitespace().collect();
-                let start = s.saturating_sub(1).min(words.len());
-                let end = e.min(words.len());
-                Some(words[start..end].join(" "))
+                if s == 0 || e == 0 || s > e {
+                    Some(String::new())
+                } else {
+                    let start = s.saturating_sub(1).min(words.len());
+                    let end = e.min(words.len());
+                    Some(words[start..end].join(" "))
+                }
             } else {
                 Some(String::new())
             }
@@ -485,6 +514,65 @@ fn call_function(
                 .collect();
             Some(result.join(" "))
         }
+        "file" => {
+            // `$(file OP filename,text)` / `$(file OP filename)`:
+            //   >  filename — write text (overwrite)
+            //   >> filename — append text
+            //   <  filename — read file contents
+            if args.is_empty() {
+                return Some(String::new());
+            }
+            let spec = expand_with_auto(&args[0], engine, auto_vars);
+            let spec = spec.trim_start();
+            let (op, filename) = if let Some(rest) = spec.strip_prefix(">>") {
+                ("append", rest.trim().to_string())
+            } else if let Some(rest) = spec.strip_prefix('>') {
+                ("write", rest.trim().to_string())
+            } else if let Some(rest) = spec.strip_prefix('<') {
+                ("read", rest.trim().to_string())
+            } else {
+                return Some(String::new());
+            };
+            match op {
+                "write" | "append" => {
+                    use std::io::Write;
+                    let mut text = if args.len() >= 2 {
+                        expand_with_auto(&args[1], engine, auto_vars)
+                    } else {
+                        String::new()
+                    };
+                    if !text.is_empty() && !text.ends_with('\n') {
+                        text.push('\n');
+                    }
+                    let open_result = if op == "append" {
+                        std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&filename)
+                    } else {
+                        std::fs::OpenOptions::new()
+                            .create(true)
+                            .write(true)
+                            .truncate(true)
+                            .open(&filename)
+                    };
+                    if let Ok(mut f) = open_result {
+                        let _ = f.write_all(text.as_bytes());
+                    }
+                    Some(String::new())
+                }
+                "read" => {
+                    // GNU make: strip a single trailing newline from the
+                    // file's contents.
+                    let mut s = std::fs::read_to_string(&filename).unwrap_or_default();
+                    if s.ends_with('\n') {
+                        s.pop();
+                    }
+                    Some(s)
+                }
+                _ => Some(String::new()),
+            }
+        }
         "shell" => {
             let cmd = expand_with_auto(
                 args.first().map(|s| s.as_str()).unwrap_or(""),
@@ -514,9 +602,115 @@ fn call_function(
                 if !cond.trim().is_empty() {
                     Some(expand_with_auto(&args[1], engine, auto_vars))
                 } else if args.len() >= 3 {
-                    Some(expand_with_auto(&args[2], engine, auto_vars))
+                    // Extra commas in the else branch stay literal in GNU
+                    // make — `$(if ,t,f,g)` → else = "f,g".
+                    let else_text = args[2..].join(",");
+                    Some(expand_with_auto(&else_text, engine, auto_vars))
                 } else {
                     Some(String::new())
+                }
+            } else {
+                Some(String::new())
+            }
+        }
+        "let" => {
+            if args.len() >= 3 {
+                let names_raw = expand_with_auto(&args[0], engine, auto_vars);
+                let names: Vec<&str> = names_raw.split_whitespace().collect();
+                let values_raw = expand_with_auto(&args[1], engine, auto_vars);
+                // Match values to names. If more values than names, the
+                // last name captures the remainder (including the whitespace
+                // that separated it from the next word).
+                let body = args[2..].join(",");
+                let values = values_raw.as_str();
+                // Save prior bindings so we can restore after the body.
+                let mut saved: Vec<(String, Option<Variable>)> = Vec::new();
+                let mut cursor = 0usize;
+                for (i, name) in names.iter().enumerate() {
+                    if name.is_empty() {
+                        continue;
+                    }
+                    saved.push((name.to_string(), engine.vars.borrow().get(*name).cloned()));
+                    let is_last = i + 1 == names.len();
+                    // Skip leading whitespace for next word.
+                    while cursor < values.len()
+                        && values[cursor..]
+                            .chars()
+                            .next()
+                            .is_some_and(|c| c.is_whitespace())
+                    {
+                        cursor += values[cursor..].chars().next().unwrap().len_utf8();
+                    }
+                    let slice = &values[cursor..];
+                    let assigned = if is_last {
+                        // Last var gets the remainder (no trim on right in
+                        // GNU make — whitespace is preserved).
+                        cursor = values.len();
+                        slice.to_string()
+                    } else {
+                        // Consume next whitespace-separated word.
+                        let word_end = slice
+                            .char_indices()
+                            .find(|(_, c)| c.is_whitespace())
+                            .map(|(i, _)| i)
+                            .unwrap_or(slice.len());
+                        let word = &slice[..word_end];
+                        cursor += word_end;
+                        word.to_string()
+                    };
+                    engine.set_var_with_origin(
+                        name,
+                        &assigned,
+                        VarFlavor::Simple,
+                        VarOrigin::Automatic,
+                    );
+                }
+                let result = expand_with_auto(&body, engine, auto_vars);
+                // Restore prior bindings.
+                for (name, prev) in saved.into_iter().rev() {
+                    let mut vars = engine.vars.borrow_mut();
+                    match prev {
+                        Some(v) => {
+                            vars.insert(name, v);
+                        }
+                        None => {
+                            vars.remove(&name);
+                        }
+                    }
+                }
+                Some(result)
+            } else {
+                Some(String::new())
+            }
+        }
+        "intcmp" => {
+            if args.len() >= 2 {
+                let lhs = expand_with_auto(&args[0], engine, auto_vars);
+                let rhs = expand_with_auto(&args[1], engine, auto_vars);
+                let lhs_n: Option<i64> = lhs.trim().parse().ok();
+                let rhs_n: Option<i64> = rhs.trim().parse().ok();
+                match (lhs_n, rhs_n) {
+                    (Some(l), Some(r)) => {
+                        let ord = l.cmp(&r);
+                        let pick = |idx: usize| {
+                            args.get(idx)
+                                .map(|a| expand_with_auto(a, engine, auto_vars))
+                                .unwrap_or_default()
+                        };
+                        // `$(intcmp L,R)` — empty unless equal (returns L).
+                        // `$(intcmp L,R,lt)` — lt or empty.
+                        // `$(intcmp L,R,lt,eq)` — lt / eq / empty.
+                        // `$(intcmp L,R,lt,eq,gt)` — three-way.
+                        let result = match (ord, args.len()) {
+                            (std::cmp::Ordering::Equal, 2) => lhs.trim().to_string(),
+                            (std::cmp::Ordering::Equal, _) => pick(3),
+                            (std::cmp::Ordering::Less, n) if n >= 3 => pick(2),
+                            (std::cmp::Ordering::Greater, n) if n >= 5 => pick(4),
+                            _ => String::new(),
+                        };
+                        Some(result)
+                    }
+                    _ => Some(String::new()),
                 }
             } else {
                 Some(String::new())
@@ -574,14 +768,23 @@ fn call_function(
         "call" => {
             if !args.is_empty() {
                 let func_name = expand_with_auto(&args[0], engine, auto_vars);
-                let func_body = engine.lookup_var(func_name.trim());
-                let mut body = func_body;
+                // Use the raw (unexpanded) body so `$1`/`$2`/… remain
+                // intact for substitution below.
+                let mut body = engine.lookup_var_raw(func_name.trim());
+                // Replace numbered parameter references. `$1`–`$9` (bare)
+                // and `$(1)`/`${1}` forms.
+                body = body.replace("$(0)", func_name.trim());
+                body = body.replace("${0}", func_name.trim());
                 for (i, arg) in args.iter().skip(1).enumerate() {
                     let val = expand_with_auto(arg, engine, auto_vars);
-                    body = body.replace(&format!("$({})", i + 1), &val);
-                    body = body.replace(&format!("${{{}}}", i + 1), &val);
+                    let n = i + 1;
+                    body = body.replace(&format!("$({n})"), &val);
+                    body = body.replace(&format!("${{{n}}}"), &val);
+                    // Bare `$<digit>` reference (only single digit).
+                    if n <= 9 {
+                        body = body.replace(&format!("${n}"), &val);
+                    }
                 }
-                body = body.replace("$(0)", func_name.trim());
                 Some(expand_with_auto(&body, engine, auto_vars))
             } else {
                 Some(String::new())
@@ -617,7 +820,11 @@ fn call_function(
                 engine,
                 auto_vars,
             );
-            eprintln!("*** {msg}.  Stop.");
+            let prefix = match engine.current_source.borrow().as_ref() {
+                Some((file, line)) => format!("{file}:{line}: "),
+                None => String::new(),
+            };
+            eprintln!("{prefix}*** {msg}.  Stop.");
             std::process::exit(2);
         }
         "warning" => {
@@ -626,7 +833,11 @@ fn call_function(
                 engine,
                 auto_vars,
             );
-            eprintln!("warning: {msg}");
+            let prefix = match engine.current_source.borrow().as_ref() {
+                Some((file, line)) => format!("{file}:{line}: "),
+                None => String::new(),
+            };
+            eprintln!("{prefix}{msg}");
             Some(String::new())
         }
         "info" => {
@@ -651,6 +862,51 @@ fn call_function(
         }
         _ => None, // Not a known function — fall through to variable lookup
     }
+}
+
+fn is_builtin_function(name: &str) -> bool {
+    matches!(
+        name,
+        "subst"
+            | "patsubst"
+            | "strip"
+            | "findstring"
+            | "filter"
+            | "filter-out"
+            | "sort"
+            | "word"
+            | "wordlist"
+            | "words"
+            | "firstword"
+            | "lastword"
+            | "dir"
+            | "notdir"
+            | "suffix"
+            | "basename"
+            | "addsuffix"
+            | "addprefix"
+            | "join"
+            | "wildcard"
+            | "realpath"
+            | "abspath"
+            | "if"
+            | "or"
+            | "and"
+            | "intcmp"
+            | "foreach"
+            | "call"
+            | "value"
+            | "eval"
+            | "origin"
+            | "flavor"
+            | "shell"
+            | "file"
+            | "error"
+            | "warning"
+            | "info"
+            | "let"
+            | "guile"
+    )
 }
 
 fn split_args(s: &str) -> Vec<String> {
@@ -700,14 +956,35 @@ pub fn patsubst(text: &str, pattern: &str, replacement: &str) -> String {
 }
 
 pub fn pattern_match(word: &str, pattern: &str) -> bool {
-    if let Some(percent_pos) = pattern.find('%') {
-        let prefix = &pattern[..percent_pos];
-        let suffix = &pattern[percent_pos + 1..];
+    // Find the first unescaped `%`. `\%` = literal `%`, `\\%` = literal
+    // backslash followed by wildcard `%`.
+    let bytes = pattern.as_bytes();
+    let mut i = 0;
+    let mut unesc = String::new();
+    let mut pct: Option<usize> = None;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'%' {
+            unesc.push('%');
+            i += 2;
+        } else if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
+            unesc.push('\\');
+            i += 2;
+        } else if bytes[i] == b'%' && pct.is_none() {
+            pct = Some(unesc.len());
+            i += 1;
+        } else {
+            unesc.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    if let Some(p) = pct {
+        let prefix = &unesc[..p];
+        let suffix = &unesc[p..];
         word.starts_with(prefix)
             && word.ends_with(suffix)
             && word.len() >= prefix.len() + suffix.len()
     } else {
-        word == pattern
+        word == unesc
     }
 }
 

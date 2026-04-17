@@ -10,13 +10,27 @@ pub enum Directive {
     Assignment(Assignment),
     Include(Vec<String>, bool), // (files, is_sinclude/-include)
     Conditional(Conditional),
-    Export(Option<String>),   // export VAR or export (all)
-    Unexport(Option<String>), // unexport VAR or unexport (all)
+    /// `export` (no args) → export all. `export VAR ...` → export the
+    /// listed vars.
+    Export(Option<Vec<String>>),
+    ExportAssign(Box<Assignment>), // export VAR = value: assign + export
+    Unexport(Option<Vec<String>>), // unexport VAR ... or unexport
     #[allow(dead_code)]
     Vpath(Option<(String, String)>),
     Override(Box<Assignment>),
     Define(String, AssignOp, Vec<String>), // multi-line variable
+    OverrideDefine(String, AssignOp, Vec<String>), // override define NAME…endef
     Undefine(String),
+    OverrideUndefine(String), // override undefine VAR — force-remove
+    /// Target-specific variable assignment: `targets: VAR OP value`.
+    /// `targets` is the raw (possibly space-separated, unexpanded) list;
+    /// the engine expands it at load time.
+    TargetVarAssign(String, Box<Assignment>),
+    /// A bare expression line (e.g. `$(error msg)` / `$(info ...)` /
+    /// `$(eval ...)`) evaluated at makefile-load time for its side effects.
+    /// Carries `(expr, source_name, line_no)` so diagnostics from
+    /// `$(error)` / `$(warning)` can include the source location.
+    Expand(String, String, usize),
 }
 
 /// A make rule: targets, prerequisites, order-only prereqs, and recipe lines.
@@ -27,6 +41,10 @@ pub struct Rule {
     pub prerequisites: Vec<String>,
     pub order_only: Vec<String>,
     pub recipe: Vec<String>,
+    /// 1-based source line number for each entry in `recipe`; parallel
+    /// to the recipe vec. Used for `$(error)`/`$(warning)` diagnostics.
+    pub recipe_lines: Vec<usize>,
+    pub source_name: String,
     pub is_double_colon: bool,
 }
 

@@ -2,6 +2,18 @@
 
 use crate::ast::*;
 
+/// Strip the recipe-prefix character from the start of `line`, returning the
+/// remainder. Default prefix is tab (`\t`), but `.RECIPEPREFIX := X` can
+/// override it.
+fn strip_recipe_prefix(line: &str, prefix: char) -> Option<&str> {
+    let mut chars = line.chars();
+    if chars.next() == Some(prefix) {
+        Some(&line[prefix.len_utf8()..])
+    } else {
+        None
+    }
+}
+
 /// Strip a Makefile comment (# and everything after, unless preceded by \)
 fn strip_makefile_comment(s: &str) -> &str {
     let bytes = s.as_bytes();
@@ -15,27 +27,59 @@ fn strip_makefile_comment(s: &str) -> &str {
 
 pub struct Parser {
     lines: Vec<String>,
+    line_nos: Vec<usize>,
     pos: usize,
+    source_name: String,
+    /// Currently configured recipe prefix character (default: tab).
+    /// Updated when `.RECIPEPREFIX := X` is seen.
+    recipe_prefix: char,
 }
 
 impl Parser {
     pub fn new(input: &str) -> Self {
-        // Join backslash-continued lines
+        Self::new_with_source(input, "-".to_string())
+    }
+
+    pub fn new_with_source(input: &str, source_name: String) -> Self {
+        // Join backslash-continued lines, keeping track of the starting
+        // physical line number for each logical line (1-based).
         let mut lines = Vec::new();
+        let mut line_nos = Vec::new();
         let mut current = String::new();
-        for line in input.lines() {
+        let mut start_line = 0usize;
+        for (i, line) in input.lines().enumerate() {
+            if current.is_empty() {
+                start_line = i + 1;
+            }
             if let Some(stripped) = line.strip_suffix('\\') {
                 current.push_str(stripped);
                 current.push(' ');
             } else {
                 current.push_str(line);
                 lines.push(std::mem::take(&mut current));
+                line_nos.push(start_line);
             }
         }
         if !current.is_empty() {
             lines.push(current);
+            line_nos.push(start_line);
         }
-        Self { lines, pos: 0 }
+        Self {
+            lines,
+            line_nos,
+            pos: 0,
+            source_name,
+            recipe_prefix: '\t',
+        }
+    }
+
+    fn current_line_no(&self) -> usize {
+        self.line_nos.get(self.pos).copied().unwrap_or(0)
+    }
+
+    #[allow(dead_code)]
+    pub fn source_name(&self) -> &str {
+        &self.source_name
     }
 
     fn peek(&self) -> Option<&str> {
@@ -135,11 +179,12 @@ impl Parser {
         }
         if let Some(rest) = trimmed.strip_prefix("export ") {
             self.advance();
-            // Check if it's export VAR = value
+            // `export VAR = value` both assigns and marks VAR exported.
             if let Some(assign) = try_parse_assignment(rest) {
-                return Ok(Some(Directive::Export(Some(assign.name.clone()))));
+                return Ok(Some(Directive::ExportAssign(Box::new(assign))));
             }
-            return Ok(Some(Directive::Export(Some(rest.trim().to_string()))));
+            let names: Vec<String> = rest.split_whitespace().map(|s| s.to_string()).collect();
+            return Ok(Some(Directive::Export(Some(names))));
         }
         if trimmed == "unexport" {
             self.advance();
@@ -147,15 +192,34 @@ impl Parser {
         }
         if let Some(rest) = trimmed.strip_prefix("unexport ") {
             self.advance();
-            return Ok(Some(Directive::Unexport(Some(rest.trim().to_string()))));
+            let names: Vec<String> = rest.split_whitespace().map(|s| s.to_string()).collect();
+            return Ok(Some(Directive::Unexport(Some(names))));
         }
 
         // Override
-        if let Some(rest) = trimmed.strip_prefix("override ")
-            && let Some(assign) = try_parse_assignment(rest)
-        {
-            self.advance();
-            return Ok(Some(Directive::Override(Box::new(assign))));
+        if let Some(rest) = trimmed.strip_prefix("override ") {
+            if let Some(assign) = try_parse_assignment(rest) {
+                self.advance();
+                return Ok(Some(Directive::Override(Box::new(assign))));
+            }
+            // `override undefine VAR` — force-remove even command-line vars.
+            if let Some(var) = rest.strip_prefix("undefine ") {
+                self.advance();
+                return Ok(Some(Directive::OverrideUndefine(var.trim().to_string())));
+            }
+            // `override define NAME …` — multi-line variable override.
+            if rest.starts_with("define ") || rest == "define" {
+                // Rewrite the current line to drop the `override ` prefix so
+                // `parse_define` can consume it normally, then wrap the
+                // resulting Define in override semantics.
+                let rest_owned = rest.to_string();
+                self.lines[self.pos] = rest_owned;
+                let directive = self.parse_define()?;
+                if let Directive::Define(name, op, body) = directive {
+                    return Ok(Some(Directive::OverrideDefine(name, op, body)));
+                }
+                return Ok(Some(directive));
+            }
         }
 
         // Undefine
@@ -189,12 +253,61 @@ impl Parser {
         // Try assignment
         if let Some(assign) = try_parse_assignment(trimmed) {
             self.advance();
+            // Track `.RECIPEPREFIX := X` so subsequent rules use X as the
+            // recipe-line marker. Empty resets to default tab.
+            if assign.name.trim() == ".RECIPEPREFIX" {
+                let val = assign.value.trim();
+                self.recipe_prefix = val.chars().next().unwrap_or('\t');
+            }
             return Ok(Some(Directive::Assignment(assign)));
+        }
+
+        // Before parsing as a rule, look for target-specific variable
+        // assignments: `target[, target...]: [private|override|export] VAR OP value`.
+        // Detecting this here avoids misparsing the assignment as a
+        // prereq list.
+        if let Some(colon) = find_rule_colon(trimmed) {
+            let is_double = trimmed[colon..].starts_with("::");
+            let after = if is_double {
+                &trimmed[colon + 2..]
+            } else {
+                &trimmed[colon + 1..]
+            };
+            let after = strip_makefile_comment(after).trim();
+            // Strip optional modifier prefixes on target-specific
+            // assignments. We accept and currently ignore the distinction
+            // (private/export would need extra scope semantics).
+            let after_mod = after
+                .strip_prefix("private ")
+                .or_else(|| after.strip_prefix("override "))
+                .or_else(|| after.strip_prefix("export "))
+                .unwrap_or(after);
+            if !after_mod.is_empty()
+                && let Some(assign) = try_parse_assignment(after_mod)
+            {
+                let targets_str = trimmed[..colon].to_string();
+                self.advance();
+                return Ok(Some(Directive::TargetVarAssign(
+                    targets_str,
+                    Box::new(assign),
+                )));
+            }
         }
 
         // Try rule
         if let Some(rule) = self.try_parse_rule()? {
             return Ok(Some(Directive::Rule(rule)));
+        }
+
+        // Bare `$(...)` expression line — expand for side effects (errors,
+        // info/warning, eval). Must be checked after rule parsing since a
+        // line like `$(x): foo` is a rule, not a bare expression.
+        if trimmed.starts_with("$(") || trimmed.starts_with("${") {
+            let expr = trimmed.to_string();
+            let line_no = self.current_line_no();
+            let source = self.source_name.clone();
+            self.advance();
+            return Ok(Some(Directive::Expand(expr, source, line_no)));
         }
 
         Ok(None)
@@ -323,6 +436,11 @@ impl Parser {
             &trimmed[colon_pos + 1..]
         };
 
+        // Strip trailing comment from the prerequisites section (a `#` not
+        // escaped starts a comment that runs to the end of the logical line,
+        // which may include an inline `;` recipe separator).
+        let after_colon = strip_makefile_comment(after_colon);
+
         // Split after-colon on semicolon for inline recipe
         let (prereqs_str, inline_recipe) = if let Some(semi_pos) = after_colon.find(';') {
             (
@@ -368,19 +486,29 @@ impl Parser {
         // The backslash-newline is preserved in the recipe text since the
         // shell handles continuation, not make.
         let mut recipe = Vec::new();
-        if let Some(inline) = inline_recipe
-            && !inline.is_empty()
-        {
+        let mut recipe_lines = Vec::new();
+        let rule_line = self
+            .line_nos
+            .get(self.pos.saturating_sub(1))
+            .copied()
+            .unwrap_or(0);
+        // An inline recipe marker (`target: ; ...`) means the rule has a
+        // recipe even when the inline text is empty — that distinguishes
+        // `all:` ("Nothing to be done") from `all: ;` ("is up to date").
+        if let Some(inline) = inline_recipe {
             recipe.push(inline);
+            recipe_lines.push(rule_line);
         }
+        let rp = self.recipe_prefix;
         while let Some(line) = self.peek() {
-            if let Some(stripped) = line.strip_prefix('\t') {
+            if let Some(stripped) = strip_recipe_prefix(line, rp) {
+                let line_no = self.current_line_no();
                 let mut combined = stripped.to_string();
                 self.advance();
                 // Join continuation lines: if line ends with \, append next line
                 while combined.ends_with('\\') {
                     if let Some(next) = self.peek() {
-                        if let Some(next_stripped) = next.strip_prefix('\t') {
+                        if let Some(next_stripped) = strip_recipe_prefix(next, rp) {
                             combined.push('\n');
                             combined.push_str(next_stripped);
                             self.advance();
@@ -395,6 +523,7 @@ impl Parser {
                     }
                 }
                 recipe.push(combined);
+                recipe_lines.push(line_no);
             } else if line.is_empty() {
                 // Empty lines within a recipe are allowed
                 self.advance();
@@ -413,6 +542,8 @@ impl Parser {
             prerequisites,
             order_only,
             recipe,
+            recipe_lines,
+            source_name: self.source_name.clone(),
             is_double_colon,
         }))
     }
