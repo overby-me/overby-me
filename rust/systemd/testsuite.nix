@@ -492,6 +492,14 @@ in
           print(output)
 
       # Check for /testok (standard systemd test success marker)
-      machine.succeed("test -f /testok")
+      (rc_ok, ok_out) = machine.execute("test -f /testok")
+      if rc_ok != 0:
+          print("=== /testok missing — dumping journal for diagnostics ===")
+          (rc_j, j) = machine.execute("journalctl --no-pager -b 2>&1 | tail -400")
+          print(j)
+          print("=== systemctl list-units --failed ===")
+          (rc_f, f) = machine.execute("systemctl list-units --failed 2>&1")
+          print(f)
+          machine.fail("test -f /testok")
     '';
   }
