@@ -608,6 +608,17 @@ fn call_function(
             }
         }
         "let" => {
+            if args.len() < 3 {
+                let prefix = match engine.current_source.borrow().as_ref() {
+                    Some((file, line)) => format!("{file}:{line}: "),
+                    None => String::new(),
+                };
+                eprintln!(
+                    "{prefix}*** insufficient number of arguments ({}) to function 'let'.  Stop.",
+                    args.len()
+                );
+                std::process::exit(2);
+            }
             if args.len() >= 3 {
                 let names_raw = expand_with_auto(&args[0], engine, auto_vars);
                 let names: Vec<&str> = names_raw.split_whitespace().collect();
@@ -751,6 +762,17 @@ fn call_function(
             Some(last)
         }
         "foreach" => {
+            if args.len() < 3 {
+                let prefix = match engine.current_source.borrow().as_ref() {
+                    Some((file, line)) => format!("{file}:{line}: "),
+                    None => String::new(),
+                };
+                eprintln!(
+                    "{prefix}*** insufficient number of arguments ({}) to function 'foreach'.  Stop.",
+                    args.len()
+                );
+                std::process::exit(2);
+            }
             if args.len() >= 3 {
                 let var = args[0].trim();
                 let list = expand_with_auto(&args[1], engine, auto_vars);
