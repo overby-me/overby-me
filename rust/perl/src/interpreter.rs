@@ -1924,8 +1924,9 @@ impl Interpreter {
                 Value::Num(-val.to_num())
             }
             UnaryOp::Pos => {
-                let val = self.eval_expr(expr);
-                Value::Num(val.to_num())
+                // Unary `+` is a no-op in Perl — it's only used to
+                // disambiguate `print (1,2,3)+4` from `print(1,2,3)+4`.
+                self.eval_expr(expr)
             }
             UnaryOp::LogNot => {
                 let val = self.eval_expr(expr);
@@ -2612,6 +2613,20 @@ impl Interpreter {
                     self.eval_expr(&args[0])
                 };
                 Value::Str(val.ref_type().to_string())
+            }
+            // test.pl installs this via eval-string iff it isn't already
+            // present; providing it directly avoids one `(eval N)` tick
+            // and matches reference perl's baseline eval counter.
+            "re::is_regexp" => {
+                let val = args
+                    .first()
+                    .map(|a| self.eval_expr(a))
+                    .unwrap_or(Value::Undef);
+                Value::Num(if matches!(val, Value::Regex(_, _)) {
+                    1.0
+                } else {
+                    0.0
+                })
             }
             "caller" => {
                 // caller([N]) — in list context returns (package, file, line)
@@ -3419,6 +3434,42 @@ impl Interpreter {
 
     fn eval_list(&mut self, expr: &Expr) -> Vec<Value> {
         match expr {
+            // Unary + is a pure no-op (keeps list context through it).
+            Expr::UnaryOp(UnaryOp::Pos, inner) => self.eval_list(inner),
+            // Ternary in list context: the chosen branch keeps list context.
+            Expr::Ternary(cond, then, else_) => {
+                if self.eval_expr(cond).to_bool() {
+                    self.eval_list(then)
+                } else {
+                    self.eval_list(else_)
+                }
+            }
+            // List-context assignment expressions propagate their RHS list
+            // so `@a = @b = (1, 2)` and `($x, $y) = ($a, $b) = (1, 2)` work.
+            Expr::Assign(target, value)
+                if matches!(
+                    target.as_ref(),
+                    Expr::ArrayLit(_) | Expr::ArrayVar(_) | Expr::HashVar(_)
+                ) =>
+            {
+                let items = self.eval_list(value);
+                match target.as_ref() {
+                    Expr::ArrayLit(targets) => {
+                        for (i, t) in targets.iter().enumerate() {
+                            let val = items.get(i).cloned().unwrap_or(Value::Undef);
+                            self.assign_to(t, val);
+                        }
+                    }
+                    Expr::ArrayVar(name) => {
+                        self.set_array(name, items.clone());
+                    }
+                    Expr::HashVar(name) => {
+                        self.set_hash_from_list(name, items.clone());
+                    }
+                    _ => {}
+                }
+                items
+            }
             Expr::ArrayLit(items) => items.iter().flat_map(|item| self.eval_list(item)).collect(),
             Expr::ArrayVar(name) => self.get_array(name),
             Expr::ArrayDerefVar(name) => {
@@ -3652,6 +3703,11 @@ impl Interpreter {
                             text.split_whitespace()
                                 .map(|s| Value::Str(s.to_string()))
                                 .collect()
+                        } else if pat.is_empty() {
+                            // `split //, STR` — split at every char boundary.
+                            // Perl's semantics don't include the leading empty
+                            // field that `regex::split("")` would produce.
+                            text.chars().map(|c| Value::Str(c.to_string())).collect()
                         } else if let Ok(re) = regex::Regex::new(&pat) {
                             re.split(&text).map(|s| Value::Str(s.to_string())).collect()
                         } else {

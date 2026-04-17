@@ -6,14 +6,14 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**37/79 Nix tests passing** (47%) — selected tests from the upstream Perl test suite.
+**39/79 Nix tests passing** (49%) — selected tests from the upstream Perl test suite.
 
 Passing: base/if, base/cond, base/while, base/pat, base/num, base/translate,
 base/term, cmd/elsif, cmd/mod, cmd/switch, opbasic/arith, opbasic/qq,
 op/arith2, op/auto, op/bop, op/chop, op/closure, op/cond, op/defined,
 op/do, op/hash, op/inc, op/index, op/lc, op/oct, op/pack, op/quotemeta,
 op/range, op/split, op/sprintf, op/sub, op/vec, io/argv, io/fs, io/open,
-re/subst, run/switches.
+io/print, io/read, re/subst, run/switches.
 
 Major unlock in this cycle: `@_` is now dynamically scoped per-call
 (was being written to globals and overwritten on every sub call — this
