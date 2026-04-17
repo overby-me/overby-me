@@ -277,10 +277,11 @@ impl Parser {
             return Ok(Some(Directive::Vpath(None)));
         }
 
-        // Try assignment. Pass the original (possibly
-        // trailing-whitespace-bearing) line so we preserve the value
-        // exactly as written — `VAR := foo ` retains the trailing space.
-        if let Some(assign) = try_parse_assignment(&line) {
+        // Try assignment. Strip comments first (GNU make: `VAR = val #comment`
+        // stores just "val"), then pass through — keeping any trailing
+        // whitespace preceding the `#`.
+        let line_no_comment = strip_makefile_comment(&line);
+        if let Some(assign) = try_parse_assignment(line_no_comment) {
             self.advance();
             // Track `.RECIPEPREFIX := X` so subsequent rules use X as the
             // recipe-line marker. Empty resets to default tab.

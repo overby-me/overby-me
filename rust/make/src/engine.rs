@@ -1071,7 +1071,20 @@ impl Engine {
 
         let targets = if targets.is_empty() {
             match self.default_goal.borrow().as_ref() {
-                Some(goal) => vec![goal.clone()],
+                Some(goal) => {
+                    let expanded = expand::expand(goal, self);
+                    let parts: Vec<String> =
+                        expanded.split_whitespace().map(|s| s.to_string()).collect();
+                    if parts.is_empty() {
+                        eprintln!("make: *** No targets.  Stop.");
+                        return 2;
+                    }
+                    if parts.len() > 1 {
+                        eprintln!("make: *** .DEFAULT_GOAL contains more than one target.  Stop.");
+                        return 2;
+                    }
+                    parts
+                }
                 None => {
                     eprintln!("make: *** No targets.  Stop.");
                     return 2;
