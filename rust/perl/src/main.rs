@@ -159,6 +159,8 @@ fn main() {
     if !script_file.is_empty() {
         interp.set_current_file(&script_file);
     }
+    // Populate @INC from -I flags (prepended in order).
+    interp.set_inc(&include_dirs);
     interp.run(&program);
 
     std::process::exit(interp.exit_code);

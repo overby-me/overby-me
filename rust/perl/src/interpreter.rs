@@ -144,6 +144,11 @@ impl Interpreter {
         self.current_file = file.to_string();
     }
 
+    pub fn set_inc(&mut self, dirs: &[String]) {
+        let items: Vec<Value> = dirs.iter().map(|d| Value::Str(d.clone())).collect();
+        self.set_array("INC", items);
+    }
+
     pub fn set_special_var(&mut self, name: &str, val: &str) {
         self.globals
             .vars
@@ -705,10 +710,59 @@ impl Interpreter {
             }
 
             Stmt::Use(module, _args) => {
-                // Silently ignore use statements for now
-                // Could handle 'use strict', 'use warnings' etc.
-                let _ = module;
-                Flow::None
+                // Pragmas / widely-used-but-we-ignore modules: silent success.
+                // Anything else: try to find `Module/Name.pm` in @INC and fail
+                // with Perl's exact error format if absent, so suites that
+                // guard `use Config;` with a fall-through `BEGIN failed` match
+                // the reference output byte-for-byte.
+                // Only actual pragmas — modules whose compiled-in behaviour
+                // we simulate (or ignore). Everything else should fail the
+                // same way reference perl does under a minimal @INC.
+                const PRAGMAS: &[&str] = &[
+                    "strict",
+                    "warnings",
+                    "feature",
+                    "integer",
+                    "utf8",
+                    "vars",
+                    "subs",
+                    "lib",
+                    "bytes",
+                    "diagnostics",
+                    "re",
+                    "sort",
+                    "version",
+                ];
+                if PRAGMAS.contains(&module.as_str()) {
+                    return Flow::None;
+                }
+                // Turn `Foo::Bar` into `Foo/Bar.pm`.
+                let filename = format!("{}.pm", module.replace("::", "/"));
+                let inc = self.get_array("INC");
+                let mut found = false;
+                for dir in &inc {
+                    let p = std::path::PathBuf::from(dir.to_str()).join(&filename);
+                    if p.is_file() {
+                        found = true;
+                        break;
+                    }
+                }
+                if found {
+                    let _ = self.do_require(&filename);
+                    return Flow::None;
+                }
+                let inc_str = inc.iter().map(|v| v.to_str()).collect::<Vec<_>>().join(" ");
+                let file = if self.current_file.is_empty() {
+                    "-e".to_string()
+                } else {
+                    self.current_file.clone()
+                };
+                let line = self.current_line;
+                let msg = format!(
+                    "Can't locate {filename} in @INC (you may need to install the {module} module) (@INC entries checked: {inc_str}) at {file} line {line}.\nBEGIN failed--compilation aborted at {file} line {line}.\n"
+                );
+                eprint!("{msg}");
+                Flow::Exit(2)
             }
 
             Stmt::Require(expr) => {

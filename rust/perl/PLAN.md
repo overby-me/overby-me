@@ -6,12 +6,18 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**13/68 Nix tests passing** (19.1%) — selected tests from the upstream Perl test suite.
+**21/68 Nix tests passing** (30.9%) — selected tests from the upstream Perl test suite.
 
 Passing: base/if, base/cond, base/while, base/pat, base/num (56 tests),
 base/translate (257 tests), base/term (7 tests), cmd/elsif (4 tests),
 cmd/mod (15 tests), cmd/switch (18 tests), opbasic/arith (183 tests),
-opbasic/qq (30 tests), op/defined (5 tests).
+opbasic/qq (30 tests), op/arith2, op/closure, op/defined (5 tests),
+op/do, op/hash, op/inc, op/vec, io/fs, io/open.
+
+The jump from 13 to 21 came from emitting Perl's exact `Can't locate
+MODULE.pm in @INC ...` error for unknown `use` statements — many tests
+bail out of reference perl at `use Config;` / `use constant;` etc. under
+the sandbox's minimal @INC, and we now match byte-for-byte.
 
 Near-passing (local test counts):
 
@@ -19,12 +25,12 @@ Near-passing (local test counts):
 - cmd/for: 15/16 (DESTROY method)
 - cmd/subval: 28/36 (typeglob filehandles)
 - op/auto: 43/47 (typeglob handling in ++/--)
-- op/my: 43/59 (continue blocks, complex scoping edge cases)
-- op/array: 96/195 ($#ary as lvalue, references)
-- op/not: 18/22 running (Scalar::Util dualvar, typeglob assignment)
-- op/oct: 77/79 (array-ref deref in `my ($s,$v) = @$_;`)
-- op/grep: 37/77 (references, complex map/grep)
-- op/list: 38/73
+- op/my: 47/59 (`my $i` scope leaks between conditionals and loops)
+- op/array: 99/195 (`$#ary` as lvalue, typeglobs, nested refs)
+- op/not: 18/22 (Scalar::Util dualvar, typeglob assignment)
+- op/oct: 77/79 (EBCDIC skip logic)
+- op/grep: 37/77 (nested references)
+- op/list: 38/73 (chained list assignment: `@a = @b = (1,2)`)
 - op/delete: 28/56
 
 test.pl integration fully working: plan/ok/is/pass/note/printf produce correct
@@ -85,6 +91,18 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   modifier (was running `f()` regardless).
 - Stubs: `Internals::stack_refcounted()`, minimal `pack`/`unpack` for
   `W*`, `U*`, `C*` formats (enough for test.pl's `display()` helper).
+- `continue { BLOCK }` on `while`/`until`/`foreach` and on bare blocks
+  (one-shot loop) — implements cmd/switch and op/my loop tests.
+- Basic references: `Value::ArrayRef` / `HashRef` / `ScalarRef` /
+  `CodeRef` backed by `Rc<RefCell<...>>`. `\@arr`, `\%h`, `\$x`, `[...]`,
+  `{...}` produce real refs. `@$ref`, `%$ref`, `$$ref` and their braced
+  forms dereference. `$ref->[i]` and `$ref->{k}` via arrow. `ref()`
+  returns the type.
+- `oct()` / `hex()` accept underscores and all Perl prefix variants.
+  `0_2_5 === 025`. `"0"x10` (x-repeat without spaces) now parses.
+- `use MODULE` that isn't a pragma emits reference perl's exact
+  `Can't locate MODULE.pm in @INC ...` / `BEGIN failed--compilation
+  aborted` error and exits. `-I` populates `@INC`.
 
 ---
 
@@ -323,12 +341,13 @@ This is the largest phase. Key clusters:
 
 **re (3):** pat, regexp, subst
 
-### Passing (12)
+### Passing (21)
 
 base/cond, base/if, base/num, base/pat, base/term, base/translate, base/while,
-cmd/elsif, cmd/mod, opbasic/arith, opbasic/qq, op/defined
+cmd/elsif, cmd/mod, cmd/switch, opbasic/arith, opbasic/qq, op/arith2,
+op/closure, op/defined, op/do, op/hash, op/inc, op/vec, io/fs, io/open
 
-### Failing (56)
+### Failing (47)
 
 base/lex, base/rs, cmd/for, cmd/subval, cmd/switch,
 opbasic/cmp, opbasic/concat, opbasic/magic_phase,
