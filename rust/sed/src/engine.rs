@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 
 use crate::types::*;
-use crate::util::escape_string_bytes;
+use crate::util::{escape_string_bytes, escape_string_tokens};
 
 /// Convert string to bytes using Latin-1 encoding (chars 0-255 → single bytes).
 /// This preserves byte values from \d/\o/\x replacement escapes.
@@ -246,6 +246,22 @@ impl Engine {
         Ok(self.exit_code)
     }
 
+    fn flush_append_queue(&mut self) {
+        if self.append_queue.is_empty() {
+            return;
+        }
+        let queue = std::mem::take(&mut self.append_queue);
+        for text in queue {
+            if text.is_empty() {
+                continue;
+            }
+            self.output.extend_from_slice(text.as_bytes());
+            if !text.ends_with('\n') {
+                self.output.push(b'\n');
+            }
+        }
+    }
+
     fn write_pattern_space(&mut self) {
         // Use raw bytes if available AND pattern space hasn't been modified
         if let Some(ref raw) = self.raw_pattern {
@@ -296,7 +312,16 @@ impl Engine {
         commands: &[SedCommand],
         range_offset: usize,
     ) -> Flow {
-        let mut i = 0;
+        self.execute_commands_from_index(commands, range_offset, 0)
+    }
+
+    fn execute_commands_from_index(
+        &mut self,
+        commands: &[SedCommand],
+        range_offset: usize,
+        start: usize,
+    ) -> Flow {
+        let mut i = start;
         while i < commands.len() {
             if self.quit {
                 return Flow::Quit;
@@ -316,9 +341,14 @@ impl Engine {
                         continue;
                     }
                     Flow::Branch(ref label) => {
-                        if let Some(target) = Self::find_label(commands, label) {
-                            i = target + 1;
-                            continue;
+                        if let Some(path) = Self::find_label_path(commands, label) {
+                            if path.len() == 1 {
+                                // Same-level label — jump iteratively (no stack growth)
+                                i = path[0] + 1;
+                                continue;
+                            }
+                            // Nested label — enter the block(s) to the label
+                            return self.branch_into(commands, range_offset, &path);
                         }
                         // Label not found at this level — propagate up
                         return Flow::Branch(label.clone());
@@ -361,21 +391,33 @@ impl Engine {
                     return true;
                 }
                 if self.range_active[range_idx] {
-                    // Check end condition based on address type
-                    let end_matches = match b {
+                    // Check end condition based on address type.
+                    // `past_end` means the range's end has already been passed
+                    // (possible if a branch skipped past this address on the
+                    // end-line cycle) — close the range without matching.
+                    let (end_matches, past_end) = match b {
                         Address::Relative(n) => {
-                            self.line_number >= self.range_start[range_idx] + n
+                            let end_line = self.range_start[range_idx] + n;
+                            (
+                                self.line_number == end_line,
+                                self.line_number > end_line,
+                            )
                         }
-                        Address::Multiple(n) if *n > 0 => {
+                        Address::Multiple(n) if *n > 0 => (
                             self.line_number >= self.range_start[range_idx]
-                                && self.line_number.is_multiple_of(*n)
-                        }
-                        Address::Line(n) => {
-                            // Close range if line number matches OR has been passed
-                            self.line_number >= *n
-                        }
-                        _ => self.addr_matches_single(b),
+                                && self.line_number.is_multiple_of(*n),
+                            false,
+                        ),
+                        Address::Line(n) => (
+                            self.line_number == *n,
+                            self.line_number > *n,
+                        ),
+                        _ => (self.addr_matches_single(b), false),
                     };
+                    if past_end {
+                        self.range_active[range_idx] = false;
+                        return false;
+                    }
                     if end_matches {
                         self.range_active[range_idx] = false;
                     } else {
@@ -462,20 +504,43 @@ impl Engine {
         }
     }
 
-    fn find_label(commands: &[SedCommand], label: &str) -> Option<usize> {
+    fn find_label_path(commands: &[SedCommand], label: &str) -> Option<Vec<usize>> {
         for (i, cmd) in commands.iter().enumerate() {
             if let Command::Label(l) = &cmd.command
                 && l == label
             {
-                return Some(i);
+                return Some(vec![i]);
             }
             if let Command::Block(ref inner) = cmd.command {
-                if Self::find_label(inner, label).is_some() {
-                    return Some(i);
+                if let Some(mut path) = Self::find_label_path(inner, label) {
+                    path.insert(0, i);
+                    return Some(path);
                 }
             }
         }
         None
+    }
+
+    fn branch_into(
+        &mut self,
+        commands: &[SedCommand],
+        range_offset: usize,
+        path: &[usize],
+    ) -> Flow {
+        if path.len() == 1 {
+            return self.execute_commands_from_index(commands, range_offset, path[0] + 1);
+        }
+        let outer_idx = path[0];
+        let inner = match &commands[outer_idx].command {
+            Command::Block(cmds) => cmds.clone(),
+            _ => return Flow::Continue,
+        };
+        let block_offset = range_offset + commands.len();
+        let flow = self.branch_into(&inner, block_offset, &path[1..]);
+        if !matches!(flow, Flow::Continue) {
+            return flow;
+        }
+        self.execute_commands_from_index(commands, range_offset, outer_idx + 1)
     }
 
     fn execute_one(
@@ -589,29 +654,34 @@ impl Engine {
                 } else {
                     self.pattern_space.as_bytes().to_vec()
                 };
-                let escaped = escape_string_bytes(&data);
                 let line_width = width.unwrap_or(self.line_wrap_width);
-                let full = format!("{escaped}$");
                 if line_width == 0 {
                     // No wrapping
-                    self.output.extend_from_slice(full.as_bytes());
+                    let escaped = escape_string_bytes(&data);
+                    self.output.extend_from_slice(escaped.as_bytes());
+                    self.output.push(b'$');
                 } else {
-                    let bytes = full.as_bytes();
-                    let mut pos = 0;
-                    while pos < bytes.len() {
-                        let remaining = bytes.len() - pos;
-                        if remaining <= line_width {
-                            self.output.extend_from_slice(&bytes[pos..]);
-                            break;
-                        } else {
-                            // Continuation: (line_width - 1) data bytes + '\'
-                            self.output
-                                .extend_from_slice(&bytes[pos..pos + line_width - 1]);
+                    // Token-aware wrapping: keep escape sequences atomic.
+                    // Continuation lines: up to line_width - 1 content chars + '\'.
+                    // Last line: content + '$' <= line_width.
+                    let tokens = escape_string_tokens(&data);
+                    let mut line_len = 0usize;
+                    for t in &tokens {
+                        let tl = t.len();
+                        if line_len + tl > line_width - 1 && line_len > 0 {
                             self.output.push(b'\\');
                             self.output.push(b'\n');
-                            pos += line_width - 1;
+                            line_len = 0;
                         }
+                        self.output.extend_from_slice(t.as_bytes());
+                        line_len += tl;
                     }
+                    // Fit the trailing '$'
+                    if line_len + 1 > line_width {
+                        self.output.push(b'\\');
+                        self.output.push(b'\n');
+                    }
+                    self.output.push(b'$');
                 }
                 self.output.push(if self.null_data { b'\0' } else { b'\n' });
                 Flow::Continue
@@ -677,6 +747,7 @@ impl Engine {
                 if !self.quiet {
                     self.write_pattern_space();
                 }
+                self.flush_append_queue();
                 if self.input_index < self.input_lines.len() {
                     self.pattern_space = self.input_lines[self.input_index].clone();
                     self.input_index += 1;
@@ -694,6 +765,7 @@ impl Engine {
                     self.input_index += 1;
                     self.line_number = self.input_index;
                     self.last_line = self.input_index == self.input_lines.len();
+                    self.flush_append_queue();
                     self.pattern_space.push('\n');
                     self.pattern_space.push_str(&next_line);
                     Flow::Continue

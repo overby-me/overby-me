@@ -95,6 +95,47 @@ impl<'a> Parser<'a> {
         self.input.get(self.pos).copied()
     }
 
+    /// Push a literal character to `target`. If `ch` is the start of a
+    /// multi-byte UTF-8 sequence, consume the continuation bytes from the
+    /// input so the full Unicode code point is preserved (otherwise the
+    /// byte is pushed as a Latin-1 char).
+    fn push_literal(&mut self, ch: u8, target: &mut String) {
+        if ch < 0x80 {
+            target.push(ch as char);
+            return;
+        }
+        let n = if ch & 0xE0 == 0xC0 {
+            2
+        } else if ch & 0xF0 == 0xE0 {
+            3
+        } else if ch & 0xF8 == 0xF0 {
+            4
+        } else {
+            1
+        };
+        let mut buf = [0u8; 4];
+        buf[0] = ch;
+        let mut len = 1;
+        while len < n {
+            match self.input.get(self.pos) {
+                Some(&b) if b & 0xC0 == 0x80 => {
+                    buf[len] = b;
+                    len += 1;
+                    self.pos += 1;
+                }
+                _ => break,
+            }
+        }
+        match std::str::from_utf8(&buf[..len]) {
+            Ok(s) => {
+                if let Some(c) = s.chars().next() {
+                    target.push(c);
+                }
+            }
+            Err(_) => target.push(ch as char),
+        }
+    }
+
     fn advance(&mut self) -> Option<u8> {
         let ch = self.input.get(self.pos).copied();
         if ch.is_some() {
@@ -434,10 +475,10 @@ impl<'a> Parser<'a> {
             let ch = self.advance().ok_or_else(|| self.err(eof_msg))?;
             if escaped {
                 if ch == delim {
-                    pattern.push(ch as char);
+                    self.push_literal(ch, &mut pattern);
                 } else {
                     pattern.push('\\');
-                    pattern.push(ch as char);
+                    self.push_literal(ch, &mut pattern);
                 }
                 escaped = false;
             } else if ch == b'\\' {
@@ -470,7 +511,7 @@ impl<'a> Parser<'a> {
                             self.advance();
                             break;
                         }
-                        pattern.push(c as char);
+                        self.push_literal(c, &mut pattern);
                         // Keep scanning — don't let ] close the bracket
                         // The POSIX class must be properly terminated
                     }
@@ -484,7 +525,7 @@ impl<'a> Parser<'a> {
             } else if ch == delim && !in_bracket {
                 break;
             } else {
-                pattern.push(ch as char);
+                self.push_literal(ch, &mut pattern);
             }
         }
         Ok(pattern)
@@ -926,7 +967,7 @@ impl<'a> Parser<'a> {
                                     // in replacement (& and \), even if they're the delimiter
                                     result.push('\\');
                                 }
-                                result.push(ch as char);
+                                self.push_literal(ch, &mut result);
                             }
                         }
                         escaped = false;
@@ -935,7 +976,7 @@ impl<'a> Parser<'a> {
                     } else if ch == delim {
                         break;
                     } else {
-                        result.push(ch as char);
+                        self.push_literal(ch, &mut result);
                     }
                 }
             }

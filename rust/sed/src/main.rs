@@ -107,15 +107,25 @@ fn validate_labels(commands: &[types::SedCommand]) {
 }
 
 fn read_script_file(path: &str) -> Result<String, String> {
-    if path == "-" {
+    let bytes = if path == "-" {
         let mut buf = Vec::new();
         io::stdin()
             .read_to_end(&mut buf)
             .map_err(|e| format!("sed: -: {}", fmt_io_err(&e)))?;
-        Ok(String::from_utf8_lossy(&buf).into_owned())
+        buf
     } else {
-        let bytes = std::fs::read(path).map_err(|e| format!("sed: {path}: {}", fmt_io_err(&e)))?;
-        Ok(String::from_utf8_lossy(&bytes).into_owned())
+        std::fs::read(path).map_err(|e| format!("sed: {path}: {}", fmt_io_err(&e)))?
+    };
+    Ok(bytes_to_string_latin1(&bytes))
+}
+
+/// Decode bytes as UTF-8 if valid, else as Latin-1 (byte-preserving 1:1).
+/// This keeps non-UTF-8 bytes in sed scripts addressable as single chars,
+/// so replacements can reproduce the original byte via the Latin-1 output path.
+fn bytes_to_string_latin1(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => s.to_string(),
+        Err(_) => bytes.iter().map(|&b| b as char).collect(),
     }
 }
 

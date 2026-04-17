@@ -213,6 +213,14 @@ pub fn bre_to_ere(bre: &str) -> String {
         } else if chars[i] == '?' {
             result.push_str("\\?");
             i += 1;
+        } else if chars[i] == '^' && i != 0 {
+            // BRE: `^` is an anchor only at pattern start; elsewhere it's literal.
+            result.push_str("\\^");
+            i += 1;
+        } else if chars[i] == '$' && i != chars.len() - 1 {
+            // BRE: `$` is an anchor only at pattern end; elsewhere it's literal.
+            result.push_str("\\$");
+            i += 1;
         } else {
             result.push(chars[i]);
             i += 1;

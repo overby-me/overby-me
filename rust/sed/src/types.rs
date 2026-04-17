@@ -8,23 +8,28 @@ pub enum SedRegex {
 
 impl SedRegex {
     pub fn new(pattern: &str) -> Result<Self, String> {
-        // Try fast regex first
-        match regex::Regex::new(pattern) {
+        // GNU sed: `.` matches any char including newline in pattern space.
+        // `^`/`$` still anchor only at start/end of the whole pattern space.
+        match regex::RegexBuilder::new(pattern).dot_matches_new_line(true).build() {
             Ok(re) => Ok(SedRegex::Fast(re)),
             Err(_) => {
-                // Fall back to fancy-regex (supports backreferences)
-                fancy_regex::RegexBuilder::new(pattern)
-                    .backtrack_limit(1_000_000)
+                // Fall back to fancy-regex (supports backreferences).
+                // Prepend (?s) to match dot-all semantics since fancy-regex
+                // doesn't expose a builder flag for it.
+                let fancy_pat = format!("(?s){pattern}");
+                fancy_regex::RegexBuilder::new(&fancy_pat)
+                    .backtrack_limit(100_000_000)
                     .build()
                     .map(SedRegex::Fancy)
                     .map_err(|e| {
-                        // Clean up fancy-regex error messages to match GNU sed format
                         let msg = format!("{e}");
-                        // Strip "Parsing error at position N: " prefix
                         if let Some(rest) = msg.strip_prefix("Parsing error at position ") {
                             if let Some(colon_pos) = rest.find(": ") {
                                 return rest[colon_pos + 2..].to_string();
                             }
+                        }
+                        if let Some(rest) = msg.strip_prefix("Error compiling regex: ") {
+                            return rest.to_string();
                         }
                         msg
                     })
