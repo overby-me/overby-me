@@ -1577,6 +1577,11 @@ impl Engine {
     fn find_pattern_rule(&self, target: &str) -> Option<(PatternRuleEntry, String)> {
         let suffixes_cleared = *self.suffixes_cleared.borrow();
         let pattern_rules = self.pattern_rules.borrow();
+        // Fallback candidate: the last user-defined pattern rule whose
+        // target matches, used when no rule has an existing/buildable
+        // prereq. GNU make still applies *some* matching rule even when
+        // the prereq is missing; we pick the most-recently-declared.
+        let mut fallback: Option<(PatternRuleEntry, String)> = None;
         for rule in pattern_rules.iter().rev() {
             // `.SUFFIXES:` (empty) disables built-in suffix-based pattern
             // rules. We tag built-ins with source_name "<built-in>".
@@ -1593,9 +1598,12 @@ impl Engine {
                 if prereqs_ok {
                     return Some((rule.clone(), stem));
                 }
+                if rule.source_name != "<built-in>" && fallback.is_none() {
+                    fallback = Some((rule.clone(), stem));
+                }
             }
         }
-        None
+        fallback
     }
 
     #[allow(clippy::too_many_arguments)]
