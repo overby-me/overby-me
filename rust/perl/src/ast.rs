@@ -260,8 +260,10 @@ pub enum Stmt {
     Use(String, Vec<Expr>),
     Require(Expr),
 
-    // BEGIN/END
-    Begin(Vec<Stmt>),
+    // BEGIN/END. The optional usize on Begin is the source line of the
+    // closing `}` — used so `BEGIN failed--compilation aborted` can report
+    // the right line (matching reference perl).
+    Begin(Vec<Stmt>, usize),
     End(Vec<Stmt>),
 
     // Die/warn

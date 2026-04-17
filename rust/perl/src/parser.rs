@@ -207,7 +207,14 @@ impl Parser {
             Token::Begin => {
                 self.pos += 1;
                 let body = self.parse_brace_block();
-                return Some(Stmt::Begin(body));
+                // `self.pos` points just past the closing `}`; the token
+                // whose line we want is the one at `pos - 1`.
+                let end_line = self
+                    .token_lines
+                    .get(self.pos.saturating_sub(1))
+                    .copied()
+                    .unwrap_or(0);
+                return Some(Stmt::Begin(body, end_line));
             }
             Token::End => {
                 self.pos += 1;
@@ -889,12 +896,31 @@ impl Parser {
         } else if let Token::Float(_) | Token::Integer(_) = self.tok() {
             // use 5.010; — version requirement, skip
             self.pos += 1;
+            // Skip trailing `.` + numbers (for `use v5.27.0` already handled
+            // as two tokens) and fall through to a no-op.
+            while matches!(self.tok(), Token::Dot | Token::Integer(_) | Token::Float(_)) {
+                self.pos += 1;
+            }
             self.eat(&Token::Semi);
             return Stmt::Nop;
         } else {
             self.eat(&Token::Semi);
             return Stmt::Nop;
         };
+
+        // `use v5.27;` — v-string version requirement. The lexer splits it
+        // into `Ident("v5")`, `Dot`, `Integer(27)` — swallow the remaining
+        // version components and skip the stmt entirely.
+        if module.starts_with('v')
+            && module.len() >= 2
+            && module[1..].chars().all(|c| c.is_ascii_digit())
+        {
+            while matches!(self.tok(), Token::Dot | Token::Integer(_) | Token::Float(_)) {
+                self.pos += 1;
+            }
+            self.eat(&Token::Semi);
+            return Stmt::Nop;
+        }
 
         let args = if self.at(&Token::Semi) || self.at(&Token::EOF) {
             Vec::new()

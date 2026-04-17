@@ -164,8 +164,32 @@ impl Interpreter {
                     self.subs
                         .insert(name.clone(), (params.clone(), body.clone()));
                 }
-                Stmt::Begin(body) => {
-                    let _flow = self.exec_stmts(body);
+                Stmt::Begin(body, end_line) => {
+                    // BEGIN runs at compile time. `require`/`use` failing
+                    // inside aborts compilation — propagate the exit so the
+                    // rest of the program never runs, and emit Perl's
+                    // `BEGIN failed--compilation aborted at FILE line N.`
+                    // using the line of the BEGIN block's closing `}`.
+                    match self.exec_stmts(body) {
+                        Flow::Exit(code) => {
+                            let file = if self.current_file.is_empty() {
+                                "-e".to_string()
+                            } else {
+                                self.current_file.clone()
+                            };
+                            eprintln!(
+                                "BEGIN failed--compilation aborted at {file} line {end_line}."
+                            );
+                            self.exit_code = code;
+                            return;
+                        }
+                        Flow::Die(msg) => {
+                            self.exit_code = 255;
+                            eprint!("{msg}");
+                            return;
+                        }
+                        _ => {}
+                    }
                 }
                 Stmt::End(body) => {
                     self.end_blocks.push(body.clone());
@@ -174,8 +198,43 @@ impl Interpreter {
             }
         }
 
-        // Execute main program
-        let _flow = self.exec_stmts(&main_stmts);
+        // After BEGIN blocks have run (and have had a chance to require
+        // modules successfully), scan the remaining statements *and* every
+        // registered sub body for any `use MODULE` that can't be located.
+        // This mirrors Perl's compile-time check and guarantees reference-
+        // compatible error output when a module is missing under a
+        // minimal @INC.
+        let mut ct_line = 0usize;
+        if let Some(err) = compile_time_use_check(&main_stmts, &mut ct_line, self) {
+            eprint!("{err}");
+            self.exit_code = 2;
+            return;
+        }
+        // Scan every user-defined sub's body too — `use` inside a sub still
+        // runs at compile time in Perl.
+        let sub_bodies: Vec<Vec<Stmt>> = self.subs.values().map(|(_, body)| body.clone()).collect();
+        for body in &sub_bodies {
+            let mut ct = 0usize;
+            if let Some(err) = compile_time_use_check(body, &mut ct, self) {
+                eprint!("{err}");
+                self.exit_code = 2;
+                return;
+            }
+        }
+
+        // Execute main program. Propagate exit_code from Flow::Exit so the
+        // caller's `exit_code` field (used by main.rs's std::process::exit)
+        // reflects `exit(N)` or aborted BEGIN blocks.
+        match self.exec_stmts(&main_stmts) {
+            Flow::Exit(code) => {
+                self.exit_code = code;
+            }
+            Flow::Die(msg) => {
+                self.exit_code = 255;
+                eprint!("{msg}");
+            }
+            _ => {}
+        }
 
         // Execute END blocks in reverse order
         let end_blocks: Vec<Vec<Stmt>> = self.end_blocks.clone().into_iter().rev().collect();
@@ -766,10 +825,58 @@ impl Interpreter {
             }
 
             Stmt::Require(expr) => {
-                let filename = self.eval_expr(expr).to_str();
+                // `require Module::Name;` is a bareword form that translates
+                // to `require "Module/Name.pm";`, and on failure emits the
+                // same `Can't locate …` error as `use`. Detect the bareword
+                // form by looking at the raw AST — a plain StringLit whose
+                // text is a valid ident chain with no slash/extension.
+                let bareword = match expr {
+                    Expr::StringLit(s)
+                        if !s.contains('/')
+                            && !s.contains('.')
+                            && s.chars()
+                                .next()
+                                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                            && s.chars()
+                                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':') =>
+                    {
+                        Some(s.clone())
+                    }
+                    _ => None,
+                };
+                let filename = if let Some(mod_name) = &bareword {
+                    format!("{}.pm", mod_name.replace("::", "/"))
+                } else {
+                    self.eval_expr(expr).to_str()
+                };
+                let inc = self.get_array("INC");
+                let mut found = false;
+                for dir in &inc {
+                    let p = std::path::PathBuf::from(dir.to_str()).join(&filename);
+                    if p.is_file() {
+                        found = true;
+                        break;
+                    }
+                }
+                if !found && !filename.starts_with('.') && !filename.starts_with('/') {
+                    // Not on disk — emit the same format reference perl uses.
+                    let module = bareword
+                        .unwrap_or_else(|| filename.trim_end_matches(".pm").replace('/', "::"));
+                    let inc_str = inc.iter().map(|v| v.to_str()).collect::<Vec<_>>().join(" ");
+                    let file = if self.current_file.is_empty() {
+                        "-e".to_string()
+                    } else {
+                        self.current_file.clone()
+                    };
+                    let line = self.current_line;
+                    let msg = format!(
+                        "Can't locate {filename} in @INC (you may need to install the {module} module) (@INC entries checked: {inc_str}) at {file} line {line}.\n"
+                    );
+                    eprint!("{msg}");
+                    return Flow::Exit(2);
+                }
                 let result = self.do_require(&filename);
                 if result.is_undef() {
-                    // require failed — die
                     let err = self.get_var("@").to_str();
                     if !err.is_empty() {
                         return Flow::Die(err);
@@ -778,7 +885,7 @@ impl Interpreter {
                 Flow::None
             }
 
-            Stmt::Begin(body) => {
+            Stmt::Begin(body, _end_line) => {
                 self.exec_stmts(body);
                 Flow::None
             }
@@ -3135,7 +3242,7 @@ impl Interpreter {
                     self.subs
                         .insert(name.clone(), (params.clone(), body.clone()));
                 }
-                Stmt::Begin(body) => {
+                Stmt::Begin(body, _end_line) => {
                     let _flow = self.exec_stmts(body);
                 }
                 Stmt::End(body) => {
@@ -3342,6 +3449,169 @@ impl Interpreter {
         }
         result
     }
+}
+
+/// Walk the program statement tree at "compile time" and look for any `use
+/// MODULE` whose `.pm` isn't on disk under @INC. Return the error message
+/// the first such `use` produces; `None` if all `use`s are resolvable (or
+/// are pragmas we silently accept).
+fn compile_time_use_check(
+    stmts: &[Stmt],
+    line: &mut usize,
+    interp: &Interpreter,
+) -> Option<String> {
+    const PRAGMAS: &[&str] = &[
+        "strict",
+        "warnings",
+        "feature",
+        "integer",
+        "utf8",
+        "vars",
+        "subs",
+        "lib",
+        "bytes",
+        "diagnostics",
+        "re",
+        "sort",
+        "version",
+    ];
+    for stmt in stmts {
+        match stmt {
+            Stmt::LineMark(n) => *line = *n,
+            Stmt::Use(module, _args) => {
+                if PRAGMAS.contains(&module.as_str()) {
+                    continue;
+                }
+                let filename = format!("{}.pm", module.replace("::", "/"));
+                let inc = interp.get_array("INC");
+                let mut found = false;
+                for dir in &inc {
+                    let p = std::path::PathBuf::from(dir.to_str()).join(&filename);
+                    if p.is_file() {
+                        found = true;
+                        break;
+                    }
+                }
+                if found {
+                    continue;
+                }
+                let inc_str = inc.iter().map(|v| v.to_str()).collect::<Vec<_>>().join(" ");
+                let file = if interp.current_file.is_empty() {
+                    "-e".to_string()
+                } else {
+                    interp.current_file.clone()
+                };
+                return Some(format!(
+                    "Can't locate {filename} in @INC (you may need to install the {module} module) (@INC entries checked: {inc_str}) at {file} line {line}.\nBEGIN failed--compilation aborted at {file} line {line}.\n"
+                ));
+            }
+            Stmt::Block(body)
+            | Stmt::BareBlock(body)
+            | Stmt::NamedBlock(_, body)
+            | Stmt::Begin(body, _)
+            | Stmt::End(body) => {
+                if let Some(e) = compile_time_use_check(body, line, interp) {
+                    return Some(e);
+                }
+            }
+            Stmt::If {
+                then,
+                elsifs,
+                else_block,
+                ..
+            } => {
+                if let Some(e) = compile_time_use_check(then, line, interp) {
+                    return Some(e);
+                }
+                for (_, body) in elsifs {
+                    if let Some(e) = compile_time_use_check(body, line, interp) {
+                        return Some(e);
+                    }
+                }
+                if let Some(body) = else_block {
+                    if let Some(e) = compile_time_use_check(body, line, interp) {
+                        return Some(e);
+                    }
+                }
+            }
+            Stmt::Unless {
+                then, else_block, ..
+            } => {
+                if let Some(e) = compile_time_use_check(then, line, interp) {
+                    return Some(e);
+                }
+                if let Some(body) = else_block {
+                    if let Some(e) = compile_time_use_check(body, line, interp) {
+                        return Some(e);
+                    }
+                }
+            }
+            Stmt::While {
+                body,
+                continue_body,
+                ..
+            }
+            | Stmt::Until {
+                body,
+                continue_body,
+                ..
+            }
+            | Stmt::Foreach {
+                body,
+                continue_body,
+                ..
+            } => {
+                if let Some(e) = compile_time_use_check(body, line, interp) {
+                    return Some(e);
+                }
+                if let Some(cont) = continue_body {
+                    if let Some(e) = compile_time_use_check(cont, line, interp) {
+                        return Some(e);
+                    }
+                }
+            }
+            Stmt::DoWhile { body, .. } | Stmt::Loop { body, .. } => {
+                if let Some(e) = compile_time_use_check(body, line, interp) {
+                    return Some(e);
+                }
+            }
+            Stmt::For { body, .. } => {
+                if let Some(e) = compile_time_use_check(body, line, interp) {
+                    return Some(e);
+                }
+            }
+            Stmt::BlockWithContinue {
+                body,
+                continue_body,
+                ..
+            } => {
+                if let Some(e) = compile_time_use_check(body, line, interp) {
+                    return Some(e);
+                }
+                if let Some(e) = compile_time_use_check(continue_body, line, interp) {
+                    return Some(e);
+                }
+            }
+            Stmt::Sub { body, .. } => {
+                if let Some(e) = compile_time_use_check(body, line, interp) {
+                    return Some(e);
+                }
+            }
+            Stmt::PostfixIf(inner, _)
+            | Stmt::PostfixUnless(inner, _)
+            | Stmt::PostfixWhile(inner, _)
+            | Stmt::PostfixUntil(inner, _)
+            | Stmt::PostfixFor(inner, _) => {
+                if let Some(e) =
+                    compile_time_use_check(std::slice::from_ref(inner.as_ref()), line, interp)
+                {
+                    return Some(e);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Perl's `oct()` — interpret a string as octal by default, or as the base
