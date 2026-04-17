@@ -20,6 +20,10 @@ pub enum Value {
     ScalarRef(Rc<RefCell<Value>>),
     /// Reference to a subroutine (by name for now) — `CODE(0x...)`.
     CodeRef(String),
+    /// Compiled regex from `qr//` (pattern, flags). `ref()` returns
+    /// "Regexp"; stringifies as `(?^flags:pattern)` — the same form real
+    /// perl uses so it can be matched against with `=~` transparently.
+    Regex(String, String),
 }
 
 impl Value {
@@ -32,6 +36,7 @@ impl Value {
             Value::HashRef(r) => format!("HASH(0x{:x})", Rc::as_ptr(r) as usize),
             Value::ScalarRef(r) => format!("SCALAR(0x{:x})", Rc::as_ptr(r) as usize),
             Value::CodeRef(name) => format!("CODE({name})"),
+            Value::Regex(pat, flags) => format!("(?^{flags}:{pat})"),
         }
     }
 
@@ -42,7 +47,11 @@ impl Value {
             Value::Str(s) => parse_number(s),
             // References stringify then parse as "ARRAY(0x..)" etc. — the
             // numeric coercion returns 0 since there are no leading digits.
-            Value::ArrayRef(_) | Value::HashRef(_) | Value::ScalarRef(_) | Value::CodeRef(_) => 0.0,
+            Value::ArrayRef(_)
+            | Value::HashRef(_)
+            | Value::ScalarRef(_)
+            | Value::CodeRef(_)
+            | Value::Regex(_, _) => 0.0,
         }
     }
 
@@ -52,9 +61,11 @@ impl Value {
             Value::Num(n) => *n != 0.0 && !n.is_nan(),
             Value::Str(s) => !s.is_empty() && s != "0",
             // References are always true (they stringify to non-"" non-"0").
-            Value::ArrayRef(_) | Value::HashRef(_) | Value::ScalarRef(_) | Value::CodeRef(_) => {
-                true
-            }
+            Value::ArrayRef(_)
+            | Value::HashRef(_)
+            | Value::ScalarRef(_)
+            | Value::CodeRef(_)
+            | Value::Regex(_, _) => true,
         }
     }
 
@@ -69,6 +80,7 @@ impl Value {
             Value::HashRef(_) => "HASH",
             Value::ScalarRef(_) => "SCALAR",
             Value::CodeRef(_) => "CODE",
+            Value::Regex(_, _) => "Regexp",
             _ => "",
         }
     }

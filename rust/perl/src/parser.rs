@@ -1952,7 +1952,18 @@ impl Parser {
                     args.extend(list_args);
                     Expr::Call(func, args)
                 } else if self.eat(&Token::LParen) {
-                    let args = self.parse_list_expr();
+                    // `map(BLOCK LIST)` or `map(EXPR, LIST)` — both forms
+                    // appear in the wild. If we see `{` first it's the
+                    // block form and we need to parse it as code, not a
+                    // hashref literal.
+                    let mut args = Vec::new();
+                    if self.at(&Token::LBrace) {
+                        let block = self.parse_brace_block();
+                        args.push(Expr::DoBlock(block));
+                        self.eat(&Token::Comma);
+                    }
+                    let list_args = self.parse_list_expr();
+                    args.extend(list_args);
                     self.expect(&Token::RParen);
                     Expr::Call(func, args)
                 } else {

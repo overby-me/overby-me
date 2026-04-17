@@ -6,12 +6,12 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**28/68 Nix tests passing** (41.2%) — selected tests from the upstream Perl test suite.
+**29/68 Nix tests passing** (42.6%) — selected tests from the upstream Perl test suite.
 
 Passing: base/if, base/cond, base/while, base/pat, base/num (56 tests),
 base/translate (257 tests), base/term (7 tests), cmd/elsif (4 tests),
 cmd/mod (15 tests), cmd/switch (18 tests), opbasic/arith (183 tests),
-opbasic/qq (30 tests), op/arith2, op/bop, op/chop, op/closure,
+opbasic/qq (30 tests), op/arith2, op/auto, op/bop, op/chop, op/closure,
 op/defined (5 tests), op/do, op/hash, op/inc, op/index, op/split,
 op/sub, op/vec, io/fs, io/open, re/subst, run/switches.
 
@@ -344,14 +344,14 @@ This is the largest phase. Key clusters:
 
 **re (3):** pat, regexp, subst
 
-### Passing (28)
+### Passing (29)
 
 base/cond, base/if, base/num, base/pat, base/term, base/translate, base/while,
 cmd/elsif, cmd/mod, cmd/switch, opbasic/arith, opbasic/qq, op/arith2,
-op/bop, op/chop, op/closure, op/defined, op/do, op/hash, op/inc, op/index,
-op/split, op/sub, op/vec, io/fs, io/open, re/subst, run/switches
+op/auto, op/bop, op/chop, op/closure, op/defined, op/do, op/hash, op/inc,
+op/index, op/split, op/sub, op/vec, io/fs, io/open, re/subst, run/switches
 
-### Failing (40)
+### Failing (39)
 
 base/lex, base/rs, cmd/for, cmd/subval, cmd/switch,
 opbasic/cmp, opbasic/concat, opbasic/magic_phase,

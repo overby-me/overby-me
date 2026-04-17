@@ -1136,11 +1136,11 @@ impl Interpreter {
             Expr::StringLit(s) => Value::Str(s.clone()),
             Expr::Undef => Value::Undef,
             Expr::RegexLit(pat, flags) => {
-                // Perl's qr// returns a compiled-regex scalar. We approximate
-                // by stringifying to Perl's own format: `(?^flags:pattern)`.
-                // `=~` / `!~` and related ops recognise this prefix and peel
-                // the pattern back out before compiling.
-                Value::Str(format!("(?^{flags}:{pat})"))
+                // Perl's qr// returns a compiled-regex scalar that `ref()`
+                // calls "Regexp". We model it with a dedicated variant that
+                // stringifies as `(?^flags:pattern)` but is distinguishable
+                // from a plain string by `ref()` / `re::is_regexp` etc.
+                Value::Regex(pat.clone(), flags.clone())
             }
             Expr::QW(words) => {
                 // In scalar context, returns last element
@@ -2135,7 +2135,7 @@ impl Interpreter {
                 if let Some(Expr::ArrayVar(name)) = args.first() {
                     let mut arr = self.get_array(name);
                     for arg in &args[1..] {
-                        arr.push(self.eval_expr(arg));
+                        arr.extend(self.eval_list(arg));
                     }
                     let len = arr.len();
                     self.set_array(name, arr);
@@ -2181,7 +2181,10 @@ impl Interpreter {
             "unshift" => {
                 if let Some(Expr::ArrayVar(name)) = args.first() {
                     let mut arr = self.get_array(name);
-                    let vals: Vec<Value> = args[1..].iter().map(|a| self.eval_expr(a)).collect();
+                    // Expand each argument in list context so empty lists
+                    // contribute nothing and nested arrays flatten.
+                    let vals: Vec<Value> =
+                        args[1..].iter().flat_map(|a| self.eval_list(a)).collect();
                     for val in vals.into_iter().rev() {
                         arr.insert(0, val);
                     }

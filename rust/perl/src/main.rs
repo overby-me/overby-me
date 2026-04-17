@@ -38,6 +38,20 @@ use lexer::Lexer;
 use parser::Parser;
 
 fn main() {
+    // Run the interpreter in a thread with a larger stack than Rust's default
+    // main-thread stack (typically 8 MiB, but the interpreter is recursive
+    // and Perl tests like op/cond.t build deeply-nested expressions — e.g.
+    // `$x ? 1 : $x ? 1 : …` 20000 levels deep). A 256 MiB thread stack is
+    // generous but keeps the cost to at-most one allocation per process.
+    let handle = std::thread::Builder::new()
+        .stack_size(256 * 1024 * 1024)
+        .spawn(run_interpreter)
+        .expect("failed to spawn interpreter thread");
+    let code = handle.join().expect("interpreter thread panicked");
+    std::process::exit(code);
+}
+
+fn run_interpreter() -> i32 {
     let args: Vec<String> = env::args().collect();
     let mut program_text = String::new();
     let mut script_file = String::new();
@@ -163,5 +177,5 @@ fn main() {
     interp.set_inc(&include_dirs);
     interp.run(&program);
 
-    std::process::exit(interp.exit_code);
+    interp.exit_code
 }
