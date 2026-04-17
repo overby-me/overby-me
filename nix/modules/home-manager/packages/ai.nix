@@ -1,6 +1,6 @@
 {pkgs, ...}: {
   home.packages = with pkgs.pkgsUnstable; [
-    mistral-vibe
+    #mistral-vibe
     claude-code
     rtk
 
