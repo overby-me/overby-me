@@ -7670,6 +7670,25 @@ pub fn execute_command(
             for unit_name in &actual_names {
                 let id = find_or_load_unit(unit_name, &run_info)?;
 
+                // Capture restart counter BEFORE activation begins.
+                // The exit handler can increment n_restarts as soon as the
+                // first activation attempt fails (e.g. for Restart=always
+                // services where the first ExecStart exits non-zero).
+                // Capturing after activate_needed_units would miss this
+                // initial failure because the restart could have already
+                // happened and bumped n_restarts.
+                let initial_restarts = {
+                    let ri = run_info.read_poisoned();
+                    ri.unit_table
+                        .get(&id)
+                        .map(|u| {
+                            u.common
+                                .n_restarts
+                                .load(std::sync::atomic::Ordering::Relaxed)
+                        })
+                        .unwrap_or(0)
+                };
+
                 // If this unit was part of a broken ordering cycle, record a
                 // per-start transaction ID.  Upstream systemd detects cycles
                 // per-transaction (per `systemctl start`); rust-systemd breaks
@@ -7997,21 +8016,10 @@ pub fn execute_command(
                 // still be in Starting state.  Poll until it leaves Starting
                 // (either becomes Started after READY=1 or fails/stops).
                 if is_notify {
-                    // Capture restart counter at the start of polling.
+                    // initial_restarts was captured above before activation.
                     // If it increases during polling, the initial start
                     // attempt failed and was restarted — report failure
                     // to match C systemd's job tracking behavior.
-                    let initial_restarts = {
-                        let ri = run_info.read_poisoned();
-                        ri.unit_table
-                            .get(&id)
-                            .map(|u| {
-                                u.common
-                                    .n_restarts
-                                    .load(std::sync::atomic::Ordering::Relaxed)
-                            })
-                            .unwrap_or(0)
-                    };
                     // Use the service's TimeoutStartSec (default 90s) for
                     // the polling deadline.  This ensures `systemctl start`
                     // returns promptly when a short timeout is configured
