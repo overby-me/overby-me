@@ -581,13 +581,35 @@ fn call_function(
             }
             match shell_cmd.arg(&cmd).output() {
                 Ok(output) => {
+                    let status = output
+                        .status
+                        .code()
+                        .or_else(|| {
+                            use std::os::unix::process::ExitStatusExt;
+                            output.status.signal().map(|s| 128 + s)
+                        })
+                        .unwrap_or(0);
+                    engine.set_var_with_origin(
+                        ".SHELLSTATUS",
+                        &status.to_string(),
+                        VarFlavor::Simple,
+                        VarOrigin::Default,
+                    );
                     let s = String::from_utf8_lossy(&output.stdout)
                         .replace('\n', " ")
                         .trim_end()
                         .to_string();
                     Some(s)
                 }
-                Err(_) => Some(String::new()),
+                Err(_) => {
+                    engine.set_var_with_origin(
+                        ".SHELLSTATUS",
+                        "127",
+                        VarFlavor::Simple,
+                        VarOrigin::Default,
+                    );
+                    Some(String::new())
+                }
             }
         }
         "if" => {
