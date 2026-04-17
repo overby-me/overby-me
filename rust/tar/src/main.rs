@@ -325,6 +325,7 @@ struct Args {
     update: bool,
     diff: bool,
     delete: bool,
+    test_label: bool,
     file: Option<String>,
     directory: Option<String>,
     verbose: bool,
@@ -377,6 +378,10 @@ struct Args {
     /// path list is still empty GNU tar still creates an empty archive
     /// rather than refusing.
     files_from_used: bool,
+    /// Volume label (`-V LABEL` / `--label=LABEL`). On create, the first
+    /// archive entry is a GNU volume header with this name. On extract,
+    /// the label must fnmatch against the archive's first entry.
+    label: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -481,7 +486,7 @@ fn parse_args() -> Args {
 
     while let Some(arg) = queue.pop_front() {
         match arg.as_str() {
-            "--version" | "-V" => {
+            "--version" => {
                 // Present as GNU tar 1.35 so upstream tests that grep for
                 // "tar (GNU tar) 1.35" pass; the implementation differs
                 // but we aim for behavioural parity.
@@ -495,6 +500,10 @@ fn parse_args() -> Args {
                 println!();
                 println!("Written by John Gilmore and Jay Fenlason.");
                 process::exit(0);
+            }
+            "-V" => {
+                // GNU tar -V LABEL is the volume-label option.
+                args.label = queue.pop_front();
             }
             "--help" => {
                 println!("tar (GNU tar) 1.35");
@@ -525,6 +534,7 @@ fn parse_args() -> Args {
             "-u" | "--update" => args.update = true,
             "-d" | "--diff" | "--compare" => args.diff = true,
             "--delete" => args.delete = true,
+            "--test-label" => args.test_label = true,
             "-f" | "--file" => {
                 args.file = queue.pop_front();
             }
@@ -725,8 +735,7 @@ fn parse_args() -> Args {
                 }
             }
             "--label" => {
-                // Label taken as next arg; no-op for now.
-                let _ = queue.pop_front();
+                args.label = queue.pop_front();
             }
             "--pax-option" => {
                 let _ = queue.pop_front();
@@ -796,6 +805,8 @@ fn parse_args() -> Args {
                         match_slash: args.match_slash_default,
                         ignore_case: args.ignore_case_default,
                     });
+                } else if let Some(val) = other.strip_prefix("--label=") {
+                    args.label = Some(val.to_string());
                 } else if let Some(val) = other.strip_prefix("--owner=") {
                     args.owner = Some(val.to_string());
                 } else if let Some(val) = other.strip_prefix("--group=") {
@@ -874,7 +885,6 @@ fn parse_args() -> Args {
                     || other.strip_prefix("--tape-length=").is_some()
                     || other.strip_prefix("--new-volume-script=").is_some()
                     || other.strip_prefix("--index-file=").is_some()
-                    || other.strip_prefix("--label=").is_some()
                     || other.strip_prefix("--checkpoint=").is_some()
                     || other.strip_prefix("--checkpoint-action=").is_some()
                     || other.strip_prefix("--volno-file=").is_some()
@@ -946,7 +956,6 @@ fn parse_args() -> Args {
                     || other == "--quiet"
                     || other == "--to-stdout"
                     || other == "-O"
-                    || other == "--test-label"
                 {
                     // Silently accept common GNU tar options
                 } else if other.starts_with('-') && !other.starts_with("--") && other.len() > 1 {
@@ -1057,11 +1066,13 @@ fn parse_args() -> Args {
                                 continue;
                             }
                             'V' => {
-                                // --label VALUE: consume and ignore.
+                                // -V LABEL: volume label.
                                 let rest: String = chars[i + 1..].iter().collect();
-                                if rest.is_empty() {
-                                    let _ = queue.pop_front();
-                                }
+                                args.label = if rest.is_empty() {
+                                    queue.pop_front()
+                                } else {
+                                    Some(rest)
+                                };
                                 i = chars.len();
                                 continue;
                             }
@@ -1211,11 +1222,23 @@ fn do_create(args: &Args) -> io::Result<()> {
 
     let mut builder = Builder::new(compressed_writer);
 
+    // Write a GNU volume-label entry as the first block when -V is set.
+    if let Some(label) = &args.label {
+        let mut header = Header::new_gnu();
+        header.set_entry_type(EntryType::new(b'V'));
+        header.set_size(0);
+        header.set_mode(0);
+        header.set_mtime(0);
+        header.set_uid(0);
+        header.set_gid(0);
+        append_entry_raw(&mut builder, &mut header, label, &mut io::empty(), None)?;
+    }
+
     if let Some(dir) = &args.directory {
         std::env::set_current_dir(dir)?;
     }
 
-    if args.paths.is_empty() && !args.files_from_used {
+    if args.paths.is_empty() && !args.files_from_used && args.label.is_none() {
         eprintln!("tar: cowardly refusing to create an empty archive");
         process::exit(2);
     }
@@ -1342,7 +1365,10 @@ fn add_paths_to_builder_filter<W: Write>(
             }
 
             // Update mode: skip if the archived entry is at least as new
-            // as the on-disk file.
+            // as the on-disk file. Directories that already exist in the
+            // archive are always skipped — their mtime bumps whenever a
+            // child is added, which would otherwise cause a spurious
+            // re-add of the directory entry.
             if let Some(map) = filter {
                 let disk_mtime = fs::metadata(path)
                     .ok()
@@ -1358,7 +1384,7 @@ fn add_paths_to_builder_filter<W: Write>(
                     .or_else(|| map.get(&with_slash))
                     .copied()
                     .unwrap_or(0);
-                if archived > 0 && disk_mtime <= archived {
+                if archived > 0 && (path.is_dir() || disk_mtime <= archived) {
                     continue;
                 }
             }
@@ -1591,6 +1617,37 @@ fn do_append(args: &Args) -> io::Result<()> {
         return do_create(args);
     }
 
+    // When --label is given with append/update, verify the archive's
+    // existing volume label matches. GNU tar refuses with a fatal error
+    // on mismatch (exit 2).
+    if let Some(expected) = &args.label {
+        let file = File::open(archive_path)?;
+        let mut archive = Archive::new(file);
+        let found_label: Option<String> =
+            archive.entries()?.next().transpose()?.and_then(|entry| {
+                if entry.header().entry_type() == EntryType::new(b'V') {
+                    let raw = entry.path_bytes().into_owned();
+                    let s = String::from_utf8_lossy(&raw).into_owned();
+                    Some(s.trim_end_matches('\0').to_string())
+                } else {
+                    None
+                }
+            });
+        match found_label {
+            None => {
+                eprintln!("tar: Archive not labeled to match '{expected}'");
+                eprintln!("tar: Error is not recoverable: exiting now");
+                process::exit(2);
+            }
+            Some(actual) if !glob_match(expected, &actual, true, false) => {
+                eprintln!("tar: Volume '{actual}' does not match '{expected}'");
+                eprintln!("tar: Error is not recoverable: exiting now");
+                process::exit(2);
+            }
+            _ => {}
+        }
+    }
+
     // Build a map of archive-member mtimes for -u (update) mode.
     let mut existing_mtimes: std::collections::HashMap<String, u64> =
         std::collections::HashMap::new();
@@ -1696,6 +1753,61 @@ fn filter_delete(
     Ok(())
 }
 
+fn do_test_label(args: &Args) -> io::Result<()> {
+    let archive_path = args.file.as_deref();
+    let reader: Box<dyn Read> = match archive_path {
+        Some("-") | None => Box::new(io::stdin().lock()),
+        Some(path) => Box::new(File::open(path)?),
+    };
+    let mut archive = Archive::new(reader);
+    // Read just the first entry and only peek at its header — we don't
+    // need to advance past the body for a volume-label check.
+    let label: Option<String> = archive.entries()?.next().transpose()?.and_then(|entry| {
+        if entry.header().entry_type() == EntryType::new(b'V') {
+            let raw = entry.path_bytes().into_owned();
+            let s = String::from_utf8_lossy(&raw).into_owned();
+            Some(s.trim_end_matches('\0').to_string())
+        } else {
+            None
+        }
+    });
+
+    let patterns: Vec<&str> = args.paths.iter().map(|s| s.as_str()).collect();
+    if patterns.is_empty() {
+        // Display label, exit 0.
+        if let Some(l) = &label {
+            println!("{l}");
+        }
+        return Ok(());
+    }
+
+    let label_str = label.as_deref().unwrap_or("");
+    let use_wildcards = args.explicit_wildcards;
+    let matched = patterns.iter().any(|p| {
+        if use_wildcards && (p.contains('*') || p.contains('?')) {
+            glob_match(p, label_str, true, false)
+        } else {
+            *p == label_str
+        }
+    });
+    if matched {
+        if args.verbose
+            && let Some(l) = &label
+        {
+            println!("{l}");
+        }
+        Ok(())
+    } else {
+        if args.verbose {
+            if let Some(l) = &label {
+                println!("{l}");
+            }
+            eprintln!("tar: Archive label mismatch");
+        }
+        process::exit(1);
+    }
+}
+
 fn do_diff(args: &Args) -> io::Result<()> {
     let archive_path = args.file.as_deref();
     let reader: Box<dyn Read> = match archive_path {
@@ -1707,6 +1819,11 @@ fn do_diff(args: &Args) -> io::Result<()> {
     for entry in archive.entries()? {
         let mut entry = entry?;
         let path = entry.path()?.to_path_buf();
+        let path_str = path.to_string_lossy().into_owned();
+        if args.verbose {
+            let line = format_verbose_entry(entry.header(), &path_str, args);
+            println!("{line}");
+        }
         if !path.exists() {
             println!("{}: Not found in filesystem", path.display());
             differ = true;
@@ -1986,6 +2103,8 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
     #[cfg(unix)]
     let mut deferred_dir_modes: Vec<(PathBuf, u32)> = Vec::new();
 
+    let mut label_checked = args.label.is_none();
+
     for entry in entries {
         let mut entry = entry?;
         // Use path_bytes() to bypass the `tar` crate's `..` / absolute-
@@ -1994,6 +2113,38 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
         let path_bytes = entry.path_bytes().into_owned();
         let path_str = String::from_utf8_lossy(&path_bytes).into_owned();
         let _orig_path = PathBuf::from(&path_str);
+
+        // GNU volume label (entry type 'V'): compare against --label.
+        if entry.header().entry_type() == EntryType::new(b'V') {
+            let archive_label = path_str.trim_end_matches('\0').to_string();
+            if let Some(expected) = &args.label {
+                if !glob_match(expected, &archive_label, true, false) {
+                    eprintln!("tar: Volume '{archive_label}' does not match '{expected}'");
+                    eprintln!("tar: Error is not recoverable: exiting now");
+                    process::exit(2);
+                }
+                label_checked = true;
+            }
+            if args.list {
+                if args.verbose {
+                    println!(
+                        "V--------- 0/0 {:>13} 1970-01-01 00:00 {archive_label}--Volume Header--",
+                        0
+                    );
+                } else {
+                    println!("{archive_label}");
+                }
+            }
+            continue;
+        } else if !label_checked {
+            // First non-volume entry reached without matching label.
+            if let Some(expected) = &args.label {
+                eprintln!("tar: Archive not labeled to match '{expected}'");
+                eprintln!("tar: Error is not recoverable: exiting now");
+                process::exit(2);
+            }
+            label_checked = true;
+        }
 
         // Apply strip-components
         let stripped = if args.strip_components > 0 {
@@ -2192,7 +2343,8 @@ fn main() {
         + args.append as u8
         + args.update as u8
         + args.diff as u8
-        + args.delete as u8;
+        + args.delete as u8
+        + args.test_label as u8;
     if op_count == 0 {
         eprintln!(
             "tar: You must specify one of the `-Acdtrux', `--delete' or `--test-label' options"
@@ -2216,6 +2368,8 @@ fn main() {
         do_delete(&args)
     } else if args.diff {
         do_diff(&args)
+    } else if args.test_label {
+        do_test_label(&args)
     } else {
         do_extract_or_list(&args)
     };
