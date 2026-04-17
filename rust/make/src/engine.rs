@@ -326,6 +326,7 @@ impl Engine {
         });
     }
 
+    #[allow(dead_code)]
     pub fn set_var(&self, name: &str, value: &str, flavor: VarFlavor) {
         self.set_var_with_origin(name, value, flavor, VarOrigin::File);
     }
@@ -522,6 +523,67 @@ impl Engine {
         None
     }
 
+    fn apply_define(&self, name: &str, op: AssignOp, body: &str, origin: VarOrigin) {
+        let flavor = match op {
+            AssignOp::Simple => VarFlavor::Simple,
+            _ => VarFlavor::Recursive,
+        };
+        match op {
+            AssignOp::Conditional => {
+                if matches!(self.var_origin(name), VarOrigin::Undefined) {
+                    self.set_var_with_origin(name, body, flavor, origin);
+                }
+            }
+            AssignOp::Append => {
+                let mut vars = self.vars.borrow_mut();
+                match vars.get_mut(name) {
+                    Some(existing) => {
+                        existing.value.push(' ');
+                        existing.value.push_str(body);
+                    }
+                    None => {
+                        vars.insert(
+                            name.to_string(),
+                            Variable {
+                                value: body.to_string(),
+                                flavor,
+                                origin,
+                            },
+                        );
+                    }
+                }
+            }
+            AssignOp::Simple => {
+                let expanded = expand::expand(body, self);
+                self.set_var_with_origin(name, &expanded, flavor, origin);
+            }
+            AssignOp::Shell => {
+                let cmd = expand::expand(body, self);
+                let shell = self.lookup_var_or("SHELL", "/bin/sh");
+                let shell_flags = self.lookup_var_or(".SHELLFLAGS", "-c");
+                let mut shell_cmd = std::process::Command::new(&shell);
+                for flag in shell_flags.split_whitespace() {
+                    shell_cmd.arg(flag);
+                }
+                let output = shell_cmd
+                    .arg(&cmd)
+                    .output()
+                    .map(|o| {
+                        let mut s = String::from_utf8_lossy(&o.stdout).into_owned();
+                        if s.ends_with('\n') {
+                            s.pop();
+                        }
+                        s.replace('\n', " ")
+                    })
+                    .unwrap_or_default();
+                self.set_var_with_origin(name, &output, VarFlavor::Recursive, origin);
+            }
+            AssignOp::Recursive => {
+                self.set_var_with_origin(name, body, flavor, origin);
+            }
+        }
+    }
+
     pub fn eval_text(&self, text: &str) {
         // `$(eval ...)` must take effect immediately so a subsequent
         // expansion in the same recipe / variable sees the updated state.
@@ -618,32 +680,14 @@ impl Engine {
                 self.process_assignment(assign, VarOrigin::Override);
             }
             Directive::Define(name, op, lines) => {
-                let value = lines.join("\n");
                 let expanded_name = expand::expand(name, self);
-                let flavor = match op {
-                    AssignOp::Simple => VarFlavor::Simple,
-                    _ => VarFlavor::Recursive,
-                };
-                let final_value = if *op == AssignOp::Simple {
-                    expand::expand(&value, self)
-                } else {
-                    value
-                };
-                self.set_var(&expanded_name, &final_value, flavor);
+                let body = lines.join("\n");
+                self.apply_define(&expanded_name, *op, &body, VarOrigin::File);
             }
             Directive::OverrideDefine(name, op, lines) => {
-                let value = lines.join("\n");
                 let expanded_name = expand::expand(name, self);
-                let flavor = match op {
-                    AssignOp::Simple => VarFlavor::Simple,
-                    _ => VarFlavor::Recursive,
-                };
-                let final_value = if *op == AssignOp::Simple {
-                    expand::expand(&value, self)
-                } else {
-                    value
-                };
-                self.set_var_with_origin(&expanded_name, &final_value, flavor, VarOrigin::Override);
+                let body = lines.join("\n");
+                self.apply_define(&expanded_name, *op, &body, VarOrigin::Override);
             }
             Directive::Undefine(name) => {
                 // `undefine` from a makefile doesn't clobber command-line

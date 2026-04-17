@@ -421,13 +421,22 @@ impl Parser {
         let trimmed = line.trim();
         let rest = trimmed.strip_prefix("define ").unwrap().trim();
 
-        // Check for assignment operator: define VAR :=
-        let (name, op) = if let Some(n) = rest.strip_suffix(" :=").or(rest.strip_suffix(" ::=")) {
+        // Check for assignment operator: `define VAR OP` (optionally
+        // followed by a `#comment`). Strip any trailing comment first,
+        // then identify the operator suffix.
+        let rest = strip_makefile_comment(rest).trim();
+        let (name, op) = if let Some(n) = rest.strip_suffix(" ::=") {
+            (n.trim().to_string(), AssignOp::Simple)
+        } else if let Some(n) = rest.strip_suffix(" :=") {
             (n.trim().to_string(), AssignOp::Simple)
         } else if let Some(n) = rest.strip_suffix(" +=") {
             (n.trim().to_string(), AssignOp::Append)
         } else if let Some(n) = rest.strip_suffix(" ?=") {
             (n.trim().to_string(), AssignOp::Conditional)
+        } else if let Some(n) = rest.strip_suffix(" !=") {
+            (n.trim().to_string(), AssignOp::Shell)
+        } else if let Some(n) = rest.strip_suffix(" =") {
+            (n.trim().to_string(), AssignOp::Recursive)
         } else {
             (rest.to_string(), AssignOp::Recursive)
         };
@@ -435,7 +444,12 @@ impl Parser {
         let mut body = Vec::new();
         loop {
             match self.peek() {
-                Some(line) if line.trim() == "endef" => {
+                Some(line)
+                    if {
+                        let t = line.trim();
+                        t == "endef" || t.starts_with("endef ") || t.starts_with("endef\t")
+                    } =>
+                {
                     self.advance();
                     break;
                 }
