@@ -454,6 +454,10 @@ struct Args {
     /// --ignore-failed-read: keep going after a file can't be opened
     /// during create/append; emit a warning instead of a fatal error.
     ignore_failed_read: bool,
+    /// --owner-map=FILE: (source_uid) -> (archived_name, archived_uid).
+    owner_map: std::collections::HashMap<u32, (String, u32)>,
+    /// --group-map=FILE: same shape for gid.
+    group_map: std::collections::HashMap<u32, (String, u32)>,
     no_recursion: bool,
     dereference: bool,
     absolute_names: bool,
@@ -505,6 +509,91 @@ enum CacheExcludeMode {
     Under,
     /// Skip the directory entirely (no entry at all).
     All,
+}
+
+#[cfg(unix)]
+fn apply_owner_group_map(header: &mut Header, uid: u32, gid: u32, args: &Args) {
+    // Priority: --owner-map wins; otherwise --owner fallback;
+    // otherwise default to the disk uid + uzers lookup.
+    if let Some((n, i)) = args.owner_map.get(&uid) {
+        header.set_uid(*i as u64);
+        let _ = header.set_username(n);
+    } else if let Some(owner) = &args.owner {
+        let (name_part, uid_part) = match owner.split_once(':') {
+            Some((n, u)) => (n.to_string(), Some(u.to_string())),
+            None => (owner.clone(), None),
+        };
+        if let Some(u) = uid_part.as_ref() {
+            if let Ok(uid) = u.parse::<u64>() {
+                header.set_uid(uid);
+            }
+        } else if let Ok(uid) = name_part.parse::<u64>() {
+            header.set_uid(uid);
+        }
+        if !name_part.is_empty() {
+            let _ = header.set_username(&name_part);
+        }
+    } else if let Some(user) = uzers::get_user_by_uid(uid) {
+        header.set_uid(uid as u64);
+        let _ = header.set_username(&user.name().to_string_lossy());
+    } else {
+        header.set_uid(uid as u64);
+    }
+
+    if let Some((n, i)) = args.group_map.get(&gid) {
+        header.set_gid(*i as u64);
+        let _ = header.set_groupname(n);
+    } else if let Some(group) = &args.group {
+        let (name_part, gid_part) = match group.split_once(':') {
+            Some((n, u)) => (n.to_string(), Some(u.to_string())),
+            None => (group.clone(), None),
+        };
+        if let Some(u) = gid_part.as_ref() {
+            if let Ok(gid) = u.parse::<u64>() {
+                header.set_gid(gid);
+            }
+        } else if let Ok(gid) = name_part.parse::<u64>() {
+            header.set_gid(gid);
+        }
+        if !name_part.is_empty() {
+            let _ = header.set_groupname(&name_part);
+        }
+    } else if let Some(group) = uzers::get_group_by_gid(gid) {
+        header.set_gid(gid as u64);
+        let _ = header.set_groupname(&group.name().to_string_lossy());
+    } else {
+        header.set_gid(gid as u64);
+    }
+}
+
+fn parse_id_map(path: &str) -> std::collections::HashMap<u32, (String, u32)> {
+    // Each line: `+SRC_ID "NAME:TARGET_ID"` or `+SRC_ID NAME:TARGET_ID`.
+    // Comments (starting with `#`) and blank lines are ignored.
+    let mut map = std::collections::HashMap::new();
+    let Ok(content) = fs::read_to_string(path) else {
+        return map;
+    };
+    for raw in content.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let body = line.strip_prefix('+').unwrap_or(line);
+        let mut parts = body.splitn(2, char::is_whitespace);
+        let Some(src) = parts.next() else { continue };
+        let Some(rest) = parts.next() else { continue };
+        let Ok(src_id) = src.parse::<u32>() else {
+            continue;
+        };
+        let rest = rest.trim();
+        let rest = rest.trim_matches('"');
+        let (name, target_id) = match rest.rsplit_once(':') {
+            Some((n, i)) => (n.to_string(), i.parse::<u32>().unwrap_or(src_id)),
+            None => (rest.to_string(), src_id),
+        };
+        map.insert(src_id, (name, target_id));
+    }
+    map
 }
 
 fn describe_open_error(e: &io::Error) -> String {
@@ -753,6 +842,16 @@ fn parse_args() -> Args {
             "-O" | "--to-stdout" => args.to_stdout = true,
             "--backup" => args.backup = true,
             "--ignore-failed-read" => args.ignore_failed_read = true,
+            "--owner-map" => {
+                if let Some(v) = queue.pop_front() {
+                    args.owner_map = parse_id_map(&v);
+                }
+            }
+            "--group-map" => {
+                if let Some(v) = queue.pop_front() {
+                    args.group_map = parse_id_map(&v);
+                }
+            }
             "--transform" | "--xform" => {
                 if let Some(v) = queue.pop_front() {
                     match parse_transform(&v) {
@@ -940,8 +1039,6 @@ fn parse_args() -> Args {
             | "--sparse-version"
             | "--xattrs-exclude"
             | "--xattrs-include"
-            | "--group-map"
-            | "--owner-map"
             | "--suffix"
             | "--backup-prefix"
             | "--transform-option"
@@ -982,6 +1079,10 @@ fn parse_args() -> Args {
                     });
                 } else if let Some(val) = other.strip_prefix("--label=") {
                     args.label = Some(val.to_string());
+                } else if let Some(val) = other.strip_prefix("--owner-map=") {
+                    args.owner_map = parse_id_map(val);
+                } else if let Some(val) = other.strip_prefix("--group-map=") {
+                    args.group_map = parse_id_map(val);
                 } else if let Some(val) = other.strip_prefix("--owner=") {
                     args.owner = Some(val.to_string());
                 } else if let Some(val) = other.strip_prefix("--group=") {
@@ -1049,8 +1150,6 @@ fn parse_args() -> Args {
                     || other.strip_prefix("--xattrs-exclude=").is_some()
                     || other.strip_prefix("--xattrs-include=").is_some()
                     || other.strip_prefix("--acls").is_some()
-                    || other.strip_prefix("--group-map=").is_some()
-                    || other.strip_prefix("--owner-map=").is_some()
                     || other.strip_prefix("--hole-detection=").is_some()
                     || other.strip_prefix("--sparse-version=").is_some()
                     || other.strip_prefix("--tape-length=").is_some()
@@ -1689,20 +1788,13 @@ fn add_paths_to_builder_filter<W: Write>(
                     header.set_mtime(mtime);
                     let uid = metadata.uid();
                     let gid = metadata.gid();
-                    header.set_uid(uid as u64);
-                    header.set_gid(gid as u64);
-                    if let Some(user) = uzers::get_user_by_uid(uid) {
-                        let _ = header.set_username(&user.name().to_string_lossy());
-                    }
-                    if let Some(group) = uzers::get_group_by_gid(gid) {
-                        let _ = header.set_groupname(&group.name().to_string_lossy());
-                    }
+                    apply_owner_group_map(&mut header, uid, gid, args);
                 }
                 #[cfg(not(unix))]
                 {
                     header.set_mode(0o755);
+                    set_owner_group(&mut header, args);
                 }
-                set_owner_group(&mut header, args);
                 let dir_name = if archive_name.ends_with('/') {
                     archive_name.to_string()
                 } else {
@@ -1791,15 +1883,9 @@ fn add_paths_to_builder_filter<W: Write>(
                     header.set_mtime(mtime);
                     let uid = metadata.uid();
                     let gid = metadata.gid();
-                    header.set_uid(uid as u64);
-                    header.set_gid(gid as u64);
-                    if let Some(user) = uzers::get_user_by_uid(uid) {
-                        let _ = header.set_username(&user.name().to_string_lossy());
-                    }
-                    if let Some(group) = uzers::get_group_by_gid(gid) {
-                        let _ = header.set_groupname(&group.name().to_string_lossy());
-                    }
+                    apply_owner_group_map(&mut header, uid, gid, args);
                 }
+                #[cfg(not(unix))]
                 set_owner_group(&mut header, args);
 
                 #[cfg(unix)]
@@ -2776,6 +2862,18 @@ fn main() {
             process::exit(2);
         }
         if msg == "read-error-exit" {
+            process::exit(2);
+        }
+        // gzip/bzip2/xz decode errors from an empty compressed stream
+        // surface as "unexpected end of file". GNU tar presents them as
+        // the compressor's exit status instead.
+        if args.compression.is_some_and(|c| c != Compression::None)
+            && (msg.contains("unexpected end of file")
+                || msg.contains("corrupt")
+                || msg.contains("decode"))
+        {
+            eprintln!("tar: Child returned status 1");
+            eprintln!("tar: Error is not recoverable: exiting now");
             process::exit(2);
         }
         let translated = match msg.as_str() {
