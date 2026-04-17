@@ -1404,20 +1404,36 @@ impl Engine {
         // .EXTRA_PREREQS: extra prereqs added to every target, built but
         // not visible in `$<`/`$^`/etc. Skip if the target being built
         // is itself one of the extra prereqs (avoid cycle).
-        let extra_prereqs_raw = self.lookup_var(".EXTRA_PREREQS");
-        let extra_prereqs: Vec<String> = extra_prereqs_raw
+        //
+        // A target-specific `.EXTRA_PREREQS` overrides the global one
+        // for this target. Globs (`*`, `?`) in entries are expanded
+        // via filesystem matching — unmatched entries are retained
+        // literally so an explicit rule can still build them.
+        let extra_raw = {
+            let tv = self.target_vars.borrow();
+            tv.get(target)
+                .and_then(|entries| entries.iter().rev().find(|(n, _, _)| n == ".EXTRA_PREREQS"))
+                .map(|(_, _, v)| expand::expand(v, self))
+                .unwrap_or_else(|| self.lookup_var(".EXTRA_PREREQS"))
+        };
+        let extra_prereqs: Vec<String> = extra_raw
             .split_whitespace()
-            .map(|s| s.to_string())
+            .flat_map(|s| {
+                if s.contains(['*', '?', '['])
+                    && let Ok(paths) = glob::glob(s)
+                {
+                    let matches: Vec<String> = paths
+                        .flatten()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .collect();
+                    if !matches.is_empty() {
+                        return matches;
+                    }
+                }
+                vec![s.to_string()]
+            })
             .collect();
         let in_extras = extra_prereqs.iter().any(|p| p == target);
-        if !in_extras {
-            for prereq in &extra_prereqs {
-                if let Err(e) = self.build_target_for(prereq, Some(target)) {
-                    pop_scope(self);
-                    return Err(e);
-                }
-            }
-        }
 
         // Build normal prerequisites first. If a prereq has no file on
         // disk after being built (a phony / FORCE-style rule) we treat
@@ -1450,6 +1466,14 @@ impl Engine {
             {
                 // Prereq has a rule but no resulting file — phony / FORCE.
                 has_phony_prereq = true;
+            }
+        }
+
+        // Build .EXTRA_PREREQS after normal prereqs but before
+        // order-only, and keep them out of `$^`/`$<`.
+        if !in_extras {
+            for prereq in &extra_prereqs {
+                self.build_target_for(prereq, Some(target))?;
             }
         }
 
