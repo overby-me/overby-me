@@ -553,30 +553,32 @@ impl Parser {
     }
 
     fn parse_my_decl(&mut self) -> Stmt {
-        let vars = self.parse_var_list();
-        Stmt::My(vars)
+        let (vars, list_ctx) = self.parse_var_list();
+        Stmt::My(vars, list_ctx)
     }
 
     fn parse_my_decl_no_semi(&mut self) -> Stmt {
         self.eat(&Token::My);
-        let vars = self.parse_var_list();
-        Stmt::My(vars)
+        let (vars, list_ctx) = self.parse_var_list();
+        Stmt::My(vars, list_ctx)
     }
 
     fn parse_our_decl(&mut self) -> Stmt {
-        let vars = self.parse_var_list();
-        Stmt::Our(vars)
+        let (vars, list_ctx) = self.parse_var_list();
+        Stmt::Our(vars, list_ctx)
     }
 
     fn parse_local_decl(&mut self) -> Stmt {
-        let vars = self.parse_var_list();
-        Stmt::Local(vars)
+        let (vars, list_ctx) = self.parse_var_list();
+        Stmt::Local(vars, list_ctx)
     }
 
-    fn parse_var_list(&mut self) -> Vec<(String, Option<Expr>)> {
+    fn parse_var_list(&mut self) -> (Vec<(String, Option<Expr>)>, bool) {
         let mut vars = Vec::new();
+        let mut list_ctx = false;
 
         if self.eat(&Token::LParen) {
+            list_ctx = true;
             // my ($a, $b, @c, %d) = expr;
             let mut names = Vec::new();
             loop {
@@ -639,7 +641,7 @@ impl Parser {
                     self.pos += 1;
                     n
                 }
-                _ => return vars,
+                _ => return (vars, list_ctx),
             };
 
             let init = if self.eat(&Token::Assign) {
@@ -650,7 +652,7 @@ impl Parser {
             vars.push((name, init));
         }
 
-        vars
+        (vars, list_ctx)
     }
 
     fn parse_print_stmt(&mut self, is_say: bool) -> Stmt {
@@ -1518,7 +1520,26 @@ impl Parser {
 
             Token::UndefKw => {
                 self.pos += 1;
-                Expr::Undef
+                // undef EXPR — clears the lvalue and returns undef
+                // undef()       — also returns undef
+                // undef alone (no argument) — returns undef
+                if self.eat(&Token::LParen) {
+                    if self.eat(&Token::RParen) {
+                        Expr::Undef
+                    } else {
+                        let arg = self.parse_expr();
+                        self.expect(&Token::RParen);
+                        Expr::Call("undef".to_string(), vec![arg])
+                    }
+                } else if matches!(
+                    self.tok(),
+                    Token::ScalarVar(_) | Token::ArrayVar(_) | Token::HashVar(_)
+                ) {
+                    let arg = self.parse_unary();
+                    Expr::Call("undef".to_string(), vec![arg])
+                } else {
+                    Expr::Undef
+                }
             }
 
             Token::LParen => {
@@ -1894,7 +1915,15 @@ impl Parser {
                         | Token::Backslash
                 ) {
                     // Function call without parentheses: func arg, ...
-                    let args = self.parse_list_expr();
+                    // Perl prototype-`$` builtins only take a single scalar arg.
+                    // Without this, `is(scalar @b, 1, $name)` would be parsed as
+                    // `is(scalar(@b, 1, $name))` — the scalar() swallowing the
+                    // remaining arguments to the outer call.
+                    let args = if is_unary_builtin(&name) {
+                        vec![self.parse_unary()]
+                    } else {
+                        self.parse_list_expr()
+                    };
                     Expr::Call(name, args)
                 } else {
                     // Bareword — treat as string in most contexts
@@ -1914,6 +1943,36 @@ impl Parser {
     fn at_scalar_var(&self) -> bool {
         matches!(self.tok(), Token::ScalarVar(_))
     }
+}
+
+/// Perl builtins with prototype `$` — they take exactly one scalar-context
+/// argument. Without this, something like `is(scalar @b, 1, "msg")` would
+/// parse as `is(scalar(@b, 1, "msg"))`, swallowing the outer call's args.
+fn is_unary_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "scalar"
+            | "defined"
+            | "ref"
+            | "chr"
+            | "ord"
+            | "lc"
+            | "uc"
+            | "lcfirst"
+            | "ucfirst"
+            | "hex"
+            | "oct"
+            | "int"
+            | "abs"
+            | "sqrt"
+            | "exp"
+            | "log"
+            | "sin"
+            | "cos"
+            | "quotemeta"
+            | "chop"
+            | "chomp"
+    )
 }
 
 /// Parse a double-quoted string with variable interpolation into an Interp expression.

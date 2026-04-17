@@ -67,6 +67,8 @@ pub struct Interpreter {
     required_files: HashSet<String>,
     // Current source file being executed
     current_file: String,
+    // Pending sub return triggered inside eval_expr (e.g., `return` in a do-block)
+    pending_return: Option<Value>,
 }
 
 impl Interpreter {
@@ -124,6 +126,7 @@ impl Interpreter {
             fh_counter: 0,
             required_files: HashSet::new(),
             current_file: String::new(),
+            pending_return: None,
         }
     }
 
@@ -204,9 +207,17 @@ impl Interpreter {
                         self.last_list_val = Some(list);
                     }
                     _ => {
-                        self.last_expr_val = self.eval_expr(expr);
-                        self.last_list_val = None;
+                        let v = self.eval_expr(expr);
+                        self.last_expr_val = v;
+                        // Preserve last_list_val if a `return` inside propagated it
+                        if self.pending_return.is_none() {
+                            self.last_list_val = None;
+                        }
                     }
+                }
+                // Propagate `return` from within a do-block or eval expression
+                if let Some(v) = self.pending_return.take() {
+                    return Flow::Return(v);
                 }
                 Flow::None
             }
@@ -439,9 +450,10 @@ impl Interpreter {
                 Flow::None
             }
 
-            Stmt::My(vars) => {
-                // Check for list destructuring: my ($a, $b, $c) = @_
-                let has_list_init = vars.len() > 1 && vars[0].1.is_some();
+            Stmt::My(vars, list_ctx) => {
+                // Check for list destructuring: my ($a, $b, $c) = @_ or my ($a) = @_
+                let has_list_init =
+                    (*list_ctx || vars.len() > 1) && vars.first().is_some_and(|v| v.1.is_some());
                 if has_list_init {
                     let init_expr = vars[0].1.as_ref().unwrap();
                     let items = self.eval_list(init_expr);
@@ -493,36 +505,64 @@ impl Interpreter {
                 Flow::None
             }
 
-            Stmt::Local(vars) => {
-                for (name, init) in vars {
-                    let var_name = name
-                        .trim_start_matches('$')
-                        .trim_start_matches('@')
-                        .trim_start_matches('%');
-                    // Save current value
-                    let old = self.get_var(var_name);
-                    if let Some(saves) = self.local_saves.last_mut() {
-                        saves.push((var_name.to_string(), old));
-                    }
-                    let val = init
-                        .as_ref()
-                        .map(|e| self.eval_expr(e))
-                        .unwrap_or(Value::Undef);
-                    if name.starts_with('@') {
-                        let items = if init.is_some() {
-                            self.eval_list(init.as_ref().unwrap())
+            Stmt::Local(vars, list_ctx) => {
+                let has_list_init =
+                    (*list_ctx || vars.len() > 1) && vars.first().is_some_and(|v| v.1.is_some());
+                if has_list_init {
+                    let init_expr = vars[0].1.as_ref().unwrap();
+                    let items = self.eval_list(init_expr);
+                    for (i, (name, _)) in vars.iter().enumerate() {
+                        let var_name = name
+                            .trim_start_matches('$')
+                            .trim_start_matches('@')
+                            .trim_start_matches('%');
+                        let old = self.get_var(var_name);
+                        if let Some(saves) = self.local_saves.last_mut() {
+                            saves.push((var_name.to_string(), old));
+                        }
+                        if name.starts_with('@') {
+                            let start = i.min(items.len());
+                            self.globals
+                                .arrays
+                                .insert(var_name.to_string(), items[start..].to_vec());
+                        } else if name.starts_with('%') {
+                            let start = i.min(items.len());
+                            self.set_hash_from_list(var_name, items[start..].to_vec());
                         } else {
-                            Vec::new()
-                        };
-                        self.globals.arrays.insert(var_name.to_string(), items);
-                    } else {
-                        self.globals.vars.insert(var_name.to_string(), val);
+                            let val = items.get(i).cloned().unwrap_or(Value::Undef);
+                            self.globals.vars.insert(var_name.to_string(), val);
+                        }
+                    }
+                } else {
+                    for (name, init) in vars {
+                        let var_name = name
+                            .trim_start_matches('$')
+                            .trim_start_matches('@')
+                            .trim_start_matches('%');
+                        let old = self.get_var(var_name);
+                        if let Some(saves) = self.local_saves.last_mut() {
+                            saves.push((var_name.to_string(), old));
+                        }
+                        let val = init
+                            .as_ref()
+                            .map(|e| self.eval_expr(e))
+                            .unwrap_or(Value::Undef);
+                        if name.starts_with('@') {
+                            let items = if init.is_some() {
+                                self.eval_list(init.as_ref().unwrap())
+                            } else {
+                                Vec::new()
+                            };
+                            self.globals.arrays.insert(var_name.to_string(), items);
+                        } else {
+                            self.globals.vars.insert(var_name.to_string(), val);
+                        }
                     }
                 }
                 Flow::None
             }
 
-            Stmt::Our(vars) => {
+            Stmt::Our(vars, _list_ctx) => {
                 for (name, init) in vars {
                     let var_name = name
                         .trim_start_matches('$')
@@ -829,13 +869,31 @@ impl Interpreter {
 
             Expr::PostfixOp(op, expr) => {
                 let val = self.eval_expr(expr);
-                let num = val.to_num();
-                let new_val = match op {
-                    PostfixOp::Inc => Value::Num(num + 1.0),
-                    PostfixOp::Dec => Value::Num(num - 1.0),
+                let (new_val, old_val) = match op {
+                    PostfixOp::Inc => {
+                        // Perl's magical string increment: if the scalar is a
+                        // defined string matching /^[A-Za-z]*[0-9]*\z/ and
+                        // non-empty, increment as a string ("aa" → "ab").
+                        if let Value::Str(s) = &val {
+                            if is_magic_inc_string(s) {
+                                let next = magic_string_inc(s);
+                                (Value::Str(next), val.clone())
+                            } else {
+                                let n = val.to_num();
+                                (Value::Num(n + 1.0), Value::Num(n))
+                            }
+                        } else {
+                            let n = val.to_num();
+                            (Value::Num(n + 1.0), Value::Num(n))
+                        }
+                    }
+                    PostfixOp::Dec => {
+                        let n = val.to_num();
+                        (Value::Num(n - 1.0), Value::Num(n))
+                    }
                 };
                 self.assign_to(expr, new_val);
-                Value::Num(num) // return old value
+                old_val
             }
 
             Expr::Assign(target, value) => {
@@ -1079,6 +1137,7 @@ impl Interpreter {
                     match self.exec_stmt(stmt) {
                         Flow::Return(v) => {
                             self.pop_scope();
+                            self.pending_return = Some(v.clone());
                             return v;
                         }
                         Flow::Die(msg) => {
@@ -1087,6 +1146,10 @@ impl Interpreter {
                             return Value::Undef;
                         }
                         _ => {}
+                    }
+                    if self.pending_return.is_some() {
+                        self.pop_scope();
+                        return self.pending_return.clone().unwrap_or(Value::Undef);
                     }
                 }
                 let result = self.last_expr_val.clone();
@@ -1227,28 +1290,34 @@ impl Interpreter {
                 }
             }
             BinOp::Mod => {
+                let ln = l.to_num();
                 let d = r.to_num();
                 if d == 0.0 {
                     eprintln!("Illegal modulus zero");
                     Value::Undef
                 } else {
-                    // Perl's % truncates operands to integers first
-                    let a = if l.to_num() >= 0.0 {
-                        l.to_num().floor() as i64
+                    // Perl's `%`: truncate both operands toward 0 first. If the
+                    // truncated values fit in i64, use integer modulo. Otherwise
+                    // fall back to floating-point modulo on the truncated values.
+                    let i64_max = i64::MAX as f64;
+                    let i64_min = i64::MIN as f64;
+                    let la = ln.trunc();
+                    let da = d.trunc();
+                    if la >= i64_min && la <= i64_max && da >= i64_min && da <= i64_max {
+                        let a = la as i64;
+                        let b = da as i64;
+                        let result = a % b;
+                        if result != 0 && (result > 0) != (b > 0) {
+                            Value::Num((result + b) as f64)
+                        } else {
+                            Value::Num(result as f64)
+                        }
                     } else {
-                        l.to_num().ceil() as i64
-                    };
-                    let b = if d >= 0.0 {
-                        d.floor() as i64
-                    } else {
-                        d.ceil() as i64
-                    };
-                    let result = a % b;
-                    // Perl adjusts: if result != 0 and signs differ, add b
-                    if result != 0 && (result > 0) != (b > 0) {
-                        Value::Num((result + b) as f64)
-                    } else {
-                        Value::Num(result as f64)
+                        let mut result = la - (la / da).trunc() * da;
+                        if result != 0.0 && (result > 0.0) != (da > 0.0) {
+                            result += da;
+                        }
+                        Value::Num(result)
                     }
                 }
             }
@@ -1342,7 +1411,15 @@ impl Interpreter {
             }
             UnaryOp::PreInc => {
                 let val = self.eval_expr(expr);
-                let new_val = Value::Num(val.to_num() + 1.0);
+                let new_val = if let Value::Str(s) = &val {
+                    if is_magic_inc_string(s) {
+                        Value::Str(magic_string_inc(s))
+                    } else {
+                        Value::Num(val.to_num() + 1.0)
+                    }
+                } else {
+                    Value::Num(val.to_num() + 1.0)
+                };
                 self.assign_to(expr, new_val.clone());
                 new_val
             }
@@ -1448,6 +1525,17 @@ impl Interpreter {
                 } else {
                     Value::Undef
                 }
+            }
+            "undef" => {
+                // undef EXPR — clear the lvalue and return undef
+                if let Some(arg) = args.first() {
+                    match arg {
+                        Expr::ArrayVar(name) => self.set_array(name, Vec::new()),
+                        Expr::HashVar(name) => self.set_hash_from_list(name, Vec::new()),
+                        _ => self.assign_to(arg, Value::Undef),
+                    }
+                }
+                Value::Undef
             }
             "abs" => {
                 let val = if args.is_empty() {
@@ -2864,4 +2952,65 @@ impl Interpreter {
         }
         result
     }
+}
+
+/// Does this string qualify for Perl's magical string-increment?
+/// Non-empty, begins with /[A-Za-z]/, and matches /^[A-Za-z]*[0-9]*\z/.
+fn is_magic_inc_string(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    let bytes = s.as_bytes();
+    if !bytes[0].is_ascii_alphabetic() {
+        return false;
+    }
+    let mut i = 0;
+    while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+        i += 1;
+    }
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    i == bytes.len()
+}
+
+/// Perform Perl's magical string increment on `s`.
+/// Examples: "aa" -> "ab"; "zz" -> "aaa"; "a9" -> "b0"; carry preserves case.
+fn magic_string_inc(s: &str) -> String {
+    let mut chars: Vec<char> = s.chars().collect();
+    let mut i = chars.len();
+    while i > 0 {
+        i -= 1;
+        let c = chars[i];
+        if c.is_ascii_digit() {
+            if c < '9' {
+                chars[i] = ((c as u8) + 1) as char;
+                return chars.iter().collect();
+            }
+            chars[i] = '0';
+        } else if c.is_ascii_lowercase() {
+            if c < 'z' {
+                chars[i] = ((c as u8) + 1) as char;
+                return chars.iter().collect();
+            }
+            chars[i] = 'a';
+            if i == 0 {
+                chars.insert(0, 'a');
+                return chars.iter().collect();
+            }
+        } else if c.is_ascii_uppercase() {
+            if c < 'Z' {
+                chars[i] = ((c as u8) + 1) as char;
+                return chars.iter().collect();
+            }
+            chars[i] = 'A';
+            if i == 0 {
+                chars.insert(0, 'A');
+                return chars.iter().collect();
+            }
+        } else {
+            return chars.iter().collect();
+        }
+    }
+    chars.iter().collect()
 }

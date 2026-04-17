@@ -6,21 +6,21 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**10/68 Nix tests passing** (14.7%) — selected tests from the upstream Perl test suite.
+**11/68 Nix tests passing** (16.2%) — selected tests from the upstream Perl test suite.
 
 Passing: base/if, base/cond, base/while, base/pat, base/num (56 tests),
 base/translate (257 tests), base/term (7 tests), cmd/elsif (4 tests),
-cmd/mod (15 tests), opbasic/qq (30 tests).
+cmd/mod (15 tests), opbasic/arith (183 tests), opbasic/qq (30 tests).
 
 Near-passing (local test counts):
 
-- opbasic/arith: 173/183 (integer overflow edge cases)
 - opbasic/concat: 230/254 (Unicode concat)
-- cmd/for: 14/16 (Internals::stack_refcounted)
-- cmd/subval: 19/36 (caller, wantarray, file I/O)
-- op/not: 8/24 (22/24 running, Config.pm missing)
-- op/bop: 196/510 (bitwise operators)
-- op/local: 96/319 (local scoping)
+- cmd/for: 14/16 (Internals::stack_refcounted, DESTROY method)
+- cmd/subval: 28/36 (caller, typeglob filehandles)
+- op/auto: 43/47 (typeglob handling in ++/--)
+- op/my: 42/59 (array/hash scoping edge cases)
+- op/array: 94/195
+- op/not: 16/22 running (Scalar::Util dualvar, typeglob assignment)
 
 test.pl integration fully working: plan/ok/is/pass/note/printf produce correct
 TAP output with test names. Function calls in argument lists fixed.
@@ -51,6 +51,15 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
 - Function args expand @arrays in list context
 - return accepts postfix if/unless modifiers
 - All builtin keywords in expects_operand for regex-after-keyword
+- `undef EXPR` actually clears the lvalue (was a no-op)
+- Float-path modulo operator for values outside i64 range
+- `my ($x) = @_` treats RHS in list context (single-var list destructure)
+- `return` inside `do { }` now propagates out of enclosing sub
+- Magical string increment on `++`: e.g. `"aa" → "ab"`, `"zz" → "aaa"`,
+  `"a9" → "b0"`, with case-preserving carry into a new leading letter.
+- Prototype-`$` builtins (scalar, defined, ref, lc, uc, chop, chomp, int, abs,
+  sqrt, chr, ord, hex, oct, etc.) take exactly one arg when called without
+  parens, fixing `is(scalar @arr, N, $name)` parsing.
 
 ---
 
@@ -289,15 +298,15 @@ This is the largest phase. Key clusters:
 
 **re (3):** pat, regexp, subst
 
-### Passing (10)
+### Passing (11)
 
 base/cond, base/if, base/num, base/pat, base/term, base/translate, base/while,
-cmd/elsif, cmd/mod, opbasic/qq
+cmd/elsif, cmd/mod, opbasic/arith, opbasic/qq
 
-### Failing (58)
+### Failing (57)
 
 base/lex, base/rs, cmd/for, cmd/subval, cmd/switch,
-opbasic/arith, opbasic/cmp, opbasic/concat, opbasic/magic_phase, opbasic/qq,
+opbasic/cmp, opbasic/concat, opbasic/magic_phase,
 op/arith2, op/array, op/auto, op/bop, op/chop, op/chr, op/closure, op/cond,
 op/context, op/defined, op/delete, op/die, op/do, op/each, op/eval, op/grep,
 op/hash, op/heredoc, op/inc, op/index, op/join, op/lc, op/length, op/list,
@@ -306,3 +315,24 @@ op/quotemeta, op/range, op/ref, op/repeat, op/reverse, op/sort, op/splice,
 op/split, op/sprintf, op/sub, op/substr, op/tr, op/undef, op/unshift, op/vec,
 op/wantarray, io/argv, io/fs, io/open, io/print, io/read, io/tell,
 re/pat, re/regexp, re/subst, run/exit, run/switches
+
+### Next high-impact targets
+
+The biggest locked-door preventing many tests from passing is:
+
+1. **Real references.** Currently `\$x`, `[...]`, `{...}` return the placeholder
+   strings `"REF"`, `"ARRAY_REF"`, `"HASH_REF"`. Dereferences (`@$ref`, `%$ref`,
+   `$$ref`, `$ref->[i]`, `$ref->{k}`) all silently give empty. This blocks
+   op/ref, op/hash, op/array (nested), op/auto (glob handling), and more —
+   any test that iterates over array-refs.
+2. **`qr//` regex values.** Currently `qr/pat/` is not stored as a usable
+   regex value; `$str =~ $rx` crashes silently. Blocks cmd/for test 13 and
+   many regex tests.
+3. **Line-number tracking in tokens.** With line info we could emit
+   reference-perl-compatible `Can't locate Config.pm in @INC ... at FILE.t
+   line NN.` errors, which would instantly pass ~15 tests whose reference
+   output is just that error (op/arith2, op/bop, op/chop, op/inc, op/lc,
+   op/pack, op/quotemeta, op/range, op/sprintf, op/vec, io/fs, io/open,
+   re/pat, re/subst, run/switches).
+4. **Typeglobs (`*F`, `*yes = \x`)** — blocks cmd/subval tests 31-36 and
+   parts of op/auto, op/not.

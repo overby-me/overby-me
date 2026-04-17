@@ -223,9 +223,9 @@ pub enum Stmt {
         params: Vec<String>,
         body: Vec<Stmt>,
     },
-    My(Vec<(String, Option<Expr>)>), // my ($a, $b) = ...
-    Local(Vec<(String, Option<Expr>)>),
-    Our(Vec<(String, Option<Expr>)>),
+    My(Vec<(String, Option<Expr>)>, bool), // my ($a, $b) = ...; bool = is list-context destructure (parens used)
+    Local(Vec<(String, Option<Expr>)>, bool),
+    Our(Vec<(String, Option<Expr>)>, bool),
 
     // Package
     Package(String),
