@@ -1,0 +1,36 @@
+# deslop configuration for rust-patch
+
+disabled_rules = [
+  # Single-file implementation is expected during early development.
+  "rust_oversized_module_file",
+
+  # patch inherently writes hunk-by-hunk to files/stdout inside match loops.
+  "rust_unbuffered_file_writes",
+
+  # .lines() is the standard way to iterate line-oriented patch input.
+  "rust_lines_allocate_per_line",
+
+  # Struct-field deref in loops is idiomatic for option checking.
+  "rust_aos_hot_path",
+
+  # Reading patch files without size limits matches GNU patch behavior.
+  "rust_unbounded_read_to_string",
+
+  # Numeric casts between line numbers and indices are intentional.
+  "rust_narrowing_numeric_cast",
+
+  # Check-then-open on target files matches GNU patch error messaging.
+  "rust_check_then_open_path",
+
+  # Option-heavy CLI flags struct mirrors GNU patch's many flags.
+  "rust_option_bag_config",
+
+  # strip_path intentionally handles leading-slash edge cases.
+  "rust_path_join_absolute",
+
+  # unwrap() on compile-time-constant regex captures is safe.
+  "unwrap_in_non_test_code",
+
+  # Release profile intentionally omits overflow checks for performance.
+  "rust_release_profile_missing_overflow_checks",
+]

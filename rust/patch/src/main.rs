@@ -23,10 +23,26 @@ struct Options {
     forward: bool,
     fuzz: usize,
     backup: bool,
+    backup_prefix: Option<String>,   // -B / --prefix
+    backup_suffix: Option<String>,   // -z / --suffix
+    basename_prefix: Option<String>, // -Y / --basename-prefix
+    version_control: Option<String>, // -V / --version-control
     no_backup_if_mismatch: bool,
     force: bool,
     remove_empty: bool,
+    read_only: ReadOnlyMode,
+    reject_file: Option<String>,
+    reject_format: Option<String>, // unified | context (None = match input)
+    posix: bool,
     positional_file: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum ReadOnlyMode {
+    Ignore,
+    #[default]
+    Warn,
+    Fail,
 }
 
 impl Default for Options {
@@ -43,9 +59,17 @@ impl Default for Options {
             forward: false,
             fuzz: 2,
             backup: false,
+            backup_prefix: None,
+            backup_suffix: None,
+            basename_prefix: None,
+            version_control: None,
             no_backup_if_mismatch: false,
             force: false,
             remove_empty: false,
+            read_only: ReadOnlyMode::Warn,
+            reject_file: None,
+            reject_format: None,
+            posix: false,
             positional_file: None,
         }
     }
@@ -63,8 +87,9 @@ struct Hunk {
     old_start: usize,
     old_count: usize,
     new_start: usize,
-    #[allow(dead_code)]
     new_count: usize,
+    /// Text after the `@@ ... @@` range (e.g. function-name heuristic).
+    header_suffix: String,
     lines: Vec<HunkLine>,
 }
 
@@ -75,13 +100,42 @@ enum HunkLine {
     Add(String),
 }
 
+#[derive(Debug, Clone, Default)]
+struct GitMeta {
+    new_file_mode: Option<u32>,
+    deleted_file_mode: Option<u32>,
+    old_mode: Option<u32>,
+    new_mode: Option<u32>,
+    rename_from: Option<String>,
+    rename_to: Option<String>,
+    copy_from: Option<String>,
+    copy_to: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 struct FilePatch {
     old_file: String,
     new_file: String,
+    /// Raw text after `--- ` / `+++ ` — preserves the label (tab-separated
+    /// timestamps, "label of X", etc.) for verbatim use in reject files.
+    old_header: String,
+    new_header: String,
+    /// `Index: path` preamble line if present; preserved in rejects.
+    index_line: Option<String>,
     hunks: Vec<Hunk>,
-    #[allow(dead_code)]
     format: DiffFormat,
+    git: GitMeta,
+}
+
+fn parse_strip(val: &str) -> usize {
+    match val.parse() {
+        Ok(n) => n,
+        Err(_) => {
+            let argv0 = env::args().next().unwrap_or_else(|| "patch".to_string());
+            eprintln!("{argv0}: **** strip count {val} is not a number");
+            process::exit(EXIT_TROUBLE);
+        }
+    }
 }
 
 fn parse_args() -> Options {
@@ -107,14 +161,14 @@ fn parse_args() -> Options {
         }
 
         if let Some(val) = arg.strip_prefix("--strip=") {
-            opts.strip = val.parse().ok();
+            opts.strip = Some(parse_strip(val));
         } else if arg == "--strip" || arg == "-p" {
             i += 1;
             if i < args.len() {
-                opts.strip = args[i].parse().ok();
+                opts.strip = Some(parse_strip(&args[i]));
             }
         } else if let Some(val) = arg.strip_prefix("-p") {
-            opts.strip = val.parse().ok();
+            opts.strip = Some(parse_strip(val));
         } else if let Some(val) = arg.strip_prefix("--directory=") {
             opts.directory = Some(val.to_string());
         } else if arg == "--directory" || arg == "-d" {
@@ -159,6 +213,61 @@ fn parse_args() -> Options {
             opts.backup = true;
         } else if arg == "--no-backup-if-mismatch" {
             opts.no_backup_if_mismatch = true;
+        } else if let Some(val) = arg.strip_prefix("--prefix=") {
+            opts.backup_prefix = Some(val.to_string());
+            opts.backup = true;
+        } else if arg == "-B" || arg == "--prefix" {
+            i += 1;
+            if i < args.len() {
+                opts.backup_prefix = Some(args[i].clone());
+                opts.backup = true;
+            }
+        } else if let Some(val) = arg.strip_prefix("--suffix=") {
+            opts.backup_suffix = Some(val.to_string());
+            opts.backup = true;
+        } else if arg == "-z" || arg == "--suffix" {
+            i += 1;
+            if i < args.len() {
+                opts.backup_suffix = Some(args[i].clone());
+                opts.backup = true;
+            }
+        } else if let Some(val) = arg.strip_prefix("--basename-prefix=") {
+            opts.basename_prefix = Some(val.to_string());
+            opts.backup = true;
+        } else if arg == "-Y" || arg == "--basename-prefix" {
+            i += 1;
+            if i < args.len() {
+                opts.basename_prefix = Some(args[i].clone());
+                opts.backup = true;
+            }
+        } else if let Some(val) = arg.strip_prefix("--version-control=") {
+            opts.version_control = Some(val.to_string());
+        } else if arg == "-V" || arg == "--version-control" {
+            i += 1;
+            if i < args.len() {
+                opts.version_control = Some(args[i].clone());
+            }
+        } else if let Some(val) = arg.strip_prefix("--reject-file=") {
+            opts.reject_file = Some(val.to_string());
+        } else if arg == "-r" || arg == "--reject-file" {
+            i += 1;
+            if i < args.len() {
+                opts.reject_file = Some(args[i].clone());
+            }
+        } else if let Some(val) = arg.strip_prefix("--reject-format=") {
+            opts.reject_format = Some(val.to_string());
+        } else if let Some(val) = arg.strip_prefix("--read-only=") {
+            opts.read_only = match val {
+                "ignore" => ReadOnlyMode::Ignore,
+                "warn" => ReadOnlyMode::Warn,
+                "fail" => ReadOnlyMode::Fail,
+                _ => {
+                    eprintln!("patch: invalid read-only mode: {val}");
+                    process::exit(EXIT_TROUBLE);
+                }
+            };
+        } else if arg == "--posix" {
+            opts.posix = true;
         } else if arg == "-f" || arg == "--force" {
             opts.force = true;
         } else if arg == "-E" || arg == "--remove-empty-files" {
@@ -193,6 +302,10 @@ fn parse_args() -> Options {
 }
 
 fn strip_path(path: &str, strip: usize) -> String {
+    // /dev/null is special-cased: never strip, preserve verbatim.
+    if path == "/dev/null" {
+        return path.to_string();
+    }
     if strip == 0 {
         return path.to_string();
     }
@@ -233,8 +346,9 @@ fn parse_unified_hunk_header(line: &str) -> Option<(usize, usize, usize, usize)>
 }
 
 fn parse_context_hunk_range(line: &str) -> Option<(usize, usize)> {
-    // Matches "*** start,end ****" or "--- start,end ----" or single line "*** start ****"
-    let re = Regex::new(r"^[\*\-]{3}\s+(\d+)(?:,(\d+))?\s+[\*\-]{4}").unwrap();
+    // Matches "*** start,end ****" or "--- start,end ----" or single line
+    // "*** start ****". Allow arbitrary whitespace around the comma.
+    let re = Regex::new(r"^[\*\-]{3}\s+(\d+)\s*(?:,\s*(\d+))?\s+[\*\-]{4}").unwrap();
     re.captures(line).map(|caps| {
         let start: usize = caps[1].parse().unwrap();
         let end: usize = caps.get(2).map_or(start, |m| m.as_str().parse().unwrap());
@@ -283,6 +397,16 @@ fn parse_file_path(line: &str, prefix: &str) -> String {
     rest.split('\t').next().unwrap_or(rest).trim().to_string()
 }
 
+fn hunk_header_suffix(line: &str) -> String {
+    // After the closing `@@`, the rest (if any) is the function-name heuristic.
+    let re = Regex::new(r"^@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@").unwrap();
+    if let Some(m) = re.find(line) {
+        line[m.end()..].to_string()
+    } else {
+        String::new()
+    }
+}
+
 fn parse_patches(input: &str) -> Vec<FilePatch> {
     let lines: Vec<&str> = input.lines().collect();
     let mut patches = Vec::new();
@@ -324,26 +448,137 @@ fn parse_patches(input: &str) -> Vec<FilePatch> {
 
 fn parse_unified_patch(lines: &[&str], start: usize) -> Option<(FilePatch, usize)> {
     let mut i = start;
+    let mut git = GitMeta::default();
+    let mut git_a: Option<String> = None;
+    let mut git_b: Option<String> = None;
+    let mut index_line: Option<String> = None;
 
-    // Skip preamble (diff --git, index, etc.)
+    // Walk preamble, picking up git-diff extensions if present.
     while i < lines.len() && !lines[i].starts_with("--- ") && !lines[i].starts_with("@@") {
+        let line = lines[i];
+        if let Some(_rest) = line.strip_prefix("Index: ") {
+            index_line = Some(line.to_string());
+        } else if let Some(rest) = line.strip_prefix("diff --git ") {
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            if parts.len() == 2 {
+                git_a = Some(parts[0].trim_start_matches("a/").to_string());
+                git_b = Some(parts[1].trim_start_matches("b/").to_string());
+            }
+        } else if let Some(rest) = line.strip_prefix("new file mode ") {
+            git.new_file_mode = u32::from_str_radix(rest.trim(), 8).ok();
+        } else if let Some(rest) = line.strip_prefix("deleted file mode ") {
+            git.deleted_file_mode = u32::from_str_radix(rest.trim(), 8).ok();
+        } else if let Some(rest) = line.strip_prefix("old mode ") {
+            git.old_mode = u32::from_str_radix(rest.trim(), 8).ok();
+        } else if let Some(rest) = line.strip_prefix("new mode ") {
+            git.new_mode = u32::from_str_radix(rest.trim(), 8).ok();
+        } else if let Some(rest) = line.strip_prefix("rename from ") {
+            git.rename_from = Some(rest.to_string());
+        } else if let Some(rest) = line.strip_prefix("rename to ") {
+            git.rename_to = Some(rest.to_string());
+        } else if let Some(rest) = line.strip_prefix("copy from ") {
+            git.copy_from = Some(rest.to_string());
+        } else if let Some(rest) = line.strip_prefix("copy to ") {
+            git.copy_to = Some(rest.to_string());
+        } else if line == "GIT binary patch" {
+            // Binary patches are not supported; bail.
+            return None;
+        }
         i += 1;
+
+        // If we reached another "diff --git" without hitting ---/@@, we've
+        // consumed a header-only patch (like rename-only or mode-only).
+        if i < lines.len() && lines[i].starts_with("diff --git ") {
+            if git_a.is_some() || git_b.is_some() {
+                let old_file = git
+                    .rename_from
+                    .clone()
+                    .or_else(|| git.copy_from.clone())
+                    .or_else(|| git_a.clone())
+                    .unwrap_or_default();
+                let new_file = git
+                    .rename_to
+                    .clone()
+                    .or_else(|| git.copy_to.clone())
+                    .or_else(|| git_b.clone())
+                    .unwrap_or_default();
+                return Some((
+                    FilePatch {
+                        old_file: old_file.clone(),
+                        new_file: new_file.clone(),
+                        old_header: old_file,
+                        new_header: new_file,
+                        index_line: index_line.clone(),
+                        hunks: Vec::new(),
+                        format: DiffFormat::Unified,
+                        git,
+                    },
+                    i,
+                ));
+            }
+        }
     }
     if i >= lines.len() {
+        // End-of-input with no hunks: if we had a git header, this is a
+        // header-only patch.
+        if git_a.is_some() || git_b.is_some() {
+            let old_file = git
+                .rename_from
+                .clone()
+                .or_else(|| git.copy_from.clone())
+                .or_else(|| git_a.clone())
+                .unwrap_or_default();
+            let new_file = git
+                .rename_to
+                .clone()
+                .or_else(|| git.copy_to.clone())
+                .or_else(|| git_b.clone())
+                .unwrap_or_default();
+            return Some((
+                FilePatch {
+                    old_file: old_file.clone(),
+                    new_file: new_file.clone(),
+                    old_header: old_file,
+                    new_header: new_file,
+                    index_line,
+                    hunks: Vec::new(),
+                    format: DiffFormat::Unified,
+                    git,
+                },
+                i,
+            ));
+        }
         return None;
     }
 
     let mut old_file = String::new();
     let mut new_file = String::new();
+    let mut old_header = String::new();
+    let mut new_header = String::new();
 
     // Parse --- and +++ headers
     if lines[i].starts_with("--- ") {
         old_file = parse_file_path(lines[i], "--- ");
+        old_header = lines[i][4..].to_string();
         i += 1;
     }
     if i < lines.len() && lines[i].starts_with("+++ ") {
         new_file = parse_file_path(lines[i], "+++ ");
+        new_header = lines[i][4..].to_string();
         i += 1;
+    }
+
+    // Prefer git header names when the --- /+++ paths are /dev/null or
+    // empty, so we know which real file to touch.
+    if old_file == "/dev/null" || old_file.is_empty() {
+        if let Some(a) = &git_a {
+            old_file = a.clone();
+        }
+    }
+    if new_file == "/dev/null" || new_file.is_empty() {
+        if let Some(b) = &git_b {
+            new_file = b.clone();
+        }
     }
 
     if old_file.is_empty() && new_file.is_empty() {
@@ -357,6 +592,8 @@ fn parse_unified_patch(lines: &[&str], start: usize) -> Option<(FilePatch, usize
             if let Some((old_start, old_count, new_start, new_count)) =
                 parse_unified_hunk_header(lines[i])
             {
+                // Capture text after the closing `@@` as a header suffix.
+                let header_suffix = hunk_header_suffix(lines[i]);
                 i += 1;
                 let mut hunk_lines = Vec::new();
 
@@ -390,6 +627,7 @@ fn parse_unified_patch(lines: &[&str], start: usize) -> Option<(FilePatch, usize
                     old_count,
                     new_start,
                     new_count,
+                    header_suffix,
                     lines: hunk_lines,
                 });
             } else {
@@ -408,8 +646,12 @@ fn parse_unified_patch(lines: &[&str], start: usize) -> Option<(FilePatch, usize
         FilePatch {
             old_file,
             new_file,
+            old_header,
+            new_header,
+            index_line,
             hunks,
             format: DiffFormat::Unified,
+            git,
         },
         i,
     ))
@@ -438,6 +680,9 @@ fn parse_context_patch(lines: &[&str], start: usize) -> Option<(FilePatch, usize
     let mut hunks = Vec::new();
 
     while i < lines.len() && lines[i].starts_with("***************") {
+        // Preserve the "function name" suffix after the `***************`
+        // header, as `*************** suffix`.
+        let header_suffix = lines[i]["***************".len()..].to_string();
         i += 1;
         if i >= lines.len() {
             break;
@@ -515,6 +760,7 @@ fn parse_context_patch(lines: &[&str], start: usize) -> Option<(FilePatch, usize
             old_count,
             new_start,
             new_count,
+            header_suffix,
             lines: hunk_lines,
         });
     }
@@ -525,10 +771,14 @@ fn parse_context_patch(lines: &[&str], start: usize) -> Option<(FilePatch, usize
 
     Some((
         FilePatch {
-            old_file,
-            new_file,
+            old_file: old_file.clone(),
+            new_file: new_file.clone(),
+            old_header: old_file,
+            new_header: new_file,
+            index_line: None,
             hunks,
             format: DiffFormat::Context,
+            git: GitMeta::default(),
         },
         i,
     ))
@@ -538,30 +788,38 @@ fn context_to_unified_lines(
     old_lines: &[(char, String)],
     new_lines: &[(char, String)],
 ) -> Vec<HunkLine> {
+    // Context diffs have the same context lines on both sides; removals and
+    // additions appear in their respective halves. Walk both sides together,
+    // emitting a single context line when both sides agree, and emitting all
+    // pending removals before switching to additions at a boundary.
     let mut result = Vec::new();
     let mut oi = 0;
     let mut ni = 0;
 
     while oi < old_lines.len() || ni < new_lines.len() {
-        if oi < old_lines.len() && old_lines[oi].0 == ' ' {
+        let old_is_ctx = oi < old_lines.len() && old_lines[oi].0 == ' ';
+        let new_is_ctx = ni < new_lines.len() && new_lines[ni].0 == ' ';
+
+        if old_is_ctx && new_is_ctx {
             result.push(HunkLine::Context(old_lines[oi].1.clone()));
             oi += 1;
-            // Skip matching context in new
-            if ni < new_lines.len() && new_lines[ni].0 == ' ' {
-                ni += 1;
-            }
-        } else if oi < old_lines.len() && (old_lines[oi].0 == '!' || old_lines[oi].0 == '-') {
+            ni += 1;
+        } else if oi < old_lines.len() && (old_lines[oi].0 == '!' || old_lines[oi].0 == '-')
+        {
             result.push(HunkLine::Remove(old_lines[oi].1.clone()));
             oi += 1;
-        } else if ni < new_lines.len() && (new_lines[ni].0 == '!' || new_lines[ni].0 == '+') {
+        } else if ni < new_lines.len() && (new_lines[ni].0 == '!' || new_lines[ni].0 == '+')
+        {
             result.push(HunkLine::Add(new_lines[ni].1.clone()));
             ni += 1;
-        } else if ni < new_lines.len() && new_lines[ni].0 == ' ' {
+        } else if old_is_ctx {
+            result.push(HunkLine::Context(old_lines[oi].1.clone()));
+            oi += 1;
+        } else if new_is_ctx {
             result.push(HunkLine::Context(new_lines[ni].1.clone()));
             ni += 1;
         } else {
-            oi += 1;
-            ni += 1;
+            break;
         }
     }
     result
@@ -608,6 +866,7 @@ fn parse_normal_patch(lines: &[&str], start: usize) -> Option<(FilePatch, usize)
                         old_count: 0,
                         new_start: s2,
                         new_count: e2 - s2 + 1,
+                        header_suffix: String::new(),
                         lines: hunk_lines,
                     });
                 }
@@ -622,6 +881,7 @@ fn parse_normal_patch(lines: &[&str], start: usize) -> Option<(FilePatch, usize)
                         old_count: e1 - s1 + 1,
                         new_start: s2,
                         new_count: 0,
+                        header_suffix: String::new(),
                         lines: hunk_lines,
                     });
                 }
@@ -644,6 +904,7 @@ fn parse_normal_patch(lines: &[&str], start: usize) -> Option<(FilePatch, usize)
                         old_count: e1 - s1 + 1,
                         new_start: s2,
                         new_count: e2 - s2 + 1,
+                        header_suffix: String::new(),
                         lines: hunk_lines,
                     });
                 }
@@ -660,10 +921,14 @@ fn parse_normal_patch(lines: &[&str], start: usize) -> Option<(FilePatch, usize)
 
     Some((
         FilePatch {
-            old_file,
-            new_file,
+            old_file: old_file.clone(),
+            new_file: new_file.clone(),
+            old_header: old_file,
+            new_header: new_file,
+            index_line: None,
             hunks,
             format: DiffFormat::Normal,
+            git: GitMeta::default(),
         },
         i,
     ))
@@ -697,8 +962,13 @@ fn resolve_target_file(patch: &FilePatch, opts: &Options) -> PathBuf {
     } else if new_path.exists() {
         new_path
     } else {
-        // Default to new file path (for creating new files)
-        new_path
+        // Neither exists. Default to the old-side filename (matches GNU
+        // patch's behaviour) unless old is empty/dev-null.
+        if old_stripped.is_empty() || old_stripped == "/dev/null" {
+            new_path
+        } else {
+            old_path
+        }
     }
 }
 
@@ -707,14 +977,7 @@ fn apply_hunk(
     hunk: &Hunk,
     fuzz: usize,
     reverse: bool,
-) -> Option<(Vec<String>, usize, usize)> {
-    // Build expected old lines and replacement new lines from hunk
-    let (remove_lines, _add_lines, context_map) = if reverse {
-        extract_reversed_hunk(hunk)
-    } else {
-        extract_hunk(hunk)
-    };
-
+) -> Option<(Vec<String>, usize, i64, usize)> {
     let target_start = if reverse {
         if hunk.new_start == 0 {
             0
@@ -727,197 +990,488 @@ fn apply_hunk(
         hunk.old_start - 1
     };
 
-    // Try exact match first, then with increasing fuzz/offset
-    for fuzz_level in 0..=fuzz {
-        let max_offset = if fuzz_level == 0 {
-            // On fuzz 0, still try nearby offsets
-            file_lines.len()
-        } else {
-            file_lines.len()
-        };
+    // Normalize the hunk view for the current direction. For each HunkLine,
+    // classify it as context/consume/produce. Reversing swaps Remove<->Add.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Kind {
+        Context,
+        Consume, // expected in old file, dropped
+        Produce, // written to new file
+    }
+    let classified: Vec<(Kind, &String)> = hunk
+        .lines
+        .iter()
+        .map(|l| match (l, reverse) {
+            (HunkLine::Context(s), _) => (Kind::Context, s),
+            (HunkLine::Remove(s), false) | (HunkLine::Add(s), true) => (Kind::Consume, s),
+            (HunkLine::Add(s), false) | (HunkLine::Remove(s), true) => (Kind::Produce, s),
+        })
+        .collect();
 
-        for offset_mag in 0..=max_offset {
+    // Count leading/trailing context lines (for fuzz).
+    let leading_ctx = classified
+        .iter()
+        .take_while(|(k, _)| *k == Kind::Context)
+        .count();
+    let trailing_ctx = classified
+        .iter()
+        .rev()
+        .take_while(|(k, _)| *k == Kind::Context)
+        .count();
+
+    // Try exact match first, then with increasing fuzz/offset.
+    for fuzz_level in 0..=fuzz {
+        let skip_lead = fuzz_level.min(leading_ctx);
+        let skip_trail = fuzz_level.min(trailing_ctx);
+
+        // Build the effective "old" (file side) pattern, skipping fuzzed
+        // context at both ends.
+        let effective: Vec<(Kind, &String)> =
+            classified[skip_lead..classified.len() - skip_trail].to_vec();
+        let old_len = effective
+            .iter()
+            .filter(|(k, _)| *k != Kind::Produce)
+            .count();
+
+        for offset_mag in 0..=file_lines.len() {
             for &sign in &[1i64, -1i64] {
                 if offset_mag == 0 && sign == -1 {
                     continue;
                 }
                 let offset = offset_mag as i64 * sign;
-                let actual_start = target_start as i64 + offset;
-
-                if actual_start < 0 {
+                // target_start already sits after `leading_ctx` lines of
+                // leading context; shift forward by `skip_lead` to land on
+                // the first non-skipped line.
+                let raw_start = target_start as i64 + offset + skip_lead as i64;
+                if raw_start < 0 {
                     continue;
                 }
-                let actual_start = actual_start as usize;
+                let actual_start = raw_start as usize;
+                if actual_start + old_len > file_lines.len() {
+                    continue;
+                }
 
-                if try_match(
-                    file_lines,
-                    actual_start,
-                    &remove_lines,
-                    &context_map,
-                    fuzz_level,
-                ) {
-                    // Apply the hunk
-                    let mut result = Vec::new();
-                    result.extend_from_slice(&file_lines[..actual_start]);
+                let mut fi = actual_start;
+                let mut matched = true;
+                for (k, s) in &effective {
+                    match k {
+                        Kind::Context | Kind::Consume => {
+                            if file_lines[fi] != **s {
+                                matched = false;
+                                break;
+                            }
+                            fi += 1;
+                        }
+                        Kind::Produce => {} // doesn't consume a file line
+                    }
+                }
+                if !matched {
+                    continue;
+                }
 
-                    let mut fi = actual_start;
-                    for line in &hunk.lines {
-                        match (line, reverse) {
-                            (HunkLine::Context(_), _) => {
-                                if fi < file_lines.len() {
-                                    result.push(file_lines[fi].clone());
-                                    fi += 1;
-                                }
-                            }
-                            (HunkLine::Remove(s), false) | (HunkLine::Add(s), true) => {
-                                // Skip this line from original
-                                if fi < file_lines.len() {
-                                    fi += 1;
-                                }
-                                let _ = s;
-                            }
-                            (HunkLine::Add(s), false) | (HunkLine::Remove(s), true) => {
-                                result.push(s.clone());
-                            }
+                // Apply: keep lines before actual_start, emit produced/kept
+                // lines for the effective region, then keep trailing file.
+                let mut result = Vec::new();
+                result.extend_from_slice(&file_lines[..actual_start]);
+                let mut fi = actual_start;
+                for (k, s) in &effective {
+                    match k {
+                        Kind::Context => {
+                            result.push(file_lines[fi].clone());
+                            fi += 1;
+                        }
+                        Kind::Consume => {
+                            fi += 1;
+                        }
+                        Kind::Produce => {
+                            result.push((*s).clone());
                         }
                     }
-
-                    result.extend_from_slice(&file_lines[fi..]);
-
-                    let applied_offset = actual_start.abs_diff(target_start);
-                    return Some((result, fuzz_level, applied_offset));
                 }
+                result.extend_from_slice(&file_lines[fi..]);
+
+                // Report the applied offset relative to the hunk's
+                // originally-expected position (before adding skip_lead).
+                let expected_start = target_start as i64 + skip_lead as i64;
+                let applied_offset = actual_start as i64 - expected_start;
+                return Some((result, fuzz_level, applied_offset, actual_start));
             }
         }
     }
     None
 }
 
-fn extract_hunk(hunk: &Hunk) -> (Vec<String>, Vec<String>, Vec<(usize, String)>) {
-    let mut remove = Vec::new();
-    let mut add = Vec::new();
-    let mut context = Vec::new();
-    let mut pos = 0;
-
-    for line in &hunk.lines {
-        match line {
-            HunkLine::Context(s) => {
-                context.push((pos, s.clone()));
-                remove.push(s.clone());
-                pos += 1;
-            }
-            HunkLine::Remove(s) => {
-                remove.push(s.clone());
-                pos += 1;
-            }
-            HunkLine::Add(s) => {
-                add.push(s.clone());
-            }
-        }
-    }
-    (remove, add, context)
+fn safe_exit_success() -> ! {
+    process::exit(EXIT_SUCCESS);
 }
 
-fn extract_reversed_hunk(hunk: &Hunk) -> (Vec<String>, Vec<String>, Vec<(usize, String)>) {
-    let mut remove = Vec::new();
-    let mut add = Vec::new();
-    let mut context = Vec::new();
-    let mut pos = 0;
-
-    for line in &hunk.lines {
-        match line {
-            HunkLine::Context(s) => {
-                context.push((pos, s.clone()));
-                remove.push(s.clone());
-                pos += 1;
-            }
-            HunkLine::Add(s) => {
-                remove.push(s.clone());
-                pos += 1;
-            }
-            HunkLine::Remove(s) => {
-                add.push(s.clone());
-            }
-        }
-    }
-    (remove, add, context)
-}
-
-fn try_match(
-    file_lines: &[String],
-    start: usize,
-    expected_old: &[String],
-    context_lines: &[(usize, String)],
-    fuzz: usize,
-) -> bool {
-    if expected_old.is_empty() {
-        // Pure addition — start must be valid insertion point
-        return start <= file_lines.len();
-    }
-
-    if start + expected_old.len() > file_lines.len() {
-        return false;
-    }
-
-    if fuzz == 0 {
-        // Exact match
-        for (i, expected) in expected_old.iter().enumerate() {
-            if file_lines[start + i] != *expected {
-                return false;
-            }
-        }
-        true
+fn compute_backup_path(target: &Path, opts: &Options) -> PathBuf {
+    // Strip a leading "./" from target so prefix/suffix join cleanly.
+    let target_owned: PathBuf;
+    let target: &Path = if let Ok(stripped) = target.strip_prefix("./") {
+        target_owned = stripped.to_path_buf();
+        &target_owned
     } else {
-        // With fuzz: skip first/last `fuzz` context lines
-        let total_context = context_lines.len();
-        let skip = fuzz.min(total_context);
+        target
+    };
 
-        // Check all non-context (remove) lines match exactly
-        let context_positions: std::collections::HashSet<usize> =
-            context_lines.iter().map(|(p, _)| *p).collect();
+    // Precedence: explicit prefix/suffix/basename-prefix options win over env.
+    // Default: `<path>.orig`, or `<path><SIMPLE_BACKUP_SUFFIX>`.
+    let env_suffix = env::var("SIMPLE_BACKUP_SUFFIX").ok();
+    let suffix: String = opts
+        .backup_suffix
+        .clone()
+        .or(env_suffix)
+        .unwrap_or_else(|| ".orig".to_string());
 
-        for (i, expected) in expected_old.iter().enumerate() {
-            if context_positions.contains(&i) {
-                // This is a context line — check if it's within fuzz skip range
-                let ctx_idx = context_lines.iter().position(|(p, _)| *p == i).unwrap();
-                if ctx_idx < skip || ctx_idx >= total_context - skip {
-                    continue; // Skip fuzzed context lines
+    // Determine VERSION_CONTROL / PATCH_VERSION_CONTROL.
+    let version_control = opts
+        .version_control
+        .clone()
+        .or_else(|| env::var("PATCH_VERSION_CONTROL").ok())
+        .or_else(|| env::var("VERSION_CONTROL").ok())
+        .unwrap_or_else(|| "existing".to_string());
+
+    let simple_backup = |target: &Path| -> PathBuf {
+        if let Some(prefix) = &opts.backup_prefix {
+            // Prepend prefix to the whole path.
+            let mut s = prefix.clone();
+            s.push_str(&target.to_string_lossy());
+            s.push_str(&suffix_if_no_prefix_only(opts, &suffix));
+            PathBuf::from(s)
+        } else if let Some(bprefix) = &opts.basename_prefix {
+            // Prepend prefix to the basename only.
+            let parent = target.parent().unwrap_or(Path::new(""));
+            let basename = target
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let mut new_name = bprefix.clone();
+            new_name.push_str(&basename);
+            new_name.push_str(&suffix_if_no_prefix_only(opts, &suffix));
+            parent.join(new_name)
+        } else {
+            PathBuf::from(format!("{}{suffix}", target.to_string_lossy()))
+        }
+    };
+
+    let numbered_backup = |target: &Path, n: u32| -> PathBuf {
+        PathBuf::from(format!("{}.~{n}~", target.to_string_lossy()))
+    };
+
+    // Numbered backups only affect the default-suffix case without explicit
+    // prefix/suffix.
+    let use_numbered = match version_control.as_str() {
+        "numbered" | "t" => true,
+        "existing" | "nil" => {
+            // Look for an existing .~N~ file.
+            let base = target.to_string_lossy();
+            let mut found = false;
+            if let Some(dir) = target.parent() {
+                if let Ok(entries) = fs::read_dir(if dir.as_os_str().is_empty() {
+                    Path::new(".")
+                } else {
+                    dir
+                }) {
+                    let base_name = target
+                        .file_name()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let prefix = format!("{base_name}.~");
+                    for e in entries.flatten() {
+                        let name = e.file_name();
+                        let name_s = name.to_string_lossy();
+                        if name_s.starts_with(&prefix) && name_s.ends_with('~') {
+                            found = true;
+                            break;
+                        }
+                    }
                 }
             }
-            if start + i >= file_lines.len() || file_lines[start + i] != *expected {
-                return false;
+            let _ = base;
+            found
+        }
+        _ => false, // simple / never / off → simple backup
+    };
+
+    if use_numbered
+        && opts.backup_prefix.is_none()
+        && opts.basename_prefix.is_none()
+        && opts.backup_suffix.is_none()
+    {
+        // Pick next N not already present.
+        let mut n: u32 = 1;
+        loop {
+            let candidate = numbered_backup(target, n);
+            if !candidate.exists() {
+                return candidate;
+            }
+            n += 1;
+        }
+    }
+
+    simple_backup(target)
+}
+
+fn suffix_if_no_prefix_only(_opts: &Options, suffix: &str) -> String {
+    // When a custom prefix is used together with a custom suffix, both apply.
+    // When only a prefix is used, no suffix is appended.
+    if _opts.backup_suffix.is_some() {
+        suffix.to_string()
+    } else if _opts.backup_prefix.is_some() || _opts.basename_prefix.is_some() {
+        String::new()
+    } else {
+        suffix.to_string()
+    }
+}
+
+fn write_reject_file(
+    path: &str,
+    patch: &FilePatch,
+    rejected: &[&Hunk],
+    opts: &Options,
+) -> io::Result<()> {
+    use std::io::Write;
+    let mut f = fs::File::create(path)?;
+    let old_label = if !patch.old_header.is_empty() {
+        patch.old_header.clone()
+    } else if !patch.old_file.is_empty() {
+        patch.old_file.clone()
+    } else {
+        "a".to_string()
+    };
+    let new_label = if !patch.new_header.is_empty() {
+        patch.new_header.clone()
+    } else if !patch.new_file.is_empty() {
+        patch.new_file.clone()
+    } else {
+        "b".to_string()
+    };
+
+    if let Some(idx) = &patch.index_line {
+        writeln!(f, "{idx}")?;
+    }
+
+    // Decide output format: --reject-format wins, else mirror input.
+    let use_context = match opts.reject_format.as_deref() {
+        Some("context") => true,
+        Some("unified") => false,
+        _ => patch.format == DiffFormat::Context,
+    };
+
+    if use_context {
+        writeln!(f, "*** {old_label}")?;
+        writeln!(f, "--- {new_label}")?;
+        for hunk in rejected {
+            writeln!(f, "***************{}", hunk.header_suffix)?;
+            write_context_hunk(&mut f, hunk)?;
+        }
+    } else {
+        writeln!(f, "--- {old_label}")?;
+        writeln!(f, "+++ {new_label}")?;
+        for hunk in rejected {
+            let old_range = format_hunk_range(hunk.old_start, hunk.old_count);
+            let new_range = format_hunk_range(hunk.new_start, hunk.new_count);
+            writeln!(f, "@@ -{old_range} +{new_range} @@{}", hunk.header_suffix)?;
+            for line in &hunk.lines {
+                match line {
+                    HunkLine::Context(s) => writeln!(f, " {s}")?,
+                    HunkLine::Remove(s) => writeln!(f, "-{s}")?,
+                    HunkLine::Add(s) => writeln!(f, "+{s}")?,
+                }
             }
         }
-        true
+    }
+    Ok(())
+}
+
+fn write_context_hunk(f: &mut fs::File, hunk: &Hunk) -> io::Result<()> {
+    use std::io::Write;
+    // Old side: `*** S,E ****` followed by lines marked ` `, `- `, or `! `.
+    let old_end = hunk.old_start + hunk.old_count.saturating_sub(1);
+    let new_end = hunk.new_start + hunk.new_count.saturating_sub(1);
+    let old_range = if hunk.old_count == 1 {
+        hunk.old_start.to_string()
+    } else {
+        format!("{},{}", hunk.old_start, old_end)
+    };
+    let new_range = if hunk.new_count == 1 {
+        hunk.new_start.to_string()
+    } else {
+        format!("{},{}", hunk.new_start, new_end)
+    };
+
+    // Determine whether each removed/added line is a change (!) or pure
+    // remove/add (-/+). GNU uses ! for lines that have a paired counterpart
+    // in the other side of the hunk (i.e. substitution), and -/+ for pure
+    // deletions/additions.
+    let has_adds = hunk.lines.iter().any(|l| matches!(l, HunkLine::Add(_)));
+    let has_removes = hunk.lines.iter().any(|l| matches!(l, HunkLine::Remove(_)));
+    let paired = has_adds && has_removes;
+
+    writeln!(f, "*** {old_range} ****")?;
+    for line in &hunk.lines {
+        match line {
+            HunkLine::Context(s) => writeln!(f, "  {s}")?,
+            HunkLine::Remove(s) => {
+                if paired {
+                    writeln!(f, "! {s}")?;
+                } else {
+                    writeln!(f, "- {s}")?;
+                }
+            }
+            HunkLine::Add(_) => {}
+        }
+    }
+    writeln!(f, "--- {new_range} ----")?;
+    for line in &hunk.lines {
+        match line {
+            HunkLine::Context(s) => writeln!(f, "  {s}")?,
+            HunkLine::Add(s) => {
+                if paired {
+                    writeln!(f, "! {s}")?;
+                } else {
+                    writeln!(f, "+ {s}")?;
+                }
+            }
+            HunkLine::Remove(_) => {}
+        }
+    }
+    Ok(())
+}
+
+fn format_hunk_range(start: usize, count: usize) -> String {
+    // `@@ -N +M @@` for single-line counts; `@@ -N,C +M,C @@` otherwise.
+    if count == 1 {
+        start.to_string()
+    } else {
+        format!("{start},{count}")
+    }
+}
+
+#[cfg(unix)]
+fn apply_git_mode(path: &Path, mode: Option<u32>) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Some(m) = mode
+        && let Ok(metadata) = fs::metadata(path)
+    {
+        let mut perms = metadata.permissions();
+        perms.set_mode(m & 0o7777);
+        let _ = fs::set_permissions(path, perms);
+    }
+}
+
+#[cfg(not(unix))]
+fn apply_git_mode(_path: &Path, _mode: Option<u32>) {}
+
+fn display_path(path: &Path) -> String {
+    // Strip leading "./" so messages read "patching file foo", not "patching file ./foo".
+    let s = path.to_string_lossy().into_owned();
+    if let Some(stripped) = s.strip_prefix("./") {
+        stripped.to_string()
+    } else {
+        s
     }
 }
 
 fn apply_file_patch(patch: &FilePatch, opts: &Options) -> i32 {
+    // Git rename/copy: move/copy the source file to the target first, then
+    // apply any hunks below against the new path.
+    if let (Some(from), Some(to)) = (&patch.git.rename_from, &patch.git.rename_to) {
+        let base = opts.directory.as_deref().unwrap_or(".");
+        let src = Path::new(base).join(from);
+        let dst = Path::new(base).join(to);
+        if let Some(parent) = dst.parent()
+            && !parent.as_os_str().is_empty()
+            && !parent.exists()
+        {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Err(e) = fs::rename(&src, &dst) {
+            eprintln!(
+                "patch: can't rename {} to {}: {e}",
+                src.display(),
+                dst.display()
+            );
+            return EXIT_TROUBLE;
+        }
+    } else if let (Some(from), Some(to)) = (&patch.git.copy_from, &patch.git.copy_to) {
+        let base = opts.directory.as_deref().unwrap_or(".");
+        let src = Path::new(base).join(from);
+        let dst = Path::new(base).join(to);
+        if let Some(parent) = dst.parent()
+            && !parent.as_os_str().is_empty()
+            && !parent.exists()
+        {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Err(e) = fs::copy(&src, &dst) {
+            eprintln!(
+                "patch: can't copy {} to {}: {e}",
+                src.display(),
+                dst.display()
+            );
+            return EXIT_TROUBLE;
+        }
+    }
+
     let target = resolve_target_file(patch, opts);
-    let target_display = target.display().to_string();
+    let target_display = display_path(&target);
 
     if !opts.silent {
-        eprintln!("patching file {}", target_display);
+        let verb = if opts.dry_run { "checking" } else { "patching" };
+        let suffix = if let Some(from) = &patch.git.rename_from {
+            format!(" (renamed from {from})")
+        } else if let Some(from) = &patch.git.copy_from {
+            format!(" (copied from {from})")
+        } else {
+            String::new()
+        };
+        println!("{verb} file {target_display}{suffix}");
+    }
+
+    // Header-only git patches (rename/copy/delete/mode with no hunks).
+    if patch.hunks.is_empty() {
+        if patch.git.deleted_file_mode.is_some() {
+            if let Err(e) = fs::remove_file(&target) {
+                eprintln!("patch: can't remove {target_display}: {e}");
+                return EXIT_TROUBLE;
+            }
+        } else if patch.git.new_file_mode.is_some() {
+            // Create empty file.
+            if let Some(parent) = target.parent()
+                && !parent.as_os_str().is_empty()
+                && !parent.exists()
+            {
+                let _ = fs::create_dir_all(parent);
+            }
+            if let Err(e) = fs::write(&target, "") {
+                eprintln!("patch: can't create {target_display}: {e}");
+                return EXIT_TROUBLE;
+            }
+            apply_git_mode(&target, patch.git.new_file_mode);
+        } else if patch.git.new_mode.is_some() {
+            apply_git_mode(&target, patch.git.new_mode);
+        }
+        return EXIT_SUCCESS;
     }
 
     // Read existing file content (or empty for new files)
     let content = if target.exists() {
         fs::read_to_string(&target).unwrap_or_else(|e| {
-            eprintln!("patch: can't read {}: {}", target_display, e);
+            eprintln!("patch: can't read {target_display}: {e}");
             process::exit(EXIT_TROUBLE);
         })
     } else {
         // Check if this is creating a new file
         if patch.old_file == "/dev/null"
             || patch.old_file.is_empty()
+            || patch.git.new_file_mode.is_some()
             || patch.hunks.iter().all(|h| h.old_count == 0)
         {
             String::new()
         } else {
-            eprintln!(
-                "patch: can't open file {}: No such file or directory",
-                target_display
-            );
+            eprintln!("patch: can't open file {target_display}: No such file or directory");
             return EXIT_TROUBLE;
         }
     };
@@ -929,22 +1483,64 @@ fn apply_file_patch(patch: &FilePatch, opts: &Options) -> i32 {
     };
 
     let mut failed_hunks = 0;
+    let mut failed_hunk_entries: Vec<&Hunk> = Vec::new();
     let total_hunks = patch.hunks.len();
+    // Running delta: lines added by prior hunks minus lines removed. Used
+    // to shift the "expected" position reported to the user.
+    let mut line_delta: i64 = 0;
 
     for (hunk_idx, hunk) in patch.hunks.iter().enumerate() {
+        let raw_start = if opts.reverse {
+            hunk.new_start
+        } else {
+            hunk.old_start
+        };
+        // Creation hunks use start 0 ("before any line"); don't report
+        // offsets for those — the effective first line is 1.
+        let expected_line = if raw_start == 0 {
+            1
+        } else {
+            raw_start as i64 + line_delta
+        };
+
         match apply_hunk(&file_lines, hunk, opts.fuzz, opts.reverse) {
-            Some((new_lines, fuzz_used, offset)) => {
+            Some((new_lines, fuzz_used, _offset, applied_start)) => {
                 file_lines = new_lines;
-                if opts.verbose {
-                    let hunk_num = hunk_idx + 1;
-                    if fuzz_used > 0 || offset > 0 {
-                        eprintln!(
-                            "Hunk #{} succeeded at offset {} (fuzz {}).",
-                            hunk_num, offset, fuzz_used
-                        );
-                    } else {
-                        eprintln!("Hunk #{} succeeded.", hunk_num);
+                let hunk_num = hunk_idx + 1;
+                let applied_line = applied_start as i64 + 1;
+                let reported_offset = applied_line - expected_line;
+                let line_word = |n: i64| if n == 1 { "line" } else { "lines" };
+                let msg = match (reported_offset, fuzz_used) {
+                    (0, 0) => format!("Hunk #{hunk_num} succeeded at {applied_line}."),
+                    (0, f) => {
+                        format!("Hunk #{hunk_num} succeeded at {applied_line} with fuzz {f}.")
                     }
+                    (o, 0) => format!(
+                        "Hunk #{hunk_num} succeeded at {applied_line} (offset {o} {}).",
+                        line_word(o)
+                    ),
+                    (o, f) => format!(
+                        "Hunk #{hunk_num} succeeded at {applied_line} with fuzz {f} (offset {o} {}).",
+                        line_word(o)
+                    ),
+                };
+                // GNU prints every success message when there is any offset
+                // or fuzz, regardless of --verbose; verbose adds a line for
+                // exact matches too.
+                if reported_offset != 0 || fuzz_used > 0 || opts.verbose {
+                    println!("{msg}");
+                }
+
+                // Track line delta for subsequent hunks.
+                let (removed, added) = hunk.lines.iter().fold((0i64, 0i64), |(r, a), l| match l {
+                    HunkLine::Context(_) => (r, a),
+                    HunkLine::Remove(_) => (r + 1, a),
+                    HunkLine::Add(_) => (r, a + 1),
+                });
+                if opts.reverse {
+                    line_delta += removed - added;
+                } else {
+                    line_delta += added - removed;
                 }
             }
             None => {
@@ -953,7 +1549,7 @@ fn apply_file_patch(patch: &FilePatch, opts: &Options) -> i32 {
                     let reverse_result = apply_hunk(&file_lines, hunk, opts.fuzz, !opts.reverse);
                     if reverse_result.is_some() {
                         if !opts.silent {
-                            eprintln!(
+                            println!(
                                 "Skipping patch -- already applied (hunk #{}).",
                                 hunk_idx + 1
                             );
@@ -962,28 +1558,30 @@ fn apply_file_patch(patch: &FilePatch, opts: &Options) -> i32 {
                     }
                 }
                 failed_hunks += 1;
+                failed_hunk_entries.push(hunk);
                 if !opts.silent {
-                    eprintln!(
-                        "Hunk #{} FAILED at {}.",
-                        hunk_idx + 1,
-                        if opts.reverse {
-                            hunk.new_start
-                        } else {
-                            hunk.old_start
-                        }
-                    );
+                    println!("Hunk #{} FAILED at {expected_line}.", hunk_idx + 1);
                 }
             }
         }
     }
 
+    // Write reject file for any failed hunks.
+    if !failed_hunk_entries.is_empty() && !opts.dry_run {
+        let reject_path = format!("{target_display}.rej");
+        if let Err(e) = write_reject_file(&reject_path, patch, &failed_hunk_entries, opts) {
+            eprintln!("patch: can't write rejects to {reject_path}: {e}");
+        }
+    }
+
     if failed_hunks > 0 && !opts.silent {
-        eprintln!(
-            "{} out of {} hunk{} FAILED",
-            failed_hunks,
-            total_hunks,
-            if total_hunks == 1 { "" } else { "s" }
-        );
+        let hunk_word = if total_hunks == 1 { "hunk" } else { "hunks" };
+        let reject_suffix = if opts.dry_run {
+            String::new()
+        } else {
+            format!(" -- saving rejects to file {target_display}.rej")
+        };
+        println!("{failed_hunks} out of {total_hunks} {hunk_word} FAILED{reject_suffix}");
     }
 
     // Write output
@@ -997,13 +1595,20 @@ fn apply_file_patch(patch: &FilePatch, opts: &Options) -> i32 {
         // Create backup if requested
         if opts.backup && output_path.exists() && (failed_hunks == 0 || !opts.no_backup_if_mismatch)
         {
-            let backup_path = format!("{}.orig", output_path.display());
+            let backup_path = compute_backup_path(&output_path, opts);
+            if let Some(parent) = backup_path.parent()
+                && !parent.as_os_str().is_empty()
+                && !parent.exists()
+            {
+                let _ = fs::create_dir_all(parent);
+            }
             let _ = fs::copy(&output_path, &backup_path);
         }
 
         let mut output_content = file_lines.join("\n");
-        // Preserve trailing newline if original had one
-        if content.ends_with('\n') || !content.is_empty() {
+        // Preserve trailing newline when there is content. An empty result
+        // is written as a truly-empty file (no stray newline).
+        if !output_content.is_empty() && (content.ends_with('\n') || !content.is_empty()) {
             output_content.push('\n');
         }
 
@@ -1047,8 +1652,34 @@ fn main() {
     let patches = parse_patches(&input);
 
     if patches.is_empty() {
-        eprintln!("patch: no valid patches found in input");
-        process::exit(EXIT_TROUBLE);
+        // Distinguish empty input from garbage. GNU uses this specific
+        // message when the input contains content but no valid hunks.
+        let argv0 = env::args().next().unwrap_or_else(|| "patch".to_string());
+        if input.trim().is_empty() {
+            // Empty input and no -o output — nothing to do, exit 0.
+            if opts.output.is_none() {
+                process::exit(EXIT_SUCCESS);
+            }
+            // With -o on an empty patch, fall through to handle below.
+        } else {
+            eprintln!("{argv0}: **** Only garbage was found in the patch input.");
+            process::exit(EXIT_TROUBLE);
+        }
+    }
+
+    // Empty patch with -o: copy input file to output.
+    if patches.is_empty() && opts.output.is_some() {
+        if let Some(src) = &opts.positional_file {
+            let dst = opts.output.as_ref().unwrap();
+            if !opts.silent {
+                println!("patching file {dst} (read from {src})");
+            }
+            if let Err(e) = fs::copy(src, dst) {
+                eprintln!("patch: can't copy {src} to {dst}: {e}");
+                process::exit(EXIT_TROUBLE);
+            }
+        }
+        safe_exit_success();
     }
 
     let mut worst_exit = EXIT_SUCCESS;
