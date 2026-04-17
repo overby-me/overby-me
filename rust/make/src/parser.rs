@@ -502,7 +502,16 @@ impl Parser {
         self.advance();
 
         let is_double_colon = trimmed[colon_pos..].starts_with("::");
-        let targets_str = &trimmed[..colon_pos];
+        let mut targets_str = &trimmed[..colon_pos];
+        // Grouped-target rule: `targets &:` (or `&: ` ungrouped). GNU
+        // make treats all the listed targets as a single group — one
+        // recipe invocation updates them all.
+        let is_grouped = targets_str.ends_with('&') || targets_str.trim_end().ends_with('&');
+        if is_grouped {
+            let stripped = targets_str.trim_end();
+            let stripped = stripped.strip_suffix('&').unwrap_or(stripped);
+            targets_str = stripped;
+        }
         let after_colon = if is_double_colon {
             &trimmed[colon_pos + 2..]
         } else {
@@ -637,6 +646,7 @@ impl Parser {
             recipe_lines,
             source_name: self.source_name.clone(),
             is_double_colon,
+            is_grouped,
         }))
     }
 }

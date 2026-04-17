@@ -46,6 +46,9 @@ pub struct Rule {
     pub recipe_lines: Vec<usize>,
     pub source_name: String,
     pub is_double_colon: bool,
+    /// `&:` grouped-target rule. Each target is considered updated
+    /// after the recipe runs once for any one of them.
+    pub is_grouped: bool,
 }
 
 /// Pattern rule info (e.g., %.o: %.c).

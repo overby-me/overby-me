@@ -67,6 +67,9 @@ struct RuleEntry {
     source_name: String,
     #[allow(dead_code)]
     is_double_colon: bool,
+    /// Other targets in the same `&:` grouped rule. When this rule
+    /// runs its recipe, all listed targets are treated as built.
+    group: Vec<String>,
 }
 
 /// A pattern rule entry.
@@ -990,6 +993,7 @@ impl Engine {
                     recipe_lines: rule.recipe_lines.clone(),
                     source_name: rule.source_name.clone(),
                     is_double_colon: rule.is_double_colon,
+                    group: Vec::new(),
                 });
             }
             if !*self.suppress_default_goal.borrow() {
@@ -1041,7 +1045,14 @@ impl Engine {
             }
         }
 
-        // Store explicit rules
+        // Store explicit rules. For `&:` grouped rules, tag each
+        // stored rule with the sibling targets so running the recipe
+        // once marks them all as built.
+        let group: Vec<String> = if rule.is_grouped {
+            targets.clone()
+        } else {
+            Vec::new()
+        };
         let entry = RuleEntry {
             prerequisites: prereqs,
             order_only,
@@ -1049,6 +1060,7 @@ impl Engine {
             recipe_lines: rule.recipe_lines.clone(),
             source_name: rule.source_name.clone(),
             is_double_colon: rule.is_double_colon,
+            group,
         };
 
         for target in &targets {
@@ -1715,6 +1727,17 @@ impl Engine {
         }
 
         self.built_targets.borrow_mut().insert(target.to_string());
+        // Mark sibling targets in the same `&:` group as built too —
+        // the single recipe we just ran is considered to have updated
+        // the whole group.
+        for rule in &rules {
+            if !rule.group.is_empty() {
+                let mut built = self.built_targets.borrow_mut();
+                for sibling in &rule.group {
+                    built.insert(sibling.clone());
+                }
+            }
+        }
         pop_scope(self);
         Ok(())
     }
