@@ -67,6 +67,14 @@ pub struct Interpreter {
     required_files: HashSet<String>,
     // Current source file being executed
     current_file: String,
+    // 1-based line number of the statement currently being executed.
+    // Updated by Stmt::LineMark emitted by the parser before each statement.
+    // Used by caller() to report `at FILE line N`.
+    current_line: usize,
+    // Call stack for `caller($N)` — each entry is the (package, file, line)
+    // of the call-site that invoked the Nth-up sub frame. We push on sub
+    // entry and pop on return, so the top is the current frame's caller.
+    call_stack: Vec<(String, String, usize)>,
     // Pending sub return triggered inside eval_expr (e.g., `return` in a do-block)
     pending_return: Option<Value>,
 }
@@ -126,6 +134,8 @@ impl Interpreter {
             fh_counter: 0,
             required_files: HashSet::new(),
             current_file: String::new(),
+            current_line: 0,
+            call_stack: Vec::new(),
             pending_return: None,
         }
     }
@@ -183,6 +193,11 @@ impl Interpreter {
     fn exec_stmt(&mut self, stmt: &Stmt) -> Flow {
         match stmt {
             Stmt::Nop => Flow::None,
+
+            Stmt::LineMark(line) => {
+                self.current_line = *line;
+                Flow::None
+            }
 
             Stmt::Expr(expr) => {
                 // Check if expression produces a list (for sub list-context return)
@@ -1895,11 +1910,32 @@ impl Interpreter {
                 Value::Str(String::new()) // simplified
             }
             "caller" => {
-                let pkg = Value::Str(self.package.clone());
-                let file = Value::Str(self.current_file.clone());
-                let line = Value::Num(0.0);
-                self.last_list_val = Some(vec![pkg.clone(), file, line]);
-                pkg
+                // caller([N]) — in list context returns (package, file, line)
+                // of the Nth-up frame (default 0 = immediate caller of the
+                // current sub). `call_stack` stores the call-site info that
+                // was current when each sub was entered, so the top of the
+                // stack describes the current frame's caller.
+                let n = if let Some(arg) = args.first() {
+                    self.eval_expr(arg).to_num() as usize
+                } else {
+                    0
+                };
+                let len = self.call_stack.len();
+                let frame = if n < len {
+                    Some(&self.call_stack[len - 1 - n])
+                } else {
+                    None
+                };
+                if let Some((pkg, file, line)) = frame {
+                    let pkg = Value::Str(pkg.clone());
+                    let file = Value::Str(file.clone());
+                    let line = Value::Num(*line as f64);
+                    self.last_list_val = Some(vec![pkg.clone(), file, line]);
+                    pkg
+                } else {
+                    self.last_list_val = Some(vec![]);
+                    Value::Undef
+                }
             }
             "eof" => {
                 // Check if filehandle is at EOF
@@ -2128,6 +2164,13 @@ impl Interpreter {
         self.local_saves.push(Vec::new());
         self.local_array_saves.push(Vec::new());
 
+        // Record the call-site so caller() can report it from inside the sub.
+        self.call_stack.push((
+            self.package.clone(),
+            self.current_file.clone(),
+            self.current_line,
+        ));
+
         // Set @_ to args
         self.set_array("_", args.to_vec());
 
@@ -2160,12 +2203,18 @@ impl Interpreter {
         self.last_list_val = saved_list;
         self.restore_locals();
         self.pop_scope();
+        self.call_stack.pop();
         result
     }
 
     /// Call a sub and return the list result (for list context)
     fn call_sub_list(&mut self, body: &[Stmt], args: &[Value]) -> Vec<Value> {
         self.push_scope();
+        self.call_stack.push((
+            self.package.clone(),
+            self.current_file.clone(),
+            self.current_line,
+        ));
         self.local_saves.push(Vec::new());
         self.local_array_saves.push(Vec::new());
 
@@ -2213,6 +2262,7 @@ impl Interpreter {
         self.last_list_val = saved_list;
         self.restore_locals();
         self.pop_scope();
+        self.call_stack.pop();
         result
     }
 
@@ -2540,8 +2590,12 @@ impl Interpreter {
                                     args.iter().flat_map(|a| self.eval_list(a)).collect();
                                 self.call_sub_list(&body, &arg_vals)
                             } else {
+                                // Builtin: call scalar path but promote to list
+                                // if it populated last_list_val (caller, etc.).
+                                let saved_list = std::mem::take(&mut self.last_list_val);
                                 let val = self.eval_call(name, args);
-                                vec![val]
+                                let list = std::mem::replace(&mut self.last_list_val, saved_list);
+                                list.unwrap_or_else(|| vec![val])
                             }
                         }
                     }
@@ -2811,7 +2865,8 @@ impl Interpreter {
 
         let mut lexer = Lexer::new(code);
         let tokens = lexer.tokenize();
-        let mut parser = Parser::new(tokens);
+        let token_lines = std::mem::take(&mut lexer.token_lines);
+        let mut parser = Parser::new_with_lines(tokens, token_lines);
         let stmts = parser.parse_program();
 
         self.set_global_var("@", Value::Str(String::new()));
@@ -2866,7 +2921,8 @@ impl Interpreter {
 
         let mut lexer = Lexer::new(code);
         let tokens = lexer.tokenize();
-        let mut parser = Parser::new(tokens);
+        let token_lines = std::mem::take(&mut lexer.token_lines);
+        let mut parser = Parser::new_with_lines(tokens, token_lines);
         let stmts = parser.parse_program();
 
         self.set_global_var("@", Value::Str(String::new()));

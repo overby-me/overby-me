@@ -131,19 +131,22 @@ fn main() {
         std::process::exit(1);
     }
 
-    // Strip shebang line
+    // Blank out the shebang line so it's ignored but keeps line numbers
+    // accurate. Lexer treats the resulting empty line as whitespace.
     if program_text.starts_with("#!") {
         if let Some(newline) = program_text.find('\n') {
-            program_text = program_text[newline + 1..].to_string();
+            let rest = program_text[newline + 1..].to_string();
+            program_text = format!("\n{rest}");
         }
     }
 
     // Tokenize
     let mut lexer = Lexer::new(&program_text);
     let tokens = lexer.tokenize();
+    let token_lines = std::mem::take(&mut lexer.token_lines);
 
     // Parse
-    let mut parser = Parser::new(tokens);
+    let mut parser = Parser::new_with_lines(tokens, token_lines);
     let program = parser.parse_program();
 
     // Execute

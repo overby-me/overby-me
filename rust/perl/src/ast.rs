@@ -257,6 +257,10 @@ pub enum Stmt {
 
     // No-op
     Nop,
+
+    /// Emitted by the parser to mark the source line of the following stmt.
+    /// The interpreter uses it to keep `current_line` up to date for `caller()`.
+    LineMark(usize),
 }
 
 #[derive(Clone, Debug)]

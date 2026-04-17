@@ -3,12 +3,32 @@ use crate::lexer::Token;
 
 pub struct Parser {
     tokens: Vec<Token>,
+    /// Parallel to `tokens` — 1-based line number of each token in source.
+    /// Empty when line tracking isn't wired up (treat as line 0).
+    token_lines: Vec<usize>,
     pos: usize,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, pos: 0 }
+        Parser {
+            tokens,
+            token_lines: Vec::new(),
+            pos: 0,
+        }
+    }
+
+    pub fn new_with_lines(tokens: Vec<Token>, token_lines: Vec<usize>) -> Self {
+        Parser {
+            tokens,
+            token_lines,
+            pos: 0,
+        }
+    }
+
+    /// Line number of the current token in the source, or 0 if unknown.
+    pub fn current_line(&self) -> usize {
+        self.token_lines.get(self.pos).copied().unwrap_or(0)
     }
 
     fn tok(&self) -> &Token {
@@ -56,10 +76,16 @@ impl Parser {
 
     pub fn parse_program(&mut self) -> Vec<Stmt> {
         let mut stmts = Vec::new();
+        let mut last_line = 0;
         while !self.at(&Token::EOF) {
             // Skip stray semicolons/newlines
             if self.eat(&Token::Semi) || self.eat(&Token::Newline) {
                 continue;
+            }
+            let line = self.current_line();
+            if line != 0 && line != last_line {
+                stmts.push(Stmt::LineMark(line));
+                last_line = line;
             }
             if let Some(stmt) = self.parse_stmt() {
                 stmts.push(stmt);
@@ -508,9 +534,15 @@ impl Parser {
 
     fn parse_block_body(&mut self) -> Vec<Stmt> {
         let mut stmts = Vec::new();
+        let mut last_line = 0;
         while !self.at(&Token::RBrace) && !self.at(&Token::EOF) {
             if self.eat(&Token::Semi) {
                 continue;
+            }
+            let line = self.current_line();
+            if line != 0 && line != last_line {
+                stmts.push(Stmt::LineMark(line));
+                last_line = line;
             }
             if let Some(stmt) = self.parse_stmt() {
                 stmts.push(stmt);

@@ -311,6 +311,11 @@ pub struct Lexer {
     input: Vec<char>,
     pos: usize,
     pub tokens: Vec<Token>,
+    /// Parallel to `tokens`: the 1-based line number each token was lexed at.
+    /// Populated by `tokenize()`. Used so `caller()` can report file:line.
+    pub token_lines: Vec<usize>,
+    /// 1-based current line. Newlines seen during lex advance it.
+    current_line: usize,
     keywords: HashSet<&'static str>,
 }
 
@@ -413,6 +418,8 @@ impl Lexer {
             input: input.chars().collect(),
             pos: 0,
             tokens: Vec::new(),
+            token_lines: Vec::new(),
+            current_line: 1,
             keywords,
         }
     }
@@ -437,8 +444,12 @@ impl Lexer {
     fn advance(&mut self) -> char {
         let c = self.ch();
         self.pos += 1;
+        if c == '\n' {
+            self.current_line += 1;
+        }
         c
     }
+
 
     fn skip_whitespace_and_comments(&mut self) {
         loop {
@@ -449,7 +460,7 @@ impl Lexer {
             {
                 self.pos += 1;
             }
-            // Skip comments
+            // Skip comments (to end-of-line, not including the newline)
             if self.ch() == '#' {
                 while self.pos < self.input.len() && self.ch() != '\n' {
                     self.pos += 1;
@@ -458,6 +469,20 @@ impl Lexer {
                 break;
             }
         }
+    }
+
+    /// Recount `current_line` from the start of input up to `self.pos`.
+    /// O(N) but N is small per call; amortized still fine since we call once
+    /// per token. Keeps line tracking correct even when helpers consume
+    /// newlines without updating `current_line`.
+    fn recompute_line(&mut self) {
+        let mut line = 1;
+        for i in 0..self.pos.min(self.input.len()) {
+            if self.input[i] == '\n' {
+                line += 1;
+            }
+        }
+        self.current_line = line;
     }
 
     fn skip_pod(&mut self) {
@@ -486,13 +511,29 @@ impl Lexer {
     }
 
     pub fn tokenize(&mut self) -> Vec<Token> {
+        // Track line numbers: increment on every `\n` we consume so the
+        // position of each emitted token reflects its source line.
+        // We use a local `tokens` Vec for the existing logic, then record
+        // line numbers in parallel via a closure over `self.current_line`.
+        // To avoid rewriting 107 push sites, the loop captures the line at
+        // the start of each iteration and backfills `self.token_lines` for
+        // any new tokens pushed during that iteration.
         let mut tokens = Vec::new();
 
         loop {
             self.skip_whitespace_and_comments();
+            // Recompute line from absolute position to catch any newlines
+            // consumed by internal helpers (heredocs, POD, multi-line strings)
+            // that didn't update `current_line` themselves.
+            self.recompute_line();
+            let line_at_token_start = self.current_line;
+            let token_count_before = tokens.len();
 
             if self.pos >= self.input.len() {
                 tokens.push(Token::EOF);
+                while self.token_lines.len() < tokens.len() {
+                    self.token_lines.push(line_at_token_start);
+                }
                 break;
             }
 
@@ -521,6 +562,7 @@ impl Lexer {
             match c {
                 '\n' => {
                     self.pos += 1;
+                    self.current_line += 1;
                     // Check for POD after newline
                     if self.pos < self.input.len() && self.ch() == '=' {
                         let rest: String = self.input[self.pos..].iter().take(5).collect();
@@ -1167,13 +1209,26 @@ impl Lexer {
                     self.pos += 1;
                 }
             }
+            // Backfill token_lines for any tokens pushed during this iteration.
+            while self.token_lines.len() < tokens.len() {
+                self.token_lines.push(line_at_token_start);
+            }
+            let _ = token_count_before;
         }
 
-        // Filter out newlines (they're not significant in our grammar)
-        tokens.retain(|t| !matches!(t, Token::Newline));
-
-        self.tokens = tokens.clone();
-        tokens
+        // Filter out newlines (they're not significant in our grammar).
+        // We have to drop the parallel line entries too to keep them aligned.
+        let mut kept_tokens = Vec::with_capacity(tokens.len());
+        let mut kept_lines = Vec::with_capacity(tokens.len());
+        for (t, l) in tokens.iter().zip(self.token_lines.iter()) {
+            if !matches!(t, Token::Newline) {
+                kept_tokens.push(t.clone());
+                kept_lines.push(*l);
+            }
+        }
+        self.token_lines = kept_lines;
+        self.tokens = kept_tokens.clone();
+        kept_tokens
     }
 
     fn read_ident(&mut self) -> String {
