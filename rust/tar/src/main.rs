@@ -537,6 +537,12 @@ struct Args {
     remove_files: bool,
     /// --index-file=FILE: write -v listings to FILE instead of stderr.
     index_file: Option<String>,
+    /// --one-top-level[=DIR]: wrap extracted members under DIR if they
+    /// don't already share it as a common prefix.  Empty string means
+    /// "derive from archive basename".
+    one_top_level: Option<String>,
+    /// --show-transformed-names: show listings with post-transform paths.
+    show_transformed: bool,
     /// --backup: rename existing destination files to NAME~ before
     /// overwriting during extract.
     backup: bool,
@@ -933,6 +939,16 @@ fn parse_args() -> Args {
             "--index-file" => {
                 args.index_file = queue.pop_front();
             }
+            "--show-transformed-names" | "--show-transformed-name" | "--show-transformed" => {
+                args.show_transformed = true;
+            }
+            "--one-top-level" => {
+                // With an argument like `--one-top-level=DIR` the
+                // prefix-match branch further down handles it; here we
+                // just note that the flag was present and let the
+                // default name be derived from the archive filename.
+                args.one_top_level = Some(String::new());
+            }
             "--backup" => args.backup = true,
             "--ignore-failed-read" => args.ignore_failed_read = true,
             "--owner-map" => {
@@ -1171,6 +1187,8 @@ fn parse_args() -> Args {
                     });
                 } else if let Some(val) = other.strip_prefix("--index-file=") {
                     args.index_file = Some(val.to_string());
+                } else if let Some(val) = other.strip_prefix("--one-top-level=") {
+                    args.one_top_level = Some(val.to_string());
                 } else if let Some(val) = other.strip_prefix("--label=") {
                     args.label = Some(val.to_string());
                 } else if let Some(val) = other.strip_prefix("--owner-map=") {
@@ -1303,9 +1321,6 @@ fn parse_args() -> Args {
                     || other == "--preserve-order"
                     || other == "-s"
                     || other == "--same-permissions"
-                    || other == "--show-transformed-names"
-                    || other == "--show-transformed-name"
-                    || other == "--show-transformed"
                     || other == "--show-stored-names"
                     || other == "--utc"
                     || other == "--quiet"
@@ -2675,6 +2690,35 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
     let mut label_checked = args.label.is_none();
     let mut extract_had_error = false;
 
+    // Resolve --one-top-level target directory once.  If the user gave
+    // an empty argument, derive from the archive's basename minus a
+    // standard compression suffix.
+    let one_top_level_dir: Option<String> = args.one_top_level.as_ref().map(|v| {
+        if !v.is_empty() {
+            return v.clone();
+        }
+        let name = args
+            .file
+            .as_deref()
+            .and_then(|p| Path::new(p).file_name().and_then(|n| n.to_str()));
+        match name {
+            Some(name) => {
+                let trimmed = name
+                    .trim_end_matches(".tar")
+                    .trim_end_matches(".gz")
+                    .trim_end_matches(".bz2")
+                    .trim_end_matches(".xz")
+                    .trim_end_matches(".tgz")
+                    .trim_end_matches(".tbz2")
+                    .trim_end_matches(".txz");
+                // After stripping .gz we might have left a trailing .tar.
+                let trimmed = trimmed.trim_end_matches(".tar");
+                trimmed.to_string()
+            }
+            None => "tartop".to_string(),
+        }
+    });
+
     for entry in entries {
         let mut entry = entry?;
         // Use path_bytes() to bypass the `tar` crate's `..` / absolute-
@@ -2736,6 +2780,23 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
             apply_transforms(&stripped, &args.transforms)
         } else {
             stripped
+        };
+
+        // Apply --one-top-level: wrap any path that isn't already under
+        // the top-level directory.
+        let final_path = if let Some(top) = &one_top_level_dir {
+            let needs_prefix = {
+                let prefix_eq = final_path == *top;
+                let prefix_slash = final_path.starts_with(&format!("{top}/"));
+                !(prefix_eq || prefix_slash)
+            };
+            if needs_prefix {
+                format!("{top}/{final_path}")
+            } else {
+                final_path
+            }
+        } else {
+            final_path
         };
 
         // Check excludes
@@ -2801,11 +2862,20 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
         // Extract
         if args.verbose {
             // GNU tar prints the ORIGINAL archive path in verbose output
-            // during extract, regardless of --strip-components / --xform.
-            if args.verbose_level >= 2 {
-                println!("{}", format_verbose_entry(entry.header(), &path_str, args));
+            // by default; --show-transformed flips to the final (post-
+            // strip/transform/one-top-level) path.
+            let verbose_name = if args.show_transformed {
+                final_path.as_str()
             } else {
-                println!("{path_str}");
+                path_str.as_str()
+            };
+            if args.verbose_level >= 2 {
+                println!(
+                    "{}",
+                    format_verbose_entry(entry.header(), verbose_name, args)
+                );
+            } else {
+                println!("{verbose_name}");
             }
         }
 
