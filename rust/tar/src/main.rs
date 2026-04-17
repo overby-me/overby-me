@@ -2838,8 +2838,37 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
                     io::copy(&mut entry, &mut io::stdout().lock())?;
                     continue;
                 }
-                if let Some(parent) = dest.parent() {
-                    fs::create_dir_all(parent)?;
+                if let Some(parent) = dest.parent()
+                    && let Err(e) = fs::create_dir_all(parent)
+                {
+                    // Find the innermost ancestor that failed to mkdir
+                    // and emit the GNU-style 'Cannot mkdir' + 'Cannot
+                    // open: No such file or directory' pair. GNU shows
+                    // the archive-relative path, not the on-disk path
+                    // (ignoring -C DIR prefix).
+                    let reason = describe_open_error(&e);
+                    let mut failed_abs = parent.to_path_buf();
+                    let dest_dir = match &args.directory {
+                        Some(d) => PathBuf::from(d),
+                        None => PathBuf::new(),
+                    };
+                    while let Some(pp) = failed_abs.parent() {
+                        if pp == dest_dir.as_path() || pp.as_os_str().is_empty() {
+                            break;
+                        }
+                        if pp.exists() {
+                            break;
+                        }
+                        failed_abs = pp.to_path_buf();
+                    }
+                    let failed_rel = failed_abs
+                        .strip_prefix(&dest_dir)
+                        .unwrap_or(&failed_abs)
+                        .to_path_buf();
+                    eprintln!("tar: {}: Cannot mkdir: {reason}", failed_rel.display());
+                    eprintln!("tar: {final_path}: Cannot open: No such file or directory");
+                    extract_had_error = true;
+                    continue;
                 }
                 if dest.exists() {
                     if args.skip_old_files {
