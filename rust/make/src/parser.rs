@@ -514,6 +514,18 @@ impl Parser {
             (after_colon, None)
         };
 
+        // Detect static pattern rule: `targets : target-pattern : prereq-patterns`
+        // — a second top-level colon (outside `$(…)`) in the prereqs
+        // section means the middle field is the target pattern and
+        // everything after the second colon is the prereq pattern list.
+        let (static_pat, prereqs_str) = if let Some(second_colon) = find_rule_colon(prereqs_str) {
+            let pat = prereqs_str[..second_colon].trim().to_string();
+            let rest = &prereqs_str[second_colon + 1..];
+            (Some(pat), rest)
+        } else {
+            (None, prereqs_str)
+        };
+
         // Split prerequisites on | for order-only
         let (normal_prereqs, order_only) = if let Some(pipe_pos) = prereqs_str.find('|') {
             (&prereqs_str[..pipe_pos], &prereqs_str[pipe_pos + 1..])
@@ -534,8 +546,15 @@ impl Parser {
             .map(|s| s.to_string())
             .collect();
 
-        // Detect pattern rules
-        let pattern = if targets.iter().any(|t| t.contains('%')) {
+        // Detect pattern rules. A static pattern rule uses the middle
+        // field (`target-pattern`) against the explicit target list,
+        // while a conventional pattern rule has `%` in the target.
+        let pattern = if let Some(pat) = static_pat {
+            Some(PatternRule {
+                target_pattern: pat,
+                prereq_patterns: prerequisites.clone(),
+            })
+        } else if targets.iter().any(|t| t.contains('%')) {
             Some(PatternRule {
                 target_pattern: targets[0].clone(),
                 prereq_patterns: prerequisites.clone(),

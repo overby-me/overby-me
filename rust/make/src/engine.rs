@@ -925,6 +925,58 @@ impl Engine {
             }
         }
 
+        // Static pattern rule: `targets: target-pattern: prereq-patterns`.
+        // The targets are concrete; each one's stem is derived by
+        // matching against the target-pattern, and prereqs are formed
+        // by replacing `%` in the prereq patterns with the stem.
+        // Register as explicit rules so normal lookup finds them.
+        if let Some(pattern) = &rule.pattern
+            && !targets.iter().any(|t| t.contains('%'))
+        {
+            let target_pattern = expand::expand(&pattern.target_pattern, self);
+            let expanded_prereq_patterns: Vec<String> = pattern
+                .prereq_patterns
+                .iter()
+                .flat_map(|p| {
+                    expand::expand(p, self)
+                        .split_whitespace()
+                        .map(|s| s.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            for target in &targets {
+                let stem = match expand::pattern_stem(target, &target_pattern) {
+                    Some(s) => s,
+                    None => {
+                        eprintln!("make: target '{target}' doesn't match the target pattern");
+                        continue;
+                    }
+                };
+                let resolved_prereqs: Vec<String> = expanded_prereq_patterns
+                    .iter()
+                    .map(|p| p.replace('%', &stem))
+                    .collect();
+                let mut rules = self.rules.borrow_mut();
+                rules.entry(target.clone()).or_default().push(RuleEntry {
+                    prerequisites: resolved_prereqs,
+                    order_only: order_only.clone(),
+                    recipe: rule.recipe.clone(),
+                    recipe_lines: rule.recipe_lines.clone(),
+                    source_name: rule.source_name.clone(),
+                    is_double_colon: rule.is_double_colon,
+                });
+            }
+            if !*self.suppress_default_goal.borrow() {
+                let mut default = self.default_goal.borrow_mut();
+                if default.is_none()
+                    && let Some(t) = targets.iter().find(|t| !t.starts_with('.'))
+                {
+                    *default = Some(t.clone());
+                }
+            }
+            return;
+        }
+
         // Pattern rule
         if let Some(pattern) = &rule.pattern {
             for target_pat in &targets {
