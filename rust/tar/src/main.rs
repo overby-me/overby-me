@@ -445,6 +445,15 @@ struct Args {
     keep_old_files: bool,
     /// --skip-old-files: silently skip existing files.
     skip_old_files: bool,
+    /// --to-stdout / -O: write regular-file contents to stdout instead
+    /// of creating files on disk.
+    to_stdout: bool,
+    /// --backup: rename existing destination files to NAME~ before
+    /// overwriting during extract.
+    backup: bool,
+    /// --ignore-failed-read: keep going after a file can't be opened
+    /// during create/append; emit a warning instead of a fatal error.
+    ignore_failed_read: bool,
     no_recursion: bool,
     dereference: bool,
     absolute_names: bool,
@@ -496,6 +505,14 @@ enum CacheExcludeMode {
     Under,
     /// Skip the directory entirely (no entry at all).
     All,
+}
+
+fn describe_open_error(e: &io::Error) -> String {
+    match e.kind() {
+        io::ErrorKind::PermissionDenied => "Permission denied".to_string(),
+        io::ErrorKind::NotFound => "No such file or directory".to_string(),
+        _ => e.to_string(),
+    }
 }
 
 /// Returns true on success, false if we detected a fatal condition
@@ -570,7 +587,7 @@ fn parse_args() -> Args {
             && first
                 .trim_start_matches('-')
                 .chars()
-                .all(|c| "cxtrudvzjJfphoWkSUPTXbLIVHgGl".contains(c))
+                .all(|c| "cxtrudvzjJfphoWkSUPTXbLIVHgGlO".contains(c))
         {
             argv_queue.pop_front();
             let flags: Vec<char> = first.trim_start_matches('-').chars().collect();
@@ -733,6 +750,9 @@ fn parse_args() -> Args {
             "--verify" | "-W" => args.verify = true,
             "-k" | "--keep-old-files" => args.keep_old_files = true,
             "--skip-old-files" => args.skip_old_files = true,
+            "-O" | "--to-stdout" => args.to_stdout = true,
+            "--backup" => args.backup = true,
+            "--ignore-failed-read" => args.ignore_failed_read = true,
             "--transform" | "--xform" => {
                 if let Some(v) = queue.pop_front() {
                     match parse_transform(&v) {
@@ -1045,7 +1065,6 @@ fn parse_args() -> Args {
                     || other.strip_prefix("--atime-preserve=").is_some()
                     || other.strip_prefix("--use-compress-program=").is_some()
                     || other.strip_prefix("-I").is_some()
-                    || other == "--backup"
                 {
                     // Silently accept / no-op for GNU tar options whose
                     // behaviour we don't implement but whose presence must
@@ -1054,7 +1073,6 @@ fn parse_args() -> Args {
                     || other == "--no-auto-compress"
                     || other == "--seek"
                     || other == "--no-seek"
-                    || other == "--ignore-failed-read"
                     || other == "--check-device"
                     || other == "--no-check-device"
                     || other == "--one-file-system"
@@ -1100,8 +1118,6 @@ fn parse_args() -> Args {
                     || other == "--show-stored-names"
                     || other == "--utc"
                     || other == "--quiet"
-                    || other == "--to-stdout"
-                    || other == "-O"
                 {
                     // Silently accept common GNU tar options
                 } else if other.starts_with('-') && !other.starts_with("--") && other.len() > 1 {
@@ -1128,6 +1144,7 @@ fn parse_args() -> Args {
                             'o' => args.no_same_owner = true,
                             'P' => args.absolute_names = true,
                             'k' => args.keep_old_files = true,
+                            'O' => args.to_stdout = true,
                             'W' | 'S' | 'U' | 'l' => {
                                 // accepted, no-op for now
                             }
@@ -1409,6 +1426,7 @@ fn add_paths_to_builder_filter<W: Write>(
     #[cfg(unix)]
     let mut hardlink_map: std::collections::HashMap<(u64, u64), String> =
         std::collections::HashMap::new();
+    let mut had_read_error = false;
 
     for src in &args.paths {
         if let Some(dir) = src.strip_prefix("\0-C\0") {
@@ -1429,12 +1447,41 @@ fn add_paths_to_builder_filter<W: Write>(
                 entries.push(src_path.to_path_buf());
             } else {
                 for entry in WalkDir::new(src).follow_links(args.dereference) {
-                    let entry = entry.map_err(io::Error::other)?;
-                    entries.push(entry.into_path());
+                    match entry {
+                        Ok(e) => entries.push(e.into_path()),
+                        Err(e) => {
+                            let reason = e
+                                .io_error()
+                                .map(describe_open_error)
+                                .unwrap_or_else(|| e.to_string());
+                            let path = e
+                                .path()
+                                .map(|p| p.display().to_string())
+                                .unwrap_or_else(|| src.to_string());
+                            if args.ignore_failed_read {
+                                eprintln!("tar: {path}: Warning: Cannot open: {reason}");
+                                continue;
+                            }
+                            eprintln!("tar: {path}: Cannot open: {reason}");
+                            had_read_error = true;
+                        }
+                    }
                 }
             }
-        } else {
+        } else if src_path.exists() {
             entries.push(src_path.to_path_buf());
+        } else {
+            let reason = describe_open_error(&io::Error::from(io::ErrorKind::NotFound));
+            if args.ignore_failed_read {
+                eprintln!(
+                    "tar: {}: Warning: Cannot open: {reason}",
+                    src_path.display()
+                );
+                continue;
+            }
+            eprintln!("tar: {}: Cannot open: {reason}", src_path.display());
+            had_read_error = true;
+            continue;
         }
 
         // Apply --exclude-caches / --exclude-tag filtering. We scan the
@@ -1687,7 +1734,7 @@ fn add_paths_to_builder_filter<W: Write>(
                                 &mut io::empty(),
                                 Some(link_target.as_bytes()),
                             )?;
-                            if args.verify {
+                            if args.verify && args.verbose {
                                 println!("Verify {archive_name}");
                             }
                             continue;
@@ -1710,7 +1757,20 @@ fn add_paths_to_builder_filter<W: Write>(
                     Some(&target_bytes),
                 )?;
             } else if path.is_file() {
-                let metadata = fs::metadata(path)?;
+                let metadata = match fs::metadata(path) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        let display = path.display();
+                        let reason = describe_open_error(&e);
+                        if args.ignore_failed_read {
+                            eprintln!("tar: {display}: Warning: Cannot open: {reason}");
+                            continue;
+                        }
+                        eprintln!("tar: {display}: Cannot open: {reason}");
+                        had_read_error = true;
+                        continue;
+                    }
+                };
                 let mut header = Header::new_gnu();
                 header.set_size(metadata.len());
                 #[cfg(unix)]
@@ -1768,14 +1828,31 @@ fn add_paths_to_builder_filter<W: Write>(
                     }
                 }
 
-                let mut file = File::open(path)?;
+                let mut file = match File::open(path) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        let display = path.display();
+                        let reason = describe_open_error(&e);
+                        if args.ignore_failed_read {
+                            eprintln!("tar: {display}: Warning: Cannot open: {reason}");
+                            continue;
+                        }
+                        eprintln!("tar: {display}: Cannot open: {reason}");
+                        had_read_error = true;
+                        continue;
+                    }
+                };
                 append_entry_raw(&mut *builder, &mut header, archive_name, &mut file, None)?;
             }
 
-            if args.verify {
+            if args.verify && args.verbose {
                 println!("Verify {archive_name}");
             }
         }
+    }
+    if had_read_error {
+        eprintln!("tar: Exiting with failure status due to previous errors");
+        return Err(io::Error::other("read-error-exit"));
     }
     Ok(())
 }
@@ -2512,6 +2589,9 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
         let entry_type = entry.header().entry_type();
         match entry_type {
             EntryType::Directory => {
+                if args.to_stdout {
+                    continue;
+                }
                 fs::create_dir_all(&dest)?;
                 #[cfg(unix)]
                 {
@@ -2535,6 +2615,12 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
                 }
             }
             EntryType::Regular | EntryType::GNUSparse => {
+                if args.to_stdout {
+                    // -O / --to-stdout: write contents to stdout; no
+                    // on-disk creation.
+                    io::copy(&mut entry, &mut io::stdout().lock())?;
+                    continue;
+                }
                 if let Some(parent) = dest.parent() {
                     fs::create_dir_all(parent)?;
                 }
@@ -2546,6 +2632,15 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
                         eprintln!("tar: {}: Cannot open: File exists", dest.display());
                         extract_had_error = true;
                         continue;
+                    }
+                    if args.backup {
+                        let backup_path = PathBuf::from(format!("{}~", dest.display()));
+                        println!(
+                            "Renaming '{}' to '{}'",
+                            dest.display(),
+                            backup_path.display()
+                        );
+                        fs::rename(&dest, &backup_path)?;
                     }
                 }
                 // If an existing symlink is in the way and the user has
@@ -2678,6 +2773,9 @@ fn main() {
     if let Err(e) = result {
         let msg = e.to_string();
         if msg == "not-found-in-archive" {
+            process::exit(2);
+        }
+        if msg == "read-error-exit" {
             process::exit(2);
         }
         let translated = match msg.as_str() {
