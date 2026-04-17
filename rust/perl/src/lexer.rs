@@ -450,7 +450,6 @@ impl Lexer {
         c
     }
 
-
     fn skip_whitespace_and_comments(&mut self) {
         loop {
             // Skip whitespace (but not newlines — we track those)

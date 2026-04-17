@@ -1595,15 +1595,16 @@ impl Parser {
                     return Expr::ArrayLit(Vec::new());
                 }
                 let expr = self.parse_expr();
-                // Check if there are more items (it's a list)
-                if self.eat(&Token::Comma) {
+                // Check if there are more items (it's a list) — fat-comma also
+                // acts as a list separator.
+                if self.eat(&Token::Comma) || self.eat(&Token::FatComma) {
                     let mut items = vec![expr];
                     loop {
                         if self.at(&Token::RParen) {
                             break;
                         }
                         items.push(self.parse_expr());
-                        if !self.eat(&Token::Comma) {
+                        if !self.eat(&Token::Comma) && !self.eat(&Token::FatComma) {
                             break;
                         }
                     }
@@ -1621,7 +1622,9 @@ impl Parser {
                 let mut items = Vec::new();
                 while !self.at(&Token::RBracket) && !self.at(&Token::EOF) {
                     items.push(self.parse_expr());
-                    self.eat(&Token::Comma);
+                    if !self.eat(&Token::Comma) && !self.eat(&Token::FatComma) {
+                        break;
+                    }
                 }
                 self.expect(&Token::RBracket);
                 Expr::ArrayRef(items)

@@ -2544,6 +2544,22 @@ impl Interpreter {
                             _ => Vec::new(),
                         }
                     }
+                    "keys" => {
+                        if let Some(Expr::HashVar(name)) = args.first() {
+                            let hash = self.get_hash(name);
+                            hash.keys().map(|k| Value::Str(k.clone())).collect()
+                        } else {
+                            Vec::new()
+                        }
+                    }
+                    "values" => {
+                        if let Some(Expr::HashVar(name)) = args.first() {
+                            let hash = self.get_hash(name);
+                            hash.values().cloned().collect()
+                        } else {
+                            Vec::new()
+                        }
+                    }
                     "sort" => {
                         let mut items: Vec<Value> =
                             args.iter().flat_map(|a| self.eval_list(a)).collect();
