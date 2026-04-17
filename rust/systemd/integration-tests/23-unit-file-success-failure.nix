@@ -7,7 +7,7 @@
     # Fix bare commands in unit files for NixOS PATH.
     # The testdata is in the read-only Nix store, so we patch the test script
     # to fix the unit files after they're installed to /run/systemd/system/.
-    sed -i '/^systemctl start success-failure-test$/i \
+    sed -i '/systemd-analyze log-level/a \
     # Patch bare commands for NixOS\
     for f in /usr/lib/systemd/tests/testdata/TEST-23-UNIT-FILE/TEST-23-UNIT-FILE.units/success-failure-test*.service; do\
       name=$(basename "$f")\
