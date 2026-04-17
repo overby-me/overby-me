@@ -603,6 +603,13 @@ impl Lexer {
                         self.pos += 1;
                         let name = self.read_ident();
                         tokens.push(Token::ScalarDeref(name));
+                    } else if self.ch() == ':' && self.peek(1) == ':' {
+                        // `$::name` — shorthand for `$main::name`. Keep the
+                        // `::` in the name so the interpreter can look it up
+                        // as a package-qualified scalar.
+                        self.pos += 2;
+                        let rest = self.read_ident();
+                        tokens.push(Token::ScalarVar(format!("::{rest}")));
                     } else if self.ch() == '{' {
                         // ${expr} or ${^NAME} or ${$ref}
                         self.pos += 1;

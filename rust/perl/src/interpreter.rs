@@ -1827,6 +1827,9 @@ impl Interpreter {
         // the tests to progress.
         match name {
             "Internals::stack_refcounted" => return Value::Num(1.0),
+            "__FILE__" => return Value::Str(self.current_file.clone()),
+            "__LINE__" => return Value::Num(self.current_line as f64),
+            "__PACKAGE__" => return Value::Str(self.package.clone()),
             _ => {}
         }
         match name {
@@ -2497,22 +2500,22 @@ impl Interpreter {
                 }
             }
             _ => {
-                // Check user-defined subs
-                if let Some((params, body)) = self.subs.get(name).cloned() {
-                    let arg_vals: Vec<Value> =
-                        args.iter().flat_map(|a| self.eval_list(a)).collect();
-                    self.call_sub(&body, &arg_vals)
-                } else {
-                    // Try package-qualified name
-                    let qualified = format!("{}::{}", self.package, name);
-                    if let Some((params, body)) = self.subs.get(&qualified).cloned() {
+                // Check user-defined subs. Try the bare name, a few
+                // package-qualified variants, and a main:: strip so
+                // `main::foo` resolves to `foo` when we stored it bare.
+                let candidates: [String; 3] = [
+                    name.to_string(),
+                    format!("{}::{}", self.package, name),
+                    name.strip_prefix("main::").unwrap_or(name).to_string(),
+                ];
+                for candidate in &candidates {
+                    if let Some((_params, body)) = self.subs.get(candidate).cloned() {
                         let arg_vals: Vec<Value> =
                             args.iter().flat_map(|a| self.eval_list(a)).collect();
-                        self.call_sub(&body, &arg_vals)
-                    } else {
-                        Value::Undef
+                        return self.call_sub(&body, &arg_vals);
                     }
                 }
+                Value::Undef
             }
         }
     }
@@ -2663,26 +2666,34 @@ impl Interpreter {
     // --- Variable access ---
 
     fn get_var(&self, name: &str) -> Value {
+        let key = canon_var(name);
         // Check lexical scopes from innermost to outermost
         for scope in self.scopes.iter().rev() {
-            if let Some(val) = scope.vars.get(name) {
+            if let Some(val) = scope.vars.get(key) {
                 return val.clone();
             }
         }
         // Check globals
-        self.globals.vars.get(name).cloned().unwrap_or(Value::Undef)
+        self.globals.vars.get(key).cloned().unwrap_or(Value::Undef)
     }
 
     fn set_var(&mut self, name: &str, val: Value) {
+        let key = canon_var(name).to_string();
+        // Package-qualified names always bind globally — never shadow them
+        // with a lexical scope entry that happens to share the bare name.
+        if key.contains("::") || name.starts_with("::") {
+            self.globals.vars.insert(key, val);
+            return;
+        }
         // Set in the innermost scope that has this variable, or create in global scope
         for scope in self.scopes.iter_mut().rev() {
-            if scope.vars.contains_key(name) {
-                scope.vars.insert(name.to_string(), val);
+            if let Some(slot) = scope.vars.get_mut(&key) {
+                *slot = val;
                 return;
             }
         }
         // Variable not found in any lexical scope — set in globals (package variable)
-        self.globals.vars.insert(name.to_string(), val);
+        self.globals.vars.insert(key, val);
     }
 
     /// Declare a `my` variable in the current lexical scope
@@ -3665,6 +3676,14 @@ fn compile_time_use_check(
         }
     }
     None
+}
+
+/// Canonicalise a variable name: `$::foo` → `main::foo`. Keeps
+/// already-qualified names as-is. Leaves short names untouched.
+fn canon_var(name: &str) -> &str {
+    // `$::foo` tokens arrive here as `::foo`. Strip the leading `::` so
+    // we store under `foo` in globals (same as `$foo` in the main package).
+    name.strip_prefix("::").unwrap_or(name)
 }
 
 /// Perl's `oct()` — interpret a string as octal by default, or as the base

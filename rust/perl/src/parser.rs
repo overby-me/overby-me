@@ -2088,6 +2088,13 @@ impl Parser {
                 let name = name.clone();
                 self.pos += 1;
 
+                // Compile-time constants the interpreter resolves at runtime
+                // from `current_file` / `current_line`. Treat like zero-arg
+                // function calls so they don't get parsed as barewords.
+                if name == "__FILE__" || name == "__LINE__" || name == "__PACKAGE__" {
+                    return Expr::Call(name, Vec::new());
+                }
+
                 // Check for backtick execution: Ident("backtick") followed by StringLit
                 if name == "backtick" {
                     if let Token::StringLit(cmd) = self.tok() {
@@ -2204,11 +2211,14 @@ fn parse_interp_string(s: &str) -> Expr {
     while i < chars.len() {
         if chars[i] == '$' && i + 1 < chars.len() {
             // Variable interpolation
+            let starts_pkg_prefix =
+                chars[i + 1] == ':' && i + 2 < chars.len() && chars[i + 2] == ':';
             if chars[i + 1] == '_'
                 || chars[i + 1].is_ascii_alphabetic()
                 || chars[i + 1].is_ascii_digit()
                 || chars[i + 1] == '{'
                 || chars[i + 1] == '^'
+                || starts_pkg_prefix
             {
                 // Flush literal
                 if !lit.is_empty() {
@@ -2240,6 +2250,11 @@ fn parse_interp_string(s: &str) -> Expr {
                     parts.push(InterpPart::ScalarVar(format!("^{c}")));
                 } else {
                     let mut name = String::new();
+                    // `$::foo` — leading `::` with no package name.
+                    if i + 1 < chars.len() && chars[i] == ':' && chars[i + 1] == ':' {
+                        name.push_str("::");
+                        i += 2;
+                    }
                     while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
                         name.push(chars[i]);
                         i += 1;
