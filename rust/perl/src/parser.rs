@@ -273,8 +273,82 @@ impl Parser {
                 return Some(self.maybe_postfix(stmt));
             }
             _ => {
-                // Expression statement
+                // Expression statement. A top-level comma operator — e.g.
+                // `f(), last unless COND` — groups multiple expressions so a
+                // trailing postfix modifier applies to the whole group. When
+                // the group includes a bare control keyword (last / next /
+                // return / redo), parse the flow stmt *without* letting it
+                // consume any postfix modifier, so the outer `unless` gates
+                // the whole group (Perl-consistent behaviour).
                 let expr = self.parse_expr();
+                if self.at(&Token::Comma) {
+                    let mut exprs = vec![expr];
+                    let mut flow_stmt: Option<Stmt> = None;
+                    while self.eat(&Token::Comma) {
+                        if self.at(&Token::Semi) || self.at(&Token::EOF) || self.at(&Token::RBrace)
+                        {
+                            break;
+                        }
+                        match self.tok() {
+                            Token::Last => {
+                                self.pos += 1;
+                                let lbl = if let Token::Ident(name) = self.tok() {
+                                    let n = name.clone();
+                                    self.pos += 1;
+                                    Some(n)
+                                } else {
+                                    None
+                                };
+                                flow_stmt = Some(Stmt::Last(lbl));
+                                break;
+                            }
+                            Token::Next => {
+                                self.pos += 1;
+                                let lbl = if let Token::Ident(name) = self.tok() {
+                                    let n = name.clone();
+                                    self.pos += 1;
+                                    Some(n)
+                                } else {
+                                    None
+                                };
+                                flow_stmt = Some(Stmt::Next(lbl));
+                                break;
+                            }
+                            Token::Redo => {
+                                self.pos += 1;
+                                flow_stmt = Some(Stmt::Redo(None));
+                                break;
+                            }
+                            Token::Return => {
+                                self.pos += 1;
+                                let ret_expr = if self.at(&Token::Semi)
+                                    || self.at(&Token::If)
+                                    || self.at(&Token::Unless)
+                                {
+                                    None
+                                } else {
+                                    Some(self.parse_expr())
+                                };
+                                flow_stmt = Some(Stmt::Return(ret_expr));
+                                break;
+                            }
+                            _ => {
+                                exprs.push(self.parse_expr());
+                            }
+                        }
+                    }
+                    let expr = if exprs.len() == 1 {
+                        exprs.into_iter().next().unwrap()
+                    } else {
+                        Expr::ArrayLit(exprs)
+                    };
+                    let stmt = if let Some(flow) = flow_stmt {
+                        Stmt::Block(vec![Stmt::Expr(expr), flow])
+                    } else {
+                        Stmt::Expr(expr)
+                    };
+                    return Some(self.maybe_postfix(stmt));
+                }
                 let stmt = Stmt::Expr(expr);
                 return Some(self.maybe_postfix(stmt));
             }
