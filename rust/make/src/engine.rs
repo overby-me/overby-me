@@ -292,31 +292,30 @@ impl Engine {
     }
 
     fn setup_default_rules(&self) {
-        // C compilation
+        // C compilation. Recipes use the GNU-make canonical templates so
+        // overrides like `CC="@echo cc"` or `OUTPUT_OPTION=` work as
+        // documented.
         self.add_pattern_rule(
             "%.o",
             &["%.c"],
-            &["$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<"],
+            &["$(COMPILE.c) $(OUTPUT_OPTION) $<"],
         );
-        // C++ compilation
         self.add_pattern_rule(
             "%.o",
             &["%.cpp"],
-            &["$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c -o $@ $<"],
+            &["$(COMPILE.cpp) $(OUTPUT_OPTION) $<"],
         );
         self.add_pattern_rule(
             "%.o",
             &["%.cc"],
-            &["$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c -o $@ $<"],
+            &["$(COMPILE.cc) $(OUTPUT_OPTION) $<"],
         );
-        // Assembly
-        self.add_pattern_rule("%.o", &["%.s"], &["$(AS) $(ASFLAGS) -o $@ $<"]);
-        // Linking (implicit rule for executables)
-        self.add_pattern_rule("%", &["%.o"], &["$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)"]);
+        self.add_pattern_rule("%.o", &["%.s"], &["$(COMPILE.s) -o $@ $<"]);
+        // Linking
+        self.add_pattern_rule("%", &["%.o"], &["$(LINK.o) $^ $(LOADLIBES) $(LDLIBS) -o $@"]);
 
-        // Default CC/CXX
         self.set_var_default("CC", "cc");
-        self.set_var_default("CXX", "c++");
+        self.set_var_default("CXX", "g++");
         self.set_var_default("AS", "as");
         self.set_var_default("AR", "ar");
         self.set_var_default("RM", "rm -f");
@@ -325,7 +324,31 @@ impl Engine {
         self.set_var_default("CPPFLAGS", "");
         self.set_var_default("LDFLAGS", "");
         self.set_var_default("LDLIBS", "");
+        self.set_var_default("LOADLIBES", "");
+        self.set_var_default("ASFLAGS", "");
         self.set_var_default("ARFLAGS", "rv");
+        self.set_var_default("TARGET_ARCH", "");
+        self.set_var_default("OUTPUT_OPTION", "-o $@");
+        self.set_var_default(
+            "COMPILE.c",
+            "$(CC) $(CFLAGS) $(CPPFLAGS) $(TARGET_ARCH) -c",
+        );
+        self.set_var_default(
+            "COMPILE.cpp",
+            "$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(TARGET_ARCH) -c",
+        );
+        self.set_var_default(
+            "COMPILE.cc",
+            "$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(TARGET_ARCH) -c",
+        );
+        self.set_var_default(
+            "COMPILE.s",
+            "$(AS) $(ASFLAGS)",
+        );
+        self.set_var_default(
+            "LINK.o",
+            "$(CC) $(LDFLAGS) $(TARGET_ARCH)",
+        );
     }
 
     /// Check if a target name is an old-style suffix rule (e.g., ".c.o").
