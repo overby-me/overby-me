@@ -65,8 +65,16 @@ impl Parser {
                 line
             };
             if let Some(stripped) = effective.strip_suffix('\\') {
-                current.push_str(stripped);
-                current.push(' ');
+                if logical_is_recipe {
+                    // Inside a recipe: preserve `\<newline>` so the
+                    // shell sees the continuation and concatenates the
+                    // physical lines itself.
+                    current.push_str(effective);
+                    current.push('\n');
+                } else {
+                    current.push_str(stripped);
+                    current.push(' ');
+                }
                 in_continuation = true;
             } else {
                 current.push_str(effective);

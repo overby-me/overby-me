@@ -1720,21 +1720,38 @@ impl Engine {
         let shell = self.lookup_var_or("SHELL", "/bin/sh");
         let shell_flags = self.lookup_var_or(".SHELLFLAGS", "-c");
 
-        // Expand all recipe lines first, then split any that expanded to
-        // multi-line text (e.g. from a `define`/`$(call)` expansion) so each
-        // line gets its own `@`/`-`/`+` prefix handling and its own shell
-        // invocation. `current_source` is set per-line so `$(error)` /
-        // `$(warning)` inside an expansion report a useful location.
-        let mut expanded_lines: Vec<(String, usize)> = Vec::new();
+        // Strip prefix chars (@, -, +) from the raw recipe line BEFORE
+        // expansion — these apply to every sub-line produced by the
+        // expansion. Prefix chars appearing within an expansion (e.g.
+        // `$(V)echo hello` where `$(V)` is `@`) apply to that
+        // sub-line only. This matches GNU make's behavior.
+        let mut expanded_lines: Vec<(String, usize, bool, bool)> = Vec::new();
         for (idx, line) in recipe.iter().enumerate() {
             let line_no = recipe_lines.get(idx).copied().unwrap_or(0);
             if line_no > 0 {
                 *self.current_source.borrow_mut() = Some((recipe_source.to_string(), line_no));
             }
-            let expanded_raw = expand::expand_with_auto(line, self, &auto_vars);
+            let mut outer_silent = false;
+            let mut outer_ignore = false;
+            let mut raw = line.as_str();
+            loop {
+                raw = raw.trim_start();
+                if let Some(rest) = raw.strip_prefix('@') {
+                    outer_silent = true;
+                    raw = rest;
+                } else if let Some(rest) = raw.strip_prefix('-') {
+                    outer_ignore = true;
+                    raw = rest;
+                } else if let Some(rest) = raw.strip_prefix('+') {
+                    raw = rest;
+                } else {
+                    break;
+                }
+            }
+            let expanded_raw = expand::expand_with_auto(raw, self, &auto_vars);
             for sub in expanded_raw.split('\n') {
                 if !sub.is_empty() {
-                    expanded_lines.push((sub.to_string(), line_no));
+                    expanded_lines.push((sub.to_string(), line_no, outer_silent, outer_ignore));
                 }
             }
         }
@@ -1743,13 +1760,14 @@ impl Engine {
         let target_is_silent =
             *self.silent_all.borrow() || self.silent_targets.borrow().contains(target);
 
-        for (expanded_raw, line_no) in &expanded_lines {
-            let mut silent = self.silent || target_is_silent;
-            let mut ignore_error = false;
+        for (expanded_raw, line_no, outer_silent, outer_ignore) in &expanded_lines {
+            let mut silent = self.silent || target_is_silent || *outer_silent;
+            let mut ignore_error = *outer_ignore;
 
             let mut expanded_str = expanded_raw.as_str();
 
-            // Process line prefixes (@, -, +) after expansion
+            // Inner prefix chars from the expansion itself (still honor
+            // them for the sub-line they belong to).
             loop {
                 expanded_str = expanded_str.trim_start();
                 if let Some(rest) = expanded_str.strip_prefix('@') {
@@ -1759,7 +1777,6 @@ impl Engine {
                     ignore_error = true;
                     expanded_str = rest;
                 } else if let Some(rest) = expanded_str.strip_prefix('+') {
-                    // Force execution even in dry-run mode
                     expanded_str = rest;
                 } else {
                     break;
