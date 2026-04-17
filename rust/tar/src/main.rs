@@ -448,6 +448,8 @@ struct Args {
     /// --to-stdout / -O: write regular-file contents to stdout instead
     /// of creating files on disk.
     to_stdout: bool,
+    /// --remove-files: delete the source files after they're archived.
+    remove_files: bool,
     /// --backup: rename existing destination files to NAME~ before
     /// overwriting during extract.
     backup: bool,
@@ -840,6 +842,7 @@ fn parse_args() -> Args {
             "-k" | "--keep-old-files" => args.keep_old_files = true,
             "--skip-old-files" => args.skip_old_files = true,
             "-O" | "--to-stdout" => args.to_stdout = true,
+            "--remove-files" => args.remove_files = true,
             "--backup" => args.backup = true,
             "--ignore-failed-read" => args.ignore_failed_read = true,
             "--owner-map" => {
@@ -1186,7 +1189,6 @@ fn parse_args() -> Args {
                     || other == "--unlink-first"
                     || other == "-U"
                     || other == "--recursive-unlink"
-                    || other == "--remove-files"
                     || other == "--delay-directory-restore"
                     || other == "--delay-directory-restore"
                     || other == "--no-delay-directory-restore"
@@ -1935,6 +1937,24 @@ fn add_paths_to_builder_filter<W: Write>(
                 println!("Verify {archive_name}");
             }
         }
+
+        // --remove-files: delete each archived entry in reverse so
+        // children get removed before their parents.
+        if args.remove_files {
+            let mut sorted: Vec<&PathBuf> = entries.iter().collect();
+            sorted.sort_by(|a, b| b.as_path().cmp(a.as_path()));
+            for p in sorted {
+                let meta = fs::symlink_metadata(p);
+                let (res, verb) = match meta {
+                    Ok(m) if m.file_type().is_dir() => (fs::remove_dir(p), "rmdir"),
+                    _ => (fs::remove_file(p), "unlink"),
+                };
+                if let Err(e) = res {
+                    eprintln!("tar: {}: Cannot {verb}: {}", p.display(), e);
+                    had_read_error = true;
+                }
+            }
+        }
     }
     if had_read_error {
         eprintln!("tar: Exiting with failure status due to previous errors");
@@ -2107,11 +2127,36 @@ fn filter_delete(
     let mut archive = Archive::new(input);
     let mut builder = Builder::new(output);
     let mut matched: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for entry in archive.entries()? {
-        let mut entry = entry?;
+    let entries = archive.entries()?;
+    for entry in entries {
+        let mut entry = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                // Truncated archives stop delete early — match any
+                // patterns that would have been hit against what we
+                // already saw, but don't propagate EOF as a fatal.
+                let msg = e.to_string();
+                if msg == "failed to read entire block" || msg == "unexpected EOF" {
+                    break;
+                }
+                return Err(e);
+            }
+        };
         let path = entry.path()?.to_string_lossy().into_owned();
-        if to_delete.contains(&path) {
-            matched.insert(path.clone());
+        let deleted = to_delete.iter().any(|pat| {
+            path == *pat
+                || path.trim_end_matches('/') == pat.trim_end_matches('/')
+                || (pat.ends_with('/') && path.starts_with(pat.as_str()))
+        });
+        if deleted {
+            for pat in to_delete {
+                if path == *pat
+                    || path.trim_end_matches('/') == pat.trim_end_matches('/')
+                    || (pat.ends_with('/') && path.starts_with(pat.as_str()))
+                {
+                    matched.insert(pat.clone());
+                }
+            }
             if verbose {
                 eprintln!("tar: deleting member {path}");
             }
