@@ -8,8 +8,8 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| PASS | ~230+ | Tests passing reliably (including 150/151 aux-utils) |
-| FAIL (fixable) | ~6 | Failures in rust-systemd code that can be fixed |
+| PASS | ~235+ | Tests passing reliably (including 150/151 aux-utils) |
+| FAIL (fixable) | ~4 | Failures in rust-systemd code that can be fixed |
 | FAIL (architectural) | ~12 | Missing major features (D-Bus, udev, exec deser) |
 | Boot hang (transient) | ~10 | Non-deterministic QEMU boot failures (~30% rate) |
 
