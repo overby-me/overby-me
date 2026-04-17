@@ -266,9 +266,13 @@ fn run() -> i32 {
                 println!("  -B       Always make all targets");
                 return 0;
             }
-            arg if arg.starts_with("-j") => {
-                engine.jobs = arg[2..].parse().unwrap_or(1);
-            }
+            arg if arg.starts_with("-j") => match arg[2..].parse::<usize>() {
+                Ok(n) => engine.jobs = n,
+                Err(_) => {
+                    eprintln!("make: invalid integer argument '{}' for '-j'", &arg[2..]);
+                    return 2;
+                }
+            },
             arg if arg.starts_with("-f") => {
                 makefiles.push(arg[2..].to_string());
             }

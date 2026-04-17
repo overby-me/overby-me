@@ -1357,6 +1357,11 @@ impl Engine {
                 recipe = rule.recipe.clone();
             }
         }
+        // Promote order-only entries that also appear as normal prereqs
+        // — GNU make semantics: a prereq declared in both positions
+        // counts as normal and is removed from `$|`.
+        let normal_set: HashSet<String> = all_prereqs.iter().cloned().collect();
+        all_order_only.retain(|o| !normal_set.contains(o));
 
         if let Some((pat_rule, pat_stem)) = &pattern_match {
             stem = pat_stem.clone();
