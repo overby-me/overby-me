@@ -458,6 +458,12 @@ struct Args {
     /// path list is still empty GNU tar still creates an empty archive
     /// rather than refusing.
     files_from_used: bool,
+    /// --null: treat -T files as NUL-separated.
+    null_separated: bool,
+    /// Error flag: emit exit 2 at the end of main even if all archiving
+    /// succeeded. Set by a fatal condition detected during argument
+    /// parsing (e.g. recursive -T files).
+    deferred_fatal: bool,
     /// Volume label (`-V LABEL` / `--label=LABEL`). On create, the first
     /// archive entry is a GNU volume header with this name. On extract,
     /// the label must fnmatch against the archive's first entry.
@@ -488,6 +494,63 @@ enum CacheExcludeMode {
     All,
 }
 
+/// Returns true on success, false if we detected a fatal condition
+/// (recursive -T reference, …) that should make tar exit 2 after it
+/// finishes the archive.
+fn read_files_from(
+    file: &str,
+    args: &mut Args,
+    seen: &mut std::collections::HashSet<String>,
+) -> bool {
+    let content_res = if file == "-" {
+        let mut buf = String::new();
+        io::stdin().read_to_string(&mut buf).map(|_| buf)
+    } else {
+        fs::read_to_string(file)
+    };
+    let Ok(content) = content_res else {
+        return true;
+    };
+    let mut ok = true;
+    let mut is_null_sep = args.null_separated;
+    if !is_null_sep && content.contains('\0') {
+        eprintln!("tar: {file}: file name read contains nul character");
+        is_null_sep = true;
+    }
+    let entries: Box<dyn Iterator<Item = &str>> = if is_null_sep {
+        Box::new(content.split('\0'))
+    } else {
+        Box::new(content.lines())
+    };
+    for line in entries {
+        let line = line.trim_end_matches('\0');
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(path) = line.strip_prefix("--add-file=") {
+            args.paths.push(path.to_string());
+        } else if let Some(dir) = line.strip_prefix("-C ") {
+            args.paths.push(format!("\0-C\0{dir}"));
+        } else if let Some(nested) = line.strip_prefix("-T ") {
+            if !seen.insert(nested.to_string()) {
+                eprintln!(
+                    "tar: {nested}: file list requested from {file} already read from command line"
+                );
+                eprintln!("tar: Exiting with failure status due to previous errors");
+                ok = false;
+                break;
+            }
+            if !read_files_from(nested, args, seen) {
+                ok = false;
+                break;
+            }
+        } else {
+            args.paths.push(line.to_string());
+        }
+    }
+    ok
+}
+
 fn parse_args() -> Args {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let mut argv_queue: VecDeque<String> = argv.into_iter().collect();
@@ -503,7 +566,7 @@ fn parse_args() -> Args {
             && first
                 .trim_start_matches('-')
                 .chars()
-                .all(|c| "cxtrudvzjJfphoWkSUPTXbLIVHgG".contains(c))
+                .all(|c| "cxtrudvzjJfphoWkSUPTXbLIVHgGl".contains(c))
         {
             argv_queue.pop_front();
             let flags: Vec<char> = first.trim_start_matches('-').chars().collect();
@@ -619,7 +682,17 @@ fn parse_args() -> Args {
                 args.file = queue.pop_front();
             }
             "-C" | "--directory" => {
-                args.directory = queue.pop_front();
+                let dir = queue.pop_front();
+                if args.paths.is_empty() && args.directory.is_none() {
+                    // First -C before any path becomes the global
+                    // starting directory.
+                    args.directory = dir;
+                } else if let Some(d) = dir {
+                    // Positional -C: encode as a path entry with a
+                    // sentinel prefix so create/append can process it
+                    // inline with the surrounding paths.
+                    args.paths.push(format!("\0-C\0{d}"));
+                }
             }
             "--exclude" => {
                 if let Some(v) = queue.pop_front() {
@@ -779,22 +852,16 @@ fn parse_args() -> Args {
             }
             "-T" | "--files-from" => {
                 args.files_from_used = true;
-                if let Some(v) = queue.pop_front()
-                    && let Ok(content) = fs::read_to_string(&v)
-                {
-                    for line in content.lines() {
-                        let line = line.trim_end_matches('\0');
-                        if line.is_empty() {
-                            continue;
-                        }
-                        if let Some(path) = line.strip_prefix("--add-file=") {
-                            args.paths.push(path.to_string());
-                        } else {
-                            args.paths.push(line.to_string());
-                        }
+                if let Some(v) = queue.pop_front() {
+                    let mut seen = std::collections::HashSet::new();
+                    seen.insert(v.clone());
+                    if !read_files_from(&v, &mut args, &mut seen) {
+                        args.deferred_fatal = true;
                     }
                 }
             }
+            "--null" => args.null_separated = true,
+            "--no-null" => args.null_separated = false,
             "-X" | "--exclude-from" => {
                 if let Some(v) = queue.pop_front()
                     && let Ok(content) = fs::read_to_string(&v)
@@ -917,13 +984,10 @@ fn parse_args() -> Args {
                     args.paths.push(val.to_string());
                 } else if let Some(val) = other.strip_prefix("--files-from=") {
                     args.files_from_used = true;
-                    if let Ok(content) = fs::read_to_string(val) {
-                        for line in content.lines() {
-                            let line = line.trim_end_matches('\0');
-                            if !line.is_empty() {
-                                args.paths.push(line.to_string());
-                            }
-                        }
+                    let mut seen = std::collections::HashSet::new();
+                    seen.insert(val.to_string());
+                    if !read_files_from(val, &mut args, &mut seen) {
+                        args.deferred_fatal = true;
                     }
                 } else if let Some(val) = other.strip_prefix("--exclude-from=") {
                     if let Ok(content) = fs::read_to_string(val) {
@@ -980,8 +1044,7 @@ fn parse_args() -> Args {
                     // Silently accept / no-op for GNU tar options whose
                     // behaviour we don't implement but whose presence must
                     // not error out.
-                } else if other == "--null"
-                    || other == "--totals"
+                } else if other == "--totals"
                     || other == "--no-auto-compress"
                     || other == "--seek"
                     || other == "--no-seek"
@@ -1061,7 +1124,7 @@ fn parse_args() -> Args {
                             'h' => args.dereference = true,
                             'o' => args.no_same_owner = true,
                             'P' => args.absolute_names = true,
-                            'W' | 'k' | 'S' | 'U' => {
+                            'W' | 'k' | 'S' | 'U' | 'l' => {
                                 // accepted, no-op for now
                             }
                             'f' => {
@@ -1093,14 +1156,11 @@ fn parse_args() -> Args {
                                 } else {
                                     Some(rest)
                                 };
-                                if let Some(v) = v
-                                    && let Ok(content) = fs::read_to_string(&v)
-                                {
-                                    for line in content.lines() {
-                                        let line = line.trim_end_matches('\0');
-                                        if !line.is_empty() {
-                                            args.paths.push(line.to_string());
-                                        }
+                                if let Some(v) = v {
+                                    let mut seen = std::collections::HashSet::new();
+                                    seen.insert(v.clone());
+                                    if !read_files_from(&v, &mut args, &mut seen) {
+                                        args.deferred_fatal = true;
                                     }
                                 }
                                 i = chars.len();
@@ -1340,7 +1400,20 @@ fn add_paths_to_builder_filter<W: Write>(
     args: &Args,
     filter: Option<&std::collections::HashMap<String, u64>>,
 ) -> io::Result<()> {
+    // Track (dev, inode) for files with more than one link so that
+    // subsequent hard-linked paths are emitted as Link entries.
+    #[cfg(unix)]
+    let mut hardlink_map: std::collections::HashMap<(u64, u64), String> =
+        std::collections::HashMap::new();
+
     for src in &args.paths {
+        if let Some(dir) = src.strip_prefix("\0-C\0") {
+            // Positional -C sentinel: change cwd and continue with the
+            // next path. Subsequent relative paths are resolved from the
+            // new cwd.
+            std::env::set_current_dir(dir)?;
+            continue;
+        }
         let src_path = Path::new(src);
 
         // Collect entries (for optional sorting)
@@ -1592,6 +1665,33 @@ fn add_paths_to_builder_filter<W: Write>(
                     None,
                 )?;
             } else if is_symlink {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    if let Ok(link_meta) = fs::symlink_metadata(path) {
+                        let key = (link_meta.dev(), link_meta.ino());
+                        if let Some(first) = hardlink_map.get(&key) {
+                            let link_target = first.clone();
+                            let mut header = Header::new_gnu();
+                            header.set_entry_type(EntryType::Link);
+                            header.set_size(0);
+                            set_owner_group(&mut header, args);
+                            append_entry_raw(
+                                &mut *builder,
+                                &mut header,
+                                archive_name,
+                                &mut io::empty(),
+                                Some(link_target.as_bytes()),
+                            )?;
+                            if args.verify {
+                                println!("Verify {archive_name}");
+                            }
+                            continue;
+                        } else {
+                            hardlink_map.insert(key, archive_name.to_string());
+                        }
+                    }
+                }
                 let target = fs::read_link(path)?;
                 let target_bytes = target.to_string_lossy().into_owned().into_bytes();
                 let mut header = Header::new_gnu();
@@ -1637,6 +1737,33 @@ fn add_paths_to_builder_filter<W: Write>(
                     }
                 }
                 set_owner_group(&mut header, args);
+
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    let key = (metadata.dev(), metadata.ino());
+                    if let Some(first) = hardlink_map.get(&key) {
+                        // Emit as hard-link entry: no data, linkname =
+                        // first archived path for this inode.
+                        let link_target = first.clone();
+                        header.set_entry_type(EntryType::Link);
+                        header.set_size(0);
+                        append_entry_raw(
+                            &mut *builder,
+                            &mut header,
+                            archive_name,
+                            &mut io::empty(),
+                            Some(link_target.as_bytes()),
+                        )?;
+                        if args.verify {
+                            println!("Verify {archive_name}");
+                        }
+                        continue;
+                    } else {
+                        hardlink_map.insert(key, archive_name.to_string());
+                    }
+                }
+
                 let mut file = File::open(path)?;
                 append_entry_raw(&mut *builder, &mut header, archive_name, &mut file, None)?;
             }
@@ -2439,6 +2566,12 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
                         Some(dir) => PathBuf::from(dir).join(link.as_ref()),
                         None => link.into_owned(),
                     };
+                    if link_target == dest {
+                        // Same path archived twice: the target is this
+                        // entry itself. Leave the existing regular file
+                        // in place.
+                        continue;
+                    }
                     let _ = fs::remove_file(&dest);
                     fs::hard_link(link_target, &dest)?;
                 }
@@ -2529,6 +2662,9 @@ fn main() {
             eprintln!("Try 'tar --help' or 'tar --usage' for more information.");
             process::exit(2);
         }
+        process::exit(2);
+    }
+    if args.deferred_fatal {
         process::exit(2);
     }
 }
