@@ -240,6 +240,12 @@ pub struct TransientUnitParams {
     pub socket_properties: Vec<String>,
     /// Nice level for the spawned process.
     pub nice: Option<i32>,
+    /// File descriptors to pass to the service via LISTEN_FDS/LISTEN_FDNAMES.
+    /// Set from the D-Bus `ExtraFileDescriptors` property on StartTransientUnit.
+    /// Each entry is (raw_fd, name). The caller has already transferred
+    /// ownership: rust-systemd will NOT close these fds until the service
+    /// consumes them or the unit is removed.
+    pub extra_file_descriptors: Vec<(std::os::fd::RawFd, String)>,
 }
 
 #[derive(Debug)]
@@ -741,6 +747,7 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                         path_properties,
                         socket_properties,
                         nice,
+                        extra_file_descriptors: Vec::new(),
                     })
                 }
                 Some(_) | None => {
@@ -1314,6 +1321,32 @@ fn find_sleep_binary() -> Option<std::path::PathBuf> {
     }
 
     None
+}
+
+/// Normalize `\xHH` hex escapes in an OpenFile= entry to lowercase,
+/// matching upstream systemd's canonical form.
+fn canonicalize_open_file(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\'
+            && i + 3 < bytes.len()
+            && (bytes[i + 1] == b'x' || bytes[i + 1] == b'X')
+            && (bytes[i + 2] as char).is_ascii_hexdigit()
+            && (bytes[i + 3] as char).is_ascii_hexdigit()
+        {
+            out.push('\\');
+            out.push('x');
+            out.push((bytes[i + 2] as char).to_ascii_lowercase());
+            out.push((bytes[i + 3] as char).to_ascii_lowercase());
+            i += 4;
+            continue;
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
 }
 
 pub fn find_or_load_unit(
@@ -3024,7 +3057,7 @@ fn create_transient_unit(
                     if value.is_empty() {
                         service_conf.open_file.clear();
                     } else {
-                        service_conf.open_file.push(value.to_string());
+                        service_conf.open_file.push(canonicalize_open_file(value));
                     }
                 }
                 "NotifyAccess" => {
@@ -4088,7 +4121,11 @@ fn create_transient_unit(
                     notify_monotonic_usec: None,
                     invocation_id: None,
                     watchdog_usec_override: None,
-                    stored_fds: Vec::new(),
+                    stored_fds: params
+                        .extra_file_descriptors
+                        .iter()
+                        .map(|(fd, name)| (name.clone(), *fd))
+                        .collect(),
                     notify_access_override: None,
                     accepted_fd: None,
                     accepted_peer_uid: None,
@@ -11070,6 +11107,7 @@ mod tests {
             path_properties: Vec::new(),
             socket_properties: Vec::new(),
             nice: None,
+            extra_file_descriptors: Vec::new(),
         };
         let debug = format!("{params:?}");
         assert!(debug.contains("run-test.service"));
@@ -11105,6 +11143,7 @@ mod tests {
             path_properties: Vec::new(),
             socket_properties: Vec::new(),
             nice: None,
+            extra_file_descriptors: Vec::new(),
         };
         let cloned = params.clone();
         assert_eq!(cloned.unit_name, params.unit_name);

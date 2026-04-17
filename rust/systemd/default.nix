@@ -29,6 +29,8 @@
 
         cargoLock.lockFile = ./Cargo.lock;
 
+        buildFeatures = ["dbus_support"];
+
         doCheck = false;
 
         meta = {

@@ -239,6 +239,32 @@ fn parse_success_exit_status(raw: &str) -> SuccessExitStatus {
     }
 }
 
+/// Normalize `\xHH` hex escapes in an OpenFile= entry to lowercase, matching
+/// upstream systemd's canonical form emitted by `systemctl show -p OpenFile`.
+fn canonicalize_hex_escapes(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\'
+            && i + 3 < bytes.len()
+            && (bytes[i + 1] == b'x' || bytes[i + 1] == b'X')
+            && (bytes[i + 2] as char).is_ascii_hexdigit()
+            && (bytes[i + 3] as char).is_ascii_hexdigit()
+        {
+            out.push('\\');
+            out.push('x');
+            out.push((bytes[i + 2] as char).to_ascii_lowercase());
+            out.push((bytes[i + 3] as char).to_ascii_lowercase());
+            i += 4;
+            continue;
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
 pub fn parse_service(
     parsed_file: ParsedFile,
     path: &PathBuf,
@@ -1841,7 +1867,7 @@ fn parse_service_section(
                         entries.clear();
                         continue;
                     }
-                    entries.push(trimmed.to_owned());
+                    entries.push(canonicalize_hex_escapes(trimmed));
                 }
                 entries
             }
@@ -2351,7 +2377,7 @@ mod tests {
     fn test_restart_mode_default() {
         let content = "[Service]\nExecStart=/bin/true\n";
         let config = parse_service_from_str(content).unwrap();
-        assert_eq!(config.srvc.restart_mode, super::super::RestartMode::Direct);
+        assert_eq!(config.srvc.restart_mode, super::super::RestartMode::Normal);
     }
 
     #[test]
@@ -2560,7 +2586,7 @@ ExecCondition=/usr/bin/test -f /etc/ready
                 .exit_codes
                 .is_empty()
         );
-        assert_eq!(config.srvc.restart_mode, super::super::RestartMode::Direct);
+        assert_eq!(config.srvc.restart_mode, super::super::RestartMode::Normal);
         assert_eq!(config.srvc.restart_steps, 0);
         assert!(config.srvc.restart_max_delay_sec.is_none());
         assert!(config.srvc.exec_condition.is_empty());

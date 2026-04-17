@@ -446,6 +446,31 @@ fn serialize_reexec_state(
         }
     }
 
+    // Write stored fds so they can be reattached to services after reexec.
+    // The fds themselves survive execve as long as FD_CLOEXEC is clear on
+    // them; we just need to remember which (unit_name, fd_name, raw_fd)
+    // triples to wire back up to each service's state.
+    let fds_path = path.with_extension("fds");
+    let mut fds_file = std::fs::File::create(&fds_path)
+        .map_err(|e| format!("create {}: {e}", fds_path.display()))?;
+    for unit in ri.unit_table.values() {
+        if let crate::units::Specific::Service(srvc) = &unit.specific {
+            let state = srvc.state.read_poisoned();
+            for (fd_name, raw_fd) in &state.srvc.stored_fds {
+                // Clear FD_CLOEXEC so the fd survives execve into the
+                // re-executed service manager.
+                unsafe {
+                    let flags = libc::fcntl(*raw_fd, libc::F_GETFD);
+                    if flags >= 0 {
+                        libc::fcntl(*raw_fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC);
+                    }
+                }
+                writeln!(fds_file, "{}\t{}\t{}", unit.id.name, fd_name, raw_fd)
+                    .map_err(|e| format!("write fds: {e}"))?;
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -577,6 +602,41 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
             }
         }
         let _ = std::fs::remove_file(&status_path);
+    }
+
+    // Restore stored_fds from the .fds file. These are file descriptors
+    // inherited across execve (via cleared FD_CLOEXEC) that belong to
+    // Type=notify services or were passed via ExtraFileDescriptors on
+    // StartTransientUnit. We simply reattach (name, raw_fd) pairs to
+    // each service's state.
+    let fds_path = state_path.with_extension("fds");
+    if let Ok(fds_content) = std::fs::read_to_string(&fds_path) {
+        for line in fds_content.lines() {
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() < 3 {
+                continue;
+            }
+            let unit_name = parts[0];
+            let fd_name = parts[1];
+            let raw_fd: std::os::fd::RawFd = match parts[2].parse() {
+                Ok(f) => f,
+                Err(_) => continue,
+            };
+            // Sanity check: make sure the fd is still valid.
+            let still_open = unsafe { libc::fcntl(raw_fd, libc::F_GETFD) } >= 0;
+            if !still_open {
+                trace!("Reexec: fd {raw_fd} for {unit_name}:{fd_name} is no longer open, skipping");
+                continue;
+            }
+            if let Some(unit) = ri.unit_table.values().find(|u| u.id.name == unit_name)
+                && let crate::units::Specific::Service(srvc) = &unit.specific
+            {
+                let mut state = srvc.state.write_poisoned();
+                state.srvc.stored_fds.push((fd_name.to_owned(), raw_fd));
+                info!("Reexec: restored stored fd {raw_fd} ({fd_name}) for {unit_name}");
+            }
+        }
+        let _ = std::fs::remove_file(&fds_path);
     }
 
     // Restore freezer state from the separate freezer state file.

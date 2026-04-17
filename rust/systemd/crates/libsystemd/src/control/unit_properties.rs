@@ -209,6 +209,17 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
             insert(&mut props, "ActiveState", "inactive");
             insert(&mut props, "SubState", "dead");
         }
+        // Override SubState to "exited" for completed oneshot services
+        // with RemainAfterExit=yes.  These stay Started but the process
+        // has finished, so C systemd reports SubState=exited.
+        if matches!(&*status, UnitStatus::Started(_))
+            && let Specific::Service(srvc) = &unit.specific
+            && srvc.conf.srcv_type == crate::units::ServiceType::OneShot
+            && srvc.conf.remain_after_exit
+            && srvc.state.read_poisoned().srvc.pid.is_none()
+        {
+            insert(&mut props, "SubState", "exited");
+        }
     }
 
     // ── Lifecycle timestamps ─────────────────────────────────────────
@@ -477,6 +488,19 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                     "NFileDescriptorStore",
                     &state.srvc.stored_fds.len().to_string(),
                 );
+                // ExtraFileDescriptorNames is the space-separated list of
+                // FD names registered via StartTransientUnit's
+                // ExtraFileDescriptors property. We reuse stored_fds for
+                // this because both paths feed into LISTEN_FDNAMES.
+                let names: Vec<&str> = state
+                    .srvc
+                    .stored_fds
+                    .iter()
+                    .map(|(n, _)| n.as_str())
+                    .collect();
+                if !names.is_empty() {
+                    insert(&mut props, "ExtraFileDescriptorNames", &names.join(" "));
+                }
             } else {
                 insert(&mut props, "StatusErrno", "0");
                 insert(&mut props, "NFileDescriptorStore", "0");
@@ -1563,6 +1587,9 @@ fn insert_socket_config(props: &mut PropertyMap, conf: &SocketConfig) {
             }
             crate::sockets::SpecializedSocketConfig::SpecialFile(sp) => {
                 format!("special:{}", sp.path.display())
+            }
+            crate::sockets::SpecializedSocketConfig::MessageQueue(mq) => {
+                format!("mqueue:{}", mq.name)
             }
         };
         listen_items.push(desc);

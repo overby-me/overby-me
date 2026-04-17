@@ -142,6 +142,7 @@ pub fn run_service_manager() {
     crate::timer_scheduler::start_timer_scheduler_thread(run_info.clone());
     crate::path_watcher::start_path_watcher_thread(run_info.clone());
     crate::watchdog::start_watchdog_thread(run_info.clone());
+    crate::dbus_server::start_dbus_server_thread(run_info.clone());
 
     trace!("Started all helper threads. Start activating units");
 

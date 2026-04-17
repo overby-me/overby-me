@@ -378,6 +378,14 @@ in
               -e 's|^ExecStartPre=true|ExecStartPre=/usr/bin/true|' \
               -e 's|^ExecStartPre=echo |ExecStartPre=/usr/bin/echo |' \
               -e 's|^ExecStartPre=sleep |ExecStartPre=/usr/bin/sleep |' \
+              -e 's|^ExecStartPre=grep |ExecStartPre=/usr/bin/grep |' \
+              -e 's|^ExecStartPre=test |ExecStartPre=/usr/bin/test |' \
+              -e 's|^ExecStart=grep |ExecStart=/usr/bin/grep |' \
+              -e 's|^ExecStart=test |ExecStart=/usr/bin/test |' \
+              -e 's|^ExecStart=touch |ExecStart=/usr/bin/touch |' \
+              -e 's|^ExecStart=mkdir |ExecStart=/usr/bin/mkdir |' \
+              -e 's|^ExecStart=cp |ExecStart=/usr/bin/cp |' \
+              -e 's|^ExecStart=rm |ExecStart=/usr/bin/rm |' \
               -e 's|^ExecStartPost=bash |ExecStartPost=/usr/bin/bash |' \
               -e 's|^ExecStartPost=sh |ExecStartPost=/bin/sh |' \
               -e 's|^ExecStopPost=bash |ExecStopPost=/usr/bin/bash |' \

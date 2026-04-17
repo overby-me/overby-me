@@ -131,6 +131,9 @@ fn parse_socket_section(
     let datagrams = section.remove("LISTENDATAGRAM");
     let seqpacks = section.remove("LISTENSEQUENTIALPACKET");
     let fifos = section.remove("LISTENFIFO");
+    let mqueues = section.remove("LISTENMESSAGEQUEUE");
+    let mqueue_max_messages = section.remove("MESSAGEQUEUEMAXMESSAGES");
+    let mqueue_message_size = section.remove("MESSAGEQUEUEMSGSIZE");
     let netlinks = section.remove("LISTENNETLINK");
     let specials = section.remove("LISTENSPECIAL");
     let defer_trigger = section.remove("DEFERTRIGGER");
@@ -244,6 +247,12 @@ fn parse_socket_section(
             socket_kinds.push((entry_num, SocketKind::Fifo(value)));
         }
     }
+    if let Some(mut queues) = mqueues {
+        for _ in 0..queues.len() {
+            let (entry_num, value) = queues.remove(0);
+            socket_kinds.push((entry_num, SocketKind::MessageQueue(value)));
+        }
+    }
     if let Some(mut netlinks) = netlinks {
         for _ in 0..netlinks.len() {
             let (entry_num, value) = netlinks.remove(0);
@@ -273,6 +282,21 @@ fn parse_socket_section(
                 } else {
                     return Err(ParsingErrorReason::UnknownSocketAddr(addr.to_owned()));
                 }
+            }
+            SocketKind::MessageQueue(name) => {
+                let max_msgs = mqueue_max_messages
+                    .as_ref()
+                    .and_then(|v| v.last())
+                    .and_then(|(_, s)| s.trim().parse::<i64>().ok());
+                let msg_size = mqueue_message_size
+                    .as_ref()
+                    .and_then(|v| v.last())
+                    .and_then(|(_, s)| s.trim().parse::<i64>().ok());
+                SpecializedSocketConfig::MessageQueue(crate::sockets::MessageQueueConfig {
+                    name: name.clone(),
+                    max_messages: max_msgs,
+                    message_size: msg_size,
+                })
             }
             SocketKind::Netlink(value) => {
                 let (family, group) = parse_netlink_addr(value)?;

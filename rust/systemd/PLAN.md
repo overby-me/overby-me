@@ -8,8 +8,8 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| PASS | ~236+ | Tests passing reliably (including 150/151 aux-utils) |
-| FAIL (fixable) | ~3 | Failures in rust-systemd code that can be fixed |
+| PASS | ~238+ | Tests passing reliably (including 150/151 aux-utils) |
+| FAIL (fixable) | ~2 | Failures in rust-systemd code that can be fixed |
 | FAIL (architectural) | ~12 | Missing major features (D-Bus, udev, exec deser) |
 | Boot hang (transient) | ~10 | Non-deterministic QEMU boot failures (~30% rate) |
 
@@ -31,7 +31,7 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 
 ### 07-PID1 (most pass, ~65 subtests)
 
-- PASS: condition-negation, condition-virt, daemon-reload, drop-in-override, enable-disable, exec-context, exec-reload, exec-reload-failure, exec-start-pre-post, exec-start-pre-post-order, exec-stop-post, exec-stop-post-failure, exec-timestamps, forking-pidfile, is-enabled, issue-14566, issue-16115, issue-1981, issue-27953, issue-30412, issue-3166, issue-31752, issue-33672, issue-34104, issue-38320, issue-2467, issue-3171, kill-mode, list-units, mask, multi-exec-start, on-failure, ordering, poll-limit, pr-31351, private-network, private-users, protect-hostname, remain-after-exit, requires-mounts-for, resource-limits, restart-behavior, restart-on-failure-oneshot, runtime-directory, service-dependencies, set-environment, socket-max-connection, socket-on-failure, socket-pass-fds, standard-output-file, start-limit, startv, state-logs-directory, success-exit-status, success-exit-status-custom, systemctl-kill, systemctl-restart, systemctl-show, systemctl-show-props, systemd-run-exit-code, target-ordering, timeout-stop, transient, type-exec-parallel, umask, wantedby-target, working-directory-custom, working-directory
+- PASS: condition-negation, condition-virt, daemon-reload, drop-in-override, enable-disable, exec-context, exec-reload, exec-reload-failure, exec-start-pre-post, exec-start-pre-post-order, exec-stop-post, exec-stop-post-failure, exec-timestamps, forking-pidfile, is-enabled, issue-14566, issue-16115, issue-1981, issue-27953, issue-30412, issue-3166, issue-31752, issue-33672, issue-34104, issue-38320, issue-2467, issue-3171, kill-mode, list-units, mask, mqueue-ownership, multi-exec-start, on-failure, ordering, poll-limit, pr-31351, private-network, private-users, protect-hostname, remain-after-exit, requires-mounts-for, resource-limits, restart-behavior, restart-on-failure-oneshot, runtime-directory, service-dependencies, set-environment, socket-max-connection, socket-on-failure, socket-pass-fds, standard-output-file, start-limit, startv, state-logs-directory, success-exit-status, success-exit-status-custom, systemctl-kill, systemctl-restart, systemctl-show, systemctl-show-props, systemd-run-exit-code, target-ordering, timeout-stop, transient, type-exec-parallel, umask, wantedby-target, working-directory-custom, working-directory
 
 ### 19-CGROUP (all pass)
 
@@ -42,9 +42,9 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 - 01-05, 07-21 all pass
 - 06: persistent boot hang (transient)
 
-### 23-UNIT-FILE (16 of 20 pass)
+### 23-UNIT-FILE (17 of 20 pass)
 
-- PASS: clean-unit (service sections), exec-command-ex, execreload, execstoppost, joinsnamespace-of, oneshot-restart, onsuccess-basic, percentj-wantedby, runtimedirectory, standardoutput, start-stop-no-reload, statedir, success-failure, type-exec, upholds, utmp, verify-unit-files
+- PASS: clean-unit (service sections), exec-command-ex, execreload, execstoppost, ExtraFileDescriptors, joinsnamespace-of, oneshot-restart, onsuccess-basic, percentj-wantedby, runtimedirectory, standardoutput, start-stop-no-reload, statedir, success-failure, type-exec, upholds, utmp, verify-unit-files
 
 ### 81-GENERATORS (4 of 5 pass)
 
@@ -193,15 +193,15 @@ All 23 udev tests fail because the C `udevadm` binary in the overlay lacks featu
 - [x] Fix systemctl start job tracking across restarts (success-failure test now passes — RestartMode default fixed to Normal, stop propagation limited to bound_by)
 - [x] Complete Type=notify lifecycle (STOPPING=1 parsed, Restart=on-abort passing in 59-reloading-restart)
 - [x] PrivatePIDs= — PID namespace with /proc remount (already implemented, fixed stacked mount)
-- [ ] Implement OpenFile= directive
-- [ ] Implement ExtraFileDescriptors= directive
+- [x] Implement OpenFile= directive
+- [x] Implement ExtraFileDescriptors= directive (via D-Bus StartTransientUnit)
 - [ ] Implement runtime BindPaths= / BindReadOnlyPaths=
-- [ ] Implement MessageQueue socket options
+- [x] Implement MessageQueue socket options
 - [ ] Implement exec deserialization across daemon-reload
 
 ### Priority 4: Architectural (very high effort)
 
-- [ ] D-Bus interface (org.freedesktop.systemd1) — blocks ~2 tests
+- [x] D-Bus interface (org.freedesktop.systemd1) — Manager skeleton with StartTransientUnit; per-unit object interfaces not yet
 - [ ] Rust udevadm reimplementation — blocks 23 tests
 
 ## Architecture Notes
