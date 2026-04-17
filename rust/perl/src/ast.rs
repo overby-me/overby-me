@@ -18,6 +18,7 @@ pub enum Expr {
     HashElement(String, Box<Expr>),  // $hash{expr}
     ArraySlice(String, Vec<Expr>),   // @array[list]
     HashSlice(String, Vec<Expr>),    // @hash{list}
+    HashKVSlice(String, Vec<Expr>),  // %hash{list} — key/value slice
     ArrayLen(String),                // $#array
 
     // String interpolation — a sequence of literal parts and embedded expressions

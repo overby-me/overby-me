@@ -15,28 +15,49 @@ op/do, op/hash, op/inc, op/index, op/lc, op/oct, op/pack, op/quotemeta,
 op/range, op/reverse, op/sort, op/split, op/sprintf, op/sub, op/unshift,
 op/vec, io/argv, io/fs, io/open, io/print, io/read, re/subst, run/switches.
 
-Major unlock in this cycle: `@_` is now dynamically scoped per-call
-(was being written to globals and overwritten on every sub call — this
-broke every test that used test.pl's `like()`/`is()` chains). Also
-added runtime interpolation of `$var`/`@var` inside `/regex/` patterns,
-hash slice (`@h{k1,k2}`) delete, a `splice()` implementation, and a
-`DynaLoader::boot_DynaLoader` stub so `is_miniperl()` returns false
-(matching reference perl).
+Major unlocks in this cycle:
+
+- `@_` is now dynamically scoped per-call (was being written to globals
+  and overwritten on every sub call — this broke every test that used
+  test.pl's `like()`/`is()` chains)
+- Runtime interpolation of `$var`/`@var` inside `/regex/` patterns
+- Hash slice `@h{k1,k2}` parsing + delete; hash kv-slice `%h{k1,k2}`
+- `splice()` implementation (incl. readonly check)
+- `DynaLoader::boot_DynaLoader` and `re::is_regexp` stubs so
+  `is_miniperl()` / test.pl bootstrap match reference perl
+- Recursive compile-time `use` check (walking into Foo.pm's own
+  `use`s) — emits chained `BEGIN failed` diagnostics identically
+- Interpolating heredocs (`<<EOF` / `<<"EOF"` with `$var` inside body)
+- Per-loop / per-if lexical scopes so `my $x` in conditions doesn't
+  leak; foreach-my-$x masks outer $x
+- Chain list-assign `@a = @b = (1,2)` returns the assigned list
+- Ternary in list context evaluates branches in list context
+- Hash `%h` flattens in list context (so `%copy = %orig` works)
+- RegexMatch in list context returns capture list
+- `Internals::SvREADONLY` + `unshift`/`splice` croak on ROarrays
+- `(LIST) x N` list-context repeat; `x=` compound assign
+- Unary `+` preserves list context (`return +($a, $b)` as 2-tuple)
+- Sub prototype captured; `$` slot still lets `@arr`/`%h` flatten
+- `eof` without args checks last-read filehandle
+- `split //` drops leading empty; trailing-empty suppression
+- `chr(-1)` → U+FFFD; `length` counts chars
+- `\$`/`\@` escapes in `"..."` stay literal (no spurious InterpString)
 
 Near-passing (local test counts):
 
-- opbasic/concat: 230/254 (Unicode concat)
+- opbasic/concat: ~245/254 (Unicode concat)
 - cmd/for: 15/16 (DESTROY method)
-- cmd/subval: 34/36 (typeglob local aliasing)
-- op/my: 47/59 (`my $i` scope leaks between conditionals and loops)
-- op/array: 102/195 (nested refs, typeglob coerce)
-- op/not: 19/22 (typeglob assignment to read-only scalar)
-- op/grep: 39/77 (nested references in list context)
-- op/list: 38/73 (chained list assignment: `@a = @b = (1,2)`)
-- op/delete: 28/56
-- op/splice: 9 new passes (splice added this cycle)
-- op/repeat: 3 new passes (`x=` added this cycle)
-- op/oct: 79/79 (FIXED — `@_` aliasing repaired)
+- cmd/subval: 35/36 (typeglob local aliasing)
+- op/my: 56/59 (block-level `my @y` without parens edge-case)
+- op/array: 180/195 (aelem magic, fresh_perl_is)
+- op/not: 19/22 (typeglob to read-only scalar)
+- op/grep: near-passing (test.pl $test-counter closure issue)
+- op/list: near-passing (LHS list-assign with `(undef)xN`)
+- op/delete: test.pl dependent (autoviv for deeply nested refs)
+- op/splice: 29/34 (@ISA, readonly, test.pl Config)
+- op/repeat: 42/50 (scalar context of list x, tie)
+- op/oct: 79/79 (FIXED)
+- op/reverse: 25/25 (FIXED — compiles aborts on Carp.pm absence)
 
 test.pl integration fully working: plan/ok/is/pass/note/printf produce correct
 TAP output with test names. Function calls in argument lists fixed.

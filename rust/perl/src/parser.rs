@@ -1749,7 +1749,16 @@ impl Parser {
             }
             Token::HashVar(name) => {
                 self.pos += 1;
-                Expr::HashVar(name)
+                // `%h{k1,k2}` — key-value slice (Perl 5.20+): returns
+                // (k1, $h{k1}, k2, $h{k2}, ...).
+                if matches!(self.tok(), Token::LBrace) {
+                    self.pos += 1;
+                    let keys = self.parse_list_expr();
+                    self.expect(&Token::RBrace);
+                    Expr::HashKVSlice(name, keys)
+                } else {
+                    Expr::HashVar(name)
+                }
             }
             Token::ArrayDeref(name) => {
                 self.pos += 1;
@@ -1825,6 +1834,11 @@ impl Parser {
                     Expr::ArrayLit(items)
                 } else {
                     self.expect(&Token::RParen);
+                    // `(EXPR) x N` — the parens-around-single form signals
+                    // list-context x-repeat, distinct from `EXPR x N`.
+                    if matches!(self.tok(), Token::StringRepeat) {
+                        return Expr::ArrayLit(vec![expr]);
+                    }
                     expr
                 }
             }
@@ -2205,6 +2219,47 @@ impl Parser {
                         | Token::HashDeref(_)
                         | Token::ScalarDeref(_)
                         | Token::QrLit(_, _)
+                        | Token::Ident(_)
+                        // Builtins that themselves take args also count as
+                        // valid first-arg starters when calling another sub
+                        // without parens (e.g. `myis sprintf "...", ...`).
+                        | Token::Sprintf
+                        | Token::Printf
+                        | Token::Print
+                        | Token::Push
+                        | Token::Pop
+                        | Token::Shift
+                        | Token::Unshift
+                        | Token::Splice
+                        | Token::Reverse
+                        | Token::Sort
+                        | Token::Join
+                        | Token::Split
+                        | Token::Grep
+                        | Token::Map
+                        | Token::Keys
+                        | Token::Values
+                        | Token::Each
+                        | Token::Substr
+                        | Token::Length
+                        | Token::Index
+                        | Token::Rindex
+                        | Token::Chr
+                        | Token::Ord
+                        | Token::Lc
+                        | Token::Uc
+                        | Token::Hex
+                        | Token::Oct
+                        | Token::Abs
+                        | Token::Int
+                        | Token::Ref
+                        | Token::Caller
+                        | Token::Open
+                        | Token::Close
+                        | Token::Read
+                        | Token::Eof
+                        | Token::Delete
+                        | Token::Exists
                 ) {
                     // Function call without parentheses: func arg, ...
                     // Perl prototype-`$` builtins only take a single scalar arg.
@@ -2434,6 +2489,15 @@ fn parse_interp_string(s: &str) -> Expr {
                 while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
                     name.push(chars[i]);
                     i += 1;
+                }
+                // Allow `@Pkg::name` (greedy `::` segments after the head).
+                while i + 1 < chars.len() && chars[i] == ':' && chars[i + 1] == ':' {
+                    name.push_str("::");
+                    i += 2;
+                    while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                        name.push(chars[i]);
+                        i += 1;
+                    }
                 }
                 parts.push(InterpPart::ArrayVar(name));
             }

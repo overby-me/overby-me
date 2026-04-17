@@ -1504,6 +1504,10 @@ impl Interpreter {
                                 ri += 1;
                             }
                         }
+                        // Expand scalar variables (`$var`, `${var}`) before
+                        // handing the replacement to regex's `$N` substitution
+                        // — leaves `$0..$9` alone so captures still resolve.
+                        let replacement = self.interp_regex_pattern(&replacement);
 
                         // Helper closure to expand $N and ${N} references in replacement
                         let expand_replacement = |caps: &regex::Captures,
@@ -1610,6 +1614,48 @@ impl Interpreter {
             }
 
             Expr::Call(name, args) => self.eval_call(name, args),
+
+            Expr::MethodCall(recv, method, args) => {
+                // Resolve the invocant's class name. For `Class->method`
+                // the receiver parses as an ident/string; for an object
+                // ref, take its blessed package via Value::ref_type.
+                let class = match recv.as_ref() {
+                    Expr::StringLit(s) => s.clone(),
+                    _ => {
+                        let v = self.eval_expr(recv);
+                        let rt = v.ref_type();
+                        if !rt.is_empty() {
+                            rt.to_string()
+                        } else {
+                            v.to_str()
+                        }
+                    }
+                };
+                // `Foo->isa('Bar')` — walk @Foo::ISA transitively.
+                if method == "isa" {
+                    let target = args
+                        .first()
+                        .map(|a| self.eval_expr(a).to_str())
+                        .unwrap_or_default();
+                    let yes = isa_walk(self, &class, &target);
+                    return Value::Num(if yes { 1.0 } else { 0.0 });
+                }
+                if method == "can" {
+                    let m = args
+                        .first()
+                        .map(|a| self.eval_expr(a).to_str())
+                        .unwrap_or_default();
+                    let q = format!("{class}::{m}");
+                    return Value::Num(if self.subs.contains_key(&q) { 1.0 } else { 0.0 });
+                }
+                // Otherwise dispatch — synthesize a Call to Class::method,
+                // with the class name prepended as the invocant.
+                let qualified = format!("{class}::{method}");
+                let mut all_args: Vec<Expr> = Vec::with_capacity(args.len() + 1);
+                all_args.push(Expr::StringLit(class));
+                all_args.extend(args.iter().cloned());
+                self.eval_call(&qualified, &all_args)
+            }
 
             Expr::Defined(expr) => {
                 let val = self.eval_expr(expr);
@@ -2479,6 +2525,13 @@ impl Interpreter {
                     Value::Undef
                 }
             }
+            "splice" if matches!(args.first(), Some(Expr::ArrayVar(n)) if self.readonly_arrays.contains(n)) =>
+            {
+                self.pending_flow = Some(Flow::Die(
+                    "Modification of a read-only value attempted".to_string(),
+                ));
+                Value::Undef
+            }
             "splice" => {
                 // splice(@array, offset, length, @replacement) — mutate in
                 // place, return removed chunk (list ctx) or last (scalar).
@@ -2621,13 +2674,14 @@ impl Interpreter {
                             }
                             Value::Undef
                         }
-                        Expr::HashSlice(name, keys) => {
+                        Expr::HashSlice(name, keys) | Expr::HashKVSlice(name, keys) => {
                             let keys_v: Vec<String> = keys
                                 .iter()
                                 .flat_map(|k| self.eval_list(k))
                                 .map(|v| v.to_str())
                                 .collect();
                             let mut out = Vec::new();
+                            let is_kv = matches!(a, Expr::HashKVSlice(_, _));
                             let scope_idx = self
                                 .scopes
                                 .iter()
@@ -2635,11 +2689,19 @@ impl Interpreter {
                             if let Some(idx) = scope_idx {
                                 let h = self.scopes[idx].hashes.get_mut(name).unwrap();
                                 for k in &keys_v {
-                                    out.push(h.remove(k).unwrap_or(Value::Undef));
+                                    let v = h.remove(k).unwrap_or(Value::Undef);
+                                    if is_kv {
+                                        out.push(Value::Str(k.clone()));
+                                    }
+                                    out.push(v);
                                 }
                             } else if let Some(h) = self.globals.hashes.get_mut(name) {
                                 for k in &keys_v {
-                                    out.push(h.remove(k).unwrap_or(Value::Undef));
+                                    let v = h.remove(k).unwrap_or(Value::Undef);
+                                    if is_kv {
+                                        out.push(Value::Str(k.clone()));
+                                    }
+                                    out.push(v);
                                 }
                             }
                             out.into_iter().last().unwrap_or(Value::Undef)
@@ -3550,6 +3612,22 @@ impl Interpreter {
         match expr {
             // Unary + is a pure no-op (keeps list context through it).
             Expr::UnaryOp(UnaryOp::Pos, inner) => self.eval_list(inner),
+            // `(LIST) x N` — if the left-hand side is a parens list,
+            // treat as list-context repeat (Perl's `LIST x N`).
+            Expr::BinOp(BinOp::Repeat, left, right)
+                if matches!(left.as_ref(), Expr::ArrayLit(_)) =>
+            {
+                let items = self.eval_list(left);
+                let n = self.eval_expr(right).to_num() as isize;
+                if n <= 0 {
+                    return Vec::new();
+                }
+                let mut out = Vec::with_capacity(items.len() * n as usize);
+                for _ in 0..n {
+                    out.extend(items.iter().cloned());
+                }
+                out
+            }
             // Ternary in list context: the chosen branch keeps list context.
             Expr::Ternary(cond, then, else_) => {
                 if self.eval_expr(cond).to_bool() {
@@ -3737,13 +3815,17 @@ impl Interpreter {
                         }
                     }
                     "delete" => {
-                        if let Some(Expr::HashSlice(name, keys)) = args.first() {
+                        if let Some(
+                            a0 @ (Expr::HashSlice(name, keys) | Expr::HashKVSlice(name, keys)),
+                        ) = args.first()
+                        {
                             let keys_v: Vec<String> = keys
                                 .iter()
                                 .flat_map(|k| self.eval_list(k))
                                 .map(|v| v.to_str())
                                 .collect();
                             let mut out = Vec::new();
+                            let is_kv = matches!(a0, Expr::HashKVSlice(_, _));
                             let scope_idx = self
                                 .scopes
                                 .iter()
@@ -3751,11 +3833,19 @@ impl Interpreter {
                             if let Some(idx) = scope_idx {
                                 let h = self.scopes[idx].hashes.get_mut(name).unwrap();
                                 for k in &keys_v {
-                                    out.push(h.remove(k).unwrap_or(Value::Undef));
+                                    let v = h.remove(k).unwrap_or(Value::Undef);
+                                    if is_kv {
+                                        out.push(Value::Str(k.clone()));
+                                    }
+                                    out.push(v);
                                 }
                             } else if let Some(h) = self.globals.hashes.get_mut(name) {
                                 for k in &keys_v {
-                                    out.push(h.remove(k).unwrap_or(Value::Undef));
+                                    let v = h.remove(k).unwrap_or(Value::Undef);
+                                    if is_kv {
+                                        out.push(Value::Str(k.clone()));
+                                    }
+                                    out.push(v);
                                 }
                             }
                             out
@@ -4472,6 +4562,22 @@ impl Interpreter {
 /// MODULE` whose `.pm` isn't on disk under @INC. Return the error message
 /// the first such `use` produces; `None` if all `use`s are resolvable (or
 /// are pragmas we silently accept).
+/// Walk the @ISA chain of `class` looking for `target` (depth-first, matches
+/// Perl's default mro). Trivially true when class == target.
+fn isa_walk(interp: &Interpreter, class: &str, target: &str) -> bool {
+    if class == target || class == "UNIVERSAL" {
+        return true;
+    }
+    let isa = interp.get_array(&format!("{class}::ISA"));
+    for parent in &isa {
+        let p = parent.to_str();
+        if isa_walk(interp, &p, target) {
+            return true;
+        }
+    }
+    false
+}
+
 fn compile_time_use_check(
     stmts: &[Stmt],
     line: &mut usize,
