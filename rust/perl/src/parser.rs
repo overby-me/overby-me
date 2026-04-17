@@ -685,6 +685,11 @@ impl Parser {
                     Token::ScalarVar(_) => s.push('$'),
                     Token::ArrayVar(_) => s.push('@'),
                     Token::HashVar(_) => s.push('%'),
+                    // `$$@` lexes as ScalarDeref("") + ArrayVar("") — treat
+                    // each double-sigil as two `$`s for prototype purposes.
+                    Token::ScalarDeref(_) => s.push_str("$$"),
+                    Token::ArrayDeref(_) => s.push_str("$@"),
+                    Token::HashDeref(_) => s.push_str("$%"),
                     Token::Backslash => s.push('\\'),
                     Token::Semi => s.push(';'),
                     Token::StringRepeat => s.push('*'),

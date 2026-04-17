@@ -823,9 +823,8 @@ impl Lexer {
 
                 '"' => {
                     self.pos += 1;
-                    let s = self.read_double_quoted_string('"');
-                    // Check if string needs interpolation
-                    if s.contains('$') || s.contains('@') {
+                    let (s, has_interp) = self.read_double_quoted_string_interp('"');
+                    if has_interp {
                         tokens.push(Token::InterpString(s));
                     } else {
                         tokens.push(Token::StringLit(s));
@@ -1530,7 +1529,10 @@ impl Lexer {
         s
     }
 
-    fn read_double_quoted_string(&mut self, delim: char) -> String {
+    /// Reads a double-quoted (or backtick) string and also reports whether
+    /// the original source contained an *unescaped* `$` or `@` — only
+    /// unescaped sigils trigger string interpolation.
+    fn read_double_quoted_string_interp(&mut self, delim: char) -> (String, bool) {
         let mut s = String::new();
         let mut has_interp = false;
         while self.pos < self.input.len() && self.ch() != delim {
@@ -1700,7 +1702,11 @@ impl Lexer {
         if !has_interp {
             s = s.replace('\x01', "$").replace('\x02', "@");
         }
-        s
+        (s, has_interp)
+    }
+
+    fn read_double_quoted_string(&mut self, delim: char) -> String {
+        self.read_double_quoted_string_interp(delim).0
     }
 
     fn find_matching_delim(open: char) -> char {
