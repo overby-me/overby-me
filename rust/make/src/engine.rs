@@ -1692,8 +1692,24 @@ impl Engine {
                 }
             }
         } else if self.question {
-            // -q: don't execute the recipe; report that update was needed.
-            *self.question_needs_update.borrow_mut() = true;
+            // -q: don't execute the recipe; report that update was
+            // needed — but ignore recipes that would produce nothing
+            // to run (empty/whitespace-only lines, or lines that
+            // expand to empty). A target whose entire recipe is a
+            // no-op doesn't count as "needing update".
+            let has_real_recipe = recipe.iter().any(|line| {
+                let mut s = line.as_str().trim_start();
+                while let Some(r) = s.strip_prefix(['@', '-', '+']) {
+                    s = r.trim_start();
+                }
+                if s.trim().is_empty() {
+                    return false;
+                }
+                !expand::expand(s, self).trim().is_empty()
+            });
+            if has_real_recipe {
+                *self.question_needs_update.borrow_mut() = true;
+            }
         } else if let Err(e) = self.execute_recipe(
             target,
             &recipe,
