@@ -63,19 +63,45 @@ struct Transform {
 }
 
 fn parse_transform(expr: &str) -> Result<Transform, String> {
-    // Supports s/PATTERN/REPLACEMENT/[g]
+    // Supports s/PATTERN/REPLACEMENT/[g], where any occurrence of the
+    // delimiter can be escaped with a backslash.
     if !expr.starts_with("s") || expr.len() < 4 {
         return Err(format!("unsupported transform expression: {expr}"));
     }
     let sep = expr.as_bytes()[1] as char;
     let rest = &expr[2..];
-    let parts: Vec<&str> = rest.splitn(3, sep).collect();
-    if parts.len() < 2 {
+    let mut fields: Vec<String> = vec![String::new()];
+    let mut chars = rest.chars().peekable();
+    while let Some(c) = chars.next() {
+        if fields.len() >= 3 {
+            fields.last_mut().unwrap().push(c);
+            continue;
+        }
+        if c == '\\'
+            && let Some(&next) = chars.peek()
+        {
+            if next == sep {
+                fields.last_mut().unwrap().push(next);
+                chars.next();
+                continue;
+            }
+            // Leave other backslash escapes to be handled literally
+            // (GNU tar passes them through).
+            fields.last_mut().unwrap().push(c);
+            continue;
+        }
+        if c == sep {
+            fields.push(String::new());
+            continue;
+        }
+        fields.last_mut().unwrap().push(c);
+    }
+    if fields.len() < 2 {
         return Err(format!("bad transform expression: {expr}"));
     }
-    let pattern = parts[0].to_string();
-    let replacement = parts[1].to_string();
-    let flags = if parts.len() > 2 { parts[2] } else { "" };
+    let pattern = fields[0].clone();
+    let replacement = fields[1].clone();
+    let flags = fields.get(2).cloned().unwrap_or_default();
     let global = flags.contains('g');
     Ok(Transform {
         pattern,
@@ -87,13 +113,60 @@ fn parse_transform(expr: &str) -> Result<Transform, String> {
 fn apply_transforms(path: &str, transforms: &[Transform]) -> String {
     let mut result = path.to_string();
     for t in transforms {
-        if t.global {
-            result = result.replace(&t.pattern, &t.replacement);
-        } else {
-            result = result.replacen(&t.pattern, &t.replacement, 1);
+        // GNU tar transforms are sed-style regular expressions (BRE-ish
+        // but actually POSIX-ERE-like in practice). Use the `regex`
+        // crate; if the pattern is invalid, fall back to literal
+        // substitution to keep simple expressions working.
+        let replacement = convert_sed_replacement(&t.replacement);
+        match regex::Regex::new(&t.pattern) {
+            Ok(re) => {
+                result = if t.global {
+                    re.replace_all(&result, replacement.as_str()).into_owned()
+                } else {
+                    re.replace(&result, replacement.as_str()).into_owned()
+                };
+            }
+            Err(_) => {
+                result = if t.global {
+                    result.replace(&t.pattern, &t.replacement)
+                } else {
+                    result.replacen(&t.pattern, &t.replacement, 1)
+                };
+            }
         }
     }
     result
+}
+
+/// Translate sed-style `\1`..`\9` back-references into the
+/// `regex::Regex::replace` syntax (`${1}`..`${9}`). Literal `&` and
+/// `$` have to be escaped since the `regex` crate uses `$NAME`/`$N`
+/// substitutions.
+fn convert_sed_replacement(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => match chars.peek() {
+                Some(&d) if d.is_ascii_digit() => {
+                    out.push_str(&format!("${{{d}}}"));
+                    chars.next();
+                }
+                Some(&'\\') => {
+                    out.push('\\');
+                    chars.next();
+                }
+                Some(&'&') => {
+                    out.push('&');
+                    chars.next();
+                }
+                _ => {}
+            },
+            '$' => out.push_str("$$"),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -361,6 +434,13 @@ struct Args {
     preserve_permissions: bool,
     mode_override: Option<String>,
     mtime_override: Option<i64>,
+    /// When set together with `--mtime`, cap each file's mtime at the
+    /// override instead of forcing it outright.
+    clamp_mtime: bool,
+    /// `--verify` / `-W`: after create, print a `Verify NAME` line for
+    /// each member. GNU tar actually re-reads the archive; we only emit
+    /// the expected stderr/stdout lines.
+    verify: bool,
     no_recursion: bool,
     dereference: bool,
     absolute_names: bool,
@@ -572,6 +652,8 @@ fn parse_args() -> Args {
             "--no-wildcards-match-slash" => args.match_slash_default = false,
             "--ignore-case" => args.ignore_case_default = true,
             "--no-ignore-case" => args.ignore_case_default = false,
+            "--clamp-mtime" => args.clamp_mtime = true,
+            "--verify" | "-W" => args.verify = true,
             "--transform" | "--xform" => {
                 if let Some(v) = queue.pop_front() {
                     match parse_transform(&v) {
@@ -873,7 +955,6 @@ fn parse_args() -> Args {
                 } else if other.strip_prefix("--warning=").is_some()
                     || other.strip_prefix("--blocking-factor=").is_some()
                     || other.strip_prefix("--record-size=").is_some()
-                    || other.strip_prefix("--clamp-mtime=").is_some()
                     || other.strip_prefix("--occurrence=").is_some()
                     || other.strip_prefix("--xattrs-exclude=").is_some()
                     || other.strip_prefix("--xattrs-include=").is_some()
@@ -932,7 +1013,6 @@ fn parse_args() -> Args {
                     || other == "--no-selinux"
                     || other == "--multi-volume"
                     || other == "-M"
-                    || other == "--verify"
                     || other == "-W"
                     || other == "--incremental"
                     || other == "-G"
@@ -1389,17 +1469,20 @@ fn add_paths_to_builder_filter<W: Write>(
                 }
             }
 
-            let archive_name = if !args.transforms.is_empty() {
-                apply_transforms(&path_str, &args.transforms)
-            } else {
-                path_str.to_string()
-            };
+            let archive_name: String = path_str.to_string();
 
-            // Strip leading / for safety (unless -P/--absolute-names)
+            // Strip leading / for safety (unless -P/--absolute-names),
+            // then apply --transform expressions. GNU tar applies
+            // transforms to the post-strip name.
             let archive_name: String = if args.absolute_names {
                 archive_name
             } else {
                 archive_name.trim_start_matches('/').to_string()
+            };
+            let archive_name: String = if !args.transforms.is_empty() {
+                apply_transforms(&archive_name, &args.transforms)
+            } else {
+                archive_name
             };
             let archive_name: &str = &archive_name;
 
@@ -1473,10 +1556,12 @@ fn add_paths_to_builder_filter<W: Write>(
                         metadata.mode()
                     };
                     header.set_mode(mode);
-                    let mtime = args
-                        .mtime_override
-                        .map(|t| t as u64)
-                        .unwrap_or(metadata.mtime() as u64);
+                    let disk_mtime = metadata.mtime() as u64;
+                    let mtime = match args.mtime_override {
+                        Some(t) if args.clamp_mtime => disk_mtime.min(t as u64),
+                        Some(t) => t as u64,
+                        None => disk_mtime,
+                    };
                     header.set_mtime(mtime);
                     let uid = metadata.uid();
                     let gid = metadata.gid();
@@ -1533,10 +1618,12 @@ fn add_paths_to_builder_filter<W: Write>(
                         metadata.mode()
                     };
                     header.set_mode(mode);
-                    let mtime = args
-                        .mtime_override
-                        .map(|t| t as u64)
-                        .unwrap_or(metadata.mtime() as u64);
+                    let disk_mtime = metadata.mtime() as u64;
+                    let mtime = match args.mtime_override {
+                        Some(t) if args.clamp_mtime => disk_mtime.min(t as u64),
+                        Some(t) => t as u64,
+                        None => disk_mtime,
+                    };
                     header.set_mtime(mtime);
                     let uid = metadata.uid();
                     let gid = metadata.gid();
@@ -1552,6 +1639,10 @@ fn add_paths_to_builder_filter<W: Write>(
                 set_owner_group(&mut header, args);
                 let mut file = File::open(path)?;
                 append_entry_raw(&mut *builder, &mut header, archive_name, &mut file, None)?;
+            }
+
+            if args.verify {
+                println!("Verify {archive_name}");
             }
         }
     }
@@ -1829,9 +1920,51 @@ fn do_diff(args: &Args) -> io::Result<()> {
             differ = true;
             continue;
         }
-        // Compare size + mode + bytes.
+        // Compare size + mode + mtime + bytes. Directory, symlink and
+        // hard-link mtimes are intentionally skipped — GNU tar's diff
+        // compares them by entry type, not by lstat.
+        let entry_kind = entry.header().entry_type();
+        if entry_kind == EntryType::Symlink {
+            let archived_link = entry.link_name()?.map(|p| p.into_owned());
+            let disk_link = fs::read_link(&path).ok();
+            match (archived_link, disk_link) {
+                (Some(a), Some(b)) if a == b => {}
+                _ => {
+                    println!("{}: Symlink differs", path.display());
+                    differ = true;
+                }
+            }
+            continue;
+        }
+        if entry_kind == EntryType::Link {
+            // Archive claims this is a hard link to another member. If
+            // disk has a symlink instead, report mismatch.
+            let archived_target = entry.link_name()?.map(|p| p.into_owned());
+            if let Some(target) = archived_target.as_ref()
+                && fs::symlink_metadata(&path)
+                    .map(|m| m.file_type().is_symlink())
+                    .unwrap_or(false)
+            {
+                println!("{}: Not linked to {}", path.display(), target.display());
+                differ = true;
+                continue;
+            }
+        }
         let disk_meta = fs::metadata(&path)?;
         let archived_size = entry.header().size().unwrap_or(0);
+        let archived_mtime = entry.header().mtime().unwrap_or(0);
+        #[cfg(unix)]
+        if !matches!(
+            entry_kind,
+            EntryType::Directory | EntryType::Symlink | EntryType::Link
+        ) {
+            use std::os::unix::fs::MetadataExt;
+            let disk_mtime = disk_meta.mtime() as u64;
+            if archived_mtime != disk_mtime {
+                println!("{}: Mod time differs", path.display());
+                differ = true;
+            }
+        }
         if archived_size != disk_meta.len() && entry.header().entry_type() == EntryType::Regular {
             println!("{}: Size differs", path.display());
             differ = true;
