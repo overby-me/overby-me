@@ -768,13 +768,29 @@ fn call_function(
         "call" => {
             if !args.is_empty() {
                 let func_name = expand_with_auto(&args[0], engine, auto_vars);
+                let func_name = func_name.trim();
+                // If the named function is actually a built-in and the
+                // user hasn't defined a variable by that name, dispatch
+                // directly to the built-in. GNU make allows `call` over
+                // built-ins for things like `$(call notdir,…)`.
+                if is_builtin_function(func_name) && engine.lookup_var_raw(func_name).is_empty() {
+                    let rest_args: Vec<String> = args
+                        .iter()
+                        .skip(1)
+                        .map(|a| expand_with_auto(a, engine, auto_vars))
+                        .collect();
+                    let joined = rest_args.join(",");
+                    if let Some(result) = call_function(func_name, &joined, engine, auto_vars) {
+                        return Some(result);
+                    }
+                }
                 // Use the raw (unexpanded) body so `$1`/`$2`/… remain
                 // intact for substitution below.
-                let mut body = engine.lookup_var_raw(func_name.trim());
+                let mut body = engine.lookup_var_raw(func_name);
                 // Replace numbered parameter references. `$1`–`$9` (bare)
                 // and `$(1)`/`${1}` forms.
-                body = body.replace("$(0)", func_name.trim());
-                body = body.replace("${0}", func_name.trim());
+                body = body.replace("$(0)", func_name);
+                body = body.replace("${0}", func_name);
                 for (i, arg) in args.iter().skip(1).enumerate() {
                     let val = expand_with_auto(arg, engine, auto_vars);
                     let n = i + 1;

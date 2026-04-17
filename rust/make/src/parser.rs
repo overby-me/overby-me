@@ -47,17 +47,32 @@ impl Parser {
         let mut line_nos = Vec::new();
         let mut current = String::new();
         let mut start_line = 0usize;
+        let mut in_continuation = false;
+        let mut logical_is_recipe = false;
         for (i, line) in input.lines().enumerate() {
             if current.is_empty() {
                 start_line = i + 1;
+                logical_is_recipe = line.starts_with('\t');
             }
-            if let Some(stripped) = line.strip_suffix('\\') {
+            // After a backslash-newline, leading whitespace on the
+            // next physical line is collapsed — except inside a
+            // recipe (logical line that started with the recipe
+            // prefix), where whitespace is preserved because the
+            // shell interprets continuations.
+            let effective = if in_continuation && !logical_is_recipe {
+                line.trim_start()
+            } else {
+                line
+            };
+            if let Some(stripped) = effective.strip_suffix('\\') {
                 current.push_str(stripped);
                 current.push(' ');
+                in_continuation = true;
             } else {
-                current.push_str(line);
+                current.push_str(effective);
                 lines.push(std::mem::take(&mut current));
                 line_nos.push(start_line);
+                in_continuation = false;
             }
         }
         if !current.is_empty() {
@@ -222,8 +237,12 @@ impl Parser {
             }
         }
 
-        // Undefine
-        if let Some(rest) = trimmed.strip_prefix("undefine ") {
+        // Undefine. Skip when the line also parses as an assignment —
+        // `undefine = value` is a variable named `undefine`, not an
+        // undefine directive.
+        if let Some(rest) = trimmed.strip_prefix("undefine ")
+            && try_parse_assignment(trimmed).is_none()
+        {
             self.advance();
             return Ok(Some(Directive::Undefine(rest.trim().to_string())));
         }
@@ -275,16 +294,34 @@ impl Parser {
             };
             let after = strip_makefile_comment(after).trim();
             // Strip optional modifier prefixes on target-specific
-            // assignments. We accept and currently ignore the distinction
-            // (private/export would need extra scope semantics).
-            let after_mod = after
-                .strip_prefix("private ")
-                .or_else(|| after.strip_prefix("override "))
-                .or_else(|| after.strip_prefix("export "))
-                .unwrap_or(after);
-            if !after_mod.is_empty()
-                && let Some(assign) = try_parse_assignment(after_mod)
-            {
+            // assignments. GNU make accepts any combination of
+            // `private`, `export`, and `override` in any order before
+            // the assignment; we accept them but currently ignore the
+            // distinction (the assignment itself is applied as a
+            // target-specific override regardless).
+            let mut after_mod = after;
+            loop {
+                let trimmed_mod = after_mod
+                    .strip_prefix("private ")
+                    .or_else(|| after_mod.strip_prefix("override "))
+                    .or_else(|| after_mod.strip_prefix("export "));
+                match trimmed_mod {
+                    Some(s) => after_mod = s.trim_start(),
+                    None => break,
+                }
+            }
+            // Prefer the original (un-stripped) text if it itself
+            // parses as an assignment — this handles the case where a
+            // modifier word (e.g. `private`) is actually the variable
+            // name, as in `a: private = a`.
+            let assign = try_parse_assignment(after).or_else(|| {
+                if after_mod.is_empty() {
+                    None
+                } else {
+                    try_parse_assignment(after_mod)
+                }
+            });
+            if let Some(assign) = assign {
                 let targets_str = trimmed[..colon].to_string();
                 self.advance();
                 return Ok(Some(Directive::TargetVarAssign(

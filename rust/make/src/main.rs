@@ -195,7 +195,7 @@ fn run() -> i32 {
                 // No-op — we don't track undefined-var warnings yet.
                 mflags_long.push("--warn-undefined-variables".to_string());
             }
-            "--debug" | "--debug=a" | "--debug=b" | "--debug=basic" | "--debug=v"
+            "-d" | "--debug" | "--debug=a" | "--debug=b" | "--debug=basic" | "--debug=v"
             | "--debug=verbose" | "--debug=i" | "--debug=implicit" | "--debug=j"
             | "--debug=jobs" | "--debug=m" | "--debug=makefile" | "--debug=n" | "--debug=none" => {
                 // Accept debug flags silently.

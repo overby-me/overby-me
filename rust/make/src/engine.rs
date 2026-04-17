@@ -770,26 +770,16 @@ impl Engine {
             })
             .collect();
 
-        let prereqs: Vec<String> = rule
-            .prerequisites
-            .iter()
-            .flat_map(|p| {
-                expand::expand(p, self)
-                    .split_whitespace()
-                    .map(|s| self.resolve_library_prereq(s))
-                    .collect::<Vec<_>>()
-            })
+        // Join prereqs before expansion so `$<space>` and similar
+        // single-char references span what the parser split apart.
+        let prereqs: Vec<String> = expand::expand(&rule.prerequisites.join(" "), self)
+            .split_whitespace()
+            .map(|s| self.resolve_library_prereq(s))
             .collect();
 
-        let order_only: Vec<String> = rule
-            .order_only
-            .iter()
-            .flat_map(|p| {
-                expand::expand(p, self)
-                    .split_whitespace()
-                    .map(|s| s.to_string())
-                    .collect::<Vec<_>>()
-            })
+        let order_only: Vec<String> = expand::expand(&rule.order_only.join(" "), self)
+            .split_whitespace()
+            .map(|s| s.to_string())
             .collect();
 
         // Handle special targets. A rule line may combine a special target
