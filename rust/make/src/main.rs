@@ -163,6 +163,7 @@ fn run() -> i32 {
             "-s" | "--silent" | "--quiet" => {
                 engine.silent = true;
                 mflags_short.push('s');
+                mflags_long.retain(|s| s != "--no-silent");
             }
             "--no-silent" => {
                 engine.silent = false;
@@ -446,9 +447,16 @@ fn run() -> i32 {
     // long flags as separate `--opt` tokens, then command-line var
     // assignments. GNU make format: sub-makes re-apply these when they
     // inherit MAKEFLAGS through the environment.
+    // GNU make: when there are only long options (no short flag
+    // cluster), MAKEFLAGS still begins with a space — e.g.
+    // `MAKEFLAGS= --no-silent`. This lets scripts like `ifeq
+    // ($(firstword $(MAKEFLAGS)),)` detect the long-only case.
     let mut mflags = mflags_short.clone();
-    for long in &mflags_long {
-        if !mflags.is_empty() {
+    if mflags_short.is_empty() && !mflags_long.is_empty() {
+        mflags.push(' ');
+    }
+    for (idx, long) in mflags_long.iter().enumerate() {
+        if idx > 0 || !mflags_short.is_empty() {
             mflags.push(' ');
         }
         mflags.push_str(long);

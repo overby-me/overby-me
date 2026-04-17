@@ -1558,6 +1558,7 @@ impl Engine {
         let mut first: Option<String> = None;
         for pat in patterns.split_whitespace() {
             if !pat.contains('%') {
+                eprintln!("make: .LIBPATTERNS element '{pat}' is not a pattern");
                 continue;
             }
             let candidate = pat.replace('%', lib);
