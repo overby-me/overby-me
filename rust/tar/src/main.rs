@@ -535,6 +535,8 @@ struct Args {
     to_stdout: bool,
     /// --remove-files: delete the source files after they're archived.
     remove_files: bool,
+    /// --index-file=FILE: write -v listings to FILE instead of stderr.
+    index_file: Option<String>,
     /// --backup: rename existing destination files to NAME~ before
     /// overwriting during extract.
     backup: bool,
@@ -928,6 +930,9 @@ fn parse_args() -> Args {
             "--skip-old-files" => args.skip_old_files = true,
             "-O" | "--to-stdout" => args.to_stdout = true,
             "--remove-files" => args.remove_files = true,
+            "--index-file" => {
+                args.index_file = queue.pop_front();
+            }
             "--backup" => args.backup = true,
             "--ignore-failed-read" => args.ignore_failed_read = true,
             "--owner-map" => {
@@ -1113,7 +1118,6 @@ fn parse_args() -> Args {
             }
             "--checkpoint"
             | "--checkpoint-action"
-            | "--index-file"
             | "--volno-file"
             | "--rsh-command"
             | "--new-volume-script"
@@ -1165,6 +1169,8 @@ fn parse_args() -> Args {
                         match_slash: args.match_slash_default,
                         ignore_case: args.ignore_case_default,
                     });
+                } else if let Some(val) = other.strip_prefix("--index-file=") {
+                    args.index_file = Some(val.to_string());
                 } else if let Some(val) = other.strip_prefix("--label=") {
                     args.label = Some(val.to_string());
                 } else if let Some(val) = other.strip_prefix("--owner-map=") {
@@ -1242,7 +1248,6 @@ fn parse_args() -> Args {
                     || other.strip_prefix("--sparse-version=").is_some()
                     || other.strip_prefix("--tape-length=").is_some()
                     || other.strip_prefix("--new-volume-script=").is_some()
-                    || other.strip_prefix("--index-file=").is_some()
                     || other.strip_prefix("--checkpoint=").is_some()
                     || other.strip_prefix("--checkpoint-action=").is_some()
                     || other.strip_prefix("--volno-file=").is_some()
@@ -1843,7 +1848,13 @@ fn add_paths_to_builder_filter<W: Write>(
                 } else {
                     display_name.clone()
                 };
-                if to_stderr {
+                if let Some(index_path) = &args.index_file {
+                    let _ = fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(index_path)
+                        .and_then(|mut f| writeln!(f, "{line}"));
+                } else if to_stderr {
                     eprintln!("{line}");
                 } else {
                     println!("{line}");
