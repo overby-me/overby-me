@@ -244,8 +244,8 @@ pub(crate) fn parse_args() -> Options {
             }
             "-C" | "--continue-at" => {
                 i += 1;
-                let _val = next_arg(&args, i, "-C");
-                // TODO: implement resume transfer
+                let val = next_arg(&args, i, "-C");
+                opts.resume_from = Some(val);
             }
             "--form-string" => {
                 i += 1;

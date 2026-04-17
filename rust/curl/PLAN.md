@@ -6,9 +6,9 @@ Use the upstream [curl test suite](https://github.com/curl/curl/tree/master/test
 
 ## Current Status
 
-**39/200 tests passing** (19.5%) — from the curl 8.18.0 test suite.
+**40/200 tests passing** (20%) — from the curl 8.18.0 test suite.
 
-Passing: 1, 2, 3, 4, 6, 7, 10, 11, 12, 13, 15, 19, 22, 23, 28, 30, 34, 35, 37, 40, 41, 42, 47, 49, 50, 51, 52, 54, 55, 57, 59, 97, 151, 152, 160, 164, 180, 181, 198
+Passing: 1, 2, 3, 4, 6, 7, 10, 11, 12, 13, 15, 19, 22, 23, 28, 30, 34, 35, 37, 40, 41, 42, 47, 49, 50, 51, 52, 54, 55, 57, 59, 97, 151, 152, 160, 164, 180, 181, 188, 198
 
 Test infrastructure is operational: `testsuite.nix` builds curl's C test servers from `pkgs.curl.src`, then runs `runtests.pl -c` against `rust-curl-dev`.
 
@@ -246,9 +246,9 @@ Current gaps:
 
 ## Test Inventory
 
-### Passing tests (39)
+### Passing tests (40)
 
-1, 2, 3, 4, 6, 7, 10, 11, 12, 13, 15, 19, 22, 23, 28, 30, 34, 35, 37, 40, 41, 42, 47, 49, 50, 51, 52, 54, 55, 57, 59, 97, 151, 152, 160, 164, 180, 181, 198
+1, 2, 3, 4, 6, 7, 10, 11, 12, 13, 15, 19, 22, 23, 28, 30, 34, 35, 37, 40, 41, 42, 47, 49, 50, 51, 52, 54, 55, 57, 59, 97, 151, 152, 160, 164, 180, 181, 188, 198
 
 ### Major failure categories (from tests 1-200)
 

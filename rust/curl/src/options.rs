@@ -38,6 +38,7 @@ pub struct Options {
     pub(crate) cacert: Option<PathBuf>,
     pub(crate) cert: Option<PathBuf>,
     pub(crate) cert_key: Option<PathBuf>,
+    pub(crate) resume_from: Option<String>,   // -C / --continue-at
 }
 
 #[derive(Clone, Debug)]
@@ -87,6 +88,7 @@ impl Default for Options {
             cacert: None,
             cert: None,
             cert_key: None,
+            resume_from: None,
         }
     }
 }

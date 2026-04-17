@@ -44,6 +44,11 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> Vec<u8> {
     // Range — curl sends it early, before User-Agent.
     if let Some(ref range) = opts.range {
         req.push_str(&format!("Range: bytes={range}\r\n"));
+    } else if let Some(ref resume) = opts.resume_from {
+        if resume != "-" {
+            // -C <offset> sends Range: bytes=<offset>-
+            req.push_str(&format!("Range: bytes={resume}-\r\n"));
+        }
     }
 
     // Check if custom headers override defaults.
@@ -128,26 +133,34 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> Vec<u8> {
     let body = build_body(opts);
 
     if let Some(ref body) = body {
-        // Set Content-Type if not already set by custom headers.
+        // Set Content-Type and Content-Length if not already set by custom headers.
         let has_content_type = opts
             .headers
             .iter()
             .any(|(k, _)| k.eq_ignore_ascii_case("content-type"));
+        let has_content_length = opts
+            .headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("content-length"));
         let content_len_hdr = format!("Content-Length: {}\r\n", body.len());
         if !has_content_type {
             if !opts.form_fields.is_empty() {
                 let boundary = multipart_boundary(opts);
-                req.push_str(&content_len_hdr);
+                if !has_content_length {
+                    req.push_str(&content_len_hdr);
+                }
                 req.push_str(&format!(
                     "Content-Type: multipart/form-data; boundary={boundary}\r\n"
                 ));
             } else if opts.data.is_some() {
-                req.push_str(&content_len_hdr);
+                if !has_content_length {
+                    req.push_str(&content_len_hdr);
+                }
                 req.push_str("Content-Type: application/x-www-form-urlencoded\r\n");
-            } else {
+            } else if !has_content_length {
                 req.push_str(&content_len_hdr);
             }
-        } else {
+        } else if !has_content_length {
             req.push_str(&content_len_hdr);
         }
     }
