@@ -1999,7 +1999,13 @@ impl Engine {
                 // from its environment — even if a makefile assignment
                 // later changed the value (and thus the origin). The
                 // child would otherwise inherit our stale env entry.
+                // SHELL is special: `SHELL := …` changes the shell
+                // make uses internally but must not be exported to
+                // recipes (keeps the user's login shell visible there).
                 for name in self.env_inherited.borrow().iter() {
+                    if name == "SHELL" {
+                        continue;
+                    }
                     let value = self.lookup_var(name);
                     cmd.env(name, &value);
                 }
