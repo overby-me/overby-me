@@ -543,6 +543,9 @@ struct Args {
     one_top_level: Option<String>,
     /// --show-transformed-names: show listings with post-transform paths.
     show_transformed: bool,
+    /// Set when any positional (path-affecting) option was given after
+    /// a non-option argument; GNU tar warns and exits 2 at the end.
+    positional_options_seen: bool,
     /// --backup: rename existing destination files to NAME~ before
     /// overwriting during extract.
     backup: bool,
@@ -901,13 +904,24 @@ fn parse_args() -> Args {
             }
             "--exclude" => {
                 if let Some(v) = queue.pop_front() {
-                    args.excludes.push(ExcludeEntry {
-                        pattern: v,
-                        wildcards: args.wildcards_default,
-                        anchored: args.anchored_default,
-                        match_slash: args.match_slash_default,
-                        ignore_case: args.ignore_case_default,
-                    });
+                    if !args.paths.is_empty() {
+                        if !args.positional_options_seen {
+                            eprintln!(
+                                "tar: The following options were used after non-option arguments.  These options are positional and affect only arguments that follow them.  Please, rearrange them properly."
+                            );
+                        }
+                        args.positional_options_seen = true;
+                        args.deferred_fatal = true;
+                        eprintln!("tar: --exclude '{v}' has no effect");
+                    } else {
+                        args.excludes.push(ExcludeEntry {
+                            pattern: v,
+                            wildcards: args.wildcards_default,
+                            anchored: args.anchored_default,
+                            match_slash: args.match_slash_default,
+                            ignore_case: args.ignore_case_default,
+                        });
+                    }
                 }
             }
             "--wildcards" => {
@@ -1178,13 +1192,19 @@ fn parse_args() -> Args {
                         }
                     }
                 } else if let Some(val) = other.strip_prefix("--exclude=") {
-                    args.excludes.push(ExcludeEntry {
-                        pattern: val.to_string(),
-                        wildcards: args.wildcards_default,
-                        anchored: args.anchored_default,
-                        match_slash: args.match_slash_default,
-                        ignore_case: args.ignore_case_default,
-                    });
+                    if !args.paths.is_empty() {
+                        args.positional_options_seen = true;
+                        args.deferred_fatal = true;
+                        eprintln!("tar: --exclude '{val}' has no effect");
+                    } else {
+                        args.excludes.push(ExcludeEntry {
+                            pattern: val.to_string(),
+                            wildcards: args.wildcards_default,
+                            anchored: args.anchored_default,
+                            match_slash: args.match_slash_default,
+                            ignore_case: args.ignore_case_default,
+                        });
+                    }
                 } else if let Some(val) = other.strip_prefix("--index-file=") {
                     args.index_file = Some(val.to_string());
                 } else if let Some(val) = other.strip_prefix("--one-top-level=") {
@@ -3137,6 +3157,9 @@ fn main() {
         process::exit(2);
     }
     if args.deferred_fatal {
+        if args.positional_options_seen {
+            eprintln!("tar: Exiting with failure status due to previous errors");
+        }
         process::exit(2);
     }
 }
