@@ -546,6 +546,8 @@ struct Args {
     /// Set when any positional (path-affecting) option was given after
     /// a non-option argument; GNU tar warns and exits 2 at the end.
     positional_options_seen: bool,
+    /// --occurrence: only for list/extract/diff operations.
+    occurrence: bool,
     /// --backup: rename existing destination files to NAME~ before
     /// overwriting during extract.
     backup: bool,
@@ -964,6 +966,11 @@ fn parse_args() -> Args {
                 args.one_top_level = Some(String::new());
             }
             "--backup" => args.backup = true,
+            "--occurrence" => {
+                if let Some(_v) = queue.pop_front() {
+                    args.occurrence = true;
+                }
+            }
             "--ignore-failed-read" => args.ignore_failed_read = true,
             "--owner-map" => {
                 if let Some(v) = queue.pop_front() {
@@ -1156,7 +1163,6 @@ fn parse_args() -> Args {
             | "--record-size"
             | "--tape-length"
             | "-L"
-            | "--occurrence"
             | "--hole-detection"
             | "--sparse-version"
             | "--xattrs-exclude"
@@ -1239,6 +1245,10 @@ fn parse_args() -> Args {
                         eprintln!("tar: --pax-option can be used only on POSIX archives");
                         process::exit(2);
                     }
+                } else if other.strip_prefix("--listed=").is_some()
+                    || other.strip_prefix("--listed-incremental=").is_some()
+                {
+                    // Listed-incremental snapshot file: accepted as no-op.
                 } else if let Some(val) = other.strip_prefix("--add-file=") {
                     args.paths.push(val.to_string());
                 } else if let Some(val) = other.strip_prefix("--files-from=") {
@@ -1278,7 +1288,10 @@ fn parse_args() -> Args {
                 } else if other.strip_prefix("--warning=").is_some()
                     || other.strip_prefix("--blocking-factor=").is_some()
                     || other.strip_prefix("--record-size=").is_some()
-                    || other.strip_prefix("--occurrence=").is_some()
+                    || other.strip_prefix("--occurrence=").is_some_and(|_| {
+                        args.occurrence = true;
+                        true
+                    })
                     || other.strip_prefix("--xattrs-exclude=").is_some()
                     || other.strip_prefix("--xattrs-include=").is_some()
                     || other.strip_prefix("--acls").is_some()
@@ -3099,6 +3112,21 @@ fn main() {
         eprintln!(
             "tar: You may not specify more than one `-Acdtrux', `--delete' or `--test-label' option"
         );
+        eprintln!("Try 'tar --help' or 'tar --usage' for more information.");
+        process::exit(2);
+    }
+    if args.occurrence && (args.create || args.append || args.update) {
+        eprintln!("tar: '--occurrence' cannot be used with '-c'");
+        eprintln!("Try 'tar --help' or 'tar --usage' for more information.");
+        process::exit(2);
+    }
+    if args.occurrence && args.paths.iter().all(|p| p.starts_with('\0')) {
+        eprintln!("tar: --occurrence is meaningless without a file list");
+        eprintln!("Try 'tar --help' or 'tar --usage' for more information.");
+        process::exit(2);
+    }
+    if args.verify && (args.list || args.extract || args.diff) {
+        eprintln!("tar: '--verify' cannot be used with '-t'");
         eprintln!("Try 'tar --help' or 'tar --usage' for more information.");
         process::exit(2);
     }
