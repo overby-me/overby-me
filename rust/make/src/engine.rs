@@ -94,6 +94,11 @@ pub struct Engine {
     /// top-level parse completes so rules defined later in the same
     /// makefile can build the missing include.
     pending_includes: RefCell<Vec<(String, bool)>>,
+    /// Names of variables originally inherited from the environment.
+    /// We track these separately from `VarOrigin` so we can re-export
+    /// them to child processes even after a makefile assignment has
+    /// changed their value (and consequently their origin).
+    env_inherited: RefCell<HashSet<String>>,
     // Options
     pub jobs: usize,
     pub keep_going: bool,
@@ -181,6 +186,7 @@ impl Engine {
             built_targets: RefCell::new(HashSet::new()),
             eval_queue: RefCell::new(Vec::new()),
             pending_includes: RefCell::new(Vec::new()),
+            env_inherited: RefCell::new(HashSet::new()),
             jobs: 1,
             keep_going: false,
             dry_run: false,
@@ -244,6 +250,7 @@ impl Engine {
 
         // Import environment variables
         for (key, value) in std::env::vars() {
+            engine.env_inherited.borrow_mut().insert(key.clone());
             if !engine.vars.borrow().contains_key(&key) {
                 engine.set_var_with_origin(&key, &value, VarFlavor::Simple, VarOrigin::Environment);
             }
@@ -1022,6 +1029,7 @@ impl Engine {
         };
         match std::fs::read_to_string(&resolved) {
             Ok(content) => {
+                self.append_makefile_list(&resolved);
                 let mut parser = crate::parser::Parser::new_with_source(&content, resolved.clone());
                 match parser.parse() {
                     Ok(directives) => self.load_makefile(&directives),
@@ -1038,6 +1046,21 @@ impl Engine {
                 }
             }
         }
+    }
+
+    fn append_makefile_list(&self, path: &str) {
+        let current = self.lookup_var_raw("MAKEFILE_LIST");
+        let new_value = if current.is_empty() {
+            path.to_string()
+        } else {
+            format!("{current} {path}")
+        };
+        self.set_var_with_origin(
+            "MAKEFILE_LIST",
+            &new_value,
+            VarFlavor::Simple,
+            VarOrigin::Default,
+        );
     }
 
     /// Load a Makefile from a string (used for stdin input via `-f -`).
@@ -1848,6 +1871,14 @@ impl Engine {
                     cmd.env(name, &var.value);
                 }
             } else {
+                // Re-export any variable the make process inherited
+                // from its environment — even if a makefile assignment
+                // later changed the value (and thus the origin). The
+                // child would otherwise inherit our stale env entry.
+                for name in self.env_inherited.borrow().iter() {
+                    let value = self.lookup_var(name);
+                    cmd.env(name, &value);
+                }
                 for name in self.exports.borrow().iter() {
                     let value = self.lookup_var(name);
                     cmd.env(name, &value);
