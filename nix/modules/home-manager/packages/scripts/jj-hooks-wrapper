@@ -1,12 +1,19 @@
 #!/usr/bin/env nu
 
-def --wrapped main [...args: string] {
+def --wrapped main [...raw_args: string] {
     let real_jj = "@JJ_BIN@"
 
-    if ($args | is-empty) {
+    if ($raw_args | is-empty) {
         ^$real_jj
         return
     }
+
+    # Nushell's `--wrapped main` preserves literal `"..."` around argv entries
+    # with whitespace or special characters (e.g. `-m "chore(x): msg"` arrives
+    # as the literal string `"chore(x): msg"`). Unquote every arg up front so
+    # downstream logic — both hook validation and the forwarded `^$real_jj`
+    # spawn — sees the plain user-intended values.
+    let args = ($raw_args | each {|a| unquote-arg $a})
 
     let subcommand = $args.0
 
@@ -105,6 +112,19 @@ def get-working-description [real_jj: string, subcommand: string] {
         ^$real_jj log -r $rev --no-graph -T 'description' --ignore-working-copy | str trim
     } catch {
         null
+    }
+}
+
+# Strip the surrounding quotes that nushell's `--wrapped main` adds to argv
+# entries containing whitespace, parens, or other special characters. Without
+# this, extracted -m/-r values retain literal `"..."` and `\"` sequences,
+# which breaks downstream consumers like prepare-commit-msg hooks.
+def unquote-arg [arg: string] {
+    let len = ($arg | str length)
+    if $len >= 2 and ($arg | str starts-with '"') and ($arg | str ends-with '"') {
+        $arg | str substring 1..-2 | str replace --all --regex '\\(.)' '${1}'
+    } else {
+        $arg
     }
 }
 
