@@ -18,6 +18,7 @@ pub enum Token {
     ArrayDeref(String),  // @$name or @{$name} — dereference a scalar ref as array
     HashDeref(String),   // %$name or %{$name} — dereference a scalar ref as hash
     ScalarDeref(String), // $$name or ${$name} — dereference a scalar ref as scalar
+    Glob(String),        // *NAME — typeglob reference into the symbol table
     ArrayLen(String),    // $#name
 
     // Keywords
@@ -104,66 +105,67 @@ pub enum Token {
     Stat,
 
     // Operators
-    Assign,           // =
-    Plus,             // +
-    Minus,            // -
-    Star,             // *
-    Slash,            // /
-    Percent,          // %
-    Power,            // **
-    Dot,              // .
-    DotDot,           // ..
-    Eq,               // eq
-    Ne,               // ne
-    Lt,               // lt
-    Gt,               // gt
-    Le,               // le
-    Ge,               // ge
-    NumEq,            // ==
-    NumNe,            // !=
-    NumLt,            // <
-    NumGt,            // >
-    NumLe,            // <=
-    NumGe,            // >=
-    Spaceship,        // <=>
-    Cmp,              // cmp
-    LogAnd,           // &&
-    LogOr,            // ||
-    LogNot,           // !
-    DefOr,            // //
-    BitAnd,           // &
-    BitOr,            // |
-    BitXor,           // ^
-    BitNot,           // ~
-    ShiftLeft,        // <<
-    ShiftRight,       // >>
-    PlusPlus,         // ++
-    MinusMinus,       // --
-    PlusAssign,       // +=
-    MinusAssign,      // -=
-    StarAssign,       // *=
-    SlashAssign,      // /=
-    PercentAssign,    // %=
-    DotAssign,        // .=
-    PowerAssign,      // **=
-    LogAndAssign,     // &&=
-    LogOrAssign,      // ||=
-    DefOrAssign,      // //=
-    BitAndAssign,     // &=
-    BitOrAssign,      // |=
-    BitXorAssign,     // ^=
-    ShiftLeftAssign,  // <<=
-    ShiftRightAssign, // >>=
-    Match,            // =~
-    NotMatch,         // !~
-    Arrow,            // ->
-    FatComma,         // =>
-    Question,         // ?
-    Colon,            // :
-    Comma,            // ,
-    Semi,             // ;
-    Backslash,        // \
-    StringRepeat,     // x
+    Assign,             // =
+    Plus,               // +
+    Minus,              // -
+    Star,               // *
+    Slash,              // /
+    Percent,            // %
+    Power,              // **
+    Dot,                // .
+    DotDot,             // ..
+    Eq,                 // eq
+    Ne,                 // ne
+    Lt,                 // lt
+    Gt,                 // gt
+    Le,                 // le
+    Ge,                 // ge
+    NumEq,              // ==
+    NumNe,              // !=
+    NumLt,              // <
+    NumGt,              // >
+    NumLe,              // <=
+    NumGe,              // >=
+    Spaceship,          // <=>
+    Cmp,                // cmp
+    LogAnd,             // &&
+    LogOr,              // ||
+    LogNot,             // !
+    DefOr,              // //
+    BitAnd,             // &
+    BitOr,              // |
+    BitXor,             // ^
+    BitNot,             // ~
+    ShiftLeft,          // <<
+    ShiftRight,         // >>
+    PlusPlus,           // ++
+    MinusMinus,         // --
+    PlusAssign,         // +=
+    MinusAssign,        // -=
+    StarAssign,         // *=
+    SlashAssign,        // /=
+    PercentAssign,      // %=
+    DotAssign,          // .=
+    PowerAssign,        // **=
+    LogAndAssign,       // &&=
+    LogOrAssign,        // ||=
+    DefOrAssign,        // //=
+    BitAndAssign,       // &=
+    BitOrAssign,        // |=
+    BitXorAssign,       // ^=
+    ShiftLeftAssign,    // <<=
+    ShiftRightAssign,   // >>=
+    Match,              // =~
+    NotMatch,           // !~
+    Arrow,              // ->
+    FatComma,           // =>
+    Question,           // ?
+    Colon,              // :
+    Comma,              // ,
+    Semi,               // ;
+    Backslash,          // \
+    StringRepeat,       // x
+    StringRepeatAssign, // x=
 
     // Delimiters
     LParen,
@@ -321,6 +323,18 @@ pub struct Lexer {
     /// 1-based current line. Newlines seen during lex advance it.
     current_line: usize,
     keywords: HashSet<&'static str>,
+    /// Heredocs queued up by `<<TAG` markers whose body hasn't been scanned
+    /// yet. When we hit end-of-line during tokenization we drain these in
+    /// order, backfilling the placeholder StringLit tokens with their body.
+    pending_heredocs: Vec<PendingHeredoc>,
+}
+
+struct PendingHeredoc {
+    tag: String,
+    indent: bool,
+    interpolate: bool,
+    /// Index into `tokens` of the placeholder StringLit we'll replace.
+    placeholder_idx: usize,
 }
 
 impl Lexer {
@@ -426,6 +440,7 @@ impl Lexer {
             token_lines: Vec::new(),
             current_line: 1,
             keywords,
+            pending_heredocs: Vec::new(),
         }
     }
 
@@ -567,6 +582,18 @@ impl Lexer {
                 '\n' => {
                     self.pos += 1;
                     self.current_line += 1;
+                    // Drain any pending heredocs: their body starts immediately
+                    // after this newline, and we backfill the placeholder we
+                    // stashed when `<<TAG` was first scanned.
+                    if !self.pending_heredocs.is_empty() {
+                        let pending = std::mem::take(&mut self.pending_heredocs);
+                        for ph in pending {
+                            let body = self.read_heredoc_body(&ph);
+                            if let Some(Token::StringLit(s)) = tokens.get_mut(ph.placeholder_idx) {
+                                *s = body;
+                            }
+                        }
+                    }
                     // Check for POD after newline
                     if self.pos < self.input.len() && self.ch() == '=' {
                         let rest: String = self.input[self.pos..].iter().take(5).collect();
@@ -958,7 +985,13 @@ impl Lexer {
                         "x" => {
                             // 'x' is the string repeat operator, but only in operator context
                             if !tokens.last().map(|t| t.expects_operand()).unwrap_or(true) {
-                                Token::StringRepeat
+                                // Also handle `x=` compound assignment.
+                                if self.ch() == '=' && self.peek(1) != '=' {
+                                    self.pos += 1;
+                                    Token::StringRepeatAssign
+                                } else {
+                                    Token::StringRepeat
+                                }
                             } else {
                                 Token::Ident("x".to_string())
                             }
@@ -1068,9 +1101,9 @@ impl Lexer {
                     } else if (self.ch() == '_' || self.ch().is_ascii_alphabetic())
                         && tokens.last().map(|t| t.expects_operand()).unwrap_or(true)
                     {
-                        // Glob like *FH
+                        // Typeglob like *FH / *pkg::name.
                         let name = self.read_ident();
-                        tokens.push(Token::Ident(format!("*{name}")));
+                        tokens.push(Token::Glob(name));
                     } else {
                         tokens.push(Token::Star);
                     }
@@ -1183,8 +1216,9 @@ impl Lexer {
                                 || next.is_ascii_alphabetic()
                                 || next == '_';
                             if is_heredoc {
-                                let s = self.read_heredoc();
-                                tokens.push(Token::StringLit(s));
+                                let idx = tokens.len();
+                                self.read_heredoc_header(idx);
+                                tokens.push(Token::StringLit(String::new()));
                             } else {
                                 tokens.push(Token::ShiftLeft);
                             }
@@ -1840,13 +1874,16 @@ impl Lexer {
         flags
     }
 
-    fn read_heredoc(&mut self) -> String {
-        // We're after <<
-        // Can be <<EOF, <<'EOF', <<"EOF", <<~EOF, <<~'EOF', <<~"EOF"
+    /// Parse the `<<TAG` header: read the tag + flags, register a pending
+    /// heredoc (to be filled in after the current line ends), and return an
+    /// empty placeholder string that the caller emits as a StringLit. The
+    /// real body is spliced in when the next newline is encountered.
+    /// `placeholder_idx` is the index into the tokens vector that the
+    /// StringLit token will occupy.
+    fn read_heredoc_header(&mut self, placeholder_idx: usize) {
         let mut indent = false;
         let mut interpolate = true;
 
-        // Skip whitespace
         while self.ch() == ' ' || self.ch() == '\t' {
             self.pos += 1;
         }
@@ -1856,7 +1893,6 @@ impl Lexer {
             self.pos += 1;
         }
 
-        // Skip \
         if self.ch() == '\\' {
             self.pos += 1;
             interpolate = false;
@@ -1873,72 +1909,57 @@ impl Lexer {
             None
         };
 
-        // Read the tag
         let mut tag = String::new();
+        // Unquoted tags are identifiers — stop at anything non-alphanumeric.
+        // Quoted tags read until the closing quote.
         while self.pos < self.input.len()
             && self.ch() != '\n'
-            && self.ch() != ';'
-            && self.ch() != ','
-            && Some(self.ch()) != quote.map(|_| quote.unwrap())
+            && Some(self.ch()) != quote
+            && (quote.is_some() || self.ch() == '_' || self.ch().is_ascii_alphanumeric())
         {
-            if quote.is_some() && self.ch() == quote.unwrap() {
-                break;
-            }
             tag.push(self.advance());
         }
 
-        // Skip closing quote
         if let Some(q) = quote {
             if self.ch() == q {
                 self.pos += 1;
             }
         }
 
-        // Skip to end of line (there may be more code on this line after the heredoc marker)
-        // For simplicity, skip to newline
-        while self.pos < self.input.len() && self.ch() != '\n' {
-            self.pos += 1;
-        }
-        if self.ch() == '\n' {
-            self.pos += 1;
-        }
+        self.pending_heredocs.push(PendingHeredoc {
+            tag,
+            indent,
+            interpolate,
+            placeholder_idx,
+        });
+    }
 
-        // Read the body until we find the tag on its own line
+    fn read_heredoc_body(&mut self, ph: &PendingHeredoc) -> String {
         let mut body = String::new();
         loop {
             if self.pos >= self.input.len() {
                 break;
             }
-
-            // Check if this line is the terminator
-            let line_start = self.pos;
             let mut line = String::new();
             while self.pos < self.input.len() && self.ch() != '\n' {
                 line.push(self.advance());
             }
             if self.pos < self.input.len() {
-                self.pos += 1; // skip newline
+                self.pos += 1;
+                self.current_line += 1;
             }
-
-            let trimmed = if indent {
+            let trimmed = if ph.indent {
                 line.trim().to_string()
             } else {
                 line.clone()
             };
-            if trimmed == tag {
+            if trimmed == ph.tag {
                 break;
             }
-
             body.push_str(&line);
             body.push('\n');
         }
-
-        if indent {
-            // Remove common leading whitespace
-            // TODO: implement proper indented heredoc
-        }
-
-        if interpolate {
+        if ph.interpolate {
             process_escapes(&body)
         } else {
             body

@@ -21,7 +21,8 @@
     clippy::useless_format,
     clippy::manual_strip,
     clippy::unnecessary_sort_by,
-    clippy::collapsible_else_if
+    clippy::collapsible_else_if,
+    clippy::needless_late_init
 )]
 
 mod ast;
@@ -131,8 +132,13 @@ fn run_interpreter() -> i32 {
     }
 
     if !script_file.is_empty() {
-        match fs::read_to_string(&script_file) {
-            Ok(content) => program_text = content,
+        match fs::read(&script_file) {
+            // Perl scripts are traditionally byte-oriented — some tests
+            // ship Latin-1 content. Decode lossily so the lexer always
+            // sees valid UTF-8 (invalid bytes become U+FFFD).
+            Ok(bytes) => {
+                program_text = String::from_utf8_lossy(&bytes).into_owned();
+            }
             Err(e) => {
                 eprintln!("Can't open perl script \"{}\": {}", script_file, e);
                 std::process::exit(2);

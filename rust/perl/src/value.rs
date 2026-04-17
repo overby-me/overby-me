@@ -24,6 +24,12 @@ pub enum Value {
     /// "Regexp"; stringifies as `(?^flags:pattern)` — the same form real
     /// perl uses so it can be matched against with `=~` transparently.
     Regex(String, String),
+    /// Typeglob — a symbol-table entry identified by its fully-qualified
+    /// name. Stringifies as `*main::NAME`. We model only what the Perl
+    /// test suite exercises: passing a glob as a sub argument, then
+    /// `local(*NAME) = @_` re-aliasing the current package's `NAME`
+    /// filehandle to the glob's source name (and reverting on scope exit).
+    Glob(String),
 }
 
 impl Value {
@@ -37,6 +43,13 @@ impl Value {
             Value::ScalarRef(r) => format!("SCALAR(0x{:x})", Rc::as_ptr(r) as usize),
             Value::CodeRef(name) => format!("CODE({name})"),
             Value::Regex(pat, flags) => format!("(?^{flags}:{pat})"),
+            Value::Glob(name) => {
+                if name.contains("::") {
+                    format!("*{name}")
+                } else {
+                    format!("*main::{name}")
+                }
+            }
         }
     }
 
@@ -51,7 +64,8 @@ impl Value {
             | Value::HashRef(_)
             | Value::ScalarRef(_)
             | Value::CodeRef(_)
-            | Value::Regex(_, _) => 0.0,
+            | Value::Regex(_, _)
+            | Value::Glob(_) => 0.0,
         }
     }
 
@@ -65,7 +79,8 @@ impl Value {
             | Value::HashRef(_)
             | Value::ScalarRef(_)
             | Value::CodeRef(_)
-            | Value::Regex(_, _) => true,
+            | Value::Regex(_, _)
+            | Value::Glob(_) => true,
         }
     }
 
@@ -81,6 +96,7 @@ impl Value {
             Value::ScalarRef(_) => "SCALAR",
             Value::CodeRef(_) => "CODE",
             Value::Regex(_, _) => "Regexp",
+            Value::Glob(_) => "GLOB",
             _ => "",
         }
     }

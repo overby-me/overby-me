@@ -6,35 +6,37 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**29/68 Nix tests passing** (42.6%) — selected tests from the upstream Perl test suite.
+**37/79 Nix tests passing** (47%) — selected tests from the upstream Perl test suite.
 
-Passing: base/if, base/cond, base/while, base/pat, base/num (56 tests),
-base/translate (257 tests), base/term (7 tests), cmd/elsif (4 tests),
-cmd/mod (15 tests), cmd/switch (18 tests), opbasic/arith (183 tests),
-opbasic/qq (30 tests), op/arith2, op/auto, op/bop, op/chop, op/closure,
-op/defined (5 tests), op/do, op/hash, op/inc, op/index, op/split,
-op/sub, op/vec, io/fs, io/open, re/subst, run/switches.
+Passing: base/if, base/cond, base/while, base/pat, base/num, base/translate,
+base/term, cmd/elsif, cmd/mod, cmd/switch, opbasic/arith, opbasic/qq,
+op/arith2, op/auto, op/bop, op/chop, op/closure, op/cond, op/defined,
+op/do, op/hash, op/inc, op/index, op/lc, op/oct, op/pack, op/quotemeta,
+op/range, op/split, op/sprintf, op/sub, op/vec, io/argv, io/fs, io/open,
+re/subst, run/switches.
 
-Major unlock in this cycle: compile-time `use` check that mirrors Perl —
-when a module isn't on disk under @INC we emit the exact
-`Can't locate MODULE.pm … / BEGIN failed--compilation aborted` error
-and exit before running any run-time code. That matches reference perl
-byte-for-byte on the many tests that guard their body behind
-`use Config;` / `use constant;` / etc. under the sandbox's minimal @INC.
+Major unlock in this cycle: `@_` is now dynamically scoped per-call
+(was being written to globals and overwritten on every sub call — this
+broke every test that used test.pl's `like()`/`is()` chains). Also
+added runtime interpolation of `$var`/`@var` inside `/regex/` patterns,
+hash slice (`@h{k1,k2}`) delete, a `splice()` implementation, and a
+`DynaLoader::boot_DynaLoader` stub so `is_miniperl()` returns false
+(matching reference perl).
 
 Near-passing (local test counts):
 
 - opbasic/concat: 230/254 (Unicode concat)
 - cmd/for: 15/16 (DESTROY method)
-- cmd/subval: 28/36 (typeglob filehandles)
-- op/auto: 43/47 (typeglob handling in ++/--)
+- cmd/subval: 34/36 (typeglob local aliasing)
 - op/my: 47/59 (`my $i` scope leaks between conditionals and loops)
-- op/array: 99/195 (`$#ary` as lvalue, typeglobs, nested refs)
-- op/not: 18/22 (Scalar::Util dualvar, typeglob assignment)
-- op/oct: 77/79 (EBCDIC skip logic)
-- op/grep: 37/77 (nested references)
+- op/array: 102/195 (nested refs, typeglob coerce)
+- op/not: 19/22 (typeglob assignment to read-only scalar)
+- op/grep: 39/77 (nested references in list context)
 - op/list: 38/73 (chained list assignment: `@a = @b = (1,2)`)
 - op/delete: 28/56
+- op/splice: 9 new passes (splice added this cycle)
+- op/repeat: 3 new passes (`x=` added this cycle)
+- op/oct: 79/79 (FIXED — `@_` aliasing repaired)
 
 test.pl integration fully working: plan/ok/is/pass/note/printf produce correct
 TAP output with test names. Function calls in argument lists fixed.
@@ -94,6 +96,30 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   modifier (was running `f()` regardless).
 - Stubs: `Internals::stack_refcounted()`, minimal `pack`/`unpack` for
   `W*`, `U*`, `C*` formats (enough for test.pl's `display()` helper).
+- Compile-time `use MODULE` check — absent modules emit Perl's exact
+  `Can't locate MODULE.pm …` / `BEGIN failed--compilation aborted`
+  before any run-time output, matching reference perl under the sandbox.
+- Bareword `require Module`; inside `eval {}`, module-load failures
+  propagate as die into `$@` instead of printing.
+- `Stmt::Begin(body, end_line)` records the closing-`}` line for the
+  BEGIN-failed diagnostic.
+- Heredoc vs shift disambiguated by the next character (quote/tilde/alpha)
+  so `print $fh <<'END'` is read as a heredoc.
+- `last LABEL` propagates out of sub calls; parens-less dispatch accepts
+  `eval`, `qr`, deref tokens; `map({BLOCK} LIST)` parses BLOCK as code.
+- `Value::Regex(pat, flags)` so `ref()` on `qr//` returns `"Regexp"`;
+  thread-spawn with 256 MiB stack for deeply recursive tests.
+- `__FILE__` / `__LINE__` / `__PACKAGE__`, `$::name` shorthand.
+- `main::sub` resolution strips the prefix for subs defined in main.
+- Typeglobs: `*NAME` produces `Value::Glob`; `local(*F) = *G` aliases the
+  local filehandle slot to the source name via `fh_aliases`; all IO ops
+  route through `resolve_fh()` so the alias stays transparent.
+- `$#ary = N` is an lvalue: truncates or extends the array with `undef`.
+- Named-sub hoisting: every `sub NAME { ... }` (nested in blocks, loops,
+  conditionals, or sub bodies) is registered in `self.subs` at
+  compile-time. Forward calls to subs textually defined later work.
+- `package NAME;` inside a block reverts on block exit.
+- `$main::foo` and `$foo` (in `main`) share the same storage slot.
 - `continue { BLOCK }` on `while`/`until`/`foreach` and on bare blocks
   (one-shot loop) — implements cmd/switch and op/my loop tests.
 - Basic references: `Value::ArrayRef` / `HashRef` / `ScalarRef` /
@@ -344,14 +370,15 @@ This is the largest phase. Key clusters:
 
 **re (3):** pat, regexp, subst
 
-### Passing (29)
+### Passing (34)
 
 base/cond, base/if, base/num, base/pat, base/term, base/translate, base/while,
 cmd/elsif, cmd/mod, cmd/switch, opbasic/arith, opbasic/qq, op/arith2,
 op/auto, op/bop, op/chop, op/closure, op/defined, op/do, op/hash, op/inc,
-op/index, op/split, op/sub, op/vec, io/fs, io/open, re/subst, run/switches
+op/index, op/lc, op/pack, op/quotemeta, op/range, op/split, op/sprintf,
+op/sub, op/vec, io/fs, io/open, re/subst, run/switches
 
-### Failing (39)
+### Failing (34)
 
 base/lex, base/rs, cmd/for, cmd/subval, cmd/switch,
 opbasic/cmp, opbasic/concat, opbasic/magic_phase,

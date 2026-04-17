@@ -59,6 +59,8 @@ pub enum Expr {
     HashDerefVar(String),
     /// Scalar dereference of a scalar reference: `$$name` / `${$name}`.
     ScalarDerefVar(String),
+    /// Typeglob literal: `*NAME`. Evaluates to `Value::Glob(name)`.
+    GlobVar(String),
     /// Arrow-element: `$ref->[i]` or `$ref->{k}`.
     ArrowElement(Box<Expr>, Box<Expr>, ArrowKind),
 

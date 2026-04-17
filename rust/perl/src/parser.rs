@@ -673,13 +673,30 @@ impl Parser {
         } else {
             String::new()
         };
-        // Skip prototype if present
+        // Capture prototype into `params` as a single-element string like `"$$@"`
+        // so the interpreter can enforce per-arg context for classic sigil
+        // prototypes (needed so `is(reverse("abc"),...)` sees scalar reverse).
+        let mut proto: Vec<String> = Vec::new();
         if self.at(&Token::LParen) {
             self.pos += 1;
+            let mut s = String::new();
             while !self.at(&Token::RParen) && !self.at(&Token::EOF) {
+                match self.tok() {
+                    Token::ScalarVar(_) => s.push('$'),
+                    Token::ArrayVar(_) => s.push('@'),
+                    Token::HashVar(_) => s.push('%'),
+                    Token::Backslash => s.push('\\'),
+                    Token::Semi => s.push(';'),
+                    Token::StringRepeat => s.push('*'),
+                    Token::Ident(x) if x == "_" => s.push('_'),
+                    _ => {}
+                }
                 self.pos += 1;
             }
             self.eat(&Token::RParen);
+            if !s.is_empty() {
+                proto.push(s);
+            }
         }
 
         // Skip attributes
@@ -692,7 +709,7 @@ impl Parser {
         let body = self.parse_brace_block();
         Stmt::Sub {
             name,
-            params: Vec::new(),
+            params: proto,
             body,
         }
     }
@@ -743,6 +760,12 @@ impl Parser {
                     Token::UndefKw => {
                         // undef as placeholder in list destructuring
                         names.push("$_undef_placeholder".to_string());
+                        self.pos += 1;
+                    }
+                    Token::Glob(name) => {
+                        // `local(*FH) = ...` — prefix `*` distinguishes it
+                        // from scalar/array/hash slots in later handling.
+                        names.push(format!("*{}", name));
                         self.pos += 1;
                     }
                     _ => break,
@@ -866,25 +889,38 @@ impl Parser {
 
     fn parse_list_expr(&mut self) -> Vec<Expr> {
         let mut exprs = Vec::new();
-        if self.at(&Token::Semi)
-            || self.at(&Token::EOF)
-            || self.at(&Token::RBrace)
-            || self.at(&Token::RParen)
-        {
+        if self.at_list_end() {
             return exprs;
         }
         exprs.push(self.parse_expr());
         while self.eat(&Token::Comma) || self.eat(&Token::FatComma) {
-            if self.at(&Token::Semi)
-                || self.at(&Token::EOF)
-                || self.at(&Token::RBrace)
-                || self.at(&Token::RParen)
-            {
+            if self.at_list_end() {
                 break;
             }
             exprs.push(self.parse_expr());
         }
         exprs
+    }
+
+    /// A token that terminates a list-context argument list without being
+    /// consumed. Includes the usual closers plus Perl's postfix statement
+    /// modifiers (`if`, `unless`, `while`, `until`, `for`, `foreach`) so
+    /// `die if $@;` parses as `die` + postfix-if, not `die(if ...)`.
+    fn at_list_end(&self) -> bool {
+        matches!(
+            self.tok(),
+            Token::Semi
+                | Token::EOF
+                | Token::RBrace
+                | Token::RParen
+                | Token::RBracket
+                | Token::If
+                | Token::Unless
+                | Token::While
+                | Token::Until
+                | Token::For
+                | Token::Foreach
+        )
     }
 
     fn parse_use(&mut self) -> Stmt {
@@ -980,6 +1016,11 @@ impl Parser {
                 self.pos += 1;
                 let right = self.parse_assign();
                 Expr::OpAssign(BinOp::Pow, Box::new(left), Box::new(right))
+            }
+            Token::StringRepeatAssign => {
+                self.pos += 1;
+                let right = self.parse_assign();
+                Expr::OpAssign(BinOp::Repeat, Box::new(left), Box::new(right))
             }
             _ => left,
         }
@@ -1686,7 +1727,20 @@ impl Parser {
             }
             Token::ArrayVar(name) => {
                 self.pos += 1;
-                Expr::ArrayVar(name)
+                // `@foo[1,2]` — slice of @foo; `@foo{k1,k2}` — slice of %foo.
+                if matches!(self.tok(), Token::LBracket) {
+                    self.pos += 1;
+                    let keys = self.parse_list_expr();
+                    self.expect(&Token::RBracket);
+                    Expr::ArraySlice(name, keys)
+                } else if matches!(self.tok(), Token::LBrace) {
+                    self.pos += 1;
+                    let keys = self.parse_list_expr();
+                    self.expect(&Token::RBrace);
+                    Expr::HashSlice(name, keys)
+                } else {
+                    Expr::ArrayVar(name)
+                }
             }
             Token::HashVar(name) => {
                 self.pos += 1;
@@ -1703,6 +1757,10 @@ impl Parser {
             Token::ScalarDeref(name) => {
                 self.pos += 1;
                 Expr::ScalarDerefVar(name)
+            }
+            Token::Glob(name) => {
+                self.pos += 1;
+                Expr::GlobVar(name)
             }
             Token::ArrayLen(name) => {
                 self.pos += 1;
@@ -2036,7 +2094,10 @@ impl Parser {
                 self.pos += 1;
                 if self.at(&Token::LBrace) {
                     let body = self.parse_brace_block();
-                    Expr::DoBlock(body)
+                    // `eval { BLOCK }` is an expression — evaluates the block
+                    // with errors trapped into $@. Wrap in a Call so the
+                    // interpreter can handle the trap semantics.
+                    Expr::Call("eval".to_string(), vec![Expr::DoBlock(body)])
                 } else {
                     let expr = self.parse_primary();
                     Expr::Call("eval".to_string(), vec![expr])
@@ -2213,12 +2274,20 @@ fn parse_interp_string(s: &str) -> Expr {
             // Variable interpolation
             let starts_pkg_prefix =
                 chars[i + 1] == ':' && i + 2 < chars.len() && chars[i + 2] == ':';
+            // Perl's punctuation globals: $@ (eval error), $! (errno), $/ (RS),
+            // $\ (ORS), $, (OFS), $" (list separator), $; (subscript separator),
+            // $| (autoflush), $& $` $' (regex matches).
+            let is_punct_special = matches!(
+                chars[i + 1],
+                '@' | '!' | '/' | '\\' | ',' | '"' | ';' | '|' | '&' | '`' | '\''
+            );
             if chars[i + 1] == '_'
                 || chars[i + 1].is_ascii_alphabetic()
                 || chars[i + 1].is_ascii_digit()
                 || chars[i + 1] == '{'
                 || chars[i + 1] == '^'
                 || starts_pkg_prefix
+                || is_punct_special
             {
                 // Flush literal
                 if !lit.is_empty() {
@@ -2248,6 +2317,14 @@ fn parse_interp_string(s: &str) -> Expr {
                     let c = chars[i];
                     i += 1;
                     parts.push(InterpPart::ScalarVar(format!("^{c}")));
+                } else if matches!(
+                    chars[i],
+                    '@' | '!' | '/' | '\\' | ',' | '"' | ';' | '|' | '&' | '`' | '\''
+                ) {
+                    // Single-char punctuation special variable.
+                    let c = chars[i];
+                    i += 1;
+                    parts.push(InterpPart::ScalarVar(c.to_string()));
                 } else {
                     let mut name = String::new();
                     // `$::foo` — leading `::` with no package name.
@@ -2310,10 +2387,14 @@ fn parse_interp_string(s: &str) -> Expr {
                         if i < chars.len() && chars[i] == '}' {
                             i += 1;
                         }
-                        parts.push(InterpPart::HashElement(
-                            name,
-                            Box::new(Expr::StringLit(key_str)),
-                        ));
+                        // `$h{$k}` — key is a scalar variable reference.
+                        // `$h{foo}` — auto-quoted bareword key (Perl semantics).
+                        let key_expr = if let Some(varname) = key_str.strip_prefix('$') {
+                            Expr::ScalarVar(varname.to_string())
+                        } else {
+                            Expr::StringLit(key_str)
+                        };
+                        parts.push(InterpPart::HashElement(name, Box::new(key_expr)));
                     } else {
                         parts.push(InterpPart::ScalarVar(name));
                     }

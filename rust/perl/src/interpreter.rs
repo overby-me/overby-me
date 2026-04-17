@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, BufWriter, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 
 use crate::ast::*;
 use crate::value::{Value, format_number};
@@ -57,10 +57,19 @@ pub struct Interpreter {
     local_saves: Vec<Vec<(String, Value)>>,
     // Local array saves
     local_array_saves: Vec<Vec<(String, Vec<Value>)>>,
+    // Saved filehandle aliases (for `local(*F) = *G`). Each entry is
+    // (local_name, previous_target). `None` previous means the slot was
+    // absent before the local, so restore by removing the alias.
+    local_fh_alias_saves: Vec<Vec<(String, Option<String>)>>,
     // File handles for reading
     read_handles: HashMap<String, BufReader<File>>,
     // File handles for writing
     write_handles: HashMap<String, BufWriter<File>>,
+    // Typeglob aliases: when `local(*F) = *G` is in effect, any code that
+    // refers to the filehandle `F` should really read/write the slot `G`.
+    // Keyed by the local name, value is the target slot name. Restored on
+    // scope exit via `local_saves`.
+    fh_aliases: HashMap<String, String>,
     // Counter for generating anonymous filehandle names
     fh_counter: usize,
     // Tracks files already loaded via require (like %INC)
@@ -77,6 +86,7 @@ pub struct Interpreter {
     call_stack: Vec<(String, String, usize)>,
     // Pending sub return triggered inside eval_expr (e.g., `return` in a do-block)
     pending_return: Option<Value>,
+    eval_counter: usize,
     // Pending flow (Last/Next/Die/Exit) raised from inside a sub call that
     // has to propagate past the sub's return-value handshake. Consumed by
     // the caller's statement-execution loop.
@@ -125,10 +135,23 @@ impl Interpreter {
             ),
         );
 
+        // Pretend DynaLoader is loaded so test.pl's `is_miniperl`
+        // (which checks `defined &DynaLoader::boot_DynaLoader`) returns
+        // false — matching reference perl. This is what opens the door
+        // for the standard `use Foo; die $@ if $@ and !is_miniperl()`
+        // pattern in the upstream test suite to fire correctly.
+        let mut subs: HashMap<String, (Vec<String>, Vec<Stmt>)> = HashMap::new();
+        // Body returns 1 so `defined(&DynaLoader::boot_DynaLoader)` is true.
+        let stub_body = vec![Stmt::Return(Some(Expr::IntLit(1)))];
+        subs.insert(
+            "DynaLoader::boot_DynaLoader".to_string(),
+            (Vec::new(), stub_body),
+        );
+
         Interpreter {
             scopes: Vec::new(),
             globals,
-            subs: HashMap::new(),
+            subs,
             end_blocks: Vec::new(),
             package: "main".to_string(),
             exit_code: 0,
@@ -137,14 +160,17 @@ impl Interpreter {
             eval_error: String::new(),
             local_saves: Vec::new(),
             local_array_saves: Vec::new(),
+            local_fh_alias_saves: Vec::new(),
             read_handles: HashMap::new(),
             write_handles: HashMap::new(),
+            fh_aliases: HashMap::new(),
             fh_counter: 0,
             required_files: HashSet::new(),
             current_file: String::new(),
             current_line: 0,
             call_stack: Vec::new(),
             pending_return: None,
+            eval_counter: 0,
             pending_flow: None,
             eval_depth: 0,
         }
@@ -157,6 +183,17 @@ impl Interpreter {
     pub fn set_inc(&mut self, dirs: &[String]) {
         let items: Vec<Value> = dirs.iter().map(|d| Value::Str(d.clone())).collect();
         self.set_array("INC", items);
+    }
+
+    /// Resolve a filehandle name through the typeglob alias table.
+    /// `local(*F) = *G` adds an F -> G alias; the IO ops consult this so
+    /// the alias stays transparent to the rest of the interpreter.
+    fn resolve_fh(&self, name: &str) -> String {
+        let stripped = name.strip_prefix("main::").unwrap_or(name);
+        if let Some(target) = self.fh_aliases.get(stripped) {
+            return target.clone();
+        }
+        stripped.to_string()
     }
 
     pub fn set_special_var(&mut self, name: &str, val: &str) {
@@ -196,6 +233,20 @@ impl Interpreter {
                         Flow::Die(msg) => {
                             self.exit_code = 255;
                             eprint!("{msg}");
+                            // Perl follows any die out of a BEGIN with a
+                            // second `BEGIN failed--compilation aborted`
+                            // line pointing at the closing `}` of BEGIN.
+                            if !msg.ends_with('\n') {
+                                eprintln!();
+                            }
+                            let file = if self.current_file.is_empty() {
+                                "-e".to_string()
+                            } else {
+                                self.current_file.clone()
+                            };
+                            eprintln!(
+                                "BEGIN failed--compilation aborted at {file} line {end_line}."
+                            );
                             return;
                         }
                         _ => {}
@@ -206,6 +257,16 @@ impl Interpreter {
                 }
                 _ => main_stmts.push(stmt.clone()),
             }
+        }
+
+        // Hoist every named sub definition (top-level or nested) into
+        // `self.subs` before running main. Perl compile-time semantics
+        // define named subs before any run-time code runs, regardless of
+        // textual order.
+        let mut to_register: Vec<(String, Vec<String>, Vec<Stmt>)> = Vec::new();
+        collect_named_subs(&main_stmts, &mut to_register);
+        for (name, params, body) in to_register {
+            self.subs.entry(name).or_insert((params, body));
         }
 
         // After BEGIN blocks have run (and have had a chance to require
@@ -582,9 +643,13 @@ impl Interpreter {
             }
 
             Stmt::Block(stmts) | Stmt::BareBlock(stmts) => {
+                // Perl's `package NAME;` is lexically scoped to the
+                // enclosing block; revert to the outer package on exit.
+                let saved_pkg = self.package.clone();
                 self.push_scope();
                 let flow = self.exec_stmts(stmts);
                 self.pop_scope();
+                self.package = saved_pkg;
                 flow
             }
 
@@ -633,9 +698,11 @@ impl Interpreter {
             }
 
             Stmt::NamedBlock(label, stmts) => {
+                let saved_pkg = self.package.clone();
                 self.push_scope();
                 let flow = self.exec_stmts(stmts);
                 self.pop_scope();
+                self.package = saved_pkg;
                 match flow {
                     Flow::Last(Some(ref l)) if l == label => Flow::None,
                     Flow::Next(Some(ref l)) if l == label => Flow::None,
@@ -713,6 +780,27 @@ impl Interpreter {
                     let init_expr = vars[0].1.as_ref().unwrap();
                     let items = self.eval_list(init_expr);
                     for (i, (name, _)) in vars.iter().enumerate() {
+                        if name.starts_with('*') {
+                            // `local(*F) = *G` — alias filehandle slot F to
+                            // the source glob's target name.
+                            let local_name = name.trim_start_matches('*').to_string();
+                            let target = match items.get(i) {
+                                Some(Value::Glob(src)) => {
+                                    Some(src.trim_start_matches("main::").to_string())
+                                }
+                                _ => None,
+                            };
+                            let prev = self.fh_aliases.get(&local_name).cloned();
+                            if let Some(saves) = self.local_fh_alias_saves.last_mut() {
+                                saves.push((local_name.clone(), prev));
+                            }
+                            if let Some(t) = target {
+                                self.fh_aliases.insert(local_name, t);
+                            } else {
+                                self.fh_aliases.remove(&local_name);
+                            }
+                            continue;
+                        }
                         let var_name = name
                             .trim_start_matches('$')
                             .trim_start_matches('@')
@@ -736,6 +824,19 @@ impl Interpreter {
                     }
                 } else {
                     for (name, init) in vars {
+                        if name.starts_with('*') {
+                            // `local(*F);` — snapshot F's current alias so
+                            // the scope exit restores it. No assignment yet.
+                            let local_name = name.trim_start_matches('*').to_string();
+                            let prev = self.fh_aliases.get(&local_name).cloned();
+                            if let Some(saves) = self.local_fh_alias_saves.last_mut() {
+                                saves.push((local_name.clone(), prev));
+                            }
+                            // Clear the alias so the inner scope starts with
+                            // a fresh F (reference perl's symbol-table local).
+                            self.fh_aliases.remove(&local_name);
+                            continue;
+                        }
                         let var_name = name
                             .trim_start_matches('$')
                             .trim_start_matches('@')
@@ -918,8 +1019,23 @@ impl Interpreter {
             }
 
             Stmt::Die(args) => {
+                // `die;` with no args re-raises $@. Perl unconditionally
+                // appends "\t...propagated at FILE line LINE.\n" to
+                // string-valued $@ (regardless of a pre-existing trailing
+                // newline) so the stack trace records the propagation point.
                 let msg = if args.is_empty() {
-                    "Died".to_string()
+                    let prev = self.get_var("@").to_str();
+                    if prev.is_empty() {
+                        "Died at -- line 0.\n".to_string()
+                    } else {
+                        let file = if self.current_file.is_empty() {
+                            "-e".to_string()
+                        } else {
+                            self.current_file.clone()
+                        };
+                        let line = self.current_line;
+                        format!("{prev}\t...propagated at {file} line {line}.\n")
+                    }
                 } else {
                     args.iter()
                         .map(|a| self.eval_expr(a).to_str())
@@ -1116,8 +1232,9 @@ impl Interpreter {
                 let _ = io::stdout().write_all(text.as_bytes());
             }
             Some(name) => {
-                // Try writing to a file handle
-                if let Some(writer) = self.write_handles.get_mut(name) {
+                // Try writing to a file handle (resolving any typeglob alias).
+                let resolved = self.resolve_fh(name);
+                if let Some(writer) = self.write_handles.get_mut(&resolved) {
                     let _ = writer.write_all(text.as_bytes());
                 } else {
                     // Fall back to stdout
@@ -1269,10 +1386,13 @@ impl Interpreter {
                 let text = self.eval_expr(target).to_str();
                 let case_insensitive = flags.contains('i');
                 let global = flags.contains('g');
+                let pat_interp = self.interp_regex_pattern(pat);
+                let (pat_inner, inner_flags) = unwrap_qr(&pat_interp, flags);
+                let case_insensitive = case_insensitive || inner_flags.contains('i');
                 let pat_str = if case_insensitive {
-                    format!("(?i){}", pat)
+                    format!("(?i){}", pat_inner)
                 } else {
-                    pat.clone()
+                    pat_inner.clone()
                 };
                 match regex::Regex::new(&pat_str) {
                     Ok(re) => {
@@ -1483,6 +1603,17 @@ impl Interpreter {
                 } else {
                     Value::Undef
                 }
+            }
+            Expr::GlobVar(name) => {
+                // `*NAME` — produce a typeglob value pointing at the
+                // fully-qualified symbol in the current package. Strip a
+                // leading `::` (the `$::foo`-equivalent for globs).
+                let qualified = if name.contains("::") {
+                    name.trim_start_matches("::").to_string()
+                } else {
+                    format!("{}::{name}", self.package)
+                };
+                Value::Glob(qualified)
             }
             Expr::ArrowElement(lhs, idx, kind) => {
                 let lhs_val = self.eval_expr(lhs);
@@ -1973,7 +2104,12 @@ impl Interpreter {
                 } else {
                     self.eval_expr(&args[0])
                 };
-                Value::Num(val.to_str().len() as f64)
+                if matches!(val, Value::Undef) {
+                    Value::Undef
+                } else {
+                    // Perl's length() counts characters, not bytes.
+                    Value::Num(val.to_str().chars().count() as f64)
+                }
             }
             "chr" => {
                 let val = if args.is_empty() {
@@ -1981,8 +2117,15 @@ impl Interpreter {
                 } else {
                     self.eval_expr(&args[0])
                 };
-                let n = val.to_num() as u32;
-                Value::Str(char::from_u32(n).unwrap_or('\0').to_string())
+                let num = val.to_num();
+                // Perl's chr: negatives / non-integer out-of-range inputs
+                // yield U+FFFD (Unicode replacement character).
+                if num < 0.0 || !num.is_finite() {
+                    Value::Str("\u{FFFD}".to_string())
+                } else {
+                    let n = num as u32;
+                    Value::Str(char::from_u32(n).unwrap_or('\u{FFFD}').to_string())
+                }
             }
             "ord" => {
                 let val = if args.is_empty() {
@@ -2046,24 +2189,29 @@ impl Interpreter {
             }
             "substr" => {
                 let s = self.eval_expr(&args[0]).to_str();
+                let chars: Vec<char> = s.chars().collect();
+                let slen = chars.len() as i64;
                 let offset = self.eval_expr(&args[1]).to_num() as i64;
-                let len = if args.len() > 2 {
-                    Some(self.eval_expr(&args[2]).to_num() as usize)
+                let len_arg = if args.len() > 2 {
+                    Some(self.eval_expr(&args[2]).to_num() as i64)
                 } else {
                     None
                 };
 
-                let start = if offset < 0 {
-                    (s.len() as i64 + offset).max(0) as usize
-                } else {
-                    offset as usize
+                let start = if offset < 0 { slen + offset } else { offset };
+                // Clamp start into [0, slen].
+                let start = start.clamp(0, slen) as usize;
+
+                let end = match len_arg {
+                    None => slen as usize,
+                    Some(n) if n >= 0 => ((start as i64).saturating_add(n).min(slen)) as usize,
+                    Some(n) => {
+                        // Negative length counts from the end.
+                        (slen + n).max(start as i64) as usize
+                    }
                 };
 
-                let result = if let Some(len) = len {
-                    s.get(start..start + len).unwrap_or("").to_string()
-                } else {
-                    s.get(start..).unwrap_or("").to_string()
-                };
+                let result: String = chars[start..end].iter().collect();
                 Value::Str(result)
             }
             "index" => {
@@ -2198,6 +2346,42 @@ impl Interpreter {
                     Value::Undef
                 }
             }
+            "splice" => {
+                // splice(@array, offset, length, @replacement) — mutate in
+                // place, return removed chunk (list ctx) or last (scalar).
+                if let Some(Expr::ArrayVar(name)) = args.first() {
+                    let mut arr = self.get_array(name);
+                    let len = arr.len() as i64;
+                    let off_raw = args
+                        .get(1)
+                        .map(|a| self.eval_expr(a).to_num() as i64)
+                        .unwrap_or(0);
+                    let offset = if off_raw < 0 {
+                        (len + off_raw).max(0) as usize
+                    } else {
+                        (off_raw as usize).min(arr.len())
+                    };
+                    let remove_len = if args.len() >= 3 {
+                        let n = self.eval_expr(&args[2]).to_num() as i64;
+                        if n < 0 {
+                            ((arr.len() as i64 - offset as i64 + n).max(0)) as usize
+                        } else {
+                            (n as usize).min(arr.len().saturating_sub(offset))
+                        }
+                    } else {
+                        arr.len() - offset
+                    };
+                    let replacement: Vec<Value> =
+                        args[3..].iter().flat_map(|a| self.eval_list(a)).collect();
+                    let removed: Vec<Value> = arr
+                        .splice(offset..offset + remove_len, replacement)
+                        .collect();
+                    self.set_array(name, arr);
+                    removed.into_iter().last().unwrap_or(Value::Undef)
+                } else {
+                    Value::Undef
+                }
+            }
             "reverse" => {
                 let items: Vec<Value> = args
                     .iter()
@@ -2232,10 +2416,104 @@ impl Interpreter {
                 }
             }
             "exists" => {
-                // TODO: proper implementation
-                Value::Num(0.0)
+                if let Some(a) = args.first() {
+                    match a {
+                        Expr::HashElement(name, key_e) => {
+                            let key = self.eval_expr(key_e).to_str();
+                            let exists = self
+                                .scopes
+                                .iter()
+                                .rev()
+                                .find_map(|s| s.hashes.get(name))
+                                .or_else(|| self.globals.hashes.get(name))
+                                .map(|h| h.contains_key(&key))
+                                .unwrap_or(false);
+                            Value::Num(if exists { 1.0 } else { 0.0 })
+                        }
+                        Expr::ArrayElement(name, idx_e) => {
+                            let idx = self.eval_expr(idx_e).to_num() as i64;
+                            let arr = self.get_array(name);
+                            let n = arr.len() as i64;
+                            let i = if idx < 0 { n + idx } else { idx };
+                            let exists = i >= 0 && i < n;
+                            Value::Num(if exists { 1.0 } else { 0.0 })
+                        }
+                        _ => Value::Num(0.0),
+                    }
+                } else {
+                    Value::Num(0.0)
+                }
             }
-            "delete" => Value::Undef,
+            "delete" => {
+                if let Some(a) = args.first() {
+                    match a {
+                        Expr::HashElement(name, key_e) => {
+                            let key = self.eval_expr(key_e).to_str();
+                            // Find innermost scope (or globals) that owns the
+                            // hash, and remove the key from that exact copy.
+                            for scope in self.scopes.iter_mut().rev() {
+                                if let Some(h) = scope.hashes.get_mut(name) {
+                                    return h.remove(&key).unwrap_or(Value::Undef);
+                                }
+                            }
+                            if let Some(h) = self.globals.hashes.get_mut(name) {
+                                return h.remove(&key).unwrap_or(Value::Undef);
+                            }
+                            Value::Undef
+                        }
+                        Expr::ArrayElement(name, idx_e) => {
+                            let idx = self.eval_expr(idx_e).to_num() as i64;
+                            for scope in self.scopes.iter_mut().rev() {
+                                if let Some(arr) = scope.arrays.get_mut(name) {
+                                    let n = arr.len() as i64;
+                                    let i = if idx < 0 { n + idx } else { idx };
+                                    if i >= 0 && i < n {
+                                        let v =
+                                            std::mem::replace(&mut arr[i as usize], Value::Undef);
+                                        return v;
+                                    }
+                                    return Value::Undef;
+                                }
+                            }
+                            if let Some(arr) = self.globals.arrays.get_mut(name) {
+                                let n = arr.len() as i64;
+                                let i = if idx < 0 { n + idx } else { idx };
+                                if i >= 0 && i < n {
+                                    let v = std::mem::replace(&mut arr[i as usize], Value::Undef);
+                                    return v;
+                                }
+                            }
+                            Value::Undef
+                        }
+                        Expr::HashSlice(name, keys) => {
+                            let keys_v: Vec<String> = keys
+                                .iter()
+                                .flat_map(|k| self.eval_list(k))
+                                .map(|v| v.to_str())
+                                .collect();
+                            let mut out = Vec::new();
+                            let scope_idx = self
+                                .scopes
+                                .iter()
+                                .rposition(|s| s.hashes.contains_key(name));
+                            if let Some(idx) = scope_idx {
+                                let h = self.scopes[idx].hashes.get_mut(name).unwrap();
+                                for k in &keys_v {
+                                    out.push(h.remove(k).unwrap_or(Value::Undef));
+                                }
+                            } else if let Some(h) = self.globals.hashes.get_mut(name) {
+                                for k in &keys_v {
+                                    out.push(h.remove(k).unwrap_or(Value::Undef));
+                                }
+                            }
+                            out.into_iter().last().unwrap_or(Value::Undef)
+                        }
+                        _ => Value::Undef,
+                    }
+                } else {
+                    Value::Undef
+                }
+            }
             "defined" => {
                 let val = if args.is_empty() {
                     self.get_var("_")
@@ -2251,6 +2529,10 @@ impl Interpreter {
                     self.eval_expr(&args[0])
                 };
                 let s = val.to_str();
+                if s.chars().any(|c| (c as u32) > 0xFF) {
+                    self.pending_flow = Some(Flow::Die("Wide character in hex\n".to_string()));
+                    return Value::Undef;
+                }
                 Value::Num(perl_hex(&s) as f64)
             }
             "oct" => {
@@ -2260,6 +2542,10 @@ impl Interpreter {
                     self.eval_expr(&args[0])
                 };
                 let s = val.to_str();
+                if s.chars().any(|c| (c as u32) > 0xFF) {
+                    self.pending_flow = Some(Flow::Die("Wide character in oct\n".to_string()));
+                    return Value::Undef;
+                }
                 Value::Num(perl_oct(&s) as f64)
             }
             "ref" => {
@@ -2301,7 +2587,8 @@ impl Interpreter {
             "eof" => {
                 // Check if filehandle is at EOF
                 if let Some(arg) = args.first() {
-                    let name = self.eval_expr(arg).to_str();
+                    let raw = self.eval_expr(arg).to_str();
+                    let name = self.resolve_fh(&raw);
                     if let Some(reader) = self.read_handles.get_mut(&name) {
                         let buf = reader.fill_buf().unwrap_or(&[]);
                         Value::Num(if buf.is_empty() { 1.0 } else { 0.0 })
@@ -2314,6 +2601,9 @@ impl Interpreter {
             }
             "open" => self.eval_open(args),
             "close" => self.eval_close(args),
+            "read" | "sysread" => self.eval_read(args),
+            "seek" | "sysseek" => self.eval_seek(args),
+            "tell" => self.eval_tell(args),
             "binmode" => {
                 // No-op — we don't distinguish binary/text mode
                 Value::Num(1.0)
@@ -2341,9 +2631,34 @@ impl Interpreter {
                 }
             }
             "eval" => {
+                // `eval { BLOCK }` (DoBlock arg) — run the block, trap die.
+                // `eval EXPR` — stringify and eval the code.
                 if let Some(arg) = args.first() {
-                    let code = self.eval_expr(arg).to_str();
-                    self.eval_string(&code)
+                    match arg {
+                        Expr::DoBlock(body) => {
+                            self.set_global_var("@", Value::Str(String::new()));
+                            self.push_scope();
+                            self.eval_depth += 1;
+                            let flow = self.exec_stmts(body);
+                            self.eval_depth -= 1;
+                            self.pop_scope();
+                            match flow {
+                                Flow::Die(msg) => {
+                                    self.set_global_var("@", Value::Str(msg));
+                                    Value::Undef
+                                }
+                                Flow::Return(v) => v,
+                                _ => self.last_expr_val.clone(),
+                            }
+                        }
+                        _ => {
+                            let code = self.eval_expr(arg).to_str();
+                            self.eval_depth += 1;
+                            let v = self.eval_string(&code);
+                            self.eval_depth -= 1;
+                            v
+                        }
+                    }
                 } else {
                     Value::Undef
                 }
@@ -2483,7 +2798,14 @@ impl Interpreter {
                     Value::Num(0.0)
                 }
             }
-            "set_up_inc" | "File::Spec::Functions::catdir" => {
+            "set_up_inc" => {
+                // Matches test.pl's `@INC = () unless is_miniperl; unshift
+                // @INC, @_;` — i.e. REPLACE @INC with the given directories.
+                let new_dirs: Vec<Value> = args.iter().flat_map(|a| self.eval_list(a)).collect();
+                self.set_array("INC", new_dirs);
+                Value::Num(1.0)
+            }
+            "File::Spec::Functions::catdir" => {
                 // No-op / stub for test harness helpers
                 Value::Undef
             }
@@ -2509,9 +2831,8 @@ impl Interpreter {
                     name.strip_prefix("main::").unwrap_or(name).to_string(),
                 ];
                 for candidate in &candidates {
-                    if let Some((_params, body)) = self.subs.get(candidate).cloned() {
-                        let arg_vals: Vec<Value> =
-                            args.iter().flat_map(|a| self.eval_list(a)).collect();
+                    if let Some((params, body)) = self.subs.get(candidate).cloned() {
+                        let arg_vals = self.eval_args_with_proto(args, &params);
                         return self.call_sub(&body, &arg_vals);
                     }
                 }
@@ -2520,10 +2841,40 @@ impl Interpreter {
         }
     }
 
+    /// Evaluate call-site argument expressions in the context dictated by a
+    /// stored Perl prototype (e.g. `"$$@"`). A `$` slot forces scalar context;
+    /// `@` or `%` slots slurp the rest in list context. No prototype ⇒ all
+    /// args flatten as lists (Perl's default).
+    fn eval_args_with_proto(&mut self, args: &[Expr], params: &[String]) -> Vec<Value> {
+        let proto = params.first().map(String::as_str).unwrap_or("");
+        if proto.is_empty() {
+            return args.iter().flat_map(|a| self.eval_list(a)).collect();
+        }
+        let chars: Vec<char> = proto.chars().filter(|c| *c != ';' && *c != '\\').collect();
+        let mut out = Vec::new();
+        let mut ai = 0;
+        let mut pi = 0;
+        while ai < args.len() {
+            let p = chars.get(pi).copied().unwrap_or('@');
+            if p == '@' || p == '%' {
+                for a in &args[ai..] {
+                    out.extend(self.eval_list(a));
+                }
+                break;
+            }
+            // `$` and `_` slots force scalar context.
+            out.push(self.eval_expr(&args[ai]));
+            ai += 1;
+            pi += 1;
+        }
+        out
+    }
+
     fn call_sub(&mut self, body: &[Stmt], args: &[Value]) -> Value {
         self.push_scope();
         self.local_saves.push(Vec::new());
         self.local_array_saves.push(Vec::new());
+        self.local_fh_alias_saves.push(Vec::new());
 
         // Record the call-site so caller() can report it from inside the sub.
         self.call_stack.push((
@@ -2532,8 +2883,13 @@ impl Interpreter {
             self.current_line,
         ));
 
-        // Set @_ to args
-        self.set_array("_", args.to_vec());
+        // @_ is dynamically scoped per call — install it in the innermost
+        // scope so it masks any outer @_ without mutating the caller's.
+        self.scopes
+            .last_mut()
+            .unwrap()
+            .arrays
+            .insert("_".to_string(), args.to_vec());
 
         // Save and reset last_expr_val and last_list_val
         let saved_last = std::mem::replace(&mut self.last_expr_val, Value::Undef);
@@ -2601,9 +2957,15 @@ impl Interpreter {
         ));
         self.local_saves.push(Vec::new());
         self.local_array_saves.push(Vec::new());
+        self.local_fh_alias_saves.push(Vec::new());
 
-        // Set @_ to args
-        self.set_array("_", args.to_vec());
+        // @_ is dynamically scoped per call — install it in the innermost
+        // scope so it masks any outer @_ without mutating the caller's.
+        self.scopes
+            .last_mut()
+            .unwrap()
+            .arrays
+            .insert("_".to_string(), args.to_vec());
 
         // Save and reset last_expr_val and last_list_val
         let saved_last = std::mem::replace(&mut self.last_expr_val, Value::Undef);
@@ -2659,6 +3021,18 @@ impl Interpreter {
         if let Some(saves) = self.local_array_saves.pop() {
             for (name, val) in saves.into_iter().rev() {
                 self.globals.arrays.insert(name, val);
+            }
+        }
+        if let Some(saves) = self.local_fh_alias_saves.pop() {
+            for (name, prev) in saves.into_iter().rev() {
+                match prev {
+                    Some(target) => {
+                        self.fh_aliases.insert(name, target);
+                    }
+                    None => {
+                        self.fh_aliases.remove(&name);
+                    }
+                }
             }
         }
     }
@@ -2841,16 +3215,117 @@ impl Interpreter {
                 // For now, just set a single element
                 self.set_array(name, vec![val]);
             }
+            Expr::ArrayLen(name) => {
+                // `$#arr = N` — resize `@arr` so its last index is N.
+                // Truncates if smaller, extends with `undef` if larger.
+                // Negative N empties the array.
+                let target = val.to_num() as i64;
+                let new_len = if target < 0 { 0 } else { (target + 1) as usize };
+                let mut arr = self.get_array(name);
+                if arr.len() > new_len {
+                    arr.truncate(new_len);
+                } else {
+                    while arr.len() < new_len {
+                        arr.push(Value::Undef);
+                    }
+                }
+                self.set_array(name, arr);
+            }
             _ => {} // Can't assign to this
         }
     }
 
     // --- Regex ---
 
+    /// Expand `$var`, `${var}`, `@var`, `@{var}` inside a regex pattern at runtime.
+    /// Perl interpolates scalars/arrays into patterns before handing them to the
+    /// regex engine; without this, `/$expected/` would try to compile the literal
+    /// text `$expected` (which the Rust `regex` crate rejects as `$` anchors).
+    fn interp_regex_pattern(&mut self, pattern: &str) -> String {
+        let chars: Vec<char> = pattern.chars().collect();
+        let mut out = String::new();
+        let mut i = 0;
+        while i < chars.len() {
+            let c = chars[i];
+            if c == '\\' && i + 1 < chars.len() {
+                out.push(c);
+                out.push(chars[i + 1]);
+                i += 2;
+                continue;
+            }
+            if (c == '$' || c == '@') && i + 1 < chars.len() {
+                let next = chars[i + 1];
+                // `$)` `$|` and similar end-of-match anchors stay literal.
+                // `$` at end-of-pattern also stays literal.
+                let is_sigil_name_start = next == '_' || next.is_ascii_alphabetic() || next == '{';
+                // `$` followed by a digit is a backref in regex context, keep as-is.
+                if !is_sigil_name_start {
+                    out.push(c);
+                    i += 1;
+                    continue;
+                }
+                let sigil = c;
+                i += 1;
+                let name;
+                if chars[i] == '{' {
+                    i += 1;
+                    let mut n = String::new();
+                    while i < chars.len() && chars[i] != '}' {
+                        n.push(chars[i]);
+                        i += 1;
+                    }
+                    if i < chars.len() {
+                        i += 1;
+                    }
+                    name = n;
+                } else {
+                    let mut n = String::new();
+                    while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                        n.push(chars[i]);
+                        i += 1;
+                    }
+                    while i + 1 < chars.len() && chars[i] == ':' && chars[i + 1] == ':' {
+                        n.push_str("::");
+                        i += 2;
+                        while i < chars.len()
+                            && (chars[i].is_ascii_alphanumeric() || chars[i] == '_')
+                        {
+                            n.push(chars[i]);
+                            i += 1;
+                        }
+                    }
+                    name = n;
+                }
+                if name.is_empty() {
+                    out.push(sigil);
+                    continue;
+                }
+                if sigil == '$' {
+                    let v = self.get_var(&name).to_str();
+                    out.push_str(&v);
+                } else {
+                    let list = self.get_array(&name);
+                    let sep = self.get_var("\"").to_str();
+                    let joined = list
+                        .into_iter()
+                        .map(|v| v.to_str())
+                        .collect::<Vec<_>>()
+                        .join(if sep.is_empty() { " " } else { &sep });
+                    out.push_str(&joined);
+                }
+                continue;
+            }
+            out.push(c);
+            i += 1;
+        }
+        out
+    }
+
     fn regex_match(&mut self, text: &str, pattern: &str, flags: &str) -> bool {
+        let pattern = self.interp_regex_pattern(pattern);
         // If the pattern came from a stringified qr// — format `(?^flags:pat)` —
         // peel it back out so the regex engine sees a plain pattern.
-        let (pattern, flags) = unwrap_qr(pattern, flags);
+        let (pattern, flags) = unwrap_qr(&pattern, flags);
         let case_insensitive = flags.contains('i');
         let pat = if case_insensitive {
             format!("(?i){pattern}")
@@ -2944,6 +3419,67 @@ impl Interpreter {
                         items.reverse();
                         items
                     }
+                    "splice" => {
+                        if let Some(Expr::ArrayVar(name)) = args.first() {
+                            let mut arr = self.get_array(name);
+                            let len = arr.len() as i64;
+                            let off_raw = args
+                                .get(1)
+                                .map(|a| self.eval_expr(a).to_num() as i64)
+                                .unwrap_or(0);
+                            let offset = if off_raw < 0 {
+                                (len + off_raw).max(0) as usize
+                            } else {
+                                (off_raw as usize).min(arr.len())
+                            };
+                            let remove_len = if args.len() >= 3 {
+                                let n = self.eval_expr(&args[2]).to_num() as i64;
+                                if n < 0 {
+                                    ((arr.len() as i64 - offset as i64 + n).max(0)) as usize
+                                } else {
+                                    (n as usize).min(arr.len().saturating_sub(offset))
+                                }
+                            } else {
+                                arr.len() - offset
+                            };
+                            let replacement: Vec<Value> =
+                                args[3..].iter().flat_map(|a| self.eval_list(a)).collect();
+                            let removed: Vec<Value> = arr
+                                .splice(offset..offset + remove_len, replacement)
+                                .collect();
+                            self.set_array(name, arr);
+                            removed
+                        } else {
+                            Vec::new()
+                        }
+                    }
+                    "delete" => {
+                        if let Some(Expr::HashSlice(name, keys)) = args.first() {
+                            let keys_v: Vec<String> = keys
+                                .iter()
+                                .flat_map(|k| self.eval_list(k))
+                                .map(|v| v.to_str())
+                                .collect();
+                            let mut out = Vec::new();
+                            let scope_idx = self
+                                .scopes
+                                .iter()
+                                .rposition(|s| s.hashes.contains_key(name));
+                            if let Some(idx) = scope_idx {
+                                let h = self.scopes[idx].hashes.get_mut(name).unwrap();
+                                for k in &keys_v {
+                                    out.push(h.remove(k).unwrap_or(Value::Undef));
+                                }
+                            } else if let Some(h) = self.globals.hashes.get_mut(name) {
+                                for k in &keys_v {
+                                    out.push(h.remove(k).unwrap_or(Value::Undef));
+                                }
+                            }
+                            out
+                        } else {
+                            vec![self.eval_expr(&Expr::Call("delete".to_string(), args.to_vec()))]
+                        }
+                    }
                     "unpack" if args.len() >= 2 => {
                         let fmt = self.eval_expr(&args[0]).to_str();
                         let data = self.eval_expr(&args[1]).to_str();
@@ -2992,7 +3528,9 @@ impl Interpreter {
                         } else {
                             self.get_var("_").to_str()
                         };
-                        if pat == " " {
+                        let limit: Option<i64> =
+                            args.get(2).map(|a| self.eval_expr(a).to_num() as i64);
+                        let mut items: Vec<Value> = if pat == " " {
                             text.split_whitespace()
                                 .map(|s| Value::Str(s.to_string()))
                                 .collect()
@@ -3002,19 +3540,40 @@ impl Interpreter {
                             text.split(&pat)
                                 .map(|s| Value::Str(s.to_string()))
                                 .collect()
+                        };
+                        // Perl default: strip trailing empty fields. A
+                        // positive limit preserves them; 0 / no limit strips.
+                        let keep_trailing = matches!(limit, Some(n) if n > 0);
+                        if !keep_trailing {
+                            while matches!(items.last(), Some(Value::Str(s)) if s.is_empty()) {
+                                items.pop();
+                            }
                         }
+                        if let Some(n) = limit {
+                            if n > 0 && items.len() > n as usize {
+                                // We don't re-split, but cap to N by joining
+                                // the remainder with the pattern — matches Perl
+                                // only when pattern is a single char, which is
+                                // the common case in tests.
+                                let extra: Vec<String> = items
+                                    .split_off(n as usize - 1)
+                                    .into_iter()
+                                    .map(|v| v.to_str())
+                                    .collect();
+                                items.push(Value::Str(extra.join(&pat)));
+                            }
+                        }
+                        items
                     }
                     _ => {
                         // For user-defined subs, return list in list context
-                        if let Some((_params, body)) = self.subs.get(name.as_str()).cloned() {
-                            let arg_vals: Vec<Value> =
-                                args.iter().flat_map(|a| self.eval_list(a)).collect();
+                        if let Some((params, body)) = self.subs.get(name.as_str()).cloned() {
+                            let arg_vals = self.eval_args_with_proto(args, &params);
                             self.call_sub_list(&body, &arg_vals)
                         } else {
                             let qualified = format!("{}::{}", self.package, name);
-                            if let Some((_params, body)) = self.subs.get(&qualified).cloned() {
-                                let arg_vals: Vec<Value> =
-                                    args.iter().flat_map(|a| self.eval_list(a)).collect();
+                            if let Some((params, body)) = self.subs.get(&qualified).cloned() {
+                                let arg_vals = self.eval_args_with_proto(args, &params);
                                 self.call_sub_list(&body, &arg_vals)
                             } else {
                                 // Builtin: call scalar path but promote to list
@@ -3074,6 +3633,7 @@ impl Interpreter {
         } else {
             handle.to_string()
         };
+        let effective_handle = self.resolve_fh(&effective_handle);
 
         // <> or <STDIN> reads from stdin
         if effective_handle.is_empty() || effective_handle == "STDIN" {
@@ -3187,9 +3747,10 @@ impl Interpreter {
             } else {
                 File::create(&filename)
             };
+            let resolved = self.resolve_fh(&fh_name);
             match file {
                 Ok(f) => {
-                    self.write_handles.insert(fh_name, BufWriter::new(f));
+                    self.write_handles.insert(resolved, BufWriter::new(f));
                     Value::Num(1.0)
                 }
                 Err(e) => {
@@ -3198,9 +3759,10 @@ impl Interpreter {
                 }
             }
         } else {
+            let resolved = self.resolve_fh(&fh_name);
             match File::open(&filename) {
                 Ok(f) => {
-                    self.read_handles.insert(fh_name, BufReader::new(f));
+                    self.read_handles.insert(resolved, BufReader::new(f));
                     Value::Num(1.0)
                 }
                 Err(e) => {
@@ -3211,11 +3773,83 @@ impl Interpreter {
         }
     }
 
+    fn eval_read(&mut self, args: &[Expr]) -> Value {
+        // read(FH, SCALAR, LEN [, OFFSET])
+        if args.len() < 3 {
+            return Value::Undef;
+        }
+        let raw_handle = self.eval_expr(&args[0]).to_str();
+        let handle = self.resolve_fh(&raw_handle);
+        let len = self.eval_expr(&args[2]).to_num() as usize;
+        let reader = match self.read_handles.get_mut(&handle) {
+            Some(r) => r,
+            None => return Value::Undef,
+        };
+        let mut buf = vec![0u8; len];
+        let n = match reader.read(&mut buf) {
+            Ok(n) => n,
+            Err(_) => return Value::Undef,
+        };
+        buf.truncate(n);
+        let s = String::from_utf8_lossy(&buf).into_owned();
+        // Write into the target scalar (args[1]).
+        self.assign_to(&args[1], Value::Str(s));
+        Value::Num(n as f64)
+    }
+
+    fn eval_seek(&mut self, args: &[Expr]) -> Value {
+        // seek(FH, POS, WHENCE) — whence: 0=SEEK_SET, 1=SEEK_CUR, 2=SEEK_END.
+        if args.len() < 3 {
+            return Value::Num(0.0);
+        }
+        let raw_handle = self.eval_expr(&args[0]).to_str();
+        let handle = self.resolve_fh(&raw_handle);
+        let pos = self.eval_expr(&args[1]).to_num() as i64;
+        let whence = self.eval_expr(&args[2]).to_num() as i32;
+        let seek_from = match whence {
+            0 => SeekFrom::Start(pos as u64),
+            1 => SeekFrom::Current(pos),
+            2 => SeekFrom::End(pos),
+            _ => return Value::Num(0.0),
+        };
+        if let Some(reader) = self.read_handles.get_mut(&handle) {
+            if reader.seek(seek_from).is_ok() {
+                return Value::Num(1.0);
+            }
+        }
+        if let Some(writer) = self.write_handles.get_mut(&handle) {
+            if writer.flush().is_ok() && writer.seek(seek_from).is_ok() {
+                return Value::Num(1.0);
+            }
+        }
+        Value::Num(0.0)
+    }
+
+    fn eval_tell(&mut self, args: &[Expr]) -> Value {
+        if args.is_empty() {
+            return Value::Num(-1.0);
+        }
+        let raw_handle = self.eval_expr(&args[0]).to_str();
+        let handle = self.resolve_fh(&raw_handle);
+        if let Some(reader) = self.read_handles.get_mut(&handle) {
+            if let Ok(pos) = reader.stream_position() {
+                return Value::Num(pos as f64);
+            }
+        }
+        if let Some(writer) = self.write_handles.get_mut(&handle) {
+            if let Ok(pos) = writer.stream_position() {
+                return Value::Num(pos as f64);
+            }
+        }
+        Value::Num(-1.0)
+    }
+
     fn eval_close(&mut self, args: &[Expr]) -> Value {
         if args.is_empty() {
             return Value::Num(1.0);
         }
-        let name = self.eval_expr(&args[0]).to_str();
+        let raw = self.eval_expr(&args[0]).to_str();
+        let name = self.resolve_fh(&raw);
         // Flush and remove write handles
         if let Some(mut writer) = self.write_handles.remove(&name) {
             let _ = writer.flush();
@@ -3352,6 +3986,25 @@ impl Interpreter {
         let mut parser = Parser::new_with_lines(tokens, token_lines);
         let stmts = parser.parse_program();
 
+        // Temporarily switch current_file to `(eval N)` so diagnostics
+        // emitted while evaluating a string report the pseudo-file perl
+        // itself uses.
+        self.eval_counter += 1;
+        let saved_file = std::mem::replace(
+            &mut self.current_file,
+            format!("(eval {})", self.eval_counter),
+        );
+
+        // Run the compile-time `use` check on eval'd strings too, so
+        // `eval 'use SomeModule'` sets $@ the same way the top-level
+        // check does when the module isn't on disk.
+        let mut ct_line: usize = 1;
+        if let Some(err) = compile_time_use_check(&stmts, &mut ct_line, self) {
+            self.set_global_var("@", Value::Str(err));
+            self.current_file = saved_file;
+            return Value::Undef;
+        }
+
         self.set_global_var("@", Value::Str(String::new()));
         self.push_scope();
 
@@ -3359,11 +4012,13 @@ impl Interpreter {
             match self.exec_stmt(stmt) {
                 Flow::Return(v) => {
                     self.pop_scope();
+                    self.current_file = saved_file;
                     return v;
                 }
                 Flow::Die(msg) => {
                     self.set_global_var("@", Value::Str(msg));
                     self.pop_scope();
+                    self.current_file = saved_file;
                     return Value::Undef;
                 }
                 Flow::None => {}
@@ -3373,6 +4028,7 @@ impl Interpreter {
 
         let result = self.last_expr_val.clone();
         self.pop_scope();
+        self.current_file = saved_file;
         result
     }
 
@@ -3678,12 +4334,97 @@ fn compile_time_use_check(
     None
 }
 
-/// Canonicalise a variable name: `$::foo` → `main::foo`. Keeps
-/// already-qualified names as-is. Leaves short names untouched.
+/// Walk a statement tree and collect every named sub into `out`. Used to
+/// hoist nested-in-block subs before run-time, matching Perl's compile-
+/// time behaviour where `sub name {...}` is visible regardless of where
+/// it textually sits.
+fn collect_named_subs(stmts: &[Stmt], out: &mut Vec<(String, Vec<String>, Vec<Stmt>)>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Sub { name, params, body } if !name.is_empty() => {
+                out.push((name.clone(), params.clone(), body.clone()));
+                collect_named_subs(body, out);
+            }
+            Stmt::Block(body)
+            | Stmt::BareBlock(body)
+            | Stmt::NamedBlock(_, body)
+            | Stmt::Begin(body, _)
+            | Stmt::End(body) => collect_named_subs(body, out),
+            Stmt::If {
+                then,
+                elsifs,
+                else_block,
+                ..
+            } => {
+                collect_named_subs(then, out);
+                for (_, body) in elsifs {
+                    collect_named_subs(body, out);
+                }
+                if let Some(body) = else_block {
+                    collect_named_subs(body, out);
+                }
+            }
+            Stmt::Unless {
+                then, else_block, ..
+            } => {
+                collect_named_subs(then, out);
+                if let Some(body) = else_block {
+                    collect_named_subs(body, out);
+                }
+            }
+            Stmt::While {
+                body,
+                continue_body,
+                ..
+            }
+            | Stmt::Until {
+                body,
+                continue_body,
+                ..
+            }
+            | Stmt::Foreach {
+                body,
+                continue_body,
+                ..
+            } => {
+                collect_named_subs(body, out);
+                if let Some(cont) = continue_body {
+                    collect_named_subs(cont, out);
+                }
+            }
+            Stmt::DoWhile { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
+                collect_named_subs(body, out)
+            }
+            Stmt::BlockWithContinue {
+                body,
+                continue_body,
+                ..
+            } => {
+                collect_named_subs(body, out);
+                collect_named_subs(continue_body, out);
+            }
+            Stmt::PostfixIf(inner, _)
+            | Stmt::PostfixUnless(inner, _)
+            | Stmt::PostfixWhile(inner, _)
+            | Stmt::PostfixUntil(inner, _)
+            | Stmt::PostfixFor(inner, _) => {
+                collect_named_subs(std::slice::from_ref(inner.as_ref()), out);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Canonicalise a variable name: `$::foo`, `$main::foo`, `$foo` all name
+/// the same slot. Non-main packages keep their qualifier intact.
 fn canon_var(name: &str) -> &str {
-    // `$::foo` tokens arrive here as `::foo`. Strip the leading `::` so
-    // we store under `foo` in globals (same as `$foo` in the main package).
-    name.strip_prefix("::").unwrap_or(name)
+    if let Some(rest) = name.strip_prefix("::") {
+        return rest;
+    }
+    if let Some(rest) = name.strip_prefix("main::") {
+        return rest;
+    }
+    name
 }
 
 /// Perl's `oct()` — interpret a string as octal by default, or as the base
