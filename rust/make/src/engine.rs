@@ -1182,6 +1182,107 @@ impl Engine {
         // Find explicit rules
         let rules = self.rules.borrow().get(target).cloned().unwrap_or_default();
 
+        // Double-colon rules are independent: each rule is evaluated
+        // separately, with its own prereqs and its own recipe. Fall
+        // through to the normal path only if all rules are single-colon.
+        let any_double = rules.iter().any(|r| r.is_double_colon);
+        if any_double {
+            self.built_targets.borrow_mut().insert(target.to_string());
+            for (idx, rule) in rules.iter().enumerate() {
+                let prereqs: Vec<String> = rule
+                    .prerequisites
+                    .iter()
+                    .flat_map(|p| {
+                        expand::expand(p, self)
+                            .split_whitespace()
+                            .map(|s| s.to_string())
+                            .collect::<Vec<_>>()
+                    })
+                    .collect();
+                let order_only: Vec<String> = rule
+                    .order_only
+                    .iter()
+                    .flat_map(|p| {
+                        expand::expand(p, self)
+                            .split_whitespace()
+                            .map(|s| s.to_string())
+                            .collect::<Vec<_>>()
+                    })
+                    .collect();
+                for prereq in &prereqs {
+                    self.build_target_for(prereq, Some(target))?;
+                }
+                for prereq in &order_only {
+                    self.build_target_for(prereq, Some(target))?;
+                }
+                if rule.recipe.is_empty() {
+                    continue;
+                }
+                // Mimic the single-rule rebuild decision per entry.
+                let target_mtime = if is_phony {
+                    None
+                } else {
+                    std::fs::metadata(target)
+                        .ok()
+                        .and_then(|m| m.modified().ok())
+                };
+                let mut needs = self.always_make || is_phony || target_mtime.is_none();
+                if !needs {
+                    for p in &prereqs {
+                        let pm = std::fs::metadata(p).ok().and_then(|m| m.modified().ok());
+                        if pm.is_none() {
+                            needs = true;
+                            break;
+                        }
+                        if let (Some(t), Some(pt)) = (target_mtime, pm)
+                            && pt > t
+                        {
+                            needs = true;
+                            break;
+                        }
+                    }
+                }
+                if !needs {
+                    continue;
+                }
+                let _ = idx;
+                self.rebuilt_targets.borrow_mut().insert(target.to_string());
+                if self.touch {
+                    if !is_phony {
+                        if !self.silent {
+                            println!("touch {target}");
+                        }
+                        *self.recipe_executed.borrow_mut() = true;
+                        if !self.dry_run {
+                            std::fs::OpenOptions::new()
+                                .create(true)
+                                .truncate(false)
+                                .write(true)
+                                .open(target)
+                                .ok();
+                        }
+                    }
+                } else if self.question {
+                    *self.question_needs_update.borrow_mut() = true;
+                } else if let Err(e) = self.execute_recipe(
+                    target,
+                    &rule.recipe,
+                    &rule.recipe_lines,
+                    &rule.source_name,
+                    &prereqs,
+                    &order_only,
+                    &[],
+                    "",
+                ) {
+                    return Err(e);
+                } else {
+                    *self.recipe_executed.borrow_mut() = true;
+                }
+            }
+            *self.target_had_recipe.borrow_mut() = rules.iter().any(|r| !r.recipe.is_empty());
+            return Ok(());
+        }
+
         // Find matching pattern rule if no explicit recipe
         let has_recipe = rules.iter().any(|r| !r.recipe.is_empty());
         let pattern_match = if !has_recipe {
@@ -1271,18 +1372,10 @@ impl Engine {
             }
         }
 
-        // Build order-only prerequisites (just ensure they exist)
-        for prereq in &all_order_only {
-            if let Err(e) = self.build_target_for(prereq, Some(target)) {
-                pop_scope(self);
-                return Err(e);
-            }
-        }
-
-        // Build normal prerequisites. If a prereq has no file on disk after
-        // being built (a phony / FORCE-style rule) we treat it as "newer
-        // than any target" so its dependents always rebuild, matching GNU
-        // make semantics.
+        // Build normal prerequisites first. If a prereq has no file on
+        // disk after being built (a phony / FORCE-style rule) we treat
+        // it as "newer than any target" so its dependents always
+        // rebuild, matching GNU make semantics.
         let mut newest_prereq: Option<std::time::SystemTime> = None;
         let mut has_phony_prereq = false;
         let mut has_rebuilt_prereq = false;
@@ -1310,6 +1403,16 @@ impl Engine {
             {
                 // Prereq has a rule but no resulting file — phony / FORCE.
                 has_phony_prereq = true;
+            }
+        }
+
+        // Build order-only prerequisites after normal prereqs.
+        // Order-only targets just need to exist — they don't affect
+        // the target's rebuild decision based on mtime.
+        for prereq in &all_order_only {
+            if let Err(e) = self.build_target_for(prereq, Some(target)) {
+                pop_scope(self);
+                return Err(e);
             }
         }
 
