@@ -1,0 +1,16 @@
+[package]
+name = "rust-perl"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[[bin]]
+name = "perl"
+path = "src/main.rs"
+
+[dependencies]
+regex = "1"
+
+[profile.release]
+lto = true
+strip = true
