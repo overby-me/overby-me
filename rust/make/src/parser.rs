@@ -72,7 +72,11 @@ impl Parser {
                     current.push_str(effective);
                     current.push('\n');
                 } else {
-                    current.push_str(stripped);
+                    // GNU make collapses `<ws>*\<newline><ws>*` into a
+                    // single space in non-recipe context. Trim trailing
+                    // whitespace from the portion before `\` (the next
+                    // line's leading whitespace is stripped above).
+                    current.push_str(stripped.trim_end());
                     current.push(' ');
                 }
                 in_continuation = true;
