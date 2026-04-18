@@ -62,12 +62,17 @@ in
     }: let
       udevRulesOverride = pkgs.runCommand "rust-systemd-udev-rules-override" {} ''
         mkdir -p $out/lib/udev/rules.d
-        # Copy rules that reference `systemctl`, and always include
-        # 99-systemd.rules (the TEST-17-UDEV.sanity-check.sh uses
-        # `udevadm cat 99-systemd` which requires this file).
+        # Copy rules that either:
+        #  * reference `systemctl` (systemd-unit integrations)
+        #  * ship builtin IMPORTs (`net_id`, `net_setup_link`, …) needed
+        #    by TEST-17-UDEV.* for ID_NET_DRIVER/ID_NET_NAME-style props
+        #  * 99-systemd.rules (required verbatim by the sanity-check
+        #    subtest's `udevadm cat 99-systemd`)
         for rule in ${config.systemd.package}/lib/udev/rules.d/*.rules; do
           name=$(basename "$rule")
-          if grep -q 'systemctl' "$rule" || [ "$name" = "99-systemd.rules" ]; then
+          if grep -q 'systemctl' "$rule" \
+             || grep -q 'IMPORT{builtin}' "$rule" \
+             || [ "$name" = "99-systemd.rules" ]; then
             cp "$rule" "$out/lib/udev/rules.d/$name"
           fi
         done
