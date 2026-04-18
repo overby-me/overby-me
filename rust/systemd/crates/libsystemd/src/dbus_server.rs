@@ -135,6 +135,51 @@ mod inner {
                 .unwrap_or_default()
         }
 
+        #[zbus(property)]
+        fn wants(&self) -> Vec<String> {
+            dep_names(&self.run_info, &self.unit_name, |d| &d.wants)
+        }
+
+        #[zbus(property)]
+        fn requires(&self) -> Vec<String> {
+            dep_names(&self.run_info, &self.unit_name, |d| &d.requires)
+        }
+
+        #[zbus(property)]
+        fn wanted_by(&self) -> Vec<String> {
+            dep_names(&self.run_info, &self.unit_name, |d| &d.wanted_by)
+        }
+
+        #[zbus(property)]
+        fn required_by(&self) -> Vec<String> {
+            dep_names(&self.run_info, &self.unit_name, |d| &d.required_by)
+        }
+
+        #[zbus(property)]
+        fn after(&self) -> Vec<String> {
+            dep_names(&self.run_info, &self.unit_name, |d| &d.after)
+        }
+
+        #[zbus(property)]
+        fn before(&self) -> Vec<String> {
+            dep_names(&self.run_info, &self.unit_name, |d| &d.before)
+        }
+
+        #[zbus(property)]
+        fn conflicts(&self) -> Vec<String> {
+            dep_names(&self.run_info, &self.unit_name, |d| &d.conflicts)
+        }
+
+        #[zbus(property)]
+        fn part_of(&self) -> Vec<String> {
+            dep_names(&self.run_info, &self.unit_name, |d| &d.part_of)
+        }
+
+        #[zbus(property)]
+        fn binds_to(&self) -> Vec<String> {
+            dep_names(&self.run_info, &self.unit_name, |d| &d.binds_to)
+        }
+
         /// Drop-in config files merged into this unit.
         #[zbus(property)]
         fn drop_in_paths(&self) -> Vec<String> {
@@ -265,6 +310,25 @@ mod inner {
                 })
                 .unwrap_or_else(|| "success".to_string())
         }
+    }
+
+    /// Look up a unit by name and return the names of its dependency entries
+    /// selected by `select` — e.g. `|d| &d.wants`.
+    fn dep_names<F>(run_info: &ArcMutRuntimeInfo, unit_name: &str, select: F) -> Vec<String>
+    where
+        F: Fn(&crate::units::Dependencies) -> &[crate::units::UnitId],
+    {
+        let ri = run_info.read_poisoned();
+        ri.unit_table
+            .values()
+            .find(|u| u.id.name == unit_name)
+            .map(|u| {
+                select(&u.common.dependencies)
+                    .iter()
+                    .map(|id| id.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     fn service_type_string(t: &crate::units::ServiceType) -> String {
