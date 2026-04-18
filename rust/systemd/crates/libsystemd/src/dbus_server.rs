@@ -337,6 +337,66 @@ mod inner {
         unit_name: String,
     }
 
+    /// Per-slice object exposing `org.freedesktop.systemd1.Slice` for
+    /// `.slice` units — exposing the common cgroup resource controls so
+    /// tests can `busctl get-property` them (e.g.
+    /// `org.freedesktop.systemd1.Slice MemoryMax`).
+    struct SliceObj {
+        run_info: ArcMutRuntimeInfo,
+        unit_name: String,
+    }
+
+    #[interface(name = "org.freedesktop.systemd1.Slice")]
+    impl SliceObj {
+        #[zbus(property)]
+        fn memory_max(&self) -> String {
+            memory_limit_string(&self.run_info, &self.unit_name, |c| &c.memory_max)
+        }
+
+        #[zbus(property)]
+        fn memory_min(&self) -> String {
+            memory_limit_string(&self.run_info, &self.unit_name, |c| &c.memory_min)
+        }
+
+        #[zbus(property)]
+        fn memory_low(&self) -> String {
+            memory_limit_string(&self.run_info, &self.unit_name, |c| &c.memory_low)
+        }
+
+        #[zbus(property)]
+        fn memory_high(&self) -> String {
+            memory_limit_string(&self.run_info, &self.unit_name, |c| &c.memory_high)
+        }
+
+        #[zbus(property)]
+        fn memory_swap_max(&self) -> String {
+            memory_limit_string(&self.run_info, &self.unit_name, |c| &c.memory_swap_max)
+        }
+    }
+
+    fn memory_limit_string<F>(
+        run_info: &ArcMutRuntimeInfo,
+        unit_name: &str,
+        select: F,
+    ) -> String
+    where
+        F: Fn(&crate::units::SliceConfig) -> &Option<crate::units::MemoryLimit>,
+    {
+        let ri = run_info.read_poisoned();
+        let Some(unit) = ri.unit_table.values().find(|u| u.id.name == unit_name) else {
+            return "infinity".to_string();
+        };
+        let crate::units::Specific::Slice(slice) = &unit.specific else {
+            return "infinity".to_string();
+        };
+        match select(&slice.conf) {
+            None => "infinity".to_string(),
+            Some(crate::units::MemoryLimit::Infinity) => "infinity".to_string(),
+            Some(crate::units::MemoryLimit::Bytes(n)) => n.to_string(),
+            Some(crate::units::MemoryLimit::Percent(p)) => format!("{p}%"),
+        }
+    }
+
     /// Per-timer object exposing `org.freedesktop.systemd1.Timer` for
     /// `.timer` units.
     struct TimerObj {
@@ -1253,6 +1313,13 @@ mod inner {
                 unit_name: unit_name.to_owned(),
             };
             conn.object_server().at(&path, tmr)?;
+        }
+        if unit_name.ends_with(".slice") {
+            let sl = SliceObj {
+                run_info: run_info.clone(),
+                unit_name: unit_name.to_owned(),
+            };
+            conn.object_server().at(&path, sl)?;
         }
         Ok(())
     }
