@@ -3271,11 +3271,15 @@ fn main() -> ExitCode {
                 effective_settle,
                 &all_devices,
             );
-            // --wait-daemon: wait for the udev daemon's event queue to
-            // drain (implemented as a bounded `settle`).
-            if let Some(timeout_str) = wait_daemon {
-                let t = timeout_str.parse::<u64>().unwrap_or(60);
-                let _ = cmd_settle(t, &None);
+            // Wait for the kernel to enqueue uevents with udevd (short
+            // race-buffer before `settle` reads QUEUE_FILE).
+            if effective_settle {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                let timeout_secs = wait_daemon
+                    .as_deref()
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(60);
+                let _ = cmd_settle(timeout_secs, &None);
             }
             rc
         }
