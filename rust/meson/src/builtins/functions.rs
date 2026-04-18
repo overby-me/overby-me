@@ -62,6 +62,10 @@ pub fn register(vm: &mut VM) {
         "add_test_setup",
         "disabler",
         "install_tag",
+        "is_disabler",
+        "build_target",
+        "subdir_done",
+        "add_project_dependencies",
     ];
     for name in funcs {
         vm.globals
@@ -184,6 +188,16 @@ pub fn register(vm: &mut VM) {
     vm.builtins.insert("disabler".to_string(), builtin_disabler);
     vm.builtins
         .insert("install_tag".to_string(), builtin_install_tag);
+    vm.builtins
+        .insert("is_disabler".to_string(), builtin_is_disabler);
+    vm.builtins
+        .insert("build_target".to_string(), builtin_build_target);
+    vm.builtins
+        .insert("subdir_done".to_string(), builtin_subdir_done);
+    vm.builtins.insert(
+        "add_project_dependencies".to_string(),
+        builtin_add_project_dependencies,
+    );
 }
 
 fn builtin_project(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
@@ -758,26 +772,50 @@ fn builtin_custom_target(vm: &mut VM, args: &[CallArg]) -> Result<Object, String
         .unwrap_or_default();
 
     let mut command = Vec::new();
-    if let Some(Object::Array(arr)) = VM::get_arg_value(args, "command") {
-        for item in arr {
-            command.push(item.to_string_value());
+    match VM::get_arg_value(args, "command") {
+        Some(Object::Array(arr)) => {
+            for item in arr {
+                command.push(item.to_string_value());
+            }
         }
+        Some(Object::String(s)) => {
+            command.push(s.clone());
+        }
+        Some(other) => {
+            command.push(other.to_string_value());
+        }
+        None => {}
     }
 
     let mut input = Vec::new();
-    if let Some(Object::Array(arr)) = VM::get_arg_value(args, "input") {
-        for item in arr {
-            input.push(item.to_string_value());
+    match VM::get_arg_value(args, "input") {
+        Some(Object::Array(arr)) => {
+            for item in arr {
+                input.push(item.to_string_value());
+            }
         }
+        Some(Object::String(s)) => {
+            input.push(s.clone());
+        }
+        Some(other) => {
+            input.push(other.to_string_value());
+        }
+        None => {}
     }
 
     let mut output = Vec::new();
-    if let Some(Object::Array(arr)) = VM::get_arg_value(args, "output") {
-        for item in arr {
-            if let Object::String(s) = item {
-                output.push(s.clone());
+    match VM::get_arg_value(args, "output") {
+        Some(Object::Array(arr)) => {
+            for item in arr {
+                if let Object::String(s) = item {
+                    output.push(s.clone());
+                }
             }
         }
+        Some(Object::String(s)) => {
+            output.push(s.clone());
+        }
+        _ => {}
     }
 
     let capture = VM::get_arg_bool(args, "capture", false);
@@ -1217,6 +1255,23 @@ fn builtin_subdir(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         })
         .ok_or("subdir() requires directory name")?;
 
+    // Check if_found kwarg
+    if let Some(if_found) = VM::get_arg_value(args, "if_found") {
+        match &if_found {
+            Object::Dependency(dep) if !dep.found => return Ok(Object::None),
+            Object::Array(arr) => {
+                for item in arr {
+                    if let Object::Dependency(dep) = item {
+                        if !dep.found {
+                            return Ok(Object::None);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     // Save current state
     let old_subdir = vm.current_subdir.clone();
     let new_subdir = if old_subdir.is_empty() {
@@ -1245,8 +1300,13 @@ fn builtin_subdir(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
     compiler
         .compile(&program)
         .map_err(|e| format!("In {}: {}", subdir_build, e))?;
-    vm.execute(&compiler.chunk)
-        .map_err(|e| format!("In {}: {}", subdir_build, e))?;
+    match vm.execute(&compiler.chunk) {
+        Ok(_) => {}
+        Err(e) if e == "SUBDIR_DONE" => {
+            // subdir_done() was called, stop processing this subdir
+        }
+        Err(e) => return Err(format!("In {}: {}", subdir_build, e)),
+    }
 
     // Restore
     vm.current_subdir = old_subdir;
@@ -1507,16 +1567,40 @@ fn builtin_files(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
 
 fn builtin_join_paths(_vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
     let positional = VM::get_positional_args(args);
-    let parts: Vec<String> = positional.iter().map(|v| v.to_string_value()).collect();
-    let mut result = std::path::PathBuf::new();
-    for part in &parts {
+
+    // Collect the string parts: support both join_paths('a', 'b') and join_paths(['a', 'b'])
+    let parts: Vec<String> = if positional.len() == 1 {
+        match &positional[0] {
+            Object::Array(arr) => arr.iter().map(|v| v.to_string_value()).collect(),
+            other => return Ok(Object::String(other.to_string_value())),
+        }
+    } else {
+        positional.iter().map(|v| v.to_string_value()).collect()
+    };
+
+    if parts.is_empty() {
+        return Err("join_paths requires at least one argument".to_string());
+    }
+
+    // Implement os.path.join semantics:
+    // - Absolute components discard everything before them
+    // - Otherwise join with '/'
+    // - Empty last component adds trailing '/'
+    let mut result = String::new();
+    for (i, part) in parts.iter().enumerate() {
         if part.starts_with('/') {
-            result = std::path::PathBuf::from(part);
+            result = part.clone();
+        } else if i == 0 {
+            result = part.clone();
         } else {
-            result.push(part);
+            if !result.ends_with('/') {
+                result.push('/');
+            }
+            result.push_str(part);
         }
     }
-    Ok(Object::String(result.to_string_lossy().to_string()))
+
+    Ok(Object::String(result))
 }
 
 fn builtin_get_option(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
@@ -1584,10 +1668,11 @@ fn builtin_get_option(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
 }
 
 fn builtin_configuration_data(_vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
-    let mut data = ConfigData::new();
+    let data = ConfigData::new();
     if let Some(Object::Dict(entries)) = VM::get_positional_args(args).first() {
+        let mut values = data.values.borrow_mut();
         for (k, v) in entries {
-            data.values.insert(k.clone(), (v.clone(), None));
+            values.insert(k.clone(), (v.clone(), None));
         }
     }
     Ok(Object::ConfigurationData(data))
@@ -1792,5 +1877,41 @@ fn builtin_disabler(_vm: &mut VM, _args: &[CallArg]) -> Result<Object, String> {
 }
 
 fn builtin_install_tag(_vm: &mut VM, _args: &[CallArg]) -> Result<Object, String> {
+    Ok(Object::None)
+}
+
+fn builtin_is_disabler(_vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
+    if args.is_empty() {
+        return Err("is_disabler() requires exactly 1 argument".to_string());
+    }
+    Ok(Object::Bool(matches!(args[0].value, Object::Disabler)))
+}
+
+fn builtin_build_target(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
+    // build_target() is like executable() but with target_type kwarg
+    // Default to executable if not specified
+    let target_type_str = VM::get_arg_str(args, "target_type", usize::MAX).unwrap_or("executable");
+    // Delegate to the appropriate implementation based on target_type kwarg
+    match target_type_str {
+        "executable" => builtin_executable(vm, args),
+        "shared_library" => builtin_shared_library(vm, args),
+        "static_library" => builtin_static_library(vm, args),
+        "shared_module" => builtin_shared_module(vm, args),
+        "both_libraries" => builtin_both_libraries(vm, args),
+        "library" => builtin_library(vm, args),
+        "jar" => builtin_executable(vm, args), // Treat jar as executable for now
+        other => Err(format!("Unknown target type: '{}'", other)),
+    }
+}
+
+fn builtin_subdir_done(_vm: &mut VM, _args: &[CallArg]) -> Result<Object, String> {
+    // subdir_done() causes the rest of the current meson.build to be skipped
+    // We signal this with a special error that the subdir handler catches
+    Err("SUBDIR_DONE".to_string())
+}
+
+fn builtin_add_project_dependencies(_vm: &mut VM, _args: &[CallArg]) -> Result<Object, String> {
+    // add_project_dependencies() adds dependencies to all targets in the project
+    // For now, accept the arguments silently
     Ok(Object::None)
 }

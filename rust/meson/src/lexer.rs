@@ -25,6 +25,8 @@ pub enum TokenKind {
     In,
     Continue,
     Break,
+    Testcase,
+    Endtestcase,
 
     // Operators
     Plus,
@@ -465,6 +467,14 @@ impl Lexer {
     fn lex_fstring(&mut self, line: usize, col: usize) -> Result<Token, String> {
         self.advance(); // 'f'
         self.advance(); // opening quote
+
+        // Check for multiline f-string f'''...'''
+        if self.peek() == Some('\'') && self.peek_ahead(1) == Some('\'') {
+            self.advance(); // second quote
+            self.advance(); // third quote
+            return self.lex_multiline_fstring(line, col);
+        }
+
         let mut s = String::new();
         loop {
             match self.peek() {
@@ -489,6 +499,34 @@ impl Lexer {
                             ));
                         }
                     }
+                }
+                Some(c) => {
+                    self.advance();
+                    s.push(c);
+                }
+            }
+        }
+        Ok(Token {
+            kind: TokenKind::FStringLiteral(s),
+            line,
+            col,
+        })
+    }
+
+    fn lex_multiline_fstring(&mut self, line: usize, col: usize) -> Result<Token, String> {
+        let mut s = String::new();
+        loop {
+            match self.peek() {
+                None => {
+                    return Err(format!("{}:{}: Unterminated multiline f-string", line, col));
+                }
+                Some('\'')
+                    if self.peek_ahead(1) == Some('\'') && self.peek_ahead(2) == Some('\'') =>
+                {
+                    self.advance();
+                    self.advance();
+                    self.advance();
+                    break;
                 }
                 Some(c) => {
                     self.advance();
@@ -608,6 +646,8 @@ impl Lexer {
             "in" => TokenKind::In,
             "continue" => TokenKind::Continue,
             "break" => TokenKind::Break,
+            "testcase" => TokenKind::Testcase,
+            "endtestcase" => TokenKind::Endtestcase,
             _ => TokenKind::Identifier(s),
         };
         Ok(Token { kind, line, col })

@@ -66,6 +66,10 @@ pub enum OpCode {
     FString(String),
     /// No-op placeholder
     Nop,
+    /// Start testcase block: pop expected error, set up error handler. Jump target on success.
+    TestcaseStart(usize),
+    /// Testcase body completed without error - this means the testcase failed
+    TestcaseNoError,
     /// Halt
     Halt,
 }
@@ -112,7 +116,8 @@ impl Chunk {
             OpCode::Jump(t)
             | OpCode::JumpIfFalse(t)
             | OpCode::JumpIfTrue(t)
-            | OpCode::IterNext(_, t) => *t = target,
+            | OpCode::IterNext(_, t)
+            | OpCode::TestcaseStart(t) => *t = target,
             _ => panic!("Cannot patch non-jump instruction"),
         }
     }
@@ -171,6 +176,7 @@ impl Compiler {
                     self.chunk.emit(OpCode::Jump(continue_target), loc.line);
                 }
             }
+            Statement::Testcase(tc) => self.compile_testcase(tc)?,
         }
         Ok(())
     }
@@ -257,6 +263,28 @@ impl Compiler {
         Ok(())
     }
 
+    fn compile_testcase(&mut self, tc: &TestcaseStatement) -> Result<(), String> {
+        let line = tc.loc.line;
+
+        // Compile expected error expression (pushes string onto stack)
+        self.compile_expression(&tc.expected_error)?;
+
+        // Emit TestcaseStart with placeholder end target
+        let start = self.chunk.emit(OpCode::TestcaseStart(0), line);
+
+        // Compile body
+        for stmt in &tc.body {
+            self.compile_statement(stmt)?;
+        }
+
+        // Body completed without error - testcase failed
+        self.chunk.emit(OpCode::TestcaseNoError, line);
+
+        // Patch TestcaseStart to jump here on caught error
+        self.chunk.patch_jump(start);
+
+        Ok(())
+    }
     fn compile_expression(&mut self, expr: &Expression) -> Result<(), String> {
         let line = expr.loc().line;
         match expr {

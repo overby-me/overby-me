@@ -55,8 +55,11 @@ impl Interpreter {
         let program = parser.parse()?;
         let mut compiler = Compiler::new();
         compiler.compile(&program)?;
-        self.vm.execute(&compiler.chunk)?;
-        Ok(())
+        match self.vm.execute(&compiler.chunk) {
+            Ok(_) => Ok(()),
+            Err(e) if e == "SUBDIR_DONE" => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 
     pub fn print_summary(&self) {

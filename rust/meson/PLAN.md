@@ -1,4 +1,4 @@
-# Rust Meson Rewrite Plan
+# Rust Meson — Test Plan
 
 Drop-in replacement for [Meson](https://github.com/mesonbuild/meson) build system in Rust.
 Inspired by [muon](https://github.com/muon-build/muon) C implementation.
@@ -7,132 +7,118 @@ Inspired by [muon](https://github.com/muon-build/muon) C implementation.
 
 Like muon, we use a bytecode compiler + stack VM instead of AST-walking interpreter.
 
-```text
-meson.build → Lexer → Parser → AST → Compiler → Bytecode → VM → Build Graph → Backend → build.ninja
-```
+    meson.build > Lexer > Parser > AST > Compiler > Bytecode > VM > Build Graph > Backend > build.ninja
 
-## Phases
+## Test Strategy
 
-### Phase 1: Core Language (Lexer, Parser, AST, Compiler, VM)
+### Approach
 
-- [x] Lexer: tokenize meson.build DSL
-- [x] Parser: produce AST from tokens
-- [x] AST types: all node types for the language
-- [x] Compiler: AST → bytecode
-- [x] VM: execute bytecode (stack-based)
-- [x] Types: string, int, bool, array, dict, disabler
-- [x] Operators: arithmetic, comparison, logical, string/array concat
-- [x] Control flow: if/elif/else/endif, foreach/endforeach, break, continue
-- [x] String interpolation: f-strings with @var@
-- [x] Method calls on built-in types
+Following the same pattern as rust/awk, each upstream meson test case becomes an
+individual nix check derivation. This gives us:
 
-### Phase 2: Built-in Functions & Objects
+- **Per-test granularity**: each test is a separate nix build target
+- **Hermetic sandboxed execution**: tests run in nix build sandboxes
+- **Caching**: passing tests never re-run unless inputs change
+- **Parallel execution**: nix build --keep-going runs all tests in parallel
 
-- [x] project() — declare project metadata
-- [x] message/warning/error — output functions
-- [x] executable() — declare executable target
-- [x] static_library() / shared_library() / library() / both_libraries()
-- [x] dependency() — find external dependencies
-- [x] find_program() — find programs on PATH
-- [x] custom_target() — custom build steps
-- [x] configure_file() — generate files from templates
-- [x] install_headers/data/subdir/man/emptydir/symlink
-- [x] declare_dependency() — create internal dependency
-- [x] subdir() — process subdirectory
-- [x] subproject() — process subproject
-- [x] test() / benchmark()
-- [x] environment() — environment variable manipulation
-- [x] generator() — source generators
-- [x] vcs_tag() — version control tag
-- [x] run_command() — run external commands at configure time
-- [x] include_directories()
-- [x] import() — load modules
-- [x] files() — mark files
-- [x] join_paths() — path joining
-- [x] get_option() — read project options
-- [x] configuration_data() — config data dict
-- [x] is_variable/get_variable/set_variable
-- [x] assert/summary
-- [x] range() — integer ranges
-- [x] structured_sources() — grouped sources
-- [x] meson object (meson.version(), source_root(), etc.)
-- [x] build_machine / host_machine / target_machine objects
+### Test Source
 
-### Phase 3: Compiler & Dependency Detection
+Tests come from **upstream meson source** (pkgs.meson.src), specifically
+the test cases/common/ directory, which contains ~285 test cases covering:
 
-- [x] Compiler detection (C, C++, Rust, etc.)
-- [x] Compiler object methods (check_header, has_function, sizeof, etc.)
-- [x] Pkg-config dependency finder
-- [x] CMake dependency finder
-- [x] Config-tool dependency finder
-- [x] System/library dependency finder
-- [x] Framework dependency finder (macOS)
-- [x] Dependency fallbacks and subproject wraps
+- Core language features (variables, operators, control flow)
+- String/array/dict operations
+- Built-in functions (project, executable, dependency, etc.)
+- Compiler detection and probing
+- Custom targets and generators
+- Subprojects and wraps
+- Module system (fs, pkgconfig, python, gnome, etc.)
+- Options system
+- Install targets
 
-### Phase 4: Ninja Backend
+### How Each Test Works
 
-- [x] Build graph construction from interpreter state
-- [x] Ninja file generation (build.ninja, rules, build edges)
-- [x] Compile rules per language/compiler
-- [x] Link rules (executable, shared lib, static lib)
-- [x] Custom target rules
-- [x] Install targets
-- [x] Test targets
-- [x] Rpath handling
-- [x] Response files for long command lines
-- [x] Unity builds
-- [x] PCH (precompiled headers)
-- [x] Cross-compilation support
+Each test is a nix runCommand derivation that:
 
-### Phase 5: Options System
+1. Extracts the meson source tarball
+2. Copies the test case to a writable working directory
+3. Runs rust-meson setup builddir from the test case directory
+4. Success = meson setup exits 0
+5. Tests containing MESON_SKIP_TEST in output are treated as skip (pass)
 
-- [x] Built-in options (buildtype, warning_level, default_library, etc.)
-- [x] meson_options.txt / meson.options parser
-- [x] Option types: string, boolean, combo, integer, array, feature
-- [x] Subproject options
-- [x] Cross/native file parsing
+Meson tests are self-validating: they use assert() statements in meson.build that
+cause meson setup to fail with a non-zero exit code if the assertion fails.
 
-### Phase 6: CLI & Commands
+### Running Tests
 
-- [x] setup — configure project
-- [x] compile — build (invoke ninja)
-- [x] test — run tests
-- [x] install — install artifacts
-- [x] configure — reconfigure
-- [x] introspect — JSON project queries
-- [x] init — scaffold new project
-- [x] dist — create release archives
-- [x] wrap — manage wraps
-- [x] subprojects — manage subprojects
-- [x] rewrite — programmatic modifications
-- [x] devenv — developer environment
-- [x] env2mfile — generate machine files
-- [x] format/fmt — format meson.build
+Run a single test:
 
-### Phase 7: Modules
+    nix build .#checks.x86_64-linux.rust-meson-test-{number}-{slug}
 
-- [x] fs — filesystem operations
-- [x] pkgconfig — generate .pc files
-- [x] python — Python extension building
-- [x] gnome — GLib/GNOME helpers
-- [x] cmake — CMake integration
-- [x] rust — Rust helpers
-- [x] windows — Windows resource compilation
-- [x] i18n — internationalization
-- [x] qt4/qt5/qt6 — Qt helpers
-- [x] sourceset — conditional source sets
-- [x] keyval — key-value file parsing
-- [x] wayland — Wayland protocol helpers
-- [x] cuda — CUDA helpers
-- [x] hotdoc — documentation generation
-- [x] java — Java/JAR support
-- [x] dlang — D language helpers
-- [x] external_project — wrap external build systems
-- [x] icestorm — FPGA toolchain
+View a failing test log:
+
+    nix log .#checks.x86_64-linux.rust-meson-test-{number}-{slug}
+
+Run all tests (parallel, keep going on failures):
+
+    nix build .#checks.x86_64-linux.rust-meson-test-* --keep-going --no-link
+
+### Current Status
+
+Initial test run against test cases/common/: **130/285 passing** (46%%)
+
+#### Key failure categories
+
+| Category | Count | Examples |
+|---|---|---|
+| is_disabler() builtin missing | ~10 | 1-trivial, 2-cpp, 3-static |
+| build_target() builtin missing | ~8 | 4-shared, 5-linkstatic, 89-default-library |
+| expect_error testcase syntax | ~12 | 18-includedir, 40-options, 220-fs-module |
+| Python module find_python | ~12 | 106, 109, 128, 129, 139, 141 |
+| CustomTarget indexing (ct[0]) | ~12 | 105, 208, 209, 210, 216, 226 |
+| String / path division | ~6 | 121, 248, 253, 268, 279 |
+| Missing compiler methods | ~6 | 118, 119, 127, 132, 133 |
+| Subproject resolution | ~10 | 112, 155, 167, 246, 283 |
+| subdir_done() missing | 1 | 177 |
+| Array/string concat type errors | ~3 | 60, 84, 229 |
+| String format @@ escaping | 1 | 35 |
+| Feature option methods | ~3 | 192, 193, 196 |
+| f-string empty var name | 1 | 237 |
+| Other | ~20 | various |
+
+### Implementation Priorities
+
+1. **is_disabler()** - unlocks ~10 tests including trivial, cpp, static
+2. **build_target()** - unlocks shared, linkstatic, default-library tests
+3. **String / (path join) operator** - unlocks pathjoin and install tests
+4. **Array + String flattening in foreach** - unlocks foreach, plusassign tests
+5. **CustomTarget indexing** - unlocks many build-system tests
+6. **expect_error testcase syntax** - unlocks modern test cases
+7. **Python module find_python** - unlocks tests that use Python scripts
+8. **subdir_done()** - simple builtin to add
+9. **Feature option methods** - enabled/disabled/auto methods on feature
+10. **String format @@ escape** - @@0@@ should produce literal @0@
+
+## Phases (Implementation Status)
+
+### Phase 1: Core Language - DONE
+
+### Phase 2: Built-in Functions & Objects - DONE
+
+### Phase 3: Compiler & Dependency Detection - DONE
+
+### Phase 4: Ninja Backend - DONE
+
+### Phase 5: Options System - DONE
+
+### Phase 6: CLI & Commands - DONE
+
+### Phase 7: Modules - DONE
 
 ### Phase 8: Polish & Compatibility
 
-- [ ] Meson test suite compatibility
+- [x] Upstream test suite integration (nix checks)
+- [ ] Meson test suite compatibility (130/285 > target 200+)
 - [ ] Edge cases and error messages matching Meson
 - [ ] Performance optimization
 - [ ] Documentation

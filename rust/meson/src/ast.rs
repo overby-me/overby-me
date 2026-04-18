@@ -20,6 +20,7 @@ pub enum Statement {
     Foreach(ForeachStatement),
     Break(SourceLocation),
     Continue(SourceLocation),
+    Testcase(TestcaseStatement),
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +43,13 @@ pub struct IfStatement {
 pub struct ForeachStatement {
     pub varnames: Vec<String>,
     pub iterable: Expression,
+    pub body: Vec<Statement>,
+    pub loc: SourceLocation,
+}
+
+#[derive(Debug, Clone)]
+pub struct TestcaseStatement {
+    pub expected_error: Expression,
     pub body: Vec<Statement>,
     pub loc: SourceLocation,
 }

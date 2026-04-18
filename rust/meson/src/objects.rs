@@ -1,6 +1,8 @@
+use std::cell::RefCell;
 /// Object types for the Meson interpreter.
 /// These represent values that can appear on the VM stack.
 use std::collections::HashMap;
+use std::rc::Rc;
 
 #[derive(Debug, Clone)]
 pub enum Object {
@@ -69,6 +71,14 @@ impl PartialEq for Object {
             (Object::Dict(a), Object::Dict(b)) => a == b,
             (Object::Disabler, Object::Disabler) => true,
             (Object::Feature(a), Object::Feature(b)) => a == b,
+            (Object::BuildTarget(a), Object::BuildTarget(b)) => a.id == b.id,
+            (Object::CustomTarget(a), Object::CustomTarget(b)) => a.id == b.id,
+            (Object::ExternalProgram(a), Object::ExternalProgram(b)) => {
+                a.name == b.name && a.path == b.path
+            }
+            (Object::Dependency(a), Object::Dependency(b)) => {
+                a.name == b.name && a.found == b.found
+            }
             _ => false,
         }
     }
@@ -130,7 +140,13 @@ impl Object {
             Object::Int(n) => n.to_string(),
             Object::String(s) => s.clone(),
             Object::Array(a) => {
-                let items: Vec<String> = a.iter().map(|v| v.to_display_string()).collect();
+                let items: Vec<String> = a
+                    .iter()
+                    .map(|v| match v {
+                        Object::String(s) => format!("'{}'", s),
+                        other => other.to_display_string(),
+                    })
+                    .collect();
                 format!("[{}]", items.join(", "))
             }
             Object::Dict(d) => {
@@ -236,13 +252,13 @@ pub struct CompilerData {
 
 #[derive(Debug, Clone)]
 pub struct ConfigData {
-    pub values: HashMap<String, (Object, Option<String>)>,
+    pub values: Rc<RefCell<HashMap<String, (Object, Option<String>)>>>,
 }
 
 impl ConfigData {
     pub fn new() -> Self {
         Self {
-            values: HashMap::new(),
+            values: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 }

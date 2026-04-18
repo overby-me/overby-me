@@ -3,16 +3,34 @@ use crate::objects::*;
 use crate::vm::*;
 
 pub fn register(vm: &mut VM) {
+    // python.find_installation and python.find_python (alias)
     vm.method_registry.insert(
         ("module".to_string(), "python.find_installation".to_string()),
+        python_find_installation,
+    );
+    vm.method_registry.insert(
+        ("module".to_string(), "python.find_python".to_string()),
+        python_find_installation,
+    );
+    // python3.find_installation and python3.find_python (alias)
+    vm.method_registry.insert(
+        (
+            "module".to_string(),
+            "python3.find_installation".to_string(),
+        ),
         python_find_installation,
     );
     vm.method_registry.insert(
         ("module".to_string(), "python3.find_python".to_string()),
         python_find_installation,
     );
+    // extension_module for both module names
     vm.method_registry.insert(
         ("module".to_string(), "python.extension_module".to_string()),
+        python_extension_module,
+    );
+    vm.method_registry.insert(
+        ("module".to_string(), "python3.extension_module".to_string()),
         python_extension_module,
     );
 }

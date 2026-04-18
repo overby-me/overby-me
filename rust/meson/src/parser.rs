@@ -50,6 +50,7 @@ impl Parser {
             TokenKind::Elif => terminators.contains(&"elif"),
             TokenKind::Else => terminators.contains(&"else"),
             TokenKind::Endforeach => terminators.contains(&"endforeach"),
+            TokenKind::Endtestcase => terminators.contains(&"endtestcase"),
             _ => false,
         }
     }
@@ -58,6 +59,7 @@ impl Parser {
         match &self.tokens[self.pos].kind {
             TokenKind::If => self.parse_if(),
             TokenKind::Foreach => self.parse_foreach(),
+            TokenKind::Testcase => self.parse_testcase(),
             TokenKind::Break => {
                 let tok = &self.tokens[self.pos];
                 let loc = SourceLocation {
@@ -181,6 +183,39 @@ impl Parser {
         }))
     }
 
+    fn parse_testcase(&mut self) -> Result<Statement, String> {
+        let tok = &self.tokens[self.pos];
+        let loc = SourceLocation {
+            line: tok.line,
+            col: tok.col,
+        };
+        self.advance(); // 'testcase'
+
+        // Expect 'expect_error' identifier
+        let ident = self.expect_identifier()?;
+        if ident != "expect_error" {
+            return Err(format!(
+                "{}:{}: Expected 'expect_error' after 'testcase', got '{}'",
+                loc.line, loc.col, ident
+            ));
+        }
+
+        // Expect '(' expression ')'
+        self.expect_kind(&TokenKind::LParen)?;
+        let expected_error = self.parse_expression()?;
+        self.expect_kind(&TokenKind::RParen)?;
+        self.expect_newline()?;
+
+        let body = self.parse_block(&["endtestcase"])?;
+        self.expect_keyword(TokenKind::Endtestcase)?;
+        self.expect_newline_or_eof()?;
+
+        Ok(Statement::Testcase(TestcaseStatement {
+            expected_error,
+            body,
+            loc,
+        }))
+    }
     fn parse_expression(&mut self) -> Result<Expression, String> {
         self.parse_ternary()
     }
@@ -634,5 +669,16 @@ mod tests {
     fn test_foreach() {
         let prog = parse_str("foreach x : [1, 2, 3]\n  y = x\nendforeach\n");
         assert!(matches!(prog.statements[0], Statement::Foreach(_)));
+    }
+
+    #[test]
+    fn test_testcase() {
+        let prog = parse_str(
+            "testcase expect_error('some error')
+  x = 1
+endtestcase
+",
+        );
+        assert!(matches!(prog.statements[0], Statement::Testcase(_)));
     }
 }

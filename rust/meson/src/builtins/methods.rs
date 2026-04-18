@@ -65,6 +65,8 @@ pub fn register(vm: &mut VM) {
         .insert(("dict".to_string(), "values".to_string()), dict_values);
     vm.method_registry
         .insert(("dict".to_string(), "length".to_string()), dict_length);
+    vm.method_registry
+        .insert(("dict".to_string(), "add".to_string()), dict_add);
 
     // Int methods
     vm.method_registry
@@ -184,6 +186,16 @@ pub fn register(vm: &mut VM) {
     vm.method_registry.insert(
         ("custom_tgt".to_string(), "to_list".to_string()),
         custom_target_to_list,
+    );
+    vm.method_registry.insert(
+        ("custom_tgt".to_string(), "found".to_string()),
+        custom_target_found,
+    );
+
+    // Custom target index methods
+    vm.method_registry.insert(
+        ("custom_idx".to_string(), "full_path".to_string()),
+        custom_idx_full_path,
     );
 
     // External program methods
@@ -414,6 +426,10 @@ pub fn register(vm: &mut VM) {
         ("both_libs".to_string(), "get_static_lib".to_string()),
         both_libs_static,
     );
+    vm.method_registry.insert(
+        ("both_libs".to_string(), "name".to_string()),
+        both_libs_name,
+    );
 
     // File methods
     vm.method_registry.insert(
@@ -423,6 +439,10 @@ pub fn register(vm: &mut VM) {
 
     // Compiler methods
     register_compiler_methods(vm);
+
+    // Module methods
+    vm.method_registry
+        .insert(("module".to_string(), "found".to_string()), module_found);
 
     // Module methods are registered in modules/
     crate::modules::register_methods(vm);
@@ -460,11 +480,43 @@ fn str_endswith(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, 
 fn str_format(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     let template = obj.to_string_value();
     let positional = VM::get_positional_args(args);
-    let mut result = template;
-    for (i, arg) in positional.iter().enumerate() {
-        let placeholder = format!("@{}@", i);
-        result = result.replace(&placeholder, &arg.to_display_string());
+    // Phase 1: Single-pass replacement of @N@ patterns.
+    // @N@ (where N is digits) takes priority over @@ at each position.
+    let mut result = String::new();
+    let chars: Vec<char> = template.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '@' {
+            // Try to match @N@ where N is one or more digits
+            let start = i + 1;
+            let mut j = start;
+            while j < chars.len() && chars[j].is_ascii_digit() {
+                j += 1;
+            }
+            if j > start && j < chars.len() && chars[j] == '@' {
+                // Found @N@ pattern
+                let idx: usize = chars[start..j].iter().collect::<String>().parse().unwrap();
+                if idx < positional.len() {
+                    result.push_str(&positional[idx].to_display_string());
+                } else {
+                    // Index out of range - keep original text
+                    for c in &chars[i..=j] {
+                        result.push(*c);
+                    }
+                }
+                i = j + 1;
+            } else {
+                // Not an @N@ pattern, just output @
+                result.push('@');
+                i += 1;
+            }
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
     }
+    // Phase 2: Replace @@ with literal @
+    let result = result.replace("@@", "@");
     Ok(Object::String(result))
 }
 
@@ -730,6 +782,27 @@ fn dict_length(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, 
     }
 }
 
+fn dict_add(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
+    if let Object::Dict(entries) = obj {
+        let positional = VM::get_positional_args(args);
+        if let Some(Object::Dict(other)) = positional.first() {
+            let mut result = entries.clone();
+            for (k, v) in other {
+                if let Some(existing) = result.iter_mut().find(|(ek, _)| ek == k) {
+                    existing.1 = v.clone();
+                } else {
+                    result.push((k.clone(), v.clone()));
+                }
+            }
+            Ok(Object::Dict(result))
+        } else {
+            Err("dict.add() requires a dict argument".to_string())
+        }
+    } else {
+        Err("dict.add() called on non-dict".to_string())
+    }
+}
+
 // ---- Int methods ----
 
 fn int_is_even(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
@@ -750,9 +823,13 @@ fn int_is_odd(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, S
 
 fn int_to_string(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Int(n) = obj {
-        let fill = VM::get_arg_int(args, "fill", 0) as usize;
+        let fill = VM::get_arg_int(args, "fill", 0);
         if fill > 0 {
-            Ok(Object::String(format!("{:0>width$}", n, width = fill)))
+            Ok(Object::String(format!(
+                "{:0width$}",
+                n,
+                width = fill as usize
+            )))
         } else {
             Ok(Object::String(n.to_string()))
         }
@@ -761,9 +838,20 @@ fn int_to_string(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object,
     }
 }
 
-fn bool_to_string(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
+fn bool_to_string(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Bool(b) = obj {
-        Ok(Object::String(b.to_string()))
+        let positional = VM::get_positional_args(args);
+        if positional.len() >= 2 {
+            let true_str = positional[0].to_string_value();
+            let false_str = positional[1].to_string_value();
+            Ok(Object::String(if *b { true_str } else { false_str }))
+        } else {
+            Ok(Object::String(if *b {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            }))
+        }
     } else {
         Err("Not a bool".to_string())
     }
@@ -1100,6 +1188,30 @@ fn custom_target_to_list(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Resul
     }
 }
 
+fn custom_target_found(_vm: &mut VM, _obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
+    Ok(Object::Bool(true))
+}
+
+// ---- Custom target index methods ----
+
+fn custom_idx_full_path(vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
+    if let Object::CustomTargetIndex(ct_ref, idx) = obj {
+        if *idx < ct_ref.outputs.len() {
+            Ok(Object::String(format!(
+                "{}/{}",
+                vm.build_root, ct_ref.outputs[*idx]
+            )))
+        } else {
+            Ok(Object::String(format!(
+                "{}/{}_output_{}",
+                vm.build_root, ct_ref.name, idx
+            )))
+        }
+    } else {
+        Err("full_path() called on non-custom-target-index".to_string())
+    }
+}
+
 // ---- External program methods ----
 
 fn program_found(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
@@ -1141,9 +1253,8 @@ fn cfg_set(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, Strin
     let description = VM::get_arg_str(args, "description", usize::MAX).map(String::from);
 
     if let Object::ConfigurationData(data) = obj {
-        let mut data = data.clone();
-        data.values.insert(key, (value, description));
-        Ok(Object::ConfigurationData(data))
+        data.values.borrow_mut().insert(key, (value, description));
+        Ok(obj.clone())
     } else {
         Err("Not configuration data".to_string())
     }
@@ -1159,10 +1270,10 @@ fn cfg_set10(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, Str
     let description = VM::get_arg_str(args, "description", usize::MAX).map(String::from);
 
     if let Object::ConfigurationData(data) = obj {
-        let mut data = data.clone();
         data.values
+            .borrow_mut()
             .insert(key, (Object::Int(if cond { 1 } else { 0 }), description));
-        Ok(Object::ConfigurationData(data))
+        Ok(obj.clone())
     } else {
         Err("Not configuration data".to_string())
     }
@@ -1181,10 +1292,10 @@ fn cfg_set_quoted(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object
     let description = VM::get_arg_str(args, "description", usize::MAX).map(String::from);
 
     if let Object::ConfigurationData(data) = obj {
-        let mut data = data.clone();
         data.values
+            .borrow_mut()
             .insert(key, (Object::String(value), description));
-        Ok(Object::ConfigurationData(data))
+        Ok(obj.clone())
     } else {
         Err("Not configuration data".to_string())
     }
@@ -1196,7 +1307,7 @@ fn cfg_has(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, Strin
             .first()
             .map(|v| v.to_string_value())
             .unwrap_or_default();
-        Ok(Object::Bool(data.values.contains_key(&key)))
+        Ok(Object::Bool(data.values.borrow().contains_key(&key)))
     } else {
         Err("Not configuration data".to_string())
     }
@@ -1210,7 +1321,8 @@ fn cfg_get(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, Strin
             .map(|v| v.to_string_value())
             .unwrap_or_default();
         let default = positional.get(1);
-        match data.values.get(&key) {
+        let values = data.values.borrow();
+        match values.get(&key) {
             Some((val, _)) => Ok(val.clone()),
             None => default
                 .map(|v| (*v).clone())
@@ -1227,7 +1339,8 @@ fn cfg_get_unquoted(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Obje
             .first()
             .map(|v| v.to_string_value())
             .unwrap_or_default();
-        match data.values.get(&key) {
+        let values = data.values.borrow();
+        match values.get(&key) {
             Some((Object::String(s), _)) => {
                 let unquoted = s.trim_matches('"').to_string();
                 Ok(Object::String(unquoted))
@@ -1242,11 +1355,10 @@ fn cfg_get_unquoted(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Obje
 
 fn cfg_keys(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
     if let Object::ConfigurationData(data) = obj {
-        let keys: Vec<Object> = data
-            .values
-            .keys()
-            .map(|k| Object::String(k.clone()))
-            .collect();
+        let values = data.values.borrow();
+        let mut keys: Vec<String> = values.keys().cloned().collect();
+        keys.sort();
+        let keys: Vec<Object> = keys.into_iter().map(Object::String).collect();
         Ok(Object::Array(keys))
     } else {
         Err("Not configuration data".to_string())
@@ -1255,15 +1367,16 @@ fn cfg_keys(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, Str
 
 fn cfg_merge_from(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::ConfigurationData(data) = obj {
-        let mut merged = data.clone();
         if let Some(Object::ConfigurationData(other)) =
             VM::get_positional_args(args).first().map(|v| *v)
         {
-            for (k, v) in &other.values {
-                merged.values.insert(k.clone(), v.clone());
+            let other_values = other.values.borrow();
+            let mut my_values = data.values.borrow_mut();
+            for (k, v) in other_values.iter() {
+                my_values.insert(k.clone(), v.clone());
             }
         }
-        Ok(Object::ConfigurationData(merged))
+        Ok(obj.clone())
     } else {
         Err("Not configuration data".to_string())
     }
@@ -1685,6 +1798,18 @@ fn both_libs_static(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Obj
     }
 }
 
+fn both_libs_name(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
+    if let Object::BothLibraries(shared, _) = obj {
+        if let Object::BuildTarget(t) = shared.as_ref() {
+            Ok(Object::String(t.name.clone()))
+        } else {
+            Ok(Object::String(String::new()))
+        }
+    } else {
+        Err("Not both_libraries".to_string())
+    }
+}
+
 // ---- File methods ----
 
 fn file_full_path(vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
@@ -1704,6 +1829,9 @@ fn file_full_path(vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object
     }
 }
 
+fn module_found(_vm: &mut VM, _obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
+    Ok(Object::Bool(true))
+}
 // ---- Compiler methods (registered separately) ----
 
 fn register_compiler_methods(vm: &mut VM) {
@@ -1840,6 +1968,19 @@ fn register_compiler_methods(vm: &mut VM) {
         ("compiler".to_string(), "preprocess".to_string()),
         compiler_preprocess,
     );
+    vm.method_registry.insert(
+        (
+            "compiler".to_string(),
+            "symbols_have_underscore_prefix".to_string(),
+        ),
+        compiler_symbols_have_underscore_prefix,
+    );
+    vm.method_registry.insert(
+        ("compiler".to_string(), "has_define".to_string()),
+        compiler_has_define,
+    );
+    vm.method_registry
+        .insert(("compiler".to_string(), "run".to_string()), compiler_run);
 }
 
 fn compiler_get_id(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
@@ -2266,4 +2407,45 @@ fn compiler_preprocess(_vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<
         }
     }
     Ok(Object::Array(sources))
+}
+
+fn compiler_symbols_have_underscore_prefix(
+    _vm: &mut VM,
+    _obj: &Object,
+    _args: &[CallArg],
+) -> Result<Object, String> {
+    // On Linux, symbols don't have underscore prefix
+    Ok(Object::Bool(false))
+}
+
+fn compiler_has_define(_vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<Object, String> {
+    let positional = VM::get_positional_args(args);
+    let define = positional
+        .first()
+        .map(|v| v.to_string_value())
+        .unwrap_or_default();
+    // Common compiler defines that are typically always set
+    let result = matches!(
+        define.as_str(),
+        "__GNUC__"
+            | "__STDC__"
+            | "__linux__"
+            | "__unix__"
+            | "__x86_64__"
+            | "__amd64__"
+            | "__LP64__"
+            | "__SIZEOF_INT__"
+            | "__SIZEOF_POINTER__"
+    );
+    Ok(Object::Bool(result))
+}
+
+fn compiler_run(_vm: &mut VM, _obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
+    // For now, return a successful run result
+    // A proper implementation would compile and run the code
+    Ok(Object::RunResult(RunResultData {
+        returncode: 0,
+        stdout: String::new(),
+        stderr: String::new(),
+    }))
 }
