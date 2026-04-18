@@ -101,6 +101,177 @@ pub fn open_journal_stream(
     Some(s)
 }
 
+/// Build a `HelperMountNs` from a `ServiceConfig`, returning `None` when
+/// the service has no directives that change the filesystem view.  This is
+/// the input that helper commands (ExecStartPre=/Post=/StopPost=) use to
+/// match the eventual ExecStart= namespace.
+fn helper_mount_ns_from_conf(conf: &ServiceConfig) -> Option<HelperMountNs> {
+    let exec = &conf.exec_config;
+    if exec.bind_paths.is_empty()
+        && exec.bind_read_only_paths.is_empty()
+        && exec.inaccessible_paths.is_empty()
+        && !exec.private_tmp
+    {
+        return None;
+    }
+    Some(HelperMountNs {
+        bind_paths: exec.bind_paths.clone(),
+        bind_read_only_paths: exec.bind_read_only_paths.clone(),
+        inaccessible_paths: exec.inaccessible_paths.clone(),
+        private_tmp: exec.private_tmp,
+    })
+}
+
+/// Parse a `BindPaths=` / `BindReadOnlyPaths=` entry of the form
+/// `src`, `src:dst`, or `src:dst:options` and return `(src, dst)`.  If only
+/// `src` is given, the destination is the same path.  Options are currently
+/// ignored (e.g. `rbind`, `norbind`).
+fn parse_bind_entry(entry: &str) -> Option<(String, String)> {
+    let mut parts = entry.splitn(3, ':');
+    let src = parts.next()?.to_owned();
+    let dst = parts.next().map(|s| s.to_owned()).unwrap_or_else(|| src.clone());
+    if src.is_empty() || dst.is_empty() {
+        return None;
+    }
+    Some((src, dst))
+}
+
+/// Apply the minimal mount-namespace settings required by helper commands
+/// (ExecStartPre=/Post=/StopPost=) so they see the same filesystem view as
+/// ExecStart=.  Runs in the fork'd child between fork and exec (pre_exec
+/// context) — must avoid any allocator / libstd paths that could reenter.
+///
+/// Order of operations mirrors exec_helper:
+///   1. unshare(CLONE_NEWNS) — new mount namespace
+///   2. Mark `/` MS_SLAVE|MS_REC so our mounts don't propagate back up
+///   3. Apply BindPaths= and BindReadOnlyPaths=
+///   4. Apply InaccessiblePaths= — bind a read-only, empty inaccessible
+///      tmpfs over each path so the helper cannot use it as a workaround
+///   5. Apply PrivateTmp=yes — mount a fresh tmpfs over /tmp and /var/tmp
+fn apply_helper_mount_namespace(ns: &HelperMountNs) -> std::io::Result<()> {
+    use std::ffi::CString;
+
+    let ret = unsafe { libc::unshare(libc::CLONE_NEWNS) };
+    if ret != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // Remount / as slave so our mounts stay inside this namespace.
+    let slash = c"/";
+    let none_p = std::ptr::null::<libc::c_char>();
+    let ret = unsafe {
+        libc::mount(
+            none_p,
+            slash.as_ptr(),
+            none_p,
+            (libc::MS_SLAVE | libc::MS_REC) as libc::c_ulong,
+            std::ptr::null(),
+        )
+    };
+    if ret != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    // InaccessiblePaths= first: mount a read-only empty tmpfs over each so
+    // subsequent BindPaths cannot target a subpath of them.  We use a shared
+    // empty tmpfs mounted at /run/systemd/inaccessible if available, falling
+    // back to bind-mounting /dev/null (works for file paths only).
+    for p in &ns.inaccessible_paths {
+        let c_dst = CString::new(p.as_str()).ok();
+        if let Some(dst) = c_dst {
+            // Try bind-mounting an empty tmpfs over the path.
+            let tmpfs_name = c"tmpfs";
+            let ret = unsafe {
+                libc::mount(
+                    tmpfs_name.as_ptr(),
+                    dst.as_ptr(),
+                    tmpfs_name.as_ptr(),
+                    (libc::MS_RDONLY | libc::MS_NOSUID | libc::MS_NODEV) as libc::c_ulong,
+                    c"size=0k,mode=0000".as_ptr().cast(),
+                )
+            };
+            if ret != 0 {
+                // Fall back to nothing — inaccessible path may not exist or
+                // be a file we can't tmpfs-mount over.  Non-fatal.
+                continue;
+            }
+        }
+    }
+
+    // BindPaths=: read-write bind mounts.
+    for entry in &ns.bind_paths {
+        if let Some((src, dst)) = parse_bind_entry(entry) {
+            let c_src = match CString::new(src) { Ok(s) => s, Err(_) => continue };
+            let c_dst = match CString::new(dst) { Ok(s) => s, Err(_) => continue };
+            let ret = unsafe {
+                libc::mount(
+                    c_src.as_ptr(),
+                    c_dst.as_ptr(),
+                    none_p,
+                    (libc::MS_BIND | libc::MS_REC) as libc::c_ulong,
+                    std::ptr::null(),
+                )
+            };
+            if ret != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
+    }
+
+    // BindReadOnlyPaths=: bind then remount read-only.
+    for entry in &ns.bind_read_only_paths {
+        if let Some((src, dst)) = parse_bind_entry(entry) {
+            let c_src = match CString::new(src) { Ok(s) => s, Err(_) => continue };
+            let c_dst = match CString::new(dst) { Ok(s) => s, Err(_) => continue };
+            let ret = unsafe {
+                libc::mount(
+                    c_src.as_ptr(),
+                    c_dst.as_ptr(),
+                    none_p,
+                    (libc::MS_BIND | libc::MS_REC) as libc::c_ulong,
+                    std::ptr::null(),
+                )
+            };
+            if ret != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            let ret = unsafe {
+                libc::mount(
+                    none_p,
+                    c_dst.as_ptr(),
+                    none_p,
+                    (libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY) as libc::c_ulong,
+                    std::ptr::null(),
+                )
+            };
+            if ret != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
+    }
+
+    // PrivateTmp=yes: mount a new tmpfs over /tmp and /var/tmp so the helper
+    // sees the same private directories as ExecStart=.
+    if ns.private_tmp {
+        let tmpfs_name = c"tmpfs";
+        for dst in [c"/tmp", c"/var/tmp"] {
+            let ret = unsafe {
+                libc::mount(
+                    tmpfs_name.as_ptr(),
+                    dst.as_ptr(),
+                    tmpfs_name.as_ptr(),
+                    (libc::MS_NOSUID | libc::MS_NODEV) as libc::c_ulong,
+                    c"mode=01777".as_ptr().cast(),
+                )
+            };
+            if ret != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Check if a unit is masked (symlink to /dev/null) on disk.
 fn is_unit_masked(name: &str) -> bool {
     let runtime = std::path::Path::new("/run/systemd/system").join(name);
@@ -306,12 +477,37 @@ pub struct Service {
     /// PID of a running service whose mount namespace this service should join
     /// via setns(2), resolved from JoinsNamespaceOf= at start time.
     pub join_namespace_pid: Option<u32>,
+    /// When set, `run_cmd` arranges for the spawned child to enter a fresh
+    /// mount namespace (via `unshare(CLONE_NEWNS)`) and applies the listed
+    /// BindPaths=, BindReadOnlyPaths=, InaccessiblePaths= + PrivateTmp=
+    /// before exec.  Set by `run_prestart`/`run_poststart`/`run_poststop`
+    /// so that helper commands see the same filesystem view as the
+    /// eventual ExecStart=.  One-shot: cleared by `run_cmd` after spawn.
+    pub helper_mount_ns: Option<HelperMountNs>,
     /// Set to `true` when the service is explicitly stopped via `systemctl stop`
     /// (i.e. `kill()` is called). The exit handler checks this flag to suppress
     /// automatic restart even when `Restart=always` is configured. This matches
     /// real systemd's behavior where manual stop inhibits auto-restart.
     /// Cleared on `start()`.
     pub manual_stop: bool,
+}
+
+/// Minimal mount-namespace settings applied to helper commands
+/// (ExecStartPre=/ExecStartPost=/ExecStopPost=) so they see the same
+/// filesystem view as ExecStart=.  Only the directives that change file
+/// visibility are replicated here — security settings like
+/// ProtectSystem=/NoNewPrivileges= are a separate concern handled by
+/// exec_helper on the main ExecStart.
+#[derive(Clone, Debug, Default)]
+pub struct HelperMountNs {
+    /// `BindPaths=` entries in `src:dst[:opts]` form.
+    pub bind_paths: Vec<String>,
+    /// `BindReadOnlyPaths=` entries in `src:dst[:opts]` form.
+    pub bind_read_only_paths: Vec<String>,
+    /// `InaccessiblePaths=` absolute paths.
+    pub inaccessible_paths: Vec<String>,
+    /// `PrivateTmp=yes` — mount fresh tmpfs over /tmp and /var/tmp.
+    pub private_tmp: bool,
 }
 
 /// Environment variables passed to OnSuccess=/OnFailure= handler services.
@@ -972,6 +1168,16 @@ impl Service {
                     Ok(())
                 });
             }
+        } else if let Some(ns) = self.helper_mount_ns.clone() {
+            // Helper command (ExecStartPre=/Post=/StopPost=) in a service
+            // with namespace settings — apply a minimal mount namespace so
+            // the helper sees the same filesystem as ExecStart= will.  We
+            // clone rather than take so batches of helper commands (via
+            // `run_all_cmds`) all see the same namespace.
+            use std::os::unix::process::CommandExt;
+            unsafe {
+                cmd.pre_exec(move || apply_helper_mount_namespace(&ns));
+            }
         }
 
         trace!("Run {cmdline:?} for service: {name}");
@@ -1147,14 +1353,17 @@ impl Service {
         }
         let timeout = self.get_start_timeout(conf);
         let cmds = conf.startpre.clone();
-        self.run_all_cmds(
+        self.helper_mount_ns = helper_mount_ns_from_conf(conf);
+        let res = self.run_all_cmds(
             &cmds,
             id,
             name,
             timeout,
             run_info,
             conf.exec_config.working_directory.as_ref(),
-        )
+        );
+        self.helper_mount_ns = None;
+        res
     }
     fn run_poststart(
         &mut self,
@@ -1168,14 +1377,17 @@ impl Service {
         }
         let timeout = self.get_start_timeout(conf);
         let cmds = conf.startpost.clone();
-        self.run_all_cmds(
+        self.helper_mount_ns = helper_mount_ns_from_conf(conf);
+        let res = self.run_all_cmds(
             &cmds,
             id,
             name,
             timeout,
             run_info,
             conf.exec_config.working_directory.as_ref(),
-        )
+        );
+        self.helper_mount_ns = None;
+        res
     }
     pub fn run_poststop(
         &mut self,
@@ -1187,6 +1399,7 @@ impl Service {
         trace!("Run poststop for {name}");
         let timeout = self.get_stop_timeout(conf);
         let cmds = conf.stoppost.clone();
+        self.helper_mount_ns = helper_mount_ns_from_conf(conf);
         let res = self.run_all_cmds(
             &cmds,
             id,
@@ -1195,6 +1408,7 @@ impl Service {
             run_info,
             conf.exec_config.working_directory.as_ref(),
         );
+        self.helper_mount_ns = None;
 
         if conf.srcv_type != ServiceType::OneShot {
             // already happened when the oneshot process exited in the exit handler

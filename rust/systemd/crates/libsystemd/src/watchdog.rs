@@ -401,6 +401,7 @@ mod tests {
             extend_timeout_usec: None,
             extend_timeout_timestamp: None,
             join_namespace_pid: None,
+            helper_mount_ns: None,
             manual_stop: false,
         }
     }
