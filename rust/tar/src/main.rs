@@ -2548,14 +2548,29 @@ fn add_paths_to_builder_filter<W: Write>(
                     match entry {
                         Ok(e) => entries.push(e.into_path()),
                         Err(e) => {
-                            let reason = e
-                                .io_error()
-                                .map(describe_open_error)
-                                .unwrap_or_else(|| e.to_string());
                             let path = e
                                 .path()
                                 .map(|p| p.display().to_string())
                                 .unwrap_or_else(|| src.to_string());
+                            // Paths that vanished mid-walk under
+                            // listed-incremental are GNU's
+                            // "File removed before we read it" case:
+                            // warn-level, exit 1 (file changed), not
+                            // the fatal Cannot open / exit 2 path.
+                            let vanished = e
+                                .io_error()
+                                .is_some_and(|ioe| ioe.kind() == io::ErrorKind::NotFound);
+                            if vanished && args.listed_incremental.is_some() {
+                                if !args.disabled_warnings.contains("file-removed") {
+                                    eprintln!("tar: {path}: File removed before we read it");
+                                }
+                                file_changed = true;
+                                continue;
+                            }
+                            let reason = e
+                                .io_error()
+                                .map(describe_open_error)
+                                .unwrap_or_else(|| e.to_string());
                             if args.ignore_failed_read {
                                 eprintln!("tar: {path}: Warning: Cannot open: {reason}");
                                 continue;
@@ -2687,12 +2702,48 @@ fn add_paths_to_builder_filter<W: Write>(
                 continue;
             }
 
+            // Incremental: emit `Directory is new` / rename before
+            // the cache-tag diagnostic so the warnings stay in
+            // directory-first order (parent `Directory is new`, then
+            // the contains-tag note for the same dir).
+            if args.verbose
+                && args.listed_incremental.is_some()
+                && path.is_dir()
+                && !path.is_symlink()
+            {
+                let warn_new = !args.disabled_warnings.contains("new-dir");
+                let warn_rename = !args.disabled_warnings.contains("rename-directory");
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    if let Ok(m) = fs::metadata(path) {
+                        let key = (m.dev(), m.ino());
+                        if prev_time.is_some() {
+                            match prev_snapshot.as_ref().and_then(|s| s.dirs.get(&key)) {
+                                None if warn_new => {
+                                    eprintln!("tar: {path_str}: Directory is new");
+                                }
+                                Some(prev) if warn_rename => {
+                                    let prev_name = prev.name.to_string_lossy();
+                                    if prev_name != *path_str {
+                                        eprintln!(
+                                            "tar: {path_str}: Directory has been renamed from '{prev_name}'"
+                                        );
+                                    }
+                                }
+                                _ => {}
+                            }
+                        } else if warn_new {
+                            eprintln!("tar: {path_str}: Directory is new");
+                        }
+                    }
+                }
+            }
             let (skip, diag) = is_filtered(path, &skip_prefixes);
             if let Some((dir, tag)) = diag
                 && reported_tag_dirs.insert(dir.clone())
             {
                 let dir_display = dir.to_string_lossy();
-                let trailing = if dir_display.ends_with('/') { "" } else { "/" };
                 let mode_note = skip_prefixes
                     .iter()
                     .find(|(d, _, _)| d == &dir)
@@ -2702,9 +2753,18 @@ fn add_paths_to_builder_filter<W: Write>(
                     CacheExcludeMode::All => "directory not dumped",
                     _ => "contents not dumped",
                 };
-                eprintln!(
-                    "tar: {dir_display}{trailing}: contains a cache directory tag {tag}; {suffix}"
-                );
+                // Listed-incremental suppresses the trailing `/` on
+                // the dir path; the standalone --exclude-tag tests
+                // expect it to stay.
+                if args.listed_incremental.is_some() {
+                    let trimmed = dir_display.trim_end_matches('/');
+                    eprintln!("tar: {trimmed}: contains a cache directory tag {tag}; {suffix}");
+                } else {
+                    let trailing = if dir_display.ends_with('/') { "" } else { "/" };
+                    eprintln!(
+                        "tar: {dir_display}{trailing}: contains a cache directory tag {tag}; {suffix}"
+                    );
+                }
             }
             if skip {
                 continue;
@@ -2917,31 +2977,9 @@ fn add_paths_to_builder_filter<W: Write>(
                     let prev_children = prev_dir_children.get(&dev_ino);
                     let cutoff = prev_time;
 
-                    // Rename / new-dir diagnostics (only under -v and
-                    // when the associated warning isn't suppressed).
-                    // GNU writes them to stderr.
-                    let warn_new = !args.disabled_warnings.contains("new-dir");
-                    let warn_rename = !args.disabled_warnings.contains("rename-directory");
-                    if args.verbose && prev_time.is_some() {
-                        match prev_snapshot.as_ref().and_then(|s| s.dirs.get(&dev_ino)) {
-                            None => {
-                                if warn_new {
-                                    eprintln!("tar: {path_str}: Directory is new");
-                                }
-                            }
-                            Some(prev) => {
-                                let prev_name = prev.name.to_string_lossy();
-                                if prev_name != *path_str && warn_rename {
-                                    eprintln!(
-                                        "tar: {path_str}: Directory has been renamed from '{prev_name}'"
-                                    );
-                                }
-                            }
-                        }
-                    } else if args.verbose && prev_time.is_none() && warn_new {
-                        // Level 0 — every directory is "new".
-                        eprintln!("tar: {path_str}: Directory is new");
-                    }
+                    // (Rename / new-dir diagnostics moved to the
+                    // pre-cache-tag block above so they stay ahead of
+                    // any contains-tag note for the same directory.)
 
                     let mut kids: Vec<(u8, String)> = Vec::new();
                     let mut skip_children: Vec<PathBuf> = Vec::new();

@@ -2,10 +2,10 @@
 
 ## Current status
 
-**200/225 tests passing (89%)**.
+**206/225 tests passing (92%)**.
 
-Trajectory: 92 → 172 → 182 → 187 → 191 → 195 → 200. Each per-test
-derivation is wired as a flake check via the shared
+Trajectory: 92 → 172 → 182 → 187 → 191 → 195 → 200 → 206. Each
+per-test derivation is wired as a flake check via the shared
 `gnutar-test-harness` (autom4te-built `testsuite` script + helper
 programs).
 
@@ -166,11 +166,21 @@ Substantial implementation of the incremental feature:
   before the delete sweep so the on-disk source moves into place
   before any unrelated cleanup runs.
 
-### What remains (25 failing)
+### Recent: exclude-tag + incremental interop
+
+- Move the `Directory is new` / `Directory has been renamed from`
+  diagnostics ahead of the cache-tag `contains a cache directory
+  tag ...; contents not dumped` note so the stderr stream stays in
+  directory-first order.
+- Suppress the trailing `/` on the cache-tag path under
+  listed-incremental (matches GNU) while keeping it for standalone
+  `--exclude-tag` runs (those tests still expect it).
+
+### What remains (19 failing)
 
 | Bucket | Tests | Notes |
 | --- | --- | --- |
-| `--listed-incremental` — advanced | 18 | incr06/08/09/10, rename02/03/06, dirrem01/02, filerem01, exclude09/10/12/13/15/16, remfiles08b/09b. Remaining gaps: `File removed before we read it` warnings, deeper multi-dir walk invariants (incr06 mixes subdir first then parent), exclude-tag interaction with dumpdir, and several rename corner cases. |
+| `--listed-incremental` — advanced | 12 | incr06/08/09/10, rename02/03/06, dirrem01/02, filerem01, remfiles08b/09b. Remaining gaps: `File removed before we read it` warnings wired to on-disk delete during walk, deeper multi-dir walk invariants (incr06 mixes subdir first then parent), and several rename corner cases. |
 | Multi-volume (`-M`, `--tape-length=N`, `--new-volume-script`) | 7 | multiv03/04/05/08/09, label02, sparsemvp — continuation headers, volume boundary handling. |
 
 ## Approach
