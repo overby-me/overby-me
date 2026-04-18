@@ -1393,31 +1393,39 @@ impl Service {
             return Ok(true);
         }
         let timeout = self.get_start_timeout(conf);
-        for cmd in &conf.exec_condition.clone() {
-            match self.run_cmd(
-                cmd,
-                id.clone(),
-                name,
-                timeout,
-                run_info,
-                conf.exec_config.working_directory.as_ref(),
-            ) {
-                Ok(()) => {} // exit 0 — condition met, continue
-                Err(RunCmdError::BadExitCode(
-                    _,
-                    crate::signal_handler::ChildTermination::Exit(code),
-                )) if code != 255 => {
-                    // Exit 1-254: condition not met, skip service (not a failure)
-                    trace!("ExecCondition {cmd:?} exited with {code}, skipping service {name}");
-                    return Ok(false);
-                }
-                Err(e) => {
-                    // Exit 255 or signal: hard failure
-                    return Err(e);
+        // ExecCondition= checks should see the same filesystem view as
+        // ExecStart= (e.g. BindPaths= content, PrivateTmp= isolation) so
+        // their predicates are meaningful for the configured service.
+        self.helper_mount_ns = helper_mount_ns_from_conf(conf);
+        let result = (|| {
+            for cmd in &conf.exec_condition.clone() {
+                match self.run_cmd(
+                    cmd,
+                    id.clone(),
+                    name,
+                    timeout,
+                    run_info,
+                    conf.exec_config.working_directory.as_ref(),
+                ) {
+                    Ok(()) => {} // exit 0 — condition met, continue
+                    Err(RunCmdError::BadExitCode(
+                        _,
+                        crate::signal_handler::ChildTermination::Exit(code),
+                    )) if code != 255 => {
+                        trace!(
+                            "ExecCondition {cmd:?} exited with {code}, skipping service {name}"
+                        );
+                        return Ok(false);
+                    }
+                    Err(e) => {
+                        return Err(e);
+                    }
                 }
             }
-        }
-        Ok(true)
+            Ok(true)
+        })();
+        self.helper_mount_ns = None;
+        result
     }
 
     fn run_prestart(
