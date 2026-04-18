@@ -349,51 +349,54 @@ mod inner {
     #[interface(name = "org.freedesktop.systemd1.Slice")]
     impl SliceObj {
         #[zbus(property)]
-        fn memory_max(&self) -> String {
-            memory_limit_string(&self.run_info, &self.unit_name, |c| &c.memory_max)
+        fn memory_max(&self) -> u64 {
+            memory_limit_bytes(&self.run_info, &self.unit_name, |c| &c.memory_max)
         }
 
         #[zbus(property)]
-        fn memory_min(&self) -> String {
-            memory_limit_string(&self.run_info, &self.unit_name, |c| &c.memory_min)
+        fn memory_min(&self) -> u64 {
+            memory_limit_bytes(&self.run_info, &self.unit_name, |c| &c.memory_min)
         }
 
         #[zbus(property)]
-        fn memory_low(&self) -> String {
-            memory_limit_string(&self.run_info, &self.unit_name, |c| &c.memory_low)
+        fn memory_low(&self) -> u64 {
+            memory_limit_bytes(&self.run_info, &self.unit_name, |c| &c.memory_low)
         }
 
         #[zbus(property)]
-        fn memory_high(&self) -> String {
-            memory_limit_string(&self.run_info, &self.unit_name, |c| &c.memory_high)
+        fn memory_high(&self) -> u64 {
+            memory_limit_bytes(&self.run_info, &self.unit_name, |c| &c.memory_high)
         }
 
         #[zbus(property)]
-        fn memory_swap_max(&self) -> String {
-            memory_limit_string(&self.run_info, &self.unit_name, |c| &c.memory_swap_max)
+        fn memory_swap_max(&self) -> u64 {
+            memory_limit_bytes(&self.run_info, &self.unit_name, |c| &c.memory_swap_max)
         }
     }
 
-    fn memory_limit_string<F>(
+    /// Resolve a `MemoryLimit` into a `u64` (the D-Bus wire type for
+    /// MemoryMax=, MemoryMin=, etc.).  Absent or infinity limits map to
+    /// `u64::MAX` — matching upstream's "-1 / infinity" encoding.
+    fn memory_limit_bytes<F>(
         run_info: &ArcMutRuntimeInfo,
         unit_name: &str,
         select: F,
-    ) -> String
+    ) -> u64
     where
         F: Fn(&crate::units::SliceConfig) -> &Option<crate::units::MemoryLimit>,
     {
         let ri = run_info.read_poisoned();
         let Some(unit) = ri.unit_table.values().find(|u| u.id.name == unit_name) else {
-            return "infinity".to_string();
+            return u64::MAX;
         };
         let crate::units::Specific::Slice(slice) = &unit.specific else {
-            return "infinity".to_string();
+            return u64::MAX;
         };
         match select(&slice.conf) {
-            None => "infinity".to_string(),
-            Some(crate::units::MemoryLimit::Infinity) => "infinity".to_string(),
-            Some(crate::units::MemoryLimit::Bytes(n)) => n.to_string(),
-            Some(crate::units::MemoryLimit::Percent(p)) => format!("{p}%"),
+            None => u64::MAX,
+            Some(crate::units::MemoryLimit::Infinity) => u64::MAX,
+            Some(crate::units::MemoryLimit::Bytes(n)) => *n,
+            Some(crate::units::MemoryLimit::Percent(_)) => u64::MAX,
         }
     }
 
