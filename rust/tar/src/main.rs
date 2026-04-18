@@ -2164,11 +2164,17 @@ fn add_paths_to_builder_filter<W: Write>(
                 append_entry_raw(&mut *builder, &mut header, archive_name, &mut file, None)?;
                 // Detect a size-change-during-read and warn. GNU tar
                 // exits 1 (not 2) in this situation.
-                if let Ok(after) = fs::metadata(path)
-                    && after.len() != orig_size
-                {
-                    eprintln!("tar: {archive_name}: file changed as we read it");
-                    file_changed = true;
+                if let Ok(after) = fs::metadata(path) {
+                    if after.len() < orig_size {
+                        let shrank = orig_size - after.len();
+                        eprintln!(
+                            "tar: {archive_name}: File shrank by {shrank} bytes; padding with zeros"
+                        );
+                        file_changed = true;
+                    } else if after.len() > orig_size {
+                        eprintln!("tar: {archive_name}: file changed as we read it");
+                        file_changed = true;
+                    }
                 }
             }
 
@@ -2502,8 +2508,12 @@ fn do_diff(args: &Args) -> io::Result<()> {
         let path = entry.path()?.to_path_buf();
         let path_str = path.to_string_lossy().into_owned();
         if args.verbose {
-            let line = format_verbose_entry(entry.header(), &path_str, args);
-            println!("{line}");
+            if args.verbose_level >= 2 {
+                let line = format_verbose_entry(entry.header(), &path_str, args);
+                println!("{line}");
+            } else {
+                println!("{path_str}");
+            }
         }
         if !path.exists() {
             println!("{}: Not found in filesystem", path.display());
