@@ -249,9 +249,13 @@ fn main() {
         }
     }
 
-    // --fork with no notifications + command is valid — fork and exec.
-    if cli.fork && !exec_cmd.is_empty() && parts.is_empty() {
-        fork_exec_and_print_pid(&exec_cmd);
+    // --fork path: fork first so we know the child's PID, then (if the
+    // caller also requested notifications) inject MAINPID=<child> and
+    // send the message from the parent.  The parent prints the child
+    // PID and exits; the child execs the command.
+    if cli.fork && !exec_cmd.is_empty() {
+        let notify_socket = std::env::var("NOTIFY_SOCKET").ok();
+        fork_exec_and_notify(&exec_cmd, &parts, notify_socket.as_deref());
     }
 
     // If nothing to send, exit successfully
@@ -292,11 +296,6 @@ fn main() {
         process::exit(1);
     }
 
-    // If --fork was specified with a command, fork+exec and print the child PID.
-    if cli.fork && !exec_cmd.is_empty() {
-        fork_exec_and_print_pid(&exec_cmd);
-    }
-
     // If --exec was specified, exec the remaining command
     if cli.exec && !exec_cmd.is_empty() {
         use std::os::unix::process::CommandExt;
@@ -308,9 +307,15 @@ fn main() {
     }
 }
 
-/// Fork a child that execs `cmd`.  The parent prints the child's PID
-/// on stdout and exits 0.  If fork or exec fails, exits 1.
-fn fork_exec_and_print_pid(cmd: &[String]) -> ! {
+/// Fork a child that execs `cmd`.  The parent, after fork, optionally
+/// sends the given notification parts (with an added `MAINPID=<child>`
+/// line) to `$NOTIFY_SOCKET`, then prints the child's PID on stdout and
+/// exits 0.  If fork or exec fails, exits 1.
+fn fork_exec_and_notify(
+    cmd: &[String],
+    parts: &[String],
+    notify_socket: Option<&str>,
+) -> ! {
     use std::ffi::CString;
     match unsafe { libc::fork() } {
         -1 => {
@@ -359,6 +364,19 @@ fn fork_exec_and_print_pid(cmd: &[String]) -> ! {
             process::exit(1);
         }
         pid => {
+            // If the caller requested notifications, inject MAINPID=<child>
+            // and send them now — best-effort, so failures don't block
+            // returning the PID to the caller.
+            if !parts.is_empty()
+                && let Some(sock) = notify_socket
+            {
+                let mut with_mainpid = parts.to_vec();
+                if !with_mainpid.iter().any(|p| p.starts_with("MAINPID=")) {
+                    with_mainpid.push(format!("MAINPID={pid}"));
+                }
+                let msg = with_mainpid.join("\n");
+                let _ = send_notification(sock, &msg);
+            }
             println!("{pid}");
             process::exit(0);
         }
