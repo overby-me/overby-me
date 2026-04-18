@@ -93,8 +93,8 @@ enum Commands {
         #[arg(long, short = 'q', default_value = "all")]
         query: String,
 
-        /// Show device properties in key=value format
-        #[arg(long, short = 'e')]
+        /// Show device properties in key=value format (for shell eval)
+        #[arg(long, short = 'x')]
         export: bool,
 
         /// Key prefix for exported properties
@@ -109,8 +109,8 @@ enum Commands {
         #[arg(long, short = 'a')]
         attribute_walk: bool,
 
-        /// Do not look up device in the udev database, query sysfs directly
-        #[arg(long, short = 'x')]
+        /// Export entire content of the udev database
+        #[arg(long, short = 'e')]
         export_db: bool,
 
         /// Cleanup the udev database
@@ -122,7 +122,7 @@ enum Commands {
         value: bool,
 
         /// Print major:minor of the device backing a file
-        #[arg(long)]
+        #[arg(long, short = 'd')]
         device_id_of_file: Option<String>,
 
         /// Wait for the device to be initialized (max N seconds).
@@ -569,6 +569,15 @@ fn cmd_info(
     // properties (handled below alongside the normal query path).
     if export && name.is_none() && path.is_none() && devices.is_empty() {
         return cmd_info_export_db();
+    }
+
+    // Validate --query value: upstream accepts a fixed set of names.
+    if !matches!(
+        query,
+        "all" | "name" | "n" | "symlink" | "s" | "path" | "p" | "property" | "e"
+    ) {
+        eprintln!("udevadm info: invalid --query value: {query}");
+        return 1;
     }
 
     // Collect device paths to query
