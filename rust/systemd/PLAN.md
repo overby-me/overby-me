@@ -216,7 +216,10 @@ All 23 udev tests fail because the C `udevadm` binary in the overlay lacks featu
   - `CanReload` reflects ExecReload= presence or Type=notify-reload (not hard-coded false); `CanIsolate` reflects AllowIsolate=; `DefaultDependencies` exposed
   - Per-unit `/org/freedesktop/systemd1/unit/<escaped>` Unit interface: `Id`, `Description`, `ActiveState`, `SubState`, `LoadState`, `UnitFileState`, `CanStart`, `CanStop`, `CanReload`, `CanIsolate` (from AllowIsolate=), `CanFreeze`, `CanLiveMount`, `DefaultDependencies`, `Names`, `FragmentPath`, `DropInPaths` (hierarchical — type-level `service.d`, prefix-level `a-.service.d`, exact-name), `InvocationID` (raw 16 bytes), `InactiveExitTimestamp`, `ActiveEnterTimestamp`, `ActiveExitTimestamp`, `InactiveEnterTimestamp`, `Wants`, `Requires`, `WantedBy`, `RequiredBy`, `After`, `Before`, `Conflicts`, `PartOf`, `BindsTo`
   - Same object also exposes Service interface for `.service` units: `MainPID`, `ExecMainPID`, `ExecMainStatus`, `Type`, `Result`, `NRestarts`
-- [ ] Rust udevadm reimplementation — blocks 23 tests
+- [~] Rust udevadm reimplementation — in progress, blocks ~23 tests
+  - Existing: info, trigger, settle, monitor, test, control, wait
+  - Added this session: `cat` (rules/config), `lock` (--device/--backing/--print), `test-builtin` (proper builtin validation: blkid, btrfs ready, factory_reset status, hwdb, input_id, keyboard, kmod, net_driver, net_id, net_setup_link, path_id, uaccess, usb_id with device-presence checks), `trigger` flags (`--wait-daemon`, `--initialized-match`, `--initialized-nomatch`, `--name-match`, `--uuid`, `--quiet`), `wait` flags (`--initialized true/false`, `--removed`, `--settle`), `control` flags (`--property`, `--trace yes/no`, `--load-credentials`, `--revert`, log-level validation), `info` flags (`--wait-for-initialization`/`-w`, `--json=off/short/pretty/help`, all `-e` match filters, tree, subsystem/property/sysattr/tag/sysname filters), `test` help/invalid-action/resolve-names validation
+  - Remaining: real builtin implementations (currently just return property-ish stubs), JSON output body for `info`, tree view, signal lookup, database export, monitor/settle with real kernel netlink integration (the existing impl has partial netlink)
 
 ## Architecture Notes
 

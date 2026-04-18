@@ -2306,8 +2306,8 @@ fn cmd_lock(
         };
         use std::os::linux::fs::MetadataExt;
         let dev = meta.st_dev();
-        let major = unsafe { libc::major(dev) };
-        let minor = unsafe { libc::minor(dev) };
+        let major = libc::major(dev);
+        let minor = libc::minor(dev);
         let dev_path = format!("/dev/block/{major}:{minor}");
         match std::fs::OpenOptions::new()
             .read(true)
