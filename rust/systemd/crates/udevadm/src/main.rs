@@ -2119,37 +2119,26 @@ fn cmd_wait(timeout: u64, wait_until: &str, _settle: bool, devices: &[String]) -
         match wait_until {
             "removed" => !Path::new(path).exists(),
             "added" => Path::new(path).exists(),
-            // "initialized" — check that the device exists and has a udev db entry
-            // For simplicity, we just check existence + the uevent file (which
-            // indicates the kernel has finished creating the device node).
             _ => {
+                // "initialized" / default — require both:
+                //   * The sysfs/device path exists.
+                //   * A udev database entry exists at the upstream-convention
+                //     path (n<ifindex>, b<maj>:<min>, c<maj>:<min>,
+                //     +<subsystem>:<sysname>).
                 let p = Path::new(path);
                 if !p.exists() {
                     return false;
                 }
-                // If it's a sysfs path, check for the "uevent" file which
-                // indicates the device is initialized by the kernel.
-                // For /dev/ paths, existence is sufficient.
                 if path.starts_with("/sys/") {
-                    // Check for udev database entry
-                    let db_path = if let Ok(_md) = fs::metadata(p) {
-                        // For sysfs directories, the udev db key is based on the
-                        // sysfs path relative to /sys/
-                        let sys_relative = path.strip_prefix("/sys/").unwrap_or(path);
-                        let db_key = sys_relative.replace('/', "\\x2f");
-                        PathBuf::from(DB_DIR).join(db_key)
-                    } else {
-                        return false;
-                    };
-                    // If there's a udev db entry, the device is fully initialized.
-                    // Otherwise, just check uevent exists (kernel has created it).
-                    if db_path.exists() {
-                        return true;
+                    if let Some(db_path) = db_path_for_syspath(p) {
+                        return db_path.exists();
                     }
-                    p.join("uevent").exists() || p.is_file()
-                } else {
-                    true
+                    // Fall back to the uevent file existing (kernel has
+                    // created the device) for sysfs paths whose DEVICE_ID
+                    // we can't derive yet.
+                    return p.join("uevent").exists() || p.is_file();
                 }
+                true
             }
         }
     };
