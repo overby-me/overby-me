@@ -702,6 +702,26 @@ fn parse_id_map(path: &str) -> std::collections::HashMap<u32, (String, u32)> {
     map
 }
 
+/// Escape a path for GNU tar listing output: non-printable and
+/// non-ASCII bytes become `\NNN` (3-digit octal), backslashes are
+/// doubled. Operates on bytes so it stays correct for non-UTF-8 names.
+fn gnu_escape_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    for &b in path.as_bytes() {
+        match b {
+            b'\\' => out.push_str("\\\\"),
+            0x20..=0x7e => out.push(b as char),
+            _ => {
+                out.push('\\');
+                out.push(char::from_digit((b as u32 >> 6) & 0o7, 8).unwrap());
+                out.push(char::from_digit((b as u32 >> 3) & 0o7, 8).unwrap());
+                out.push(char::from_digit(b as u32 & 0o7, 8).unwrap());
+            }
+        }
+    }
+    out
+}
+
 fn describe_open_error(e: &io::Error) -> String {
     match e.kind() {
         io::ErrorKind::PermissionDenied => "Permission denied".to_string(),
@@ -3008,7 +3028,7 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
                     format_verbose_entry(entry.header(), &final_path, args)
                 );
             } else {
-                println!("{final_path}");
+                println!("{}", gnu_escape_path(&final_path));
             }
             continue;
         }
