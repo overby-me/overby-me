@@ -144,10 +144,14 @@ fn parse_bind_entry(entry: &str) -> Option<(String, String)> {
 /// Order of operations mirrors exec_helper:
 ///   1. unshare(CLONE_NEWNS) — new mount namespace
 ///   2. Mark `/` MS_SLAVE|MS_REC so our mounts don't propagate back up
-///   3. Apply BindPaths= and BindReadOnlyPaths=
-///   4. Apply InaccessiblePaths= — bind a read-only, empty inaccessible
-///      tmpfs over each path so the helper cannot use it as a workaround
-///   5. Apply PrivateTmp=yes — mount a fresh tmpfs over /tmp and /var/tmp
+///   3. PrivateTmp= first — mount a fresh tmpfs on /tmp and /var/tmp so
+///      later BindPaths= that target `/tmp/...` are created inside the
+///      fresh tmpfs (not on the host /tmp, which would be hidden by the
+///      tmpfs mount and invisible to the helper).
+///   4. BindPaths= / BindReadOnlyPaths= — create destinations as needed
+///      (directories for dir sources, empty files for file sources) so
+///      `mount(MS_BIND)` has something to bind onto.
+///   5. InaccessiblePaths= last so it blocks anything bind-mounted above.
 fn apply_helper_mount_namespace(ns: &HelperMountNs) -> std::io::Result<()> {
     use std::ffi::CString;
 
@@ -171,86 +175,8 @@ fn apply_helper_mount_namespace(ns: &HelperMountNs) -> std::io::Result<()> {
         return Err(std::io::Error::last_os_error());
     }
 
-    // InaccessiblePaths= first: mount a read-only empty tmpfs over each so
-    // subsequent BindPaths cannot target a subpath of them.  We use a shared
-    // empty tmpfs mounted at /run/systemd/inaccessible if available, falling
-    // back to bind-mounting /dev/null (works for file paths only).
-    for p in &ns.inaccessible_paths {
-        let c_dst = CString::new(p.as_str()).ok();
-        if let Some(dst) = c_dst {
-            // Try bind-mounting an empty tmpfs over the path.
-            let tmpfs_name = c"tmpfs";
-            let ret = unsafe {
-                libc::mount(
-                    tmpfs_name.as_ptr(),
-                    dst.as_ptr(),
-                    tmpfs_name.as_ptr(),
-                    (libc::MS_RDONLY | libc::MS_NOSUID | libc::MS_NODEV) as libc::c_ulong,
-                    c"size=0k,mode=0000".as_ptr().cast(),
-                )
-            };
-            if ret != 0 {
-                // Fall back to nothing — inaccessible path may not exist or
-                // be a file we can't tmpfs-mount over.  Non-fatal.
-                continue;
-            }
-        }
-    }
-
-    // BindPaths=: read-write bind mounts.
-    for entry in &ns.bind_paths {
-        if let Some((src, dst)) = parse_bind_entry(entry) {
-            let c_src = match CString::new(src) { Ok(s) => s, Err(_) => continue };
-            let c_dst = match CString::new(dst) { Ok(s) => s, Err(_) => continue };
-            let ret = unsafe {
-                libc::mount(
-                    c_src.as_ptr(),
-                    c_dst.as_ptr(),
-                    none_p,
-                    (libc::MS_BIND | libc::MS_REC) as libc::c_ulong,
-                    std::ptr::null(),
-                )
-            };
-            if ret != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-        }
-    }
-
-    // BindReadOnlyPaths=: bind then remount read-only.
-    for entry in &ns.bind_read_only_paths {
-        if let Some((src, dst)) = parse_bind_entry(entry) {
-            let c_src = match CString::new(src) { Ok(s) => s, Err(_) => continue };
-            let c_dst = match CString::new(dst) { Ok(s) => s, Err(_) => continue };
-            let ret = unsafe {
-                libc::mount(
-                    c_src.as_ptr(),
-                    c_dst.as_ptr(),
-                    none_p,
-                    (libc::MS_BIND | libc::MS_REC) as libc::c_ulong,
-                    std::ptr::null(),
-                )
-            };
-            if ret != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            let ret = unsafe {
-                libc::mount(
-                    none_p,
-                    c_dst.as_ptr(),
-                    none_p,
-                    (libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY) as libc::c_ulong,
-                    std::ptr::null(),
-                )
-            };
-            if ret != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-        }
-    }
-
-    // PrivateTmp=yes: mount a new tmpfs over /tmp and /var/tmp so the helper
-    // sees the same private directories as ExecStart=.
+    // PrivateTmp=yes FIRST so BindPaths targeting /tmp/... land in the
+    // fresh tmpfs.
     if ns.private_tmp {
         let tmpfs_name = c"tmpfs";
         for dst in [c"/tmp", c"/var/tmp"] {
@@ -269,6 +195,85 @@ fn apply_helper_mount_namespace(ns: &HelperMountNs) -> std::io::Result<()> {
         }
     }
 
+    // BindPaths=: create destination + read-write bind mount.
+    apply_bind_list(&ns.bind_paths, false)?;
+
+    // BindReadOnlyPaths=: create destination + bind + remount RO.
+    apply_bind_list(&ns.bind_read_only_paths, true)?;
+
+    // InaccessiblePaths= last: mount a read-only empty tmpfs over each so
+    // the helper cannot bypass the block via earlier bind mounts or the
+    // PrivateTmp tmpfs.
+    for p in &ns.inaccessible_paths {
+        let Ok(dst) = CString::new(p.as_str()) else { continue };
+        let tmpfs_name = c"tmpfs";
+        let ret = unsafe {
+            libc::mount(
+                tmpfs_name.as_ptr(),
+                dst.as_ptr(),
+                tmpfs_name.as_ptr(),
+                (libc::MS_RDONLY | libc::MS_NOSUID | libc::MS_NODEV) as libc::c_ulong,
+                c"size=0k,mode=0000".as_ptr().cast(),
+            )
+        };
+        if ret != 0 {
+            // Non-fatal: the path may not exist or may be a file we can't
+            // overmount with tmpfs.
+            continue;
+        }
+    }
+
+    Ok(())
+}
+
+/// Apply a list of `BindPaths=` / `BindReadOnlyPaths=` entries:
+/// create the destination (directory for directory sources, empty file
+/// otherwise), perform the bind mount, and optionally remount RO.
+fn apply_bind_list(entries: &[String], read_only: bool) -> std::io::Result<()> {
+    use std::ffi::CString;
+    let none_p = std::ptr::null::<libc::c_char>();
+    for entry in entries {
+        let Some((src, dst)) = parse_bind_entry(entry) else { continue };
+        // Figure out whether the source is a directory so we can create the
+        // right kind of destination.
+        let src_is_dir = std::fs::metadata(&src).map(|m| m.is_dir()).unwrap_or(false);
+        if src_is_dir {
+            let _ = std::fs::create_dir_all(&dst);
+        } else if let Some(parent) = std::path::Path::new(&dst).parent() {
+            let _ = std::fs::create_dir_all(parent);
+            if !std::path::Path::new(&dst).exists() {
+                let _ = std::fs::File::create(&dst);
+            }
+        }
+        let Ok(c_src) = CString::new(src) else { continue };
+        let Ok(c_dst) = CString::new(dst) else { continue };
+        let ret = unsafe {
+            libc::mount(
+                c_src.as_ptr(),
+                c_dst.as_ptr(),
+                none_p,
+                (libc::MS_BIND | libc::MS_REC) as libc::c_ulong,
+                std::ptr::null(),
+            )
+        };
+        if ret != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if read_only {
+            let ret = unsafe {
+                libc::mount(
+                    none_p,
+                    c_dst.as_ptr(),
+                    none_p,
+                    (libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY) as libc::c_ulong,
+                    std::ptr::null(),
+                )
+            };
+            if ret != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
+    }
     Ok(())
 }
 
