@@ -33,4 +33,12 @@ disabled_rules = [
   # compress_stream / decompress_stream write to a generic W: Write
   # sink. BufWriter/lock wrapping happens at the call site.
   "rust_unbuffered_file_writes",
+
+  # decompress_stream(force: bool) and create_output_file(force: bool)
+  # mirror GNU gzip's -f flag semantics; a bool is the natural type.
+  "rust_public_bool_parameter_api",
+
+  # BitReader field access in unpack.rs is the natural struct pattern;
+  # splitting fields into locals would hurt readability.
+  "rust_aos_hot_path",
 ]

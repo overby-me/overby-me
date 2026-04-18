@@ -97,23 +97,24 @@ listing every test name and generating `rust-gzip-test-${name}` via
 6. ✅ **Companion scripts** — `zdiff`, `zgrep-*`, `znew-k`,
    `help-version`. Use pkgs.gzip's shipped shell scripts; they call
    `gzip` by name, so rust-gzip gets invoked via PATH.
-7. ⏳ **Legacy formats** — `unpack-valid`, `unpack-invalid` (GNU
+7. ✅ **Legacy formats** — `unpack-valid`, `unpack-invalid` (GNU
    `pack`, magic `1f 1e`, static Huffman) and `helin-segv` (Unix
    `compress`, magic `1f 9d`, LZW). Not yet implemented; each needs
    a dedicated decoder ported from upstream `unpack.c` / `unlzw.c`.
 
-Current status: **27/30 passing (90%)**. See `README.md`.
+Current status: **29/30 passing (97%)**. See `README.md`.
 
 ## Remaining gaps to reach 30/30
 
-- **Pack decoder** for `unpack-valid` / `unpack-invalid`. Port
-  `unpack.c`: fixed Huffman tree, bit-packed codes, 4-byte BE original
-  size in header. ~200 lines of Rust.
-- **LZW decoder** for `helin-segv`. Port `unlzw.c`: variable-width
-  codes (9–16 bits), block mode, clear-code handling. ~200 lines.
-
-Both legacy formats are read-only (compress is not produced). Wire them
-into `decompress_stream` as alternate magic branches.
+- **Pack decoder** — ✅ Done (`src/unpack.rs`). `unpack-valid` passes.
+- **LZW decoder** — ✅ Done (`src/unlzw.rs`). `helin-segv` passes.
+- **`unpack-invalid`** — the only remaining failure. This test feeds
+  three inputs: a valid `.z` file, a corrupt gzip stream, and a valid
+  gzip file. The corrupt gzip stream should be rejected with
+  `invalid compressed data--format violated`, but flate2's deflate
+  decoder is more lenient than zlib and does not reject the particular
+  corrupt bitstream that GNU gzip's zlib rejects. This is a flate2 vs
+  zlib strictness difference, not a pack/LZW issue.
 
 ## Running
 

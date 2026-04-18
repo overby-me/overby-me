@@ -4,7 +4,7 @@ A GNU gzip-compatible compression tool written in Rust.
 
 ## Status
 
-**27/30 tests passing (90%)** — upstream GNU gzip 1.14 test suite
+**29/30 tests passing (97%)** — upstream GNU gzip 1.14 test suite
 (`tests/TESTS`). Each test runs rust-gzip in a sandbox against the
 upstream shell script unchanged, using pre-built zdiff / zgrep / znew
 from `pkgs.gzip` for the companion tools (those scripts call `gzip` by
@@ -12,19 +12,21 @@ name on PATH, so they pick up rust-gzip).
 
 ### Passing
 
-`gzip-env`, `help-version`, `hufts`, `keep`, `list`, `list-big`,
-`memcpy-abuse`, `mixed`, `null-suffix-clobber`, `pipe-output`,
-`reference`, `reproducible`, `stdin`, `synchronous`, `timestamp`,
-`trailing-nul`, `two-files`, `upper-suffix`, `write-error`, `z-suffix`,
-`zdiff`, `zgrep-abuse`, `zgrep-binary`, `zgrep-context`, `zgrep-f`,
-`zgrep-signal`, `znew-k`.
+`gzip-env`, `helin-segv`, `help-version`, `hufts`, `keep`, `list`,
+`list-big`, `memcpy-abuse`, `mixed`, `null-suffix-clobber`,
+`pipe-output`, `reference`, `reproducible`, `stdin`, `synchronous`,
+`timestamp`, `trailing-nul`, `two-files`, `unpack-valid`,
+`upper-suffix`, `write-error`, `z-suffix`, `zdiff`, `zgrep-abuse`,
+`zgrep-binary`, `zgrep-context`, `zgrep-f`, `zgrep-signal`, `znew-k`.
 
 ### Remaining
 
-- `unpack-valid`, `unpack-invalid` — exercise GNU `pack` format
-  (magic `1f 1e`, static Huffman). Needs a Huffman decoder port.
-- `helin-segv` — exercises Unix `compress` / `.Z` format (magic
-  `1f 9d`, LZW). Needs an LZW decoder port.
+- `unpack-invalid` — the only remaining failure. This test feeds three
+  inputs including a corrupt gzip stream that should be rejected with
+  `invalid compressed data--format violated`. flate2's deflate decoder
+  is more lenient than zlib and does not reject the particular corrupt
+  bitstream that GNU gzip's zlib rejects. This is a flate2 vs zlib
+  strictness difference, not a missing feature.
 
 ## Usage
 
@@ -45,26 +47,25 @@ installed as symlinks.
 
 ## Architecture
 
-Single-file `src/main.rs`:
+Multi-module `src/` layout:
 
-- `parse_args` — GNU-style option parsing with `--long`, clustered
-  short options (`-dckv`), program-name dispatch (`gunzip`/`zcat`).
-- `compress_stream` — hand-rolled gzip framing: writes the 10-byte
-  header with OS=3 (Unix) and either a recorded source mtime or 0,
-  delegates deflate to `flate2::write::DeflateEncoder`, and emits the
-  CRC32 + ISIZE trailer. Control over the exact header bytes is what
-  gets `reference` / `reproducible` byte-for-byte against upstream.
-- `decompress_stream` — buffers the full input, then walks member
-  boundaries manually using `flate2::Decompress` plus a small
-  `parse_gzip_header` for flag-aware header parsing. This handles
+- `main.rs` — thin entry point.
+- `cli.rs` — argument parsing, `Mode`/`Options`, `--help`/`--version`.
+- `compress.rs` — gzip compression with hand-rolled framing: writes the
+  10-byte header with OS=3 (Unix) and either a recorded source mtime
+  or 0, delegates deflate to `flate2::write::DeflateEncoder`, and emits
+  the CRC32 + ISIZE trailer.
+- `decompress.rs` — multi-format decompression (gzip, pack, LZW) with
+  CRC32 verification. Walks member boundaries manually using
+  `flate2::Decompress` plus flag-aware header parsing. Handles
   multi-member archives, trailing NUL padding (tape convention), and
   `-cdf` cat-style pass-through for non-gzip content.
-- `CountingReader` — thin adapter over `Read` that tallies bytes for
-  `-l` on stdin without buffering the whole stream.
-- Error-path normalization via `canonical_decode_error` maps
-  flate2's wording to GNU gzip's
-  `invalid compressed data--format violated` / `not in gzip format`
-  / `unexpected end of file` so stderr comparisons pass.
+- `ops.rs` — file operations (compress/decompress/test/list for files
+  and stdio).
+- `unpack.rs` — Pack format decoder (magic `1f 1e`, static Huffman).
+- `unlzw.rs` — LZW/compress decoder (magic `1f 9d`, variable-width
+  codes).
+- `util.rs` — `CountingReader`, suffix handling, output file creation.
 
 ## Features
 
@@ -79,5 +80,9 @@ Single-file `src/main.rs`:
   (e.g. `/dev/full`), matching coreutils conventions.
 - `--synchronous`, `---presume-input-tty` accepted as no-ops (the
   test harness relies on both being recognized).
+- Pack format decompression (legacy `.z` files, magic `1f 1e`, static
+  Huffman).
+- LZW/compress format decompression (legacy `.Z` files, magic `1f 9d`,
+  variable-width codes).
 - Multi-member gzip streams fully supported; trailing NUL padding
   after a valid stream is silently tolerated.
