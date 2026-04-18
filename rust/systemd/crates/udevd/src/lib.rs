@@ -3370,23 +3370,24 @@ fn resolve_program_path(name: &str) -> PathBuf {
 
 /// Get the database file path for a device.
 pub fn device_db_path(event: &UEvent) -> PathBuf {
-    // Database entries are stored by device type + major:minor or by devpath
+    // Upstream systemd convention:
+    //   * block: b<maj>:<min>
+    //   * char:  c<maj>:<min>
+    //   * net:   n<ifindex>
+    //   * else:  +<subsystem>:<sysname>
     if !event.major.is_empty() && !event.minor.is_empty() {
-        // Block or char device
         let dev_type = if event.subsystem == "block" { 'b' } else { 'c' };
         Path::new(DB_DIR).join(format!("{}{}:{}", dev_type, event.major, event.minor))
+    } else if event.subsystem == "net"
+        && let Some(ifindex) = event.env.get("IFINDEX")
+        && !ifindex.is_empty()
+    {
+        Path::new(DB_DIR).join(format!("n{ifindex}"))
+    } else if !event.subsystem.is_empty() {
+        let basename = event.devpath.rsplit('/').next().unwrap_or(&event.devpath);
+        Path::new(DB_DIR).join(format!("+{}:{}", event.subsystem, basename))
     } else {
-        // No major:minor — use escaped devpath with +<subsystem> prefix
-        let escaped = if event.subsystem.is_empty() {
-            format!("n{}", event.devpath.replace('/', "\\x2f"))
-        } else {
-            format!(
-                "+{}:{}",
-                event.subsystem,
-                event.devpath.rsplit('/').next().unwrap_or(&event.devpath)
-            )
-        };
-        Path::new(DB_DIR).join(escaped)
+        Path::new(DB_DIR).join(format!("n{}", event.devpath.replace('/', "\\x2f")))
     }
 }
 
