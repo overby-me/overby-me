@@ -2754,6 +2754,21 @@ impl Interpreter {
                 };
                 Value::Str(val.ref_type().to_string())
             }
+            // `$h{a, b, c}` — multi-key hash subscript joins with $; (\\034).
+            "_subscript_join" => {
+                let sep = self.get_var(";").to_str();
+                let sep = if sep.is_empty() {
+                    "\u{1c}".to_string()
+                } else {
+                    sep
+                };
+                let parts: Vec<String> = args
+                    .iter()
+                    .flat_map(|a| self.eval_list(a))
+                    .map(|v| v.to_str())
+                    .collect();
+                Value::Str(parts.join(&sep))
+            }
             // test.pl installs this via eval-string iff it isn't already
             // present; providing it directly avoids one `(eval N)` tick
             // and matches reference perl's baseline eval counter.

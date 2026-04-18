@@ -1,5 +1,6 @@
 use crate::ast::*;
 use crate::lexer::Token;
+use std::collections::HashSet;
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -7,22 +8,31 @@ pub struct Parser {
     /// Empty when line tracking isn't wired up (treat as line 0).
     token_lines: Vec<usize>,
     pos: usize,
+    /// Names that appear as `sub NAME` in this token stream — populated
+    /// in a first pass so that bareword references later in the file can
+    /// be recognised as no-arg sub calls (`done_testing;` after the sub
+    /// is declared elsewhere).
+    known_subs: HashSet<String>,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
+        let known_subs = scan_sub_names(&tokens);
         Parser {
             tokens,
             token_lines: Vec::new(),
             pos: 0,
+            known_subs,
         }
     }
 
     pub fn new_with_lines(tokens: Vec<Token>, token_lines: Vec<usize>) -> Self {
+        let known_subs = scan_sub_names(&tokens);
         Parser {
             tokens,
             token_lines,
             pos: 0,
+            known_subs,
         }
     }
 
@@ -1630,7 +1640,31 @@ impl Parser {
                     };
 
                     if is_subscript {
-                        let key = self.parse_expr();
+                        // Perl auto-quotes a sole bareword inside `{...}`
+                        // when used as a hash key — `$h{foo}` means
+                        // `$h{"foo"}` regardless of whether `foo` names
+                        // a sub. Detect the simple bareword case.
+                        let key = if let Token::Ident(n) = self.tok().clone()
+                            && matches!(self.tokens.get(self.pos + 1), Some(Token::RBrace))
+                        {
+                            self.pos += 1;
+                            Expr::StringLit(n)
+                        } else {
+                            let first = self.parse_expr();
+                            // `$h{a, b}` joins keys with $; (Perl semantics).
+                            if matches!(self.tok(), Token::Comma) {
+                                let mut items = vec![first];
+                                while self.eat(&Token::Comma) {
+                                    if matches!(self.tok(), Token::RBrace) {
+                                        break;
+                                    }
+                                    items.push(self.parse_expr());
+                                }
+                                Expr::Call("_subscript_join".to_string(), items)
+                            } else {
+                                first
+                            }
+                        };
                         self.expect(&Token::RBrace);
                         match expr {
                             Expr::ScalarVar(name) | Expr::HashVar(name) | Expr::MyVar(name) => {
@@ -2272,6 +2306,12 @@ impl Parser {
                         self.parse_list_expr()
                     };
                     Expr::Call(name, args)
+                } else if self.known_subs.contains(&name) {
+                    // Bareword that names a known sub — emit a no-arg
+                    // call so `done_testing;` (after `sub done_testing`)
+                    // dispatches to the sub instead of returning the
+                    // string "done_testing".
+                    Expr::Call(name, Vec::new())
                 } else {
                     // Bareword — treat as string in most contexts
                     Expr::StringLit(name)
@@ -2539,4 +2579,37 @@ impl PartialEq for Token {
             _ => std::mem::discriminant(self) == std::mem::discriminant(other),
         }
     }
+}
+
+/// Scan the token stream for `sub IDENT` declarations and return the set
+/// of sub names. Used so the parser can convert `name;` (bareword statement)
+/// into a Call when `name` is a known sub. Pre-seeded with the common
+/// helpers from t/test.pl since test files reference them via bareword
+/// before any local `sub NAME` declaration would put them in scope.
+fn scan_sub_names(tokens: &[Token]) -> HashSet<String> {
+    let mut subs: HashSet<String> = [
+        "done_testing",
+        "plan",
+        "skip_all",
+        "skip_all_if_miniperl",
+        "skip_all_without_dynamic_extension",
+        "skip_all_without_perlio",
+        "skip_all_without_config",
+        "skip_all_without_unicode_tables",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    for w in tokens.windows(2) {
+        if matches!(w[0], Token::Sub) {
+            if let Token::Ident(n) = &w[1] {
+                subs.insert(n.clone());
+                // Also accept the unqualified tail of `Pkg::name`.
+                if let Some(idx) = n.rfind("::") {
+                    subs.insert(n[idx + 2..].to_string());
+                }
+            }
+        }
+    }
+    subs
 }
