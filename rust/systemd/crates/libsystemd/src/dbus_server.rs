@@ -1327,24 +1327,24 @@ mod inner {
             );
         }
 
-        // Periodically scan the unit table and register per-unit objects
-        // for new units (transient services from StartTransientUnit,
-        // implicit slices created on-demand, units added via
-        // daemon-reload).  A set of already-registered names lets us
-        // detect just the delta each scan.  The scan runs at a 2s
-        // cadence — fast enough that `busctl get-property` soon after
-        // `systemd-run` sees the new object, slow enough that it
-        // doesn't measurably contend on the read-lock.
+        // Periodically reconcile per-unit D-Bus objects with the unit
+        // table: register objects for newly-added units (transient
+        // services from StartTransientUnit, implicit slices,
+        // daemon-reload additions) and unregister objects for units
+        // removed on daemon-reload.  A 2 s cadence is fast enough that
+        // `busctl get-property` sees new objects quickly and slow
+        // enough to not contend on the read lock.
         let mut known: std::collections::HashSet<String> = {
             let ri = run_info.read_poisoned();
             ri.unit_table.values().map(|u| u.id.name.clone()).collect()
         };
         loop {
             std::thread::sleep(std::time::Duration::from_secs(2));
-            let current_names: Vec<String> = {
+            let current_names: std::collections::HashSet<String> = {
                 let ri = run_info.read_poisoned();
                 ri.unit_table.values().map(|u| u.id.name.clone()).collect()
             };
+            // Additions
             for name in &current_names {
                 if !known.contains(name)
                     && register_unit_object(&conn, &run_info, name).is_ok()
@@ -1352,6 +1352,30 @@ mod inner {
                     trace!("dbus-server: registered new unit object {name}");
                     known.insert(name.clone());
                 }
+            }
+            // Removals — clean up stale object paths when a unit was
+            // removed (daemon-reload with disk deletion, for example).
+            let stale: Vec<String> = known
+                .iter()
+                .filter(|n| !current_names.contains(*n))
+                .cloned()
+                .collect();
+            for name in stale {
+                let path = unit_object_path(&name);
+                let _ = conn.object_server().remove::<UnitObj, _>(&path);
+                if name.ends_with(".service") {
+                    let _ = conn.object_server().remove::<ServiceObj, _>(&path);
+                } else if name.ends_with(".socket") {
+                    let _ = conn.object_server().remove::<SocketObj, _>(&path);
+                } else if name.ends_with(".timer") {
+                    let _ = conn.object_server().remove::<TimerObj, _>(&path);
+                } else if name.ends_with(".slice") {
+                    let _ = conn.object_server().remove::<SliceObj, _>(&path);
+                } else if name.ends_with(".path") {
+                    let _ = conn.object_server().remove::<PathObj, _>(&path);
+                }
+                known.remove(&name);
+                trace!("dbus-server: unregistered removed unit object {name}");
             }
         }
     }
