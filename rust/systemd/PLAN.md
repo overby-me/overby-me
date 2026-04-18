@@ -8,7 +8,7 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| PASS | ~238+ | Tests passing reliably (incl. 150/151 aux-utils) — **needs re-verification** after testsuite.nix /testok assertion fix (previous `machine.fail` was inverted and silently accepted missing /testok) |
+| PASS | unknown | **Needs re-verification.** Previous `machine.fail("test -f /testok")` was inverted (asserted /testok must NOT exist); now corrected to `machine.succeed(...)`. Many tests listed as PASS may have been false positives — the test script failed an internal assertion (set -e aborted before `touch /testok`) but the inverted check let the nix build succeed. 80-notifyaccess verified to fall into this bucket post-fix. |
 | FAIL (fixable) | unknown | Re-run required post-fix |
 | FAIL (architectural) | ~7 | Missing major features (udev, exec-deser, fstab-generator) — D-Bus, BindPaths-runtime, MessageQueue, OpenFile, ExtraFileDescriptors, socket-activate, notify --fork now implemented |
 | Boot hang (transient) | ~10 | Non-deterministic QEMU boot failures (~30% rate) |
