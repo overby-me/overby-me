@@ -2,11 +2,12 @@
 
 ## Current status
 
-**187/225 tests passing (83%)**.
+**195/225 tests passing (87%)**.
 
-Trajectory: 92 → 172 → 182 → 187. Each per-test derivation is wired
-as a flake check via the shared `gnutar-test-harness` (autom4te-built
-`testsuite` script + helper programs).
+Trajectory: 92 → 172 → 182 → 187 → 191 → 195. Each per-test
+derivation is wired as a flake check via the shared
+`gnutar-test-harness` (autom4te-built `testsuite` script + helper
+programs).
 
 ## Running tests
 
@@ -125,19 +126,43 @@ See `default.nix` for the full list of 225 test names.
   archive side, so a concurrent truncation reports `Size differs`
   rather than `Contents differ`.
 
-### What remains (38 failing)
+### Recent: `--listed-incremental`
 
-Two buckets, both substantial:
+Substantial implementation of the incremental feature:
+
+1. **Bootstrap (+4 tests):** snapshot-file I/O (GNU format 2 header +
+   time + per-dir records), level-0/level-N+1 file-level time
+   filtering, GNU dumpdir ('D') directory entries carrying child
+   listings as the entry body, and extract-side deletion of disk
+   children not mentioned in the dumpdir (gated on `-v` for the
+   message). Deferred directory mtime restore so child writes don't
+   clobber parent timestamps. Unlocks listed01, incr01, incr02,
+   incremental.
+2. **Per-dir dumpdir state (+4 tests):** snapshot now carries the
+   dumpdir each directory wrote last run. On create we look up the
+   current dir's (dev, inode) in the snapshot, match each child's
+   name against the previous dumpdir, and mark unchanged files 'N'
+   (skipped from this run's archive) vs new/changed 'Y' (archived).
+   Time comparisons use both sec + nsec so same-second creations
+   don't false-positive as "changed". Snapshot path is canonicalised
+   pre-chdir so `-g db -C dir` lands relative to the invocation cwd.
+   Listed-incremental walks now emit all dirs first, then files
+   ordered by parent dir, matching GNU's directory-first layout.
+   Unlocks incr03, incr05, rename04, rename05.
+
+### What remains (30 failing)
 
 | Bucket | Tests | Notes |
 | --- | --- | --- |
-| `--listed-incremental` (incr*, dirrem*, filerem*, rename*, listed*, exclude09/10/12/13/15/16, remfiles08b/09b) | 31 | Snapshot database, `--level=N`, dumpdir format, `Directory is new` / `File removed before we read it` messages. |
+| `--listed-incremental` — advanced (rename detection, exclude-tag interop, remove-files, complex nests) | 23 | incr06/07/08/09/10, listed02/03/04, dirrem01/02, filerem01, rename01/02/03/06, exclude09/10/12/13/15/16, remfiles08b/09b. Needs `Directory has been renamed from X` (inode-based rename detection), `File removed before we read it` warnings, deeper multi-dir walk invariants, and exclude-tag interaction with dumpdir. |
 | Multi-volume (`-M`, `--tape-length=N`, `--new-volume-script`) | 7 | multiv03/04/05/08/09, label02, sparsemvp — continuation headers, volume boundary handling. |
 
 ## Approach
 
-`--listed-incremental` is the highest-impact remaining project (31
-tests). Multi-volume brings the final 7. The buckets are independent.
+Continue peeling off incremental edge cases: the biggest remaining
+sub-bucket is rename detection (inode-based tracking so a `mv dir
+newdir` shows up as `Directory has been renamed from`). Multi-volume
+is independent; needs continuation headers and volume switching.
 
 After each phase commit and rerun the suite:
 

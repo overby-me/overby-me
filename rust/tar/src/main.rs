@@ -448,6 +448,209 @@ impl<R: Read> PaddedReader<R> {
     }
 }
 
+/// GNU listed-incremental snapshot (format 2). Stores a reference
+/// timestamp (when the last run started) plus per-directory records
+/// keyed by (dev, inode). A `None` loaded snapshot means the target
+/// file was empty / missing — first-run semantics (level 0).
+#[derive(Debug, Default, Clone)]
+struct IncrementalSnapshot {
+    /// Seconds since Unix epoch at the start of the previous run.
+    time_sec: i64,
+    /// Nanoseconds fraction of the previous run's start time.
+    time_nsec: i64,
+    /// (dev, inode) → directory record. Used to recognise renames
+    /// and unchanged children across runs.
+    dirs: std::collections::HashMap<(u64, u64), IncrementalDirRecord>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct IncrementalDirRecord {
+    /// 1 if the directory is on an NFS mount (not detected yet —
+    /// always serialised as 0).
+    nfs: u8,
+    mtime_sec: i64,
+    mtime_nsec: i64,
+    dev: u64,
+    inode: u64,
+    /// Path recorded on the previous run. Used to detect renames
+    /// when the same (dev, inode) surfaces under a different name.
+    name: PathBuf,
+    /// Dumpdir entries the previous run emitted for this directory.
+    /// Each tuple is `(code, name)` — code is `Y`, `N`, `D`, `R`,
+    /// `T`, … per GNU's listed-incremental encoding. Used this run
+    /// to recognise unchanged (N) vs renamed/new children.
+    children: Vec<(u8, String)>,
+}
+
+impl IncrementalSnapshot {
+    /// Parse a GNU format-2 snapshot. Missing / empty files yield
+    /// default (level-0 semantics). Malformed entries are ignored —
+    /// tar still moves forward with whatever records parsed cleanly.
+    fn load(path: &str) -> IncrementalSnapshot {
+        let data = match fs::read(path) {
+            Ok(b) => b,
+            Err(_) => return IncrementalSnapshot::default(),
+        };
+        if data.is_empty() {
+            return IncrementalSnapshot::default();
+        }
+        // Format 2:
+        //   Line 1: "GNU tar-<version>-2\n"
+        //   Line 2: "<time_sec> <time_nsec>\n"
+        //   Then zero or more NUL-delimited directory records:
+        //     "<nfs>\0<mtime_sec>\0<mtime_nsec>\0<dev>\0<inode>\0<name>\0<dumpdir>\0"
+        let mut out = IncrementalSnapshot::default();
+        // Split off the two leading newline-terminated header lines.
+        let mut cursor = 0usize;
+        let find_nl = |buf: &[u8], from: usize| -> Option<usize> {
+            buf[from..]
+                .iter()
+                .position(|&b| b == b'\n')
+                .map(|p| from + p)
+        };
+        let magic_end = match find_nl(&data, cursor) {
+            Some(p) => p,
+            None => return out,
+        };
+        cursor = magic_end + 1;
+        let time_end = match find_nl(&data, cursor) {
+            Some(p) => p,
+            None => return out,
+        };
+        let time_line = &data[cursor..time_end];
+        cursor = time_end + 1;
+        let time_str = String::from_utf8_lossy(time_line);
+        let mut parts = time_str.split_whitespace();
+        out.time_sec = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        out.time_nsec = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        // Remainder: NUL-delimited directory records.
+        while cursor < data.len() {
+            let take_field = |buf: &[u8], from: &mut usize| -> Option<Vec<u8>> {
+                let end = buf[*from..].iter().position(|&b| b == 0)?;
+                let slice = buf[*from..*from + end].to_vec();
+                *from += end + 1;
+                Some(slice)
+            };
+            let Some(nfs_b) = take_field(&data, &mut cursor) else {
+                break;
+            };
+            let Some(mtsec_b) = take_field(&data, &mut cursor) else {
+                break;
+            };
+            let Some(mtnsec_b) = take_field(&data, &mut cursor) else {
+                break;
+            };
+            let Some(dev_b) = take_field(&data, &mut cursor) else {
+                break;
+            };
+            let Some(ino_b) = take_field(&data, &mut cursor) else {
+                break;
+            };
+            let Some(name_b) = take_field(&data, &mut cursor) else {
+                break;
+            };
+            // Dumpdir follows: a sequence of <code><name>\0 entries
+            // terminated by an empty field.
+            let mut children: Vec<(u8, String)> = Vec::new();
+            loop {
+                let Some(f) = take_field(&data, &mut cursor) else {
+                    break;
+                };
+                if f.is_empty() {
+                    break;
+                }
+                if f.len() < 1 {
+                    continue;
+                }
+                let code = f[0];
+                let name = String::from_utf8_lossy(&f[1..]).into_owned();
+                children.push((code, name));
+            }
+            let rec = IncrementalDirRecord {
+                nfs: parse_u8_lossy(&nfs_b),
+                mtime_sec: parse_i64_lossy(&mtsec_b),
+                mtime_nsec: parse_i64_lossy(&mtnsec_b),
+                dev: parse_u64_lossy(&dev_b),
+                inode: parse_u64_lossy(&ino_b),
+                name: PathBuf::from(String::from_utf8_lossy(&name_b).into_owned()),
+                children,
+            };
+            out.dirs.insert((rec.dev, rec.inode), rec);
+        }
+        out
+    }
+
+    /// Serialise to the path. On write failure we silently keep going
+    /// — GNU tar does the same (warning surfaces on the next run when
+    /// the snapshot doesn't match). Matches the format 2 layout the
+    /// loader accepts.
+    fn save(&self, path: &str) -> io::Result<()> {
+        let mut buf: Vec<u8> = Vec::new();
+        buf.extend_from_slice(b"GNU tar-1.35-2\n");
+        buf.extend_from_slice(format!("{} {}\n", self.time_sec, self.time_nsec).as_bytes());
+        for rec in self.dirs.values() {
+            buf.extend_from_slice(format!("{}", rec.nfs).as_bytes());
+            buf.push(0);
+            buf.extend_from_slice(format!("{}", rec.mtime_sec).as_bytes());
+            buf.push(0);
+            buf.extend_from_slice(format!("{}", rec.mtime_nsec).as_bytes());
+            buf.push(0);
+            buf.extend_from_slice(format!("{}", rec.dev).as_bytes());
+            buf.push(0);
+            buf.extend_from_slice(format!("{}", rec.inode).as_bytes());
+            buf.push(0);
+            buf.extend_from_slice(rec.name.as_os_str().to_string_lossy().as_bytes());
+            buf.push(0);
+            // Dumpdir: each child as <code><name>\0, then an empty
+            // field (\0) to terminate the list.
+            for (code, name) in &rec.children {
+                buf.push(*code);
+                buf.extend_from_slice(name.as_bytes());
+                buf.push(0);
+            }
+            buf.push(0);
+        }
+        fs::write(path, buf)
+    }
+}
+
+/// Look up `(dev, inode)` of a path's parent, used to gate the
+/// fallback mtime filter below only for files that weren't visited
+/// through a dir dumpdir pass.
+fn dir_of(path: &Path) -> Option<(u64, u64)> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let parent = path.parent()?;
+        let m = fs::metadata(parent).ok()?;
+        Some((m.dev(), m.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        None
+    }
+}
+
+fn parse_u8_lossy(b: &[u8]) -> u8 {
+    std::str::from_utf8(b)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
+}
+fn parse_i64_lossy(b: &[u8]) -> i64 {
+    std::str::from_utf8(b)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
+}
+fn parse_u64_lossy(b: &[u8]) -> u64 {
+    std::str::from_utf8(b)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
+}
+
 impl<R: Read> Read for PaddedReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.read >= self.target {
@@ -871,6 +1074,11 @@ struct Args {
     /// `--checkpoint-action=...` occurrences stack. `genfile --run`
     /// appends `echo=genfile checkpoint %u` + `wait=SIGUSR1`.
     checkpoint_actions: Vec<CheckpointAction>,
+    /// `--listed-incremental=FILE` / `-g FILE` / `--listed=FILE`:
+    /// snapshot file recording per-directory state across runs. An
+    /// empty or missing file is treated as level 0 (first-time dump);
+    /// a populated file drives level-N+1 filtering.
+    listed_incremental: Option<String>,
     /// --index-file=FILE: write -v listings to FILE instead of stderr.
     index_file: Option<String>,
     /// --one-top-level[=DIR]: wrap extracted members under DIR if they
@@ -1550,6 +1758,9 @@ fn parse_args() -> Args {
                     args.checkpoint_actions.push(act);
                 }
             }
+            "-g" | "--listed-incremental" => {
+                args.listed_incremental = queue.pop_front();
+            }
             "--volno-file"
             | "--rsh-command"
             | "--new-volume-script"
@@ -1641,10 +1852,10 @@ fn parse_args() -> Args {
                         eprintln!("tar: --pax-option can be used only on POSIX archives");
                         process::exit(2);
                     }
-                } else if other.strip_prefix("--listed=").is_some()
-                    || other.strip_prefix("--listed-incremental=").is_some()
-                {
-                    // Listed-incremental snapshot file: accepted as no-op.
+                } else if let Some(val) = other.strip_prefix("--listed-incremental=") {
+                    args.listed_incremental = Some(val.to_string());
+                } else if let Some(val) = other.strip_prefix("--listed=") {
+                    args.listed_incremental = Some(val.to_string());
                 } else if let Some(val) = other.strip_prefix("--add-file=") {
                     args.paths.push(val.to_string());
                 } else if let Some(val) = other.strip_prefix("--files-from=") {
@@ -1744,7 +1955,6 @@ fn parse_args() -> Args {
                     || other == "-W"
                     || other == "--incremental"
                     || other == "-G"
-                    || other == "--listed-incremental"
                     || other == "--read-full-records"
                     || other == "-B"
                     || other == "--full-time"
@@ -2041,6 +2251,23 @@ fn do_create(args: &Args) -> io::Result<()> {
     });
 
     let has_compression = !matches!(compression, Compression::None);
+    // Resolve the listed-incremental snapshot path BEFORE any chdir
+    // so subsequent -C DIR args don't shift where we look for it.
+    let args = if let Some(ref p) = args.listed_incremental {
+        if !p.is_empty()
+            && !p.starts_with('/')
+            && let Ok(cwd) = std::env::current_dir()
+        {
+            let mut c = args.clone();
+            c.listed_incremental = Some(cwd.join(p).to_string_lossy().into_owned());
+            std::borrow::Cow::Owned(c)
+        } else {
+            std::borrow::Cow::Borrowed(args)
+        }
+    } else {
+        std::borrow::Cow::Borrowed(args)
+    };
+    let args: &Args = &args;
     let writer: Box<dyn Write> = match args.file.as_deref() {
         Some("-") | None => Box::new(io::stdout().lock()),
         Some(path) => match File::create(path) {
@@ -2207,6 +2434,57 @@ fn add_paths_to_builder_filter<W: Write>(
     let mut had_read_error = false;
     let mut file_changed = false;
     let mut current_no_recursion = args.no_recursion;
+    // Listed-incremental: load previous-run snapshot (empty on first
+    // run). `prev_time` gates per-file includes; files with an mtime
+    // older than the snapshot time are skipped on level-N+1 runs.
+    // Direct directory walks stay full-dump for now — per-dir dumpdir
+    // state would live in `prev_snapshot.dirs` in a later phase.
+    let (prev_time, prev_snapshot) = match &args.listed_incremental {
+        Some(path) => {
+            let snap = IncrementalSnapshot::load(path);
+            let t = if snap.time_sec == 0 && snap.time_nsec == 0 {
+                None
+            } else {
+                // Track both seconds and nanoseconds so same-second
+                // file creations still get classified correctly as
+                // "older" when their nanosecond fraction beats the
+                // snapshot's.
+                Some((snap.time_sec, snap.time_nsec))
+            };
+            (t, Some(snap))
+        }
+        None => (None, None),
+    };
+    // Fast-lookup table of (dev, inode) → previous-run child-name set
+    // for rename/delete detection. Entries present in a prev dumpdir
+    // but missing this run drop out of the new dumpdir and trigger
+    // delete on extract; new names (e.g. renamed-in) always get a Y
+    // code regardless of mtime.
+    let prev_dir_children: std::collections::HashMap<
+        (u64, u64),
+        std::collections::HashSet<String>,
+    > = prev_snapshot
+        .as_ref()
+        .map(|snap| {
+            snap.dirs
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        *k,
+                        v.children.iter().map(|(_, name)| name.clone()).collect(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    // Paths the dumpdir logic marked 'N' (unchanged) — skipped when
+    // we later reach them in the walk.
+    let mut incremental_skip: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    // Per-(dev, inode) children list we'll serialise as the new
+    // snapshot at end of run. Keys in this map come from dirs
+    // encountered during this run's walk.
+    let mut new_snapshot_dirs: std::collections::HashMap<(u64, u64), IncrementalDirRecord> =
+        std::collections::HashMap::new();
     // Track chdir targets whose entire contents were archived (via a
     // subsequent `.` path). --remove-files also rmdirs these after the
     // walk — matching GNU tar's 'tar -cf a.tar --remove-files -C foo .'
@@ -2294,6 +2572,31 @@ fn add_paths_to_builder_filter<W: Write>(
             eprintln!("tar: {}: Cannot open: {reason}", src_path.display());
             had_read_error = true;
             continue;
+        }
+
+        // Listed-incremental uses GNU's "directory-first" member
+        // ordering: every directory entry fires before any regular
+        // file. Files then follow in parent-dir order so parent-dir
+        // files come before subdir files (dir `.` files before dir
+        // `./sub` files). This keeps dumpdir records adjacent and
+        // matches GNU's layout.
+        if args.listed_incremental.is_some() {
+            let mut dirs: Vec<PathBuf> = Vec::new();
+            let mut files: Vec<PathBuf> = Vec::new();
+            for p in entries.drain(..) {
+                if p.is_dir() && !p.is_symlink() {
+                    dirs.push(p);
+                } else {
+                    files.push(p);
+                }
+            }
+            files.sort_by(|a, b| {
+                let ap = a.parent().unwrap_or(Path::new(""));
+                let bp = b.parent().unwrap_or(Path::new(""));
+                ap.cmp(bp).then_with(|| a.cmp(b))
+            });
+            entries = dirs;
+            entries.extend(files);
         }
 
         // Apply --exclude-caches / --exclude-tag filtering. We scan the
@@ -2424,6 +2727,40 @@ fn add_paths_to_builder_filter<W: Write>(
                 }
             }
 
+            // Listed-incremental: skip files the parent directory's
+            // dumpdir decision marked 'N' (unchanged). Directories
+            // aren't skipped — they always get a dumpdir of their
+            // own. The fallback time filter below handles paths the
+            // dumpdir pass didn't touch (e.g. top-level file args).
+            if args.listed_incremental.is_some()
+                && !path.is_dir()
+                && incremental_skip.contains(path)
+            {
+                continue;
+            }
+            if let Some((cut_sec, cut_nsec)) = prev_time
+                && !path.is_dir()
+                && !path.is_symlink()
+                && !incremental_skip.contains(path)
+            {
+                // For files that aren't part of any dumpdir pass
+                // (top-level args), fall back to the simple mtime
+                // filter.
+                if !new_snapshot_dirs.contains_key(&dir_of(path).unwrap_or((0, 0))) {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::MetadataExt;
+                        if let Ok(md) = fs::metadata(path) {
+                            let ms = md.mtime() as i64;
+                            let mn = md.mtime_nsec() as i64;
+                            if (ms, mn) <= (cut_sec, cut_nsec) {
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+
             let archive_name: String = path_str.to_string();
 
             // Strip leading / for safety (unless -P/--absolute-names),
@@ -2548,13 +2885,131 @@ fn add_paths_to_builder_filter<W: Write>(
                 } else {
                     format!("{archive_name}/")
                 };
-                append_entry_raw(
-                    &mut *builder,
-                    &mut header,
-                    &dir_name,
-                    &mut io::empty(),
-                    None,
-                )?;
+                // Listed-incremental: carry the directory's current
+                // child listing as the entry body so extract can
+                // delete disk children not mentioned here.
+                if args.listed_incremental.is_some() {
+                    // Resolve (dev, inode) so we can match this dir
+                    // against the previous snapshot and decide per-
+                    // child Y / N / D codes.
+                    let (dev_ino, _): ((u64, u64), bool) = {
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::MetadataExt;
+                            match fs::metadata(path) {
+                                Ok(m) => ((m.dev(), m.ino()), true),
+                                Err(_) => ((0, 0), false),
+                            }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            ((0, 0), false)
+                        }
+                    };
+                    let prev_children = prev_dir_children.get(&dev_ino);
+                    let cutoff = prev_time;
+
+                    let mut kids: Vec<(u8, String)> = Vec::new();
+                    let mut skip_children: Vec<PathBuf> = Vec::new();
+                    if let Ok(rd) = fs::read_dir(path) {
+                        for child in rd.flatten() {
+                            let name = child.file_name().to_string_lossy().into_owned();
+                            let child_path = child.path();
+                            let is_dir = child.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                            let in_prev = prev_children.map(|s| s.contains(&name)).unwrap_or(false);
+                            let changed = if let Some((cut_sec, cut_nsec)) = cutoff {
+                                #[cfg(unix)]
+                                {
+                                    use std::os::unix::fs::MetadataExt;
+                                    fs::metadata(&child_path)
+                                        .map(|m| {
+                                            let ms = m.mtime() as i64;
+                                            let mn = m.mtime_nsec() as i64;
+                                            (ms, mn) > (cut_sec, cut_nsec)
+                                        })
+                                        .unwrap_or(true)
+                                }
+                                #[cfg(not(unix))]
+                                {
+                                    true
+                                }
+                            } else {
+                                // Level 0 — everything is "new".
+                                true
+                            };
+                            // Codes: directories always D (tar will
+                            // recurse into them and emit their own
+                            // dumpdir); regular files Y if new/changed,
+                            // N (kept on disk, not re-archived) when
+                            // unchanged and previously known.
+                            let code = if is_dir {
+                                b'D'
+                            } else if in_prev && !changed {
+                                skip_children.push(child_path.clone());
+                                b'N'
+                            } else {
+                                b'Y'
+                            };
+                            kids.push((code, name));
+                        }
+                    }
+                    kids.sort_by(|a, b| a.1.cmp(&b.1));
+                    // Record in the new-snapshot map so next run can
+                    // spot entries that disappear between runs.
+                    new_snapshot_dirs.insert(
+                        dev_ino,
+                        IncrementalDirRecord {
+                            nfs: 0,
+                            mtime_sec: {
+                                #[cfg(unix)]
+                                {
+                                    use std::os::unix::fs::MetadataExt;
+                                    fs::metadata(path).map(|m| m.mtime()).unwrap_or(0)
+                                }
+                                #[cfg(not(unix))]
+                                {
+                                    0
+                                }
+                            },
+                            mtime_nsec: 0,
+                            dev: dev_ino.0,
+                            inode: dev_ino.1,
+                            name: PathBuf::from(path_str.to_string()),
+                            children: kids.clone(),
+                        },
+                    );
+                    for p in skip_children {
+                        incremental_skip.insert(p);
+                    }
+                    let mut dumpdir: Vec<u8> = Vec::new();
+                    for (code, name) in kids {
+                        dumpdir.push(code);
+                        dumpdir.extend_from_slice(name.as_bytes());
+                        dumpdir.push(0);
+                    }
+                    // GNU format terminates the dumpdir with a single
+                    // extra NUL even when empty.
+                    dumpdir.push(0);
+                    header.set_entry_type(EntryType::new(b'D'));
+                    header.set_size(dumpdir.len() as u64);
+                    let len = dumpdir.len() as u64;
+                    let mut cursor = io::Cursor::new(dumpdir);
+                    append_entry_raw(
+                        &mut *builder,
+                        &mut header,
+                        &dir_name,
+                        &mut PaddedReader::new(&mut cursor, len),
+                        None,
+                    )?;
+                } else {
+                    append_entry_raw(
+                        &mut *builder,
+                        &mut header,
+                        &dir_name,
+                        &mut io::empty(),
+                        None,
+                    )?;
+                }
             } else if is_symlink {
                 #[cfg(unix)]
                 {
@@ -2749,6 +3204,21 @@ fn add_paths_to_builder_filter<W: Write>(
         for root in chdir_roots.iter().rev() {
             let _ = fs::remove_dir(root);
         }
+    }
+    // Update the listed-incremental snapshot for next run: stamp
+    // run time and flush the per-dir dumpdirs we computed during
+    // the walk. A future run keys into this by (dev, inode) to tell
+    // renamed/new/unchanged apart.
+    if let Some(path) = &args.listed_incremental {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let snap = IncrementalSnapshot {
+            time_sec: now.as_secs() as i64,
+            time_nsec: now.subsec_nanos() as i64,
+            dirs: new_snapshot_dirs,
+        };
+        let _ = snap.save(path);
     }
     // --check-links: warn once per inode whose archived-peer count
     // fell short of its on-disk nlink count. GNU format: "tar: Missing
@@ -3459,7 +3929,7 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
     // extracted, so we can still write children into directories whose
     // final mode lacks write permission.
     #[cfg(unix)]
-    let mut deferred_dir_modes: Vec<(PathBuf, u32)> = Vec::new();
+    let mut deferred_dir_modes: Vec<(PathBuf, u32, Option<u64>)> = Vec::new();
 
     let mut label_checked = args.label.is_none();
     let mut extract_had_error = false;
@@ -3719,7 +4189,17 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
         };
 
         let entry_type = entry.header().entry_type();
-        match entry_type {
+        // GNU dumpdir ('D') is a directory entry whose body carries
+        // the dumpdir listing — treat it as a regular directory but
+        // also consume the body for delete-missing-children handling
+        // further below.
+        let is_dumpdir = entry_type == EntryType::new(b'D');
+        let effective_type = if is_dumpdir {
+            EntryType::Directory
+        } else {
+            entry_type
+        };
+        match effective_type {
             EntryType::Directory => {
                 if args.to_stdout {
                     continue;
@@ -3774,10 +4254,59 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
                             effective
                         };
                         fs::set_permissions(&dest, fs::Permissions::from_mode(final_mode | 0o700))?;
-                        deferred_dir_modes.push((dest.clone(), final_mode));
+                        // Defer the dir's mtime too: extracting
+                        // children always bumps the parent's mtime,
+                        // so we restore the archive's value after all
+                        // descendants land (common for incremental
+                        // archives where dir entries precede files).
+                        let mtime = entry.header().mtime().ok();
+                        deferred_dir_modes.push((dest.clone(), final_mode, mtime));
                     }
                     if let Some(ref mode_str) = args.mode_override {
                         let _ = apply_mode_to_path(&dest, mode_str);
+                    }
+                }
+                // Listed-incremental dumpdir: compare disk children
+                // against the archive's dumpdir and delete any that
+                // weren't carried forward (they were removed between
+                // the level-0 and level-N runs). GNU prints
+                // `tar: Deleting 'PATH'` for each removal.
+                if is_dumpdir {
+                    let mut body: Vec<u8> = Vec::new();
+                    entry.read_to_end(&mut body)?;
+                    let kept: std::collections::HashSet<String> = body
+                        .split(|&b| b == 0)
+                        .filter(|field| !field.is_empty())
+                        .map(|field| {
+                            // Each field is <code><name>; the first
+                            // byte is the code (Y/N/D/R/T/…).
+                            let start = if !field.is_empty() { 1 } else { 0 };
+                            String::from_utf8_lossy(&field[start..]).into_owned()
+                        })
+                        .collect();
+                    if let Ok(rd) = fs::read_dir(&dest) {
+                        for child in rd.flatten() {
+                            let name = child.file_name().to_string_lossy().into_owned();
+                            if kept.contains(&name) {
+                                continue;
+                            }
+                            let child_path = child.path();
+                            let display = format!("{}/{}", final_path.trim_end_matches('/'), name);
+                            // GNU only surfaces the `Deleting` notice
+                            // under verbose extraction; otherwise the
+                            // deletion happens silently. When it does
+                            // print, it goes to stdout so it stays
+                            // inline with the -v listing.
+                            if args.verbose {
+                                println!("tar: Deleting '{display}'");
+                            }
+                            let is_dir = child.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                            if is_dir {
+                                let _ = fs::remove_dir_all(&child_path);
+                            } else {
+                                let _ = fs::remove_file(&child_path);
+                            }
+                        }
                     }
                 }
             }
@@ -3912,10 +4441,26 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
     {
         use std::os::unix::fs::PermissionsExt;
         // Apply deferred directory modes in reverse so deeper directories
-        // get their mode restored before their parents (not strictly
-        // required, but keeps behaviour deterministic).
-        for (path, mode) in deferred_dir_modes.into_iter().rev() {
-            let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
+        // get their mode restored before their parents, then set each
+        // dir's mtime last so child writes stop mutating it.
+        for (path, mode, mtime) in deferred_dir_modes.into_iter().rev() {
+            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(mode));
+            if let Some(secs) = mtime {
+                // Reuse the archive's mtime for atime too (neither is
+                // recorded separately for dirs in our tracking), which
+                // is what GNU tar does when restoring dir timestamps
+                // from an archive that carries only mtime.
+                let ts = libc::timespec {
+                    tv_sec: secs as libc::time_t,
+                    tv_nsec: 0,
+                };
+                let times = [ts, ts];
+                let cpath =
+                    std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap_or_default();
+                unsafe {
+                    libc::utimensat(libc::AT_FDCWD, cpath.as_ptr(), times.as_ptr(), 0);
+                }
+            }
         }
     }
 
