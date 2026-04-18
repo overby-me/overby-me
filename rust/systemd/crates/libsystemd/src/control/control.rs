@@ -9157,13 +9157,22 @@ pub fn execute_command(
             }
 
             // Remove units whose files no longer exist on disk.
-            // Skip transient units (no file path) — they only exist at runtime.
+            // Skip transient units — they only exist at runtime.  A unit
+            // is transient if it has no fragment_path OR its fragment_path
+            // lives under /run/systemd/transient (where busctl/systemd-run
+            // write synthetic config for on-the-fly units).
             let mut removed_units_names = Vec::new();
             let stale_ids: Vec<_> = run_info
                 .unit_table
                 .iter()
                 .filter(|(_, unit)| {
-                    !fresh_names.contains(&unit.id.name) && unit.common.unit.fragment_path.is_some()
+                    if fresh_names.contains(&unit.id.name) {
+                        return false;
+                    }
+                    match &unit.common.unit.fragment_path {
+                        None => false,
+                        Some(p) => !p.starts_with("/run/systemd/transient"),
+                    }
                 })
                 .map(|(id, _)| id.clone())
                 .collect();
