@@ -706,6 +706,9 @@ fn describe_open_error(e: &io::Error) -> String {
     match e.kind() {
         io::ErrorKind::PermissionDenied => "Permission denied".to_string(),
         io::ErrorKind::NotFound => "No such file or directory".to_string(),
+        io::ErrorKind::AlreadyExists => "File exists".to_string(),
+        io::ErrorKind::IsADirectory => "Is a directory".to_string(),
+        io::ErrorKind::NotADirectory => "Not a directory".to_string(),
         _ => e.to_string(),
     }
 }
