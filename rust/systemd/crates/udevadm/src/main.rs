@@ -262,12 +262,22 @@ enum Commands {
         #[arg(long, short = 'a', default_value = "add")]
         action: String,
 
-        /// Subsystem override
+        /// Resolve policy: early, late, or never. Only `--action help`
+        /// allows this to be omitted with no devpath.
         #[arg(long, short = 'N')]
         resolve_names: Option<String>,
 
-        /// Device path in sysfs
-        devpath: String,
+        /// Verbose output (no-op; accepted for compatibility).
+        #[arg(long, short = 'v')]
+        verbose: bool,
+
+        /// JSON output: off, short, pretty, or help.  `help` prints the
+        /// list and exits 0.
+        #[arg(long)]
+        json: Option<String>,
+
+        /// Device path in sysfs.  Optional when `--action help`.
+        devpath: Option<String>,
     },
 
     /// Test a built-in command
@@ -648,6 +658,21 @@ fn cmd_trigger(
     _settle: bool,
     devices: &[String],
 ) -> i32 {
+    if action == "help" {
+        for a in UDEV_ACTIONS {
+            println!("{a}");
+        }
+        return 0;
+    }
+    if !UDEV_ACTIONS.contains(&action) {
+        eprintln!("udevadm trigger: invalid action: {action}");
+        return 1;
+    }
+    if !matches!(type_, "devices" | "subsystems" | "all") {
+        eprintln!("udevadm trigger: invalid type: {type_}");
+        return 1;
+    }
+
     let mut count = 0u64;
     let mut errors = 0u64;
 
@@ -1216,7 +1241,25 @@ fn parse_monitor_event(data: &[u8]) -> Option<HashMap<String, String>> {
 // udevadm test
 // ---------------------------------------------------------------------------
 
+/// Valid uevent actions accepted by `udevadm test --action` and
+/// `udevadm trigger --action`.  `help` is a pseudo-action that prints
+/// the list and exits 0.
+const UDEV_ACTIONS: &[&str] = &[
+    "add", "remove", "change", "move", "online", "offline", "bind", "unbind",
+];
+
 fn cmd_test(action: &str, devpath: &str) -> i32 {
+    if action == "help" {
+        for a in UDEV_ACTIONS {
+            println!("{a}");
+        }
+        return 0;
+    }
+    if !UDEV_ACTIONS.contains(&action) {
+        eprintln!("udevadm test: invalid action: {action}");
+        return 1;
+    }
+
     let syspath = normalize_syspath(devpath);
     if !syspath.exists() {
         eprintln!(
@@ -2217,9 +2260,43 @@ fn main() -> ExitCode {
 
         Commands::Test {
             ref action,
-            resolve_names: _,
+            ref resolve_names,
+            verbose: _,
+            ref json,
             ref devpath,
-        } => cmd_test(action, devpath),
+        } => {
+            // `--json help` / `--action help` short-circuit before we
+            // need a devpath.
+            if json.as_deref() == Some("help") {
+                for v in ["off", "short", "pretty"] {
+                    println!("{v}");
+                }
+                return ExitCode::from(0);
+            }
+            if action == "help" {
+                for a in UDEV_ACTIONS {
+                    println!("{a}");
+                }
+                return ExitCode::from(0);
+            }
+            if let Some(rn) = resolve_names
+                && !matches!(rn.as_str(), "early" | "late" | "never")
+            {
+                eprintln!("udevadm test: invalid --resolve-names value: {rn}");
+                return ExitCode::from(1);
+            }
+            if let Some(j) = json
+                && !matches!(j.as_str(), "off" | "short" | "pretty")
+            {
+                eprintln!("udevadm test: invalid --json value: {j}");
+                return ExitCode::from(1);
+            }
+            let Some(devpath) = devpath else {
+                eprintln!("udevadm test: a device path is required (or pass --action help)");
+                return ExitCode::from(1);
+            };
+            cmd_test(action, devpath)
+        }
 
         Commands::TestBuiltin {
             ref command,
@@ -2571,7 +2648,7 @@ mod tests {
         } = cli.command
         {
             assert_eq!(action, "add");
-            assert_eq!(devpath, "/sys/devices/test");
+            assert_eq!(devpath.as_deref(), Some("/sys/devices/test"));
         } else {
             panic!("Expected Test command");
         }
