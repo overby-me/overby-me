@@ -303,6 +303,23 @@ in
           [ -e "/usr/lib/udev/rules.d/$name" ] || ln -sfn "$f" "/usr/lib/udev/rules.d/$name"
         done
 
+        # Populate /dev/block/ with major:minor symlinks for existing block
+        # devices. The TEST-17-UDEV.sanity-check.sh lock-test iterates
+        # `/dev/block/*` and set-e aborts if the glob is empty — this ensures
+        # at least one entry is present even if rust-udevd hasn't processed
+        # block events yet.
+        mkdir -p /dev/block
+        for blk in /sys/block/*; do
+          [ -d "$blk" ] || continue
+          if [ -f "$blk/dev" ]; then
+            devstr=$(cat "$blk/dev" 2>/dev/null)
+            name=$(basename "$blk")
+            if [ -n "$devstr" ] && [ -e "/dev/$name" ]; then
+              [ -e "/dev/block/$devstr" ] || ln -sfn "/dev/$name" "/dev/block/$devstr"
+            fi
+          fi
+        done
+
         # Copy share data (e.g. gatewayd/browse.html) to /usr/share as a
         # writable directory.  Tests like journal-gatewayd need to mv/restore
         # files under /usr/share/systemd, which fails if it's a read-only
