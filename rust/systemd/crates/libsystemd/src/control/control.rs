@@ -7333,17 +7333,45 @@ pub fn execute_command(
                     out.push_str(&content);
                 }
 
-                // Also include drop-in files from .d and system.control directories
+                // Also include drop-in files from .d and system.control
+                // directories, following the same hierarchy rules as the
+                // loader: type-level ("service.d"), prefix-level
+                // ("a-.service.d", "a-b-.service.d"), and exact-name
+                // ("a-b-c.service.d") — from least to most specific.
                 let name = &unit.id.name;
-                let dropin_dirs = [
-                    format!("/etc/systemd/system/{name}.d"),
-                    format!("/run/systemd/system/{name}.d"),
-                    format!("/etc/systemd/system.control/{name}.d"),
-                    format!("/run/systemd/system.control/{name}.d"),
+                let base_dirs = [
+                    "/etc/systemd/system",
+                    "/run/systemd/system",
+                    "/usr/lib/systemd/system",
+                    "/etc/systemd/system.control",
+                    "/run/systemd/system.control",
                 ];
-                for dir in &dropin_dirs {
-                    let dir_path = std::path::Path::new(dir);
-                    if dir_path.is_dir() {
+                // Build the list of dropin directory *names* applicable to
+                // this unit, in order.
+                let mut dropin_dir_names: Vec<String> = Vec::new();
+                if let Some(type_suffix) = name.rsplit('.').next()
+                    && !type_suffix.is_empty()
+                {
+                    dropin_dir_names.push(format!("{type_suffix}.d"));
+                }
+                if let Some(dot_pos) = name.rfind('.') {
+                    let base = &name[..dot_pos];
+                    let suffix = &name[dot_pos..];
+                    let parts: Vec<&str> = base.split('-').collect();
+                    for i in 1..parts.len() {
+                        let prefix = parts[..i].join("-");
+                        dropin_dir_names.push(format!("{prefix}-{suffix}.d"));
+                    }
+                }
+                dropin_dir_names.push(format!("{name}.d"));
+
+                for base in &base_dirs {
+                    for dir_name in &dropin_dir_names {
+                        let dir = format!("{base}/{dir_name}");
+                        let dir_path = std::path::Path::new(&dir);
+                        if !dir_path.is_dir() {
+                            continue;
+                        }
                         let mut files: Vec<_> = std::fs::read_dir(dir_path)
                             .into_iter()
                             .flatten()
