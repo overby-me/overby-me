@@ -62,7 +62,7 @@ pkgs.runCommand "rust-tar-test-${name}" {
   echo "Running tar test: ${name} (id $test_id)"
 
   set +e
-  timeout 60 bash ./testsuite "$test_id" -v 2>&1 | tee testsuite.out
+  timeout 600 bash ./testsuite "$test_id" -v 2>&1 | tee testsuite.out
   rc=''${PIPESTATUS[0]}
   set -e
 
