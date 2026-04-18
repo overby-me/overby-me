@@ -1425,8 +1425,15 @@ fn cmd_test(action: &str, devpath: &str) -> i32 {
         return 1;
     }
 
-    // Accept systemd-escaped unit names (e.g. from `systemd-escape -p --suffix device`).
-    let syspath = if devpath.ends_with(".device")
+    // Resolve the given path:
+    //   * `/dev/foo` — use devname_to_syspath to walk /sys/class.
+    //   * `x-y-z.device` — unescape systemd-escape output.
+    //   * else — treat as a sysfs path (normalize_syspath).
+    let syspath = if devpath.starts_with("/dev/")
+        && let Some(sp) = devname_to_syspath(devpath)
+    {
+        sp
+    } else if devpath.ends_with(".device")
         && let Some(unescaped) = systemd_unescape_path(devpath)
         && unescaped.exists()
     {
