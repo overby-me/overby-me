@@ -732,6 +732,28 @@ mod inner {
             Ok(())
         }
 
+        /// Clean the given unit — remove its RuntimeDirectory/StateDirectory/
+        /// CacheDirectory/LogsDirectory/ConfigurationDirectory as requested
+        /// by the `what` list (values: "configuration", "runtime", "state",
+        /// "cache", "logs", "all").  Empty list defaults to runtime+cache.
+        fn clean_unit(
+            &self,
+            name: String,
+            what: Vec<String>,
+        ) -> zbus::fdo::Result<()> {
+            let what_str = if what.is_empty() {
+                None
+            } else {
+                Some(what.join(","))
+            };
+            invoke_command(
+                &self.run_info,
+                crate::control::Command::Clean(name, what_str),
+            )
+            .map_err(zbus::fdo::Error::Failed)?;
+            Ok(())
+        }
+
         /// Thaw a previously frozen unit's cgroup (resume processes).
         fn thaw_unit(&self, name: String) -> zbus::fdo::Result<()> {
             invoke_command(&self.run_info, crate::control::Command::Thaw(name))
