@@ -293,6 +293,16 @@ in
           [ -e "/usr/lib/systemd/$name" ] || ln -sfn "$bin" "/usr/lib/systemd/$name"
         done
 
+        # Symlink udev rules files so tests like TEST-17-UDEV.sanity-check.sh
+        # that reference /usr/lib/udev/rules.d/99-systemd.rules directly can
+        # find them (NixOS installs rules only under /etc/udev/rules.d).
+        mkdir -p /usr/lib/udev/rules.d
+        for f in ${config.systemd.package}/lib/udev/rules.d/*.rules; do
+          [ -e "$f" ] || continue
+          name=$(basename "$f")
+          [ -e "/usr/lib/udev/rules.d/$name" ] || ln -sfn "$f" "/usr/lib/udev/rules.d/$name"
+        done
+
         # Copy share data (e.g. gatewayd/browse.html) to /usr/share as a
         # writable directory.  Tests like journal-gatewayd need to mv/restore
         # files under /usr/share/systemd, which fails if it's a read-only
