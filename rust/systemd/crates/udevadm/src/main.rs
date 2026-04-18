@@ -500,7 +500,23 @@ enum Commands {
 /// back to a sysfs path.  Returns None when the string is not a
 /// recognised DEVICE_ID form.
 fn device_id_to_syspath(id: &str) -> Option<PathBuf> {
-    // n<ifname>: network interface.
+    // n<ifindex>: look up the interface by reading /sys/class/net/*/ifindex.
+    if let Some(rest) = id.strip_prefix('n')
+        && !rest.is_empty()
+        && rest.chars().all(|c| c.is_ascii_digit())
+        && let Ok(rd) = std::fs::read_dir("/sys/class/net")
+    {
+        for ent in rd.flatten() {
+            let p = ent.path();
+            let ifindex_path = p.join("ifindex");
+            if let Ok(s) = std::fs::read_to_string(&ifindex_path)
+                && s.trim() == rest
+            {
+                return Some(p);
+            }
+        }
+    }
+    // n<ifname>: network interface by name — legacy/alternative lookup.
     if let Some(ifname) = id.strip_prefix('n')
         && !ifname.is_empty()
         && ifname
@@ -2051,12 +2067,15 @@ fn cmd_info_json(mode: &str, name: Option<&str>, path: Option<&str>, devices: &[
         //   * `b<maj>:<min>` / `c<maj>:<min>` — block/char major:minor.
         let syspath = if target.starts_with("/dev/") {
             devname_to_syspath(target).unwrap_or_else(|| normalize_syspath(target))
+        } else if let Some(sp) = device_id_to_syspath(target) {
+            // n<ifindex>/b<maj:min>/c<maj:min> DEVICE_ID.
+            sp
         } else if let Some(ifname) = target.strip_prefix('n')
             && ifname
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '_')
         {
-            // n<ifname> network interface lookup.
+            // n<ifname> network interface lookup (fallback for non-numeric).
             PathBuf::from(format!("/sys/class/net/{ifname}"))
         } else if let Some(rest) = target.strip_prefix('b') {
             if let Some((maj, min)) = rest.split_once(':') {
@@ -2083,11 +2102,16 @@ fn cmd_info_json(mode: &str, name: Option<&str>, path: Option<&str>, devices: &[
         let interface = uevent.get("INTERFACE").cloned().unwrap_or_default();
 
         // Compute DEVICE_ID.  Rules:
-        //   * net interface: "n<interface>" (when INTERFACE is set).
+        //   * net interface: "n<ifindex>" (preferred — upstream convention).
         //   * block device: "b<major>:<minor>" (when SUBSYSTEM=block).
         //   * char device with /dev node: "c<major>:<minor>".
         //   * else: fall back to the basename of the sys path.
-        let device_id = if !interface.is_empty() && subsystem == "net" {
+        let ifindex = uevent.get("IFINDEX").cloned();
+        let device_id = if subsystem == "net"
+            && let Some(idx) = ifindex.as_deref()
+        {
+            format!("n{idx}")
+        } else if !interface.is_empty() && subsystem == "net" {
             format!("n{interface}")
         } else if let (Some(maj), Some(min)) = (uevent.get("MAJOR"), uevent.get("MINOR")) {
             if subsystem == "block" {
