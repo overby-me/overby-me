@@ -1268,10 +1268,29 @@ mod inner {
                     return Some(strs.join(" "));
                 }
 
-                // Complex values — e.g. ExecStart as a(sasb).  Try to
-                // flatten into a space-separated argv string so the text
-                // parser can split it on whitespace.
+                // Complex values — e.g. ExecStart as a(sasb).  Flatten
+                // into a shell-quoted argv string so the text parser can
+                // split it back out.  Any argument containing whitespace
+                // or quotes is double-quoted and inner " / \ escaped —
+                // matching `systemd.service(5)`'s quoting rules.
                 if key == "ExecStart" {
+                    let shell_quote = |s: &str| -> String {
+                        let needs_quoting =
+                            s.is_empty() || s.chars().any(|c| c.is_whitespace() || c == '"' || c == '\\' || c == '\'');
+                        if !needs_quoting {
+                            return s.to_owned();
+                        }
+                        let mut out = String::with_capacity(s.len() + 2);
+                        out.push('"');
+                        for c in s.chars() {
+                            if c == '"' || c == '\\' {
+                                out.push('\\');
+                            }
+                            out.push(c);
+                        }
+                        out.push('"');
+                        out
+                    };
                     let mut out = String::new();
                     for item in items.iter() {
                         if let Value::Structure(s) = item {
@@ -1280,7 +1299,7 @@ mod inner {
                                 let words: Vec<String> = args
                                     .iter()
                                     .filter_map(|a| match a {
-                                        Value::Str(s) => Some(s.to_string()),
+                                        Value::Str(s) => Some(shell_quote(s)),
                                         _ => None,
                                     })
                                     .collect();
