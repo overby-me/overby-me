@@ -62,9 +62,13 @@ in
     }: let
       udevRulesOverride = pkgs.runCommand "rust-systemd-udev-rules-override" {} ''
         mkdir -p $out/lib/udev/rules.d
+        # Copy rules that reference `systemctl`, and always include
+        # 99-systemd.rules (the TEST-17-UDEV.sanity-check.sh uses
+        # `udevadm cat 99-systemd` which requires this file).
         for rule in ${config.systemd.package}/lib/udev/rules.d/*.rules; do
-          if grep -q 'systemctl' "$rule"; then
-            cp "$rule" "$out/lib/udev/rules.d/$(basename "$rule")"
+          name=$(basename "$rule")
+          if grep -q 'systemctl' "$rule" || [ "$name" = "99-systemd.rules" ]; then
+            cp "$rule" "$out/lib/udev/rules.d/$name"
           fi
         done
       '';
