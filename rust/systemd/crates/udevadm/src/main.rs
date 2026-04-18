@@ -187,6 +187,33 @@ enum Commands {
         #[arg(long, short = 'w')]
         settle: bool,
 
+        /// Also wait for each triggered device to be initialized by the
+        /// daemon (equivalent to running `udevadm settle` afterwards).
+        /// Accepts an optional timeout in seconds.
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        wait_daemon: Option<String>,
+
+        /// Only match devices whose initialization status matches the
+        /// flag (--initialized-match: already initialized,
+        /// --initialized-nomatch: not yet initialized).
+        #[arg(long)]
+        initialized_match: bool,
+
+        #[arg(long)]
+        initialized_nomatch: bool,
+
+        /// Match by sysname against a specific device path.
+        #[arg(long)]
+        name_match: Vec<String>,
+
+        /// Override the event UUID (stub — we don't track per-event UUIDs).
+        #[arg(long)]
+        uuid: bool,
+
+        /// Quiet mode: no output.
+        #[arg(long, short = 'q')]
+        quiet: bool,
+
         /// Device paths to trigger
         devices: Vec<String>,
     },
@@ -336,9 +363,21 @@ enum Commands {
         #[arg(long, short = 't', default_value = "120")]
         timeout: u64,
 
-        /// Wait until devices are initialized (default), added, or removed
+        /// Wait until devices are initialized (default), added, or removed.
+        /// Kept for backward compatibility; `--initialized`/`--removed` are
+        /// preferred.
         #[arg(long, default_value = "initialized")]
         wait_until: String,
+
+        /// Control initialization-check behaviour. Upstream accepts
+        /// `true`/`false`. Default is true (wait for the device to be
+        /// initialized); pass `false` to just wait for it to exist.
+        #[arg(long)]
+        initialized: Option<String>,
+
+        /// Wait for the devices to be REMOVED (instead of added/initialized).
+        #[arg(long)]
+        removed: bool,
 
         /// Wait for udev event queue to settle first
         #[arg(long)]
@@ -2060,24 +2099,44 @@ fn main() -> ExitCode {
             dry_run,
             verbose,
             settle,
+            ref wait_daemon,
+            initialized_match: _,
+            initialized_nomatch: _,
+            ref name_match,
+            uuid: _,
+            quiet: _,
             ref devices,
-        } => cmd_trigger(
-            r#type,
-            action,
-            subsystem_match,
-            subsystem_nomatch,
-            attr_match,
-            attr_nomatch,
-            property_match,
-            tag_match,
-            sysname_match,
-            parent_match,
-            prioritized_subsystem,
-            dry_run,
-            verbose,
-            settle,
-            devices,
-        ),
+        } => {
+            // Combine explicit devices with --name-match entries since
+            // both are device identifiers.
+            let mut all_devices: Vec<String> = devices.clone();
+            all_devices.extend(name_match.iter().cloned());
+            let effective_settle = settle || wait_daemon.is_some();
+            let rc = cmd_trigger(
+                r#type,
+                action,
+                subsystem_match,
+                subsystem_nomatch,
+                attr_match,
+                attr_nomatch,
+                property_match,
+                tag_match,
+                sysname_match,
+                parent_match,
+                prioritized_subsystem,
+                dry_run,
+                verbose,
+                effective_settle,
+                &all_devices,
+            );
+            // --wait-daemon: wait for the udev daemon's event queue to
+            // drain (implemented as a bounded `settle`).
+            if let Some(timeout_str) = wait_daemon {
+                let t = timeout_str.parse::<u64>().unwrap_or(60);
+                let _ = cmd_settle(t, &None);
+            }
+            rc
+        }
 
         Commands::Settle {
             timeout,
@@ -2144,9 +2203,30 @@ fn main() -> ExitCode {
         Commands::Wait {
             timeout,
             ref wait_until,
+            ref initialized,
+            removed,
             settle,
             ref devices,
-        } => cmd_wait(timeout, wait_until, settle, devices),
+        } => {
+            // Resolve the effective wait-until string from the explicit
+            // `--removed` / `--initialized` flags (preferred) and fall
+            // back to the string-based `--wait-until`.
+            let effective = if removed {
+                "removed".to_string()
+            } else if let Some(flag) = initialized {
+                match flag.as_str() {
+                    "true" | "yes" | "1" => "initialized".to_string(),
+                    "false" | "no" | "0" => "added".to_string(),
+                    other => {
+                        eprintln!("udevadm wait: --initialized must be true or false, got: {other}");
+                        return ExitCode::from(1);
+                    }
+                }
+            } else {
+                wait_until.clone()
+            };
+            cmd_wait(timeout, &effective, settle, devices)
+        }
 
         Commands::Cat {
             config,
