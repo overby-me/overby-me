@@ -2735,8 +2735,8 @@ fn handle_cat_arg(arg: &str) -> bool {
     }
 
     // Absolute path to a directory — print every .rules file inside.
+    // An empty directory is not an error (upstream behavior).
     if p.is_absolute() && p.is_dir() {
-        let mut any = false;
         if let Ok(entries) = std::fs::read_dir(p) {
             let mut names: Vec<_> = entries.flatten().collect();
             names.sort_by_key(|e| e.file_name());
@@ -2744,11 +2744,10 @@ fn handle_cat_arg(arg: &str) -> bool {
                 let path = entry.path();
                 if path.extension().and_then(|e| e.to_str()) == Some("rules") {
                     print_rules_file(&path);
-                    any = true;
                 }
             }
         }
-        return any;
+        return true;
     }
 
     // Basename — search standard dirs.  Accept with or without `.rules`.
@@ -2921,6 +2920,12 @@ fn cmd_lock(
 }
 
 fn main() -> ExitCode {
+    // Restore default SIGPIPE so piped output (`| head`, `| jq ...`) exits
+    // cleanly on a closed pipe instead of panicking in Rust's stdio.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+
     // Multi-call dispatch: when invoked as `systemd-udevd` (e.g. via symlink
     // in the NixOS initrd where systemd-udevd -> udevadm), run the daemon
     // instead of the udevadm CLI.
