@@ -27,6 +27,24 @@ fn parse_integer(s: &str) -> Option<(bool, String)> {
     }
 }
 
+/// Rewrite a line of shell stderr for `$(shell …)`: strip the leading
+/// `<shell>:` and optional `line N:` prefixes so the caller can
+/// re-emit the remainder under the `make:` prefix. Returns the
+/// cleaned portion (or an empty string if the line has no content
+/// after the prefixes).
+fn rewrite_shell_error(line: &str) -> String {
+    let rest = if let Some((_pfx, rest)) = line.split_once(": ") {
+        rest
+    } else {
+        return line.trim_end().to_string();
+    };
+    let rest = rest
+        .strip_prefix("line ")
+        .and_then(|r| r.split_once(": ").map(|(_, tail)| tail))
+        .unwrap_or(rest);
+    rest.trim_end().to_string()
+}
+
 /// Compare two integers parsed by `parse_integer`.
 fn cmp_integer(a: &(bool, String), b: &(bool, String)) -> std::cmp::Ordering {
     use std::cmp::Ordering;
@@ -616,10 +634,37 @@ fn call_function(
             }
             // Re-export env-inherited vars with their current values
             // so `$(shell echo $$FOO)` sees makefile-side updates.
-            // Snapshot the sets first, and use raw values for simple
-            // vars to avoid re-entering expansion (a recursive var
-            // whose body contains `$(shell …)` would otherwise cause
-            // infinite recursion through this same code path).
+            // For recursive vars, expand the body at the outermost
+            // `$(shell)` call — but fall back to the raw value when
+            // the body self-references (e.g. `HI = $(shell echo $$HI)`)
+            // to avoid infinite recursion. `shell_depth` is bumped
+            // *before* resolving so inner `$(shell)` calls see depth
+            // > 1 and use raw values.
+            *engine.shell_depth.borrow_mut() += 1;
+            let at_top_outer = *engine.shell_depth.borrow() == 1;
+            let resolve_for_env = |name: &str| -> String {
+                if engine.var_flavor(name) == VarFlavor::Simple {
+                    return engine.lookup_var(name);
+                }
+                if !at_top_outer {
+                    return engine.lookup_var_raw(name);
+                }
+                let raw = engine.lookup_var_raw(name);
+                // If the body contains another `$(shell …)` call, we
+                // can't expand here without risking recursion (every
+                // inner `$(shell)` triggers another env re-export
+                // pass). Fall back to the original process-env value
+                // for env-inherited vars — matches GNU make's
+                // observed behavior for `HI = $(shell echo $$HI)`.
+                let self_ref = raw.contains(&format!("$({name})"))
+                    || raw.contains(&format!("${{{name}}}"))
+                    || raw.contains("$(shell");
+                if self_ref {
+                    std::env::var(name).unwrap_or(raw)
+                } else {
+                    engine.lookup_var(name)
+                }
+            };
             let env_names: Vec<String> = engine
                 .env_inherited
                 .borrow()
@@ -628,17 +673,15 @@ fn call_function(
                 .cloned()
                 .collect();
             for name in &env_names {
-                if engine.var_flavor(name) == VarFlavor::Simple {
-                    shell_cmd.env(name, engine.lookup_var_raw(name));
-                }
+                shell_cmd.env(name, resolve_for_env(name));
             }
             let export_names: Vec<String> = engine.exports.borrow().iter().cloned().collect();
             for name in &export_names {
-                if engine.var_flavor(name) == VarFlavor::Simple {
-                    shell_cmd.env(name, engine.lookup_var_raw(name));
-                }
+                shell_cmd.env(name, resolve_for_env(name));
             }
-            match shell_cmd.arg(&cmd).output() {
+            let result = shell_cmd.arg(&cmd).output();
+            *engine.shell_depth.borrow_mut() -= 1;
+            match result {
                 Ok(output) => {
                     let status = output
                         .status
@@ -654,6 +697,17 @@ fn call_function(
                         VarFlavor::Simple,
                         VarOrigin::Default,
                     );
+                    // Forward child stderr with the shell's prefix
+                    // rewritten to `make:` and any `line N:` noise
+                    // stripped — matches GNU make's `$(shell)` error
+                    // reformatting.
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    for line in stderr.lines() {
+                        let rewritten = rewrite_shell_error(line);
+                        if !rewritten.is_empty() {
+                            eprintln!("make: {rewritten}");
+                        }
+                    }
                     let s = String::from_utf8_lossy(&output.stdout)
                         .replace('\n', " ")
                         .trim_end()

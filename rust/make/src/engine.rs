@@ -107,6 +107,11 @@ pub struct Engine {
     /// expanded but a later `+=` appends text verbatim (recursive
     /// semantics), matching GNU make.
     immediate_recursive: RefCell<HashSet<String>>,
+    /// Recursion depth into `$(shell …)`. Used to break infinite
+    /// loops when re-exporting a recursive env-inherited variable
+    /// whose body itself calls `$(shell …)` — at depth > 0 we skip
+    /// re-expanding recursive bodies and fall back to the raw value.
+    pub shell_depth: RefCell<usize>,
     /// Targets of the most recently processed explicit rule. Used to
     /// attach `Directive::RecipeLine` entries that appear in a taken
     /// conditional branch after a rule (e.g. `all:\nifeq…\n\t@echo\n…`).
@@ -200,6 +205,7 @@ impl Engine {
             pending_includes: RefCell::new(Vec::new()),
             env_inherited: RefCell::new(HashSet::new()),
             immediate_recursive: RefCell::new(HashSet::new()),
+            shell_depth: RefCell::new(0),
             last_rule_targets: RefCell::new(None),
             jobs: 1,
             keep_going: false,

@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**70/135 tests passing** (52%) — upstream test harness from GNU make 4.4.1.
+**71/135 tests passing** (53%) — upstream test harness from GNU make 4.4.1.
 
 `rust/make` has a parser, expander, and build engine (~5k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -97,8 +97,12 @@ organised in six directories under `tests/scripts/`:
 - Control: `foreach` (binding writes into var scope so `$(eval)`
   inside the body sees the iteration), `call` (dispatches to built-ins
   too), `value`, `eval`, `origin`, `flavor`, `let`.
-- I/O: `shell` (sets `.SHELLSTATUS`, re-exports env-inherited vars),
-  `file`, `error`, `warning`, `info`.
+- I/O: `shell` (sets `.SHELLSTATUS`, re-exports env-inherited vars
+  using their current expanded values; falls back to the original
+  process-env value when the body self-references or itself contains
+  another `$(shell …)` to avoid infinite recursion; child stderr is
+  re-emitted under the `make:` prefix with `<shell>:`/`line N:`
+  noise stripped), `file`, `error`, `warning`, `info`.
 - Fatal errors for invalid `word`/`wordlist`/`intcmp`/`foreach`/`let`
   args with GNU-compatible diagnostic text.
 - Substitution references `$(VAR:from=to)` and `$(VAR:a=%b)`.
