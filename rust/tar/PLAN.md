@@ -2,9 +2,9 @@
 
 ## Current status
 
-**195/225 tests passing (87%)**.
+**200/225 tests passing (89%)**.
 
-Trajectory: 92 → 172 → 182 → 187 → 191 → 195. Each per-test
+Trajectory: 92 → 172 → 182 → 187 → 191 → 195 → 200. Each per-test
 derivation is wired as a flake check via the shared
 `gnutar-test-harness` (autom4te-built `testsuite` script + helper
 programs).
@@ -150,19 +150,34 @@ Substantial implementation of the incremental feature:
    ordered by parent dir, matching GNU's directory-first layout.
    Unlocks incr03, incr05, rename04, rename05.
 
-### What remains (30 failing)
+### Recent: rename detection + new-dir warnings
+
+- `--warning=no-<name>`: parse and apply to `new-dir`,
+  `rename-directory`, so verbose create/append respects the
+  suppression flags used by several test harnesses.
+- Under `-v` on level-N+1 runs: emit `tar: PATH: Directory is new`
+  when a current dir's (dev, inode) isn't in the prev snapshot, and
+  `tar: PATH: Directory has been renamed from 'OLD'` when the inode
+  match surfaces under a different name.
+- On create, detect subdir renames by matching (dev, inode) against
+  the previous-snapshot `dirs` map; when the inode surfaces under a
+  new basename in this dir, emit GNU dumpdir codes `R <old>` +
+  `T <new>` in the parent's dumpdir. On extract, process R/T pairs
+  before the delete sweep so the on-disk source moves into place
+  before any unrelated cleanup runs.
+
+### What remains (25 failing)
 
 | Bucket | Tests | Notes |
 | --- | --- | --- |
-| `--listed-incremental` — advanced (rename detection, exclude-tag interop, remove-files, complex nests) | 23 | incr06/07/08/09/10, listed02/03/04, dirrem01/02, filerem01, rename01/02/03/06, exclude09/10/12/13/15/16, remfiles08b/09b. Needs `Directory has been renamed from X` (inode-based rename detection), `File removed before we read it` warnings, deeper multi-dir walk invariants, and exclude-tag interaction with dumpdir. |
+| `--listed-incremental` — advanced | 18 | incr06/08/09/10, rename02/03/06, dirrem01/02, filerem01, exclude09/10/12/13/15/16, remfiles08b/09b. Remaining gaps: `File removed before we read it` warnings, deeper multi-dir walk invariants (incr06 mixes subdir first then parent), exclude-tag interaction with dumpdir, and several rename corner cases. |
 | Multi-volume (`-M`, `--tape-length=N`, `--new-volume-script`) | 7 | multiv03/04/05/08/09, label02, sparsemvp — continuation headers, volume boundary handling. |
 
 ## Approach
 
-Continue peeling off incremental edge cases: the biggest remaining
-sub-bucket is rename detection (inode-based tracking so a `mv dir
-newdir` shows up as `Directory has been renamed from`). Multi-volume
-is independent; needs continuation headers and volume switching.
+Continue chipping at the incremental edge cases. Multi-volume is a
+self-contained project: continuation headers + volume switching +
+`-M` on extract.
 
 After each phase commit and rerun the suite:
 

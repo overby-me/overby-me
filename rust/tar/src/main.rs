@@ -1079,6 +1079,11 @@ struct Args {
     /// empty or missing file is treated as level 0 (first-time dump);
     /// a populated file drives level-N+1 filtering.
     listed_incremental: Option<String>,
+    /// Names of warnings disabled via `--warning=no-<name>`. Only the
+    /// subset the test suite exercises (new-dir, rename-directory,
+    /// timestamp) is honoured at check-time; the rest are harmless
+    /// placeholders.
+    disabled_warnings: std::collections::HashSet<String>,
     /// --index-file=FILE: write -v listings to FILE instead of stderr.
     index_file: Option<String>,
     /// --one-top-level[=DIR]: wrap extracted members under DIR if they
@@ -1903,8 +1908,11 @@ fn parse_args() -> Args {
                     if let Some(act) = parse_checkpoint_action(val) {
                         args.checkpoint_actions.push(act);
                     }
-                } else if other.strip_prefix("--warning=").is_some()
-                    || other.strip_prefix("--blocking-factor=").is_some()
+                } else if let Some(val) = other.strip_prefix("--warning=") {
+                    if let Some(name) = val.strip_prefix("no-") {
+                        args.disabled_warnings.insert(name.to_string());
+                    }
+                } else if other.strip_prefix("--blocking-factor=").is_some()
                     || other.strip_prefix("--record-size=").is_some()
                     || other.strip_prefix("--occurrence=").is_some_and(|_| {
                         args.occurrence = true;
@@ -2909,13 +2917,79 @@ fn add_paths_to_builder_filter<W: Write>(
                     let prev_children = prev_dir_children.get(&dev_ino);
                     let cutoff = prev_time;
 
+                    // Rename / new-dir diagnostics (only under -v and
+                    // when the associated warning isn't suppressed).
+                    // GNU writes them to stderr.
+                    let warn_new = !args.disabled_warnings.contains("new-dir");
+                    let warn_rename = !args.disabled_warnings.contains("rename-directory");
+                    if args.verbose && prev_time.is_some() {
+                        match prev_snapshot.as_ref().and_then(|s| s.dirs.get(&dev_ino)) {
+                            None => {
+                                if warn_new {
+                                    eprintln!("tar: {path_str}: Directory is new");
+                                }
+                            }
+                            Some(prev) => {
+                                let prev_name = prev.name.to_string_lossy();
+                                if prev_name != *path_str && warn_rename {
+                                    eprintln!(
+                                        "tar: {path_str}: Directory has been renamed from '{prev_name}'"
+                                    );
+                                }
+                            }
+                        }
+                    } else if args.verbose && prev_time.is_none() && warn_new {
+                        // Level 0 — every directory is "new".
+                        eprintln!("tar: {path_str}: Directory is new");
+                    }
+
                     let mut kids: Vec<(u8, String)> = Vec::new();
                     let mut skip_children: Vec<PathBuf> = Vec::new();
+                    // Names we "consume" via rename so a leftover R
+                    // entry isn't emitted for them separately.
+                    let mut consumed_prev_names: std::collections::HashSet<String> =
+                        std::collections::HashSet::new();
                     if let Ok(rd) = fs::read_dir(path) {
                         for child in rd.flatten() {
                             let name = child.file_name().to_string_lossy().into_owned();
                             let child_path = child.path();
                             let is_dir = child.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                            // Detect dir renames by matching (dev,
+                            // inode) against the previous snapshot.
+                            // When the inode surfaces under a new
+                            // basename in this dir, emit R (prev
+                            // basename) + T (new basename) so extract
+                            // can do a rename in place.
+                            let mut rename_from: Option<String> = None;
+                            if is_dir
+                                && prev_snapshot.is_some()
+                                && let Ok(cm) = fs::metadata(&child_path)
+                            {
+                                #[cfg(unix)]
+                                {
+                                    use std::os::unix::fs::MetadataExt;
+                                    let ck = (cm.dev(), cm.ino());
+                                    if let Some(prev_rec) =
+                                        prev_snapshot.as_ref().and_then(|s| s.dirs.get(&ck))
+                                    {
+                                        let prev_basename = prev_rec
+                                            .name
+                                            .file_name()
+                                            .and_then(|s| s.to_str())
+                                            .unwrap_or("")
+                                            .to_string();
+                                        if !prev_basename.is_empty() && prev_basename != name {
+                                            rename_from = Some(prev_basename);
+                                        }
+                                    }
+                                }
+                            }
+                            if let Some(from) = rename_from {
+                                kids.push((b'R', from.clone()));
+                                kids.push((b'T', name.clone()));
+                                consumed_prev_names.insert(from);
+                                continue;
+                            }
                             let in_prev = prev_children.map(|s| s.contains(&name)).unwrap_or(false);
                             let changed = if let Some((cut_sec, cut_nsec)) = cutoff {
                                 #[cfg(unix)]
@@ -4274,14 +4348,46 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
                 if is_dumpdir {
                     let mut body: Vec<u8> = Vec::new();
                     entry.read_to_end(&mut body)?;
-                    let kept: std::collections::HashSet<String> = body
-                        .split(|&b| b == 0)
-                        .filter(|field| !field.is_empty())
-                        .map(|field| {
-                            // Each field is <code><name>; the first
-                            // byte is the code (Y/N/D/R/T/…).
-                            let start = if !field.is_empty() { 1 } else { 0 };
-                            String::from_utf8_lossy(&field[start..]).into_owned()
+                    // Parse dumpdir into (code, name) pairs so we can
+                    // pair R/T for rename handling and know which
+                    // names are meant to stay.
+                    let mut entries: Vec<(u8, String)> = Vec::new();
+                    for field in body.split(|&b| b == 0) {
+                        if field.is_empty() {
+                            continue;
+                        }
+                        let code = field[0];
+                        let name = String::from_utf8_lossy(&field[1..]).into_owned();
+                        entries.push((code, name));
+                    }
+                    // Execute R/T renames first so the target name
+                    // ends up on disk before we compare against the
+                    // rest of the dumpdir.
+                    let mut i = 0;
+                    while i < entries.len() {
+                        if entries[i].0 == b'R' && i + 1 < entries.len() && entries[i + 1].0 == b'T'
+                        {
+                            let from = dest.join(&entries[i].1);
+                            let to = dest.join(&entries[i + 1].1);
+                            if from.exists() && !to.exists() {
+                                let _ = fs::rename(&from, &to);
+                            }
+                            i += 2;
+                            continue;
+                        }
+                        i += 1;
+                    }
+                    let kept: std::collections::HashSet<String> = entries
+                        .iter()
+                        .filter_map(|(code, name)| {
+                            // R entries' disk paths have already been
+                            // renamed; only their T counterpart keeps
+                            // the name on disk.
+                            if *code == b'R' {
+                                None
+                            } else {
+                                Some(name.clone())
+                            }
                         })
                         .collect();
                     if let Ok(rd) = fs::read_dir(&dest) {
