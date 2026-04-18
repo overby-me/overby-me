@@ -8,8 +8,8 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| PASS | ~240+ | Tests passing reliably (including 150/151 aux-utils; 23-unit-file-runtime-bind-paths verified; 15-dropin verified) |
-| FAIL (fixable) | ~1 | Failures in rust-systemd code that can be fixed |
+| PASS | ~238+ | Tests passing reliably (incl. 150/151 aux-utils) — **needs re-verification** after testsuite.nix /testok assertion fix (previous `machine.fail` was inverted and silently accepted missing /testok) |
+| FAIL (fixable) | unknown | Re-run required post-fix |
 | FAIL (architectural) | ~7 | Missing major features (udev, exec-deser, fstab-generator) — D-Bus, BindPaths-runtime, MessageQueue, OpenFile, ExtraFileDescriptors, socket-activate, notify --fork now implemented |
 | Boot hang (transient) | ~10 | Non-deterministic QEMU boot failures (~30% rate) |
 
@@ -69,7 +69,7 @@ rust-systemd's PID 1 now exposes `org.freedesktop.systemd1` on the system bus vi
 
 **Affected tests:**
 
-- 15-dropin — **NOW PASSES** (D-Bus + hierarchical dropins + transient slice support + CleanUnit + Socket/Timer/Slice/Path D-Bus interfaces verified together)
+- 15-dropin — implementation complete (D-Bus + hierarchical dropins + transient slice support + CleanUnit + Socket/Timer/Slice/Path D-Bus interfaces); VM test needs re-verification post-testsuite-fix (my previous "PASS" was a false positive)
 - 81-generators-fstab-generator (still blocked: needs `systemd-fstab-generator` binary)
 
 ### 2. Type=notify Service Lifecycle (Advanced)
@@ -99,7 +99,7 @@ Basic Type=notify (READY=1) works. NotifyAccess=all/main/exec/none enforcement w
 
 **BindPaths=/BindReadOnlyPaths= at runtime:** — DONE AND VERIFIED
 
-- 23-unit-file-runtime-bind-paths — **NOW PASSES** (VM test exit 0)
+- 23-unit-file-runtime-bind-paths — implementation complete; VM test needs re-verification post-testsuite-fix (my previous "PASS" observation was a false positive from the inverted `machine.fail("test -f /testok")` assertion, which used to let missing-/testok silently pass)
 - Fix: Implemented `systemctl bind` (control protocol `bind` command) and D-Bus `BindMountUnit` method backed by a shared `bind_mount_into_unit` helper that forks + `setns`es into `/proc/<main_pid>/ns/mnt` of the target service, optionally creates the destination, and performs `mount(MS_BIND | MS_REC)` (plus optional `MS_REMOUNT | MS_RDONLY`). Paired with helper-command mount-namespace alignment (ExecStartPre/Post/StopPost unshare a new namespace and apply the service's BindPaths/InaccessiblePaths/PrivateTmp via `pre_exec`, in the correct order — PrivateTmp first, then BindPaths with destination creation, then InaccessiblePaths last) so ExecStartPre sees the same filesystem as ExecStart.
 
 **PrivatePIDs=:**
