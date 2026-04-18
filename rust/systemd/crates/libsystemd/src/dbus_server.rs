@@ -385,6 +385,21 @@ mod inner {
                 })
                 .unwrap_or_else(|| "success".to_string())
         }
+
+        /// Number of times this service has been restarted (Restart= fires).
+        #[zbus(property)]
+        fn n_restarts(&self) -> u32 {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .map(|u| {
+                    u.common
+                        .n_restarts
+                        .load(std::sync::atomic::Ordering::Acquire) as u32
+                })
+                .unwrap_or(0)
+        }
     }
 
     /// Look up a unit by name and read an Option<u64> timestamp field from
