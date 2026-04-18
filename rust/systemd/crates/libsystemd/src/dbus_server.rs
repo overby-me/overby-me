@@ -655,6 +655,20 @@ mod inner {
             Ok(())
         }
 
+        /// Freeze the given unit's cgroup (pause all processes in it).
+        fn freeze_unit(&self, name: String) -> zbus::fdo::Result<()> {
+            invoke_command(&self.run_info, crate::control::Command::Freeze(name))
+                .map_err(zbus::fdo::Error::Failed)?;
+            Ok(())
+        }
+
+        /// Thaw a previously frozen unit's cgroup (resume processes).
+        fn thaw_unit(&self, name: String) -> zbus::fdo::Result<()> {
+            invoke_command(&self.run_info, crate::control::Command::Thaw(name))
+                .map_err(zbus::fdo::Error::Failed)?;
+            Ok(())
+        }
+
         /// Subscribe to manager signals.  We don't emit signals yet — the
         /// method is a no-op accept for compatibility with callers that
         /// blindly call Subscribe() before making any query (systemctl
