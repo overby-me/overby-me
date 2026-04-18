@@ -310,7 +310,6 @@
       "sparse06"
       "sparse07"
       "sparsemv"
-      "sparsemvp"
       "spmvp00"
       "spmvp01"
       "spmvp10"
