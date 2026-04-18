@@ -382,11 +382,11 @@ enum Commands {
         reload_rules: bool,
 
         /// Set the maximum number of children
-        #[arg(long, short = 'c')]
+        #[arg(long, short = 'm')]
         children_max: Option<usize>,
 
         /// Seconds to delay execution of RUN
-        #[arg(long, short = 'e')]
+        #[arg(long)]
         exec_delay: Option<u64>,
 
         /// Set the log level
@@ -394,7 +394,7 @@ enum Commands {
         log_level: Option<String>,
 
         /// Request the daemon to exit
-        #[arg(long)]
+        #[arg(long, short = 'e')]
         exit: bool,
 
         /// Ping the daemon
@@ -1588,8 +1588,15 @@ fn cmd_control(
         }
     }
 
-    for prop in property {
-        let _ = send_and_check(&format!("ENV {prop}"), timeout_dur);
+    if !property.is_empty() {
+        let mut rc = 0;
+        for prop in property {
+            let r = send_and_check(&format!("ENV {prop}"), timeout_dur);
+            if r != 0 {
+                rc = r;
+            }
+        }
+        return rc;
     }
 
     if ping {
