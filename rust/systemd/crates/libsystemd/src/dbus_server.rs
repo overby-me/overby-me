@@ -337,6 +337,68 @@ mod inner {
         unit_name: String,
     }
 
+    /// Per-socket object exposing `org.freedesktop.systemd1.Socket` for
+    /// `.socket` units.
+    struct SocketObj {
+        run_info: ArcMutRuntimeInfo,
+        unit_name: String,
+    }
+
+    #[interface(name = "org.freedesktop.systemd1.Socket")]
+    impl SocketObj {
+        #[zbus(property)]
+        fn accept(&self) -> bool {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .and_then(|u| match &u.specific {
+                    crate::units::Specific::Socket(sock) => Some(sock.conf.accept),
+                    _ => None,
+                })
+                .unwrap_or(false)
+        }
+
+        #[zbus(property)]
+        fn max_connections(&self) -> u32 {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .and_then(|u| match &u.specific {
+                    crate::units::Specific::Socket(sock) => Some(sock.conf.max_connections as u32),
+                    _ => None,
+                })
+                .unwrap_or(0)
+        }
+
+        #[zbus(property)]
+        fn socket_mode(&self) -> u32 {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .and_then(|u| match &u.specific {
+                    crate::units::Specific::Socket(sock) => sock.conf.socket_mode,
+                    _ => None,
+                })
+                .unwrap_or(0o666)
+        }
+
+        #[zbus(property)]
+        fn pass_credentials(&self) -> bool {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .and_then(|u| match &u.specific {
+                    crate::units::Specific::Socket(sock) => Some(sock.conf.pass_credentials),
+                    _ => None,
+                })
+                .unwrap_or(false)
+        }
+    }
+
     #[interface(name = "org.freedesktop.systemd1.Service")]
     impl ServiceObj {
         #[zbus(property)]
@@ -1129,6 +1191,13 @@ mod inner {
                 unit_name: unit_name.to_owned(),
             };
             conn.object_server().at(&path, svc)?;
+        }
+        if unit_name.ends_with(".socket") {
+            let sock = SocketObj {
+                run_info: run_info.clone(),
+                unit_name: unit_name.to_owned(),
+            };
+            conn.object_server().at(&path, sock)?;
         }
         Ok(())
     }
