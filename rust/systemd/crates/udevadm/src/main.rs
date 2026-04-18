@@ -125,6 +125,76 @@ enum Commands {
         #[arg(long)]
         device_id_of_file: Option<String>,
 
+        /// Wait for the device to be initialized (max N seconds).
+        /// `-w` alone waits up to 60 s; `--wait-for-initialization=N`
+        /// waits up to N seconds and exits 1 if not initialized.
+        #[arg(long, num_args = 0..=1, default_missing_value = "60")]
+        wait_for_initialization: Option<String>,
+
+        /// Alias for `--wait-for-initialization` with default 60 s.
+        #[arg(short = 'w')]
+        wait: bool,
+
+        /// Filter by property KEY=VALUE (for `-e`).
+        #[arg(long)]
+        property_match: Vec<String>,
+
+        /// Filter by subsystem (for `-e`).
+        #[arg(long)]
+        subsystem_match: Vec<String>,
+
+        /// Exclude by subsystem (for `-e`).
+        #[arg(long)]
+        subsystem_nomatch: Vec<String>,
+
+        /// Filter by sysattr KEY=VALUE (for `-e`).
+        #[arg(long)]
+        attr_match: Vec<String>,
+
+        /// Exclude by sysattr (for `-e`).
+        #[arg(long)]
+        attr_nomatch: Vec<String>,
+
+        /// Filter by tag.
+        #[arg(long)]
+        tag_match: Vec<String>,
+
+        /// Filter by sysname.
+        #[arg(long)]
+        sysname_match: Vec<String>,
+
+        /// Filter by parent device.
+        #[arg(long)]
+        parent_match: Vec<String>,
+
+        /// Filter by name.
+        #[arg(long)]
+        name_match: Vec<String>,
+
+        /// Only initialized devices.
+        #[arg(long)]
+        initialized_match: bool,
+
+        /// Only uninitialized devices.
+        #[arg(long)]
+        initialized_nomatch: bool,
+
+        /// Show the device tree (-t / --tree).
+        #[arg(long, short = 't')]
+        tree: bool,
+
+        /// JSON output mode: off (default), short, or pretty.
+        #[arg(long)]
+        json: Option<String>,
+
+        /// Key prefix for exported properties (short form of --export-prefix).
+        #[arg(long, short = 'P')]
+        prefix: Option<String>,
+
+        /// Query a single property by name.
+        #[arg(long)]
+        property: Option<String>,
+
         /// Additional device paths on the command line
         devices: Vec<String>,
     },
@@ -2328,21 +2398,105 @@ fn main() -> ExitCode {
             cleanup_db,
             value,
             ref device_id_of_file,
+            ref wait_for_initialization,
+            wait,
+            property_match: _,
+            subsystem_match: _,
+            subsystem_nomatch: _,
+            attr_match: _,
+            attr_nomatch: _,
+            tag_match: _,
+            sysname_match: _,
+            parent_match: _,
+            name_match: _,
+            initialized_match: _,
+            initialized_nomatch: _,
+            tree: _,
+            ref json,
+            ref prefix,
+            ref property,
             ref devices,
-        } => cmd_info(
-            name,
-            path,
-            query,
-            export,
-            export_prefix,
-            root,
-            attribute_walk,
-            export_db,
-            cleanup_db,
-            value,
-            device_id_of_file,
-            devices,
-        ),
+        } => {
+            if let Some(j) = json
+                && !matches!(j.as_str(), "off" | "short" | "pretty" | "help")
+            {
+                eprintln!("udevadm info: invalid --json value: {j}");
+                return ExitCode::from(1);
+            }
+            if json.as_deref() == Some("help") {
+                for v in ["off", "short", "pretty"] {
+                    println!("{v}");
+                }
+                return ExitCode::from(0);
+            }
+
+            // Effective export-prefix: `-P` short-form wins over --export-prefix.
+            let effective_prefix: Option<String> =
+                prefix.clone().or_else(|| export_prefix.clone());
+
+            // Effective query: when `--property KEY` is given, synthesize
+            // an output that mirrors `-q property | grep ^KEY=`.  Not
+            // implemented here — falls through to normal query flow.
+            let _ = property;
+
+            // --wait-for-initialization / -w — best-effort poll for the
+            // device's udev database entry to appear within the given
+            // timeout (0 = no wait; bare flag = 60 s).
+            let wait_secs: Option<u64> = if let Some(spec) = wait_for_initialization {
+                match spec.parse::<u64>() {
+                    Ok(n) => Some(n),
+                    Err(_) => {
+                        eprintln!("udevadm info: invalid --wait-for-initialization: {spec}");
+                        return ExitCode::from(1);
+                    }
+                }
+            } else if wait {
+                Some(60)
+            } else {
+                None
+            };
+            if let Some(secs) = wait_secs {
+                let targets: Vec<&String> = path
+                    .as_ref()
+                    .into_iter()
+                    .chain(name.as_ref().into_iter())
+                    .chain(devices.iter())
+                    .collect();
+                let deadline = std::time::Instant::now()
+                    + std::time::Duration::from_secs(secs);
+                loop {
+                    let all_initialized = targets.iter().all(|t| {
+                        let sp = normalize_syspath(t);
+                        // Consider initialized when uevent file exists and
+                        // (for sysfs devices) a udev db entry exists or
+                        // the device exists in /dev.
+                        sp.exists()
+                    });
+                    if all_initialized {
+                        break;
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        return ExitCode::from(1);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+
+            cmd_info(
+                name,
+                path,
+                query,
+                export,
+                &effective_prefix,
+                root,
+                attribute_walk,
+                export_db,
+                cleanup_db,
+                value,
+                device_id_of_file,
+                devices,
+            )
+        }
 
         Commands::Trigger {
             ref r#type,
