@@ -3167,6 +3167,24 @@ fn builtin_net_setup_link(event: &mut UEvent) {
     }
 }
 
+/// Encode udev-db-style whitespace/control chars as `\xNN` — matches
+/// the upstream serialization so `udevadm info` output round-trips
+/// through pipelines that would otherwise be tripped up by literal
+/// spaces or tabs in env values.  Backslash is NOT escaped so a value
+/// that already contains a `\xNN` sequence (e.g. from a rule file)
+/// passes through unchanged.
+fn escape_db_value(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b' ' | b'\t' | b'\n' | b'\r' => out.push_str(&format!("\\x{:02x}", b)),
+            1..=0x1f | 0x7f => out.push_str(&format!("\\x{:02x}", b)),
+            _ => out.push(b as char),
+        }
+    }
+    out
+}
+
 /// Query the kernel via SIOCETHTOOL/ETHTOOL_GDRVINFO for `ifname`'s
 /// driver name (e.g. "dummy", "virtio_net").  Returns None on any
 /// error or if the driver field is empty.
@@ -3558,14 +3576,15 @@ fn write_device_db(event: &UEvent, result: &RuleResult) -> io::Result<()> {
         content.push_str("L:0\n");
     }
 
-    // Environment properties
+    // Environment properties — escape whitespace so `udevadm info`
+    // output round-trips through shell pipelines.  Matches upstream's
+    // `\x20`, `\x09`, `\x0a` encoding for SP/TAB/LF in env values.
     for (key, val) in &event.env {
-        // Skip kernel-standard properties
         match key.as_str() {
             "ACTION" | "DEVPATH" | "SUBSYSTEM" | "SEQNUM" | "SYNTH_UUID" => continue,
             _ => {}
         }
-        content.push_str(&format!("E:{}={}\n", key, val));
+        content.push_str(&format!("E:{}={}\n", key, escape_db_value(val)));
     }
 
     // Surface tag state as pseudo-properties so `udevadm info` output
