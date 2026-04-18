@@ -848,7 +848,20 @@ fn cmd_trigger(
     // If specific devices are given, trigger only those
     if !devices.is_empty() {
         for dev in devices {
-            let syspath = normalize_syspath(dev);
+            // Accept /dev/ paths, systemd-escaped .device unit names, and
+            // sysfs-relative paths — same resolution logic as `info`.
+            let syspath = if dev.starts_with("/dev/")
+                && let Some(sp) = devname_to_syspath(dev)
+            {
+                sp
+            } else if dev.ends_with(".device")
+                && let Some(unescaped) = systemd_unescape_path(dev)
+                && unescaped.exists()
+            {
+                unescaped
+            } else {
+                normalize_syspath(dev)
+            };
             if trigger_one_device(
                 &syspath,
                 action,
