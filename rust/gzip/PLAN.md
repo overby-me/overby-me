@@ -102,19 +102,23 @@ listing every test name and generating `rust-gzip-test-${name}` via
    `compress`, magic `1f 9d`, LZW). Not yet implemented; each needs
    a dedicated decoder ported from upstream `unpack.c` / `unlzw.c`.
 
-Current status: **29/30 passing (97%)**. See `README.md`.
+Current status: **30/30 passing (100%)**. See `README.md`.
 
-## Remaining gaps to reach 30/30
+## Completion notes
 
-- **Pack decoder** — ✅ Done (`src/unpack.rs`). `unpack-valid` passes.
-- **LZW decoder** — ✅ Done (`src/unlzw.rs`). `helin-segv` passes.
-- **`unpack-invalid`** — the only remaining failure. This test feeds
-  three inputs: a valid `.z` file, a corrupt gzip stream, and a valid
-  gzip file. The corrupt gzip stream should be rejected with
-  `invalid compressed data--format violated`, but flate2's deflate
-  decoder is more lenient than zlib and does not reject the particular
-  corrupt bitstream that GNU gzip's zlib rejects. This is a flate2 vs
-  zlib strictness difference, not a pack/LZW issue.
+All 30 upstream tests pass. Key implementation details:
+
+- **flate2 zlib-rs backend** — switched from the default miniz_oxide to
+  zlib-rs (`flate2 = { features = ["zlib-rs"] }`) so that deflate
+  validation strictness matches GNU gzip's (e.g. rejecting corrupt
+  bitstreams in `unpack-invalid`). zlib-rs is a pure Rust rewrite of
+  zlib, keeping the entire dependency tree C-free.
+- **CRC32 + ISIZE verification** — the gzip member decoder verifies both
+  the CRC32 checksum and the original-size field in the 8-byte trailer.
+- **Deflate no-progress handling** — when zlib-rs consumes all input without
+  reaching StreamEnd, the error is reported as "format violated" to
+  match GNU gzip's own inflate.c behavior (which detects structural
+  Huffman table errors rather than treating them as premature EOF).
 
 ## Running
 

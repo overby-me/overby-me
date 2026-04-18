@@ -9,8 +9,13 @@ name = "gzip"
 path = "src/main.rs"
 
 [dependencies]
-flate2 = "1"
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 
 [profile.release]
 lto = true
 strip = true
+
+# zlib-rs is a hot path (compressing/decompressing GiB of data in tests);
+# keep it optimized even in debug builds so list-big doesn't time out.
+[profile.dev.package.zlib-rs]
+opt-level = 2

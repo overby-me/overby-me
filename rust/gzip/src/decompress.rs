@@ -80,9 +80,14 @@ fn decode_gzip_member<W: Write>(data: &[u8], writer: &mut W) -> io::Result<usize
             break;
         }
         if consumed == 0 && produced == 0 {
+            // The deflate decompressor consumed all available input
+            // without reaching StreamEnd. GNU gzip's own inflate.c
+            // would detect structural errors in the Huffman tables
+            // and return "format violated"; zlib just says "need more
+            // data". Match GNU gzip's behavior.
             return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "unexpected end of file",
+                io::ErrorKind::InvalidData,
+                "invalid compressed data--format violated",
             ));
         }
     }

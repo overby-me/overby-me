@@ -4,7 +4,7 @@ A GNU gzip-compatible compression tool written in Rust.
 
 ## Status
 
-**29/30 tests passing (97%)** — upstream GNU gzip 1.14 test suite
+**30/30 tests passing (100%)** — upstream GNU gzip 1.14 test suite
 (`tests/TESTS`). Each test runs rust-gzip in a sandbox against the
 upstream shell script unchanged, using pre-built zdiff / zgrep / znew
 from `pkgs.gzip` for the companion tools (those scripts call `gzip` by
@@ -15,18 +15,11 @@ name on PATH, so they pick up rust-gzip).
 `gzip-env`, `helin-segv`, `help-version`, `hufts`, `keep`, `list`,
 `list-big`, `memcpy-abuse`, `mixed`, `null-suffix-clobber`,
 `pipe-output`, `reference`, `reproducible`, `stdin`, `synchronous`,
-`timestamp`, `trailing-nul`, `two-files`, `unpack-valid`,
+`timestamp`, `trailing-nul`, `two-files`, `unpack-invalid`, `unpack-valid`,
 `upper-suffix`, `write-error`, `z-suffix`, `zdiff`, `zgrep-abuse`,
 `zgrep-binary`, `zgrep-context`, `zgrep-f`, `zgrep-signal`, `znew-k`.
 
-### Remaining
-
-- `unpack-invalid` — the only remaining failure. This test feeds three
-  inputs including a corrupt gzip stream that should be rejected with
-  `invalid compressed data--format violated`. flate2's deflate decoder
-  is more lenient than zlib and does not reject the particular corrupt
-  bitstream that GNU gzip's zlib rejects. This is a flate2 vs zlib
-  strictness difference, not a missing feature.
+All 30 tests pass.
 
 ## Usage
 
@@ -56,7 +49,7 @@ Multi-module `src/` layout:
   or 0, delegates deflate to `flate2::write::DeflateEncoder`, and emits
   the CRC32 + ISIZE trailer.
 - `decompress.rs` — multi-format decompression (gzip, pack, LZW) with
-  CRC32 verification. Walks member boundaries manually using
+  CRC32 + ISIZE trailer verification. Walks member boundaries manually using
   `flate2::Decompress` plus flag-aware header parsing. Handles
   multi-member archives, trailing NUL padding (tape convention), and
   `-cdf` cat-style pass-through for non-gzip content.

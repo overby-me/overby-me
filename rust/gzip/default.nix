@@ -18,7 +18,6 @@
         };
 
         cargoLock.lockFile = ./Cargo.lock;
-
         postInstall = ''
           ln -s $out/bin/gzip $out/bin/gunzip
           ln -s $out/bin/gzip $out/bin/zcat
@@ -50,7 +49,6 @@
         };
 
         cargoLock.lockFile = ./Cargo.lock;
-
         buildType = "debug";
 
         postInstall = ''
