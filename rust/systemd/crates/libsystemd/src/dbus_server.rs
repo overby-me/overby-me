@@ -337,6 +337,56 @@ mod inner {
         unit_name: String,
     }
 
+    /// Per-path object exposing `org.freedesktop.systemd1.Path` for
+    /// `.path` units.
+    struct PathObj {
+        run_info: ArcMutRuntimeInfo,
+        unit_name: String,
+    }
+
+    #[interface(name = "org.freedesktop.systemd1.Path")]
+    impl PathObj {
+        /// Unit= value — the unit this path activates when it matches.
+        #[zbus(property)]
+        fn unit(&self) -> String {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .and_then(|u| match &u.specific {
+                    crate::units::Specific::Path(p) => Some(p.conf.unit.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| self.unit_name.replace(".path", ".service"))
+        }
+
+        #[zbus(property)]
+        fn make_directory(&self) -> bool {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .and_then(|u| match &u.specific {
+                    crate::units::Specific::Path(p) => Some(p.conf.make_directory),
+                    _ => None,
+                })
+                .unwrap_or(false)
+        }
+
+        #[zbus(property)]
+        fn directory_mode(&self) -> u32 {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .and_then(|u| match &u.specific {
+                    crate::units::Specific::Path(p) => Some(p.conf.directory_mode),
+                    _ => None,
+                })
+                .unwrap_or(0o755)
+        }
+    }
+
     /// Per-slice object exposing `org.freedesktop.systemd1.Slice` for
     /// `.slice` units — exposing the common cgroup resource controls so
     /// tests can `busctl get-property` them (e.g.
@@ -1323,6 +1373,13 @@ mod inner {
                 unit_name: unit_name.to_owned(),
             };
             conn.object_server().at(&path, sl)?;
+        }
+        if unit_name.ends_with(".path") {
+            let pp = PathObj {
+                run_info: run_info.clone(),
+                unit_name: unit_name.to_owned(),
+            };
+            conn.object_server().at(&path, pp)?;
         }
         Ok(())
     }
