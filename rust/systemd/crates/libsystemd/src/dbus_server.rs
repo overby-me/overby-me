@@ -111,6 +111,60 @@ mod inner {
             true
         }
 
+        /// Invocation ID of the current or most-recent activation, as a
+        /// lowercase hex string without dashes.  Empty when the unit has
+        /// never been activated.
+        #[zbus(property)]
+        fn invocation_id(&self) -> Vec<u8> {
+            let ri = self.run_info.read_poisoned();
+            let id = ri
+                .unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .map(|u| u.common.invocation_id.lock().unwrap().clone())
+                .unwrap_or_default();
+            // Upstream returns an ay (byte array) of the raw 16-byte id.
+            // We store as hex — decode back to bytes.
+            let mut out = Vec::with_capacity(16);
+            let mut iter = id.chars().filter(|c| c.is_ascii_hexdigit());
+            loop {
+                let (a, b) = match (iter.next(), iter.next()) {
+                    (Some(a), Some(b)) => (a, b),
+                    _ => break,
+                };
+                if let Ok(byte) = u8::from_str_radix(&format!("{a}{b}"), 16) {
+                    out.push(byte);
+                }
+            }
+            out
+        }
+
+        /// When the unit last transitioned out of inactive (activation
+        /// began), in microseconds since the Unix epoch.  `0` means never.
+        #[zbus(property)]
+        fn inactive_exit_timestamp(&self) -> u64 {
+            ts_field(&self.run_info, &self.unit_name, |t| t.inactive_exit)
+        }
+
+        /// When the unit last became active, in microseconds since the
+        /// Unix epoch.  `0` means never.
+        #[zbus(property)]
+        fn active_enter_timestamp(&self) -> u64 {
+            ts_field(&self.run_info, &self.unit_name, |t| t.active_enter)
+        }
+
+        /// When the unit last left active state (stop began).
+        #[zbus(property)]
+        fn active_exit_timestamp(&self) -> u64 {
+            ts_field(&self.run_info, &self.unit_name, |t| t.active_exit)
+        }
+
+        /// When the unit last re-entered inactive state (stop completed).
+        #[zbus(property)]
+        fn inactive_enter_timestamp(&self) -> u64 {
+            ts_field(&self.run_info, &self.unit_name, |t| t.inactive_enter)
+        }
+
         /// All names this unit answers to — primary id plus any aliases.
         #[zbus(property)]
         fn names(&self) -> Vec<String> {
@@ -310,6 +364,24 @@ mod inner {
                 })
                 .unwrap_or_else(|| "success".to_string())
         }
+    }
+
+    /// Look up a unit by name and read an Option<u64> timestamp field from
+    /// its UnitTimestamps, returning 0 when the unit doesn't exist or the
+    /// field is unset.
+    fn ts_field<F>(run_info: &ArcMutRuntimeInfo, unit_name: &str, select: F) -> u64
+    where
+        F: Fn(&crate::units::UnitTimestamps) -> Option<u64>,
+    {
+        let ri = run_info.read_poisoned();
+        ri.unit_table
+            .values()
+            .find(|u| u.id.name == unit_name)
+            .and_then(|u| {
+                let ts = u.common.timestamps.read_poisoned();
+                select(&ts)
+            })
+            .unwrap_or(0)
     }
 
     /// Look up a unit by name and return the names of its dependency entries
