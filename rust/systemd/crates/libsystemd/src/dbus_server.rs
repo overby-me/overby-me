@@ -234,6 +234,27 @@ mod inner {
             dep_names(&self.run_info, &self.unit_name, |d| &d.binds_to)
         }
 
+        /// Whether the unit file is masked (`/dev/null` symlink) or enabled.
+        /// Returns one of `"masked"`, `"enabled"`, `"disabled"`, or
+        /// `"static"` — we don't track enable-state reliably for all
+        /// runtime-installed units, so non-masked units report `"enabled"`
+        /// by default.
+        #[zbus(property)]
+        fn unit_file_state(&self) -> String {
+            let name = &self.unit_name;
+            let runtime = std::path::Path::new("/run/systemd/system").join(name);
+            let persistent = std::path::Path::new("/etc/systemd/system").join(name);
+            let masked = std::fs::read_link(&runtime)
+                .or_else(|_| std::fs::read_link(&persistent))
+                .map(|t| t == std::path::Path::new("/dev/null"))
+                .unwrap_or(false);
+            if masked {
+                "masked".to_string()
+            } else {
+                "enabled".to_string()
+            }
+        }
+
         /// Drop-in config files merged into this unit.
         #[zbus(property)]
         fn drop_in_paths(&self) -> Vec<String> {
