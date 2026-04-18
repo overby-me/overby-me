@@ -207,7 +207,10 @@ All 23 udev tests fail because the C `udevadm` binary in the overlay lacks featu
 
 ### Priority 4: Architectural (very high effort)
 
-- [x] D-Bus interface (org.freedesktop.systemd1) — Manager (StartTransientUnit, StartUnit, StopUnit, RestartUnit, Reload, BindMountUnit, ListUnits, GetUnit) + per-unit Unit interface (Id, Description, ActiveState, SubState, LoadState, CanStart/Stop/Reload/Isolate/Freeze/LiveMount, Names, FragmentPath, DropInPaths, Wants/Requires/WantedBy/RequiredBy/After/Before/Conflicts/PartOf/BindsTo) + per-service Service interface (MainPID, ExecMainPID, ExecMainStatus, Type, Result)
+- [x] D-Bus interface (org.freedesktop.systemd1):
+  - Manager: `Version`, `Architecture`, `NNames`, `NJobs`, `NFailedUnits`, `ServiceWatchdogs`, `Features`, `Virtualization`, `ShowStatus` (properties); `ListUnits`, `GetUnit`, `GetUnitByPID`, `StartUnit`, `StopUnit`, `RestartUnit`, `Reload` (→ `Command::LoadAllNew`), `StartTransientUnit` (with `ExtraFileDescriptors a(hs)` dup-out), `BindMountUnit`, `KillUnit`, `FreezeUnit`, `ThawUnit`, `ResetFailedUnit`, `ResetFailed`, `Subscribe`, `Unsubscribe` (methods)
+  - Per-unit `/org/freedesktop/systemd1/unit/<escaped>` Unit interface: `Id`, `Description`, `ActiveState`, `SubState`, `LoadState`, `UnitFileState`, `CanStart`, `CanStop`, `CanReload`, `CanIsolate`, `CanFreeze`, `CanLiveMount`, `Names`, `FragmentPath`, `DropInPaths`, `InvocationID` (raw 16 bytes), `InactiveExitTimestamp`, `ActiveEnterTimestamp`, `ActiveExitTimestamp`, `InactiveEnterTimestamp`, `Wants`, `Requires`, `WantedBy`, `RequiredBy`, `After`, `Before`, `Conflicts`, `PartOf`, `BindsTo`
+  - Same object also exposes Service interface for `.service` units: `MainPID`, `ExecMainPID`, `ExecMainStatus`, `Type`, `Result`, `NRestarts`
 - [ ] Rust udevadm reimplementation — blocks 23 tests
 
 ## Architecture Notes
