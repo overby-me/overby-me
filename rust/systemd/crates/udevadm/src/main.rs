@@ -2461,6 +2461,17 @@ fn cmd_test_builtin(action: &str, command: &str, devpath: &str) -> i32 {
         _ => {}
     }
 
+    // Accept systemd-escaped .device unit names as a device path.
+    let resolved_devpath: String = if devpath.ends_with(".device")
+        && let Some(unescaped) = systemd_unescape_path(devpath)
+        && unescaped.exists()
+    {
+        unescaped.to_string_lossy().into_owned()
+    } else {
+        devpath.to_string()
+    };
+    let devpath = resolved_devpath.as_str();
+
     // Builtins that fail on non-device targets.
     let looks_like_real_device = devpath.starts_with("/sys/") || devpath.starts_with("/dev/");
     let requires_real_device = matches!(builtin, "net_id" | "net_driver" | "path_id" | "usb_id");
