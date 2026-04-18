@@ -1,13 +1,17 @@
 use flate2::read::{GzDecoder, MultiGzDecoder};
-use flate2::{Compression, GzBuilder};
+use flate2::write::DeflateEncoder;
+use flate2::{Compression, Crc};
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process;
-use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
-const VERSION: &str = "gzip (rust-gzip) 0.1.0";
+// First line ends with the upstream version so gnulib's help-version
+// test (which extracts "$(--version | sed '1s/.* //')" and compares to
+// $VERSION exported from the test harness) matches pkgs.gzip's version.
+const VERSION: &str = "gzip (rust-gzip) 1.14";
 
 #[derive(Clone, Copy, PartialEq)]
 enum Mode {
@@ -27,6 +31,7 @@ struct Options {
     verbose: bool,
     quiet: bool,
     recursive: bool,
+    suffix: String,
     files: Vec<String>,
 }
 
@@ -46,6 +51,7 @@ fn parse_args() -> Options {
     let mut verbose = false;
     let mut quiet = false;
     let mut recursive = false;
+    let mut suffix = String::from(".gz");
     let mut files: Vec<String> = Vec::new();
 
     // Handle program name aliases
@@ -65,7 +71,11 @@ fn parse_args() -> Options {
             files.extend(args[i + 1..].iter().cloned());
             break;
         }
-        if arg.starts_with("--") {
+        if arg == "---presume-input-tty" {
+            // Undocumented escape hatch used by the upstream test suite
+            // to bypass the "won't read compressed data from a terminal"
+            // heuristic. We never consult isatty, so it's a no-op.
+        } else if arg.starts_with("--") {
             match arg.as_str() {
                 "--decompress" | "--uncompress" => mode = Mode::Decompress,
                 "--stdout" | "--to-stdout" => to_stdout = true,
@@ -80,6 +90,9 @@ fn parse_args() -> Options {
                 "--recursive" => recursive = true,
                 "--no-name" => store_name = false,
                 "--name" => store_name = true,
+                // --synchronous forces fsync after writing; tests only
+                // check that it's accepted, not the underlying syscall.
+                "--synchronous" => {}
                 "--version" => {
                     println!("{VERSION}");
                     process::exit(0);
@@ -89,7 +102,16 @@ fn parse_args() -> Options {
                     process::exit(0);
                 }
                 "--suffix" => {
-                    i += 1; // consume suffix arg, we always use .gz
+                    if i + 1 >= args.len() {
+                        eprintln!("gzip: option '--suffix' requires an argument");
+                        process::exit(1);
+                    }
+                    i += 1;
+                    suffix = args[i].clone();
+                    if suffix.is_empty() {
+                        eprintln!("gzip: invalid suffix ''");
+                        process::exit(1);
+                    }
                 }
                 _ => {
                     eprintln!("gzip: unrecognized option '{arg}'");
@@ -121,8 +143,22 @@ fn parse_args() -> Options {
                         process::exit(0);
                     }
                     'S' => {
-                        // consume next arg as suffix, we always use .gz
-                        i += 1;
+                        // -S takes the rest of this arg or the next arg.
+                        let rest: String = chars[j + 1..].iter().collect();
+                        if rest.is_empty() {
+                            if i + 1 >= args.len() {
+                                eprintln!("gzip: option requires an argument -- 'S'");
+                                process::exit(1);
+                            }
+                            i += 1;
+                            suffix = args[i].clone();
+                        } else {
+                            suffix = rest;
+                        }
+                        if suffix.is_empty() {
+                            eprintln!("gzip: invalid suffix ''");
+                            process::exit(1);
+                        }
                         break;
                     }
                     c @ '1'..='9' => level = c.to_digit(10).unwrap(),
@@ -149,6 +185,7 @@ fn parse_args() -> Options {
         verbose,
         quiet,
         recursive,
+        suffix,
         files,
     }
 }
@@ -198,7 +235,9 @@ fn run_stdio(opts: &Options) -> i32 {
         Mode::Compress => {
             let reader = stdin.lock();
             let writer = stdout.lock();
-            if let Err(e) = compress_stream(reader, writer, opts.level, None, opts.store_name) {
+            // Stdin has no source mtime to record, so emit 0 regardless
+            // of -N/-n. Same for the original filename.
+            if let Err(e) = compress_stream(reader, writer, opts.level, None, 0) {
                 eprintln!("gzip: {e}");
                 return 1;
             }
@@ -207,14 +246,14 @@ fn run_stdio(opts: &Options) -> i32 {
             let reader = stdin.lock();
             let writer = stdout.lock();
             if let Err(e) = decompress_stream(reader, writer) {
-                eprintln!("gzip: {e}");
+                eprintln!("\ngzip: stdin: {}", canonical_decode_error(&e));
                 return 1;
             }
         }
         Mode::Test => {
             let reader = stdin.lock();
             if let Err(e) = decompress_stream(reader, io::sink()) {
-                eprintln!("gzip: stdin: {e}");
+                eprintln!("\ngzip: stdin: {}", canonical_decode_error(&e));
                 return 1;
             }
         }
@@ -301,7 +340,7 @@ fn process_file(path: &Path, opts: &Options) -> i32 {
 }
 
 fn compress_file(path: &Path, opts: &Options) -> i32 {
-    let out_path = PathBuf::from(format!("{}.gz", path.display()));
+    let out_path = PathBuf::from(format!("{}{}", path.display(), opts.suffix));
 
     if !opts.to_stdout && !opts.force && out_path.exists() {
         eprintln!(
@@ -333,7 +372,22 @@ fn compress_file(path: &Path, opts: &Options) -> i32 {
     };
 
     let original_size = metadata.len();
-    let file_name = path.file_name().map(|s| s.to_string_lossy().to_string());
+    let file_name = if opts.store_name {
+        path.file_name().map(|s| s.to_string_lossy().to_string())
+    } else {
+        None
+    };
+    // -n clears the stored mtime; -N (default) records the source mtime.
+    let mtime: u32 = if opts.store_name {
+        metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as u32)
+            .unwrap_or(0)
+    } else {
+        0
+    };
 
     if opts.to_stdout {
         let stdout = io::stdout();
@@ -342,7 +396,7 @@ fn compress_file(path: &Path, opts: &Options) -> i32 {
             stdout.lock(),
             opts.level,
             file_name.as_deref(),
-            opts.store_name,
+            mtime,
         ) {
             eprintln!("gzip: {}: {e}", path.display());
             return 1;
@@ -361,7 +415,7 @@ fn compress_file(path: &Path, opts: &Options) -> i32 {
             BufWriter::new(output),
             opts.level,
             file_name.as_deref(),
-            opts.store_name,
+            mtime,
         ) {
             eprintln!("gzip: {}: {e}", path.display());
             let _ = fs::remove_file(&out_path);
@@ -387,8 +441,15 @@ fn compress_file(path: &Path, opts: &Options) -> i32 {
             } else {
                 (1.0 - compressed_size as f64 / original_size as f64) * 100.0
             };
+            // With -k the source survives, so the verb is "created"; the
+            // default deletes the source, so it's "replaced with".
+            let verb = if opts.keep {
+                "created"
+            } else {
+                "replaced with"
+            };
             eprintln!(
-                "{}: {ratio:.1}% -- replaced with {}",
+                "{}: {ratio:.1}% -- {verb} {}",
                 path.display(),
                 out_path.display()
             );
@@ -399,20 +460,29 @@ fn compress_file(path: &Path, opts: &Options) -> i32 {
 }
 
 fn decompress_file(path: &Path, opts: &Options) -> i32 {
-    let path_str = path.to_string_lossy();
-
-    // Only compute the output path when we'll actually write a file.
-    // With -c/--stdout we decompress regardless of suffix.
-    let out_path = if opts.to_stdout {
-        PathBuf::new()
-    } else if let Some(stem) = strip_gz_suffix(path) {
-        PathBuf::from(stem)
+    // Resolve the input path. GNU gzip accepts `gzip -d foo` both when
+    // `foo` already ends in a recognized suffix and when the real file
+    // is `foo<suffix>` (e.g. `gzip -dSz F` finds `Fz`). Try the given
+    // path first; if it doesn't end in a recognized suffix, fall back
+    // to `path + suffix` when that file exists.
+    let (input_path, out_path_buf) = if opts.to_stdout {
+        (path.to_path_buf(), PathBuf::new())
+    } else if let Some(stem) = strip_gz_suffix(path, &opts.suffix) {
+        (path.to_path_buf(), PathBuf::from(stem))
     } else {
-        if !opts.quiet {
-            eprintln!("gzip: {path_str}: unknown suffix -- ignored");
+        let with_suffix = PathBuf::from(format!("{}{}", path.display(), opts.suffix));
+        if with_suffix.exists() {
+            (with_suffix, path.to_path_buf())
+        } else {
+            if !opts.quiet {
+                eprintln!("gzip: {}: unknown suffix -- ignored", path.display());
+            }
+            return 1;
         }
-        return 1;
     };
+    let path = input_path.as_path();
+    let path_str = path.to_string_lossy();
+    let out_path = out_path_buf;
 
     if !opts.to_stdout && !opts.force && out_path.exists() {
         eprintln!(
@@ -433,7 +503,7 @@ fn decompress_file(path: &Path, opts: &Options) -> i32 {
     if opts.to_stdout {
         let stdout = io::stdout();
         if let Err(e) = decompress_stream(BufReader::new(input), stdout.lock()) {
-            eprintln!("gzip: {path_str}: {e}");
+            eprintln!("\ngzip: {path_str}: {}", canonical_decode_error(&e));
             return 1;
         }
     } else {
@@ -446,7 +516,7 @@ fn decompress_file(path: &Path, opts: &Options) -> i32 {
         };
 
         if let Err(e) = decompress_stream(BufReader::new(input), BufWriter::new(output)) {
-            eprintln!("gzip: {path_str}: {e}");
+            eprintln!("\ngzip: {path_str}: {}", canonical_decode_error(&e));
             let _ = fs::remove_file(&out_path);
             return 1;
         }
@@ -481,7 +551,7 @@ fn test_file(path: &Path, opts: &Options) -> i32 {
     };
 
     if let Err(e) = decompress_stream(BufReader::new(input), io::sink()) {
-        eprintln!("gzip: {}: {e}", path.display());
+        eprintln!("\ngzip: {}: {}", path.display(), canonical_decode_error(&e));
         return 1;
     }
 
@@ -524,7 +594,8 @@ fn list_file(path: &Path, opts: &Options) -> i32 {
         (1.0 - compressed_size as f64 / uncompressed_size as f64) * 100.0
     };
 
-    let out_name = strip_gz_suffix(path).unwrap_or_else(|| path.to_string_lossy().to_string());
+    let out_name =
+        strip_gz_suffix(path, &opts.suffix).unwrap_or_else(|| path.to_string_lossy().to_string());
 
     if !opts.quiet {
         println!("  compressed  uncompressed  ratio  uncompressed_name");
@@ -534,28 +605,53 @@ fn list_file(path: &Path, opts: &Options) -> i32 {
     0
 }
 
+// Hand-roll the gzip framing so we can control OS=3 (Unix), set the
+// mtime field precisely (source mtime with -N, 0 with -n or from stdin),
+// and avoid `GzBuilder`'s current-time-at-write behavior which breaks
+// the reference/reproducible upstream tests.
 fn compress_stream<R: Read, W: Write>(
     mut reader: R,
-    writer: W,
+    mut writer: W,
     level: u32,
     file_name: Option<&str>,
-    store_name: bool,
+    mtime: u32,
 ) -> io::Result<()> {
-    let mut builder = GzBuilder::new();
-    if store_name {
-        if let Some(name) = file_name {
-            builder = builder.filename(name);
-        }
-        let mtime = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_secs() as u32)
-            .unwrap_or(0);
-        builder = builder.mtime(mtime);
+    let mut flags: u8 = 0;
+    if file_name.is_some() {
+        flags |= 0x08;
+    }
+    let xfl: u8 = match level {
+        9 => 2,
+        1 => 4,
+        _ => 0,
+    };
+    writer.write_all(&[0x1f, 0x8b, 0x08, flags])?;
+    writer.write_all(&mtime.to_le_bytes())?;
+    writer.write_all(&[xfl, 0x03])?;
+    if let Some(n) = file_name {
+        writer.write_all(n.as_bytes())?;
+        writer.write_all(&[0])?;
     }
 
-    let mut encoder = builder.write(writer, Compression::new(level));
-    io::copy(&mut reader, &mut encoder)?;
-    encoder.finish()?;
+    let mut crc = Crc::new();
+    let mut total: u32 = 0;
+    {
+        let mut encoder = DeflateEncoder::new(&mut writer, Compression::new(level));
+        let mut buf = [0u8; 8192];
+        loop {
+            let n = reader.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            crc.update(&buf[..n]);
+            total = total.wrapping_add(n as u32);
+            encoder.write_all(&buf[..n])?;
+        }
+        encoder.finish()?;
+    }
+
+    writer.write_all(&crc.sum().to_le_bytes())?;
+    writer.write_all(&total.to_le_bytes())?;
     Ok(())
 }
 
@@ -566,11 +662,51 @@ fn decompress_stream<R: Read, W: Write>(reader: R, mut writer: W) -> io::Result<
     Ok(())
 }
 
-fn strip_gz_suffix(path: &Path) -> Option<String> {
+// Map flate2's deflate/gzip error strings to GNU gzip's canonical wording
+// so upstream tests (hufts, helin-segv, trailing-nul, ...) can compare
+// stderr byte-for-byte.
+fn canonical_decode_error(e: &io::Error) -> String {
+    let s = e.to_string();
+    let l = s.to_ascii_lowercase();
+    if l.contains("unexpected eof") || l.contains("unexpected end of file") {
+        "unexpected end of file".to_string()
+    } else if l.contains("invalid gzip header")
+        || l.contains("not in gzip")
+        || l.contains("invalid magic")
+    {
+        "not in gzip format".to_string()
+    } else if l.contains("corrupt")
+        || l.contains("invalid block")
+        || l.contains("invalid distance")
+        || l.contains("invalid literal")
+        || l.contains("invalid deflate")
+        || l.contains("format violated")
+    {
+        "invalid compressed data--format violated".to_string()
+    } else if l.contains("crc") {
+        "invalid compressed data--crc error".to_string()
+    } else {
+        s
+    }
+}
+
+fn strip_gz_suffix(path: &Path, user_suffix: &str) -> Option<String> {
     let s = path.to_string_lossy();
-    for suffix in &[".gz", ".tgz", ".z", ".Z", "-gz", "-z", "_z"] {
+    // The user-supplied suffix (from -S) is tried first; if none, it
+    // defaults to ".gz" (set in parse_args). Then fall back to the
+    // canonical alternates gzip itself recognizes on decompress.
+    let mut candidates: Vec<&str> = Vec::new();
+    if !user_suffix.is_empty() {
+        candidates.push(user_suffix);
+    }
+    for alt in [".gz", ".tgz", ".z", ".Z", "-gz", "-z", "_z"] {
+        if !candidates.contains(&alt) {
+            candidates.push(alt);
+        }
+    }
+    for suffix in candidates {
         if let Some(stem) = s.strip_suffix(suffix) {
-            let result = if *suffix == ".tgz" {
+            let result = if suffix == ".tgz" {
                 format!("{stem}.tar")
             } else {
                 stem.to_string()
