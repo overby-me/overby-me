@@ -4200,6 +4200,7 @@ fn create_transient_unit(
                     extend_timeout_timestamp: None,
                     join_namespace_pid: None,
                     helper_mount_ns: None,
+                    current_exec_argv: None,
                     manual_stop: false,
                 },
             }),

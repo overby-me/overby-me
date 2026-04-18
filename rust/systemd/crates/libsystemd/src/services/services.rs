@@ -482,6 +482,13 @@ pub struct Service {
     /// PID of a running service whose mount namespace this service should join
     /// via setns(2), resolved from JoinsNamespaceOf= at start time.
     pub join_namespace_pid: Option<u32>,
+    /// Argv of the currently-executing `ExecStart=` command (full command
+    /// line as `cmd arg1 arg2 …`), or `None` when no ExecStart is running.
+    /// Used by the oneshot activation loop to survive `daemon-reload`
+    /// mid-activation: after each command completes, we re-read the
+    /// ServiceConfig from the unit table and look up this argv to find
+    /// where to resume in the (possibly modified) exec list.
+    pub current_exec_argv: Option<String>,
     /// When set, `run_cmd` arranges for the spawned child to enter a fresh
     /// mount namespace (via `unshare(CLONE_NEWNS)`) and applies the listed
     /// BindPaths=, BindReadOnlyPaths=, InaccessiblePaths= + PrivateTmp=
@@ -742,12 +749,50 @@ impl Service {
         if !conf.exec.is_empty() {
             // For multi-ExecStart oneshot services, run all but the last
             // command via run_cmd (helper process style) sequentially.
+            //
+            // The loop re-reads the service's `exec` list from the unit
+            // table on each iteration so a `systemctl daemon-reload` that
+            // swaps `ExecStart=` lines mid-activation is observed: we
+            // record the just-completed command's argv in
+            // `self.current_exec_argv`, then look that argv up in the
+            // re-read list to decide where to go next.  If the running
+            // command was removed from the new config, or if the new
+            // position is at the end, we drop out of the preliminary loop
+            // and let the main-process path dispatch the now-last command.
             if conf.srcv_type == ServiceType::OneShot && conf.exec.len() > 1 {
                 let timeout = self.get_start_timeout(conf);
-                let working_dir = conf.exec_config.working_directory.as_ref();
-                let preliminary = &conf.exec[..conf.exec.len() - 1];
-                for cmd in preliminary {
-                    self.run_cmd(cmd, id.clone(), name, timeout, run_info, working_dir)
+                let mut idx: usize = 0;
+                loop {
+                    let (exec_list, working_dir) = match run_info
+                        .unit_table
+                        .values()
+                        .find(|u| u.id == id)
+                        .map(|u| &u.specific)
+                    {
+                        Some(crate::units::Specific::Service(srvc)) => (
+                            srvc.conf.exec.clone(),
+                            srvc.conf.exec_config.working_directory.clone(),
+                        ),
+                        _ => break,
+                    };
+
+                    if let Some(last_argv) = self.current_exec_argv.take() {
+                        match exec_list.iter().position(|c| c.to_string() == last_argv) {
+                            Some(pos) => idx = pos + 1,
+                            None => break,
+                        }
+                    }
+
+                    // Stop the preliminary loop once we've reached the
+                    // last command in the re-read list — the main-process
+                    // dispatch below runs it.
+                    if idx + 1 >= exec_list.len() {
+                        break;
+                    }
+
+                    let cmd = exec_list[idx].clone();
+                    self.current_exec_argv = Some(cmd.to_string());
+                    self.run_cmd(&cmd, id.clone(), name, timeout, run_info, working_dir.as_ref())
                         .map_err(|start_err| {
                             match self.run_poststop(conf, id.clone(), name, run_info) {
                                 Ok(()) => ServiceErrorReason::StartFailed(start_err),
@@ -758,6 +803,7 @@ impl Service {
                             }
                         })?;
                 }
+                self.current_exec_argv = None;
             }
 
             // Fork the last ExecStart command as the main process.

@@ -203,7 +203,7 @@ All 23 udev tests fail because the C `udevadm` binary in the overlay lacks featu
 - [x] Implement MessageQueue socket options
 - [x] Implement `systemd-socket-activate` `--inetd` / `--now` / validation flags
 - [x] Implement `systemd-notify --fork` (shell-captured daemon PID + MAINPID injection to `$NOTIFY_SOCKET`)
-- [ ] Implement exec deserialization across daemon-reload
+- [~] Exec deserialization across daemon-reload — **infrastructure added** (`Service::current_exec_argv` tracks the running ExecStart argv; oneshot preliminary loop re-reads the unit's exec list from `unit_table` each iteration and maps the just-completed argv to its new index). Full test (07-pid1-exec-deserialization) still blocked: daemon-reload takes the `run_info` write-lock, which blocks while an activation holds the read-lock, so mid-activation config swaps can't happen in our architecture. Fully fixing would require releasing the `run_info` read-lock during helper-command waits and re-acquiring after each command.
 
 ### Priority 4: Architectural (very high effort)
 
