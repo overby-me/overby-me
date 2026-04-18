@@ -73,6 +73,10 @@ struct Cli {
     #[arg(long, short = 'd', global = true)]
     debug: bool,
 
+    /// Print version and exit (subcommands accept this too)
+    #[arg(long, short = 'V', global = true)]
+    version: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -2931,6 +2935,11 @@ fn main() -> ExitCode {
 
     if cli.debug {
         log::set_max_level(log::LevelFilter::Debug);
+    }
+
+    if cli.version {
+        println!("udevadm {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
     }
 
     let exit_code = match cli.command {
