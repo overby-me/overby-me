@@ -103,7 +103,12 @@ mod inner {
 
         #[zbus(property)]
         fn can_isolate(&self) -> bool {
-            false
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .map(|u| u.common.unit.allow_isolate)
+                .unwrap_or(false)
         }
 
         #[zbus(property)]
