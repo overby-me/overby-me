@@ -1245,6 +1245,9 @@ mod inner {
         match inner {
             Value::Str(s) => Some(s.to_string()),
             Value::Bool(b) => Some(if *b { "true" } else { "false" }.to_string()),
+            Value::U8(u) => Some(u.to_string()),
+            Value::I16(i) => Some(i.to_string()),
+            Value::U16(u) => Some(u.to_string()),
             Value::I32(i) => Some(i.to_string()),
             Value::U32(u) => Some(u.to_string()),
             Value::I64(i) => Some(i.to_string()),
