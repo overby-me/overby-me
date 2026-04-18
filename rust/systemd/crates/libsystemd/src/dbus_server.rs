@@ -630,6 +630,56 @@ mod inner {
             Ok(())
         }
 
+        /// Reset all failed units (clears stored errors everywhere).
+        fn reset_failed(&self) -> zbus::fdo::Result<()> {
+            invoke_command(
+                &self.run_info,
+                crate::control::Command::ResetFailed(None),
+            )
+            .map_err(zbus::fdo::Error::Failed)?;
+            Ok(())
+        }
+
+        /// Subscribe to manager signals.  We don't emit signals yet — the
+        /// method is a no-op accept for compatibility with callers that
+        /// blindly call Subscribe() before making any query (systemctl
+        /// does this during `monitor`/`list-units`).
+        fn subscribe(&self) -> zbus::fdo::Result<()> {
+            Ok(())
+        }
+
+        /// Unsubscribe from manager signals — matching no-op.
+        fn unsubscribe(&self) -> zbus::fdo::Result<()> {
+            Ok(())
+        }
+
+        /// Find the unit that owns the given PID.  Returns the unit's
+        /// object path, or an error if the PID isn't tracked.
+        fn get_unit_by_pid(
+            &self,
+            pid: u32,
+        ) -> zbus::fdo::Result<zbus::zvariant::OwnedObjectPath> {
+            let ri = self.run_info.read_poisoned();
+            let pid_i32 = pid as i32;
+            // Fast path: check per-unit atomic MainPID.
+            let owner = ri
+                .unit_table
+                .values()
+                .find(|u| {
+                    u.common
+                        .main_pid
+                        .load(std::sync::atomic::Ordering::Acquire)
+                        == pid_i32
+                })
+                .map(|u| u.id.name.clone());
+            match owner {
+                Some(name) => Ok(unit_object_path(&name)),
+                None => Err(zbus::fdo::Error::Failed(format!(
+                    "PID {pid} not tracked by any unit"
+                ))),
+            }
+        }
+
         /// Bind-mount `source` onto `destination` inside the mount namespace
         /// of the running service `name`.  If `mkdir` is true, the destination
         /// is created (as a file or directory mirroring the source type)
