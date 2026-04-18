@@ -1578,6 +1578,44 @@ fn cmd_test(action: &str, devpath: &str) -> i32 {
     0
 }
 
+/// `udevadm test --json=short|pretty <devpath>` — emit a JSON object
+/// describing the simulated event.  Mirrors upstream which prints a
+/// structured representation of the synthesized UEvent, suitable for
+/// `jq` consumption in the sanity test.
+fn cmd_test_json(mode: &str, action: &str, devpath: &str) -> i32 {
+    if !UDEV_ACTIONS.contains(&action) {
+        eprintln!("udevadm test: invalid action: {action}");
+        return 1;
+    }
+    let syspath = if devpath.starts_with("/dev/")
+        && let Some(sp) = devname_to_syspath(devpath)
+    {
+        sp
+    } else if devpath.ends_with(".device")
+        && let Some(unescaped) = systemd_unescape_path(devpath)
+        && unescaped.exists()
+    {
+        unescaped
+    } else {
+        normalize_syspath(devpath)
+    };
+    if !syspath.exists() {
+        eprintln!("udevadm test: device '{}' not found", devpath);
+        return 1;
+    }
+    let devpath_str = syspath_to_devpath(&syspath);
+    let uevent = read_sysfs_uevent(&syspath);
+    let mut map: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
+    map.insert("ACTION".to_string(), action.to_string());
+    map.insert("DEVPATH".to_string(), devpath_str);
+    for (k, v) in uevent {
+        map.entry(k).or_insert(v);
+    }
+    println!("{}", render_json_object(&map, mode));
+    0
+}
+
 // ---------------------------------------------------------------------------
 // udevadm control
 // ---------------------------------------------------------------------------
@@ -3224,6 +3262,14 @@ fn main() -> ExitCode {
                 eprintln!("udevadm test: a device path is required (or pass --action help)");
                 return ExitCode::from(1);
             };
+            // For `--json=short|pretty`, emit a JSON object describing the
+            // simulated event; `--json=off` falls through to the plain
+            // property-list format expected by the sanity test.
+            if let Some(mode) = json.as_deref()
+                && matches!(mode, "short" | "pretty")
+            {
+                return ExitCode::from(cmd_test_json(mode, action, devpath) as u8);
+            }
             cmd_test(action, devpath)
         }
 
