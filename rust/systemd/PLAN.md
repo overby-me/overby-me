@@ -8,9 +8,9 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| PASS | ~239+ | Tests passing reliably (including 150/151 aux-utils; 23-unit-file-runtime-bind-paths verified) |
-| FAIL (fixable) | ~2 | Failures in rust-systemd code that can be fixed |
-| FAIL (architectural) | ~8 | Missing major features (udev, exec-deser) — D-Bus, BindPaths-runtime, MessageQueue, OpenFile, ExtraFileDescriptors, socket-activate, notify --fork now implemented (most pending end-to-end verification) |
+| PASS | ~240+ | Tests passing reliably (including 150/151 aux-utils; 23-unit-file-runtime-bind-paths verified; 15-dropin verified) |
+| FAIL (fixable) | ~1 | Failures in rust-systemd code that can be fixed |
+| FAIL (architectural) | ~7 | Missing major features (udev, exec-deser, fstab-generator) — D-Bus, BindPaths-runtime, MessageQueue, OpenFile, ExtraFileDescriptors, socket-activate, notify --fork now implemented |
 | Boot hang (transient) | ~10 | Non-deterministic QEMU boot failures (~30% rate) |
 
 ## Passing Tests
