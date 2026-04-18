@@ -1,0 +1,28 @@
+# deslop configuration for rust-gzip compression tool.
+#
+# gzip inherently needs narrowing casts (u64 size → u32 mtime field),
+# existence checks before opening (so we don't clobber output unless
+# -f was given), and small generic helper names. Disable rules that
+# flag those patterns.
+
+disabled_rules = [
+  # u64 file-size / SystemTime seconds → u32 gzip-header fields,
+  # CRC-32 ⇢ u32, ratio math. All intentional.
+  "rust_narrowing_numeric_cast",
+
+  # gzip must stat the destination before open() so `-k`/default
+  # refuses to overwrite without -f. TOCTOU is inherent to the tool.
+  "rust_check_then_open_path",
+
+  # Small helpers like `create_output_file` carry the semantics in
+  # their parameters, not the name.
+  "generic_name",
+
+  # The stdout/stdin locking pairs are sequential I/O handles, not
+  # async locks with a meaningful acquisition order.
+  "rust_async_lock_order_cycle",
+
+  # Release profile already enables LTO + strip; overflow-checks are
+  # out of scope for a gzip wrapper around flate2.
+  "rust_release_profile_missing_overflow_checks",
+]

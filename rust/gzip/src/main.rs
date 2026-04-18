@@ -401,8 +401,11 @@ fn compress_file(path: &Path, opts: &Options) -> i32 {
 fn decompress_file(path: &Path, opts: &Options) -> i32 {
     let path_str = path.to_string_lossy();
 
-    // Determine output path by stripping known suffixes
-    let out_path = if let Some(stem) = strip_gz_suffix(path) {
+    // Only compute the output path when we'll actually write a file.
+    // With -c/--stdout we decompress regardless of suffix.
+    let out_path = if opts.to_stdout {
+        PathBuf::new()
+    } else if let Some(stem) = strip_gz_suffix(path) {
         PathBuf::from(stem)
     } else {
         if !opts.quiet {

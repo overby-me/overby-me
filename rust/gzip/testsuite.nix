@@ -66,7 +66,10 @@ pkgs.runCommand "rust-gzip-test-${name}" {
   export PATH="$abs_top_builddir:$PATH"
 
   echo "Running gzip test: ${name}"
-  if timeout 60 sh "./${name}"; then
+  # Makefile.am's TESTS_ENVIRONMENT ends with `; 9>&2`, which init.cfg
+  # reads as `stderr_fileno_=9`. Provide it here so init.sh's skip_/
+  # framework_failure_ helpers don't trip on "Bad file descriptor".
+  if timeout 60 sh "./${name}" 9>&2; then
     touch $out
   else
     exit 1
