@@ -552,6 +552,8 @@ struct Args {
     /// (in command-line order). Includes --exclude, positional -C, and
     /// friends.
     positional_warnings: Vec<String>,
+    /// --no-overwrite-dir: keep existing directory permissions.
+    no_overwrite_dir: bool,
     /// --backup: rename existing destination files to NAME~ before
     /// overwriting during extract.
     backup: bool,
@@ -971,6 +973,7 @@ fn parse_args() -> Args {
                     args.occurrence = true;
                 }
             }
+            "--no-overwrite-dir" => args.no_overwrite_dir = true,
             "--ignore-failed-read" => args.ignore_failed_read = true,
             "--owner-map" => {
                 if let Some(v) = queue.pop_front() {
@@ -1326,7 +1329,6 @@ fn parse_args() -> Args {
                     || other == "--keep-directory-symlink"
                     || other == "--overwrite"
                     || other == "--overwrite-dir"
-                    || other == "--no-overwrite-dir"
                     || other == "--unlink-first"
                     || other == "-U"
                     || other == "--recursive-unlink"
@@ -2985,6 +2987,7 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
                 if args.to_stdout {
                     continue;
                 }
+                let existed_before = dest.exists();
                 fs::create_dir_all(&dest)?;
                 #[cfg(unix)]
                 {
@@ -2995,12 +2998,19 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
                         } else {
                             mode & !0o022
                         };
-                        // Ensure the directory is writable during
-                        // extraction. Defer the final mode restore to
-                        // after the loop so children (including symlinks
-                        // into read-only dirs) can still be created.
-                        fs::set_permissions(&dest, fs::Permissions::from_mode(effective | 0o700))?;
-                        deferred_dir_modes.push((dest.clone(), effective));
+                        // --no-overwrite-dir keeps an already-existing
+                        // directory's mode; otherwise use the archive's.
+                        // During the loop we still ensure u+wx so
+                        // children can be created.
+                        let final_mode = if existed_before && args.no_overwrite_dir {
+                            fs::metadata(&dest)
+                                .map(|m| m.permissions().mode() & 0o7777)
+                                .unwrap_or(effective)
+                        } else {
+                            effective
+                        };
+                        fs::set_permissions(&dest, fs::Permissions::from_mode(final_mode | 0o700))?;
+                        deferred_dir_modes.push((dest.clone(), final_mode));
                     }
                     if let Some(ref mode_str) = args.mode_override {
                         let _ = apply_mode_to_path(&dest, mode_str);
