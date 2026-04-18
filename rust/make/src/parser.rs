@@ -660,6 +660,7 @@ pub fn try_parse_assignment(line: &str) -> Option<Assignment> {
 
     // Try each operator (longest first to avoid partial matches)
     for (suffix, op) in [
+        (":::=", AssignOp::ImmediateRecursive),
         ("::=", AssignOp::Simple),
         (":=", AssignOp::Simple),
         ("?=", AssignOp::Conditional),

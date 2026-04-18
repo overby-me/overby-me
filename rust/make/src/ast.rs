@@ -70,11 +70,12 @@ pub struct Assignment {
 /// Assignment operators.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AssignOp {
-    Recursive,   // =
-    Simple,      // :=  or ::=
-    Conditional, // ?=
-    Append,      // +=
-    Shell,       // !=
+    Recursive,          // =
+    Simple,             // :=  or ::=
+    ImmediateRecursive, // :::= (expand RHS now, but store as recursive)
+    Conditional,        // ?=
+    Append,             // +=
+    Shell,              // !=
 }
 
 /// Conditional directives.

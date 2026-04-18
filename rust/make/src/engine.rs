@@ -102,6 +102,10 @@ pub struct Engine {
     /// them to child processes even after a makefile assignment has
     /// changed their value (and consequently their origin).
     env_inherited: RefCell<HashSet<String>>,
+    /// Names of variables assigned with `:::=`. Such vars are simply
+    /// expanded but a later `+=` appends text verbatim (recursive
+    /// semantics), matching GNU make.
+    immediate_recursive: RefCell<HashSet<String>>,
     // Options
     pub jobs: usize,
     pub keep_going: bool,
@@ -190,6 +194,7 @@ impl Engine {
             eval_queue: RefCell::new(Vec::new()),
             pending_includes: RefCell::new(Vec::new()),
             env_inherited: RefCell::new(HashSet::new()),
+            immediate_recursive: RefCell::new(HashSet::new()),
             jobs: 1,
             keep_going: false,
             dry_run: false,
@@ -295,24 +300,16 @@ impl Engine {
         // C compilation. Recipes use the GNU-make canonical templates so
         // overrides like `CC="@echo cc"` or `OUTPUT_OPTION=` work as
         // documented.
-        self.add_pattern_rule(
-            "%.o",
-            &["%.c"],
-            &["$(COMPILE.c) $(OUTPUT_OPTION) $<"],
-        );
-        self.add_pattern_rule(
-            "%.o",
-            &["%.cpp"],
-            &["$(COMPILE.cpp) $(OUTPUT_OPTION) $<"],
-        );
-        self.add_pattern_rule(
-            "%.o",
-            &["%.cc"],
-            &["$(COMPILE.cc) $(OUTPUT_OPTION) $<"],
-        );
+        self.add_pattern_rule("%.o", &["%.c"], &["$(COMPILE.c) $(OUTPUT_OPTION) $<"]);
+        self.add_pattern_rule("%.o", &["%.cpp"], &["$(COMPILE.cpp) $(OUTPUT_OPTION) $<"]);
+        self.add_pattern_rule("%.o", &["%.cc"], &["$(COMPILE.cc) $(OUTPUT_OPTION) $<"]);
         self.add_pattern_rule("%.o", &["%.s"], &["$(COMPILE.s) -o $@ $<"]);
         // Linking
-        self.add_pattern_rule("%", &["%.o"], &["$(LINK.o) $^ $(LOADLIBES) $(LDLIBS) -o $@"]);
+        self.add_pattern_rule(
+            "%",
+            &["%.o"],
+            &["$(LINK.o) $^ $(LOADLIBES) $(LDLIBS) -o $@"],
+        );
 
         self.set_var_default("CC", "cc");
         self.set_var_default("CXX", "g++");
@@ -329,10 +326,7 @@ impl Engine {
         self.set_var_default("ARFLAGS", "rv");
         self.set_var_default("TARGET_ARCH", "");
         self.set_var_default("OUTPUT_OPTION", "-o $@");
-        self.set_var_default(
-            "COMPILE.c",
-            "$(CC) $(CFLAGS) $(CPPFLAGS) $(TARGET_ARCH) -c",
-        );
+        self.set_var_default("COMPILE.c", "$(CC) $(CFLAGS) $(CPPFLAGS) $(TARGET_ARCH) -c");
         self.set_var_default(
             "COMPILE.cpp",
             "$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(TARGET_ARCH) -c",
@@ -341,14 +335,8 @@ impl Engine {
             "COMPILE.cc",
             "$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(TARGET_ARCH) -c",
         );
-        self.set_var_default(
-            "COMPILE.s",
-            "$(AS) $(ASFLAGS)",
-        );
-        self.set_var_default(
-            "LINK.o",
-            "$(CC) $(LDFLAGS) $(TARGET_ARCH)",
-        );
+        self.set_var_default("COMPILE.s", "$(AS) $(ASFLAGS)");
+        self.set_var_default("LINK.o", "$(CC) $(LDFLAGS) $(TARGET_ARCH)");
     }
 
     /// Check if a target name is an old-style suffix rule (e.g., ".c.o").
@@ -619,6 +607,10 @@ impl Engine {
                 let expanded = expand::expand(body, self);
                 self.set_var_with_origin(name, &expanded, flavor, origin);
             }
+            AssignOp::ImmediateRecursive => {
+                let expanded = expand::expand(body, self);
+                self.set_var_with_origin(name, &expanded, VarFlavor::Recursive, origin);
+            }
             AssignOp::Shell => {
                 let cmd = expand::expand(body, self);
                 let shell = self.lookup_var_or("SHELL", "/bin/sh");
@@ -805,6 +797,17 @@ impl Engine {
                 let value = expand::expand(&assign.value, self);
                 self.set_var_with_origin(&name, &value, VarFlavor::Simple, origin);
             }
+            AssignOp::ImmediateRecursive => {
+                // `:::=` expands RHS immediately. The result is stored
+                // as recursive flavor so a later `+=` appends raw text
+                // that WILL be re-expanded on lookup. To avoid double
+                // expansion of the original RHS, `$` is escaped to `$$`
+                // so the one additional expansion round is a no-op for
+                // the already-expanded portion.
+                let expanded = expand::expand(&assign.value, self);
+                let escaped = expanded.replace('$', "$$");
+                self.set_var_with_origin(&name, &escaped, VarFlavor::Recursive, origin);
+            }
             AssignOp::Recursive => {
                 self.set_var_with_origin(&name, &assign.value, VarFlavor::Recursive, origin);
             }
@@ -818,13 +821,20 @@ impl Engine {
                 let existing = self.lookup_var_raw(&name);
                 // GNU make: if var is simple-flavored, RHS is expanded at
                 // append time. Recursive / new vars keep RHS unexpanded.
-                let rhs = if existing_flavor == VarFlavor::Simple {
-                    expand::expand(&assign.value, self)
-                } else {
+                // Vars assigned with `:::=` keep append RHS raw too
+                // (recursive semantics) even though the stored flavor is
+                // Simple.
+                let keep_raw = existing_flavor != VarFlavor::Simple
+                    || self.immediate_recursive.borrow().contains(&name);
+                let rhs = if keep_raw {
                     assign.value.clone()
+                } else {
+                    expand::expand(&assign.value, self)
                 };
                 let new_value = if existing.is_empty() {
                     rhs
+                } else if rhs.is_empty() {
+                    existing
                 } else {
                     format!("{existing} {rhs}")
                 };
