@@ -615,19 +615,36 @@ fn accept_and_spawn(
             Err(io::Error::last_os_error())
         }
         0 => {
+            // Child: set up the accepted fd and exec the command.  Any
+            // failure terminates the child — returning up into the parent's
+            // accept loop would cause a rogue second accept() from a
+            // fork()ed worker.
             unsafe { libc::close(listen_fd) };
 
             if inetd {
                 if unsafe { libc::dup2(conn_fd, 0) } < 0
                     || unsafe { libc::dup2(conn_fd, 1) } < 0
                 {
-                    return Err(io::Error::last_os_error());
+                    eprintln!(
+                        "dup2 of accepted fd failed: {}",
+                        io::Error::last_os_error()
+                    );
+                    process::exit(1);
                 }
                 unsafe { libc::close(conn_fd) };
-                exec_command(command, 0, fd_names)?;
+                if let Err(e) = exec_command(command, 0, fd_names) {
+                    eprintln!("exec {} failed: {e}", command.first().map(|s| s.as_str()).unwrap_or(""));
+                    process::exit(1);
+                }
             } else {
-                move_fd(conn_fd, LISTEN_FDS_START)?;
-                exec_command(command, 1, fd_names)?;
+                if let Err(e) = move_fd(conn_fd, LISTEN_FDS_START) {
+                    eprintln!("move_fd failed: {e}");
+                    process::exit(1);
+                }
+                if let Err(e) = exec_command(command, 1, fd_names) {
+                    eprintln!("exec {} failed: {e}", command.first().map(|s| s.as_str()).unwrap_or(""));
+                    process::exit(1);
+                }
             }
             process::exit(1);
         }
