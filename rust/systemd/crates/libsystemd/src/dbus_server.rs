@@ -98,7 +98,21 @@ mod inner {
 
         #[zbus(property)]
         fn can_reload(&self) -> bool {
-            false
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .map(|u| match &u.specific {
+                    crate::units::Specific::Service(srvc) => {
+                        !srvc.conf.reload.is_empty()
+                            || matches!(
+                                srvc.conf.srcv_type,
+                                crate::units::ServiceType::NotifyReload
+                            )
+                    }
+                    _ => false,
+                })
+                .unwrap_or(false)
         }
 
         #[zbus(property)]
