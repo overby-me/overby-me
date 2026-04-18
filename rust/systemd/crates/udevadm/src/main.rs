@@ -3106,10 +3106,59 @@ fn main() -> ExitCode {
                 return ExitCode::from(rc as u8);
             }
 
-            // Effective query: when `--property KEY` is given, synthesize
-            // an output that mirrors `-q property | grep ^KEY=`.  Not
-            // implemented here — falls through to normal query flow.
-            let _ = property;
+            // `--property KEY` / `-q property --property KEY` — print
+            // only that key (or its bare value with `--value`).
+            if let Some(prop_key) = property
+                && query == "property"
+            {
+                let mut syspaths: Vec<PathBuf> = Vec::new();
+                let resolve = |d: &str| -> Option<PathBuf> {
+                    if d.starts_with("/dev/") {
+                        devname_to_syspath(d)
+                    } else if let Some(sp) = device_id_to_syspath(d) {
+                        Some(sp)
+                    } else if d.ends_with(".device")
+                        && let Some(u) = systemd_unescape_path(d)
+                        && u.exists()
+                    {
+                        Some(u)
+                    } else {
+                        let sp = normalize_syspath(d);
+                        if sp.exists() { Some(sp) } else { None }
+                    }
+                };
+                if let Some(n) = name
+                    && let Some(sp) = resolve(n)
+                {
+                    syspaths.push(sp);
+                }
+                if let Some(p) = path
+                    && let Some(sp) = resolve(p)
+                {
+                    syspaths.push(sp);
+                }
+                for d in devices {
+                    if let Some(sp) = resolve(d) {
+                        syspaths.push(sp);
+                    }
+                }
+                for sp in &syspaths {
+                    let devpath = syspath_to_devpath(sp);
+                    let db = read_device_db_by_syspath(sp, &devpath);
+                    let mut props = read_sysfs_uevent(sp);
+                    for (k, v) in &db.env {
+                        props.insert(k.clone(), v.clone());
+                    }
+                    if let Some(val) = props.get(prop_key) {
+                        if value {
+                            println!("{val}");
+                        } else {
+                            println!("{prop_key}={val}");
+                        }
+                    }
+                }
+                return ExitCode::from(0);
+            }
 
             // --wait-for-initialization / -w — best-effort poll for the
             // device's udev database entry to appear within the given
