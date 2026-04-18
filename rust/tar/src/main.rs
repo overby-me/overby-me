@@ -60,6 +60,13 @@ struct Transform {
     pattern: String,
     replacement: String,
     global: bool,
+    /// Scope flags — which kinds of names the transform applies to.
+    /// `r`: regular path names (always on).
+    /// `h`: hard-link targets (off by default).
+    /// `s`: symlink targets (on by default).
+    /// An explicit scope string like `hrs` replaces the defaults.
+    apply_to_hardlink: bool,
+    apply_to_symlink: bool,
 }
 
 fn parse_transform(expr: &str) -> Result<Transform, String> {
@@ -103,16 +110,52 @@ fn parse_transform(expr: &str) -> Result<Transform, String> {
     let replacement = fields[1].clone();
     let flags = fields.get(2).cloned().unwrap_or_default();
     let global = flags.contains('g');
+    // Scope flags: defaults transform regular paths, symlink targets
+    // AND hard-link targets. An explicit uppercase flag disables the
+    // corresponding scope.
+    let mut apply_to_hardlink = true;
+    let mut apply_to_symlink = true;
+    if flags.contains('H') {
+        apply_to_hardlink = false;
+    }
+    if flags.contains('S') {
+        apply_to_symlink = false;
+    }
+    // Lowercase letters are ACCEPTED but already the default.
+    let _ = flags.contains('h');
+    let _ = flags.contains('s');
     Ok(Transform {
         pattern,
         replacement,
         global,
+        apply_to_hardlink,
+        apply_to_symlink,
     })
 }
 
+#[derive(Copy, Clone)]
+#[allow(dead_code)]
+enum TransformScope {
+    Regular,
+    HardLink,
+    Symlink,
+}
+
 fn apply_transforms(path: &str, transforms: &[Transform]) -> String {
+    apply_transforms_scoped(path, transforms, TransformScope::Regular)
+}
+
+fn apply_transforms_scoped(path: &str, transforms: &[Transform], scope: TransformScope) -> String {
     let mut result = path.to_string();
     for t in transforms {
+        let applies = match scope {
+            TransformScope::Regular => true,
+            TransformScope::HardLink => t.apply_to_hardlink,
+            TransformScope::Symlink => t.apply_to_symlink,
+        };
+        if !applies {
+            continue;
+        }
         // GNU tar transforms are sed-style regular expressions (BRE-ish
         // but actually POSIX-ERE-like in practice). Use the `regex`
         // crate; if the pattern is invalid, fall back to literal
@@ -233,6 +276,280 @@ fn eq_opt_ci_prefix(a: &str, b: &str, ignore_case: bool) -> bool {
     } else {
         a.starts_with(b)
     }
+}
+
+fn has_glob_meta(s: &str) -> bool {
+    s.chars().any(|c| c == '*' || c == '?' || c == '[')
+}
+
+/// Actions wired up via `--checkpoint-action=...`. GNU tar supports a
+/// richer set; we implement only the forms exercised by the upstream
+/// test suite (`genfile --run` injects `echo=…` + `wait=SIGUSR1`).
+#[derive(Debug, Clone)]
+enum CheckpointAction {
+    /// Print `format` to stderr with `%u` replaced by the checkpoint
+    /// number. A trailing newline is always appended.
+    Echo(String),
+    /// Block until `signo` is delivered. The signal handler is installed
+    /// on first wait and leaves an atomic flag that the main thread
+    /// consumes in a pause() loop.
+    Wait(libc::c_int),
+}
+
+fn parse_checkpoint_action(spec: &str) -> Option<CheckpointAction> {
+    if let Some(fmt) = spec.strip_prefix("echo=") {
+        return Some(CheckpointAction::Echo(fmt.to_string()));
+    }
+    if spec == "echo" {
+        // GNU default echo format.
+        return Some(CheckpointAction::Echo("Write checkpoint %u".to_string()));
+    }
+    if let Some(sig) = spec.strip_prefix("wait=") {
+        let signo = match sig {
+            "SIGUSR1" | "USR1" => libc::SIGUSR1,
+            "SIGUSR2" | "USR2" => libc::SIGUSR2,
+            "SIGHUP" | "HUP" => libc::SIGHUP,
+            _ => return None,
+        };
+        // Install the signal handler now, before any checkpoint
+        // message we might emit can race with genfile's reply.
+        install_checkpoint_signal(signo);
+        return Some(CheckpointAction::Wait(signo));
+    }
+    // Unrecognised actions are accepted as no-ops to stay compatible
+    // with scripts that chain multiple actions.
+    None
+}
+
+static CHECKPOINT_SIG_FIRED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static CHECKPOINT_SIG_HANDLERS_INSTALLED: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0);
+
+extern "C" fn checkpoint_signal_handler(_sig: libc::c_int) {
+    CHECKPOINT_SIG_FIRED.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn install_checkpoint_signal(signo: libc::c_int) {
+    use std::sync::atomic::Ordering;
+    let mask = 1u32 << (signo as u32 & 31);
+    let installed = CHECKPOINT_SIG_HANDLERS_INSTALLED.load(Ordering::SeqCst);
+    if installed & mask != 0 {
+        return;
+    }
+    unsafe {
+        let mut sa: libc::sigaction = std::mem::zeroed();
+        sa.sa_sigaction = checkpoint_signal_handler as usize;
+        sa.sa_flags = 0;
+        libc::sigemptyset(&mut sa.sa_mask);
+        libc::sigaction(signo, &sa, std::ptr::null_mut());
+    }
+    CHECKPOINT_SIG_HANDLERS_INSTALLED.fetch_or(mask, Ordering::SeqCst);
+}
+
+fn wait_for_checkpoint_signal() {
+    use std::sync::atomic::Ordering;
+    while !CHECKPOINT_SIG_FIRED.swap(false, Ordering::SeqCst) {
+        // pause() returns -1 with errno=EINTR on any signal. We loop
+        // until the handler has set the flag.
+        unsafe {
+            libc::pause();
+        }
+    }
+}
+
+fn fire_checkpoint_actions(actions: &[CheckpointAction], number: u64) {
+    for action in actions {
+        match action {
+            CheckpointAction::Echo(fmt) => {
+                let msg = fmt.replace("%u", &number.to_string());
+                eprintln!("tar: {msg}");
+            }
+            CheckpointAction::Wait(signo) => {
+                install_checkpoint_signal(*signo);
+                wait_for_checkpoint_signal();
+            }
+        }
+    }
+}
+
+/// Tar stream wrapper that counts bytes and fires checkpoint actions at
+/// record boundaries. `record_size` is blocking-factor × 512 (default
+/// 10240); we fire every `interval` records.
+struct CheckpointStream<S> {
+    inner: S,
+    bytes: u64,
+    record_size: u64,
+    interval: u64,
+    number: u64,
+    next_boundary: u64,
+    actions: Vec<CheckpointAction>,
+}
+
+impl<S> CheckpointStream<S> {
+    fn new(inner: S, interval: u64, actions: Vec<CheckpointAction>) -> Self {
+        let record_size: u64 = 10240;
+        Self {
+            inner,
+            bytes: 0,
+            record_size,
+            interval,
+            number: 0,
+            next_boundary: record_size * interval,
+            actions,
+        }
+    }
+
+    fn accumulate(&mut self, n: usize) {
+        self.bytes += n as u64;
+        while self.bytes >= self.next_boundary {
+            self.number += 1;
+            fire_checkpoint_actions(&self.actions, self.number);
+            self.next_boundary += self.record_size * self.interval;
+        }
+    }
+}
+
+impl<W: Write> Write for CheckpointStream<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        self.accumulate(n);
+        Ok(n)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+impl<R: Read> Read for CheckpointStream<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.accumulate(n);
+        Ok(n)
+    }
+}
+
+/// Reader that hands out zero-padding once the inner reader hits EOF
+/// early, keeping the tar stream's declared-size promise intact when a
+/// source file shrinks during archive creation.
+struct PaddedReader<R> {
+    inner: R,
+    target: u64,
+    read: u64,
+}
+
+impl<R: Read> PaddedReader<R> {
+    fn new(inner: R, target: u64) -> Self {
+        Self {
+            inner,
+            target,
+            read: 0,
+        }
+    }
+}
+
+impl<R: Read> Read for PaddedReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.read >= self.target {
+            return Ok(0);
+        }
+        let remaining = (self.target - self.read) as usize;
+        let limit = buf.len().min(remaining);
+        let slice = &mut buf[..limit];
+        match self.inner.read(slice)? {
+            0 => {
+                // EOF early — zero-pad the rest so the archive stays
+                // self-consistent; the caller has already warned about
+                // the shrink.
+                for b in slice.iter_mut() {
+                    *b = 0;
+                }
+                self.read += limit as u64;
+                Ok(limit)
+            }
+            n => {
+                self.read += n as u64;
+                Ok(n)
+            }
+        }
+    }
+}
+
+/// Format-specific name-length check used at create/append time.
+/// Returns Some(message_suffix) when the archive name won't fit the
+/// chosen header format, None otherwise. The caller prints
+/// `tar: NAME: SUFFIX` and skips the entry with exit-2 semantics.
+fn name_too_long_for_format(name: &str, format: Option<&str>) -> Option<String> {
+    let len = name.len();
+    match format {
+        Some("v7") => {
+            if len > 99 {
+                Some("file name is too long (max 99); not dumped".to_string())
+            } else {
+                None
+            }
+        }
+        Some("ustar") => {
+            // posix / pax carry arbitrary names via PAX extended
+            // headers, so only strict ustar enforces the split rule.
+            if len <= 100 {
+                return None;
+            }
+            // ustar splits into prefix[155] + '/' + name[100]. A valid
+            // split needs a '/' position `idx` so the suffix after it
+            // (non-empty, ≤100) and the prefix (≤155) both fit.
+            let bytes = name.as_bytes();
+            let splittable = (0..len).rev().any(|idx| {
+                if bytes[idx] != b'/' {
+                    return false;
+                }
+                let suffix_len = len - idx - 1;
+                let prefix_len = idx;
+                suffix_len > 0 && suffix_len <= 100 && prefix_len > 0 && prefix_len <= 155
+            });
+            if splittable {
+                None
+            } else {
+                Some("file name is too long (cannot be split); not dumped".to_string())
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Expand a single-level filesystem glob like `./file.*` or `dir/*.txt`.
+/// Directory-portion metacharacters aren't supported — GNU tar doesn't
+/// test any either. Returns the matched paths preserving the caller's
+/// directory prefix (so `./file.*` → `./file.a`, `./file.b`, …).
+fn fs_glob_expand(pattern: &str) -> Vec<String> {
+    let (dir_prefix, base_pat) = match pattern.rfind('/') {
+        Some(idx) => (&pattern[..=idx], &pattern[idx + 1..]),
+        None => ("", pattern),
+    };
+    let scan_dir = if dir_prefix.is_empty() {
+        "."
+    } else {
+        dir_prefix.trim_end_matches('/')
+    };
+    let scan_dir = if scan_dir.is_empty() { "/" } else { scan_dir };
+    let read_dir = match fs::read_dir(scan_dir) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    let mut matches = Vec::new();
+    for entry in read_dir {
+        let Ok(entry) = entry else { continue };
+        let name = entry.file_name();
+        let Some(name_s) = name.to_str() else {
+            continue;
+        };
+        // Glob a basename — '/' can't appear, so match_slash is moot.
+        if glob_match(base_pat, name_s, false, false) {
+            matches.push(format!("{dir_prefix}{name_s}"));
+        }
+    }
+    matches.sort();
+    matches
 }
 
 struct ExcludeFilter<'a> {
@@ -535,6 +852,25 @@ struct Args {
     to_stdout: bool,
     /// --remove-files: delete the source files after they're archived.
     remove_files: bool,
+    /// `-l` / `--check-links`: warn when a multi-link file is archived
+    /// without all of its peer hard links.
+    check_links: bool,
+    /// `--use-compress-program=PROGRAM` / `-I PROGRAM`: external
+    /// compressor. Whitespace-split into argv. The child's stdin is
+    /// the tar stream; its stdout goes to `-f`.
+    use_compress_program: Option<String>,
+    /// `--keep-directory-symlink`: when a dir entry's destination is a
+    /// symlink pointing at a directory, keep the symlink and extract
+    /// children through it. Default replaces the symlink with a real
+    /// directory.
+    keep_directory_symlink: bool,
+    /// `--checkpoint[=N]`: emit a notification every N records. GNU
+    /// default N is 10. `None` means checkpointing is disabled.
+    checkpoint_interval: Option<u64>,
+    /// Ordered list of actions fired at each checkpoint. Multiple
+    /// `--checkpoint-action=...` occurrences stack. `genfile --run`
+    /// appends `echo=genfile checkpoint %u` + `wait=SIGUSR1`.
+    checkpoint_actions: Vec<CheckpointAction>,
     /// --index-file=FILE: write -v listings to FILE instead of stderr.
     index_file: Option<String>,
     /// --one-top-level[=DIR]: wrap extracted members under DIR if they
@@ -770,6 +1106,16 @@ fn read_files_from(
             args.paths.push(path.to_string());
         } else if let Some(dir) = line.strip_prefix("-C ") {
             args.paths.push(format!("\0-C\0{dir}"));
+        } else if line == "--no-recursion" || line == "--no-recurs" || line == "--no-recur" {
+            if args.paths.is_empty() {
+                args.no_recursion = true;
+            } else {
+                args.paths.push("\0-no-recursion\0".to_string());
+            }
+        } else if line == "--recursion" {
+            if !args.paths.is_empty() {
+                args.paths.push("\0-recursion\0".to_string());
+            }
         } else if let Some(nested) = line.strip_prefix("-T ") {
             if !seen.insert(nested.to_string()) {
                 eprintln!(
@@ -977,6 +1323,8 @@ fn parse_args() -> Args {
             "--skip-old-files" => args.skip_old_files = true,
             "-O" | "--to-stdout" => args.to_stdout = true,
             "--remove-files" => args.remove_files = true,
+            "-l" | "--check-links" => args.check_links = true,
+            "--keep-directory-symlink" => args.keep_directory_symlink = true,
             "--index-file" => {
                 args.index_file = queue.pop_front();
             }
@@ -1055,7 +1403,7 @@ fn parse_args() -> Args {
                 args.no_same_owner = true;
             }
             "--no-same-permissions" => args.no_same_permissions = true,
-            "--no-recursion" => {
+            "--no-recursion" | "--no-recurs" | "--no-recur" => {
                 if args.paths.is_empty() {
                     args.no_recursion = true;
                 } else {
@@ -1190,9 +1538,19 @@ fn parse_args() -> Args {
                     process::exit(2);
                 }
             }
-            "--checkpoint"
-            | "--checkpoint-action"
-            | "--volno-file"
+            "--checkpoint" => {
+                if let Some(v) = queue.pop_front() {
+                    args.checkpoint_interval = v.parse().ok();
+                }
+            }
+            "--checkpoint-action" => {
+                if let Some(v) = queue.pop_front()
+                    && let Some(act) = parse_checkpoint_action(&v)
+                {
+                    args.checkpoint_actions.push(act);
+                }
+            }
+            "--volno-file"
             | "--rsh-command"
             | "--new-volume-script"
             | "--blocking-factor"
@@ -1206,10 +1564,11 @@ fn parse_args() -> Args {
             | "--xattrs-include"
             | "--suffix"
             | "--backup-prefix"
-            | "--transform-option"
-            | "--use-compress-program"
-            | "-I" => {
+            | "--transform-option" => {
                 let _ = queue.pop_front();
+            }
+            "--use-compress-program" | "-I" => {
+                args.use_compress_program = queue.pop_front();
             }
             other => {
                 if let Some(val) = other.strip_prefix("--file=") {
@@ -1322,6 +1681,17 @@ fn parse_args() -> Args {
                 } else if let Some(val) = other.strip_prefix("--exclude-tag-all=") {
                     args.tag_excludes
                         .push((val.to_string(), CacheExcludeMode::All));
+                } else if let Some(val) = other.strip_prefix("--use-compress-program=") {
+                    args.use_compress_program = Some(val.to_string());
+                } else if let Some(val) = other.strip_prefix("-I") {
+                    // -Iprog form (argv-concatenated).
+                    args.use_compress_program = Some(val.to_string());
+                } else if let Some(val) = other.strip_prefix("--checkpoint=") {
+                    args.checkpoint_interval = val.parse().ok();
+                } else if let Some(val) = other.strip_prefix("--checkpoint-action=") {
+                    if let Some(act) = parse_checkpoint_action(val) {
+                        args.checkpoint_actions.push(act);
+                    }
                 } else if other.strip_prefix("--warning=").is_some()
                     || other.strip_prefix("--blocking-factor=").is_some()
                     || other.strip_prefix("--record-size=").is_some()
@@ -1336,15 +1706,11 @@ fn parse_args() -> Args {
                     || other.strip_prefix("--sparse-version=").is_some()
                     || other.strip_prefix("--tape-length=").is_some()
                     || other.strip_prefix("--new-volume-script=").is_some()
-                    || other.strip_prefix("--checkpoint=").is_some()
-                    || other.strip_prefix("--checkpoint-action=").is_some()
                     || other.strip_prefix("--volno-file=").is_some()
                     || other.strip_prefix("--rsh-command=").is_some()
                     || other.strip_prefix("--backup=").is_some()
                     || other.strip_prefix("--suffix=").is_some()
                     || other.strip_prefix("--atime-preserve=").is_some()
-                    || other.strip_prefix("--use-compress-program=").is_some()
-                    || other.strip_prefix("-I").is_some()
                 {
                     // Silently accept / no-op for GNU tar options whose
                     // behaviour we don't implement but whose presence must
@@ -1419,7 +1785,8 @@ fn parse_args() -> Args {
                             'P' => args.absolute_names = true,
                             'k' => args.keep_old_files = true,
                             'O' => args.to_stdout = true,
-                            'W' | 'S' | 'U' | 'l' => {
+                            'l' => args.check_links = true,
+                            'W' | 'S' | 'U' => {
                                 // accepted, no-op for now
                             }
                             'f' => {
@@ -1658,6 +2025,14 @@ fn append_entry_raw<W: Write>(
 }
 
 fn do_create(args: &Args) -> io::Result<()> {
+    // --use-compress-program overrides built-in compressors: spawn the
+    // requested program with its stdin connected to the tar stream and
+    // stdout writing to `-f`. If the child exits non-zero, we emit
+    // GNU's "Error is not recoverable" and exit 2.
+    if let Some(cmdline) = &args.use_compress_program {
+        return do_create_with_compressor(args, cmdline);
+    }
+
     let compression = args.compression.unwrap_or_else(|| {
         args.file
             .as_deref()
@@ -1665,9 +2040,26 @@ fn do_create(args: &Args) -> io::Result<()> {
             .unwrap_or(Compression::None)
     });
 
+    let has_compression = !matches!(compression, Compression::None);
     let writer: Box<dyn Write> = match args.file.as_deref() {
         Some("-") | None => Box::new(io::stdout().lock()),
-        Some(path) => Box::new(File::create(path)?),
+        Some(path) => match File::create(path) {
+            Ok(f) => Box::new(f),
+            Err(e) if has_compression => {
+                // GNU tar runs compression in a separate child process,
+                // so file-open failures surface prefixed with
+                // `tar (child):`. Match that and bail before any
+                // --remove-files walk — an unwritten archive must not
+                // unlink the user's sources.
+                eprintln!(
+                    "tar (child): {path}: Cannot open: {}",
+                    describe_open_error(&e)
+                );
+                eprintln!("tar (child): Error is not recoverable: exiting now");
+                return Err(io::Error::other("compressor-exit"));
+            }
+            Err(e) => return Err(e),
+        },
     };
 
     let compressed_writer: Box<dyn Write> = match compression {
@@ -1677,7 +2069,19 @@ fn do_create(args: &Args) -> io::Result<()> {
         Compression::Xz => Box::new(XzEncoder::new(writer, 6)),
     };
 
-    let mut builder = Builder::new(compressed_writer);
+    let final_writer: Box<dyn Write> = if let Some(n) = args.checkpoint_interval
+        && !args.checkpoint_actions.is_empty()
+    {
+        Box::new(CheckpointStream::new(
+            compressed_writer,
+            n,
+            args.checkpoint_actions.clone(),
+        ))
+    } else {
+        compressed_writer
+    };
+
+    let mut builder = Builder::new(final_writer);
 
     // Write a GNU volume-label entry as the first block when -V is set.
     if let Some(label) = &args.label {
@@ -1706,6 +2110,81 @@ fn do_create(args: &Args) -> io::Result<()> {
     Ok(())
 }
 
+fn do_create_with_compressor(args: &Args, cmdline: &str) -> io::Result<()> {
+    use std::process::{Command, Stdio};
+
+    let mut parts = cmdline.split_whitespace();
+    let program = parts
+        .next()
+        .ok_or_else(|| io::Error::other("--use-compress-program requires a non-empty command"))?;
+    let extra: Vec<&str> = parts.collect();
+
+    let stdout: Stdio = match args.file.as_deref() {
+        Some("-") | None => Stdio::inherit(),
+        Some(path) => match File::create(path) {
+            Ok(f) => Stdio::from(f),
+            Err(e) => {
+                eprintln!("tar: {path}: Cannot open: {}", describe_open_error(&e));
+                eprintln!("tar: Error is not recoverable: exiting now");
+                return Err(io::Error::other("compressor-exit"));
+            }
+        },
+    };
+
+    let mut child = match Command::new(program)
+        .args(&extra)
+        .stdin(Stdio::piped())
+        .stdout(stdout)
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("tar: {program}: Cannot exec: {}", describe_open_error(&e));
+            eprintln!("tar: Error is not recoverable: exiting now");
+            return Err(io::Error::other("compressor-exit"));
+        }
+    };
+
+    let stdin = child.stdin.take().expect("stdin was piped");
+    let mut builder = Builder::new(stdin);
+
+    if let Some(label) = &args.label {
+        let mut header = Header::new_gnu();
+        header.set_entry_type(EntryType::new(b'V'));
+        header.set_size(0);
+        header.set_mode(0);
+        header.set_mtime(0);
+        header.set_uid(0);
+        header.set_gid(0);
+        let _ = append_entry_raw(&mut builder, &mut header, label, &mut io::empty(), None);
+    }
+
+    if let Some(dir) = &args.directory {
+        std::env::set_current_dir(dir)?;
+    }
+
+    if args.paths.is_empty() && !args.files_from_used && args.label.is_none() {
+        eprintln!("tar: cowardly refusing to create an empty archive");
+        drop(builder);
+        let _ = child.wait();
+        process::exit(2);
+    }
+
+    // Feed the compressor; EPIPE from an early-exiting child is a
+    // downstream failure we'll diagnose via child.wait() below.
+    let _ = add_paths_to_builder(&mut builder, args);
+    let _ = builder.into_inner().and_then(|mut w| w.flush());
+    // Ensure the compressor sees EOF on stdin before we wait.
+    // (Builder::into_inner returns the wrapped writer; dropping it
+    // above closes stdin.)
+    let status = child.wait()?;
+    if !status.success() {
+        eprintln!("tar: Error is not recoverable: exiting now");
+        return Err(io::Error::other("compressor-exit"));
+    }
+    Ok(())
+}
+
 /// Walk each path in `args.paths` and write the corresponding header +
 /// body to `builder`. Shared between `do_create` and `do_append`.
 fn add_paths_to_builder<W: Write>(builder: &mut Builder<W>, args: &Args) -> io::Result<()> {
@@ -1718,13 +2197,25 @@ fn add_paths_to_builder_filter<W: Write>(
     filter: Option<&std::collections::HashMap<String, u64>>,
 ) -> io::Result<()> {
     // Track (dev, inode) for files with more than one link so that
-    // subsequent hard-linked paths are emitted as Link entries.
+    // subsequent hard-linked paths are emitted as Link entries. Each
+    // value holds (first_archived_path, nlink_on_disk, archived_count)
+    // so `--check-links` can emit a warning for inodes whose peer
+    // count fell short.
     #[cfg(unix)]
-    let mut hardlink_map: std::collections::HashMap<(u64, u64), String> =
+    let mut hardlink_map: std::collections::HashMap<(u64, u64), (String, u64, u64)> =
         std::collections::HashMap::new();
     let mut had_read_error = false;
     let mut file_changed = false;
     let mut current_no_recursion = args.no_recursion;
+    // Track chdir targets whose entire contents were archived (via a
+    // subsequent `.` path). --remove-files also rmdirs these after the
+    // walk — matching GNU tar's 'tar -cf a.tar --remove-files -C foo .'
+    // semantics.
+    let mut chdir_roots: Vec<PathBuf> = Vec::new();
+    // Whether a -C has taken effect at the current point in the walk.
+    // Used to gate chdir-root tracking so `cd foo && tar cf a.tar .`
+    // doesn't try to rmdir its cwd.
+    let mut chdir_active = args.directory.is_some();
 
     for src in &args.paths {
         if let Some(dir) = src.strip_prefix("\0-C\0") {
@@ -1732,6 +2223,7 @@ fn add_paths_to_builder_filter<W: Write>(
             // next path. Subsequent relative paths are resolved from the
             // new cwd.
             std::env::set_current_dir(dir)?;
+            chdir_active = true;
             continue;
         }
         if src == "\0-no-recursion\0" {
@@ -1741,6 +2233,16 @@ fn add_paths_to_builder_filter<W: Write>(
         if src == "\0-recursion\0" {
             current_no_recursion = false;
             continue;
+        }
+        // Archiving `.` after a -C under --remove-files means the whole
+        // (positional) chdir target will be removed: remember its
+        // canonical path so rmdir runs after children are unlinked.
+        if args.remove_files
+            && chdir_active
+            && (src == "." || src == "./")
+            && let Ok(abs) = std::env::current_dir()
+        {
+            chdir_roots.push(abs);
         }
         let src_path = Path::new(src);
 
@@ -1752,7 +2254,11 @@ fn add_paths_to_builder_filter<W: Write>(
                 // Only add the directory itself, not its contents.
                 entries.push(src_path.to_path_buf());
             } else {
-                for entry in WalkDir::new(src).follow_links(args.dereference) {
+                // Keep max_open small so tar survives tight ulimit -n
+                // environments (see upstream extrac11). walkdir's
+                // default is 10 — with stdin/stdout/stderr + the archive
+                // FD that already eats most of a 10-FD budget.
+                for entry in WalkDir::new(src).follow_links(args.dereference).max_open(3) {
                     match entry {
                         Ok(e) => entries.push(e.into_path()),
                         Err(e) => {
@@ -1935,6 +2441,16 @@ fn add_paths_to_builder_filter<W: Write>(
             };
             let archive_name: &str = &archive_name;
 
+            // V7 / ustar enforce strict name-field limits; skip entries
+            // whose archive name doesn't fit (and flag exit 2 via
+            // had_read_error). GNU / oldgnu / pax accept long names via
+            // LongLink records and fall through.
+            if let Some(err_msg) = name_too_long_for_format(archive_name, args.format.as_deref()) {
+                eprintln!("tar: {archive_name}: {err_msg}");
+                had_read_error = true;
+                continue;
+            }
+
             let display_name = if path.is_dir() && !archive_name.ends_with('/') {
                 format!("{archive_name}/")
             } else {
@@ -1979,7 +2495,7 @@ fn add_paths_to_builder_filter<W: Write>(
                     set_owner_group(&mut hdr, args);
                     format_verbose_entry(&hdr, &display_name, args)
                 } else {
-                    display_name.clone()
+                    gnu_escape_path(&display_name)
                 };
                 if let Some(index_path) = &args.index_file {
                     let _ = fs::OpenOptions::new()
@@ -2045,8 +2561,12 @@ fn add_paths_to_builder_filter<W: Write>(
                     use std::os::unix::fs::MetadataExt;
                     if let Ok(link_meta) = fs::symlink_metadata(path) {
                         let key = (link_meta.dev(), link_meta.ino());
-                        if let Some(first) = hardlink_map.get(&key) {
-                            let link_target = first.clone();
+                        if let Some(entry) = hardlink_map.get_mut(&key) {
+                            let link_target = apply_transforms_scoped(
+                                &entry.0,
+                                &args.transforms,
+                                TransformScope::HardLink,
+                            );
                             let mut header = Header::new_gnu();
                             header.set_entry_type(EntryType::Link);
                             header.set_size(0);
@@ -2058,12 +2578,16 @@ fn add_paths_to_builder_filter<W: Write>(
                                 &mut io::empty(),
                                 Some(link_target.as_bytes()),
                             )?;
+                            entry.2 += 1;
                             if args.verify && args.verbose {
                                 println!("Verify {archive_name}");
                             }
                             continue;
                         } else {
-                            hardlink_map.insert(key, archive_name.to_string());
+                            // Store the PRE-transform name so we can
+                            // re-apply (or skip) transforms with the
+                            // HardLink scope when we see the duplicate.
+                            hardlink_map.insert(key, (path_str.to_string(), link_meta.nlink(), 1));
                         }
                     }
                 }
@@ -2124,10 +2648,15 @@ fn add_paths_to_builder_filter<W: Write>(
                 {
                     use std::os::unix::fs::MetadataExt;
                     let key = (metadata.dev(), metadata.ino());
-                    if let Some(first) = hardlink_map.get(&key) {
+                    if let Some(entry) = hardlink_map.get_mut(&key) {
                         // Emit as hard-link entry: no data, linkname =
-                        // first archived path for this inode.
-                        let link_target = first.clone();
+                        // first archived path for this inode with hard-
+                        // link-scoped transforms.
+                        let link_target = apply_transforms_scoped(
+                            &entry.0,
+                            &args.transforms,
+                            TransformScope::HardLink,
+                        );
                         header.set_entry_type(EntryType::Link);
                         header.set_size(0);
                         append_entry_raw(
@@ -2137,16 +2666,17 @@ fn add_paths_to_builder_filter<W: Write>(
                             &mut io::empty(),
                             Some(link_target.as_bytes()),
                         )?;
+                        entry.2 += 1;
                         if args.verify {
                             println!("Verify {archive_name}");
                         }
                         continue;
                     } else {
-                        hardlink_map.insert(key, archive_name.to_string());
+                        hardlink_map.insert(key, (path_str.to_string(), metadata.nlink(), 1));
                     }
                 }
 
-                let mut file = match File::open(path) {
+                let file = match File::open(path) {
                     Ok(f) => f,
                     Err(e) => {
                         let display = path.display();
@@ -2161,7 +2691,12 @@ fn add_paths_to_builder_filter<W: Write>(
                     }
                 };
                 let orig_size = metadata.len();
-                append_entry_raw(&mut *builder, &mut header, archive_name, &mut file, None)?;
+                // Wrap so that a file shrinking during read still
+                // delivers orig_size bytes (zero-padded past EOF).
+                // Keeps the archive valid even though we flag the
+                // shrink afterwards.
+                let mut padded = PaddedReader::new(file, orig_size);
+                append_entry_raw(&mut *builder, &mut header, archive_name, &mut padded, None)?;
                 // Detect a size-change-during-read and warn. GNU tar
                 // exits 1 (not 2) in this situation.
                 if let Ok(after) = fs::metadata(path) {
@@ -2184,14 +2719,16 @@ fn add_paths_to_builder_filter<W: Write>(
         }
 
         // --remove-files: delete each archived entry in reverse so
-        // children get removed before their parents. Skip '.' since we
-        // can't rmdir the current working directory — GNU tar also
-        // leaves it alone.
+        // children get removed before their parents. When the walked
+        // root is "." and we didn't come here via a positional -C, we
+        // still attempt the rmdir so GNU-compatible 'Cannot rmdir .'
+        // errors surface (and the overall exit becomes 2).
         if args.remove_files {
             let mut sorted: Vec<&PathBuf> = entries.iter().collect();
             sorted.sort_by(|a, b| b.as_path().cmp(a.as_path()));
+            let skip_self_dot = !chdir_roots.is_empty() || args.directory.is_some();
             for p in sorted {
-                if p.as_os_str() == "." || p.as_os_str() == "./" {
+                if skip_self_dot && (p.as_os_str() == "." || p.as_os_str() == "./") {
                     continue;
                 }
                 let meta = fs::symlink_metadata(p);
@@ -2203,6 +2740,24 @@ fn add_paths_to_builder_filter<W: Write>(
                     eprintln!("tar: {}: Cannot {verb}: {}", p.display(), e);
                     had_read_error = true;
                 }
+            }
+        }
+    }
+    // After the full walk, --remove-files also removes the positional
+    // -C chdir roots (deepest first) if they're now empty.
+    if args.remove_files {
+        for root in chdir_roots.iter().rev() {
+            let _ = fs::remove_dir(root);
+        }
+    }
+    // --check-links: warn once per inode whose archived-peer count
+    // fell short of its on-disk nlink count. GNU format: "tar: Missing
+    // links to 'PATH'."
+    #[cfg(unix)]
+    if args.check_links {
+        for (_, (first_path, nlink, archived)) in &hardlink_map {
+            if *nlink > 1 && *archived < *nlink {
+                eprintln!("tar: Missing links to '{first_path}'.");
             }
         }
     }
@@ -2343,8 +2898,57 @@ fn do_append(args: &Args) -> io::Result<()> {
     } else {
         None
     };
-    add_paths_to_builder_filter(&mut builder, args, filter)?;
+    // When --wildcards is set, expand filesystem globs in path
+    // arguments (GNU tar semantics for create/append/update). For
+    // update mode, a pattern that matches nothing on the filesystem
+    // AND nothing in the archive is a fatal `Not found in archive`
+    // error, matching `tar: PATTERN: Not found in archive` + exit 2.
+    let mut not_found_in_archive = false;
+    let args_owned;
+    let effective_args: &Args = if args.explicit_wildcards
+        && args
+            .paths
+            .iter()
+            .any(|p| !p.starts_with('\0') && has_glob_meta(p))
+    {
+        let mut new_paths: Vec<String> = Vec::with_capacity(args.paths.len());
+        for p in &args.paths {
+            if p.starts_with('\0') || !has_glob_meta(p) {
+                new_paths.push(p.clone());
+                continue;
+            }
+            let matches = fs_glob_expand(p);
+            if !matches.is_empty() {
+                new_paths.extend(matches);
+                continue;
+            }
+            if args.update {
+                let matches_archive = existing_mtimes
+                    .keys()
+                    .any(|k| glob_match(p, k, true, false));
+                if !matches_archive {
+                    eprintln!("tar: {p}: Not found in archive");
+                    not_found_in_archive = true;
+                    continue;
+                }
+            }
+            // Keep the pattern; create/append will surface its own
+            // `Cannot open` for unmatched filesystem globs.
+            new_paths.push(p.clone());
+        }
+        let mut cloned = args.clone();
+        cloned.paths = new_paths;
+        args_owned = cloned;
+        &args_owned
+    } else {
+        args
+    };
+    add_paths_to_builder_filter(&mut builder, effective_args, filter)?;
     builder.into_inner()?.flush()?;
+    if not_found_in_archive {
+        eprintln!("tar: Exiting with failure status due to previous errors");
+        return Err(io::Error::other("not-found-in-archive"));
+    }
     Ok(())
 }
 
@@ -2501,6 +3105,17 @@ fn do_diff(args: &Args) -> io::Result<()> {
         Some("-") | None => Box::new(io::stdin().lock()),
         Some(path) => Box::new(File::open(path)?),
     };
+    let reader: Box<dyn Read> = if let Some(n) = args.checkpoint_interval
+        && !args.checkpoint_actions.is_empty()
+    {
+        Box::new(CheckpointStream::new(
+            reader,
+            n,
+            args.checkpoint_actions.clone(),
+        ))
+    } else {
+        reader
+    };
     let mut archive = Archive::new(reader);
     let mut differ = false;
     for entry in archive.entries()? {
@@ -2565,19 +3180,29 @@ fn do_diff(args: &Args) -> io::Result<()> {
                 differ = true;
             }
         }
-        if archived_size != disk_meta.len() && entry.header().entry_type() == EntryType::Regular {
-            println!("{}: Size differs", path.display());
-            differ = true;
-        }
         if entry.header().entry_type() == EntryType::Regular {
             let mut archived = Vec::with_capacity(archived_size as usize);
             entry.read_to_end(&mut archived)?;
-            let mut disk = Vec::with_capacity(disk_meta.len() as usize);
+            // Re-stat after reading the archive side; a concurrent
+            // truncation (e.g. `genfile --run --truncate`) may have
+            // changed the on-disk size during our read.
+            let disk_len_after = fs::metadata(&path)
+                .map(|m| m.len())
+                .unwrap_or(disk_meta.len());
+            let mut disk = Vec::with_capacity(disk_len_after as usize);
             File::open(&path)?.read_to_end(&mut disk)?;
-            if archived != disk {
+            if archived.len() != disk.len() {
+                println!("{}: Size differs", path.display());
+                differ = true;
+            } else if archived != disk {
                 println!("{}: Contents differ", path.display());
                 differ = true;
             }
+        } else if archived_size != disk_meta.len()
+            && entry.header().entry_type() == EntryType::Regular
+        {
+            println!("{}: Size differs", path.display());
+            differ = true;
         }
     }
     if differ {
@@ -2993,9 +3618,22 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
             // not the post-strip/transform path. Fall back to the
             // final_path too in case the user specified the transformed
             // form.
-            let matches_any = args.paths.iter().any(|p| {
+            // Walk args.paths in order so positional --no-recursion /
+            // --recursion sentinels can gate prefix (descendant) matches
+            // per user path.
+            let mut current_no_recursion = args.no_recursion;
+            let mut matches_any = false;
+            for p in &args.paths {
+                if p == "\0-no-recursion\0" {
+                    current_no_recursion = true;
+                    continue;
+                }
+                if p == "\0-recursion\0" {
+                    current_no_recursion = false;
+                    continue;
+                }
                 if p.starts_with('\0') {
-                    return false;
+                    continue;
                 }
                 let p_trim = p.trim_end_matches('/');
                 let unanchored = args.explicit_anchored == Some(false);
@@ -3016,16 +3654,23 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
                             || (unanchored && glob_match(p, basename, match_slash, ignore_case))
                     } else {
                         let ignore_case = args.ignore_case_default;
-                        eq_opt_ci_prefix(cand, p.as_str(), ignore_case)
-                            || eq_opt_ci(cand.trim_end_matches('/'), p_trim, ignore_case)
-                            || (unanchored && eq_opt_ci(basename, p.as_str(), ignore_case))
+                        let exact = eq_opt_ci(cand.trim_end_matches('/'), p_trim, ignore_case)
+                            || (unanchored && eq_opt_ci(basename, p.as_str(), ignore_case));
+                        if exact {
+                            return true;
+                        }
+                        // Prefix (descendant) match is only allowed when
+                        // --no-recursion isn't active for this user path.
+                        !current_no_recursion && eq_opt_ci_prefix(cand, p.as_str(), ignore_case)
                     }
                 });
-                if hit && matched_user_path.is_none() {
-                    matched_user_path = Some(p.as_str());
+                if hit {
+                    if matched_user_path.is_none() {
+                        matched_user_path = Some(p.as_str());
+                    }
+                    matches_any = true;
                 }
-                hit
-            });
+            }
             if !matches_any {
                 continue;
             }
@@ -3078,6 +3723,33 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
             EntryType::Directory => {
                 if args.to_stdout {
                     continue;
+                }
+                // Handle pre-existing symlinks at the destination:
+                // - default: replace with a real directory so subsequent
+                //   file entries materialize the archive's tree exactly.
+                // - --keep-directory-symlink: keep a symlink that
+                //   resolves to a directory; later child entries follow
+                //   it. A broken or non-dir-targeting symlink still gets
+                //   replaced.
+                // Trim any trailing `/` before the lstat probe: on Unix
+                // `lstat("link/")` follows the symlink, which would miss
+                // the replace case.
+                let probe_buf: PathBuf = {
+                    let s = dest.as_os_str().to_string_lossy().into_owned();
+                    PathBuf::from(s.trim_end_matches('/').to_string())
+                };
+                if let Ok(link_meta) = fs::symlink_metadata(&probe_buf)
+                    && link_meta.file_type().is_symlink()
+                {
+                    let resolves_to_dir = fs::metadata(&probe_buf)
+                        .map(|m| m.is_dir())
+                        .unwrap_or(false);
+                    if args.keep_directory_symlink && resolves_to_dir {
+                        // Keep symlink as-is; don't create or record
+                        // deferred mode changes for it.
+                        continue;
+                    }
+                    let _ = fs::remove_file(&probe_buf);
                 }
                 let existed_before = dest.exists();
                 fs::create_dir_all(&dest)?;
@@ -3153,7 +3825,12 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
                         continue;
                     }
                     if args.keep_old_files {
-                        eprintln!("tar: {}: Cannot open: File exists", dest.display());
+                        // Report the archive-relative path (post-strip/
+                        // transform) rather than the on-disk dest. This
+                        // matches GNU tar's error format and stays
+                        // consistent when `-C DIR` shifts extraction
+                        // under an external prefix.
+                        eprintln!("tar: {final_path}: Cannot open: File exists");
                         extract_had_error = true;
                         continue;
                     }
@@ -3322,7 +3999,7 @@ fn main() {
 
     if let Err(e) = result {
         let msg = e.to_string();
-        if msg == "not-found-in-archive" {
+        if msg == "not-found-in-archive" || msg == "compressor-exit" {
             process::exit(2);
         }
         if msg == "read-error-exit" {

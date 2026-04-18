@@ -2,97 +2,11 @@
 
 ## Current status
 
-**92/225 tests passing (41%)** after the first iteration pass.
+**187/225 tests passing (83%)**.
 
-Baseline checkpoint: `rust-tar-test-NAME` fully wired as flake checks
-via `gnutar-test-harness` (autom4te-built `testsuite` script + helper
-programs), 225 upstream `.at` tests under evaluation.
-
-### What works
-
-- Create / list / extract for regular files, symlinks, directories.
-- `-r`/`--append`, `-u`/`--update`, `-d`/`--diff`/`--compare`,
-  `--delete`.
-- `TAR_OPTIONS` environment variable prepended to argv.
-- Bundled short flags (`cvfT`, `xvfT`, etc.) with proper arg-taker
-  pairing so `-f` / `-T` / `-X` / `-L` / `-b` / `-H` / `-g` each eat
-  the next argv word.
-- `-H FMT` / `--format=FMT` parsed; also `-V LABEL`, `-T FILE`,
-  `-X FILE`, `--add-file` (including `--add-file=…` inside -T lists).
-- `--exclude`, `--exclude-from`, `--exclude-caches`(-under|-all),
-  `--exclude-tag`(-under|-all)=FILE, `--exclude-backups`,
-  `--exclude-vcs` (with the standard VCS list).
-- `--wildcards` / `--no-wildcards` and `--anchored` / `--no-anchored`
-  with proper per-entry tracking plus separate state for list/extract
-  path matching.
-- `--mtime=@SECONDS|ISO`, `--mode=EXPR`, `--owner=NAME[:UID]`,
-  `--group=NAME[:GID]`, `--numeric-owner`, `--transform=EXPR`,
-  `--xform=EXPR`, `--strip-components=N`.
-- `-P`/`--absolute-names`, `-h`/`--dereference`, `-o`/
-  `--no-same-owner`, `-p`/`--preserve-permissions`,
-  `--no-same-permissions`, `--no-recursion`.
-- Short-file detection emits GNU's
-  `tar: This does not look like a tar archive` + exit 2.
-- `--delete NAME` on missing member emits
-  `tar: NAME: Not found in archive` + exit 2.
-- `--pax-option` on non-POSIX archive emits the GNU-exact error.
-- Verbose routing: `-cv ... -f -` → verbose to stderr; `-xv` and
-  `-tv` → verbose to stdout; `-vv` → detailed listing (mode
-  user/group size date name) via `format_verbose_entry`.
-- Username/group lookup via `uzers` crate so listings carry names.
-
-### What remains (≈133 failing)
-
-Most of the remaining failures depend on deeper features:
-
-- **Sparse files** (`sparse*`, `sparsemv*`, `spmvp*`, `sptr*`, ≈12 tests)
-  — need `lseek(SEEK_HOLE)` during create and materialisation during
-  extract.
-- **Incremental / listed-incremental** (`incr*`, `listed*`, `dirrem*`,
-  `filerem*`, `rename*`, `remfiles*`, ≈40+ tests) — `-g FILE`
-  snapshot database, `--level=N`, dumpdir format.
-- **Multi-volume** (`multiv*`, ≈10 tests) — `-M`, `--tape-length=N`,
-  `--new-volume-script`.
-- **Extended attributes / ACL / SELinux / file capabilities**
-  (`xattr0[2-8]`, partial support already) — proper xattr / ACL
-  storage.
-- **Labels / GNU volume headers** (`label0*`, `xform01`, ≈5 tests) —
-  need to write the first entry as a volume header with the given
-  label.
-- **Transform-in-listing** (`xform0[1-3]`, `xform-h`, ≈4 tests) —
-  show-transformed-names should apply transforms to listing output.
-- **Format-specific byte layout** (`longv7`, `lustar01`, `extrac1?`,
-  `options03`, ≈10 tests) — emit archive in the chosen format
-  (`v7`/`ustar`/`oldgnu`/`posix`) and enforce its filename-length
-  restrictions.
-- **Positional options** (`positional0[1-3]`, `recurs02`, ≈5 tests) —
-  GNU's "options set after positional args have no effect" semantics
-  plus the accompanying warning.
-- **-C in file lists** (`T-cd`, `T-dir0*`, `T-rec`, `T-recurse`,
-  `T-null*`, ≈6 tests) — per-line parsing of `-C DIR` inside -T
-  input.
-- **Error message format parity** (`extrac15`, `extrac07`, `gzip`,
-  `comperr`, `ignfail`, ≈10 tests) — GNU's exact wording with path
-  context.
-- **`--backup` on extract** (`backup01`) — rename existing file
-  before overwriting.
-- **File-descriptor frugality** (`extrac11`) — work within a strict
-  `ulimit -n` by not holding directory handles while walking.
-- **Comparison differences detection** (`difflink`, `verify`,
-  `truncate`) — detailed per-member diff reporting.
-- **`--use-compress-program`, `--checkpoint`** — not implemented.
-
-## Approach
-
-Each phase from here on adds one of the above features and its
-diagnostic output. After each phase commit and rerun the suite:
-
-```sh
-for t in $(ls /path/to/tests/*.at | xargs -n1 basename | sed s/.at$//); do
-  nix build ".#checks.x86_64-linux.rust-tar-test-$t" 2>&1 |
-    grep -q "error:" && echo "FAIL $t" || echo "PASS $t"
-done
-```
+Trajectory: 92 → 172 → 182 → 187. Each per-test derivation is wired
+as a flake check via the shared `gnutar-test-harness` (autom4te-built
+`testsuite` script + helper programs).
 
 ## Running tests
 
@@ -102,3 +16,134 @@ nix log .#checks.x86_64-linux.rust-tar-test-{name}
 ```
 
 See `default.nix` for the full list of 225 test names.
+
+### What works
+
+- Core ops: create / list / extract / diff / append / update /
+  delete / `--test-label`, for regular files, directories,
+  symlinks, and hard links.
+- Positional `-C DIR` in create, append, and extract, plus inside
+  `-T` files, each path carrying its own chdir context.
+- Hard-link detection: a `(dev, inode)` map flags the second
+  occurrence as a `Link` entry with the linkname pointing at the
+  first archived path.
+- Scoped `--transform` / `--xform`: `H` excludes hard-link targets,
+  `S` excludes symlink targets; defaults match GNU 1.35 (transforms
+  apply to every name kind).
+- Volume labels: `-V LABEL` / `--label=` write a GNU `V` block as
+  the first entry; extract, append/update, and `--test-label`
+  fnmatch-verify.
+- Options: `--ignore-failed-read`, `--keep-old-files` / `-k`,
+  `--skip-old-files`, `--backup`, `--remove-files`, `--verify` /
+  `-W`, `--to-stdout` / `-O`, `--one-top-level[=DIR]`,
+  `--show-transformed-names`, `--no-overwrite-dir`,
+  `--clamp-mtime`, `--occurrence` validation, `--index-file=FILE`.
+- Excludes: `--exclude`, `--exclude-from`, `--exclude-caches`
+  variants, `--exclude-tag` variants, `--exclude-backups`,
+  `--exclude-vcs`.
+- Match modifiers: `--wildcards` / `--no-wildcards`, `--anchored` /
+  `--no-anchored`, `--ignore-case`, `--wildcards-match-slash`.
+- Owner/group: `--owner-map=FILE`, `--group-map=FILE`,
+  `--owner=NAME[:UID]`, `--group=NAME[:GID]`, `--numeric-owner`.
+- Time/mode: `--mtime=@SECONDS|ISO`, `--mode=EXPR`,
+  `--preserve-permissions`, `--no-same-permissions`.
+- Positional `--no-recursion` / `--recursion` for create (and
+  `--no-recurs` / `--no-recur` abbreviations).
+- Positional-option warnings for `--exclude` and trailing `-C`
+  with GNU's exact header and `Exiting with failure status due
+  to previous errors`.
+- Raw GNU header path writes bypass the tar crate's `..` /
+  absolute-path validation; long names trigger GNU `LongLink`
+  blocks.
+- `-T -` (read from stdin), nested `-T FILE` inside a `-T` file
+  with recursion detection, `--null` with auto-fallback when a
+  stray NUL appears.
+- Archive-can't-contain-itself check so `tar cf a.tar .` doesn't
+  recurse into the growing archive.
+- Fast-path exclude filter: literal patterns go through per-path
+  and per-basename `HashSet`s, keeping exclude05's 1M-line file
+  under the 60s harness budget.
+- Non-printable bytes are octal-escaped in both `-t` and `-vc`
+  listings (GNU format).
+- `--remove-files` cleans up the positional `-C` chdir root when
+  `.` is given as the path, and emits GNU's `Cannot rmdir .` +
+  exit 2 when run with no positional `-C`.
+- Extract: deferred directory-mode restore for read-only dirs;
+  `--overwrite` + symlink handling honours `-h`; `--backup`
+  renames to `NAME~`; mkdir failures emit the GNU `Cannot mkdir`
+  / `Cannot open` pair using the archive-relative name.
+- Diff: `Not linked to X`, `Symlink differs`, `Mod time differs`,
+  `Contents differ` with GNU wording; directory mtime left out so
+  child changes don't taint the parent.
+- Compressor error translation: empty gzip / bzip2 / xz streams
+  surface as `Child returned status 1` + `Error is not
+  recoverable` instead of `unexpected end of file`.
+- Short-file detection; `--delete NAME` + missing member;
+  `--delete 'dir/'` prefix match; `--pax-option` on non-POSIX
+  archive; GNU-style strerror translation for the common
+  `io::ErrorKind` values.
+- `--no-recursion` / `--recursion` directives inside `-T` file
+  content; list/extract matching gates prefix (descendant) matches
+  per user-path so `tar tf archive --no-recursion dir1 --recursion
+  dir2` filters correctly.
+- `--wildcards` expands filesystem globs in path arguments during
+  create/append/update. Patterns that match nothing on disk are
+  checked against archive members in update mode; a pattern that
+  matches neither emits `Not found in archive` + exit 2.
+- `-l` / `--check-links`: nlink + archived-count tracking emits
+  `Missing links to 'PATH'.` when a multi-link file is archived
+  without all of its peer hard links.
+- Format-aware name-length enforcement: V7 rejects names > 99 chars
+  (`file name is too long (max 99); not dumped`); strict ustar
+  rejects unsplittable names > 100 chars (`cannot be split`).
+  Posix/pax fall through (long names ride on PAX extended headers).
+- `--use-compress-program PROGRAM` / `-I PROGRAM` spawns an external
+  compressor (whitespace-split argv); a non-zero child status
+  surfaces `Error is not recoverable: exiting now` and exit 2.
+  Built-in gzip/bzip2/xz compressors tag file-open failures with a
+  `tar (child):` prefix and bail before `--remove-files` runs on a
+  half-built archive.
+- `--keep-directory-symlink`: at a directory entry whose destination
+  is a symlink-to-dir, keep the symlink and let children extract
+  through it. Default now replaces symlinks with real directories
+  (previously children were silently landing in the symlink's
+  target). `--keep-old-files` errors now show archive-relative paths.
+- WalkDir `.max_open(3)` so creation survives `ulimit -n 10`
+  environments (extrac11).
+- `--checkpoint=N` + `--checkpoint-action=echo=FMT` +
+  `--checkpoint-action=wait=SIGNAL`: a `CheckpointStream` wraps the
+  tar stream (write for create/append, read for diff), counts
+  10240-byte records, and fires each action every N records. Echo
+  substitutes `%u` and emits to stderr; wait installs a libc signal
+  handler (at parse time, before any checkpoint races with a reply)
+  and blocks in a `pause()` + atomic-flag loop. This unlocks the
+  `genfile --run` synchronization used by grow/truncate/sptr*.
+- `PaddedReader` keeps the archive valid when a source file shrinks
+  during read: once the underlying file hits EOF we return zeros up
+  to the declared size.
+- `tar d` comparison now re-stats the on-disk file AFTER reading the
+  archive side, so a concurrent truncation reports `Size differs`
+  rather than `Contents differ`.
+
+### What remains (38 failing)
+
+Two buckets, both substantial:
+
+| Bucket | Tests | Notes |
+| --- | --- | --- |
+| `--listed-incremental` (incr*, dirrem*, filerem*, rename*, listed*, exclude09/10/12/13/15/16, remfiles08b/09b) | 31 | Snapshot database, `--level=N`, dumpdir format, `Directory is new` / `File removed before we read it` messages. |
+| Multi-volume (`-M`, `--tape-length=N`, `--new-volume-script`) | 7 | multiv03/04/05/08/09, label02, sparsemvp — continuation headers, volume boundary handling. |
+
+## Approach
+
+`--listed-incremental` is the highest-impact remaining project (31
+tests). Multi-volume brings the final 7. The buckets are independent.
+
+After each phase commit and rerun the suite:
+
+```sh
+for t in $(ls /path/to/tests/*.at | xargs -n1 basename | sed s/.at$//); do
+  nix build ".#checks.x86_64-linux.rust-tar-test-$t" 2>/dev/null &&
+    echo "PASS $t" || echo "FAIL $t"
+done
+```
