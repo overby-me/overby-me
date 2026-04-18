@@ -2,12 +2,12 @@
 
 ## Current status
 
-**209/225 tests passing (93%)**.
+**210/225 tests passing (93%)**.
 
-Trajectory: 92 → 172 → 182 → 187 → 191 → 195 → 200 → 206 → 209.
-Each per-test derivation is wired as a flake check via the shared
-`gnutar-test-harness` (autom4te-built `testsuite` script + helper
-programs).
+Trajectory: 92 → 172 → 182 → 187 → 191 → 195 → 200 → 206 → 209 →
+210. Each per-test derivation is wired as a flake check via the
+shared `gnutar-test-harness` (autom4te-built `testsuite` script +
+helper programs).
 
 ## Running tests
 
@@ -192,11 +192,19 @@ Substantial implementation of the incremental feature:
   standard `Cannot open` report from the per-source loop handles
   it instead of double-reporting.
 
-### What remains (16 failing)
+### Recent: `--incremental` without a snapshot file
+
+- Accept `--incremental` / `-G` as a standalone incremental-mode
+  flag (no snapshot file). Snapshot I/O is gated on
+  `listed_incremental` being Some; the dumpdir emission, new-dir
+  messages, and across-pass gating all check `args.incremental`
+  instead so plain-incremental runs still get the dumpdir layout.
+
+### What remains (15 failing)
 
 | Bucket | Tests | Notes |
 | --- | --- | --- |
-| `--listed-incremental` — advanced | 9 | incr06/08/09/10, rename02/03/06, remfiles08b/09b. Remaining gaps: multi-src dir-first walk invariant (dir args that also appear as children of another dir arg), cross-hierarchy moves (`mv foo/bar/baz foo`), and filename-normalization behaviour with mixed relative/absolute roots. |
+| `--listed-incremental` — advanced | 8 | incr06/08/09/10, rename02/03/06, remfiles08b. Remaining gaps: multi-src dir-first walk invariant (dir args that also appear as children of another dir arg), cross-hierarchy moves (`mv foo/bar/baz foo`), and filename-normalization behaviour with mixed relative/absolute roots. |
 | Multi-volume (`-M`, `--tape-length=N`, `--new-volume-script`) | 7 | multiv03/04/05/08/09, label02, sparsemvp — continuation headers, volume boundary handling. |
 
 ## Approach

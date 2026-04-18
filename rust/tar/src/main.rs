@@ -1083,6 +1083,10 @@ struct Args {
     /// empty or missing file is treated as level 0 (first-time dump);
     /// a populated file drives level-N+1 filtering.
     listed_incremental: Option<String>,
+    /// `--incremental` / `-G`: plain incremental mode (no snapshot
+    /// file). Still emits dumpdir bodies and the new-dir / renamed
+    /// diagnostics so downstream tools see the right layout.
+    incremental: bool,
     /// Names of warnings disabled via `--warning=no-<name>`. Only the
     /// subset the test suite exercises (new-dir, rename-directory,
     /// timestamp) is honoured at check-time; the rest are harmless
@@ -1775,6 +1779,10 @@ fn parse_args() -> Args {
             }
             "-g" | "--listed-incremental" => {
                 args.listed_incremental = queue.pop_front();
+                args.incremental = true;
+            }
+            "--incremental" | "-G" => {
+                args.incremental = true;
             }
             "--blocking-factor" | "-b" => {
                 if let Some(v) = queue.pop_front()
@@ -1875,8 +1883,10 @@ fn parse_args() -> Args {
                     }
                 } else if let Some(val) = other.strip_prefix("--listed-incremental=") {
                     args.listed_incremental = Some(val.to_string());
+                    args.incremental = true;
                 } else if let Some(val) = other.strip_prefix("--listed=") {
                     args.listed_incremental = Some(val.to_string());
+                    args.incremental = true;
                 } else if let Some(val) = other.strip_prefix("--add-file=") {
                     args.paths.push(val.to_string());
                 } else if let Some(val) = other.strip_prefix("--files-from=") {
@@ -1982,8 +1992,6 @@ fn parse_args() -> Args {
                     || other == "--multi-volume"
                     || other == "-M"
                     || other == "-W"
-                    || other == "--incremental"
-                    || other == "-G"
                     || other == "--read-full-records"
                     || other == "-B"
                     || other == "--full-time"
@@ -2582,7 +2590,7 @@ fn add_paths_to_builder_filter<W: Write>(
                             let vanished = e
                                 .io_error()
                                 .is_some_and(|ioe| ioe.kind() == io::ErrorKind::NotFound);
-                            if vanished && args.listed_incremental.is_some() {
+                            if vanished && args.incremental {
                                 if !args.disabled_warnings.contains("file-removed") {
                                     eprintln!("tar: {path}: File removed before we read it");
                                 }
@@ -2625,7 +2633,7 @@ fn add_paths_to_builder_filter<W: Write>(
         // files come before subdir files (dir `.` files before dir
         // `./sub` files). This keeps dumpdir records adjacent and
         // matches GNU's layout.
-        if args.listed_incremental.is_some() {
+        if args.incremental {
             let mut dirs: Vec<PathBuf> = Vec::new();
             let mut files: Vec<PathBuf> = Vec::new();
             for p in entries.drain(..) {
@@ -2728,11 +2736,7 @@ fn add_paths_to_builder_filter<W: Write>(
             // the cache-tag diagnostic so the warnings stay in
             // directory-first order (parent `Directory is new`, then
             // the contains-tag note for the same dir).
-            if args.verbose
-                && args.listed_incremental.is_some()
-                && path.is_dir()
-                && !path.is_symlink()
-            {
+            if args.verbose && args.incremental && path.is_dir() && !path.is_symlink() {
                 let warn_new = !args.disabled_warnings.contains("new-dir");
                 let warn_rename = !args.disabled_warnings.contains("rename-directory");
                 #[cfg(unix)]
@@ -2778,7 +2782,7 @@ fn add_paths_to_builder_filter<W: Write>(
                 // Listed-incremental suppresses the trailing `/` on
                 // the dir path; the standalone --exclude-tag tests
                 // expect it to stay.
-                if args.listed_incremental.is_some() {
+                if args.incremental {
                     let trimmed = dir_display.trim_end_matches('/');
                     eprintln!("tar: {trimmed}: contains a cache directory tag {tag}; {suffix}");
                 } else {
@@ -2822,10 +2826,7 @@ fn add_paths_to_builder_filter<W: Write>(
             // aren't skipped — they always get a dumpdir of their
             // own. The fallback time filter below handles paths the
             // dumpdir pass didn't touch (e.g. top-level file args).
-            if args.listed_incremental.is_some()
-                && !path.is_dir()
-                && incremental_skip.contains(path)
-            {
+            if args.incremental && !path.is_dir() && incremental_skip.contains(path) {
                 continue;
             }
             if let Some((cut_sec, cut_nsec)) = prev_time
@@ -2978,7 +2979,7 @@ fn add_paths_to_builder_filter<W: Write>(
                 // Listed-incremental: carry the directory's current
                 // child listing as the entry body so extract can
                 // delete disk children not mentioned here.
-                if args.listed_incremental.is_some() {
+                if args.incremental {
                     // Resolve (dev, inode) so we can match this dir
                     // against the previous snapshot and decide per-
                     // child Y / N / D codes.
@@ -3311,7 +3312,7 @@ fn add_paths_to_builder_filter<W: Write>(
                 // the normal Cannot open path — that's what GNU does
                 // when the user asked for a directory that's gone.
                 let is_direct_source = args.paths.iter().any(|p| Path::new(p) == path);
-                if args.listed_incremental.is_some() && !is_direct_source {
+                if args.incremental && !is_direct_source {
                     let mut cur = path.to_path_buf();
                     let mut ancestor_is_source = false;
                     while let Some(parent) = cur.parent() {
