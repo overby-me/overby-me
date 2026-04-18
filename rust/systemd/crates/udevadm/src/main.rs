@@ -2112,8 +2112,16 @@ fn make_dev_id_from_syspath(syspath: &Path, subsystem: &str) -> String {
 ///
 /// Polls the specified device paths until they satisfy the wait condition
 /// (initialized, added, or removed) or the timeout expires.
-fn cmd_wait(timeout: u64, wait_until: &str, _settle: bool, devices: &[String]) -> i32 {
+fn cmd_wait(timeout: u64, wait_until: &str, settle: bool, devices: &[String]) -> i32 {
     let deadline = Instant::now() + Duration::from_secs(timeout);
+
+    // `--settle` first so the udev queue drains before checking the
+    // per-device state — otherwise `udevadm wait --removed --settle`
+    // can see the sysfs path disappear before udevd has a chance to
+    // process the remove event and clean up `/run/udev/data/…`.
+    if settle {
+        let _ = cmd_settle(timeout, &None);
+    }
 
     let check_device = |path: &str| -> bool {
         match wait_until {
