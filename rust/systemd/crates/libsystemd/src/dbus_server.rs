@@ -125,6 +125,17 @@ mod inner {
                 .unwrap_or(false)
         }
 
+        /// `Documentation=` URIs.
+        #[zbus(property)]
+        fn documentation(&self) -> Vec<String> {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .map(|u| u.common.unit.documentation.clone())
+                .unwrap_or_default()
+        }
+
         /// Whether the unit has the default implicit dependencies
         /// (Before=shutdown.target / After=basic.target etc.).
         #[zbus(property)]
