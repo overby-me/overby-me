@@ -1633,16 +1633,22 @@ fn handle_import(
     match import_type {
         "program" => {
             if let Some(output) = run_program_capture(value, event) {
-                // Parse output as KEY=VALUE lines
+                // Parse output as KEY=VALUE lines.  Don't trim the
+                // value — leading/trailing whitespace is meaningful
+                // and is preserved by upstream's IMPORT{program}
+                // (the TEST-17-UDEV.IMPORT test exercises this via
+                // `echo -e FOO=\x20aaa\x20` where the surrounding
+                // spaces have to round-trip into E:FOO=\x20aaa\x20).
                 for line in output.lines() {
-                    let line = line.trim();
                     if line.is_empty() || line.starts_with('#') {
                         continue;
                     }
                     if let Some(eq) = line.find('=') {
-                        let key = line[..eq].trim().to_string();
-                        let val = line[eq + 1..].trim().to_string();
-                        event.env.insert(key, val);
+                        let key = line[..eq].to_string();
+                        let val = line[eq + 1..].to_string();
+                        if !key.is_empty() {
+                            event.env.insert(key, val);
+                        }
                     }
                 }
                 *program_result = output;
