@@ -2884,13 +2884,27 @@ fn cmd_lock(
     use std::os::unix::io::{AsRawFd, IntoRawFd};
 
     // Determine which file descriptor to flock.
+    //
+    // Use O_RDONLY | O_NONBLOCK: write mode fails on read-only devices
+    // (loop-ro); blocking mode trips on CD-ROM with no media inserted
+    // (ENOMEDIUM).  flock(2) doesn't care about open mode or blocking
+    // — any fd works.
+    let open_flags = libc::O_RDONLY | libc::O_NONBLOCK | libc::O_CLOEXEC;
+    let open_fd = |path: &str| -> Result<i32, std::io::Error> {
+        let cpath = std::ffi::CString::new(path).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "path contains NUL byte")
+        })?;
+        let rc = unsafe { libc::open(cpath.as_ptr(), open_flags) };
+        if rc < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(rc)
+        }
+    };
+
     let fd: std::os::unix::io::RawFd = if let Some(dev_path) = device {
-        match std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(dev_path)
-        {
-            Ok(f) => f.into_raw_fd(),
+        match open_fd(dev_path) {
+            Ok(f) => f,
             Err(e) => {
                 eprintln!("udevadm lock: cannot open device {dev_path}: {e}");
                 return 1;
@@ -2911,12 +2925,8 @@ fn cmd_lock(
         let major = libc::major(dev);
         let minor = libc::minor(dev);
         let dev_path = format!("/dev/block/{major}:{minor}");
-        match std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&dev_path)
-        {
-            Ok(f) => f.into_raw_fd(),
+        match open_fd(&dev_path) {
+            Ok(f) => f,
             Err(e) => {
                 eprintln!("udevadm lock: cannot open backing device {dev_path}: {e}");
                 return 1;
