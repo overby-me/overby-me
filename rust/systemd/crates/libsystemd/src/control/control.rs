@@ -2158,19 +2158,41 @@ fn create_transient_slice(
         unit.common.unit.description = desc.clone();
     }
 
-    // Apply cgroup/resource properties specified via `-p KEY=VALUE`.
-    if let crate::units::Specific::Slice(ref mut slice) = unit.specific {
-        for prop in &params.properties {
-            if let Some((k, v)) = prop.split_once('=') {
-                match k {
-                    "MemoryMax" => slice.conf.memory_max = Some(parse_memory_limit(v)),
-                    "MemoryMin" => slice.conf.memory_min = Some(parse_memory_limit(v)),
-                    "MemoryLow" => slice.conf.memory_low = Some(parse_memory_limit(v)),
-                    "MemoryHigh" => slice.conf.memory_high = Some(parse_memory_limit(v)),
-                    "MemorySwapMax" => slice.conf.memory_swap_max = Some(parse_memory_limit(v)),
-                    _ => {
-                        // Unrecognised slice property — ignored.  Upstream
-                        // has many more; add on demand.
+    // Apply Documentation= entries (accumulate) + cgroup/resource
+    // properties from `-p KEY=VALUE`.
+    for prop in &params.properties {
+        if let Some((k, v)) = prop.split_once('=') {
+            match k {
+                "Documentation" => {
+                    for entry in v.split(|c: char| c.is_whitespace()) {
+                        let entry = entry.trim();
+                        if !entry.is_empty() {
+                            unit.common.unit.documentation.push(entry.to_owned());
+                        }
+                    }
+                }
+                _ => {
+                    if let crate::units::Specific::Slice(ref mut slice) = unit.specific {
+                        match k {
+                            "MemoryMax" => {
+                                slice.conf.memory_max = Some(parse_memory_limit(v))
+                            }
+                            "MemoryMin" => {
+                                slice.conf.memory_min = Some(parse_memory_limit(v))
+                            }
+                            "MemoryLow" => {
+                                slice.conf.memory_low = Some(parse_memory_limit(v))
+                            }
+                            "MemoryHigh" => {
+                                slice.conf.memory_high = Some(parse_memory_limit(v))
+                            }
+                            "MemorySwapMax" => {
+                                slice.conf.memory_swap_max = Some(parse_memory_limit(v))
+                            }
+                            _ => {
+                                // Unrecognised slice property — ignored.
+                            }
+                        }
                     }
                 }
             }
