@@ -1892,6 +1892,35 @@ struct DeviceDb {
     env: HashMap<String, String>,
 }
 
+/// Compute the udev database file path for a sysfs device, if we can
+/// derive a DEVICE_ID for it (network interface, block/char major:minor,
+/// or subsystem:sysname).
+fn db_path_for_syspath(syspath: &Path) -> Option<PathBuf> {
+    let props = read_sysfs_uevent(syspath);
+    let subsystem = props
+        .get("SUBSYSTEM")
+        .cloned()
+        .unwrap_or_else(|| read_sysfs_subsystem(syspath));
+    // Network interface: n<ifindex>.
+    if subsystem == "net"
+        && let Some(ifindex) = props.get("IFINDEX")
+    {
+        return Some(Path::new(DB_DIR).join(format!("n{ifindex}")));
+    }
+    // Block/char device: b<maj>:<min> / c<maj>:<min>.
+    if let (Some(maj), Some(min)) = (props.get("MAJOR"), props.get("MINOR")) {
+        let prefix = if subsystem == "block" { 'b' } else { 'c' };
+        return Some(Path::new(DB_DIR).join(format!("{prefix}{maj}:{min}")));
+    }
+    // Other: +<subsystem>:<sysname>.
+    if !subsystem.is_empty()
+        && let Some(basename) = syspath.file_name().and_then(|n| n.to_str())
+    {
+        return Some(Path::new(DB_DIR).join(format!("+{subsystem}:{basename}")));
+    }
+    None
+}
+
 /// Read the udev database entry for a device.
 fn read_device_db_by_syspath(syspath: &Path, devpath: &str) -> DeviceDb {
     let mut db = DeviceDb {
@@ -2946,10 +2975,18 @@ fn main() -> ExitCode {
                 loop {
                     let all_initialized = targets.iter().all(|t| {
                         let sp = normalize_syspath(t);
-                        // Consider initialized when uevent file exists and
-                        // (for sysfs devices) a udev db entry exists or
-                        // the device exists in /dev.
-                        sp.exists()
+                        if !sp.exists() {
+                            return false;
+                        }
+                        // For sysfs paths, check udev db entry (device
+                        // processed by udevd).  Non-sysfs paths (e.g.
+                        // /dev/foo) are considered initialized when they
+                        // exist.
+                        if t.starts_with("/sys/") || t.starts_with("class/") {
+                            let db_entry = db_path_for_syspath(&sp);
+                            return db_entry.is_some_and(|p| p.exists());
+                        }
+                        true
                     });
                     if all_initialized {
                         break;
