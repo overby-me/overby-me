@@ -2146,6 +2146,13 @@ fn create_transient_slice(
         .find(|u| u.id.name == slice_name)
         .ok_or_else(|| format!("Transient slice {slice_name} not found after creation"))?;
 
+    // Mark as transient by rebasing the fragment path under
+    // /run/systemd/transient so `systemctl show -P Transient` returns
+    // "yes" (the property helper detects transience by prefix).
+    let transient_dir = std::path::Path::new("/run/systemd/transient");
+    let _ = std::fs::create_dir_all(transient_dir);
+    unit.common.unit.fragment_path = Some(transient_dir.join(&slice_name));
+
     // Apply Description= from params if provided.
     if let Some(ref desc) = params.description {
         unit.common.unit.description = desc.clone();
