@@ -499,7 +499,10 @@ in
           (rc, output) = machine.execute(test_cmd, timeout=${toString testTimeout})
           print(output)
 
-      # Check for /testok (standard systemd test success marker)
+      # Check for /testok (standard systemd test success marker).  The
+      # upstream systemd tests create /testok as the last step of the
+      # test script after all assertions pass — its absence means the
+      # script crashed / a set-e-trapped `test` assertion failed.
       (rc_ok, ok_out) = machine.execute("test -f /testok")
       if rc_ok != 0:
           print("=== /testok missing — dumping journal for diagnostics ===")
@@ -508,6 +511,8 @@ in
           print("=== systemctl list-units --failed ===")
           (rc_f, f) = machine.execute("systemctl list-units --failed 2>&1")
           print(f)
-          machine.fail("test -f /testok")
+      # Assert /testok exists — previous `machine.fail` was inverted and
+      # silently let missing-/testok cases pass the NixOS test.
+      machine.succeed("test -f /testok")
     '';
   }
