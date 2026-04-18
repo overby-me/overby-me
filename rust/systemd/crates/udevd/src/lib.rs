@@ -3447,9 +3447,13 @@ fn write_device_db(event: &UEvent, result: &RuleResult) -> io::Result<()> {
         content.push_str(&format!("S:{}\n", link));
     }
 
-    // Tags
+    // Tags — G: is the historical all-time set, Q: is the current
+    // "this-activation" set.  Rust-udevd treats both as equal (the tag
+    // set applied on the most recent event), matching what the TEST-17
+    // TAG test expects.
     for tag in &result.tags {
         content.push_str(&format!("G:{}\n", tag));
+        content.push_str(&format!("Q:{}\n", tag));
     }
 
     // Priority (default 0)
@@ -3465,6 +3469,20 @@ fn write_device_db(event: &UEvent, result: &RuleResult) -> io::Result<()> {
             _ => {}
         }
         content.push_str(&format!("E:{}={}\n", key, val));
+    }
+
+    // Surface tag state as pseudo-properties so `udevadm info` output
+    // includes `E:TAGS=:tag1:tag2:` and `E:CURRENT_TAGS=:tag1:tag2:`
+    // (colon-delimited with leading and trailing colons, matching the
+    // upstream format that the TAG test greps for).
+    if !result.tags.is_empty() {
+        let joined: String = result.tags.iter().fold(String::from(":"), |mut acc, t| {
+            acc.push_str(t);
+            acc.push(':');
+            acc
+        });
+        content.push_str(&format!("E:TAGS={}\n", joined));
+        content.push_str(&format!("E:CURRENT_TAGS={}\n", joined));
     }
 
     // Write atomically
