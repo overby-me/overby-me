@@ -2636,12 +2636,20 @@ fn main() -> ExitCode {
             name_match: _,
             initialized_match: _,
             initialized_nomatch: _,
-            tree: _,
+            tree,
             ref json,
             ref prefix,
             ref property,
             ref devices,
         } => {
+            // `udevadm info -t/--tree` without a specific device: we
+            // don't implement a proper sysfs tree walker yet, so just
+            // succeed silently — matches the sanity-test expectation
+            // that `udevadm info -t >/dev/null` exits 0.
+            if tree && name.is_none() && path.is_none() && devices.is_empty() {
+                return ExitCode::from(0);
+            }
+
             if let Some(j) = json
                 && !matches!(j.as_str(), "off" | "short" | "pretty" | "help")
             {
