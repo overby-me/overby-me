@@ -10,7 +10,7 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 |--------|-------|-------------|
 | PASS | ~238+ | Tests passing reliably (including 150/151 aux-utils) |
 | FAIL (fixable) | ~2 | Failures in rust-systemd code that can be fixed |
-| FAIL (architectural) | ~12 | Missing major features (D-Bus, udev, exec deser) |
+| FAIL (architectural) | ~9 | Missing major features (udev, exec deser) — D-Bus, BindPaths-runtime, MessageQueue, OpenFile, ExtraFileDescriptors, socket-activate now implemented, pending end-to-end verification |
 | Boot hang (transient) | ~10 | Non-deterministic QEMU boot failures (~30% rate) |
 
 ## Passing Tests
@@ -59,16 +59,18 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 
 ## Failing Tests — Categorized by Root Cause
 
-### 1. Missing D-Bus Interface (org.freedesktop.systemd1)
+### 1. D-Bus Interface (org.freedesktop.systemd1) — IMPLEMENTED (pending VM verification)
 
-rust-systemd does not expose the `org.freedesktop.systemd1` D-Bus interface. Tests that use `busctl call` or rely on D-Bus monitoring fail with timeout or "No such file or directory".
+rust-systemd's PID 1 now exposes `org.freedesktop.systemd1` on the system bus via an in-process zbus server. `dbus_server.rs` exports:
+
+- `/org/freedesktop/systemd1` — Manager interface: `Version`, `Architecture`, `ListUnits`, `GetUnit`, `StartUnit`, `StopUnit`, `RestartUnit`, `Reload` (wired to `Command::LoadAllNew`), `StartTransientUnit` (includes `ExtraFileDescriptors a(hs)` dup'd out of the D-Bus message), `BindMountUnit(s s s b b)`.
+- `/org/freedesktop/systemd1/unit/<escaped>` — Unit interface: `Id`, `Description`, `ActiveState`, `SubState`, `LoadState`, `CanStart`, `CanStop`, `CanReload`, `CanIsolate`, `CanFreeze`, `CanLiveMount` (true iff the service has a private mount namespace), `Names` (primary + aliases), `FragmentPath`, `DropInPaths`, and the dep vecs (`Wants`, `Requires`, `WantedBy`, `RequiredBy`, `After`, `Before`, `Conflicts`, `PartOf`, `BindsTo`).
+- Same object also exposes Service interface for `.service` units: `MainPID`, `ExecMainPID`, `ExecMainStatus`, `Type` (simple/forking/oneshot/…), `Result` (success/failure).
 
 **Affected tests:**
 
 - 15-dropin (also has NixOS PATH issue with bare `sleep` in unit files)
 - 81-generators-fstab-generator
-
-**Fix complexity:** Very high — requires implementing the full systemd D-Bus API. This is a major architectural feature.
 
 ### 2. Type=notify Service Lifecycle (Advanced)
 
@@ -95,10 +97,10 @@ Basic Type=notify (READY=1) works. NotifyAccess=all/main/exec/none enforcement w
 - 23-unit-file-extrafiledescriptors
 - Fix: Implement ExtraFileDescriptors= directive
 
-**BindPaths=/BindReadOnlyPaths= at runtime:**
+**BindPaths=/BindReadOnlyPaths= at runtime:** — DONE
 
 - 23-unit-file-runtime-bind-paths
-- Fix: Implement runtime bind mount operations
+- Fix: Implemented `systemctl bind` (control protocol `bind` command) and D-Bus `BindMountUnit` method backed by a shared `bind_mount_into_unit` helper that forks + `setns`es into `/proc/<main_pid>/ns/mnt` of the target service, optionally creates the destination, and performs `mount(MS_BIND | MS_REC)` (plus optional `MS_REMOUNT | MS_RDONLY`). Paired with helper-command mount-namespace alignment (ExecStartPre/Post/StopPost unshare a new namespace and apply the service's BindPaths/InaccessiblePaths/PrivateTmp via `pre_exec`) so ExecStartPre sees the same filesystem as ExecStart.
 
 **PrivatePIDs=:**
 
@@ -110,10 +112,11 @@ Basic Type=notify (READY=1) works. NotifyAccess=all/main/exec/none enforcement w
 - 07-pid1-mqueue-ownership
 - Fix: Implement POSIX message queue socket options
 
-**systemd-socket-activate binary:**
+**systemd-socket-activate binary:** — DONE (`--inetd` / `--now` / validation of `--accept+--now` and `--inetd` with multiple `-l`)
 
 - 74-aux-utils-socket-activate
 - Fix: Implement systemd-socket-activate binary (socket activation helper)
+- Also needs: `systemd-notify --fork -- …` to launch the daemon and report its PID via stdout (DONE, with setsid+stdio redirect so child survives `$()` subshell termination; and optional MAINPID injection to `$NOTIFY_SOCKET` when combined with `--ready` etc.)
 
 ### 4. NixOS PATH Issue (bare commands in inline unit files)
 
@@ -195,13 +198,16 @@ All 23 udev tests fail because the C `udevadm` binary in the overlay lacks featu
 - [x] PrivatePIDs= — PID namespace with /proc remount (already implemented, fixed stacked mount)
 - [x] Implement OpenFile= directive
 - [x] Implement ExtraFileDescriptors= directive (via D-Bus StartTransientUnit)
-- [ ] Implement runtime BindPaths= / BindReadOnlyPaths=
+- [x] Implement runtime BindPaths= / BindReadOnlyPaths= (`systemctl bind [--mkdir] [--read-only]` + D-Bus `BindMountUnit`, helper via setns into `/proc/<main_pid>/ns/mnt`)
+- [x] Align ExecStartPre= mount namespace with ExecStart= (applies BindPaths/InaccessiblePaths/PrivateTmp in per-helper child namespace via `pre_exec`)
 - [x] Implement MessageQueue socket options
+- [x] Implement `systemd-socket-activate` `--inetd` / `--now` / validation flags
+- [x] Implement `systemd-notify --fork` (shell-captured daemon PID + MAINPID injection to `$NOTIFY_SOCKET`)
 - [ ] Implement exec deserialization across daemon-reload
 
 ### Priority 4: Architectural (very high effort)
 
-- [x] D-Bus interface (org.freedesktop.systemd1) — Manager skeleton with StartTransientUnit; per-unit object interfaces not yet
+- [x] D-Bus interface (org.freedesktop.systemd1) — Manager (StartTransientUnit, StartUnit, StopUnit, RestartUnit, Reload, BindMountUnit, ListUnits, GetUnit) + per-unit Unit interface (Id, Description, ActiveState, SubState, LoadState, CanStart/Stop/Reload/Isolate/Freeze/LiveMount, Names, FragmentPath, DropInPaths, Wants/Requires/WantedBy/RequiredBy/After/Before/Conflicts/PartOf/BindsTo) + per-service Service interface (MainPID, ExecMainPID, ExecMainStatus, Type, Result)
 - [ ] Rust udevadm reimplementation — blocks 23 tests
 
 ## Architecture Notes
