@@ -1199,8 +1199,16 @@ fn cmd_settle(timeout: u64, exit_if_exists: &Option<String>) -> i32 {
     let start = Instant::now();
     let timeout_dur = Duration::from_secs(timeout);
 
-    // Fast path: queue is already empty
-    if !Path::new(QUEUE_FILE).exists() {
+    // Ask the daemon first: if the control socket reports "queue empty
+    // AND no active workers", we're settled.  We deliberately don't
+    // short-circuit on QUEUE_FILE absence alone — the file can lag by a
+    // few hundred ms after a kernel uevent is fired (netlink delivery,
+    // then the daemon's main loop picks it up), making the file-absence
+    // a false "already settled" on the immediate `trigger --settle`
+    // call path.
+    if let Ok(resp) = send_control_command("SETTLE", Duration::from_secs(5))
+        && resp.starts_with("OK")
+    {
         return 0;
     }
 
