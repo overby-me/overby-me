@@ -3167,6 +3167,71 @@ fn builtin_net_setup_link(event: &mut UEvent) {
     }
 }
 
+/// Query the kernel via SIOCETHTOOL/ETHTOOL_GDRVINFO for `ifname`'s
+/// driver name (e.g. "dummy", "virtio_net").  Returns None on any
+/// error or if the driver field is empty.
+fn ethtool_driver(ifname: &str) -> Option<String> {
+    const ETHTOOL_GDRVINFO: u32 = 0x00000003;
+    const SIOCETHTOOL: libc::c_ulong = 0x8946;
+
+    #[repr(C)]
+    struct EthtoolDrvinfo {
+        cmd: u32,
+        driver: [u8; 32],
+        version: [u8; 32],
+        fw_version: [u8; 32],
+        bus_info: [u8; 32],
+        erom_version: [u8; 32],
+        reserved2: [u8; 12],
+        n_priv_flags: u32,
+        n_stats: u32,
+        testinfo_len: u32,
+        eedump_len: u32,
+        regdump_len: u32,
+    }
+
+    if ifname.is_empty() || ifname.len() >= libc::IFNAMSIZ {
+        return None;
+    }
+
+    let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
+    if fd < 0 {
+        return None;
+    }
+
+    let mut drvinfo = EthtoolDrvinfo {
+        cmd: ETHTOOL_GDRVINFO,
+        driver: [0; 32],
+        version: [0; 32],
+        fw_version: [0; 32],
+        bus_info: [0; 32],
+        erom_version: [0; 32],
+        reserved2: [0; 12],
+        n_priv_flags: 0,
+        n_stats: 0,
+        testinfo_len: 0,
+        eedump_len: 0,
+        regdump_len: 0,
+    };
+
+    let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
+    let name_bytes = ifname.as_bytes();
+    for (i, b) in name_bytes.iter().enumerate() {
+        ifr.ifr_name[i] = *b as libc::c_char;
+    }
+    ifr.ifr_ifru.ifru_data = (&raw mut drvinfo).cast();
+
+    let rc = unsafe { libc::ioctl(fd, SIOCETHTOOL, &raw mut ifr) };
+    unsafe { libc::close(fd) };
+    if rc < 0 {
+        return None;
+    }
+
+    let nul = drvinfo.driver.iter().position(|&b| b == 0).unwrap_or(32);
+    let s = std::str::from_utf8(&drvinfo.driver[..nul]).ok()?;
+    if s.is_empty() { None } else { Some(s.to_owned()) }
+}
+
 /// Handle IMPORT{builtin} for common udev builtins.
 fn handle_builtin_import(cmd: &str, event: &mut UEvent, hwdb: Option<&Hwdb>) {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
@@ -3235,12 +3300,21 @@ fn handle_builtin_import(cmd: &str, event: &mut UEvent, hwdb: Option<&Hwdb>) {
             }
         }
         "net_id" => {
-            // Generate predictable network interface names
-            // This is complex; provide basic ID_NET_NAME_PATH
+            // Generate predictable network interface name info.
+            // Upstream's net_id sets several ID_NET_NAME_* variants plus
+            // ID_NET_DRIVER (via ethtool SIOCETHTOOL/ETHTOOL_GDRVINFO);
+            // we provide the minimum subset TEST-17-UDEV.netif-*.sh
+            // exercises.
             if event.subsystem == "net"
-                && let Some(ref devname) = event.env.get("INTERFACE").cloned()
+                && let Some(ref ifname) = event.env.get("INTERFACE").cloned()
             {
-                event.env.insert("ID_NET_NAME".to_string(), devname.clone());
+                event.env.insert("ID_NET_NAME".to_string(), ifname.clone());
+                event
+                    .env
+                    .insert("ID_NET_NAME_PATH".to_string(), ifname.clone());
+                if let Some(drv) = ethtool_driver(ifname) {
+                    event.env.insert("ID_NET_DRIVER".to_string(), drv);
+                }
             }
         }
         "blkid" => {
