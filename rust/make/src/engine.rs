@@ -89,7 +89,7 @@ pub struct Engine {
     default_goal: RefCell<Option<String>>,
     phony_targets: RefCell<HashSet<String>>,
     suffixes: RefCell<Vec<String>>,
-    exports: RefCell<HashSet<String>>,
+    pub exports: RefCell<HashSet<String>>,
     export_all: RefCell<bool>,
     built_targets: RefCell<HashSet<String>>,
     eval_queue: RefCell<Vec<String>>,
@@ -101,7 +101,7 @@ pub struct Engine {
     /// We track these separately from `VarOrigin` so we can re-export
     /// them to child processes even after a makefile assignment has
     /// changed their value (and consequently their origin).
-    env_inherited: RefCell<HashSet<String>>,
+    pub env_inherited: RefCell<HashSet<String>>,
     /// Names of variables assigned with `:::=`. Such vars are simply
     /// expanded but a later `+=` appends text verbatim (recursive
     /// semantics), matching GNU make.

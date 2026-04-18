@@ -579,6 +579,30 @@ fn call_function(
             for flag in shell_flags.split_whitespace() {
                 shell_cmd.arg(flag);
             }
+            // Re-export env-inherited vars with their current values
+            // so `$(shell echo $$FOO)` sees makefile-side updates.
+            // Snapshot the sets first, and use raw values for simple
+            // vars to avoid re-entering expansion (a recursive var
+            // whose body contains `$(shell …)` would otherwise cause
+            // infinite recursion through this same code path).
+            let env_names: Vec<String> = engine
+                .env_inherited
+                .borrow()
+                .iter()
+                .filter(|n| n.as_str() != "SHELL")
+                .cloned()
+                .collect();
+            for name in &env_names {
+                if engine.var_flavor(name) == VarFlavor::Simple {
+                    shell_cmd.env(name, engine.lookup_var_raw(name));
+                }
+            }
+            let export_names: Vec<String> = engine.exports.borrow().iter().cloned().collect();
+            for name in &export_names {
+                if engine.var_flavor(name) == VarFlavor::Simple {
+                    shell_cmd.env(name, engine.lookup_var_raw(name));
+                }
+            }
             match shell_cmd.arg(&cmd).output() {
                 Ok(output) => {
                     let status = output

@@ -17,10 +17,48 @@ fn strip_recipe_prefix(line: &str, prefix: char) -> Option<&str> {
 /// Strip a Makefile comment (# and everything after, unless preceded by \)
 fn strip_makefile_comment(s: &str) -> &str {
     let bytes = s.as_bytes();
-    for i in 0..bytes.len() {
-        if bytes[i] == b'#' && (i == 0 || bytes[i - 1] != b'\\') {
+    let mut paren_depth: i32 = 0;
+    let mut brace_depth: i32 = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        // Track `$(...)` / `${...}` nesting so `#` inside a function
+        // call (e.g. `$(shell echo '#')`) is treated as literal.
+        if c == b'$' && i + 1 < bytes.len() {
+            match bytes[i + 1] {
+                b'(' => {
+                    paren_depth += 1;
+                    i += 2;
+                    continue;
+                }
+                b'{' => {
+                    brace_depth += 1;
+                    i += 2;
+                    continue;
+                }
+                b'$' => {
+                    i += 2;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        if c == b'(' && paren_depth > 0 {
+            paren_depth += 1;
+        } else if c == b')' && paren_depth > 0 {
+            paren_depth -= 1;
+        } else if c == b'{' && brace_depth > 0 {
+            brace_depth += 1;
+        } else if c == b'}' && brace_depth > 0 {
+            brace_depth -= 1;
+        } else if c == b'#'
+            && paren_depth == 0
+            && brace_depth == 0
+            && (i == 0 || bytes[i - 1] != b'\\')
+        {
             return &s[..i];
         }
+        i += 1;
     }
     s
 }
