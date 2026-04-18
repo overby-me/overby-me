@@ -295,6 +295,41 @@ enum Commands {
         timeout: u64,
     },
 
+    /// Cat udev rules files or the udev configuration
+    Cat {
+        /// Show udev.conf / drop-ins instead of rule files.
+        #[arg(long)]
+        config: bool,
+
+        /// Paths or basenames to show.  When empty and not --config,
+        /// all rule files from the standard search paths are printed.
+        args: Vec<String>,
+    },
+
+    /// Lock a block device or the filesystem backing a path, then exec
+    /// the command given after `--` (or print the lock and exit if
+    /// `--print` is passed).
+    Lock {
+        /// Lock this specific block device node.
+        #[arg(long)]
+        device: Option<String>,
+
+        /// Lock the block device backing this path.
+        #[arg(long)]
+        backing: Option<String>,
+
+        /// Acquire the lock then print the fd number and exit.
+        #[arg(long)]
+        print: bool,
+
+        /// Timeout for lock acquisition in seconds.
+        #[arg(long, short = 't', default_value = "0")]
+        timeout: u64,
+
+        /// Command to execute while holding the lock.
+        command: Vec<String>,
+    },
+
     /// Wait for devices to be processed by udev
     Wait {
         /// Maximum time to wait in seconds
@@ -1686,6 +1721,284 @@ fn cmd_wait(timeout: u64, wait_until: &str, _settle: bool, devices: &[String]) -
 // Main
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// udevadm cat
+// ---------------------------------------------------------------------------
+
+/// Standard search paths for udev rules files, in priority order
+/// (higher-priority directories come first in the slice, but files in
+/// later dirs are still shown — systemd's behavior is to concatenate
+/// content from all directories with a `# <path>` header).
+const UDEV_RULES_DIRS: &[&str] = &[
+    "/etc/udev/rules.d",
+    "/run/udev/rules.d",
+    "/usr/local/lib/udev/rules.d",
+    "/usr/lib/udev/rules.d",
+];
+
+/// Standard search paths for udev.conf.
+const UDEV_CONFIG_PATHS: &[&str] = &[
+    "/etc/udev/udev.conf",
+    "/run/udev/udev.conf",
+    "/usr/local/lib/udev/udev.conf",
+    "/usr/lib/udev/udev.conf",
+];
+
+/// Drop-in directory basenames that extend udev.conf.
+const UDEV_CONF_DROPIN_DIRS: &[&str] = &[
+    "/etc/udev/udev.conf.d",
+    "/run/udev/udev.conf.d",
+    "/usr/local/lib/udev/udev.conf.d",
+    "/usr/lib/udev/udev.conf.d",
+];
+
+fn cmd_cat(config: bool, args: &[String]) -> i32 {
+    if config {
+        return cmd_cat_config();
+    }
+
+    // With no args, dump every rules file we can find (in priority order,
+    // highest-priority wins for same basename — but for simple `cat` we
+    // just show all).
+    if args.is_empty() {
+        let mut shown: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut any = false;
+        for dir in UDEV_RULES_DIRS {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                let mut names: Vec<_> = entries.flatten().collect();
+                names.sort_by_key(|e| e.file_name());
+                for entry in names {
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) != Some("rules") {
+                        continue;
+                    }
+                    let basename = match entry.file_name().into_string() {
+                        Ok(n) => n,
+                        Err(_) => continue,
+                    };
+                    if shown.contains(&basename) {
+                        continue;
+                    }
+                    shown.insert(basename);
+                    print_rules_file(&path);
+                    any = true;
+                }
+            }
+        }
+        return if any { 0 } else { 0 };
+    }
+
+    // With args: interpret each as a path, a dir, a basename (with or
+    // without `.rules` suffix), or refuse with non-zero.
+    let mut rc = 0;
+    for arg in args {
+        if !handle_cat_arg(arg) {
+            rc = 1;
+        }
+    }
+    rc
+}
+
+fn handle_cat_arg(arg: &str) -> bool {
+    // Refuse non-rules files (e.g. /dev/null).  Upstream checks that the
+    // path refers to a readable regular file ending in .rules.
+    let p = std::path::Path::new(arg);
+
+    // Absolute path to a regular file — must end in .rules.
+    if p.is_absolute() && p.is_file() {
+        if p.extension().and_then(|e| e.to_str()) == Some("rules") {
+            print_rules_file(p);
+            return true;
+        }
+        eprintln!("udevadm cat: {arg} is not a *.rules file");
+        return false;
+    }
+
+    // Absolute path to a directory — print every .rules file inside.
+    if p.is_absolute() && p.is_dir() {
+        let mut any = false;
+        if let Ok(entries) = std::fs::read_dir(p) {
+            let mut names: Vec<_> = entries.flatten().collect();
+            names.sort_by_key(|e| e.file_name());
+            for entry in names {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("rules") {
+                    print_rules_file(&path);
+                    any = true;
+                }
+            }
+        }
+        return any;
+    }
+
+    // Basename — search standard dirs.  Accept with or without `.rules`.
+    let target = if arg.ends_with(".rules") {
+        arg.to_owned()
+    } else {
+        format!("{arg}.rules")
+    };
+    for dir in UDEV_RULES_DIRS {
+        let candidate = std::path::Path::new(dir).join(&target);
+        if candidate.is_file() {
+            print_rules_file(&candidate);
+            return true;
+        }
+    }
+
+    eprintln!("udevadm cat: no rules file matching {arg}");
+    false
+}
+
+fn print_rules_file(path: &std::path::Path) {
+    if let Ok(content) = std::fs::read_to_string(path) {
+        println!("# {}", path.display());
+        print!("{content}");
+        if !content.ends_with('\n') {
+            println!();
+        }
+    }
+}
+
+fn cmd_cat_config() -> i32 {
+    let mut any = false;
+    for cfg in UDEV_CONFIG_PATHS {
+        let p = std::path::Path::new(cfg);
+        if p.is_file()
+            && let Ok(content) = std::fs::read_to_string(p)
+        {
+            println!("# {}", p.display());
+            print!("{content}");
+            if !content.ends_with('\n') {
+                println!();
+            }
+            any = true;
+            break; // highest-priority wins for udev.conf itself
+        }
+    }
+    for dir in UDEV_CONF_DROPIN_DIRS {
+        let dir_path = std::path::Path::new(dir);
+        if let Ok(entries) = std::fs::read_dir(dir_path) {
+            let mut names: Vec<_> = entries.flatten().collect();
+            names.sort_by_key(|e| e.file_name());
+            for entry in names {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("conf") {
+                    continue;
+                }
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    println!("# {}", path.display());
+                    print!("{content}");
+                    if !content.ends_with('\n') {
+                        println!();
+                    }
+                    any = true;
+                }
+            }
+        }
+    }
+    if any { 0 } else { 0 }
+}
+
+// ---------------------------------------------------------------------------
+// udevadm lock
+// ---------------------------------------------------------------------------
+
+fn cmd_lock(
+    device: Option<&str>,
+    backing: Option<&str>,
+    print: bool,
+    timeout: u64,
+    command: &[String],
+) -> i32 {
+    use std::os::unix::io::{AsRawFd, IntoRawFd};
+
+    // Determine which file descriptor to flock.
+    let fd: std::os::unix::io::RawFd = if let Some(dev_path) = device {
+        match std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(dev_path)
+        {
+            Ok(f) => f.into_raw_fd(),
+            Err(e) => {
+                eprintln!("udevadm lock: cannot open device {dev_path}: {e}");
+                return 1;
+            }
+        }
+    } else if let Some(path) = backing {
+        // Find the backing block device by statting the path and looking
+        // up st_dev in /sys/dev/block/<major>:<minor>.
+        let meta = match std::fs::metadata(path) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("udevadm lock: cannot stat {path}: {e}");
+                return 1;
+            }
+        };
+        use std::os::linux::fs::MetadataExt;
+        let dev = meta.st_dev();
+        let major = unsafe { libc::major(dev) };
+        let minor = unsafe { libc::minor(dev) };
+        let dev_path = format!("/dev/block/{major}:{minor}");
+        match std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&dev_path)
+        {
+            Ok(f) => f.into_raw_fd(),
+            Err(e) => {
+                eprintln!("udevadm lock: cannot open backing device {dev_path}: {e}");
+                return 1;
+            }
+        }
+    } else {
+        eprintln!("udevadm lock: --device or --backing is required");
+        return 1;
+    };
+
+    // Acquire the lock.  flock(LOCK_EX | LOCK_NB) if timeout=0, otherwise
+    // spin-retry up to `timeout` seconds.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout);
+    loop {
+        let r = unsafe { libc::flock(fd.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if r == 0 {
+            break;
+        }
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() != Some(libc::EWOULDBLOCK) || std::time::Instant::now() >= deadline {
+            eprintln!("udevadm lock: flock failed: {err}");
+            return 1;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    if print {
+        println!("{fd}");
+        return 0;
+    }
+
+    if command.is_empty() {
+        // Nothing to run — just hold the lock until we exit.
+        return 0;
+    }
+
+    // Run the command while holding the lock; lock is released when the
+    // fd is closed (on process exit).
+    let mut cmd = std::process::Command::new(&command[0]);
+    cmd.args(&command[1..]);
+    let status = match cmd.status() {
+        Ok(s) => s,
+        Err(e) => {
+            let _ = unsafe { libc::close(fd) };
+            eprintln!("udevadm lock: failed to exec {}: {e}", command[0]);
+            return 1;
+        }
+    };
+    // close fd releases the lock.
+    let _ = unsafe { libc::close(fd) };
+    status.code().unwrap_or(1)
+}
+
 fn main() -> ExitCode {
     // Multi-call dispatch: when invoked as `systemd-udevd` (e.g. via symlink
     // in the NixOS initrd where systemd-udevd -> udevadm), run the daemon
@@ -1834,6 +2147,19 @@ fn main() -> ExitCode {
             settle,
             ref devices,
         } => cmd_wait(timeout, wait_until, settle, devices),
+
+        Commands::Cat {
+            config,
+            ref args,
+        } => cmd_cat(config, args),
+
+        Commands::Lock {
+            ref device,
+            ref backing,
+            print,
+            timeout,
+            ref command,
+        } => cmd_lock(device.as_deref(), backing.as_deref(), print, timeout, command),
 
         Commands::Version => {
             println!("udevadm (rust-systemd)");
