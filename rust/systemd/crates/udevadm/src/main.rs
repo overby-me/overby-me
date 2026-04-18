@@ -619,14 +619,20 @@ fn cmd_info(
     }
 
     for dev in devices {
-        // Could be a /dev node, /sys path, or a DEVICE_ID (n<ifname>,
-        // b<maj>:<min>, c<maj>:<min>) — accept all three.
+        // Could be a /dev node, /sys path, a DEVICE_ID (n<ifindex>,
+        // b<maj>:<min>, c<maj>:<min>), or a systemd-escaped unit name
+        // (e.g. `sys-devices-virtual-net-hoge.device`).
         if dev.starts_with("/dev/") {
             if let Some(sp) = devname_to_syspath(dev) {
                 syspaths.push(sp);
             }
         } else if let Some(sp) = device_id_to_syspath(dev) {
             syspaths.push(sp);
+        } else if dev.ends_with(".device")
+            && let Some(unescaped) = systemd_unescape_path(dev)
+            && unescaped.exists()
+        {
+            syspaths.push(unescaped);
         } else {
             let sp = normalize_syspath(dev);
             if sp.exists() {
@@ -1411,7 +1417,15 @@ fn cmd_test(action: &str, devpath: &str) -> i32 {
         return 1;
     }
 
-    let syspath = normalize_syspath(devpath);
+    // Accept systemd-escaped unit names (e.g. from `systemd-escape -p --suffix device`).
+    let syspath = if devpath.ends_with(".device")
+        && let Some(unescaped) = systemd_unescape_path(devpath)
+        && unescaped.exists()
+    {
+        unescaped
+    } else {
+        normalize_syspath(devpath)
+    };
     if !syspath.exists() {
         eprintln!(
             "udevadm test: device '{}' not found (tried {})",
@@ -1725,6 +1739,40 @@ fn syspath_to_devpath(syspath: &Path) -> String {
 }
 
 /// Try to find the sysfs path for a /dev/ device node.
+/// Decode a systemd-escaped path name (as produced by `systemd-escape
+/// -p --suffix device`) back to a sysfs path.  Strips a `.device` suffix
+/// if present.  Only supports the subset of escapes that appear in
+/// upstream udev test fixtures: `-` → `/`, `\x2d` → `-`, `\x2f` → `/`.
+fn systemd_unescape_path(s: &str) -> Option<PathBuf> {
+    let stripped = s.strip_suffix(".device").unwrap_or(s);
+    if stripped.is_empty() {
+        return None;
+    }
+    let mut out = String::with_capacity(stripped.len() + 1);
+    out.push('/');
+    let bytes = stripped.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c == b'-' {
+            out.push('/');
+            i += 1;
+            continue;
+        }
+        if c == b'\\' && bytes.get(i + 1) == Some(&b'x') && i + 3 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 2..i + 4]).ok()?;
+            if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                out.push(byte as char);
+                i += 4;
+                continue;
+            }
+        }
+        out.push(c as char);
+        i += 1;
+    }
+    Some(PathBuf::from(out))
+}
+
 fn devname_to_syspath(devname: &str) -> Option<PathBuf> {
     let devname = devname.strip_prefix("/dev/").unwrap_or(devname);
 
@@ -2099,6 +2147,11 @@ fn cmd_info_json(mode: &str, name: Option<&str>, path: Option<&str>, devices: &[
         } else if let Some(sp) = device_id_to_syspath(target) {
             // n<ifindex>/b<maj:min>/c<maj:min> DEVICE_ID.
             sp
+        } else if target.ends_with(".device")
+            && let Some(unescaped) = systemd_unescape_path(target)
+            && unescaped.exists()
+        {
+            unescaped
         } else if let Some(ifname) = target.strip_prefix('n')
             && ifname
                 .chars()
