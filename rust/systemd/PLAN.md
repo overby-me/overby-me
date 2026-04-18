@@ -142,7 +142,14 @@ Rust udevadm reimplementation is in progress.
 
 - 17-udev-sanity-check — full coverage including `cat`, `control`, `info` (all flags / JSON modes / DEVICE_ID round-trip), `test`, `test-builtin` (ethtool for net_driver), `trigger`, `wait`, `settle`, `monitor`, `lock` (CD-ROM no-media handling)
 
-**FAIL (unimplemented features):** The remaining 17-udev-* tests exercise deeper udev semantics — variable substitution in SYMLINK+= rules, `udevadm verify` (comprehensive rules validator), IMPORT{builtin}=…, netlink event ordering, etc.
+**FAIL (unimplemented features):** The remaining 17-udev-* tests exercise deeper udev semantics:
+
+- 17-udev-tag — `TAG+=` rule fires but tag file `/run/udev/tags/<tag>/c1:3` is not created after trigger/settle.  Rules load and parse (rule count increases as expected); `udevadm trigger --settle --action add /dev/null` reports "triggered 1 device(s)" but udevd processes nothing visible at INFO level afterwards.  Likely event-pipeline issue: kernel uevent from sysfs-write isn't reaching the worker.
+- 17-udev-database — similar event-pipeline dependency.
+- 17-udev-global-property — needs `udevadm control -p` persistence (implemented this session, unverified) plus rule-engine `ENV{…}` matching on injected globals.
+- 17-udev-verify — comprehensive rules validator with ~100 syntax-error patterns (large feature).
+- 17-udev-netif-altname / -link-property / -loop-own — need `.link` file processing (net_setup_link semantic) and systemd-dissect integration.
+- 17-udev-SYSTEMD_WANTS* / -systemd-alias — require udev → systemd device-unit alias/Wants wiring.
 
 ### 7. NixOS Framework Limitations
 
