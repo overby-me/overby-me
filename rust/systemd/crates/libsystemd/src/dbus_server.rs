@@ -177,6 +177,110 @@ mod inner {
         }
     }
 
+    /// Per-unit object additionally exposing `org.freedesktop.systemd1.Service`
+    /// for .service units.  Registered on the same object path as the Unit
+    /// interface; zbus routes introspection/property queries to whichever
+    /// interface matches.
+    struct ServiceObj {
+        run_info: ArcMutRuntimeInfo,
+        unit_name: String,
+    }
+
+    #[interface(name = "org.freedesktop.systemd1.Service")]
+    impl ServiceObj {
+        #[zbus(property)]
+        fn main_pid(&self) -> u32 {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .map(|u| {
+                    let pid = u
+                        .common
+                        .main_pid
+                        .load(std::sync::atomic::Ordering::Acquire);
+                    if pid > 0 { pid as u32 } else { 0 }
+                })
+                .unwrap_or(0)
+        }
+
+        #[zbus(property)]
+        fn exec_main_pid(&self) -> u32 {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .map(|u| {
+                    let pid = u
+                        .common
+                        .main_exit_pid
+                        .load(std::sync::atomic::Ordering::Acquire);
+                    if pid > 0 { pid as u32 } else { 0 }
+                })
+                .unwrap_or(0)
+        }
+
+        #[zbus(property)]
+        fn exec_main_status(&self) -> i32 {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .map(|u| {
+                    u.common
+                        .main_exit_status
+                        .load(std::sync::atomic::Ordering::Acquire)
+                })
+                .unwrap_or(-1)
+        }
+
+        #[zbus(property)]
+        fn type_(&self) -> String {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .and_then(|u| match &u.specific {
+                    crate::units::Specific::Service(srvc) => Some(service_type_string(
+                        &srvc.conf.srcv_type,
+                    )),
+                    _ => None,
+                })
+                .unwrap_or_else(|| "simple".to_string())
+        }
+
+        #[zbus(property)]
+        fn result(&self) -> String {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .map(|u| {
+                    let status = u.common.status.read_poisoned();
+                    match &*status {
+                        UnitStatus::Stopped(_, errs) if !errs.is_empty() => "failure",
+                        _ => "success",
+                    }
+                    .to_string()
+                })
+                .unwrap_or_else(|| "success".to_string())
+        }
+    }
+
+    fn service_type_string(t: &crate::units::ServiceType) -> String {
+        match t {
+            crate::units::ServiceType::Simple => "simple",
+            crate::units::ServiceType::Forking => "forking",
+            crate::units::ServiceType::OneShot => "oneshot",
+            crate::units::ServiceType::Dbus => "dbus",
+            crate::units::ServiceType::Notify => "notify",
+            crate::units::ServiceType::NotifyReload => "notify-reload",
+            crate::units::ServiceType::Idle => "idle",
+            crate::units::ServiceType::Exec => "exec",
+        }
+        .to_string()
+    }
+
     /// Per-unit tuple returned by `ListUnits`: (name, description, load,
     /// active, sub, follower, obj_path, job_id, job_type, job_obj_path).
     type ListUnitsEntry = (
@@ -559,6 +663,7 @@ mod inner {
     }
 
     /// Register a Unit object at the encoded object path for `unit_name`.
+    /// For `.service` units, also attach the Service interface.
     fn register_unit_object(
         conn: &Connection,
         run_info: &ArcMutRuntimeInfo,
@@ -569,6 +674,14 @@ mod inner {
             run_info: run_info.clone(),
             unit_name: unit_name.to_owned(),
         };
-        conn.object_server().at(&path, obj).map(|_| ())
+        conn.object_server().at(&path, obj)?;
+        if unit_name.ends_with(".service") {
+            let svc = ServiceObj {
+                run_info: run_info.clone(),
+                unit_name: unit_name.to_owned(),
+            };
+            conn.object_server().at(&path, svc)?;
+        }
+        Ok(())
     }
 }
