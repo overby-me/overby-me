@@ -387,8 +387,12 @@ struct CheckpointStream<S> {
 }
 
 impl<S> CheckpointStream<S> {
-    fn new(inner: S, interval: u64, actions: Vec<CheckpointAction>) -> Self {
-        let record_size: u64 = 10240;
+    fn new(inner: S, interval: u64, actions: Vec<CheckpointAction>, blocking_factor: u64) -> Self {
+        // record_size = blocking_factor × 512 bytes. GNU default is 20
+        // (→ 10240-byte records). --blocking-factor=1 shrinks the
+        // record so `genfile --run --checkpoint N` triggers at the
+        // offsets the test suite expects.
+        let record_size: u64 = blocking_factor.max(1) * 512;
         Self {
             inner,
             bytes: 0,
@@ -1084,6 +1088,11 @@ struct Args {
     /// timestamp) is honoured at check-time; the rest are harmless
     /// placeholders.
     disabled_warnings: std::collections::HashSet<String>,
+    /// `--blocking-factor=N` / `-b N`: number of 512-byte blocks per
+    /// record. Default matches GNU's 20 (10240 bytes). Used by the
+    /// checkpoint byte-counter so `genfile --run --checkpoint N`
+    /// triggers at the expected offsets.
+    blocking_factor: u64,
     /// --index-file=FILE: write -v listings to FILE instead of stderr.
     index_file: Option<String>,
     /// --one-top-level[=DIR]: wrap extracted members under DIR if they
@@ -1421,6 +1430,7 @@ fn parse_args() -> Args {
     let mut args = Args {
         wildcards_default: true,
         match_slash_default: true,
+        blocking_factor: 20,
         ..Args::default()
     };
     let mut queue: VecDeque<String> = raw.into_iter().collect();
@@ -1766,11 +1776,17 @@ fn parse_args() -> Args {
             "-g" | "--listed-incremental" => {
                 args.listed_incremental = queue.pop_front();
             }
+            "--blocking-factor" | "-b" => {
+                if let Some(v) = queue.pop_front()
+                    && let Ok(n) = v.parse::<u64>()
+                    && n > 0
+                {
+                    args.blocking_factor = n;
+                }
+            }
             "--volno-file"
             | "--rsh-command"
             | "--new-volume-script"
-            | "--blocking-factor"
-            | "-b"
             | "--record-size"
             | "--tape-length"
             | "-L"
@@ -1912,8 +1928,13 @@ fn parse_args() -> Args {
                     if let Some(name) = val.strip_prefix("no-") {
                         args.disabled_warnings.insert(name.to_string());
                     }
-                } else if other.strip_prefix("--blocking-factor=").is_some()
-                    || other.strip_prefix("--record-size=").is_some()
+                } else if let Some(val) = other.strip_prefix("--blocking-factor=") {
+                    if let Ok(n) = val.parse::<u64>()
+                        && n > 0
+                    {
+                        args.blocking_factor = n;
+                    }
+                } else if other.strip_prefix("--record-size=").is_some()
                     || other.strip_prefix("--occurrence=").is_some_and(|_| {
                         args.occurrence = true;
                         true
@@ -2311,6 +2332,7 @@ fn do_create(args: &Args) -> io::Result<()> {
             compressed_writer,
             n,
             args.checkpoint_actions.clone(),
+            args.blocking_factor,
         ))
     } else {
         compressed_writer
@@ -3278,6 +3300,53 @@ fn add_paths_to_builder_filter<W: Write>(
                         file_changed = true;
                     }
                 }
+            } else if !path.exists() {
+                // Path vanished between walk collection and archive
+                // write — under listed-incremental GNU emits
+                // `File removed before we read it` and exits 1. If a
+                // parent also disappeared, report the topmost gone
+                // ancestor so the user sees the source of the
+                // cascade rather than every leaf. Explicitly-named
+                // source paths (ones listed on argv) fall through to
+                // the normal Cannot open path — that's what GNU does
+                // when the user asked for a directory that's gone.
+                let is_direct_source = args.paths.iter().any(|p| Path::new(p) == path);
+                if args.listed_incremental.is_some() && !is_direct_source {
+                    let mut cur = path.to_path_buf();
+                    let mut ancestor_is_source = false;
+                    while let Some(parent) = cur.parent() {
+                        if parent.as_os_str().is_empty() || parent.exists() {
+                            break;
+                        }
+                        cur = parent.to_path_buf();
+                        // If the walk-up lands on a path the user
+                        // named explicitly, let the per-source
+                        // `Cannot open` report handle it — otherwise
+                        // we'd double-report the same directory.
+                        if args.paths.iter().any(|p| Path::new(p) == cur) {
+                            ancestor_is_source = true;
+                            break;
+                        }
+                    }
+                    if ancestor_is_source {
+                        file_changed = true;
+                        continue;
+                    }
+                    let report_name = cur.to_string_lossy().into_owned();
+                    if !args.disabled_warnings.contains("file-removed") {
+                        eprintln!("tar: {report_name}: File removed before we read it");
+                    }
+                    file_changed = true;
+                    continue;
+                }
+                let reason = describe_open_error(&io::Error::from(io::ErrorKind::NotFound));
+                if args.ignore_failed_read {
+                    eprintln!("tar: {archive_name}: Warning: Cannot open: {reason}");
+                    continue;
+                }
+                eprintln!("tar: {archive_name}: Cannot open: {reason}");
+                had_read_error = true;
+                continue;
             }
 
             if args.verify && args.verbose {
@@ -3694,6 +3763,7 @@ fn do_diff(args: &Args) -> io::Result<()> {
             reader,
             n,
             args.checkpoint_actions.clone(),
+            args.blocking_factor,
         ))
     } else {
         reader
