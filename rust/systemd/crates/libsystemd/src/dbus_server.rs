@@ -510,6 +510,33 @@ mod inner {
             Ok(())
         }
 
+        /// Send a Unix signal to one or more of a unit's processes.  `whom`
+        /// selects the recipient: `"main"`, `"control"`, or `"all"` (default).
+        fn kill_unit(&self, name: String, whom: String, signal: i32) -> zbus::fdo::Result<()> {
+            let whom_norm = if whom.is_empty() {
+                "all".to_string()
+            } else {
+                whom
+            };
+            invoke_command(
+                &self.run_info,
+                crate::control::Command::Kill(name, signal, whom_norm, None, false),
+            )
+            .map_err(zbus::fdo::Error::Failed)?;
+            Ok(())
+        }
+
+        /// Reset the "failed" state of one unit (clears stored errors so it
+        /// can be restarted without `--force`).
+        fn reset_failed_unit(&self, name: String) -> zbus::fdo::Result<()> {
+            invoke_command(
+                &self.run_info,
+                crate::control::Command::ResetFailed(Some(name)),
+            )
+            .map_err(zbus::fdo::Error::Failed)?;
+            Ok(())
+        }
+
         /// Bind-mount `source` onto `destination` inside the mount namespace
         /// of the running service `name`.  If `mkdir` is true, the destination
         /// is created (as a file or directory mirroring the source type)
