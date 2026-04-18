@@ -5048,15 +5048,14 @@ pub fn run_daemon() {
             ));
         }
 
-        // Reap child processes
+        // Clear the SIGCHLD flag without reaping.  Worker threads use
+        // Rust's `Command::output()` which calls `waitpid(pid, ...)` for
+        // its own child — reaping with `waitpid(-1, ..., WNOHANG)` here
+        // races with that call and makes `Child::wait` panic when the
+        // kernel reports "no such child" for a pid the worker still
+        // expects to reap.
         if CHILDREN_FLAG.load(Ordering::SeqCst) {
             CHILDREN_FLAG.store(false, Ordering::SeqCst);
-            loop {
-                let ret = unsafe { libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) };
-                if ret <= 0 {
-                    break;
-                }
-            }
         }
 
         // Send watchdog keepalive

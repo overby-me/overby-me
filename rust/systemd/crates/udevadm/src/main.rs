@@ -2971,18 +2971,22 @@ fn cmd_lock(
 }
 
 fn main() -> ExitCode {
-    // Restore default SIGPIPE so piped output (`| head`, `| jq ...`) exits
-    // cleanly on a closed pipe instead of panicking in Rust's stdio.
-    unsafe {
-        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
-    }
-
     // Multi-call dispatch: when invoked as `systemd-udevd` (e.g. via symlink
     // in the NixOS initrd where systemd-udevd -> udevadm), run the daemon
     // instead of the udevadm CLI.
     if systemd_udevd::invoked_as_daemon() {
         systemd_udevd::run_daemon();
         return ExitCode::SUCCESS;
+    }
+
+    // udevadm CLI only: restore default SIGPIPE so piped output
+    // (`| head`, `| jq ...`) exits cleanly on a closed pipe instead of
+    // panicking in Rust's stdio.  Do NOT apply this to the daemon — the
+    // daemon forks PROGRAM= helpers and benefits from stdlib's default
+    // SIGPIPE handling (which Rust initializes to SIG_IGN so writes to
+    // closed pipes return EPIPE instead of killing the process).
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
 
     init_logging();
