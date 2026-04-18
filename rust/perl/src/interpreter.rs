@@ -70,6 +70,9 @@ pub struct Interpreter {
     /// Mutating builtins (push/unshift/splice/shift/pop) raise a die when
     /// the target is in this set.
     readonly_arrays: std::collections::HashSet<String>,
+    /// Per-hash iteration cursor for `each %h` — index into the snapshot
+    /// of keys taken on first call. Reset on `keys`/`values`/end-of-iter.
+    each_cursors: HashMap<String, (Vec<String>, usize)>,
     // File handles for writing
     write_handles: HashMap<String, BufWriter<File>>,
     // Typeglob aliases: when `local(*F) = *G` is in effect, any code that
@@ -171,6 +174,7 @@ impl Interpreter {
             read_handles: HashMap::new(),
             last_read_fh: None,
             readonly_arrays: std::collections::HashSet::new(),
+            each_cursors: HashMap::new(),
             write_handles: HashMap::new(),
             fh_aliases: HashMap::new(),
             fh_counter: 0,
@@ -2590,6 +2594,7 @@ impl Interpreter {
             }
             "keys" => {
                 if let Some(Expr::HashVar(name)) = args.first() {
+                    self.each_cursors.remove(name);
                     let hash = self.get_hash(name);
                     Value::Num(hash.len() as f64) // scalar context
                 } else {
@@ -2598,8 +2603,32 @@ impl Interpreter {
             }
             "values" => {
                 if let Some(Expr::HashVar(name)) = args.first() {
+                    self.each_cursors.remove(name);
                     let hash = self.get_hash(name);
                     Value::Num(hash.len() as f64)
+                } else {
+                    Value::Undef
+                }
+            }
+            "each" => {
+                if let Some(Expr::HashVar(name)) = args.first() {
+                    let hash = self.get_hash(name);
+                    let entry = self
+                        .each_cursors
+                        .entry(name.clone())
+                        .or_insert_with(|| (hash.keys().cloned().collect(), 0));
+                    if entry.1 >= entry.0.len() {
+                        // Iteration exhausted — reset and return empty.
+                        self.each_cursors.remove(name);
+                        self.last_list_val = Some(Vec::new());
+                        return Value::Undef;
+                    }
+                    let key = entry.0[entry.1].clone();
+                    entry.1 += 1;
+                    let v = hash.get(&key).cloned().unwrap_or(Value::Undef);
+                    self.last_list_val = Some(vec![Value::Str(key.clone()), v.clone()]);
+                    // Scalar context returns the key.
+                    Value::Str(key)
                 } else {
                     Value::Undef
                 }
@@ -3881,6 +3910,7 @@ impl Interpreter {
                     }
                     "keys" => {
                         if let Some(Expr::HashVar(name)) = args.first() {
+                            self.each_cursors.remove(name);
                             let hash = self.get_hash(name);
                             hash.keys().map(|k| Value::Str(k.clone())).collect()
                         } else {
@@ -3889,11 +3919,17 @@ impl Interpreter {
                     }
                     "values" => {
                         if let Some(Expr::HashVar(name)) = args.first() {
+                            self.each_cursors.remove(name);
                             let hash = self.get_hash(name);
                             hash.values().cloned().collect()
                         } else {
                             Vec::new()
                         }
+                    }
+                    "each" => {
+                        // List context: returns (key, value) pair, or () at end.
+                        let _ = self.eval_call("each", args);
+                        self.last_list_val.take().unwrap_or_default()
                     }
                     "sort" => {
                         let mut items: Vec<Value> =
