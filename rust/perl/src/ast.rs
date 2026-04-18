@@ -78,6 +78,12 @@ pub enum Expr {
     DoBlock(Vec<Stmt>),
     DoFile(Box<Expr>),
 
+    // Anonymous sub: `sub { ... }` → CodeRef
+    AnonSub(Vec<String>, Vec<Stmt>),
+
+    // `$coderef->(args)` — invoke a code reference
+    CodeCall(Box<Expr>, Vec<Expr>),
+
     // Local/My as expression (for my $x = ...)
     MyVar(String),
     LocalVar(String),
@@ -240,6 +246,12 @@ pub enum Stmt {
     Last(Option<String>),
     Next(Option<String>),
     Redo(Option<String>),
+    Goto(String),
+    /// Statement label — marks a position that `goto LABEL` / `last LABEL` /
+    /// `next LABEL` / `redo LABEL` can target. The label applies to the
+    /// *following* statement; we emit it as its own no-op Stmt so the
+    /// enclosing block can scan for the name on jump.
+    Label(String),
     Return(Option<Expr>),
 
     // Block
@@ -254,6 +266,11 @@ pub enum Stmt {
     },
     My(Vec<(String, Option<Expr>)>, bool), // my ($a, $b) = ...; bool = is list-context destructure (parens used)
     Local(Vec<(String, Option<Expr>)>, bool),
+    /// `local $NAME{KEY} = VAL;` — save the old hash element, set the new
+    /// value, and schedule restoration at scope exit. Required for the
+    /// `local $SIG{__DIE__} = sub {…}` idiom (temporarily install a die
+    /// handler for the enclosing block).
+    LocalHashElem(String, Expr, Option<Expr>),
     Our(Vec<(String, Option<Expr>)>, bool),
 
     // Package
@@ -268,6 +285,8 @@ pub enum Stmt {
     // the right line (matching reference perl).
     Begin(Vec<Stmt>, usize),
     End(Vec<Stmt>),
+    Check(Vec<Stmt>),
+    Init(Vec<Stmt>),
 
     // Die/warn
     Die(Vec<Expr>),

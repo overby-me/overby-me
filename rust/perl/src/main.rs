@@ -42,10 +42,11 @@ fn main() {
     // Run the interpreter in a thread with a larger stack than Rust's default
     // main-thread stack (typically 8 MiB, but the interpreter is recursive
     // and Perl tests like op/cond.t build deeply-nested expressions — e.g.
-    // `$x ? 1 : $x ? 1 : …` 20000 levels deep). A 256 MiB thread stack is
+    // `$x ? 1 : $x ? 1 : …` 20000 levels deep, and op/list.t does `() =
+    // (1,(1,(1,…)))` 100 000 levels deep). A 1 GiB thread stack is
     // generous but keeps the cost to at-most one allocation per process.
     let handle = std::thread::Builder::new()
-        .stack_size(256 * 1024 * 1024)
+        .stack_size(1024 * 1024 * 1024)
         .spawn(run_interpreter)
         .expect("failed to spawn interpreter thread");
     let code = handle.join().expect("interpreter thread panicked");

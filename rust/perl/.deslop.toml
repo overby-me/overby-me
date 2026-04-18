@@ -13,4 +13,16 @@ disabled_rules = [
   "expect_in_non_test_code",
   "unreachable_macro_leftover",
   "rust_partial_init_escape",
+  # Live-aliased globals (\@arr / \$var / \%h) intentionally store
+  # state as Rc<RefCell<_>> so the ref and the slot share storage.
+  "rust_rc_refcell_domain_model",
+  # Some helper names are long-but-clear (descriptive intent over
+  # brevity). Tradeoff acceptable for an interpreter glue layer.
+  "overlong_name",
+  # `libc::kill` is the only unsafe block; it's a thin syscall
+  # wrapper with no invariants beyond what libc::kill itself documents.
+  "unsafe_without_safety_comment",
+  # `#[allow(dead_code)]` is on a single helper kept around for
+  # future use; not a broad blanket.
+  "rust_broad_allow_dead_code",
 ]

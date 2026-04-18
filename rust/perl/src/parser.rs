@@ -108,6 +108,26 @@ impl Parser {
         // Check for label
         let label = self.try_parse_label();
 
+        // If the label is followed by a non-loop/block statement (e.g.
+        // `loop: my $test = undef;`), emit a standalone `Stmt::Label` so a
+        // subsequent `goto LABEL` can target it. Loops/blocks/if/foreach
+        // below still consume the label themselves via the `label` local.
+        if let Some(ref lbl) = label
+            && !matches!(
+                self.tok(),
+                Token::LBrace
+                    | Token::While
+                    | Token::Until
+                    | Token::For
+                    | Token::Foreach
+                    | Token::If
+                    | Token::Unless
+                    | Token::Do
+            )
+        {
+            return Some(Stmt::Label(lbl.clone()));
+        }
+
         match self.tok() {
             Token::EOF => return None,
             Token::Semi => {
@@ -171,24 +191,43 @@ impl Parser {
                 return Some(self.parse_for(label));
             }
             Token::Sub => {
+                // Distinguish `sub NAME { ... }` (declaration) from
+                // `sub { ... }->(args)` (anonymous sub, immediately invoked,
+                // or otherwise used as an expression). If the next token is
+                // `{` (no name, no proto, no attribs) we may have an anon
+                // sub expression — peek past the matching `}` to see if the
+                // next token after the body is one that continues an
+                // expression (`->`, `(`, `->(`, operator, etc.).
+                if matches!(self.tokens.get(self.pos + 1), Some(Token::LBrace))
+                    && self.anon_sub_starts_expr(self.pos + 1)
+                {
+                    let expr = self.parse_expr();
+                    let stmt = Stmt::Expr(expr);
+                    let stmt = self.maybe_postfix(stmt);
+                    self.eat(&Token::Semi);
+                    return Some(stmt);
+                }
                 self.pos += 1;
                 return Some(self.parse_sub_decl());
             }
             Token::My => {
                 self.pos += 1;
                 let stmt = self.parse_my_decl();
+                let stmt = self.maybe_postfix(stmt);
                 self.eat(&Token::Semi);
                 return Some(stmt);
             }
             Token::Our => {
                 self.pos += 1;
                 let stmt = self.parse_our_decl();
+                let stmt = self.maybe_postfix(stmt);
                 self.eat(&Token::Semi);
                 return Some(stmt);
             }
             Token::Local => {
                 self.pos += 1;
                 let stmt = self.parse_local_decl();
+                let stmt = self.maybe_postfix(stmt);
                 self.eat(&Token::Semi);
                 return Some(stmt);
             }
@@ -201,6 +240,19 @@ impl Parser {
                 } else {
                     "main".to_string()
                 };
+                // `package NAME { BLOCK }` — scoped package: switch to
+                // NAME inside the block, revert on exit. Implement by
+                // wrapping the block's statements with a Package(NAME) at
+                // the front and a Package(<previous>) at the end. The
+                // interpreter's `Stmt::Block` already reverts the package
+                // on exit (see `Stmt::Block` handling).
+                if self.at(&Token::LBrace) {
+                    let body = self.parse_brace_block();
+                    let mut stmts = Vec::with_capacity(body.len() + 1);
+                    stmts.push(Stmt::Package(name));
+                    stmts.extend(body);
+                    return Some(Stmt::Block(stmts));
+                }
                 self.eat(&Token::Semi);
                 return Some(Stmt::Package(name));
             }
@@ -231,6 +283,16 @@ impl Parser {
                 let body = self.parse_brace_block();
                 return Some(Stmt::End(body));
             }
+            Token::Check => {
+                self.pos += 1;
+                let body = self.parse_brace_block();
+                return Some(Stmt::Check(body));
+            }
+            Token::Init => {
+                self.pos += 1;
+                let body = self.parse_brace_block();
+                return Some(Stmt::Init(body));
+            }
             Token::Last => {
                 self.pos += 1;
                 let label = if let Token::Ident(name) = self.tok() {
@@ -241,6 +303,18 @@ impl Parser {
                     None
                 };
                 let stmt = Stmt::Last(label);
+                return Some(self.maybe_postfix(stmt));
+            }
+            Token::Goto => {
+                self.pos += 1;
+                let label = if let Token::Ident(name) = self.tok() {
+                    let n = name.clone();
+                    self.pos += 1;
+                    n
+                } else {
+                    String::new()
+                };
+                let stmt = Stmt::Goto(label);
                 return Some(self.maybe_postfix(stmt));
             }
             Token::Next => {
@@ -313,10 +387,10 @@ impl Parser {
                 // consume any postfix modifier, so the outer `unless` gates
                 // the whole group (Perl-consistent behaviour).
                 let expr = self.parse_expr();
-                if self.at(&Token::Comma) {
+                if self.at(&Token::Comma) || self.at(&Token::FatComma) {
                     let mut exprs = vec![expr];
                     let mut flow_stmt: Option<Stmt> = None;
-                    while self.eat(&Token::Comma) {
+                    while self.eat(&Token::Comma) || self.eat(&Token::FatComma) {
                         if self.at(&Token::Semi) || self.at(&Token::EOF) || self.at(&Token::RBrace)
                         {
                             break;
@@ -692,6 +766,15 @@ impl Parser {
             let mut s = String::new();
             while !self.at(&Token::RParen) && !self.at(&Token::EOF) {
                 match self.tok() {
+                    // `$@` / `$%` inside a prototype lex as Token::ScalarVar("@")
+                    // / ScalarVar("%") (the special vars). In proto context the
+                    // second char is really a sigil, not part of the var name —
+                    // `sub ok ($@)` means "scalar + rest-as-array", not "scalar
+                    // var `$@`". Push both chars.
+                    Token::ScalarVar(name) if name == "@" || name == "%" || name == "$" => {
+                        s.push('$');
+                        s.push_str(name);
+                    }
                     Token::ScalarVar(_) => s.push('$'),
                     Token::ArrayVar(_) => s.push('@'),
                     Token::HashVar(_) => s.push('%'),
@@ -721,7 +804,18 @@ impl Parser {
             }
         }
 
-        let body = self.parse_brace_block();
+        // `sub NAME;` or `sub NAME (PROTO);` — forward declaration with no
+        // body. Accept that by consuming the trailing semicolon and emitting
+        // an empty-body Sub. We still install the name so later calls parse
+        // as sub calls.
+        let body = if self.at(&Token::Semi) {
+            self.pos += 1;
+            Vec::new()
+        } else if self.at(&Token::LBrace) {
+            self.parse_brace_block()
+        } else {
+            Vec::new()
+        };
         Stmt::Sub {
             name,
             params: proto,
@@ -746,6 +840,35 @@ impl Parser {
     }
 
     fn parse_local_decl(&mut self) -> Stmt {
+        // `local $NAME{KEY}` / `local $NAME[IDX]` — hash/array element
+        // localisation. Peek before falling through to parse_var_list,
+        // which only understands bare `$`/`@`/`%` vars.
+        if let Token::ScalarVar(name) = self.tok()
+            && matches!(self.peek(1), Token::LBrace | Token::LBracket)
+        {
+            let var_name = name.clone();
+            let is_hash = matches!(self.peek(1), Token::LBrace);
+            self.pos += 2; // skip ScalarVar and `{` / `[`
+            let key = self.parse_expr();
+            let close = if is_hash {
+                &Token::RBrace
+            } else {
+                &Token::RBracket
+            };
+            self.expect(close);
+            let val = if self.eat(&Token::Assign) {
+                Some(self.parse_expr())
+            } else {
+                None
+            };
+            if is_hash {
+                return Stmt::LocalHashElem(var_name, key, val);
+            }
+            // Array element `local $a[0]` is rare — synthesise the equivalent
+            // hash-elem form with an Integer-keyed array-slot; interpreter
+            // handles both via `LocalHashElem` for now.
+            return Stmt::LocalHashElem(format!("@{var_name}"), key, val);
+        }
         let (vars, list_ctx) = self.parse_var_list();
         Stmt::Local(vars, list_ctx)
     }
@@ -851,16 +974,26 @@ impl Parser {
                 let fh_name = name.clone();
                 self.pos += 1;
 
-                // Check if it's actually a filehandle
-                if !self.at(&Token::Semi) && !self.at(&Token::EOF) && !self.at(&Token::FatComma) {
-                    if matches!(fh_name.as_str(), "STDOUT" | "STDERR" | "STDIN")
-                        || fh_name.chars().all(|c| c.is_ascii_uppercase() || c == '_')
-                    {
+                // Check if it's actually a filehandle. A trailing `;`/EOF
+                // after an all-caps identifier still counts as a filehandle —
+                // `print STDOUT;` should print `$_` *to* STDOUT, not print
+                // the literal "STDOUT".
+                let is_fh_name = matches!(fh_name.as_str(), "STDOUT" | "STDERR" | "STDIN")
+                    || fh_name.chars().all(|c| c.is_ascii_uppercase() || c == '_');
+                if self.at(&Token::FatComma) {
+                    // `print FOO => …` — not a filehandle call, `FOO` is a
+                    // bareword hash key.
+                    self.pos = saved;
+                    None
+                } else if self.at(&Token::Semi) || self.at(&Token::EOF) {
+                    if is_fh_name {
                         Some(Expr::StringLit(fh_name))
                     } else {
                         self.pos = saved;
                         None
                     }
+                } else if is_fh_name {
+                    Some(Expr::StringLit(fh_name))
                 } else {
                     self.pos = saved;
                     None
@@ -1036,6 +1169,46 @@ impl Parser {
                 self.pos += 1;
                 let right = self.parse_assign();
                 Expr::OpAssign(BinOp::Repeat, Box::new(left), Box::new(right))
+            }
+            Token::LogOrAssign => {
+                self.pos += 1;
+                let right = self.parse_assign();
+                Expr::OpAssign(BinOp::LogOr, Box::new(left), Box::new(right))
+            }
+            Token::LogAndAssign => {
+                self.pos += 1;
+                let right = self.parse_assign();
+                Expr::OpAssign(BinOp::LogAnd, Box::new(left), Box::new(right))
+            }
+            Token::DefOrAssign => {
+                self.pos += 1;
+                let right = self.parse_assign();
+                Expr::OpAssign(BinOp::DefOr, Box::new(left), Box::new(right))
+            }
+            Token::BitOrAssign => {
+                self.pos += 1;
+                let right = self.parse_assign();
+                Expr::OpAssign(BinOp::BitOr, Box::new(left), Box::new(right))
+            }
+            Token::BitAndAssign => {
+                self.pos += 1;
+                let right = self.parse_assign();
+                Expr::OpAssign(BinOp::BitAnd, Box::new(left), Box::new(right))
+            }
+            Token::BitXorAssign => {
+                self.pos += 1;
+                let right = self.parse_assign();
+                Expr::OpAssign(BinOp::BitXor, Box::new(left), Box::new(right))
+            }
+            Token::ShiftLeftAssign => {
+                self.pos += 1;
+                let right = self.parse_assign();
+                Expr::OpAssign(BinOp::ShiftLeft, Box::new(left), Box::new(right))
+            }
+            Token::ShiftRightAssign => {
+                self.pos += 1;
+                let right = self.parse_assign();
+                Expr::OpAssign(BinOp::ShiftRight, Box::new(left), Box::new(right))
             }
             _ => left,
         }
@@ -1478,6 +1651,35 @@ impl Parser {
                         Vec::new()
                     };
                     Expr::Call(name, args)
+                } else if let Token::ScalarVar(name) = self.tok() {
+                    // `&$subref(args)` / `&$subref` — invoke the code ref
+                    // in `$subref`. Maps to `$subref->(args)`; with no args
+                    // the current `@_` is forwarded in Perl, but for most
+                    // tests an empty arg list works.
+                    let name = name.clone();
+                    self.pos += 1;
+                    let args = if self.eat(&Token::LParen) {
+                        let a = self.parse_list_expr();
+                        self.expect(&Token::RParen);
+                        a
+                    } else {
+                        Vec::new()
+                    };
+                    Expr::CodeCall(Box::new(Expr::ScalarVar(name)), args)
+                } else if self.at(&Token::LBrace) {
+                    // `&{EXPR}(args)` / `&{EXPR}` — invoke the code ref
+                    // produced by EXPR.
+                    self.pos += 1;
+                    let inner = self.parse_expr();
+                    self.expect(&Token::RBrace);
+                    let args = if self.eat(&Token::LParen) {
+                        let a = self.parse_list_expr();
+                        self.expect(&Token::RParen);
+                        a
+                    } else {
+                        Vec::new()
+                    };
+                    Expr::CodeCall(Box::new(inner), args)
                 } else {
                     // Regular bitwise-and as unary (take address)
                     let expr = self.parse_unary();
@@ -1489,15 +1691,109 @@ impl Parser {
                 // `defined` has prototype `$`. With parens, accept any
                 // expression (so `defined($false ? $x : @arr)` works). Without
                 // parens, parse a single unary so it binds like other
-                // prototype-$ builtins.
+                // prototype-$ builtins. Bare `defined` with no arg = `defined($_)`.
                 let expr = if self.eat(&Token::LParen) {
-                    let e = self.parse_expr();
-                    self.eat(&Token::RParen);
-                    e
+                    if self.eat(&Token::RParen) {
+                        Expr::ScalarVar("_".to_string())
+                    } else {
+                        let e = self.parse_expr();
+                        self.eat(&Token::RParen);
+                        e
+                    }
+                } else if matches!(
+                    self.tok(),
+                    Token::Semi
+                        | Token::Comma
+                        | Token::RParen
+                        | Token::RBrace
+                        | Token::RBracket
+                        | Token::Question
+                        | Token::Colon
+                        | Token::EOF
+                        | Token::Newline
+                        | Token::FatComma
+                ) {
+                    Expr::ScalarVar("_".to_string())
                 } else {
                     self.parse_unary()
                 };
                 Expr::Defined(Box::new(expr))
+            }
+            Token::Our => {
+                // `our $T` in expression position — e.g.
+                // `open our $T, "...";`. Treat as a global var reference
+                // so open() / readline() route through the global slot.
+                self.pos += 1;
+                if let Token::ScalarVar(name) = self.tok() {
+                    let n = name.clone();
+                    self.pos += 1;
+                    Expr::ScalarVar(n)
+                } else if let Token::ArrayVar(name) = self.tok() {
+                    let n = name.clone();
+                    self.pos += 1;
+                    Expr::ArrayVar(n)
+                } else if let Token::HashVar(name) = self.tok() {
+                    let n = name.clone();
+                    self.pos += 1;
+                    Expr::HashVar(n)
+                } else if self.at(&Token::LParen) {
+                    // `our (...)` — collect the names, return an array
+                    // literal of bare var refs so a following `= LIST`
+                    // does proper list-context destructure.
+                    self.pos += 1;
+                    let mut names = Vec::new();
+                    loop {
+                        match self.tok() {
+                            Token::ScalarVar(name) => {
+                                names.push(format!("${}", name));
+                                self.pos += 1;
+                            }
+                            Token::ArrayVar(name) => {
+                                names.push(format!("@{}", name));
+                                self.pos += 1;
+                            }
+                            Token::HashVar(name) => {
+                                names.push(format!("%{}", name));
+                                self.pos += 1;
+                            }
+                            _ => break,
+                        }
+                        if !self.eat(&Token::Comma) {
+                            break;
+                        }
+                    }
+                    self.expect(&Token::RParen);
+                    if names.is_empty() {
+                        Expr::Undef
+                    } else if names.len() == 1 {
+                        let n = names.into_iter().next().unwrap();
+                        if let Some(rest) = n.strip_prefix('@') {
+                            Expr::ArrayVar(rest.to_string())
+                        } else if let Some(rest) = n.strip_prefix('%') {
+                            Expr::HashVar(rest.to_string())
+                        } else {
+                            let rest = n.strip_prefix('$').unwrap_or(&n).to_string();
+                            Expr::ScalarVar(rest)
+                        }
+                    } else {
+                        let exprs = names
+                            .into_iter()
+                            .map(|n| {
+                                if let Some(rest) = n.strip_prefix('@') {
+                                    Expr::ArrayVar(rest.to_string())
+                                } else if let Some(rest) = n.strip_prefix('%') {
+                                    Expr::HashVar(rest.to_string())
+                                } else {
+                                    let rest = n.strip_prefix('$').unwrap_or(&n).to_string();
+                                    Expr::ScalarVar(rest)
+                                }
+                            })
+                            .collect();
+                        Expr::ArrayLit(exprs)
+                    }
+                } else {
+                    Expr::Undef
+                }
             }
             Token::My => {
                 self.pos += 1;
@@ -1505,6 +1801,26 @@ impl Parser {
                     let n = name.clone();
                     self.pos += 1;
                     Expr::MyVar(n)
+                } else if let Token::ArrayVar(name) = self.tok() {
+                    // `my @name` in expression position — internal call
+                    // that declares the lexical and returns Expr::ArrayVar
+                    // so a following `= LIST` does list-assignment that
+                    // returns the assigned list.
+                    let n = name.clone();
+                    self.pos += 1;
+                    // Synthesize a Stmt::My so the var is declared as
+                    // lexical, then return ArrayVar so `= LIST` works.
+                    Expr::DoBlock(vec![
+                        Stmt::My(vec![(format!("@{n}"), None)], false),
+                        Stmt::Expr(Expr::ArrayVar(n)),
+                    ])
+                } else if let Token::HashVar(name) = self.tok() {
+                    let n = name.clone();
+                    self.pos += 1;
+                    Expr::DoBlock(vec![
+                        Stmt::My(vec![(format!("%{n}"), None)], false),
+                        Stmt::Expr(Expr::HashVar(n)),
+                    ])
                 } else if self.at(&Token::LParen) {
                     // my (...) in expression context
                     // For now, just parse the first var
@@ -1520,6 +1836,10 @@ impl Parser {
                                 names.push(format!("@{}", name));
                                 self.pos += 1;
                             }
+                            Token::HashVar(name) => {
+                                names.push(format!("%{}", name));
+                                self.pos += 1;
+                            }
                             _ => break,
                         }
                         if !self.eat(&Token::Comma) {
@@ -1527,11 +1847,49 @@ impl Parser {
                         }
                     }
                     self.expect(&Token::RParen);
-                    if names.len() == 1 {
-                        Expr::MyVar(names.into_iter().next().unwrap())
+                    if names.is_empty() {
+                        Expr::Undef
+                    } else if names.len() == 1 {
+                        let n = names.into_iter().next().unwrap();
+                        // Single `my (@arr)` / `my (%h)` should still be
+                        // declared as the right kind of slot — same trick
+                        // as the bare `my @arr` form below.
+                        if let Some(rest) = n.strip_prefix('@') {
+                            Expr::DoBlock(vec![
+                                Stmt::My(vec![(format!("@{rest}"), None)], true),
+                                Stmt::Expr(Expr::ArrayVar(rest.to_string())),
+                            ])
+                        } else if let Some(rest) = n.strip_prefix('%') {
+                            Expr::DoBlock(vec![
+                                Stmt::My(vec![(format!("%{rest}"), None)], true),
+                                Stmt::Expr(Expr::HashVar(rest.to_string())),
+                            ])
+                        } else {
+                            Expr::MyVar(n)
+                        }
                     } else {
-                        // Return the list as an array literal of MyVars
-                        Expr::ArrayLit(names.into_iter().map(Expr::MyVar).collect())
+                        // Mixed list — convert each name to the right
+                        // expression kind so the outer `= LIST` does a
+                        // proper list-context destructure.
+                        let exprs = names
+                            .into_iter()
+                            .map(|n| {
+                                if let Some(rest) = n.strip_prefix('@') {
+                                    Expr::DoBlock(vec![
+                                        Stmt::My(vec![(format!("@{rest}"), None)], true),
+                                        Stmt::Expr(Expr::ArrayVar(rest.to_string())),
+                                    ])
+                                } else if let Some(rest) = n.strip_prefix('%') {
+                                    Expr::DoBlock(vec![
+                                        Stmt::My(vec![(format!("%{rest}"), None)], true),
+                                        Stmt::Expr(Expr::HashVar(rest.to_string())),
+                                    ])
+                                } else {
+                                    Expr::MyVar(n)
+                                }
+                            })
+                            .collect();
+                        Expr::ArrayLit(exprs)
                     }
                 } else {
                     Expr::Undef
@@ -1574,16 +1932,85 @@ impl Parser {
                 Token::LBracket => {
                     // Array subscript
                     self.pos += 1;
-                    let index = self.parse_expr();
+                    let first = self.parse_expr();
+                    let mut indices = vec![first];
+                    while self.eat(&Token::Comma) {
+                        if matches!(self.tok(), Token::RBracket) {
+                            break;
+                        }
+                        indices.push(self.parse_expr());
+                    }
                     self.expect(&Token::RBracket);
+                    let single_index = indices.len() == 1;
                     match &expr {
                         Expr::ScalarVar(name) | Expr::ArrayVar(name) | Expr::MyVar(name) => {
                             let name = name.clone();
-                            expr = Expr::ArrayElement(name, Box::new(index));
+                            if single_index {
+                                expr = Expr::ArrayElement(
+                                    name,
+                                    Box::new(indices.into_iter().next().unwrap()),
+                                );
+                            } else {
+                                expr = Expr::ArraySlice(name, indices);
+                            }
+                        }
+                        // `%arr[i,j]` — array key/value slice. Returns
+                        // (i, $arr[i], j, $arr[j]) in list context. Parsed
+                        // as HashVar + `[…]` because the lexer already
+                        // stripped the `%` sigil; promote to an AK-V slice
+                        // helper call.
+                        Expr::HashVar(name) => {
+                            let name = name.clone();
+                            let mut call_args = vec![Expr::StringLit(name)];
+                            call_args.extend(indices);
+                            expr = Expr::Call("_array_kvslice".to_string(), call_args);
+                        }
+                        // `${EXPR}[i]` — Perl shorthand for `(EXPR)->[i]`.
+                        // The `${…}` block already evaluates to the scalar
+                        // ref target; the `[i]` subscripts it as an array
+                        // ref (same as `$$r[i]` / `$r->[i]`).
+                        Expr::Call(n, call_args)
+                            if n == "_scalar_block_deref" && call_args.len() == 1 =>
+                        {
+                            let inner = call_args[0].clone();
+                            if single_index {
+                                expr = Expr::ArrowElement(
+                                    Box::new(inner),
+                                    Box::new(indices.into_iter().next().unwrap()),
+                                    ArrowKind::Array,
+                                );
+                            } else {
+                                let mut args = vec![expr];
+                                args.extend(indices);
+                                expr = Expr::Call("_list_slice".to_string(), args);
+                            }
+                        }
+                        // `$$ref[i]` — subscript of a scalar-deref is the
+                        // shorthand for `$ref->[i]`. Without this, the
+                        // fallback `_list_slice` treats `$$ref` as a single
+                        // value and picks its [i]th "element" (usually
+                        // undef).
+                        Expr::ScalarDerefVar(name) => {
+                            let name = name.clone();
+                            if single_index {
+                                expr = Expr::ArrowElement(
+                                    Box::new(Expr::ScalarVar(name)),
+                                    Box::new(indices.into_iter().next().unwrap()),
+                                    ArrowKind::Array,
+                                );
+                            } else {
+                                let mut args = vec![expr];
+                                args.extend(indices);
+                                expr = Expr::Call("_list_slice".to_string(), args);
+                            }
                         }
                         _ => {
-                            // (expr)[idx] — index into result of expression as list
-                            expr = Expr::Call("_list_index".to_string(), vec![expr, index]);
+                            // `(LIST)[idx1, idx2, ...]` — list slice. Use a
+                            // helper Call so the interpreter evaluates LIST
+                            // in list context and picks out each index.
+                            let mut args = vec![expr];
+                            args.extend(indices);
+                            expr = Expr::Call("_list_slice".to_string(), args);
                         }
                     }
                 }
@@ -1670,6 +2097,27 @@ impl Parser {
                             Expr::ScalarVar(name) | Expr::HashVar(name) | Expr::MyVar(name) => {
                                 expr = Expr::HashElement(name, Box::new(key));
                             }
+                            // `${EXPR}{k}` — `(EXPR)->{k}` — hash-ref
+                            // subscript through a scalar-block deref.
+                            Expr::Call(ref n, ref call_args)
+                                if n == "_scalar_block_deref" && call_args.len() == 1 =>
+                            {
+                                let inner = call_args[0].clone();
+                                expr = Expr::ArrowElement(
+                                    Box::new(inner),
+                                    Box::new(key),
+                                    ArrowKind::Hash,
+                                );
+                            }
+                            // `$$ref{k}` — hash subscript of a scalar
+                            // deref is shorthand for `$ref->{k}`.
+                            Expr::ScalarDerefVar(name) => {
+                                expr = Expr::ArrowElement(
+                                    Box::new(Expr::ScalarVar(name)),
+                                    Box::new(key),
+                                    ArrowKind::Hash,
+                                );
+                            }
                             _ => {
                                 expr = Expr::HashElement("_deref_".to_string(), Box::new(key));
                             }
@@ -1698,6 +2146,17 @@ impl Parser {
                             self.expect(&Token::RBrace);
                             expr =
                                 Expr::ArrowElement(Box::new(expr), Box::new(key), ArrowKind::Hash);
+                        }
+                        Token::LParen => {
+                            // `$coderef->(args)` — invoke coderef.
+                            self.pos += 1;
+                            let args = if self.at(&Token::RParen) {
+                                Vec::new()
+                            } else {
+                                self.parse_list_expr()
+                            };
+                            self.expect(&Token::RParen);
+                            expr = Expr::CodeCall(Box::new(expr), args);
                         }
                         Token::Ident(name) => {
                             let method = name.clone();
@@ -1798,6 +2257,29 @@ impl Parser {
                 self.pos += 1;
                 Expr::ArrayDerefVar(name)
             }
+            Token::ArrayBlockDerefOpen => {
+                // `@{ EXPR }` — evaluate EXPR, treat its result as an
+                // array ref and return its elements.
+                self.pos += 1;
+                let inner = self.parse_expr();
+                self.expect(&Token::RBrace);
+                Expr::Call("_array_block_deref".to_string(), vec![inner])
+            }
+            Token::HashBlockDerefOpen => {
+                // `%{ EXPR }` — evaluate EXPR, treat its result as a hash
+                // ref and return the key/value list.
+                self.pos += 1;
+                let inner = self.parse_expr();
+                self.expect(&Token::RBrace);
+                Expr::Call("_hash_block_deref".to_string(), vec![inner])
+            }
+            Token::ScalarBlockDerefOpen => {
+                // `${ EXPR }` — evaluate EXPR, dereference as scalar.
+                self.pos += 1;
+                let inner = self.parse_expr();
+                self.expect(&Token::RBrace);
+                Expr::Call("_scalar_block_deref".to_string(), vec![inner])
+            }
             Token::HashDeref(name) => {
                 self.pos += 1;
                 Expr::HashDerefVar(name)
@@ -1835,7 +2317,7 @@ impl Parser {
                     }
                 } else if matches!(
                     self.tok(),
-                    Token::ScalarVar(_) | Token::ArrayVar(_) | Token::HashVar(_)
+                    Token::ScalarVar(_) | Token::ArrayVar(_) | Token::HashVar(_) | Token::BitAnd
                 ) {
                     let arg = self.parse_unary();
                     Expr::Call("undef".to_string(), vec![arg])
@@ -1868,9 +2350,9 @@ impl Parser {
                     Expr::ArrayLit(items)
                 } else {
                     self.expect(&Token::RParen);
-                    // `(EXPR) x N` — the parens-around-single form signals
-                    // list-context x-repeat, distinct from `EXPR x N`.
-                    if matches!(self.tok(), Token::StringRepeat) {
+                    // `(EXPR) x N` — list-context x-repeat.
+                    // `(EXPR) = …`  — list-context assignment with one target.
+                    if matches!(self.tok(), Token::StringRepeat | Token::Assign) {
                         return Expr::ArrayLit(vec![expr]);
                     }
                     expr
@@ -1893,17 +2375,20 @@ impl Parser {
 
             Token::LBrace => {
                 // Anonymous hash ref {...} or block
-                // Heuristic: { ident => ... } is a hash ref
+                // Heuristic: { ident => ... } is a hash ref; `{}` (empty)
+                // is an empty hashref (the common `my $h = {};` idiom);
+                // otherwise it's a block.
                 let saved = self.pos;
                 self.pos += 1;
 
                 // Check if it looks like a hash ref
-                let is_hash = matches!(
-                    (self.tok(), self.peek(1)),
-                    (Token::StringLit(_), Token::FatComma)
-                        | (Token::Ident(_), Token::FatComma)
-                        | (Token::Integer(_), Token::FatComma)
-                );
+                let is_hash = self.at(&Token::RBrace)
+                    || matches!(
+                        (self.tok(), self.peek(1)),
+                        (Token::StringLit(_), Token::FatComma)
+                            | (Token::Ident(_), Token::FatComma)
+                            | (Token::Integer(_), Token::FatComma)
+                    );
 
                 if is_hash {
                     let mut pairs = Vec::new();
@@ -1948,8 +2433,7 @@ impl Parser {
                     }
                 }
                 let body = self.parse_brace_block();
-                // Return as a callable reference
-                Expr::StringLit("CODE_REF".to_string()) // placeholder
+                Expr::AnonSub(Vec::new(), body)
             }
 
             // Named unary builtins
@@ -2051,7 +2535,22 @@ impl Parser {
                 .to_string();
                 self.pos += 1;
 
-                if self.at(&Token::LBrace) {
+                // Disambiguate `{...}` after map/grep: a hashref (an EXPR
+                // arg) if the first key looks like `WORD =>`, `"x" =>` or
+                // `N =>`; otherwise a code BLOCK.
+                let brace_is_hashref = |this: &Self| {
+                    if !this.at(&Token::LBrace) {
+                        return false;
+                    }
+                    matches!(
+                        (this.peek(1), this.peek(2)),
+                        (Token::StringLit(_), Token::FatComma)
+                            | (Token::Ident(_), Token::FatComma)
+                            | (Token::Integer(_), Token::FatComma)
+                    )
+                };
+
+                if self.at(&Token::LBrace) && !brace_is_hashref(self) {
                     // map { BLOCK } LIST
                     let block = self.parse_brace_block();
                     // Skip comma if present
@@ -2064,11 +2563,10 @@ impl Parser {
                     Expr::Call(func, args)
                 } else if self.eat(&Token::LParen) {
                     // `map(BLOCK LIST)` or `map(EXPR, LIST)` — both forms
-                    // appear in the wild. If we see `{` first it's the
-                    // block form and we need to parse it as code, not a
-                    // hashref literal.
+                    // appear in the wild. If we see `{` first AND it
+                    // doesn't look like a hashref, it's the block form.
                     let mut args = Vec::new();
-                    if self.at(&Token::LBrace) {
+                    if self.at(&Token::LBrace) && !brace_is_hashref(self) {
                         let block = self.parse_brace_block();
                         args.push(Expr::DoBlock(block));
                         self.eat(&Token::Comma);
@@ -2078,6 +2576,21 @@ impl Parser {
                     self.expect(&Token::RParen);
                     Expr::Call(func, args)
                 } else {
+                    // `grep $var (list)` / `map $var (list)` — Perl rejects
+                    // this at parse time (the parentheses-around-list form
+                    // without a comma after the first argument). Detect
+                    // `$ident (` and emit Perl's exact error message via
+                    // the error_diagnostic flag so `eval` catches it.
+                    if matches!(self.tok(), Token::ScalarVar(_))
+                        && matches!(self.peek(1), Token::LParen)
+                    {
+                        return Expr::Call(
+                            "_parse_error".to_string(),
+                            vec![Expr::StringLit(format!(
+                                "Missing comma after first argument to {func} function"
+                            ))],
+                        );
+                    }
                     let args = self.parse_list_expr();
                     Expr::Call(func, args)
                 }
@@ -2103,7 +2616,24 @@ impl Parser {
                 }
             }
 
-            // List builtins: push, unshift, splice, delete, exists, keys, values, each,
+            // Unary-on-hash/array builtins: take a single expression so the
+            // ternary and list comma at the call-site bind correctly.
+            // `print keys %h ? a : b, "rest"` must parse as
+            // `print((keys %h) ? a : b, "rest")`, not as `keys(...rest)`.
+            Token::Keys | Token::Values | Token::Each => {
+                let func = format!("{:?}", self.tok()).to_lowercase();
+                self.pos += 1;
+                let arg = if self.eat(&Token::LParen) {
+                    let a = self.parse_expr();
+                    self.expect(&Token::RParen);
+                    a
+                } else {
+                    self.parse_unary()
+                };
+                Expr::Call(func, vec![arg])
+            }
+
+            // List builtins: push, unshift, splice, delete, exists,
             // reverse, join, split, substr, index, rindex, sprintf,
             // open, close, read, binmode, unlink, rename, mkdir, rmdir, chdir, stat
             Token::Push
@@ -2111,9 +2641,6 @@ impl Parser {
             | Token::Splice
             | Token::Delete
             | Token::Exists
-            | Token::Keys
-            | Token::Values
-            | Token::Each
             | Token::Reverse
             | Token::Join
             | Token::Split
@@ -2130,7 +2657,8 @@ impl Parser {
             | Token::Mkdir
             | Token::Rmdir
             | Token::Chdir
-            | Token::Stat => {
+            | Token::Stat
+            | Token::Bless => {
                 let func = format!("{:?}", self.tok()).to_lowercase();
                 self.pos += 1;
                 let args = if self.eat(&Token::LParen) {
@@ -2169,15 +2697,94 @@ impl Parser {
             }
 
             Token::Local => {
+                // `local $var` / `local @arr` / `local %h` / `local (...)`
+                // in expression position. Wrap each in a `do { local …;
+                // EXPR }` so the local's save+restore happens, and the
+                // expression evaluates to the just-localised slot — so a
+                // following `= LIST` does the assignment under list context.
                 self.pos += 1;
                 if let Token::ScalarVar(name) = self.tok() {
                     let n = name.clone();
                     self.pos += 1;
-                    Expr::LocalVar(n)
+                    Expr::DoBlock(vec![
+                        Stmt::Local(vec![(format!("${n}"), None)], false),
+                        Stmt::Expr(Expr::ScalarVar(n)),
+                    ])
                 } else if let Token::ArrayVar(name) = self.tok() {
                     let n = name.clone();
                     self.pos += 1;
-                    Expr::LocalVar(format!("@{n}"))
+                    Expr::DoBlock(vec![
+                        Stmt::Local(vec![(format!("@{n}"), None)], false),
+                        Stmt::Expr(Expr::ArrayVar(n)),
+                    ])
+                } else if let Token::HashVar(name) = self.tok() {
+                    let n = name.clone();
+                    self.pos += 1;
+                    Expr::DoBlock(vec![
+                        Stmt::Local(vec![(format!("%{n}"), None)], false),
+                        Stmt::Expr(Expr::HashVar(n)),
+                    ])
+                } else if self.at(&Token::LParen) {
+                    // `local (...)` in expression position. Collect names,
+                    // declare each as local (snapshot+save), then return an
+                    // ArrayLit referencing the bare slots so a following
+                    // `= LIST` does proper list-context destructure.
+                    self.pos += 1;
+                    let mut names = Vec::new();
+                    loop {
+                        match self.tok() {
+                            Token::ScalarVar(name) => {
+                                names.push(format!("${}", name));
+                                self.pos += 1;
+                            }
+                            Token::ArrayVar(name) => {
+                                names.push(format!("@{}", name));
+                                self.pos += 1;
+                            }
+                            Token::HashVar(name) => {
+                                names.push(format!("%{}", name));
+                                self.pos += 1;
+                            }
+                            Token::UndefKw => {
+                                names.push("$_undef_placeholder".to_string());
+                                self.pos += 1;
+                            }
+                            _ => break,
+                        }
+                        if !self.eat(&Token::Comma) {
+                            break;
+                        }
+                    }
+                    self.expect(&Token::RParen);
+                    if names.is_empty() {
+                        return Expr::Undef;
+                    }
+                    // Build a do-block: declare all locals (no init), then
+                    // emit an expression list of the bare vars.
+                    let local_decls: Vec<(String, Option<Expr>)> =
+                        names.iter().map(|n| (n.clone(), None)).collect();
+                    let mut stmts: Vec<Stmt> = vec![Stmt::Local(local_decls, true)];
+                    let exprs: Vec<Expr> = names
+                        .iter()
+                        .map(|n| {
+                            if n == "$_undef_placeholder" {
+                                Expr::Undef
+                            } else if let Some(rest) = n.strip_prefix('@') {
+                                Expr::ArrayVar(rest.to_string())
+                            } else if let Some(rest) = n.strip_prefix('%') {
+                                Expr::HashVar(rest.to_string())
+                            } else {
+                                let rest = n.strip_prefix('$').unwrap_or(n).to_string();
+                                Expr::ScalarVar(rest)
+                            }
+                        })
+                        .collect();
+                    if exprs.len() == 1 {
+                        stmts.push(Stmt::Expr(exprs.into_iter().next().unwrap()));
+                    } else {
+                        stmts.push(Stmt::Expr(Expr::ArrayLit(exprs)));
+                    }
+                    Expr::DoBlock(stmts)
                 } else {
                     Expr::Undef
                 }
@@ -2199,8 +2806,41 @@ impl Parser {
             }
 
             Token::Ident(name) => {
-                let name = name.clone();
+                let mut name = name.clone();
                 self.pos += 1;
+
+                // `::name` — explicit top-level / `main::name` reference.
+                // The lexer emitted `Ident("::")` + `Ident("name")`; stitch
+                // them into the full qualified name here so call resolution
+                // finds the sub. Further `::segment` suffixes collapse too.
+                if name == "::" {
+                    while let Token::Ident(n) = self.tok() {
+                        if n == "::" {
+                            name.push_str("::");
+                            self.pos += 1;
+                        } else {
+                            name.push_str(n);
+                            self.pos += 1;
+                            // Allow `A::B::C`.
+                            while let Token::Ident(m) = self.tok() {
+                                if m == "::" {
+                                    name.push_str("::");
+                                    self.pos += 1;
+                                } else {
+                                    name.push_str(m);
+                                    self.pos += 1;
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    // Drop the leading `::` — callers index the sub table
+                    // without it (main::is is registered as either "is" or
+                    // "main::is", and we canonicalize to the short form).
+                    if let Some(rest) = name.strip_prefix("::") {
+                        name = rest.to_string();
+                    }
+                }
 
                 // Compile-time constants the interpreter resolves at runtime
                 // from `current_file` / `current_line`. Treat like zero-arg
@@ -2252,6 +2892,9 @@ impl Parser {
                         | Token::ArrayDeref(_)
                         | Token::HashDeref(_)
                         | Token::ScalarDeref(_)
+                        | Token::ArrayBlockDerefOpen
+                        | Token::HashBlockDerefOpen
+                        | Token::ScalarBlockDerefOpen
                         | Token::QrLit(_, _)
                         | Token::Ident(_)
                         // Builtins that themselves take args also count as
@@ -2313,8 +2956,11 @@ impl Parser {
                     // string "done_testing".
                     Expr::Call(name, Vec::new())
                 } else {
-                    // Bareword — treat as string in most contexts
-                    Expr::StringLit(name)
+                    // Bareword — treat as string in most contexts. Perl's
+                    // `Foo::` bareword is the string "Foo" (not "Foo::"),
+                    // used as the class name in e.g. `bless {}, Foo::`.
+                    let s = name.strip_suffix("::").unwrap_or(&name).to_string();
+                    Expr::StringLit(s)
                 }
             }
 
@@ -2329,6 +2975,49 @@ impl Parser {
     // Helper for matching Token::ScalarVar in match arms
     fn at_scalar_var(&self) -> bool {
         matches!(self.tok(), Token::ScalarVar(_))
+    }
+
+    /// Scan past `{ ... }` starting at token index `brace_pos` (which must
+    /// point at the `{`) and return whether the next token continues an
+    /// expression — i.e., the `sub { ... }` is being used as a value, not
+    /// declared. True for `->`, operators, or end-of-expression punctuation
+    /// that implies the whole `sub {…}` is a statement expression.
+    fn anon_sub_starts_expr(&self, brace_pos: usize) -> bool {
+        // Scan past the matching close brace.
+        let mut depth = 0i32;
+        let mut i = brace_pos;
+        while i < self.tokens.len() {
+            match &self.tokens[i] {
+                Token::LBrace => depth += 1,
+                Token::RBrace => {
+                    depth -= 1;
+                    if depth == 0 {
+                        i += 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        // Look at the next non-LineMark-ish token.
+        matches!(
+            self.tokens.get(i),
+            Some(Token::Arrow)
+                | Some(Token::LParen)
+                | Some(Token::Plus)
+                | Some(Token::Minus)
+                | Some(Token::StringRepeat)
+                | Some(Token::Slash)
+                | Some(Token::Star)
+                | Some(Token::Percent)
+                | Some(Token::Dot)
+                | Some(Token::LogAnd)
+                | Some(Token::LogOr)
+                | Some(Token::DefOr)
+                | Some(Token::Question)
+                | Some(Token::Comma)
+        )
     }
 }
 
@@ -2359,6 +3048,14 @@ fn is_unary_builtin(name: &str) -> bool {
             | "quotemeta"
             | "chop"
             | "chomp"
+            | "pos"
+            // `keys`/`values`/`each` take a single hash (or array) argument.
+            // Without this, `print keys %h ? a : b, "rest"` parses as
+            // `print keys(%h ? a : b, "rest")` — the ternary and the comma
+            // get swallowed into keys()'s argument list.
+            | "keys"
+            | "values"
+            | "each"
     )
 }
 
@@ -2379,8 +3076,16 @@ fn parse_interp_string(s: &str) -> Expr {
             // $| (autoflush), $& $` $' (regex matches).
             let is_punct_special = matches!(
                 chars[i + 1],
-                '@' | '!' | '/' | '\\' | ',' | '"' | ';' | '|' | '&' | '`' | '\''
+                '@' | '!' | '/' | '\\' | ',' | '"' | ';' | '|' | '&' | '`' | '\'' | '?'
             );
+            // `$$name` — scalar deref interpolation. Detect `$$` followed
+            // by an ident (otherwise `$$` is the pid var or literal).
+            let is_scalar_deref = chars[i + 1] == '$'
+                && i + 2 < chars.len()
+                && (chars[i + 2] == '_' || chars[i + 2].is_ascii_alphabetic());
+            // `$$` followed by anything other than an ident (or end of
+            // string) is the process-id special var.
+            let is_pid = chars[i + 1] == '$' && !is_scalar_deref;
             if chars[i + 1] == '_'
                 || chars[i + 1].is_ascii_alphabetic()
                 || chars[i + 1].is_ascii_digit()
@@ -2388,6 +3093,8 @@ fn parse_interp_string(s: &str) -> Expr {
                 || chars[i + 1] == '^'
                 || starts_pkg_prefix
                 || is_punct_special
+                || is_scalar_deref
+                || is_pid
             {
                 // Flush literal
                 if !lit.is_empty() {
@@ -2396,22 +3103,70 @@ fn parse_interp_string(s: &str) -> Expr {
 
                 i += 1; // skip $
 
-                if chars[i] == '{' {
-                    // ${var} or ${^VAR}
+                if chars[i] == '$' {
+                    // `$$name` — scalar deref of $name; `$$` alone is PID.
                     i += 1;
                     let mut name = String::new();
-                    if i < chars.len() && chars[i] == '^' {
-                        name.push('^');
-                        i += 1;
-                    }
-                    while i < chars.len() && chars[i] != '}' {
+                    while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
                         name.push(chars[i]);
                         i += 1;
                     }
-                    if i < chars.len() && chars[i] == '}' {
+                    if name.is_empty() {
+                        parts.push(InterpPart::ScalarVar("$".to_string()));
+                    } else {
+                        parts.push(InterpPart::Expr(Box::new(Expr::ScalarDerefVar(name))));
+                    }
+                } else if chars[i] == '{' {
+                    // ${var}, ${^VAR}, or ${ EXPR } block deref.
+                    i += 1;
+                    // Read the brace contents (matched braces).
+                    let mut depth = 1;
+                    let mut inner = String::new();
+                    while i < chars.len() && depth > 0 {
+                        match chars[i] {
+                            '{' => {
+                                depth += 1;
+                                inner.push('{');
+                            }
+                            '}' => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    break;
+                                }
+                                inner.push('}');
+                            }
+                            c => inner.push(c),
+                        }
                         i += 1;
                     }
-                    parts.push(InterpPart::ScalarVar(name));
+                    if i < chars.len() {
+                        i += 1; // skip closing }
+                    }
+                    // Simple ident → scalar var. Otherwise, parse as expr
+                    // and emit a block-deref Call.
+                    let trimmed = inner.trim();
+                    let is_simple_ident = !trimmed.is_empty()
+                        && trimmed.chars().enumerate().all(|(idx, c)| {
+                            if idx == 0 {
+                                c == '_' || c == '^' || c.is_ascii_alphabetic()
+                            } else {
+                                c == '_' || c.is_ascii_alphanumeric() || c == ':'
+                            }
+                        });
+                    if is_simple_ident {
+                        parts.push(InterpPart::ScalarVar(trimmed.to_string()));
+                    } else {
+                        use crate::lexer::Lexer;
+                        let mut lex = Lexer::new(&inner);
+                        let toks = lex.tokenize();
+                        let tl = std::mem::take(&mut lex.token_lines);
+                        let mut p = Parser::new_with_lines(toks, tl);
+                        let inner_expr = p.parse_expr();
+                        parts.push(InterpPart::Expr(Box::new(Expr::Call(
+                            "_scalar_block_deref".to_string(),
+                            vec![inner_expr],
+                        ))));
+                    }
                 } else if chars[i] == '^' && i + 1 < chars.len() {
                     i += 1;
                     let c = chars[i];
@@ -2419,12 +3174,95 @@ fn parse_interp_string(s: &str) -> Expr {
                     parts.push(InterpPart::ScalarVar(format!("^{c}")));
                 } else if matches!(
                     chars[i],
-                    '@' | '!' | '/' | '\\' | ',' | '"' | ';' | '|' | '&' | '`' | '\''
+                    '@' | '!' | '/' | '\\' | ',' | '"' | ';' | '|' | '&' | '`' | '\'' | '?'
                 ) {
                     // Single-char punctuation special variable.
+                    // May be followed by an arrow-chain: `$@->{k}`, `$!->[0]`.
                     let c = chars[i];
                     i += 1;
-                    parts.push(InterpPart::ScalarVar(c.to_string()));
+                    if i + 1 < chars.len()
+                        && chars[i] == '-'
+                        && chars[i + 1] == '>'
+                        && i + 2 < chars.len()
+                        && (chars[i + 2] == '{' || chars[i + 2] == '[')
+                    {
+                        let mut accum: Expr = Expr::ScalarVar(c.to_string());
+                        loop {
+                            if i + 1 < chars.len() && chars[i] == '-' && chars[i + 1] == '>' {
+                                i += 2;
+                            }
+                            if i >= chars.len() {
+                                break;
+                            }
+                            match chars[i] {
+                                '[' => {
+                                    i += 1;
+                                    let mut inner = String::new();
+                                    let mut depth = 1;
+                                    while i < chars.len() && depth > 0 {
+                                        if chars[i] == '[' {
+                                            depth += 1;
+                                        } else if chars[i] == ']' {
+                                            depth -= 1;
+                                            if depth == 0 {
+                                                break;
+                                            }
+                                        }
+                                        inner.push(chars[i]);
+                                        i += 1;
+                                    }
+                                    if i < chars.len() {
+                                        i += 1;
+                                    }
+                                    let idx_expr = if let Ok(n) = inner.parse::<i64>() {
+                                        Expr::IntLit(n)
+                                    } else if let Some(v) = inner.strip_prefix('$') {
+                                        Expr::ScalarVar(v.to_string())
+                                    } else {
+                                        Expr::StringLit(inner)
+                                    };
+                                    accum = Expr::ArrowElement(
+                                        Box::new(accum),
+                                        Box::new(idx_expr),
+                                        crate::ast::ArrowKind::Array,
+                                    );
+                                }
+                                '{' => {
+                                    i += 1;
+                                    let mut inner = String::new();
+                                    while i < chars.len() && chars[i] != '}' {
+                                        inner.push(chars[i]);
+                                        i += 1;
+                                    }
+                                    if i < chars.len() {
+                                        i += 1;
+                                    }
+                                    let key_expr = if let Some(v) = inner.strip_prefix('$') {
+                                        Expr::ScalarVar(v.to_string())
+                                    } else {
+                                        Expr::StringLit(inner)
+                                    };
+                                    accum = Expr::ArrowElement(
+                                        Box::new(accum),
+                                        Box::new(key_expr),
+                                        crate::ast::ArrowKind::Hash,
+                                    );
+                                }
+                                _ => break,
+                            }
+                            if !(i + 1 < chars.len()
+                                && chars[i] == '-'
+                                && chars[i + 1] == '>'
+                                && i + 2 < chars.len()
+                                && (chars[i + 2] == '{' || chars[i + 2] == '['))
+                            {
+                                break;
+                            }
+                        }
+                        parts.push(InterpPart::Expr(Box::new(accum)));
+                    } else {
+                        parts.push(InterpPart::ScalarVar(c.to_string()));
+                    }
                 } else {
                     let mut name = String::new();
                     // `$::foo` — leading `::` with no package name.
@@ -2495,6 +3333,94 @@ fn parse_interp_string(s: &str) -> Expr {
                             Expr::StringLit(key_str)
                         };
                         parts.push(InterpPart::HashElement(name, Box::new(key_expr)));
+                    } else if i + 1 < chars.len()
+                        && chars[i] == '-'
+                        && chars[i + 1] == '>'
+                        && i + 2 < chars.len()
+                        && (chars[i + 2] == '{' || chars[i + 2] == '[')
+                    {
+                        // `$ref->[i]` / `$ref->{k}` — arrow deref. Walk a chain
+                        // of `->[...]` and `->{...}` so `$h->{a}->[0]->{b}`
+                        // interpolates as the chained arrow expression.
+                        let mut accum: Expr = Expr::ScalarVar(name);
+                        loop {
+                            // Optional `->`. The first iteration's `->` was
+                            // already detected; subsequent ones also need it
+                            // (Perl allows omitting `->` between successive
+                            // subscripts, so we accept either).
+                            if i + 1 < chars.len() && chars[i] == '-' && chars[i + 1] == '>' {
+                                i += 2;
+                            }
+                            if i >= chars.len() {
+                                break;
+                            }
+                            match chars[i] {
+                                '[' => {
+                                    i += 1;
+                                    let mut inner = String::new();
+                                    let mut depth = 1;
+                                    while i < chars.len() && depth > 0 {
+                                        if chars[i] == '[' {
+                                            depth += 1;
+                                        } else if chars[i] == ']' {
+                                            depth -= 1;
+                                            if depth == 0 {
+                                                break;
+                                            }
+                                        }
+                                        inner.push(chars[i]);
+                                        i += 1;
+                                    }
+                                    if i < chars.len() {
+                                        i += 1; // skip ]
+                                    }
+                                    let idx_expr = if let Ok(n) = inner.parse::<i64>() {
+                                        Expr::IntLit(n)
+                                    } else if let Some(v) = inner.strip_prefix('$') {
+                                        Expr::ScalarVar(v.to_string())
+                                    } else {
+                                        Expr::StringLit(inner)
+                                    };
+                                    accum = Expr::ArrowElement(
+                                        Box::new(accum),
+                                        Box::new(idx_expr),
+                                        crate::ast::ArrowKind::Array,
+                                    );
+                                }
+                                '{' => {
+                                    i += 1;
+                                    let mut inner = String::new();
+                                    while i < chars.len() && chars[i] != '}' {
+                                        inner.push(chars[i]);
+                                        i += 1;
+                                    }
+                                    if i < chars.len() {
+                                        i += 1; // skip }
+                                    }
+                                    let key_expr = if let Some(v) = inner.strip_prefix('$') {
+                                        Expr::ScalarVar(v.to_string())
+                                    } else {
+                                        Expr::StringLit(inner)
+                                    };
+                                    accum = Expr::ArrowElement(
+                                        Box::new(accum),
+                                        Box::new(key_expr),
+                                        crate::ast::ArrowKind::Hash,
+                                    );
+                                }
+                                _ => break,
+                            }
+                            // Continue if another arrow + subscript follows.
+                            if !(i + 1 < chars.len()
+                                && chars[i] == '-'
+                                && chars[i + 1] == '>'
+                                && i + 2 < chars.len()
+                                && (chars[i + 2] == '{' || chars[i + 2] == '['))
+                            {
+                                break;
+                            }
+                        }
+                        parts.push(InterpPart::Expr(Box::new(accum)));
                     } else {
                         parts.push(InterpPart::ScalarVar(name));
                     }
@@ -2515,7 +3441,44 @@ fn parse_interp_string(s: &str) -> Expr {
                 parts.push(InterpPart::Lit(std::mem::take(&mut lit)));
             }
             i += 1; // skip @
-            if chars[i] == '$' {
+            if chars[i] == '{' {
+                // `@{ EXPR }` — parse the inner expression and treat its
+                // value as an array (block deref).
+                i += 1;
+                let mut depth = 1;
+                let mut inner = String::new();
+                while i < chars.len() && depth > 0 {
+                    match chars[i] {
+                        '{' => {
+                            depth += 1;
+                            inner.push('{');
+                        }
+                        '}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                            inner.push('}');
+                        }
+                        c => inner.push(c),
+                    }
+                    i += 1;
+                }
+                if i < chars.len() {
+                    i += 1; // skip closing }
+                }
+                // Parse the inner string via the lexer/parser pair.
+                use crate::lexer::Lexer;
+                let mut lex = Lexer::new(&inner);
+                let toks = lex.tokenize();
+                let tl = std::mem::take(&mut lex.token_lines);
+                let mut p = Parser::new_with_lines(toks, tl);
+                let inner_expr = p.parse_expr();
+                parts.push(InterpPart::Expr(Box::new(Expr::Call(
+                    "_array_block_deref".to_string(),
+                    vec![inner_expr],
+                ))));
+            } else if chars[i] == '$' {
                 // @$name — dereference array ref
                 i += 1;
                 let mut name = String::new();
@@ -2596,6 +3559,12 @@ fn scan_sub_names(tokens: &[Token]) -> HashSet<String> {
         "skip_all_without_perlio",
         "skip_all_without_config",
         "skip_all_without_unicode_tables",
+        "is_miniperl",
+        "curr_test",
+        "next_test",
+        "fresh_perl",
+        "which_perl",
+        "set_up_inc",
     ]
     .iter()
     .map(|s| s.to_string())

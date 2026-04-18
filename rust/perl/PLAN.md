@@ -6,14 +6,16 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**42/79 Nix tests passing** (53%) — selected tests from the upstream Perl test suite.
+**57/79 Nix tests passing** (72%) — selected tests from the upstream Perl test suite.
 
 Passing: base/if, base/cond, base/while, base/pat, base/num, base/translate,
-base/term, cmd/elsif, cmd/mod, cmd/switch, opbasic/arith, opbasic/qq,
-op/arith2, op/auto, op/bop, op/chop, op/closure, op/cond, op/defined,
-op/do, op/hash, op/inc, op/index, op/lc, op/oct, op/pack, op/quotemeta,
-op/range, op/reverse, op/sort, op/split, op/sprintf, op/sub, op/unshift,
-op/vec, io/argv, io/fs, io/open, io/print, io/read, re/subst, run/switches.
+base/term, base/rs, cmd/elsif, cmd/for, cmd/mod, cmd/switch, opbasic/arith,
+opbasic/qq, opbasic/magic_phase, op/arith2, op/auto, op/bop, op/chop,
+op/closure, op/cond, op/context, op/defined, op/delete, op/do, op/each,
+op/grep, op/hash, op/inc, op/index, op/lc, op/my, op/oct, op/pack, op/push,
+op/quotemeta, op/range, op/ref, op/reverse, op/sort, op/splice, op/split,
+op/sprintf, op/sub, op/substr, op/unshift, op/vec, op/wantarray, io/argv,
+io/fs, io/open, io/print, io/read, re/pat, re/subst, run/exit, run/switches.
 
 Major unlocks in this cycle:
 
@@ -42,18 +44,472 @@ Major unlocks in this cycle:
 - `split //` drops leading empty; trailing-empty suppression
 - `chr(-1)` → U+FFFD; `length` counts chars
 - `\$`/`\@` escapes in `"..."` stay literal (no spurious InterpString)
+- `keys`/`values`/`each` accept hash deref (`%$h`), not just `%h`
+- `keys`/`values`/`each` parse as named-unary, so `print keys %h ? a : b, x`
+  no longer swallows the trailing comma list into `keys()`
+- `qq(...)` interpolates `$var`/`@arr` like `"..."` does (was inert), but
+  `\$1` / `\@arr` still go through as literal sigils (placeholders survive
+  the InterpString round-trip)
+- `map({a => $_}, LIST)` recognises the `{...}` as an anon-hashref EXPR
+  arg when the first key looks like `WORD =>` / `"x" =>` / `N =>` —
+  previously always treated as a code BLOCK. Same for `map { … }` without
+  parens.
+- Implicit list-context return from a sub: `sub { map {…} @_ }` now
+  returns the map result list instead of the scalar count. The last
+  bare-expression statement is evaluated via `eval_list` when the sub
+  is called in list context.
+- Postfix `for` localizes `$_` for the loop body and restores it after,
+  so `map { …postfix-for…; …$_… }` sees the outer (map) `$_`.
+- `${^GLOBAL_PHASE}` is set to "START" during BEGIN, "CHECK" during CHECK
+  blocks, "INIT" during INIT blocks, "RUN" during main, "END" during END
+  blocks. (DESTRUCT phase not yet tracked.)
+- `CHECK { ... }` and `INIT { ... }` blocks are parsed and run between
+  compile-time and main: CHECK in reverse registration order, INIT in
+  registration order. END-block scope-restoration logic (push the file
+  scope of an origin file on entry, snapshot back on exit) applies to
+  CHECK/INIT too.
+- `$SIG{__DIE__}` handler is invoked before `Flow::Die` propagates. If
+  the die arg is a ref (array/hash/scalar/code), the handler receives
+  the ref directly so `$_[0]->[0]++` mutations reach the original. A
+  `in_die_handler` depth counter prevents a handler that itself raises
+  `die` from looping back into itself.
+- `local $NAME{KEY} = VAL;` — added `Stmt::LocalHashElem`; parser
+  recognises `local $var{key}` / `local $var[idx]` before falling
+  through to the generic `parse_var_list` bare-variable form. Required
+  for `local $SIG{__DIE__} = sub {…}` idiom.
+- `$ref->[i] = VAL` / `$ref->{k} = VAL` now actually mutate the backing
+  store (autovivifying a fresh `ArrayRef`/`HashRef` when the lhs is
+  undef). Previously `assign_to` had no case for `Expr::ArrowElement`
+  so arrow-slot assignments were silent no-ops, which broke any test
+  that relied on reaching an outer array via `$_[0]->[…]` inside a sub
+  or handler.
+- `local` save/restore is now tied to every lexical scope: `push_scope`
+  pushes a fresh `local_saves` / `local_array_saves` /
+  `local_fh_alias_saves` / `local_hash_elem_saves` frame, and
+  `pop_scope` auto-restores. Previously only sub calls pushed their
+  save frame, so `local $X` inside a bare block leaked.
+- `local $@;` (and `$!`, `$/`, `$\\`, `$,`, `$"`) now clears the var
+  for the scope — the previous strip logic was `trim_start_matches('$').trim_start_matches('@')`
+  which ate the `@` *name* of `$@`, leaving an empty key.
+- `bless REF, CLASS` / `bless REF` as a keyword: `Token::Bless`, parsed as
+  a list-builtin so the parens-less form `bless {}, 'Foo'` works alongside
+  `bless({}, 'Foo')`. Tags the ref's backing pointer in `blessed_refs`.
+- `ref()` and method dispatch now consult the blessed class first, so
+  `$obj->isa('C')` walks `@C::ISA` instead of always returning false for
+  blessed refs whose ref type is `HASH`/`ARRAY`/`SCALAR`.
+- `my $h = {};` is an **empty anon-hashref** (was parsed as a block and
+  collapsed to `undef`). Disambiguation: `{}` followed immediately by
+  `}` at the start of the brace is a hashref; otherwise the existing
+  `WORD =>` / `"x" =>` / `N =>` heuristic still picks hashref, else block.
+- `$#$ref` — last index of the array `$ref` points to (was lexed as
+  `ArrayLen("")` + `ScalarVar("ref")`, which had the parser falling
+  through). Now lexed as `ArrayLen("$ref")`; the `$`-prefix signals
+  deref so the interpreter walks the ref's backing array.
+- Prototype `$@` / `$%` / `$$` on sub signatures (e.g. `sub ok ($@)`)
+  now captured as two proto chars instead of one — the lexer emits
+  `Token::ScalarVar("@")` for `$@` inside `(…)`, which the proto
+  collector used to treat as just `$`, losing the `@`.
+- `m/pattern/flags` — explicit match regex is now lexed as `RegexLit`
+  (was tokenised as bareword `m` followed by a division operator,
+  producing runtime "Illegal division by zero"). This was the root
+  cause of **35 subs in test.pl not getting hoisted**: `sub runperl`
+  contained `$runperl =~ m/\s/`, and parsing that statement derailed
+  the sub's body — subsequent sub definitions (including `isa_ok` and
+  34 others) got absorbed into the failed `_create_runperl` body
+  instead of being registered in `self.subs`. Fixed.
+- `\&name` — take a code reference to `name` WITHOUT calling it.
+  Previously `\&runperl` parsed as `Ref(Call("runperl", []))` and the
+  interpreter evaluated the `Call` (invoking `runperl()` with no args,
+  dying) before wrapping. Now `Expr::Ref(Expr::Call(name, []))` at
+  eval time returns `Value::CodeRef(name)` directly. Fixes test.pl's
+  top-level `*run_perl = \&runperl;` which used to die at load time.
+- `$ref->isa('X')` on an **unblessed** ref now dies with the Perl
+  message `Can't call method "isa" on unblessed reference at …` —
+  required for test.pl's `isa_ok` to reach the `/^Can't call method
+  "isa" on unblessed reference/` branch and delegate to `UNIVERSAL::isa`.
+- `UNIVERSAL::isa(obj, class)` / `UNIVERSAL::can(obj, method)` are
+  intercepted in `eval_call`. `isa` walks @class::ISA and, for
+  unblessed refs, matches against the ref type ("ARRAY"/"HASH"/…).
+  `can` checks the package sub table.
+- `$blessed_ref->isa('ARRAY')` now returns true — Perl treats the
+  underlying ref type as an implicit base class. If walking @Foo::ISA
+  misses the target, we fall back to checking the raw ref_type.
+- `goto LABEL` + `LABEL:` on bare statements. Parser emits a standalone
+  `Stmt::Label(name)` when a label is followed by a non-loop/block stmt;
+  `Flow::Goto(label)` propagates through `exec_stmts`, which scans the
+  current block for a matching label and resumes from there.
+- `wantarray` inside `map { … }` / `grep { … }` now sees list / scalar
+  respectively (was undef). The block's tail statement is evaluated via
+  `eval_expr` with the caller's pushed context instead of being coerced
+  to void by the statement-level void hint; map/grep also clear the
+  stale `next_call_ctx = 0` set by the outer `Stmt::Expr` so the first
+  iteration's sub call doesn't inherit it.
+- Nix tests now use the release build of rust-perl. Debug builds time
+  out on tests with deeply-recursive parses (e.g. op/cond.t's 20 000
+  nested ternaries) — `pkgs.rust-perl-dev` couldn't finish op/cond
+  inside the 60 s sandbox timeout; release does it in ~2.5 s.
+- **File-scope closures for `require`d files**: every `require`d file gets a
+  persistent lexical scope; subs defined in that file capture it via
+  `sub_origin`, and `call_sub_named` pushes the file scope as an outer
+  lexical frame on entry. This stops `$test++` in a `.t` script from
+  bumping test.pl's `my $test = 1;` counter (the cause of the long-standing
+  test-counter drift in op/grep et al.). END blocks that came from a file
+  also get the file scope pushed before they run, so test.pl's
+  `Looks like you planned ... but ran ...` END can read its own `$planned`.
+- `&` / `|` / `^` byte-wise on byte-string operands (codepoints < 256)
+  instead of always coercing to numeric. Fixes `$_ & "\xFF…"` masks.
+- `push @arr, …` now croaks `Modification of a read-only value` when `@arr`
+  was flagged `Internals::SvREADONLY` (already implemented for unshift / splice).
+- `"$h->{k}"` / `"$r->[i]"` interpolate the arrow chain instead of
+  emitting `HASH(0x…)->{k}` literal text.
+- `"$@->{k}"` / `"$!->[i]"` — arrow chains after a special-char variable
+  (`$@`, `$!`, `$,`, `$;`, `$/`, `$\\`, `$"`, `$|`, `$&`, `\``, `$'`)
+  interpolate the deref chain instead of stringifying the ref and appending
+  the literal`->{k}` text.
+- `die $ref` / `die $@;` preserve the ref value in `$@`: `Stmt::Die`
+  stashes `pending_die_value = Some(ref)` so the catching `eval` reinstates
+  the real reference instead of its stringification (`HASH(0x…)`). For a
+  bare `die;` the stash only kicks in when `$@` is already a ref — otherwise
+  the default `"...propagated at …"` text path stays intact (so tests that
+  compare against the propagated-string error message still match).
+- Autovivification of **nested** LHS arrow-element assigns:
+  `$h{k}->{x} = v` / `$ref->{k}->[i] = v` now autoviv a fresh ref into
+  whatever the outer LHS was (HashElement / ArrayElement / chained
+  ArrowElement), via a recursive `assign_to` call on the outer LHS. The
+  old code only handled the simple `$name->…` case and silently no-op'd
+  for `$h{k}->…`.
+- `%{ EXPR }` — block-form hash deref. Lexer emits a new
+  `Token::HashBlockDerefOpen` when `%` is followed by `{` and the last
+  token expects an operand. Parser wraps the inner expr in a
+  `_hash_block_deref` call. `resolve_hash_arg` (used by `keys`/`values`/`each`)
+  recognises that call and dereferences the HashRef — so
+  `keys %{$h{top}}` actually reads the keys of the nested hashref instead
+  of returning empty.
+- `delete $ref->{k}` / `delete $ref->[i]` — arrow-element delete for
+  hashrefs/arrayrefs (was a silent no-op, causing autoviv-+-delete tests
+  to see stale keys).
+- `delete @arr[i,j,...]` — array-slice delete. Replaces each slot with
+  undef; returns the old values in order (list context) or the last one
+  (scalar context). `%arr[i,j]` kv-slice delete already worked.
+- `*FH = *SRC` / `*FH = \&sub` — scalar typeglob assignment. When RHS
+  is a `Value::Glob`, the filehandle slot aliases the source's fh
+  (so readline/print route correctly) and the sub slot aliases the
+  source's sub. When RHS is a `Value::CodeRef`, only the sub slot is
+  updated. Previously these assignments were silent no-ops, which left
+  `*FH = shift; <FH>` reading empty.
+- `local(*foo) = *bar` / `local(*foo) = 'name'` / `local(*foo);` — now
+  also copies the source's scalar into the local's scalar slot (not just
+  filehandle), and saves the old scalar for scope-exit restore. Bare
+  `local(*foo);` clears the scalar too (required so `local(*foo); is($foo, undef)`
+  sees undef instead of the prior value).
+- Readline honours `$/`:
+  - `$/ = undef` → slurp to EOF
+  - `$/ = "sep"` → read until terminator (inclusive) or EOF
+  - `$/ = ""` → paragraph mode: skip leading blank lines, read until
+    two consecutive newlines
+  - `$/ = \N` (N > 0) → fixed-width: read N bytes
+- `$/ = BAD_REF` dies immediately with reference perl's exact message
+  (`Setting $/ to a { ARRAY | HASH | CODE | REGEXP | GLOB | REF } reference
+  is forbidden`, `Setting $/ to a reference to zero is forbidden`,
+  `Setting $/ to a reference to a negative integer is forbidden`).
+  `set_var` intercepts assignments to `/` and validates.
+- `open our $T, …;` now works: `Token::Our` parses in expression position
+  as a plain var reference (previously only statement-level `our` was
+  recognised, so the token just bailed out as `Undef`). `eval_open` also
+  accepts `Expr::LocalVar` (used for `our $T`) the same as `MyVar`.
+- **Live-aliased globals** for `\$name` / `\@name` / `\%name`: previously
+  a ref took a *copy* of the current value into a fresh `Rc<RefCell<_>>`,
+  so mutations through the ref and later assigns to `$name`/`@name`
+  diverged. Now the first `\@name` (or `\$name` / `\%name`) migrates
+  `@name`'s storage out of `globals.arrays` into a shared
+  `aliased_arrays: HashMap<String, Rc<RefCell<…>>>`; `get_array` /
+  `set_array` consult the aliased map so the ref and the slot share one
+  storage. Scoped `my` names keep copy semantics (no cross-scope alias).
+  Fixes `$ref[0] = \@a; push @{$ref[0]}, …; print @a;` and the
+  `$FOO = \$BAR; $BAR = …; $$$FOO` chain in op/ref.
+- `${EXPR}[i]` / `${EXPR}{k}` / `$$ref[i]` / `$$ref{k}` — scalar-deref
+  subscripts now map to `ArrowElement` instead of the `_list_slice`
+  fallback (which picked the i-th "element" of the single value). Same
+  for the hash-key form.
+- `$$$foo` — symbolic-ref chains. The lexer now consumes successive
+  `$` sigils before an ident and encodes the extra levels as leading
+  `$` characters in the `ScalarDeref` name; the interpreter walks N+1
+  levels of `Value::ScalarRef` / string-named-scalar-lookup. Under
+  `no strict 'refs'` a string value in `$$foo` is treated as the name
+  of another global scalar (matches Perl's symbolic ref).
+- `&$subref(args)` / `&{EXPR}(args)` — invoke a code reference. The
+  parser now handles these two forms as `CodeCall(...)`; previously the
+  `&` + scalar-var fallback created a `Ref(...)` (taking a ScalarRef
+  instead of calling the sub).
+- `\&{EXPR}` — take a code ref to the sub *named* by EXPR, without
+  calling it. Previously `Ref(CodeCall(...))` fell through the
+  general-purpose arm, which evaluated the call and wrapped the return
+  value — now we intercept `Ref(CodeCall(name, []))` to return
+  `Value::CodeRef(n)` directly.
+- `scalar @{EXPR}` is now a valid named-unary argument: the lexer's
+  `ArrayBlockDerefOpen` / `HashBlockDerefOpen` / `ScalarBlockDerefOpen`
+  were missing from the "first-arg can start with …" token list, so
+  `scalar @{…}` was parsed as the bareword "scalar" followed by the
+  array deref. Added all three to the allow-list. `_array_block_deref`
+  now also honours scalar context — returns the deref'd array's length
+  instead of the last element.
+- `@{'name'}` / `@{EXPR}` where the inner is a string → symbolic array
+  ref. Under `no strict 'refs'`, `@{'d'}` reads the array `@d`.
+- Typeglob aliasing `local(*foo) = *bar` / `= 'name'` / bare
+  `local(*foo);` now also copies / clears the **scalar slot** and
+  saves the old scalar for scope-exit restore. Previously only the
+  filehandle alias was tracked — `$foo` inside the local block still
+  saw the old value.
+- **`sub {…}->(args)` at statement position** — the parser now detects
+  that the anonymous sub is being used as an expression (the token
+  after the matching `}` is `->`, `(`, an operator, `,`, etc.) and
+  parses it as `Stmt::Expr(CodeCall(AnonSub, args))` instead of
+  `Stmt::Sub("", ...)` (a no-op declaration). Without this,
+  `sub { is(...) }->(...)` at top level registered an anon sub and
+  discarded the `->(...)` — skipping the `is()` call entirely.
+- **`$/` record-separator variants in `readline`**: `ReadMode` enum
+  with Slurp / Fixed(N) / Paragraph / Until(String). Works for both
+  file-backed `read_handles` and the new `string_read_handles` (see
+  below).
+- **In-memory scalar-ref filehandles** — `open FH, "<", \$str;` /
+  `open FH, ">", \$str;`. Read side uses `string_read_handles:
+  HashMap<String, (Rc<RefCell<Value>>, byte_offset)>`; each readline
+  slices the next record out honouring `$/`. Write side appends to
+  the backing scalar. `close` drops both sides.
+- **`delete $arr[i]` / `delete @arr[i,j]` now mark slots** as deleted
+  so `exists $arr[i]` reports false, and trailing runs of deleted
+  slots are trimmed (so `scalar @arr` shrinks). Backed by
+  `deleted_slots: HashMap<String, HashSet<usize>>`; `set_array` /
+  `push` / etc. clear the deleted-slot set on overwrite.
+- **DESTROY / DESTRUCT phase** — implemented enough of Perl's
+  destructor machinery for opbasic/magic_phase. At end-of-main the
+  interpreter walks its top lexical frame (the main-file scope,
+  freshly pushed on entry) and any registered file-scopes for
+  blessed scalars, calls `$class::DESTROY` on each, then pops the
+  main scope. After END blocks run, the phase flips to "DESTRUCT"
+  and globals (`our $obj = bless …;`) get destroyed next.
+- `Foo::` bareword now stringifies as `"Foo"` (not `"Foo::"`), matching
+  Perl. `bless {}, Foo::` now produces a ref blessed into `Foo`, and
+  `${^GLOBAL_PHASE}` comparisons inside a `Foo::DESTROY` sub see the
+  right class.
+- `map BLOCK @arr` / `grep BLOCK @arr` — when the source is a single
+  `@array` / `@$ref`, the loop now reads the items, runs the block
+  with `$_` set to the item, and **writes `$_` back** into the source
+  slot. Matches Perl's `$_`-aliasing so `my $c = map { $_ *= 2 } @list`
+  leaves `@list` doubled in place.
+- Larger interpreter thread stack (1 GiB) — op/list.t builds a 100 000
+  deep nested expression (`(1,(1,(1,…)))`) and evals it; our
+  tree-walking interpreter and recursive-descent parser both need the
+  headroom. 256 MiB was enough for op/cond but overflowed here.
+- `caller()` line accuracy: returning from a sub now restores the
+  caller's `current_line` from the popped call-stack frame, so the
+  next `is(...)` / `ok(...)` line-mark in test.pl reports the line
+  of the call-site and not the sub body's last line-mark.
+- **Deleted-slot tracking + trailing trim** on arrays:
+  `delete $arr[i]` / `delete @arr[i,j]` / `delete %arr[i,j]` mark the
+  indices deleted (via `deleted_slots: HashMap<String, HashSet<usize>>`)
+  so `exists $arr[i]` reports false. Trailing runs of deleted slots
+  contract so `scalar @arr` shrinks. `delete $ref->[N]` through an
+  arrow now also pops trailing undef slots (matches Perl's arrayref
+  delete behaviour where autoviv'd pad cells are absent-not-undef).
+  `set_array` / `push` clear the deleted-slot set on overwrite.
+- **`%arr[i,j]` array key/value slice** — emits a synthesized
+  `_array_kvslice(name, idxs…)` call. In list context flattens to
+  `(i, $arr[i], j, $arr[j], …)`. Delete understands this form and
+  (additionally) marks each index as deleted so trailing trim fires.
+- **DESTROY on scope exit / slot overwrite / container clear**:
+  - `pop_scope` scans the popped frame for blessed scalars and calls
+    `$class::DESTROY` when no other slot in the interpreter (scopes,
+    globals, aliased tables) still holds the pointer. Main's own
+    scope is now pushed in `run()` so top-level `my $obj = bless …`
+    destructs at end-of-main (phase = RUN).
+  - `set_var` fires DESTROY when a slot that held a blessed ref is
+    about to be overwritten with a different value — and only if the
+    old ref is truly unreachable. This is what drives `foreach $h{k}, 1
+    { delete $h{k} }` — when iter 2 overwrites `$_` with `1`, the old
+    blessed ref's DESTROY fires before the replacement.
+  - `set_array` fires DESTROY for each blessed ref in the old array
+    that the new array doesn't keep and no other slot references.
+    Makes `@a = ()` run DESTROY on each contained blessed ref.
+  - Map in void context (`next_call_ctx == Some(0)`) no longer
+    accumulates per-iteration results; instead each block return is
+    scanned for blessed refs whose last strong ref is the map's
+    padtmp, and DESTROY fires. Matches Perl's block-level ENTER/LEAVE
+    semantics for void-context expression loops.
+  - `grep` / `map` save+restore `$_` so the last iterated value
+    doesn't keep a blessed ref alive past the call.
+- `package NAME { BLOCK }` — scoped package: parser now accepts the
+  block form, wrapping the contents in a `Stmt::Block` preceded by
+  a `Stmt::Package(NAME)`. The enclosing block's package-reversion
+  logic then restores the outer package on exit.
+- `sub NAME { ... }` inside a non-`main` package now registers as
+  `Package::NAME` (was registering as just `NAME`), so
+  `package FOO { sub DESTROY { ... } }` correctly creates
+  `FOO::DESTROY` for `bless`ed refs to find.
+- `::name` / `::pkg::name` — bareword calls qualified with a leading
+  `::` are stitched back together in the parser: the lexer emits
+  `Ident("::")` + `Ident("name")` and the parser combines them and
+  strips the redundant `main::` prefix so call resolution finds the
+  top-level sub from inside a `package OTHER { ... }` block.
+- `map { ... }`, `grep { ... }` block body with `=>` inside now
+  parses as a list expression statement instead of splitting on the
+  fat-comma. Without this, `map { $_ => -1 } LIST` evaluated only
+  `-1` per iteration (dropping the keys).
+- `_parse_error` synthetic call — parser emits this Call when it
+  needs to surface a Perl parse error at runtime so `eval STRING`
+  captures it in `$@`. Currently only used for `grep/map $var (…)`
+  which should produce "Missing comma after first argument to grep
+  function".
+- `system LIST` / `exec LIST` builtins. `system` runs the command,
+  waits, sets `$?` and `${^CHILD_ERROR_NATIVE}` to the wait status
+  (`exit_code << 8` for normal exits, `signal` low byte for signal
+  termination), and returns the same wait status. `exec` replaces the
+  process; on success exits with the program's status, on failure
+  leaves `$!` set and returns false.
+- `kill SIGNAL, PID, …` and `sleep N` builtins. `kill` invokes
+  `libc::kill`, returns the count of successfully signalled processes.
+  `sleep` parks via `std::thread::sleep`. Required for the
+  `kill 15, $$; sleep 1;` pattern that produces SIGTERM-by-self
+  termination in run/exit.t.
+- `exit N` builtin (was missing entirely — `exit 42` previously
+  exited with code 0). Now sets `pending_flow` to `Flow::Exit(N)` so
+  the interpreter unwinds with status `N`.
+- **`$? = N` from an END block** propagates as the program exit code:
+  if no other Flow::Exit / Flow::Die overrode the status, `run()`
+  reads `$?` after the END phase and uses `($? >> 8) & 0xff` (or the
+  low byte if upper is zero) as the final exit code.
+- `<FH>` in list context now slurps all remaining lines (was
+  returning a single line).
+- Special scalar vars `$?` / `$&` / `` $` `` / `$'` are now lexed
+  as `Token::ScalarVar("?")` etc., not silently rewritten to `$_`.
+  String interpolation handles `$?` (and `$$` for PID inside
+  strings: `"PID: $$\n"` now interpolates).
+- `Foo::` bareword stringifies as `"Foo"` (already had this); now
+  also `::name` qualified barewords resolve correctly when called
+  from inside `package OTHER { … }`.
+- `local @arr` / `local %hash` (and `local (undef, @arr) = LIST`,
+  `local (@a) = local(@b) = LIST` chains) now snapshot the **array
+  / hash** value before overwriting and restore on scope exit. Was
+  only saving the scalar slot, so arrays leaked across the scope.
+- `our (@arr, %h) = LIST` — list-context destructure across `our`
+  declarations now works: scalars take a single value, `@arr` /
+  `%h` slurp the rest.
+- `my (@arr) = LIST` (parens form) now properly declares `@arr` as
+  a lexical array — was treating `my (@arr)` as a single MyVar
+  with the literal name `@arr`, which `assign_to` then bound as a
+  *scalar* in the inner scope.
+- **Lvalue substr**: `substr($s, OFFS, [LEN]) = REPL` now mutates
+  `$s` in place. The 2-arg form (no length) defaults length to "to
+  end". Implemented by routing the assignment through the 4-arg
+  form `substr($s, OFFS, LEN, REPL)`. The 4-arg form computes the
+  splice and writes the new string back via `assign_to`.
+- `substr` "outside of string" warning + die — non-lvalue calls
+  emit a warning (via `$SIG{__WARN__}` if set), lvalue calls die
+  with Perl's exact `substr outside of string at FILE line N.`.
+  Detection follows Perl's overlap semantics: 2-arg silently clamps;
+  3-arg warns when the requested range has no overlap with the
+  string (`raw_start > slen` OR `raw_start < 0 && raw_end < 0`).
+- `$SIG{__WARN__}` handler is now invoked by an `emit_warning`
+  helper. Builtins like `substr` route warnings through it instead
+  of writing directly to stderr.
+- Regex `$` (in non-/m mode) now matches end-of-string OR before a
+  final newline (Perl behaviour). `perl_dollar_anchor` post-
+  processes the pattern, replacing trailing `$` (at end-of-pattern,
+  before `|`, or before `)`) with `(?:\n?$)` so Rust's regex engine
+  matches "**END**\n" against `/^__END__$/`.
+- `package NAME { BLOCK }` block form (already; documented above).
+- `use bytes` / `no bytes` lexical pragma. The `bytes_mode_saves`
+  stack is pushed by `push_scope` and popped by `pop_scope`, so a
+  nested `use bytes` doesn't leak past the enclosing block.
+  `length()` returns the byte count when the flag is on, character
+  count otherwise.
+- `require Foo;` failure that propagates as `Flow::Exit` (typically
+  via a chained `BEGIN failed` inside the loaded file) now also
+  prints Perl's `Compilation failed in require at FILE line N.`
+  line on the parent's behalf, so the require chain matches
+  reference perl byte-for-byte. (Captures the call-site line *before*
+  `do_require` so the child file's line marks don't bleed in.)
+- `<FH>` in **list context** slurps all remaining lines (was reading
+  one only). `Expr::Diamond` now has a dedicated `eval_list` arm.
+- `undef &name` removes the named sub from `self.subs` (parser also
+  now treats `Token::BitAnd` as a valid `undef` argument; previously
+  `undef` with no parens only consumed scalar/array/hash sigils).
+  Calling a missing `&name` returns undef, so the standard
+  `defined &name` check correctly reports false afterwards.
+- `local @arr` / `local %h` / `local (…)` in **expression position**:
+  parser now wraps each in a `do { local …; EXPR }` so the local's
+  save+restore happens, and the expression evaluates to the just-
+  localised slot — making `local @bee = local(@bee) = qw(…)` chains
+  work end-to-end. The `Expr::Assign` special-case for DoBlock-
+  wrapped declarations now also recognises `Stmt::Local` /
+  `Stmt::Our` (was only matching `Stmt::My`).
+- `pos($var)` and `/PAT/g` continuation. `pos_offsets:
+  HashMap<String, usize>` keyed by canonical scalar name. After a
+  successful `=~ /…/g` against `$var`, we record the byte offset
+  where the match ended; `pos($var)` reads it; an unsuccessful
+  `/g` (without `/c`) clears it; any `set_var` on `$var` also
+  clears the pos so subsequent `=~ /…/g` starts from the head.
+- `use strict 'vars'` enforcement on `eval STRING`. Tracked via
+  `strict_vars: bool` (saved/restored alongside `bytes_mode` per
+  scope). When the eval'd code references a scalar/array/hash
+  whose name isn't declared in the eval body or the surrounding
+  closure scope, `eval_string` dies with Perl's exact "Global
+  symbol \"$NAME\" requires explicit package name (did you forget
+  to declare \"my $NAME\"?) at FILE line N." and fires
+  `$SIG{__DIE__}`with the same message before returning undef.`$a` / `$b` are exempt (Perl's special sort vars).
+- `runperl(prog => …, stderr => 1, stdin => …, switches => […], args => […])`
+  builtin — bypass test.pl's runperl (which depends on Config to
+  build the perl path). We spawn our own binary directly and
+  collect stdout (+ stderr if asked). Required for op-array's
+  later destructor / array-warning tests that all funnel through
+  `runperl(prog => '…')`.
+- `warn` now routes through `$SIG{__WARN__}` (when set as a
+  CodeRef) instead of writing directly to stderr — matches Perl,
+  and unlocks op-die's "warn handler with utf8" test (the handler
+  stores the message into `$err`, which the test compares against
+  the original `$msg`). When the message has no trailing newline,
+  Perl's "at FILE line N." suffix is appended.
+- `s/PAT/REPL/eg` (substitute, global, with replacement-as-code).
+  The substitution loop now manually iterates each match (instead
+  of `regex::Regex::replace_all`) so it can update `pos($var)` to
+  the match's start before evaluating REPL via `eval_string`, then
+  advance pos to the match's end after. The /e flag also disables
+  the variable-interpolation pre-pass on the replacement so
+  `pos($x)` survives literally to the eval.
+- `pos` is a unary builtin (proto `$`) — added to
+  `is_unary_builtin` so `is(pos $x, 3, "name")` doesn't swallow
+  the rest of the args into pos's call.
+- 4-arg lvalue substr (`substr($s,0,0,"") = "abc"`) now compiles
+  to a die with Perl's exact "Can't modify substr in scalar
+  assignment at FILE line N." Used by op/substr's compile-time
+  error tests.
+- `substr` "Use of uninitialized value in substr" warnings — emitted
+  when any of the source string, offset, or length is undef.
+- `substr($ref, OFFS, LEN) = REPL` warns "Attempt to use reference
+  as lvalue in substr" before the splice (matching reference perl,
+  whose `__WARN__` handler counts this warning specially in
+  op/substr's coercion-of-references tests).
 
 Near-passing (local test counts):
 
+- base/rs: tests 1-31 pass (glob scalar alias + `$/` record separator
+  support). Remaining: scalar-ref-as-filehandle (`open FH, "<", \$str`).
 - opbasic/concat: ~245/254 (Unicode concat)
 - cmd/for: 15/16 (DESTROY method)
-- cmd/subval: 35/36 (typeglob local aliasing)
+- cmd/subval: 35/36 (autoviv + arg aliasing for `autov($href->{k})`)
 - op/my: 56/59 (block-level `my @y` without parens edge-case)
 - op/array: 180/195 (aelem magic, fresh_perl_is)
 - op/not: 19/22 (typeglob to read-only scalar)
-- op/grep: near-passing (test.pl $test-counter closure issue)
+- op/grep: counter aligned (closures for required files); 4 specific tests
+  remain (`{a => $_}` block-vs-hashref disambiguation in map, `for`-aliasing
+  inside map, scalar-context map detection)
 - op/list: near-passing (LHS list-assign with `(undef)xN`)
-- op/delete: test.pl dependent (autoviv for deeply nested refs)
+- op/delete: autoviv hashref delete now works (test 25);
+  arrow-element / array-slice delete now work. Remaining failures need
+  deleted-slot tracking (`exists $arr[i]` false after `delete`) and
+  `@_` aliasing for array kv-slice delete (test 40+).
+- op/ref: scalar-glob-alias tests pass (1-7). Remaining: symbolic-refs
+  (`$$$foo`), deeper symbol-table ops.
 - op/splice: 29/34 (@ISA, readonly, test.pl Config)
 - op/repeat: 42/50 (scalar context of list x, tie)
 - op/oct: 79/79 (FIXED)
@@ -391,44 +847,55 @@ This is the largest phase. Key clusters:
 
 **re (3):** pat, regexp, subst
 
-### Passing (34)
+### Passing (49)
 
 base/cond, base/if, base/num, base/pat, base/term, base/translate, base/while,
 cmd/elsif, cmd/mod, cmd/switch, opbasic/arith, opbasic/qq, op/arith2,
-op/auto, op/bop, op/chop, op/closure, op/defined, op/do, op/hash, op/inc,
-op/index, op/lc, op/pack, op/quotemeta, op/range, op/split, op/sprintf,
-op/sub, op/vec, io/fs, io/open, re/subst, run/switches
+op/auto, op/bop, op/chop, op/closure, op/cond, op/context, op/defined, op/do,
+op/each, op/hash, op/inc, op/index, op/lc, op/my, op/oct, op/pack, op/push,
+op/quotemeta, op/range, op/reverse, op/sort, op/splice, op/split,
+op/sprintf, op/sub, op/unshift, op/vec, op/wantarray,
+io/argv, io/fs, io/open, io/print, io/read, re/pat, re/subst, run/switches
 
-### Failing (34)
+### Failing (30)
 
-base/lex, base/rs, cmd/for, cmd/subval, cmd/switch,
+base/lex, base/rs, cmd/for, cmd/subval, io/tell,
 opbasic/cmp, opbasic/concat, opbasic/magic_phase,
-op/arith2, op/array, op/auto, op/bop, op/chop, op/chr, op/closure, op/cond,
-op/context, op/delete, op/die, op/do, op/each, op/eval, op/grep,
-op/hash, op/heredoc, op/inc, op/index, op/join, op/lc, op/length, op/list,
-op/local, op/my, op/not, op/oct, op/ord, op/pack, op/pos, op/print, op/push,
-op/quotemeta, op/range, op/ref, op/repeat, op/reverse, op/sort, op/splice,
-op/split, op/sprintf, op/sub, op/substr, op/tr, op/undef, op/unshift, op/vec,
-op/wantarray, io/argv, io/fs, io/open, io/print, io/read, io/tell,
-re/pat, re/regexp, re/subst, run/exit, run/switches
+op/array, op/chr, op/delete, op/die, op/eval, op/grep,
+op/heredoc, op/join, op/length, op/list, op/local, op/not, op/ord,
+op/pos, op/print, op/ref, op/repeat, op/substr, op/tr, op/undef,
+re/regexp, run/exit
 
 ### Next high-impact targets
 
-The biggest locked-door preventing many tests from passing is:
-
-1. **Real references.** Currently `\$x`, `[...]`, `{...}` return the placeholder
-   strings `"REF"`, `"ARRAY_REF"`, `"HASH_REF"`. Dereferences (`@$ref`, `%$ref`,
-   `$$ref`, `$ref->[i]`, `$ref->{k}`) all silently give empty. This blocks
-   op/ref, op/hash, op/array (nested), op/auto (glob handling), and more —
-   any test that iterates over array-refs.
-2. **`qr//` regex values.** Currently `qr/pat/` is not stored as a usable
-   regex value; `$str =~ $rx` crashes silently. Blocks cmd/for test 13 and
-   many regex tests.
-3. **Line-number tracking in tokens.** With line info we could emit
-   reference-perl-compatible `Can't locate Config.pm in @INC ... at FILE.t
-   line NN.` errors, which would instantly pass ~15 tests whose reference
-   output is just that error (op/arith2, op/bop, op/chop, op/inc, op/lc,
-   op/pack, op/quotemeta, op/range, op/sprintf, op/vec, io/fs, io/open,
-   re/pat, re/subst, run/switches).
-4. **Typeglobs (`*F`, `*yes = \x`)** — blocks cmd/subval tests 31-36 and
-   parts of op/auto, op/not.
+1. **`bless` + class-tagged refs.** Many op/die tests (and blocks of
+   opbasic/magic_phase, op/ref, cmd/for) need blessed objects: `bless {}, 'C'`,
+   method dispatch via the stored class, `ref($x)` returning the class
+   name. Requires adding either a `Value::Blessed(…)` wrapper or a
+   class field on `ArrayRef`/`HashRef`/`ScalarRef`. Without it,
+   `$x->isa('C')` always returns 0.
+2. **`@_` argument aliasing + autovivification of lvalue subscripts.**
+   `autov($href->{b})` should pass an aliased slot so `$_[0] = 23` writes
+   back to `$href->{b}`, autovivifying if absent. We copy values into
+   `@_`, so such writes never reach the caller. Blocks cmd/subval test
+   36, op/list test 67, and half of op/delete.
+3. **Parser-level error reporting for `eval STRING`.** op/eval tests 5–7
+   (`eval '$foo =;'`, `eval 'print \$foo = /'`, `eval '++'`) require `$@`
+   to be set when the parse fails. Our parser currently silently produces
+   `Expr::Undef` for unrecognised input. Would also help op/die's several
+   $@-inspection tests.
+4. **DESTROY + DESTRUCT phase.** Closes opbasic/magic_phase (already at
+   5/7; CHECK+INIT added) and cmd/for test 14 (DESTROY called from
+   `delete $h{foo} for …`). Requires tying Rust's Drop to a per-ref
+   class lookup so destructors fire at the right time.
+5. **`use bytes` lexical pragma.** Required for op/length and the
+   byte-oriented half of opbasic/concat (`beq(...)` helper).
+6. **`$.` per-filehandle line counter.** io/tell.
+7. **`$?` after system/backticks.** run/exit.
+8. **`local @arr = local(@arr) = LIST` chained-list-assign.** op/array
+   tests 44+ stack `local()` inside an outer `local() = …`; the inner one
+   needs to emit an lvalue list whose mutation hits the outer name's
+   localised slot.
+9. **Surrogate codepoints / overflow chars.** op/chr and op/ord test
+   `chr(0xD800)` / `chr(0x110000)` — Rust's `char` rejects these. Would
+   need a bytes-wide representation for scalars.

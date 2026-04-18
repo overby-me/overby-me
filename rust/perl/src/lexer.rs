@@ -38,6 +38,7 @@ pub enum Token {
     Last,
     Next,
     Redo,
+    Goto,
     Continue,
     Print,
     Say,
@@ -45,6 +46,9 @@ pub enum Token {
     Warn,
     Begin,
     End,
+    Check,
+    Init,
+    Bless,
     Use,
     Require,
     Package,
@@ -166,6 +170,16 @@ pub enum Token {
     Backslash,          // \
     StringRepeat,       // x
     StringRepeatAssign, // x=
+    /// `@{ EXPR }` — block-form array deref. Parser treats the next `{`
+    /// as opening an expression block whose value is dereferenced as an
+    /// array.
+    ArrayBlockDerefOpen,
+    /// `${ EXPR }` — block-form scalar deref. The inner expression is
+    /// evaluated and its result is dereferenced as a scalar.
+    ScalarBlockDerefOpen,
+    /// `%{ EXPR }` — block-form hash deref. The inner expression is
+    /// evaluated; its result (a hash ref) is dereferenced as a hash.
+    HashBlockDerefOpen,
 
     // Delimiters
     LParen,
@@ -356,6 +370,7 @@ impl Lexer {
             "last",
             "next",
             "redo",
+            "goto",
             "continue",
             "print",
             "say",
@@ -363,6 +378,9 @@ impl Lexer {
             "warn",
             "BEGIN",
             "END",
+            "CHECK",
+            "INIT",
+            "bless",
             "use",
             "require",
             "package",
@@ -459,6 +477,35 @@ impl Lexer {
         } else {
             '\0'
         }
+    }
+
+    /// True if the upcoming chars are `IDENT}` (optionally with one or
+    /// more `::IDENT` package segments). Used to disambiguate
+    /// `@{name}` (simple deref) from `@{ EXPR }` (block deref).
+    fn lookahead_close_brace_after_ident(&self) -> bool {
+        let mut i = self.pos;
+        // Allow an initial `$` when peeking into `@{$ref}`.
+        if i < self.input.len() && self.input[i] == '$' {
+            i += 1;
+        }
+        let start = i;
+        while i < self.input.len()
+            && (self.input[i].is_ascii_alphanumeric() || self.input[i] == '_')
+        {
+            i += 1;
+        }
+        if i == start {
+            return false;
+        }
+        while i + 1 < self.input.len() && self.input[i] == ':' && self.input[i + 1] == ':' {
+            i += 2;
+            while i < self.input.len()
+                && (self.input[i].is_ascii_alphanumeric() || self.input[i] == '_')
+            {
+                i += 1;
+            }
+        }
+        i < self.input.len() && self.input[i] == '}'
     }
 
     fn advance(&mut self) -> char {
@@ -624,15 +671,48 @@ impl Lexer {
                 '$' => {
                     self.pos += 1;
                     if self.ch() == '#' {
-                        // $#array or $#{ ... }
+                        // $#array, $#$ref, or $#{ ... }
                         self.pos += 1;
-                        let name = self.read_ident();
-                        tokens.push(Token::ArrayLen(name));
+                        if self.ch() == '$' {
+                            // `$#$ref` — last index of @$ref. Mark with
+                            // leading `$` so parser can emit ArrayLenDeref.
+                            self.pos += 1;
+                            let name = self.read_ident();
+                            tokens.push(Token::ArrayLen(format!("${name}")));
+                        } else {
+                            let name = self.read_ident();
+                            tokens.push(Token::ArrayLen(name));
+                        }
                     } else if self.ch() == '$' {
-                        // $$name — scalar dereference of a scalar ref.
+                        // `$$` alone (no following ident/{/$) is the
+                        // process-id special var; otherwise scalar deref.
+                        // Multiple `$`s compose: `$$$foo` is two derefs —
+                        // emit a ScalarDeref whose name has one leading `$`
+                        // for each extra level. The interpreter strips
+                        // leading `$`s, looking up / dereffing N times.
                         self.pos += 1;
+                        let mut extra = 0usize;
+                        while self.ch() == '$'
+                            && (self.peek(1).is_ascii_alphabetic()
+                                || self.peek(1) == '_'
+                                || self.peek(1) == '$'
+                                || self.peek(1) == '{')
+                        {
+                            extra += 1;
+                            self.pos += 1;
+                        }
                         let name = self.read_ident();
-                        tokens.push(Token::ScalarDeref(name));
+                        if name.is_empty() && self.ch() != '{' {
+                            if extra > 0 {
+                                // `$$$` with no ident — unusual; fall back.
+                                tokens.push(Token::ScalarVar("$".to_string()));
+                            } else {
+                                tokens.push(Token::ScalarVar("$".to_string()));
+                            }
+                        } else {
+                            let prefix: String = "$".repeat(extra);
+                            tokens.push(Token::ScalarDeref(format!("{prefix}{name}")));
+                        }
                     } else if self.ch() == ':' && self.peek(1) == ':' {
                         // `$::name` — shorthand for `$main::name`. Keep the
                         // `::` in the name so the interpreter can look it up
@@ -641,7 +721,7 @@ impl Lexer {
                         let rest = self.read_ident();
                         tokens.push(Token::ScalarVar(format!("::{rest}")));
                     } else if self.ch() == '{' {
-                        // ${expr} or ${^NAME} or ${$ref}
+                        // ${expr} or ${^NAME} or ${$ref} or ${name}
                         self.pos += 1;
                         if self.ch() == '^' {
                             self.pos += 1;
@@ -651,7 +731,7 @@ impl Lexer {
                                 self.pos += 1;
                             }
                             tokens.push(Token::ScalarVar(format!("^{name}")));
-                        } else if self.ch() == '$' {
+                        } else if self.ch() == '$' && self.lookahead_close_brace_after_ident() {
                             // ${$ref} — same as $$ref
                             self.pos += 1;
                             let n = self.read_ident();
@@ -659,12 +739,17 @@ impl Lexer {
                                 self.pos += 1;
                             }
                             tokens.push(Token::ScalarDeref(n));
-                        } else {
+                        } else if (self.ch() == '_' || self.ch().is_ascii_alphabetic())
+                            && self.lookahead_close_brace_after_ident()
+                        {
                             let name = self.read_ident();
                             if self.ch() == '}' {
                                 self.pos += 1;
                             }
                             tokens.push(Token::ScalarVar(name));
+                        } else {
+                            // `${ EXPR }` — block-scalar-deref. Sentinel.
+                            tokens.push(Token::ScalarBlockDerefOpen);
                         }
                     } else if self.ch() == '^' {
                         // $^X style special variable
@@ -718,6 +803,18 @@ impl Lexer {
                     } else if self.ch() == '|' {
                         self.pos += 1;
                         tokens.push(Token::ScalarVar("|".to_string()));
+                    } else if self.ch() == '?' {
+                        self.pos += 1;
+                        tokens.push(Token::ScalarVar("?".to_string()));
+                    } else if self.ch() == '&' {
+                        self.pos += 1;
+                        tokens.push(Token::ScalarVar("&".to_string()));
+                    } else if self.ch() == '`' {
+                        self.pos += 1;
+                        tokens.push(Token::ScalarVar("`".to_string()));
+                    } else if self.ch() == '\'' {
+                        self.pos += 1;
+                        tokens.push(Token::ScalarVar("'".to_string()));
                     } else {
                         // Unknown special var, just treat as $_
                         tokens.push(Token::ScalarVar("_".to_string()));
@@ -756,7 +853,10 @@ impl Lexer {
                                 self.pos += 1;
                             }
                             tokens.push(Token::ArrayVar(format!("^{name}")));
-                        } else if self.ch() == '$' {
+                        } else if self.ch() == '$'
+                            && self.peek(1).is_ascii_alphabetic()
+                            && self.lookahead_close_brace_after_ident()
+                        {
                             // @{$ref} — same as @$ref
                             self.pos += 1;
                             let n = self.read_ident();
@@ -764,12 +864,19 @@ impl Lexer {
                                 self.pos += 1;
                             }
                             tokens.push(Token::ArrayDeref(n));
-                        } else {
+                        } else if (self.ch() == '_' || self.ch().is_ascii_alphabetic())
+                            && self.lookahead_close_brace_after_ident()
+                        {
                             let name = self.read_ident();
                             if self.ch() == '}' {
                                 self.pos += 1;
                             }
                             tokens.push(Token::ArrayVar(name));
+                        } else {
+                            // `@{ EXPR }` — block-deref. Emit a sentinel
+                            // token for the parser to treat as start of a
+                            // braced expression that derefs as an array.
+                            tokens.push(Token::ArrayBlockDerefOpen);
                         }
                     } else {
                         tokens.push(Token::ArrayVar(String::new()));
@@ -807,6 +914,12 @@ impl Lexer {
                         if is_hash && (self.ch() == '_' || self.ch().is_ascii_alphabetic()) {
                             let name = self.read_ident();
                             tokens.push(Token::HashVar(name));
+                        } else if is_hash && self.ch() == '{' {
+                            // `%{ EXPR }` — block-form hash deref. The inner
+                            // expression is arbitrary; the parser handles
+                            // the `{`..`}` as an expression whose result is
+                            // treated as a hash ref.
+                            tokens.push(Token::HashBlockDerefOpen);
                         } else {
                             tokens.push(Token::Percent);
                         }
@@ -868,7 +981,27 @@ impl Lexer {
                         }
                         "qq" if !self.ch().is_alphanumeric() && self.ch() != '_' => {
                             let s = self.read_qq_string();
-                            tokens.push(Token::StringLit(s));
+                            // qq// is double-quote-equivalent. Route through
+                            // InterpString iff there's an *unescaped* sigil
+                            // (a real $ / @, not the \x01 / \x02 placeholders
+                            // process_escapes leaves behind for `\$` / `\@`).
+                            // Otherwise StringLit, with placeholders mapped
+                            // back so the literal carries `$` / `@` directly.
+                            if s.contains('$') || s.contains('@') {
+                                tokens.push(Token::InterpString(s));
+                            } else if s.contains('\x01') || s.contains('\x02') {
+                                let restored: String = s
+                                    .chars()
+                                    .map(|c| match c {
+                                        '\x01' => '$',
+                                        '\x02' => '@',
+                                        c => c,
+                                    })
+                                    .collect();
+                                tokens.push(Token::StringLit(restored));
+                            } else {
+                                tokens.push(Token::StringLit(s));
+                            }
                             continue;
                         }
                         "qw" if !self.ch().is_alphanumeric() && self.ch() != '_' => {
@@ -879,6 +1012,22 @@ impl Lexer {
                         "qr" if !self.ch().is_alphanumeric() && self.ch() != '_' => {
                             let (pat, flags) = self.read_qr();
                             tokens.push(Token::QrLit(pat, flags));
+                            continue;
+                        }
+                        "m" if !self.ch().is_alphanumeric()
+                            && self.ch() != '_'
+                            && self.ch() != '='
+                            && self.ch() != ';'
+                            && self.ch() != ','
+                            && self.ch() != ')' =>
+                        {
+                            // `m/pat/flags` — explicit match regex. Emit as
+                            // RegexLit so `$x =~ m/…/` (and the bare regex
+                            // context for `m/…/` matching against `$_`) works
+                            // identically to `/…/`. Guard against taking a
+                            // bareword `m` at end-of-expression as regex.
+                            let (pat, flags) = self.read_qr();
+                            tokens.push(Token::RegexLit(pat, flags));
                             continue;
                         }
                         "s" if !self.ch().is_alphanumeric() && self.ch() != '_' => {
@@ -912,6 +1061,7 @@ impl Lexer {
                         "last" => Token::Last,
                         "next" => Token::Next,
                         "redo" => Token::Redo,
+                        "goto" => Token::Goto,
                         "continue" => Token::Continue,
                         "print" => Token::Print,
                         "say" => Token::Say,
@@ -919,6 +1069,9 @@ impl Lexer {
                         "warn" => Token::Warn,
                         "BEGIN" => Token::Begin,
                         "END" => Token::End,
+                        "CHECK" => Token::Check,
+                        "INIT" => Token::Init,
+                        "bless" => Token::Bless,
                         "use" => Token::Use,
                         "require" => Token::Require,
                         "package" => Token::Package,
@@ -1536,6 +1689,29 @@ impl Lexer {
         let mut s = String::new();
         let mut has_interp = false;
         while self.pos < self.input.len() && self.ch() != delim {
+            // `${ EXPR }` / `@{ EXPR }` — copy the inner expression
+            // verbatim so backslash escapes (`\7`) inside it aren't
+            // mistaken for string-literal escapes (octal 7).
+            if (self.ch() == '$' || self.ch() == '@') && self.peek(1) == '{' {
+                has_interp = true;
+                s.push(self.advance()); // $ or @
+                s.push(self.advance()); // {
+                let mut depth = 1;
+                while self.pos < self.input.len() && depth > 0 {
+                    let c = self.ch();
+                    if c == '{' {
+                        depth += 1;
+                    } else if c == '}' {
+                        depth -= 1;
+                        if depth == 0 {
+                            s.push(self.advance());
+                            break;
+                        }
+                    }
+                    s.push(self.advance());
+                }
+                continue;
+            }
             if self.ch() == '\\' {
                 self.pos += 1;
                 match self.ch() {
@@ -1771,8 +1947,27 @@ impl Lexer {
     }
 
     fn read_qw(&mut self) -> Vec<String> {
-        let (_, _, s) = self.read_delimited_string();
-        s.split_whitespace().map(|w| w.to_string()).collect()
+        let (open, close, s) = self.read_delimited_string();
+        // qw// is semantically `split ' ', q(...)`, so the same minimal
+        // single-quote-style escape handling applies: `\\` collapses to a
+        // single backslash, and `\<delim>` escapes the delimiter. Any other
+        // backslash stays literal.
+        let mut out = String::with_capacity(s.len());
+        let chars: Vec<char> = s.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            if chars[i] == '\\' && i + 1 < chars.len() {
+                let next = chars[i + 1];
+                if next == '\\' || next == open || next == close {
+                    out.push(next);
+                    i += 2;
+                    continue;
+                }
+            }
+            out.push(chars[i]);
+            i += 1;
+        }
+        out.split_whitespace().map(|w| w.to_string()).collect()
     }
 
     fn read_qr(&mut self) -> (String, String) {
@@ -1996,8 +2191,12 @@ fn process_escapes(s: &str) -> String {
                 'r' => result.push('\r'),
                 '\\' => result.push('\\'),
                 '"' => result.push('"'),
-                '$' => result.push('$'),
-                '@' => result.push('@'),
+                // Escaped sigil: emit a placeholder that the interp parser
+                // turns back into the literal character — keeps `qq{\$1}` /
+                // `<<"END"\n\$1\nEND` from interpolating $1 (which would
+                // otherwise hit the regex match group).
+                '$' => result.push('\x01'),
+                '@' => result.push('\x02'),
                 '0'..='7' => {
                     let mut oct = String::new();
                     oct.push(chars[i]);

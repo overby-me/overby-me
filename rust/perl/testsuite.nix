@@ -12,7 +12,7 @@
   name,
 }:
 pkgs.runCommand "rust-perl-test-${category}-${name}" {
-  nativeBuildInputs = [pkgs.rust-perl-dev pkgs.perl pkgs.coreutils pkgs.diffutils pkgs.gnused pkgs.gnugrep];
+  nativeBuildInputs = [pkgs.rust-perl pkgs.perl pkgs.coreutils pkgs.diffutils pkgs.gnused pkgs.gnugrep];
   perlSrc = pkgs.perl.src;
 } ''
   # Extract the perl source
@@ -28,12 +28,13 @@ pkgs.runCommand "rust-perl-test-${category}-${name}" {
   # Run with reference perl — execute the .t file and capture TAP output
   timeout 60 ${pkgs.perl}/bin/perl -I../lib ${category}/${name}.t > "$TMPDIR/expected" 2>&1 || true
 
-  # Run with rust-perl
-  timeout 60 ${pkgs.rust-perl-dev}/bin/perl -I../lib ${category}/${name}.t > "$TMPDIR/actual" 2>&1 || true
+  # Run with rust-perl (release build — debug is too slow for tests like
+  # op/cond.t whose 20 000-deep ternary doesn't finish in 60 s unoptimised).
+  timeout 60 ${pkgs.rust-perl}/bin/perl -I../lib ${category}/${name}.t > "$TMPDIR/actual" 2>&1 || true
 
   # Normalize binary paths so /nix/store/... differences don't cause false failures
   REF_PERL="${pkgs.perl}/bin/perl"
-  TEST_PERL="${pkgs.rust-perl-dev}/bin/perl"
+  TEST_PERL="${pkgs.rust-perl}/bin/perl"
   sed -i "s|$REF_PERL|perl|g" "$TMPDIR/expected"
   sed -i "s|$TEST_PERL|perl|g" "$TMPDIR/actual"
 
