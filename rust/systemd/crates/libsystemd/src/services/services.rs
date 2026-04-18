@@ -114,9 +114,23 @@ fn helper_mount_ns_from_conf(conf: &ServiceConfig) -> Option<HelperMountNs> {
     {
         return None;
     }
+    let prepare = |entries: &[String]| -> Vec<PreparedBindPath> {
+        entries
+            .iter()
+            .filter_map(|e| parse_bind_entry(e))
+            .map(|(src, dst)| {
+                let src_is_dir = std::fs::metadata(&src).map(|m| m.is_dir()).unwrap_or(false);
+                PreparedBindPath {
+                    src,
+                    dst,
+                    src_is_dir,
+                }
+            })
+            .collect()
+    };
     Some(HelperMountNs {
-        bind_paths: exec.bind_paths.clone(),
-        bind_read_only_paths: exec.bind_read_only_paths.clone(),
+        bind_paths: prepare(&exec.bind_paths),
+        bind_read_only_paths: prepare(&exec.bind_read_only_paths),
         inaccessible_paths: exec.inaccessible_paths.clone(),
         private_tmp: exec.private_tmp,
     })
@@ -226,27 +240,27 @@ fn apply_helper_mount_namespace(ns: &HelperMountNs) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Apply a list of `BindPaths=` / `BindReadOnlyPaths=` entries:
+/// Apply a list of prepared `BindPaths=` / `BindReadOnlyPaths=` entries:
 /// create the destination (directory for directory sources, empty file
-/// otherwise), perform the bind mount, and optionally remount RO.
-fn apply_bind_list(entries: &[String], read_only: bool) -> std::io::Result<()> {
+/// otherwise), perform the bind mount, and optionally remount RO.  Uses
+/// [`PreparedBindPath`] so the source-type probe is done in the parent
+/// and not in pre_exec context.
+fn apply_bind_list(entries: &[PreparedBindPath], read_only: bool) -> std::io::Result<()> {
     use std::ffi::CString;
     let none_p = std::ptr::null::<libc::c_char>();
     for entry in entries {
-        let Some((src, dst)) = parse_bind_entry(entry) else { continue };
-        // Figure out whether the source is a directory so we can create the
-        // right kind of destination.
-        let src_is_dir = std::fs::metadata(&src).map(|m| m.is_dir()).unwrap_or(false);
-        if src_is_dir {
-            let _ = std::fs::create_dir_all(&dst);
-        } else if let Some(parent) = std::path::Path::new(&dst).parent() {
+        let src = &entry.src;
+        let dst = &entry.dst;
+        if entry.src_is_dir {
+            let _ = std::fs::create_dir_all(dst);
+        } else if let Some(parent) = std::path::Path::new(dst).parent() {
             let _ = std::fs::create_dir_all(parent);
-            if !std::path::Path::new(&dst).exists() {
-                let _ = std::fs::File::create(&dst);
+            if !std::path::Path::new(dst).exists() {
+                let _ = std::fs::File::create(dst);
             }
         }
-        let Ok(c_src) = CString::new(src) else { continue };
-        let Ok(c_dst) = CString::new(dst) else { continue };
+        let Ok(c_src) = CString::new(src.as_str()) else { continue };
+        let Ok(c_dst) = CString::new(dst.as_str()) else { continue };
         let ret = unsafe {
             libc::mount(
                 c_src.as_ptr(),
@@ -510,16 +524,30 @@ pub struct Service {
 /// visibility are replicated here — security settings like
 /// ProtectSystem=/NoNewPrivileges= are a separate concern handled by
 /// exec_helper on the main ExecStart.
+///
+/// Bind entries are normalized to [`PreparedBindPath`] (with the
+/// source-type resolved in the parent before `fork()`) so the
+/// `pre_exec` closure can avoid `std::fs::metadata` — allocator-using
+/// code is not async-signal-safe between `fork` and `execve`.
 #[derive(Clone, Debug, Default)]
 pub struct HelperMountNs {
-    /// `BindPaths=` entries in `src:dst[:opts]` form.
-    pub bind_paths: Vec<String>,
-    /// `BindReadOnlyPaths=` entries in `src:dst[:opts]` form.
-    pub bind_read_only_paths: Vec<String>,
+    /// `BindPaths=` entries, pre-parsed + src-stat'd.
+    pub bind_paths: Vec<PreparedBindPath>,
+    /// `BindReadOnlyPaths=` entries, pre-parsed + src-stat'd.
+    pub bind_read_only_paths: Vec<PreparedBindPath>,
     /// `InaccessiblePaths=` absolute paths.
     pub inaccessible_paths: Vec<String>,
     /// `PrivateTmp=yes` — mount fresh tmpfs over /tmp and /var/tmp.
     pub private_tmp: bool,
+}
+
+/// A bind-path entry with the source-type probe already resolved in
+/// the parent so the pre_exec child doesn't need to `stat()`.
+#[derive(Clone, Debug)]
+pub struct PreparedBindPath {
+    pub src: String,
+    pub dst: String,
+    pub src_is_dir: bool,
 }
 
 /// Environment variables passed to OnSuccess=/OnFailure= handler services.
