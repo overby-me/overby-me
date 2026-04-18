@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**69/135 tests passing** (51%) — upstream test harness from GNU make 4.4.1.
+**70/135 tests passing** (52%) — upstream test harness from GNU make 4.4.1.
 
 `rust/make` has a parser, expander, and build engine (~5k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -139,7 +139,13 @@ organised in six directories under `tests/scripts/`:
   substitutes the stem into the order-only pattern and adds it to `$|`
   for matched targets.
 - `.DELETE_ON_ERROR`, `.SILENT`, `.POSIX`, `.SUFFIXES`, `.DEFAULT`
-  special targets.
+  special targets. `.POSIX` installs POSIX-standard built-in variable
+  defaults (`ARFLAGS=-rv`, `CC=c99`, `CFLAGS=-O1`, `FC=fort77`,
+  `FFLAGS=-O1`, `LEX=lex`, `SCCSGETFLAGS=-s`, `YACC=yacc`) and sets
+  `.SHELLFLAGS=-ec`. On a recipe line with `-` ignore-errors prefix,
+  the `-e` is stripped only when `.SHELLFLAGS` is still at its
+  `.POSIX`-installed default — matching GNU make's observable
+  behavior where user-assigned flags are respected verbatim.
 - Pattern-implied prerequisites visible via `$<`.
 - `.WAIT` filtered from automatic variables.
 

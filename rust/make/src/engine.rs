@@ -983,13 +983,35 @@ impl Engine {
                 }
                 ".POSIX" => {
                     // POSIX mode changes .SHELLFLAGS to include -e so
-                    // recipe commands stop on first failure.
+                    // each recipe line's shell stops at the first
+                    // failing command. Lines prefixed with `-` have
+                    // the `-e` stripped at exec time so the remaining
+                    // commands after `;` still run (matches GNU make).
                     self.set_var_with_origin(
                         ".SHELLFLAGS",
                         "-ec",
                         VarFlavor::Simple,
                         VarOrigin::Default,
                     );
+                    // POSIX-standard defaults for built-in variables
+                    // (see IEEE Std 1003.1-2008 `make` utility).
+                    for (name, val) in [
+                        ("ARFLAGS", "-rv"),
+                        ("CC", "c99"),
+                        ("CFLAGS", "-O1"),
+                        ("FC", "fort77"),
+                        ("FFLAGS", "-O1"),
+                        ("LEX", "lex"),
+                        ("SCCSGETFLAGS", "-s"),
+                        ("YACC", "yacc"),
+                    ] {
+                        self.set_var_with_origin(
+                            name,
+                            val,
+                            VarFlavor::Recursive,
+                            VarOrigin::Default,
+                        );
+                    }
                 }
                 ".DELETE_ON_ERROR" => {
                     *self.delete_on_error.borrow_mut() = true;
@@ -2167,8 +2189,24 @@ impl Engine {
             let mut cmd = std::process::Command::new(&shell);
             // Split .SHELLFLAGS on whitespace like GNU make does,
             // so that e.g. "-e -c" becomes two separate arguments.
+            // When this line has the ignore-errors prefix (`-`) AND
+            // the `-ec` came from implicit `.POSIX:` handling (origin
+            // Default), drop any `-e` so a `;`-separated command chain
+            // keeps running past a failing first command — matches
+            // GNU make's observable `.POSIX` behavior. If the user
+            // explicitly assigned `.SHELLFLAGS` to include `-e`, we
+            // respect it verbatim.
+            let posix_relax =
+                ignore_error && matches!(self.var_origin(".SHELLFLAGS"), VarOrigin::Default);
             for flag in shell_flags.split_whitespace() {
-                cmd.arg(flag);
+                if posix_relax && flag.starts_with('-') && flag.contains('e') {
+                    let stripped: String = flag.chars().filter(|c| *c != 'e').collect();
+                    if stripped != "-" {
+                        cmd.arg(stripped);
+                    }
+                } else {
+                    cmd.arg(flag);
+                }
             }
             cmd.arg(&expanded);
 
