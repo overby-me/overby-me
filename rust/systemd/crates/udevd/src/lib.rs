@@ -4428,6 +4428,30 @@ fn handle_control_command(
             EXEC_QUEUE_PAUSED.store(true, Ordering::SeqCst);
             "OK\n".to_string()
         }
+        "SET_EXEC_DELAY" => {
+            // Stub — we don't delay RUN execution.  Accept the value.
+            "OK\n".to_string()
+        }
+        "SET_TRACE" => {
+            // Stub — we don't implement PROGRAM rule tracing.
+            "OK\n".to_string()
+        }
+        "ENV" => {
+            // `ENV KEY=VALUE` — set a global property for subsequent
+            // events.  Stub: accepted without side effect.
+            "OK\n".to_string()
+        }
+        "RELOAD_CREDS" => {
+            // Stub — systemd credentials are not yet integrated.
+            "OK\n".to_string()
+        }
+        "REVERT" => {
+            // Revert to startup configuration.  Trigger a rule reload to
+            // approximate; a full revert would require snapshotting
+            // state at startup.
+            *rules_reload_needed = true;
+            "OK\n".to_string()
+        }
         _ => format!("ERR unknown command: {}\n", command),
     }
 }
