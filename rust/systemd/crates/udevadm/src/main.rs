@@ -536,7 +536,7 @@ fn device_id_to_syspath(id: &str) -> Option<PathBuf> {
     {
         let p = PathBuf::from(format!("/sys/dev/block/{maj}:{min}"));
         if p.exists() {
-            return Some(p);
+            return Some(std::fs::canonicalize(&p).unwrap_or(p));
         }
     }
     // c<maj>:<min> — char major:minor.
@@ -547,7 +547,7 @@ fn device_id_to_syspath(id: &str) -> Option<PathBuf> {
     {
         let p = PathBuf::from(format!("/sys/dev/char/{maj}:{min}"));
         if p.exists() {
-            return Some(p);
+            return Some(std::fs::canonicalize(&p).unwrap_or(p));
         }
     }
     None
