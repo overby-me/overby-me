@@ -23,6 +23,7 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 - 63-path, 65-analyze, 66-device-isolation, 68-propagate-exit-status, 71-hostname
 - 59-reloading-restart, 73-locale, 76-sysctl, 34-dynamicusermigrate, 53-timer, 53-issue-16347
 - 80-notifyaccess
+- 17-udev-sanity-check
 
 ### 04-JOURNAL (all 14 pass)
 
@@ -133,13 +134,15 @@ C systemd's exec helper cannot find bare commands like `sleep`, `bash`, `touch` 
 
 - 07-pid1-exec-deserialization: ExecStart commands added after daemon-reload not picked up during running oneshot. Requires exec index tracking across daemon-reload.
 
-### 6. udev Tests (all fail — C binary limitations)
+### 6. udev Tests (mostly fail — CLI coverage in progress)
 
-All 23 udev tests fail because the C `udevadm` binary in the overlay lacks features (`udevadm cat` subcommand, etc.) or the tests exercise udev daemon behavior. These are NOT rust-systemd failures — they test the C udev subsystem.
+Rust udevadm reimplementation is in progress.
 
-**Affected:** All 17-udev-* tests (23 total)
+**PASSING:**
 
-**Fix:** Not fixable without reimplementing udevadm in Rust.
+- 17-udev-sanity-check — full coverage including `cat`, `control`, `info` (all flags / JSON modes / DEVICE_ID round-trip), `test`, `test-builtin` (ethtool for net_driver), `trigger`, `wait`, `settle`, `monitor`, `lock` (CD-ROM no-media handling)
+
+**FAIL (unimplemented features):** The remaining 17-udev-* tests exercise deeper udev semantics — variable substitution in SYMLINK+= rules, `udevadm verify` (comprehensive rules validator), IMPORT{builtin}=…, netlink event ordering, etc.
 
 ### 7. NixOS Framework Limitations
 
