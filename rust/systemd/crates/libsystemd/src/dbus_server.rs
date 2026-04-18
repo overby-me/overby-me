@@ -111,6 +111,18 @@ mod inner {
                 .unwrap_or(false)
         }
 
+        /// Whether the unit has the default implicit dependencies
+        /// (Before=shutdown.target / After=basic.target etc.).
+        #[zbus(property)]
+        fn default_dependencies(&self) -> bool {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .map(|u| u.common.unit.default_dependencies)
+                .unwrap_or(true)
+        }
+
         #[zbus(property)]
         fn can_freeze(&self) -> bool {
             true
