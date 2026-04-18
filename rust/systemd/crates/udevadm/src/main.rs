@@ -317,6 +317,22 @@ enum Commands {
         #[arg(long)]
         ping: bool,
 
+        /// Add a global property to all processed events (KEY=VALUE form).
+        #[arg(long, short = 'p')]
+        property: Vec<String>,
+
+        /// Enable or disable the PROGRAM rule tracer (yes/no).
+        #[arg(long)]
+        trace: Option<String>,
+
+        /// Reload credentials from the credentials store.
+        #[arg(long)]
+        load_credentials: bool,
+
+        /// Revert udevd to its startup configuration.
+        #[arg(long)]
+        revert: bool,
+
         /// Maximum seconds to wait for reply
         #[arg(long, short = 't', default_value = "60")]
         timeout: u64,
@@ -1340,6 +1356,7 @@ fn cmd_test(action: &str, devpath: &str) -> i32 {
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn cmd_control(
     stop_exec_queue: bool,
     start_exec_queue: bool,
@@ -1350,9 +1367,48 @@ fn cmd_control(
     log_level: &Option<String>,
     exit: bool,
     ping: bool,
+    property: &[String],
+    trace: &Option<String>,
+    load_credentials: bool,
+    revert: bool,
     timeout: u64,
 ) -> i32 {
+    // Validate --log-level values up front so callers get a clean error.
+    if let Some(level) = log_level
+        && !matches!(
+            level.as_str(),
+            "emerg" | "alert" | "crit" | "err" | "warning" | "notice" | "info" | "debug" | "0"
+                | "1" | "2" | "3" | "4" | "5" | "6" | "7"
+        )
+    {
+        eprintln!("udevadm control: invalid log-level: {level}");
+        return 1;
+    }
+
     let timeout_dur = Duration::from_secs(timeout);
+
+    if load_credentials {
+        return send_and_check("RELOAD_CREDS", timeout_dur);
+    }
+
+    if revert {
+        return send_and_check("REVERT", timeout_dur);
+    }
+
+    if let Some(t) = trace {
+        match t.as_str() {
+            "yes" | "true" | "1" => return send_and_check("SET_TRACE 1", timeout_dur),
+            "no" | "false" | "0" => return send_and_check("SET_TRACE 0", timeout_dur),
+            _ => {
+                eprintln!("udevadm control --trace expects yes/no, got: {t}");
+                return 1;
+            }
+        }
+    }
+
+    for prop in property {
+        let _ = send_and_check(&format!("ENV {prop}"), timeout_dur);
+    }
 
     if ping {
         match send_control_command("PING", timeout_dur) {
@@ -2186,6 +2242,10 @@ fn main() -> ExitCode {
             ref log_level,
             exit,
             ping,
+            ref property,
+            ref trace,
+            load_credentials,
+            revert,
             timeout,
         } => cmd_control(
             stop_exec_queue,
@@ -2197,6 +2257,10 @@ fn main() -> ExitCode {
             log_level,
             exit,
             ping,
+            property,
+            trace,
+            load_credentials,
+            revert,
             timeout,
         ),
 
