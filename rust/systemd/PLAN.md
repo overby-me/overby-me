@@ -23,7 +23,7 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 - 63-path, 65-analyze, 66-device-isolation, 68-propagate-exit-status, 71-hostname
 - 59-reloading-restart, 73-locale, 76-sysctl, 34-dynamicusermigrate, 53-timer, 53-issue-16347
 - 80-notifyaccess
-- 17-udev-sanity-check, 17-udev-database
+- 17-udev-sanity-check, 17-udev-database, 17-udev-tag
 
 ### 04-JOURNAL (all 14 pass)
 
@@ -142,6 +142,7 @@ Rust udevadm reimplementation is in progress.
 
 - 17-udev-sanity-check — full coverage including `cat`, `control`, `info` (all flags / JSON modes / DEVICE_ID round-trip), `test`, `test-builtin` (ethtool for net_driver), `trigger`, `wait`, `settle`, `monitor`, `lock` (CD-ROM no-media handling)
 - 17-udev-database — `ip link add/del` + `udevadm wait --timeout --settle` correctly waits for the udev queue to drain (via cmd_settle) before checking that `/run/udev/data/n<ifindex>` exists/is removed; includes a 200 ms pre-settle sleep to let the kernel's netlink delivery race resolve before we ask the daemon for its queue state
+- 17-udev-tag — `TAG+="…"` rules fire (tag files in `/run/udev/tags/<tag>/c1:3`); TAGS is the sticky union across events (accumulative) while CURRENT_TAGS is only this event's tag set — matching upstream's invariant that `E:TAGS=:added:` remains in the db even after a later `change` event whose rule only sets `changed`
 
 **FAIL (unimplemented features):** The remaining 17-udev-* tests exercise deeper udev semantics:
 
