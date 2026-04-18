@@ -78,7 +78,7 @@ struct Cli {
     version: bool,
 
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -2942,7 +2942,12 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    let exit_code = match cli.command {
+    let Some(command) = cli.command else {
+        eprintln!("udevadm: a subcommand is required (run `udevadm --help`)");
+        return ExitCode::from(1);
+    };
+
+    let exit_code = match command {
         Commands::Info {
             ref name,
             ref path,
@@ -3482,7 +3487,7 @@ mod tests {
     #[test]
     fn test_cli_parse_info() {
         let cli = Cli::try_parse_from(["udevadm", "info", "--name=/dev/sda"]).unwrap();
-        if let Commands::Info { name, .. } = cli.command {
+        if let Some(Commands::Info { name, .. }) = cli.command {
             assert_eq!(name, Some("/dev/sda".to_string()));
         } else {
             panic!("Expected Info command");
@@ -3499,12 +3504,12 @@ mod tests {
             "--verbose",
         ])
         .unwrap();
-        if let Commands::Trigger {
+        if let Some(Commands::Trigger {
             r#type,
             action,
             verbose,
             ..
-        } = cli.command
+        }) = cli.command
         {
             assert_eq!(r#type, "all");
             assert_eq!(action, "add");
@@ -3517,7 +3522,7 @@ mod tests {
     #[test]
     fn test_cli_parse_settle() {
         let cli = Cli::try_parse_from(["udevadm", "settle", "--timeout=30"]).unwrap();
-        if let Commands::Settle { timeout, .. } = cli.command {
+        if let Some(Commands::Settle { timeout, .. }) = cli.command {
             assert_eq!(timeout, 30);
         } else {
             panic!("Expected Settle command");
@@ -3527,7 +3532,7 @@ mod tests {
     #[test]
     fn test_cli_parse_control_reload() {
         let cli = Cli::try_parse_from(["udevadm", "control", "--reload"]).unwrap();
-        if let Commands::Control { reload, .. } = cli.command {
+        if let Some(Commands::Control { reload, .. }) = cli.command {
             assert!(reload);
         } else {
             panic!("Expected Control command");
@@ -3537,7 +3542,7 @@ mod tests {
     #[test]
     fn test_cli_parse_control_ping() {
         let cli = Cli::try_parse_from(["udevadm", "control", "--ping"]).unwrap();
-        if let Commands::Control { ping, .. } = cli.command {
+        if let Some(Commands::Control { ping, .. }) = cli.command {
             assert!(ping);
         } else {
             panic!("Expected Control command");
@@ -3547,9 +3552,9 @@ mod tests {
     #[test]
     fn test_cli_parse_monitor() {
         let cli = Cli::try_parse_from(["udevadm", "monitor", "--kernel", "--property"]).unwrap();
-        if let Commands::Monitor {
+        if let Some(Commands::Monitor {
             kernel, property, ..
-        } = cli.command
+        }) = cli.command
         {
             assert!(kernel);
             assert!(property);
@@ -3562,9 +3567,9 @@ mod tests {
     fn test_cli_parse_test() {
         let cli =
             Cli::try_parse_from(["udevadm", "test", "--action=add", "/sys/devices/test"]).unwrap();
-        if let Commands::Test {
+        if let Some(Commands::Test {
             action, devpath, ..
-        } = cli.command
+        }) = cli.command
         {
             assert_eq!(action, "add");
             assert_eq!(devpath.as_deref(), Some("/sys/devices/test"));
@@ -3583,10 +3588,10 @@ mod tests {
             "--prioritized-subsystem=module,block,tpmrm,net,tty,input",
         ])
         .unwrap();
-        if let Commands::Trigger {
+        if let Some(Commands::Trigger {
             prioritized_subsystem,
             ..
-        } = cli.command
+        }) = cli.command
         {
             assert_eq!(prioritized_subsystem.len(), 1);
             assert_eq!(prioritized_subsystem[0], "module,block,tpmrm,net,tty,input");
@@ -3604,11 +3609,11 @@ mod tests {
             "--path=/sys/devices/test",
         ])
         .unwrap();
-        if let Commands::Info {
+        if let Some(Commands::Info {
             attribute_walk,
             path,
             ..
-        } = cli.command
+        }) = cli.command
         {
             assert!(attribute_walk);
             assert_eq!(path, Some("/sys/devices/test".to_string()));
@@ -3621,9 +3626,9 @@ mod tests {
     fn test_cli_parse_info_device_id_of_file() {
         let cli =
             Cli::try_parse_from(["udevadm", "info", "--device-id-of-file=/dev/null"]).unwrap();
-        if let Commands::Info {
+        if let Some(Commands::Info {
             device_id_of_file, ..
-        } = cli.command
+        }) = cli.command
         {
             assert_eq!(device_id_of_file, Some("/dev/null".to_string()));
         } else {
@@ -3636,9 +3641,9 @@ mod tests {
         // Also accept --device-id-of-file=PATH (equals form)
         let cli =
             Cli::try_parse_from(["udevadm", "info", "--device-id-of-file=/etc/hostname"]).unwrap();
-        if let Commands::Info {
+        if let Some(Commands::Info {
             device_id_of_file, ..
-        } = cli.command
+        }) = cli.command
         {
             assert_eq!(device_id_of_file, Some("/etc/hostname".to_string()));
         } else {
@@ -3800,7 +3805,7 @@ mod tests {
     #[test]
     fn test_settle_cli_parse_timeout() {
         let cli = Cli::try_parse_from(["udevadm", "settle", "--timeout=5"]).unwrap();
-        if let Commands::Settle { timeout, .. } = cli.command {
+        if let Some(Commands::Settle { timeout, .. }) = cli.command {
             assert_eq!(timeout, 5);
         } else {
             panic!("Expected Settle command");
