@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**71/135 tests passing** (53%) — upstream test harness from GNU make 4.4.1.
+**72/135 tests passing** (53%) — upstream test harness from GNU make 4.4.1.
 
 `rust/make` has a parser, expander, and build engine (~5k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -167,6 +167,14 @@ organised in six directories under `tests/scripts/`:
   command-line variable assignments; split short vs long options so
   long-only MAKEFLAGS begins with a space.
 - GNUMAKEFLAGS prepended once, then cleared for sub-makes.
+
+### Shell / recipe execution
+
+- `SHELL` may itself contain arguments (e.g. `SHELL := echo hi`): the
+  first word is the program, subsequent words are leading arguments.
+- `.SHELLFLAGS` is tokenized with shell-style quote handling — single-
+  and double-quoted sections stay as a single token with the quotes
+  stripped, so `'ho;ho'` becomes one arg containing a literal `;`.
 
 ### Environment / sub-makes
 

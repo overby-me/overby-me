@@ -2192,19 +2192,30 @@ impl Engine {
             }
 
             // Export variables
-            let mut cmd = std::process::Command::new(&shell);
-            // Split .SHELLFLAGS on whitespace like GNU make does,
-            // so that e.g. "-e -c" becomes two separate arguments.
-            // When this line has the ignore-errors prefix (`-`) AND
-            // the `-ec` came from implicit `.POSIX:` handling (origin
-            // Default), drop any `-e` so a `;`-separated command chain
-            // keeps running past a failing first command — matches
-            // GNU make's observable `.POSIX` behavior. If the user
-            // explicitly assigned `.SHELLFLAGS` to include `-e`, we
-            // respect it verbatim.
+            // SHELL may itself contain arguments (e.g. `SHELL := echo hi`);
+            // GNU make splits on whitespace, using the first word as
+            // the program and the rest as leading arguments — so a
+            // target-specific `SHELL := echo hi` with `.SHELLFLAGS :=
+            // ho ho` runs `echo hi ho ho <recipe>`.
+            let mut shell_parts = shell.split_whitespace();
+            let shell_prog = shell_parts.next().unwrap_or("/bin/sh");
+            let mut cmd = std::process::Command::new(shell_prog);
+            for extra in shell_parts {
+                cmd.arg(extra);
+            }
+            // Split .SHELLFLAGS on whitespace, honoring single- and
+            // double-quoted sections as single tokens (and stripping
+            // the quotes) — matches GNU make's shell-style split for
+            // flags like `'ho;ho'`. When this line has the
+            // ignore-errors prefix (`-`) AND the `-ec` came from
+            // implicit `.POSIX:` handling (origin Default), drop any
+            // `-e` so a `;`-separated command chain keeps running
+            // past a failing first command. If the user explicitly
+            // assigned `.SHELLFLAGS` to include `-e`, we respect it
+            // verbatim.
             let posix_relax =
                 ignore_error && matches!(self.var_origin(".SHELLFLAGS"), VarOrigin::Default);
-            for flag in shell_flags.split_whitespace() {
+            for flag in shell_split(&shell_flags) {
                 if posix_relax && flag.starts_with('-') && flag.contains('e') {
                     let stripped: String = flag.chars().filter(|c| *c != 'e').collect();
                     if stripped != "-" {
@@ -2280,6 +2291,60 @@ impl Engine {
 
         Ok(())
     }
+}
+
+/// Split a string like `/bin/sh` does for unquoted-yet-tokenized
+/// contexts: whitespace separates tokens, but single- and
+/// double-quoted substrings stay together with their quotes stripped.
+/// Backslashes outside quotes escape the next char; inside quotes
+/// they're preserved. Good enough for `.SHELLFLAGS`.
+fn shell_split(s: &str) -> Vec<String> {
+    let mut tokens: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut in_token = false;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            ' ' | '\t' | '\n' => {
+                if in_token {
+                    tokens.push(std::mem::take(&mut cur));
+                    in_token = false;
+                }
+            }
+            '\'' => {
+                in_token = true;
+                for nc in chars.by_ref() {
+                    if nc == '\'' {
+                        break;
+                    }
+                    cur.push(nc);
+                }
+            }
+            '"' => {
+                in_token = true;
+                for nc in chars.by_ref() {
+                    if nc == '"' {
+                        break;
+                    }
+                    cur.push(nc);
+                }
+            }
+            '\\' => {
+                in_token = true;
+                if let Some(nc) = chars.next() {
+                    cur.push(nc);
+                }
+            }
+            _ => {
+                in_token = true;
+                cur.push(c);
+            }
+        }
+    }
+    if in_token {
+        tokens.push(cur);
+    }
+    tokens
 }
 
 fn dedup_join(items: &[String]) -> String {
