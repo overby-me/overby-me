@@ -1327,9 +1327,32 @@ mod inner {
             );
         }
 
-        // Block forever — zbus spawns its own message-dispatch thread.
+        // Periodically scan the unit table and register per-unit objects
+        // for new units (transient services from StartTransientUnit,
+        // implicit slices created on-demand, units added via
+        // daemon-reload).  A set of already-registered names lets us
+        // detect just the delta each scan.  The scan runs at a 2s
+        // cadence — fast enough that `busctl get-property` soon after
+        // `systemd-run` sees the new object, slow enough that it
+        // doesn't measurably contend on the read-lock.
+        let mut known: std::collections::HashSet<String> = {
+            let ri = run_info.read_poisoned();
+            ri.unit_table.values().map(|u| u.id.name.clone()).collect()
+        };
         loop {
-            std::thread::sleep(std::time::Duration::from_secs(3600));
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let current_names: Vec<String> = {
+                let ri = run_info.read_poisoned();
+                ri.unit_table.values().map(|u| u.id.name.clone()).collect()
+            };
+            for name in &current_names {
+                if !known.contains(name)
+                    && register_unit_object(&conn, &run_info, name).is_ok()
+                {
+                    trace!("dbus-server: registered new unit object {name}");
+                    known.insert(name.clone());
+                }
+            }
         }
     }
 
