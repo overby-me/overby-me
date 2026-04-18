@@ -3440,6 +3440,30 @@ fn write_device_db(event: &UEvent, result: &RuleResult) -> io::Result<()> {
     // Acquire exclusive lock — released when `_lock` is dropped at scope exit.
     let _lock = lock_db()?;
 
+    // Read the previous entry so we can preserve the historical (G:)
+    // tag set across action=add/change events.  Upstream's `TAGS` is
+    // the union of every tag ever applied (sticky); `CURRENT_TAGS` is
+    // only this event's tag set.  TEST-17-UDEV.TAG exercises this
+    // distinction by checking that an earlier `:added:` remains in
+    // `TAGS` after a later `change` event whose rule only sets
+    // `:changed:`.
+    let mut merged_tags: Vec<String> = Vec::new();
+    if let Ok(prev) = fs::read_to_string(&db_path) {
+        for line in prev.lines() {
+            if let Some(tag) = line.strip_prefix("G:")
+                && !tag.is_empty()
+                && !merged_tags.contains(&tag.to_string())
+            {
+                merged_tags.push(tag.to_string());
+            }
+        }
+    }
+    for tag in &result.tags {
+        if !merged_tags.contains(tag) {
+            merged_tags.push(tag.clone());
+        }
+    }
+
     let mut content = String::new();
 
     // Symlinks
@@ -3447,12 +3471,11 @@ fn write_device_db(event: &UEvent, result: &RuleResult) -> io::Result<()> {
         content.push_str(&format!("S:{}\n", link));
     }
 
-    // Tags — G: is the historical all-time set, Q: is the current
-    // "this-activation" set.  Rust-udevd treats both as equal (the tag
-    // set applied on the most recent event), matching what the TEST-17
-    // TAG test expects.
-    for tag in &result.tags {
+    // G: — historical (accumulated) tag set.  Q: — current event only.
+    for tag in &merged_tags {
         content.push_str(&format!("G:{}\n", tag));
+    }
+    for tag in &result.tags {
         content.push_str(&format!("Q:{}\n", tag));
     }
 
@@ -3472,23 +3495,41 @@ fn write_device_db(event: &UEvent, result: &RuleResult) -> io::Result<()> {
     }
 
     // Surface tag state as pseudo-properties so `udevadm info` output
-    // includes `E:TAGS=:tag1:tag2:` and `E:CURRENT_TAGS=:tag1:tag2:`
-    // (colon-delimited with leading and trailing colons, matching the
-    // upstream format that the TAG test greps for).
+    // includes `E:TAGS=:tag1:tag2:` (union of all tags ever applied)
+    // and `E:CURRENT_TAGS=:tag1:tag2:` (only this event).  Colon-
+    // delimited with leading and trailing colons.
+    let format_joined = |tags: &[String]| -> String {
+        if tags.is_empty() {
+            String::new()
+        } else {
+            tags.iter().fold(String::from(":"), |mut acc, t| {
+                acc.push_str(t);
+                acc.push(':');
+                acc
+            })
+        }
+    };
+    if !merged_tags.is_empty() {
+        content.push_str(&format!("E:TAGS={}\n", format_joined(&merged_tags)));
+    }
     if !result.tags.is_empty() {
-        let joined: String = result.tags.iter().fold(String::from(":"), |mut acc, t| {
-            acc.push_str(t);
-            acc.push(':');
-            acc
-        });
-        content.push_str(&format!("E:TAGS={}\n", joined));
-        content.push_str(&format!("E:CURRENT_TAGS={}\n", joined));
+        content.push_str(&format!(
+            "E:CURRENT_TAGS={}\n",
+            format_joined(&result.tags)
+        ));
     }
 
     // Write atomically
     let tmp_path = db_path.with_extension("tmp");
     fs::write(&tmp_path, &content)?;
     fs::rename(&tmp_path, &db_path)?;
+
+    // Reflect the merged (sticky) tag set into /run/udev/tags/ so
+    // later `test -f /run/udev/tags/<tag>/c1:3` probes see every tag
+    // the device has ever received, not just the most recent event's.
+    if !merged_tags.is_empty() {
+        write_device_tags(event, &merged_tags);
+    }
 
     Ok(())
 }
@@ -4180,10 +4221,9 @@ fn process_event(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) {
                 log::debug!("Failed to write device db: {}", e);
             }
 
-            // Write tags
-            if !result.tags.is_empty() {
-                write_device_tags(event, &result.tags);
-            }
+            // (Tag-file writes now happen inside write_device_db so
+            // the tag file set is kept in sync with the merged-G:
+            // historical tag set persisted to the database.)
 
             // Execute RUN programs
             execute_run_programs(event, &result, hwdb);
