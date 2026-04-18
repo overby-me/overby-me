@@ -654,6 +654,75 @@ mod inner {
                 })
                 .unwrap_or(0)
         }
+
+        /// `ExecStart=` as a list of `(path, argv, ignore_errors)` tuples
+        /// — signature `a(sasb)` to match upstream's wire type.
+        #[zbus(property)]
+        fn exec_start(&self) -> Vec<(String, Vec<String>, bool)> {
+            exec_commandlines(&self.run_info, &self.unit_name, |c| &c.exec)
+        }
+
+        #[zbus(property)]
+        fn exec_start_pre(&self) -> Vec<(String, Vec<String>, bool)> {
+            exec_commandlines(&self.run_info, &self.unit_name, |c| &c.startpre)
+        }
+
+        #[zbus(property)]
+        fn exec_start_post(&self) -> Vec<(String, Vec<String>, bool)> {
+            exec_commandlines(&self.run_info, &self.unit_name, |c| &c.startpost)
+        }
+
+        #[zbus(property)]
+        fn exec_stop(&self) -> Vec<(String, Vec<String>, bool)> {
+            exec_commandlines(&self.run_info, &self.unit_name, |c| &c.stop)
+        }
+
+        #[zbus(property)]
+        fn exec_stop_post(&self) -> Vec<(String, Vec<String>, bool)> {
+            exec_commandlines(&self.run_info, &self.unit_name, |c| &c.stoppost)
+        }
+
+        #[zbus(property)]
+        fn exec_reload(&self) -> Vec<(String, Vec<String>, bool)> {
+            exec_commandlines(&self.run_info, &self.unit_name, |c| &c.reload)
+        }
+
+        #[zbus(property)]
+        fn exec_condition(&self) -> Vec<(String, Vec<String>, bool)> {
+            exec_commandlines(&self.run_info, &self.unit_name, |c| &c.exec_condition)
+        }
+    }
+
+    fn exec_commandlines<F>(
+        run_info: &ArcMutRuntimeInfo,
+        unit_name: &str,
+        select: F,
+    ) -> Vec<(String, Vec<String>, bool)>
+    where
+        F: Fn(&crate::units::ServiceConfig) -> &[crate::units::Commandline],
+    {
+        let ri = run_info.read_poisoned();
+        ri.unit_table
+            .values()
+            .find(|u| u.id.name == unit_name)
+            .and_then(|u| match &u.specific {
+                crate::units::Specific::Service(srvc) => Some(
+                    select(&srvc.conf)
+                        .iter()
+                        .map(|c| {
+                            let mut argv = Vec::with_capacity(c.args.len() + 1);
+                            argv.push(c.cmd.clone());
+                            argv.extend(c.args.iter().cloned());
+                            let ignore_errors = c
+                                .prefixes
+                                .contains(&crate::units::unit_parsing::CommandlinePrefix::Minus);
+                            (c.cmd.clone(), argv, ignore_errors)
+                        })
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default()
     }
 
     /// Look up a unit by name and read an Option<u64> timestamp field from
