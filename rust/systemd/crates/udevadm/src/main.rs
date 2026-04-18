@@ -496,6 +496,45 @@ enum Commands {
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
+/// Resolve a DEVICE_ID string (as emitted by `udevadm info --json=short`)
+/// back to a sysfs path.  Returns None when the string is not a
+/// recognised DEVICE_ID form.
+fn device_id_to_syspath(id: &str) -> Option<PathBuf> {
+    // n<ifname>: network interface.
+    if let Some(ifname) = id.strip_prefix('n')
+        && !ifname.is_empty()
+        && ifname.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        let p = PathBuf::from(format!("/sys/class/net/{ifname}"));
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    // b<maj>:<min> — block major:minor.
+    if let Some(rest) = id.strip_prefix('b')
+        && let Some((maj, min)) = rest.split_once(':')
+        && maj.chars().all(|c| c.is_ascii_digit())
+        && min.chars().all(|c| c.is_ascii_digit())
+    {
+        let p = PathBuf::from(format!("/sys/dev/block/{maj}:{min}"));
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    // c<maj>:<min> — char major:minor.
+    if let Some(rest) = id.strip_prefix('c')
+        && let Some((maj, min)) = rest.split_once(':')
+        && maj.chars().all(|c| c.is_ascii_digit())
+        && min.chars().all(|c| c.is_ascii_digit())
+    {
+        let p = PathBuf::from(format!("/sys/dev/char/{maj}:{min}"));
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
 fn cmd_info(
     name: &Option<String>,
     path: &Option<String>,
@@ -545,11 +584,14 @@ fn cmd_info(
     }
 
     for dev in devices {
-        // Could be a /dev node or /sys path
+        // Could be a /dev node, /sys path, or a DEVICE_ID (n<ifname>,
+        // b<maj>:<min>, c<maj>:<min>) — accept all three.
         if dev.starts_with("/dev/") {
             if let Some(sp) = devname_to_syspath(dev) {
                 syspaths.push(sp);
             }
+        } else if let Some(sp) = device_id_to_syspath(dev) {
+            syspaths.push(sp);
         } else {
             let sp = normalize_syspath(dev);
             if sp.exists() {
@@ -1934,6 +1976,178 @@ fn cmd_wait(timeout: u64, wait_until: &str, _settle: bool, devices: &[String]) -
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
+// udevadm info --json=short/pretty
+// ---------------------------------------------------------------------------
+
+/// Emit udev info as JSON (one object per device).  The output includes
+/// a `DEVICE_ID` field — systemd's canonical per-device identifier that
+/// feeds back into `udevadm info` invocations (e.g. `udevadm info n1`
+/// resolves to the `eth0`-like interface).
+fn cmd_info_json(
+    mode: &str,
+    name: Option<&str>,
+    path: Option<&str>,
+    devices: &[String],
+) -> i32 {
+    // Build a combined list of targets to query.
+    let mut targets: Vec<String> = Vec::new();
+    if let Some(n) = name {
+        targets.push(n.to_owned());
+    }
+    if let Some(p) = path {
+        targets.push(p.to_owned());
+    }
+    targets.extend(devices.iter().cloned());
+    if targets.is_empty() {
+        // No targets — let caller handle the empty case by printing {}.
+        if mode == "short" {
+            println!("{{}}");
+        } else {
+            println!("{{\n}}");
+        }
+        return 0;
+    }
+
+    let mut outputs: Vec<String> = Vec::new();
+    for target in &targets {
+        // Resolve to a syspath.  Accept:
+        //   * `/dev/foo` — look up via devname_to_syspath.
+        //   * `/sys/...` or bare path — use normalize_syspath.
+        //   * `n<index>` — network interface id (DEVICE_ID for netifs).
+        //   * `b<maj>:<min>` / `c<maj>:<min>` — block/char major:minor.
+        let syspath = if target.starts_with("/dev/") {
+            devname_to_syspath(target)
+                .unwrap_or_else(|| normalize_syspath(target))
+        } else if let Some(ifname) = target.strip_prefix('n')
+            && ifname.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            // n<ifname> network interface lookup.
+            PathBuf::from(format!("/sys/class/net/{ifname}"))
+        } else if let Some(rest) = target.strip_prefix('b') {
+            if let Some((maj, min)) = rest.split_once(':') {
+                PathBuf::from(format!("/sys/dev/block/{maj}:{min}"))
+            } else {
+                normalize_syspath(target)
+            }
+        } else if let Some(rest) = target.strip_prefix('c') {
+            if let Some((maj, min)) = rest.split_once(':') {
+                PathBuf::from(format!("/sys/dev/char/{maj}:{min}"))
+            } else {
+                normalize_syspath(target)
+            }
+        } else {
+            normalize_syspath(target)
+        };
+
+        let uevent = read_sysfs_uevent(&syspath);
+        let devname = uevent.get("DEVNAME").cloned().unwrap_or_default();
+        let subsystem = uevent
+            .get("SUBSYSTEM")
+            .cloned()
+            .unwrap_or_else(|| read_sysfs_subsystem(&syspath));
+        let interface = uevent.get("INTERFACE").cloned().unwrap_or_default();
+
+        // Compute DEVICE_ID.  Rules:
+        //   * net interface: "n<interface>" (when INTERFACE is set).
+        //   * block device: "b<major>:<minor>" (when SUBSYSTEM=block).
+        //   * char device with /dev node: "c<major>:<minor>".
+        //   * else: fall back to the basename of the sys path.
+        let device_id = if !interface.is_empty() && subsystem == "net" {
+            format!("n{interface}")
+        } else if let (Some(maj), Some(min)) = (uevent.get("MAJOR"), uevent.get("MINOR")) {
+            if subsystem == "block" {
+                format!("b{maj}:{min}")
+            } else {
+                format!("c{maj}:{min}")
+            }
+        } else if !target.starts_with('/')
+            && target.chars().next().map(|c| c == 'n' || c == 'b' || c == 'c').unwrap_or(false)
+        {
+            target.clone()
+        } else {
+            // As a last resort use the path's basename.
+            syspath
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string()
+        };
+
+        // Assemble the JSON map.  Start with the standard fields, then
+        // merge the uevent properties.
+        let mut map: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
+        map.insert("DEVICE_ID".to_string(), device_id);
+        if !devname.is_empty() {
+            map.insert("DEVNAME".to_string(), devname);
+        }
+        if !subsystem.is_empty() {
+            map.insert("SUBSYSTEM".to_string(), subsystem);
+        }
+        for (k, v) in uevent {
+            map.entry(k).or_insert(v);
+        }
+        // DEVPATH is canonical from our path mapper.
+        map.insert(
+            "DEVPATH".to_string(),
+            syspath_to_devpath(&syspath),
+        );
+
+        outputs.push(render_json_object(&map, mode));
+    }
+
+    if outputs.len() == 1 {
+        println!("{}", outputs[0]);
+    } else {
+        // Multiple devices — emit a JSON array.
+        match mode {
+            "short" => println!("[{}]", outputs.join(",")),
+            _ => println!("[\n{}\n]", outputs.join(",\n")),
+        }
+    }
+    0
+}
+
+/// Render a map as either compact or pretty JSON.  Values are escaped
+/// using a minimal JSON string encoder (backslash + quote only — udev
+/// property values are ASCII-ish).
+fn render_json_object(map: &std::collections::BTreeMap<String, String>, mode: &str) -> String {
+    let mut entries: Vec<String> = Vec::with_capacity(map.len());
+    let indent = if mode == "short" { "" } else { "  " };
+    let sep = if mode == "short" { "," } else { ",\n" };
+    let colon = if mode == "short" { ":" } else { ": " };
+    for (k, v) in map {
+        entries.push(format!("{indent}{}{colon}{}", json_escape(k), json_escape(v)));
+    }
+    let body = entries.join(sep);
+    if mode == "short" {
+        format!("{{{body}}}")
+    } else {
+        format!("{{\n{body}\n}}")
+    }
+}
+
+fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+// ---------------------------------------------------------------------------
 // udevadm test-builtin
 // ---------------------------------------------------------------------------
 
@@ -2433,6 +2647,22 @@ fn main() -> ExitCode {
             // Effective export-prefix: `-P` short-form wins over --export-prefix.
             let effective_prefix: Option<String> =
                 prefix.clone().or_else(|| export_prefix.clone());
+
+            // JSON output: assemble property dict and emit as a single
+            // JSON object (short=compact, pretty=indented).  Includes
+            // `DEVICE_ID` — the sanity test pipes this back into
+            // subsequent `udevadm info` invocations.
+            if let Some(json_mode) = json.as_deref()
+                && matches!(json_mode, "short" | "pretty")
+            {
+                let rc = cmd_info_json(
+                    json_mode,
+                    name.as_deref(),
+                    path.as_deref(),
+                    devices,
+                );
+                return ExitCode::from(rc as u8);
+            }
 
             // Effective query: when `--property KEY` is given, synthesize
             // an output that mirrors `-q property | grep ^KEY=`.  Not
