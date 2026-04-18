@@ -2135,70 +2135,83 @@ fn create_transient_slice(
     run_info: &ArcMutRuntimeInfo,
 ) -> Result<crate::units::UnitId, String> {
     let slice_name = params.unit_name.clone();
+
+    // Apply the caller-provided properties first, then let
+    // `create_or_update_implicit_slice` apply filesystem dropins on top
+    // so dropins win for conflicting keys — matching upstream's
+    // "dropin-files override transient properties" semantic (15-dropin
+    // testcase_hierarchical_slice_dropins).  For non-conflicting keys
+    // (e.g. Description= when no dropin sets it) the transient value
+    // survives.
     {
         let mut ri_mut = run_info.write_poisoned();
         create_or_update_implicit_slice(&slice_name, &mut ri_mut);
-    }
-    let mut ri_mut = run_info.write_poisoned();
-    let unit = ri_mut
-        .unit_table
-        .values_mut()
-        .find(|u| u.id.name == slice_name)
-        .ok_or_else(|| format!("Transient slice {slice_name} not found after creation"))?;
+        let unit = ri_mut
+            .unit_table
+            .values_mut()
+            .find(|u| u.id.name == slice_name)
+            .ok_or_else(|| format!("Transient slice {slice_name} not found after creation"))?;
 
-    // Mark as transient by rebasing the fragment path under
-    // /run/systemd/transient so `systemctl show -P Transient` returns
-    // "yes" (the property helper detects transience by prefix).
-    let transient_dir = std::path::Path::new("/run/systemd/transient");
-    let _ = std::fs::create_dir_all(transient_dir);
-    unit.common.unit.fragment_path = Some(transient_dir.join(&slice_name));
+        // Transient values first — fill in fields the dropin didn't set.
+        if let Some(ref desc) = params.description
+            && unit.common.unit.description.is_empty()
+        {
+            unit.common.unit.description = desc.clone();
+        } else if let Some(ref desc) = params.description
+            && unit.common.unit.description.starts_with("Slice /")
+        {
+            // Synthetic default from create_or_update_implicit_slice —
+            // replace with the caller-specified one.
+            unit.common.unit.description = desc.clone();
+        }
 
-    // Apply Description= from params if provided.
-    if let Some(ref desc) = params.description {
-        unit.common.unit.description = desc.clone();
-    }
-
-    // Apply Documentation= entries (accumulate) + cgroup/resource
-    // properties from `-p KEY=VALUE`.
-    for prop in &params.properties {
-        if let Some((k, v)) = prop.split_once('=') {
-            match k {
-                "Documentation" => {
-                    for entry in v.split(|c: char| c.is_whitespace()) {
-                        let entry = entry.trim();
-                        if !entry.is_empty() {
-                            unit.common.unit.documentation.push(entry.to_owned());
-                        }
-                    }
-                }
-                _ => {
-                    if let crate::units::Specific::Slice(ref mut slice) = unit.specific {
-                        match k {
-                            "MemoryMax" => {
-                                slice.conf.memory_max = Some(parse_memory_limit(v))
-                            }
-                            "MemoryMin" => {
-                                slice.conf.memory_min = Some(parse_memory_limit(v))
-                            }
-                            "MemoryLow" => {
-                                slice.conf.memory_low = Some(parse_memory_limit(v))
-                            }
-                            "MemoryHigh" => {
-                                slice.conf.memory_high = Some(parse_memory_limit(v))
-                            }
-                            "MemorySwapMax" => {
-                                slice.conf.memory_swap_max = Some(parse_memory_limit(v))
-                            }
-                            _ => {
-                                // Unrecognised slice property — ignored.
-                            }
-                        }
+        // Always-accumulating list values.
+        for prop in &params.properties {
+            if let Some((k, v)) = prop.split_once('=')
+                && k == "Documentation"
+            {
+                for entry in v.split(|c: char| c.is_whitespace()) {
+                    let entry = entry.trim();
+                    if !entry.is_empty() {
+                        unit.common.unit.documentation.push(entry.to_owned());
                     }
                 }
             }
         }
+
+        // Scalar cgroup/resource values — only set if the dropin didn't.
+        if let crate::units::Specific::Slice(ref mut slice) = unit.specific {
+            for prop in &params.properties {
+                if let Some((k, v)) = prop.split_once('=') {
+                    match k {
+                        "MemoryMax" if slice.conf.memory_max.is_none() => {
+                            slice.conf.memory_max = Some(parse_memory_limit(v))
+                        }
+                        "MemoryMin" if slice.conf.memory_min.is_none() => {
+                            slice.conf.memory_min = Some(parse_memory_limit(v))
+                        }
+                        "MemoryLow" if slice.conf.memory_low.is_none() => {
+                            slice.conf.memory_low = Some(parse_memory_limit(v))
+                        }
+                        "MemoryHigh" if slice.conf.memory_high.is_none() => {
+                            slice.conf.memory_high = Some(parse_memory_limit(v))
+                        }
+                        "MemorySwapMax" if slice.conf.memory_swap_max.is_none() => {
+                            slice.conf.memory_swap_max = Some(parse_memory_limit(v))
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Mark as transient so `systemctl show -P Transient` returns yes.
+        let transient_dir = std::path::Path::new("/run/systemd/transient");
+        let _ = std::fs::create_dir_all(transient_dir);
+        unit.common.unit.fragment_path = Some(transient_dir.join(&slice_name));
+
+        return Ok(unit.id.clone());
     }
-    Ok(unit.id.clone())
 }
 
 fn create_or_update_implicit_slice(
