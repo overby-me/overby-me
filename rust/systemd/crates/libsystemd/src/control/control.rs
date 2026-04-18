@@ -2127,6 +2127,51 @@ fn unit_status_marker(unit_name: &str, unit_table: &UnitTable) -> &'static str {
 /// Create or update an implicit slice unit with default properties and any applicable
 /// drop-in overrides. In systemd, slice units exist implicitly without a unit file.
 /// The description follows the pattern "Slice /a/b/c" where dashes become path separators.
+/// Create (or update) a transient slice unit.  Uses the same filesystem-
+/// dropin pipeline as `create_or_update_implicit_slice`, then merges the
+/// caller's D-Bus properties on top.
+fn create_transient_slice(
+    params: &TransientUnitParams,
+    run_info: &ArcMutRuntimeInfo,
+) -> Result<crate::units::UnitId, String> {
+    let slice_name = params.unit_name.clone();
+    {
+        let mut ri_mut = run_info.write_poisoned();
+        create_or_update_implicit_slice(&slice_name, &mut ri_mut);
+    }
+    let mut ri_mut = run_info.write_poisoned();
+    let unit = ri_mut
+        .unit_table
+        .values_mut()
+        .find(|u| u.id.name == slice_name)
+        .ok_or_else(|| format!("Transient slice {slice_name} not found after creation"))?;
+
+    // Apply Description= from params if provided.
+    if let Some(ref desc) = params.description {
+        unit.common.unit.description = desc.clone();
+    }
+
+    // Apply cgroup/resource properties specified via `-p KEY=VALUE`.
+    if let crate::units::Specific::Slice(ref mut slice) = unit.specific {
+        for prop in &params.properties {
+            if let Some((k, v)) = prop.split_once('=') {
+                match k {
+                    "MemoryMax" => slice.conf.memory_max = Some(parse_memory_limit(v)),
+                    "MemoryMin" => slice.conf.memory_min = Some(parse_memory_limit(v)),
+                    "MemoryLow" => slice.conf.memory_low = Some(parse_memory_limit(v)),
+                    "MemoryHigh" => slice.conf.memory_high = Some(parse_memory_limit(v)),
+                    "MemorySwapMax" => slice.conf.memory_swap_max = Some(parse_memory_limit(v)),
+                    _ => {
+                        // Unrecognised slice property — ignored.  Upstream
+                        // has many more; add on demand.
+                    }
+                }
+            }
+        }
+    }
+    Ok(unit.id.clone())
+}
+
 fn create_or_update_implicit_slice(
     slice_name: &str,
     run_info: &mut crate::runtime_info::RuntimeInfo,
@@ -2716,6 +2761,13 @@ fn create_transient_unit(
     use std::sync::RwLock;
 
     let unit_name = &params.unit_name;
+
+    // Transient slice units (e.g. `busctl call Manager StartTransientUnit
+    // 'a-b-c.slice' ...`) reuse the implicit-slice creation path and then
+    // apply the caller-provided Description=/MemoryMax= etc. as overrides.
+    if unit_name.ends_with(".slice") {
+        return create_transient_slice(params, run_info);
+    }
 
     // Determine the service type.
     let srvc_type = match params.service_type.as_deref() {
