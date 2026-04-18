@@ -222,7 +222,25 @@ impl Parser {
             if let Some(dir) = self.try_parse_directive()? {
                 directives.push(dir);
             } else {
-                self.advance();
+                // Line doesn't match any directive, assignment, or rule.
+                // GNU make reports "missing separator" for such lines.
+                let line_no = self.current_line_no();
+                let line = self.peek().unwrap_or("");
+                let trimmed_line = line.trim();
+                let source = &self.source_name;
+                if trimmed_line.starts_with("ifeq(") || trimmed_line.starts_with("ifneq(") {
+                    eprintln!(
+                        "{source}:{line_no}: *** missing separator (ifeq/ifneq must be followed by whitespace).  Stop."
+                    );
+                } else {
+                    let hint = if self.recipe_prefix == '\t' && line.starts_with("        ") {
+                        " (did you mean TAB instead of 8 spaces?)"
+                    } else {
+                        ""
+                    };
+                    eprintln!("{source}:{line_no}: *** missing separator{hint}.  Stop.");
+                }
+                std::process::exit(2);
             }
         }
 
@@ -240,29 +258,40 @@ impl Parser {
         if trimmed.starts_with("ifdef ")
             || trimmed.starts_with("ifndef ")
             || trimmed.starts_with("ifeq ")
-            || trimmed.starts_with("ifeq(")
             || trimmed.starts_with("ifneq ")
-            || trimmed.starts_with("ifneq(")
+            || trimmed == "ifeq"
+            || trimmed == "ifneq"
         {
             return self.parse_conditional().map(Some);
         }
 
         // Include
-        if let Some(rest) = trimmed.strip_prefix("include ") {
+        if trimmed == "include" || trimmed.starts_with("include ") {
+            let line_no = self.current_line_no();
+            let source = self.source_name.clone();
             self.advance();
+            let rest = trimmed.strip_prefix("include").unwrap().trim_start();
             // Strip comments (# and everything after)
             let rest = strip_makefile_comment(rest);
             let files: Vec<String> = rest.split_whitespace().map(|s| s.to_string()).collect();
-            return Ok(Some(Directive::Include(files, false)));
+            return Ok(Some(Directive::Include(files, false, source, line_no)));
         }
-        if let Some(rest) = trimmed
-            .strip_prefix("-include ")
-            .or_else(|| trimmed.strip_prefix("sinclude "))
+        if trimmed == "-include"
+            || trimmed == "sinclude"
+            || trimmed.starts_with("-include ")
+            || trimmed.starts_with("sinclude ")
         {
+            let line_no = self.current_line_no();
+            let source = self.source_name.clone();
             self.advance();
+            let rest = trimmed
+                .strip_prefix("-include")
+                .or_else(|| trimmed.strip_prefix("sinclude"))
+                .unwrap()
+                .trim_start();
             let rest = strip_makefile_comment(rest);
             let files: Vec<String> = rest.split_whitespace().map(|s| s.to_string()).collect();
-            return Ok(Some(Directive::Include(files, true)));
+            return Ok(Some(Directive::Include(files, true, source, line_no)));
         }
 
         // Export / Unexport
@@ -300,8 +329,14 @@ impl Parser {
             }
             // `override undefine VAR` — force-remove even command-line vars.
             if let Some(var) = rest.strip_prefix("undefine ") {
+                let line_no = self.current_line_no();
+                let source = self.source_name.clone();
                 self.advance();
-                return Ok(Some(Directive::OverrideUndefine(var.trim().to_string())));
+                return Ok(Some(Directive::OverrideUndefine(
+                    var.trim().to_string(),
+                    source,
+                    line_no,
+                )));
             }
             // `override define NAME …` — multi-line variable override.
             if rest.starts_with("define ") || rest == "define" {
@@ -311,8 +346,8 @@ impl Parser {
                 let rest_owned = rest.to_string();
                 self.lines[self.pos] = rest_owned;
                 let directive = self.parse_define()?;
-                if let Directive::Define(name, op, body) = directive {
-                    return Ok(Some(Directive::OverrideDefine(name, op, body)));
+                if let Directive::Define(name, op, body, src, line) = directive {
+                    return Ok(Some(Directive::OverrideDefine(name, op, body, src, line)));
                 }
                 return Ok(Some(directive));
             }
@@ -324,8 +359,14 @@ impl Parser {
         if let Some(rest) = trimmed.strip_prefix("undefine ")
             && try_parse_assignment(trimmed).is_none()
         {
+            let line_no = self.current_line_no();
+            let source = self.source_name.clone();
             self.advance();
-            return Ok(Some(Directive::Undefine(rest.trim().to_string())));
+            return Ok(Some(Directive::Undefine(
+                rest.trim().to_string(),
+                source,
+                line_no,
+            )));
         }
 
         // Define (multi-line variable). Skip when the line also parses
@@ -357,6 +398,8 @@ impl Parser {
         // whitespace preceding the `#`.
         let line_no_comment = strip_makefile_comment(&line);
         if let Some(assign) = try_parse_assignment(line_no_comment) {
+            let assign_line_no = self.current_line_no();
+            let assign_source = self.source_name.clone();
             self.advance();
             // Track `.RECIPEPREFIX := X` so subsequent rules use X as the
             // recipe-line marker. Empty resets to default tab.
@@ -364,7 +407,11 @@ impl Parser {
                 let val = assign.value.trim();
                 self.recipe_prefix = val.chars().next().unwrap_or('\t');
             }
-            return Ok(Some(Directive::Assignment(assign)));
+            return Ok(Some(Directive::Assignment(
+                assign,
+                assign_source,
+                assign_line_no,
+            )));
         }
 
         // Before parsing as a rule, look for target-specific variable
@@ -442,10 +489,18 @@ impl Parser {
     }
 
     fn parse_conditional(&mut self) -> Result<Directive, String> {
+        let cond_line_no = self.current_line_no();
         let line = self.advance().unwrap();
         let trimmed = line.trim();
 
-        let kind = parse_cond_kind(trimmed)?;
+        let kind = match parse_cond_kind(trimmed) {
+            Ok(k) => k,
+            Err(_) => {
+                let source = &self.source_name;
+                eprintln!("{source}:{cond_line_no}: *** invalid syntax in conditional.  Stop.");
+                std::process::exit(2);
+            }
+        };
 
         let then_body = self.parse_body(&["else", "endif"])?;
 
@@ -456,9 +511,9 @@ impl Parser {
             if rest.starts_with("ifdef ")
                 || rest.starts_with("ifndef ")
                 || rest.starts_with("ifeq ")
-                || rest.starts_with("ifeq(")
                 || rest.starts_with("ifneq ")
-                || rest.starts_with("ifneq(")
+                || rest == "ifeq"
+                || rest == "ifneq"
             {
                 // `else ifX …` chains to another conditional. Re-feed
                 // the line (sans the `else ` prefix) into
@@ -509,50 +564,102 @@ impl Parser {
     }
 
     fn parse_define(&mut self) -> Result<Directive, String> {
+        let define_line_no = self.current_line_no();
+        let source = self.source_name.clone();
         let line = self.advance().unwrap();
         let trimmed = line.trim();
         let rest = trimmed.strip_prefix("define ").unwrap().trim();
 
-        // Check for assignment operator: `define VAR OP` (optionally
-        // followed by a `#comment`). Strip any trailing comment first,
-        // then identify the operator suffix.
+        // Strip trailing comment, then detect the assignment operator.
+        // Use `find_assignment_op` directly (instead of
+        // `try_parse_assignment`) because variable names in `define`
+        // directives may contain spaces inside `$(...)` function
+        // calls that `is_valid_varname` would reject.
         let rest = strip_makefile_comment(rest).trim();
-        let (name, op) = if let Some(n) = rest.strip_suffix(" ::=") {
-            (n.trim().to_string(), AssignOp::Simple)
-        } else if let Some(n) = rest.strip_suffix(" :=") {
-            (n.trim().to_string(), AssignOp::Simple)
-        } else if let Some(n) = rest.strip_suffix(" +=") {
-            (n.trim().to_string(), AssignOp::Append)
-        } else if let Some(n) = rest.strip_suffix(" ?=") {
-            (n.trim().to_string(), AssignOp::Conditional)
-        } else if let Some(n) = rest.strip_suffix(" !=") {
-            (n.trim().to_string(), AssignOp::Shell)
-        } else if let Some(n) = rest.strip_suffix(" =") {
-            (n.trim().to_string(), AssignOp::Recursive)
-        } else {
-            (rest.to_string(), AssignOp::Recursive)
+        let (name, op) = {
+            let mut found = None;
+            for (suffix, assign_op) in [
+                (":::=", AssignOp::ImmediateRecursive),
+                ("::=", AssignOp::Simple),
+                (":=", AssignOp::Simple),
+                ("?=", AssignOp::Conditional),
+                ("+=", AssignOp::Append),
+                ("!=", AssignOp::Shell),
+                ("=", AssignOp::Recursive),
+            ] {
+                if let Some(pos) = find_assignment_op(rest, suffix) {
+                    let n = rest[..pos].trim().to_string();
+                    let extra = rest[pos + suffix.len()..].trim();
+                    if !extra.is_empty() {
+                        eprintln!(
+                            "{}:{}: extraneous text after 'define' directive",
+                            source, define_line_no
+                        );
+                    }
+                    found = Some((n, assign_op));
+                    break;
+                }
+            }
+            found.unwrap_or_else(|| (rest.to_string(), AssignOp::Recursive))
         };
 
+        // Collect body lines, tracking nested define/endef pairs so
+        // that inner `endef` tokens don't prematurely close the outer
+        // define block.
+        let mut depth: usize = 0;
         let mut body = Vec::new();
         loop {
             match self.peek() {
-                Some(line)
-                    if {
-                        let t = line.trim();
-                        t == "endef" || t.starts_with("endef ") || t.starts_with("endef\t")
-                    } =>
-                {
-                    self.advance();
-                    break;
+                Some(line) => {
+                    let t = line.trim();
+                    let is_endef =
+                        t == "endef" || t.starts_with("endef ") || t.starts_with("endef\t");
+                    let is_define = {
+                        let d = t
+                            .strip_prefix("override ")
+                            .or_else(|| t.strip_prefix("override\t"))
+                            .map(|r| r.trim_start())
+                            .unwrap_or(t);
+                        d == "define" || d.starts_with("define ") || d.starts_with("define\t")
+                    };
+
+                    if is_endef {
+                        if depth == 0 {
+                            // Warn about extraneous text after `endef`.
+                            // Strip comments — `endef # comment` is fine.
+                            let after =
+                                strip_makefile_comment(t.strip_prefix("endef").unwrap()).trim();
+                            if !after.is_empty() {
+                                let endef_line = self.current_line_no();
+                                eprintln!(
+                                    "{}:{}: extraneous text after 'endef' directive",
+                                    source, endef_line
+                                );
+                            }
+                            self.advance();
+                            break;
+                        } else {
+                            depth -= 1;
+                            body.push(self.advance().unwrap());
+                        }
+                    } else if is_define {
+                        depth += 1;
+                        body.push(self.advance().unwrap());
+                    } else {
+                        body.push(self.advance().unwrap());
+                    }
                 }
-                Some(_) => {
-                    body.push(self.advance().unwrap());
+                None => {
+                    eprintln!(
+                        "{}:{}: *** missing 'endef', unterminated 'define'.  Stop.",
+                        source, define_line_no
+                    );
+                    std::process::exit(2);
                 }
-                None => return Err("unterminated define".to_string()),
             }
         }
 
-        Ok(Directive::Define(name, op, body))
+        Ok(Directive::Define(name, op, body, source, define_line_no))
     }
 
     fn try_parse_rule(&mut self) -> Result<Option<Rule>, String> {
@@ -717,6 +824,7 @@ impl Parser {
             source_name: self.source_name.clone(),
             is_double_colon,
             is_grouped,
+            line_no: rule_line,
         }))
     }
 }
@@ -831,7 +939,22 @@ fn parse_cond_args(s: &str) -> Result<(String, String), String> {
     let s = s.trim();
     if s.starts_with('(') && s.ends_with(')') {
         let inner = &s[1..s.len() - 1];
-        if let Some(comma) = inner.find(',') {
+        // Find the comma at paren-depth 0 so nested $(filter a,b)
+        // calls don't split prematurely.
+        let mut depth = 0i32;
+        let mut comma_pos = None;
+        for (i, ch) in inner.char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                ',' if depth == 0 => {
+                    comma_pos = Some(i);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        if let Some(comma) = comma_pos {
             let a = inner[..comma].trim();
             let b = inner[comma + 1..].trim();
             return Ok((strip_quotes(a), strip_quotes(b)));

@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**74/135 tests passing** (55%) — upstream test harness from GNU make 4.4.1.
+**90/135 tests passing** (67%) — upstream test harness from GNU make 4.4.1.
 
 `rust/make` has a parser, expander, and build engine (~5k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at

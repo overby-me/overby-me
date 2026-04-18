@@ -81,12 +81,44 @@ pub fn expand_with_auto(s: &str, engine: &Engine, auto_vars: &HashMap<&str, Stri
                 }
                 '(' => {
                     i += 1;
-                    let expr = read_balanced(&chars, &mut i, '(', ')');
+                    let (expr, terminated) = read_balanced(&chars, &mut i, '(', ')');
+                    if !terminated {
+                        // Use expand_chain_source (definition location) first,
+                        // then fall back to current_source (invocation location).
+                        let loc = engine
+                            .expand_chain_source
+                            .borrow()
+                            .clone()
+                            .or_else(|| engine.current_source.borrow().clone());
+                        if let Some((source, line_no)) = loc {
+                            eprintln!(
+                                "{source}:{line_no}: *** unterminated variable reference.  Stop."
+                            );
+                        } else {
+                            eprintln!("*** unterminated variable reference.  Stop.");
+                        }
+                        std::process::exit(2);
+                    }
                     result.push_str(&expand_expr(&expr, engine, auto_vars));
                 }
                 '{' => {
                     i += 1;
-                    let expr = read_balanced(&chars, &mut i, '{', '}');
+                    let (expr, terminated) = read_balanced(&chars, &mut i, '{', '}');
+                    if !terminated {
+                        let loc = engine
+                            .expand_chain_source
+                            .borrow()
+                            .clone()
+                            .or_else(|| engine.current_source.borrow().clone());
+                        if let Some((source, line_no)) = loc {
+                            eprintln!(
+                                "{source}:{line_no}: *** unterminated variable reference.  Stop."
+                            );
+                        } else {
+                            eprintln!("*** unterminated variable reference.  Stop.");
+                        }
+                        std::process::exit(2);
+                    }
                     result.push_str(&expand_expr(&expr, engine, auto_vars));
                 }
                 '@' | '<' | '^' | '+' | '?' | '*' | '|' => {
@@ -127,7 +159,7 @@ pub fn expand_with_auto(s: &str, engine: &Engine, auto_vars: &HashMap<&str, Stri
     result
 }
 
-fn read_balanced(chars: &[char], i: &mut usize, open: char, close: char) -> String {
+fn read_balanced(chars: &[char], i: &mut usize, open: char, close: char) -> (String, bool) {
     let mut depth = 1;
     let mut result = String::new();
     while *i < chars.len() && depth > 0 {
@@ -144,7 +176,7 @@ fn read_balanced(chars: &[char], i: &mut usize, open: char, close: char) -> Stri
         }
         *i += 1;
     }
-    result
+    (result, depth == 0)
 }
 
 /// Expand a $(expr) or ${expr} — either a variable reference or function call.
@@ -349,12 +381,12 @@ fn call_function(
         "wordlist" => {
             if args.len() >= 3 {
                 let raw_s = expand_with_auto(&args[0], engine, auto_vars);
-                let s = parse_numeric_arg(engine, "wordlist", "first", &raw_s, false);
+                let s = parse_numeric_arg(engine, "wordlist", "first", &raw_s, true);
                 let raw_e = expand_with_auto(&args[1], engine, auto_vars);
                 let e = parse_numeric_arg(engine, "wordlist", "second", &raw_e, false);
                 let text = expand_with_auto(&args[2], engine, auto_vars);
                 let words: Vec<&str> = text.split_whitespace().collect();
-                if s == 0 || e == 0 || s > e {
+                if e == 0 || s > e {
                     Some(String::new())
                 } else {
                     let start = s.saturating_sub(1).min(words.len());
@@ -517,9 +549,18 @@ fn call_function(
             );
             let mut result = Vec::new();
             for pat in pattern.split_whitespace() {
+                // The Rust `glob` crate strips the leading "./"
+                // component, but GNU make keeps it.  Only re-add the
+                // literal "./" prefix — don't touch other directory
+                // components which may contain globs.
+                let has_dot_slash = pat.starts_with("./");
                 if let Ok(paths) = glob::glob(pat) {
                     for entry in paths.flatten() {
-                        result.push(entry.to_string_lossy().to_string());
+                        let mut s = entry.to_string_lossy().to_string();
+                        if has_dot_slash && !s.starts_with("./") {
+                            s = format!("./{}", s);
+                        }
+                        result.push(s);
                     }
                 }
             }
@@ -569,6 +610,10 @@ fn call_function(
             if args.is_empty() {
                 return Some(String::new());
             }
+            let prefix = match engine.current_source.borrow().as_ref() {
+                Some((file, line)) => format!("{file}:{line}: "),
+                None => String::new(),
+            };
             let spec = expand_with_auto(&args[0], engine, auto_vars);
             let spec = spec.trim_start();
             let (op, filename) = if let Some(rest) = spec.strip_prefix(">>") {
@@ -578,17 +623,31 @@ fn call_function(
             } else if let Some(rest) = spec.strip_prefix('<') {
                 ("read", rest.trim().to_string())
             } else {
-                return Some(String::new());
+                // Invalid operation: extract the first word for the error
+                let op_word = spec.split_whitespace().next().unwrap_or(spec);
+                eprintln!("{prefix}*** file: invalid file operation: {op_word}.  Stop.");
+                std::process::exit(2);
             };
+            // Missing filename check
+            if filename.is_empty() {
+                eprintln!("{prefix}*** file: missing filename.  Stop.");
+                std::process::exit(2);
+            }
             match op {
                 "write" | "append" => {
                     use std::io::Write;
-                    let mut text = if args.len() >= 2 {
+                    let has_text_arg = args.len() >= 2;
+                    let mut text = if has_text_arg {
                         expand_with_auto(&args[1], engine, auto_vars)
                     } else {
                         String::new()
                     };
-                    if !text.is_empty() && !text.ends_with('\n') {
+                    // GNU make: if text arg is present (comma was used),
+                    // always ensure content ends with newline -- even if
+                    // the expanded text is empty.
+                    if (has_text_arg && text.is_empty())
+                        || (!text.is_empty() && !text.ends_with('\n'))
+                    {
                         text.push('\n');
                     }
                     let open_result = if op == "append" {
@@ -603,12 +662,32 @@ fn call_function(
                             .truncate(true)
                             .open(&filename)
                     };
-                    if let Ok(mut f) = open_result {
-                        let _ = f.write_all(text.as_bytes());
+                    match open_result {
+                        Ok(mut f) => {
+                            let _ = f.write_all(text.as_bytes());
+                        }
+                        Err(e) => {
+                            // Format OS error without Rust's "(os error N)" suffix.
+                            // Rust's Display for io::Error produces e.g.
+                            // "Permission denied (os error 13)" but GNU make
+                            // expects just "Permission denied".
+                            let err_str = e.to_string();
+                            let err_msg = match err_str.rfind(" (os error ") {
+                                Some(pos) => &err_str[..pos],
+                                None => &err_str,
+                            };
+                            eprintln!("{prefix}*** open: {filename}: {err_msg}.  Stop.");
+                            std::process::exit(2);
+                        }
                     }
                     Some(String::new())
                 }
                 "read" => {
+                    // Read mode does not accept extra arguments
+                    if args.len() >= 2 {
+                        eprintln!("{prefix}*** file: too many arguments.  Stop.");
+                        std::process::exit(2);
+                    }
                     // GNU make: strip a single trailing newline from the
                     // file's contents.
                     let mut s = std::fs::read_to_string(&filename).unwrap_or_default();
@@ -744,7 +823,12 @@ fn call_function(
         }
         "let" => {
             if args.len() < 3 {
-                let prefix = match engine.current_source.borrow().as_ref() {
+                let loc = engine
+                    .expand_chain_source
+                    .borrow()
+                    .clone()
+                    .or_else(|| engine.current_source.borrow().clone());
+                let prefix = match loc.as_ref() {
                     Some((file, line)) => format!("{file}:{line}: "),
                     None => String::new(),
                 };
@@ -798,11 +882,17 @@ fn call_function(
                         cursor += word_end;
                         word.to_string()
                     };
-                    engine.set_var_with_origin(
-                        name,
-                        &assigned,
-                        VarFlavor::Simple,
-                        VarOrigin::Automatic,
+                    // Insert directly (bypassing origin precedence) like
+                    // foreach — let bindings are temporary scoped
+                    // overrides that must mask any existing variable
+                    // regardless of its origin.
+                    engine.vars.borrow_mut().insert(
+                        name.to_string(),
+                        Variable {
+                            value: assigned,
+                            flavor: VarFlavor::Simple,
+                            origin: VarOrigin::Automatic,
+                        },
                     );
                 }
                 let result = expand_with_auto(&body, engine, auto_vars);
@@ -905,7 +995,12 @@ fn call_function(
         }
         "foreach" => {
             if args.len() < 3 {
-                let prefix = match engine.current_source.borrow().as_ref() {
+                let loc = engine
+                    .expand_chain_source
+                    .borrow()
+                    .clone()
+                    .or_else(|| engine.current_source.borrow().clone());
+                let prefix = match loc.as_ref() {
                     Some((file, line)) => format!("{file}:{line}: "),
                     None => String::new(),
                 };
@@ -1205,7 +1300,15 @@ fn parse_numeric_arg(
     raw: &str,
     strict_nonzero: bool,
 ) -> usize {
-    let prefix = match engine.current_source.borrow().as_ref() {
+    // Prefer the definition-site location (expand_chain_source) when
+    // the error occurs inside a recursive variable body, falling back
+    // to the invocation site (current_source) for direct usage.
+    let loc = engine
+        .expand_chain_source
+        .borrow()
+        .clone()
+        .or_else(|| engine.current_source.borrow().clone());
+    let prefix = match loc.as_ref() {
         Some((file, line)) => format!("{file}:{line}: "),
         None => String::new(),
     };
@@ -1215,10 +1318,25 @@ fn parse_numeric_arg(
     }
     match raw.trim().parse::<usize>() {
         Ok(n) => {
-            if strict_nonzero && n == 0 {
+            // GNU make uses signed 64-bit internally; values exceeding
+            // i64::MAX are reported as "out of range".
+            if n > i64::MAX as usize {
                 eprintln!(
-                    "{prefix}*** first argument to '{func}' function must be greater than 0.  Stop."
+                    "{prefix}*** invalid {which} argument to '{func}' function: '{}' out of range.  Stop.",
+                    raw.trim()
                 );
+                std::process::exit(2);
+            }
+            if strict_nonzero && n == 0 {
+                if func == "word" {
+                    eprintln!(
+                        "{prefix}*** first argument to '{func}' function must be greater than 0.  Stop."
+                    );
+                } else {
+                    eprintln!(
+                        "{prefix}*** invalid {which} argument to '{func}' function: '0'.  Stop."
+                    );
+                }
                 std::process::exit(2);
             }
             n

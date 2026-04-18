@@ -2,7 +2,7 @@
 
 use crate::ast::*;
 use crate::expand;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -81,6 +81,14 @@ struct PatternRuleEntry {
     recipe: Vec<String>,
     recipe_lines: Vec<usize>,
     source_name: String,
+    /// Double-colon pattern rules are "terminal": they only match when
+    /// prerequisites actually exist (or "should exist" because they are
+    /// mentioned as an explicit prerequisite of a non-pattern rule).
+    is_terminal: bool,
+    /// Other target patterns from the same multi-target pattern rule.
+    /// After the recipe fires, targets derived from these patterns
+    /// (with the same stem) are considered built too.
+    sibling_patterns: Vec<String>,
 }
 
 pub struct Engine {
@@ -98,11 +106,24 @@ pub struct Engine {
     unexports: RefCell<HashSet<String>>,
     export_all: RefCell<bool>,
     built_targets: RefCell<HashSet<String>>,
+    /// Targets that were marked as built because a sibling in their
+    /// `&:` grouped rule had its recipe run. Used to distinguish
+    /// "built by group" from "built by own recipe" in the top-level
+    /// build loop so the correct diagnostic message is emitted.
+    group_built_targets: RefCell<HashSet<String>>,
+    /// Keys identifying grouped-target rules whose recipe has already
+    /// been executed. For double-colon grouped rules, this prevents
+    /// re-running the same recipe for each member of the group.
+    group_recipe_done: RefCell<HashSet<String>>,
     eval_queue: RefCell<Vec<String>>,
     /// Includes that failed to load (file missing). Retried after the
     /// top-level parse completes so rules defined later in the same
     /// makefile can build the missing include.
-    pending_includes: RefCell<Vec<(String, bool)>>,
+    pub pending_includes: RefCell<Vec<(String, bool, String, usize)>>,
+    /// All files included via `include`/`-include` — tracked for
+    /// include-file remaking. Even files that loaded successfully need
+    /// their build rules checked (GNU make restarts after remaking).
+    included_files: RefCell<Vec<String>>,
     /// Names of variables originally inherited from the environment.
     /// We track these separately from `VarOrigin` so we can re-export
     /// them to child processes even after a makefile assignment has
@@ -128,7 +149,7 @@ pub struct Engine {
     pub silent: bool,
     pub touch: bool,
     pub question: bool,
-    pub always_make: bool,
+    pub always_make: Cell<bool>,
     /// `-e`: env vars override makefile assignments
     pub env_overrides: bool,
     /// `-i`: ignore errors in recipes
@@ -189,6 +210,23 @@ pub struct Engine {
     /// Used when auto-loading MAKEFILES env-var files so rules defined
     /// there don't steal the default goal from the primary makefile.
     pub suppress_default_goal: RefCell<bool>,
+    /// Source location (file, line) where each variable was defined.
+    /// Used for error reporting (e.g. unterminated variable reference).
+    var_source_locs: RefCell<HashMap<String, (String, usize)>>,
+    /// Source location tracking for the current recursive expansion chain.
+    /// Updated in `lookup_var_with_auto` when expanding a recursive
+    /// variable that has a known file definition location. Used by the
+    /// expand module to report unterminated variable reference errors at
+    /// the correct definition line. Separate from `current_source` which
+    /// is used by `$(error)` / `$(warning)` for invocation-site reporting.
+    pub expand_chain_source: RefCell<Option<(String, usize)>>,
+    /// True while a recipe is being expanded. `$(eval)` inside a recipe
+    /// must not define new prerequisites (GNU make Savannah bug #12124).
+    pub in_recipe: RefCell<bool>,
+    /// Targets that failed to build during -k (keep-going) mode.
+    /// Prevents re-attempting targets that already failed when they
+    /// appear as prerequisites of different dependents.
+    failed_targets: RefCell<HashSet<String>>,
 }
 
 impl Engine {
@@ -211,8 +249,11 @@ impl Engine {
             unexports: RefCell::new(HashSet::new()),
             export_all: RefCell::new(false),
             built_targets: RefCell::new(HashSet::new()),
+            group_built_targets: RefCell::new(HashSet::new()),
+            group_recipe_done: RefCell::new(HashSet::new()),
             eval_queue: RefCell::new(Vec::new()),
             pending_includes: RefCell::new(Vec::new()),
+            included_files: RefCell::new(Vec::new()),
             env_inherited: RefCell::new(HashSet::new()),
             immediate_recursive: RefCell::new(HashSet::new()),
             shell_depth: RefCell::new(0),
@@ -223,7 +264,7 @@ impl Engine {
             silent: false,
             touch: false,
             question: false,
-            always_make: false,
+            always_make: Cell::new(false),
             env_overrides: false,
             ignore_errors: false,
             print_directory_opt: None,
@@ -243,6 +284,10 @@ impl Engine {
             assume_new: RefCell::new(HashSet::new()),
             rebuilt_targets: RefCell::new(HashSet::new()),
             suppress_default_goal: RefCell::new(false),
+            var_source_locs: RefCell::new(HashMap::new()),
+            expand_chain_source: RefCell::new(None),
+            in_recipe: RefCell::new(false),
+            failed_targets: RefCell::new(HashSet::new()),
         };
 
         // Set default variables
@@ -394,6 +439,8 @@ impl Engine {
             recipe: recipe.iter().map(|s| s.to_string()).collect(),
             recipe_lines: vec![0; recipe.len()],
             source_name: "<built-in>".to_string(),
+            is_terminal: false,
+            sibling_patterns: Vec::new(),
         });
     }
 
@@ -480,7 +527,18 @@ impl Engine {
             let flavor = var.flavor;
             drop(vars);
             match flavor {
-                VarFlavor::Recursive => expand::expand_with_auto(&value, self, auto_vars),
+                VarFlavor::Recursive => {
+                    // Save/restore expand_chain_source so that inner
+                    // recursive lookups don't clobber the outer
+                    // definition location used for error reporting.
+                    let old_chain = self.expand_chain_source.borrow().clone();
+                    if let Some(loc) = self.var_source_locs.borrow().get(name).cloned() {
+                        *self.expand_chain_source.borrow_mut() = Some(loc);
+                    }
+                    let result = expand::expand_with_auto(&value, self, auto_vars);
+                    *self.expand_chain_source.borrow_mut() = old_chain;
+                    result
+                }
                 VarFlavor::Simple => value,
                 VarFlavor::Undefined => String::new(),
             }
@@ -506,6 +564,43 @@ impl Engine {
             .unwrap_or_default()
     }
 
+    /// Resolve a filename through VPATH. Returns the VPATH-resolved path
+    /// if the file is found in a VPATH directory, or None if not found.
+    /// If the file already exists in the current directory, returns None
+    /// (the caller should check the current directory first).
+    fn resolve_vpath(&self, name: &str) -> Option<String> {
+        let vpath = self.lookup_var("VPATH");
+        if vpath.is_empty() {
+            return None;
+        }
+        for dir in vpath.split(&[':', ' '][..]) {
+            let dir = dir.trim();
+            if dir.is_empty() {
+                continue;
+            }
+            let candidate = Path::new(dir).join(name);
+            if candidate.exists() {
+                return Some(candidate.to_string_lossy().to_string());
+            }
+        }
+        None
+    }
+
+    /// Check if a file exists, either in the current directory or via VPATH.
+    fn file_exists_or_vpath(&self, name: &str) -> bool {
+        Path::new(name).exists() || self.resolve_vpath(name).is_some()
+    }
+
+    /// Get file metadata (for mtime checks), resolving through VPATH if needed.
+    fn metadata_or_vpath(&self, name: &str) -> Option<std::fs::Metadata> {
+        if let Ok(meta) = std::fs::metadata(name) {
+            return Some(meta);
+        }
+        if let Some(resolved) = self.resolve_vpath(name) {
+            return std::fs::metadata(&resolved).ok();
+        }
+        None
+    }
     pub fn var_origin(&self, name: &str) -> VarOrigin {
         // Automatic variables (`$@`, `$<`, `$^`, `$*`, `$?`, `$+`, `$|`, `$%`,
         // and the `D`/`F` variants) always report "automatic".
@@ -559,31 +654,264 @@ impl Engine {
         self.process_eval_queue();
     }
 
-    /// After the top-level parse, try to build any deferred include files
-    /// whose build rules are now known. If a rule exists (explicit or
-    /// pattern), run it and reload the file; otherwise emit the standard
-    /// missing-include diagnostic unless the include was silent.
-    pub fn finalize_includes(&self) {
-        let pending: Vec<(String, bool)> = self.pending_includes.borrow_mut().drain(..).collect();
-        for (file, silent) in pending {
-            // Search via `load_file` which consults `-I` directories too.
-            if self.resolve_include_path(&file).is_some() {
-                self.load_file(&file, silent);
+    /// After the top-level parse, try to build any deferred include files.
+    /// Returns 0 on success, 2 if mandatory includes failed.
+    pub fn finalize_includes(&self) -> i32 {
+        let pending: Vec<(String, bool, String, usize)> =
+            self.pending_includes.borrow_mut().drain(..).collect();
+
+        // Phase 0: Try to remake include files that were successfully loaded.
+        // GNU make always tries to rebuild included files; if the recipe
+        // runs but doesn't change the file, the build proceeds normally.
+        let loaded_includes: Vec<String> = self.included_files.borrow_mut().drain(..).collect();
+        for file in &loaded_includes {
+            let has_explicit = self.rules.borrow().contains_key(file.as_str());
+            let has_pattern = self.find_pattern_rule(file).is_some();
+            if !has_explicit && !has_pattern {
                 continue;
             }
-            let has_rule =
-                self.rules.borrow().contains_key(&file) || self.find_pattern_rule(&file).is_some();
-            if has_rule {
-                let _ = self.build_target(&file);
+            let is_phony = self.phony_targets.borrow().contains(file.as_str());
+            let is_double_colon_no_prereqs = {
+                let rules = self.rules.borrow();
+                if let Some(entries) = rules.get(file.as_str()) {
+                    entries.iter().any(|e| e.is_double_colon)
+                        && entries.iter().all(|e| e.prerequisites.is_empty())
+                } else {
+                    false
+                }
+            };
+            if is_phony || is_double_colon_no_prereqs {
+                continue;
             }
-            if self.resolve_include_path(&file).is_some() {
-                self.load_file(&file, silent);
-            } else if !silent {
-                eprintln!("make: {}: No such file or directory", file);
+            // Save mtime before attempting rebuild
+            let mtime_before = std::fs::metadata(file).ok().and_then(|m| m.modified().ok());
+            let _ = self.build_target(file);
+            // If the file changed, re-read it
+            let mtime_after = std::fs::metadata(file).ok().and_then(|m| m.modified().ok());
+            if mtime_before != mtime_after {
+                // File was modified — re-read it
+                self.load_file_with_loc(file, true, None);
+            }
+            // Mark as built so main build doesn't re-evaluate
+            self.built_targets.borrow_mut().insert(file.clone());
+        }
+        // Clear rebuilt_targets from the remaking phase so the main build
+        // doesn't cascade unnecessary rebuilds.
+        self.rebuilt_targets.borrow_mut().clear();
+
+        // Phase 1: Try to load files that might now exist (e.g. created by
+        // $(shell) during parsing). Collect those that still need building.
+        struct PendingEntry {
+            file: String,
+            silent: bool,
+            source: String,
+            line_no: usize,
+            file_exists_unreadable: bool,
+        }
+        let mut to_build: Vec<PendingEntry> = Vec::new();
+        for (file, silent, source, line_no) in &pending {
+            if self.load_file_with_loc(file, true, None) {
+                continue;
+            }
+            // Check if file exists but is unreadable
+            let file_exists_unreadable =
+                std::path::Path::new(file).exists() && std::fs::read_to_string(file).is_err();
+            to_build.push(PendingEntry {
+                file: file.clone(),
+                silent: *silent,
+                source: source.clone(),
+                line_no: *line_no,
+                file_exists_unreadable,
+            });
+        }
+
+        if to_build.is_empty() {
+            return 0;
+        }
+
+        // Phase 2: Attempt to build each pending include file.
+        struct BuildResult {
+            file: String,
+            silent: bool,
+            source: String,
+            line_no: usize,
+            build_err: Option<String>,
+            had_rule: bool,
+            skip_reason: Option<&'static str>, // "phony" or "double_colon"
+            #[allow(dead_code)]
+            printed_nsfd: bool,
+        }
+        let mut results: Vec<BuildResult> = Vec::new();
+        for entry in &to_build {
+            let has_explicit = self.rules.borrow().contains_key(entry.file.as_str());
+            let has_pattern = self.find_pattern_rule(&entry.file).is_some();
+            let has_rule = has_explicit || has_pattern;
+
+            let is_phony = self.phony_targets.borrow().contains(entry.file.as_str());
+            let is_double_colon_no_prereqs = {
+                let rules = self.rules.borrow();
+                if let Some(entries) = rules.get(entry.file.as_str()) {
+                    entries.iter().any(|e| e.is_double_colon)
+                        && entries.iter().all(|e| e.prerequisites.is_empty())
+                } else {
+                    false
+                }
+            };
+
+            let skip_reason = if is_phony {
+                Some("phony")
+            } else if is_double_colon_no_prereqs {
+                Some("double_colon")
+            } else {
+                None
+            };
+
+            let should_build = has_rule && skip_reason.is_none();
+
+            // Print "file not found" diagnostic before attempting build.
+            // GNU make prints NSFD first, then any build errors. However,
+            // only print it when:
+            //   1. It's a non-silent include
+            //   2. The file doesn't exist (not just unreadable)
+            //   3. There IS a rule to try building it (otherwise phase 3
+            //      handles the error for the no-rule case)
+            //   4. The build will actually be attempted (not skipped)
+            // Print NSFD before build only in keep-going mode, where the
+            // ordering matters (build errors appear during build, and
+            // NSFD must precede them). In non-keep-going mode, Phase 3
+            // handles the error after we know the outcome.
+            let printed_nsfd = if self.keep_going
+                && !entry.silent
+                && should_build
+                && !std::path::Path::new(&entry.file).exists()
+                && !entry.file_exists_unreadable
+            {
+                eprintln!(
+                    "{}:{}: {}: No such file or directory",
+                    entry.source, entry.line_no, entry.file
+                );
+                true
+            } else {
+                false
+            };
+
+            let build_err = if should_build {
+                // For unreadable files, force rebuild by temporarily setting
+                // always_make. This ensures the recipe runs even though the
+                // file "exists" (but can't be read).
+                let saved_always = self.always_make.get();
+                if entry.file_exists_unreadable {
+                    self.always_make.set(true);
+                }
+                let result = match self.build_target(&entry.file) {
+                    Ok(()) => None,
+                    Err(e) => {
+                        // Mark as built to prevent pattern rule siblings
+                        // from re-running the same recipe.
+                        self.built_targets.borrow_mut().insert(entry.file.clone());
+                        Some(e)
+                    }
+                };
+                if entry.file_exists_unreadable {
+                    self.always_make.set(saved_always);
+                }
+                result
+            } else {
+                None
+            };
+
+            results.push(BuildResult {
+                file: entry.file.clone(),
+                silent: entry.silent,
+                source: entry.source.clone(),
+                line_no: entry.line_no,
+                build_err,
+                had_rule: should_build,
+                skip_reason,
+                printed_nsfd,
+            });
+        }
+
+        // Phase 3: Try to load rebuilt files and report errors.
+        let mut has_fatal = false;
+        for res in &results {
+            if self.load_file_with_loc(&res.file, true, None) {
+                continue;
+            }
+
+            if res.silent {
+                // -include: silently skip all failures, even build errors.
+                // The error will surface if/when the target is needed
+                // during the main build phase.
+                continue;
+            }
+
+            has_fatal = true;
+
+            let file_exists = std::path::Path::new(&res.file).exists();
+            let err_msg = if file_exists {
+                match std::fs::read_to_string(&res.file) {
+                    Err(e) => clean_io_error(&format!("{}", e)),
+                    Ok(_) => "No such file or directory".to_string(),
+                }
+            } else {
+                "No such file or directory".to_string()
+            };
+
+            if let Some(ref build_err) = res.build_err {
+                // Build attempted but failed. Print NSFD only if not
+                // already printed during Phase 2.
+                if !res.printed_nsfd {
+                    eprintln!("{}:{}: {}: {}", res.source, res.line_no, res.file, err_msg);
+                }
+                if !build_err.is_empty() {
+                    if build_err.starts_with('[') {
+                        eprintln!("make: *** {build_err}");
+                    } else {
+                        eprintln!("make: *** {build_err}.  Stop.");
+                    }
+                }
+                if self.keep_going {
+                    eprintln!(
+                        "{}:{}: Failed to remake makefile '{}'.",
+                        res.source, res.line_no, res.file
+                    );
+                }
+            } else if res.had_rule {
+                // Rule existed, build OK, but file still missing/unreadable
+                eprintln!(
+                    "{}:{}: Failed to remake makefile '{}'.",
+                    res.source, res.line_no, res.file
+                );
+            } else if res.skip_reason.is_some() {
+                // Phony or double-colon-no-prereqs: just print NSFD
+                eprintln!("{}:{}: {}: {}", res.source, res.line_no, res.file, err_msg);
+            } else {
+                // No rule at all
+                eprintln!("{}:{}: {}: {}", res.source, res.line_no, res.file, err_msg);
+                eprintln!("make: *** No rule to make target '{}'.  Stop.", res.file);
             }
         }
+
+        // Clear build state from include remaking so the main build
+        // starts fresh. Without this, targets rebuilt during include
+        // remaking would cascade unnecessary rebuilds in the main build.
+        self.built_targets.borrow_mut().clear();
+        self.rebuilt_targets.borrow_mut().clear();
+
+        // Mark successfully remade include files as "built" so the main
+        // build doesn't re-evaluate them (matching GNU make's restart
+        // behavior where include files are up-to-date in the second pass).
+        for res in &results {
+            if res.build_err.is_none() && res.had_rule {
+                self.built_targets.borrow_mut().insert(res.file.clone());
+            }
+        }
+
+        if has_fatal { 2 } else { 0 }
     }
 
+    #[allow(dead_code)]
     fn resolve_include_path(&self, path: &str) -> Option<String> {
         if std::path::Path::new(path).exists() {
             return Some(path.to_string());
@@ -633,7 +961,12 @@ impl Engine {
             }
             AssignOp::ImmediateRecursive => {
                 let expanded = expand::expand(body, self);
-                self.set_var_with_origin(name, &expanded, VarFlavor::Recursive, origin);
+                // Escape `$` → `$$` so the stored recursive value
+                // round-trips through one more expansion without
+                // losing literal dollar signs (same as `:::=` in
+                // `process_assignment`).
+                let escaped = expanded.replace('$', "$$");
+                self.set_var_with_origin(name, &escaped, VarFlavor::Recursive, origin);
             }
             AssignOp::Shell => {
                 let cmd = expand::expand(body, self);
@@ -690,31 +1023,54 @@ impl Engine {
 
     fn process_directive(&self, directive: &Directive) {
         match directive {
-            Directive::Assignment(assign) => {
+            Directive::Assignment(assign, source, line_no) => {
+                *self.current_source.borrow_mut() = Some((source.clone(), *line_no));
                 self.process_assignment(assign, VarOrigin::File);
+                // Only record source location if the assignment actually took
+                // effect (i.e., wasn't overridden by a higher-priority origin
+                // like CommandLine). This ensures that unterminated-reference
+                // errors correctly trace through the actual expansion chain.
+                let expanded_name = expand::expand(&assign.name, self);
+                let origin = self.vars.borrow().get(&expanded_name).map(|v| v.origin);
+                if origin == Some(VarOrigin::File) {
+                    self.var_source_locs
+                        .borrow_mut()
+                        .insert(expanded_name, (source.clone(), *line_no));
+                }
+                *self.current_source.borrow_mut() = None;
             }
             Directive::Rule(rule) => {
                 self.process_rule(rule);
             }
-            Directive::Include(files, silent) => {
+            Directive::Include(files, silent, source, line_no) => {
                 for file_pattern in files {
                     let expanded = expand::expand(file_pattern, self);
                     for file in expanded.split_whitespace() {
                         let mut matched = false;
+                        let mut loaded = false;
                         if let Ok(paths) = glob::glob(file) {
                             for entry in paths.flatten() {
                                 let path = entry.to_string_lossy().to_string();
-                                self.load_file(&path, *silent);
+                                // Try to load; suppress errors during initial parse
+                                // since finalize_includes will retry with proper
+                                // error reporting after attempting to rebuild.
+                                if self.load_file_with_loc(&path, true, None) {
+                                    loaded = true;
+                                    self.included_files.borrow_mut().push(path.clone());
+                                }
                                 matched = true;
                             }
                         }
-                        if !matched {
+                        if !matched || !loaded {
                             // Defer: a rule to build this file may appear
                             // later in the same makefile. `finalize_includes`
                             // retries after the full parse.
-                            self.pending_includes
-                                .borrow_mut()
-                                .push((file.to_string(), *silent));
+                            self.pending_includes.borrow_mut().push((
+                                file.to_string(),
+                                *silent,
+                                source.clone(),
+                                *line_no,
+                            ));
                         }
                     }
                 }
@@ -766,20 +1122,32 @@ impl Engine {
             Directive::Override(assign) => {
                 self.process_assignment(assign, VarOrigin::Override);
             }
-            Directive::Define(name, op, lines) => {
+            Directive::Define(name, op, lines, source, line_no) => {
                 let expanded_name = expand::expand(name, self);
+                if expanded_name.trim().is_empty() {
+                    eprintln!("{source}:{line_no}: *** empty variable name.  Stop.");
+                    std::process::exit(2);
+                }
                 let body = lines.join("\n");
                 self.apply_define(&expanded_name, *op, &body, VarOrigin::File);
             }
-            Directive::OverrideDefine(name, op, lines) => {
+            Directive::OverrideDefine(name, op, lines, source, line_no) => {
                 let expanded_name = expand::expand(name, self);
+                if expanded_name.trim().is_empty() {
+                    eprintln!("{source}:{line_no}: *** empty variable name.  Stop.");
+                    std::process::exit(2);
+                }
                 let body = lines.join("\n");
                 self.apply_define(&expanded_name, *op, &body, VarOrigin::Override);
             }
-            Directive::Undefine(name) => {
+            Directive::Undefine(name, source, line_no) => {
                 // `undefine` from a makefile doesn't clobber command-line
                 // or override variables; those still win.
                 let expanded = expand::expand(name, self);
+                if expanded.trim().is_empty() {
+                    eprintln!("{source}:{line_no}: *** empty variable name.  Stop.");
+                    std::process::exit(2);
+                }
                 let mut vars = self.vars.borrow_mut();
                 let remove = matches!(
                     vars.get(&expanded).map(|v| v.origin),
@@ -789,10 +1157,14 @@ impl Engine {
                     vars.remove(&expanded);
                 }
             }
-            Directive::OverrideUndefine(name) => {
+            Directive::OverrideUndefine(name, source, line_no) => {
                 // `override undefine VAR` force-removes the variable
                 // regardless of origin.
                 let expanded = expand::expand(name, self);
+                if expanded.trim().is_empty() {
+                    eprintln!("{source}:{line_no}: *** empty variable name.  Stop.");
+                    std::process::exit(2);
+                }
                 self.vars.borrow_mut().remove(&expanded);
             }
             Directive::TargetVarAssign(targets_str, assign) => {
@@ -983,6 +1355,19 @@ impl Engine {
             .split_whitespace()
             .map(|s| s.to_string())
             .collect();
+        // GNU make forbids defining new prerequisites inside a recipe
+        // (Savannah bug #12124). When $(eval) is called during recipe
+        // expansion and the eval'd text contains a rule with prereqs,
+        // error out.
+        if *self.in_recipe.borrow() && (!prereqs.is_empty() || !order_only.is_empty()) {
+            let (src, line) = self
+                .current_source
+                .borrow()
+                .clone()
+                .unwrap_or_else(|| (rule.source_name.clone(), rule.line_no));
+            eprintln!("{src}:{line}: *** prerequisites cannot be defined in recipes.  Stop.");
+            std::process::exit(2);
+        }
 
         // Handle special targets. A rule line may combine a special target
         // with normal ones (e.g. `.DEFAULT all:`). We handle each special
@@ -1091,6 +1476,8 @@ impl Engine {
                     recipe: rule.recipe.clone(),
                     recipe_lines: rule.recipe_lines.clone(),
                     source_name: rule.source_name.clone(),
+                    is_terminal: false,
+                    sibling_patterns: Vec::new(),
                 });
                 return;
             }
@@ -1169,6 +1556,12 @@ impl Engine {
                     recipe: rule.recipe.clone(),
                     recipe_lines: rule.recipe_lines.clone(),
                     source_name: rule.source_name.clone(),
+                    is_terminal: rule.is_double_colon,
+                    sibling_patterns: targets
+                        .iter()
+                        .filter(|t| *t != target_pat)
+                        .cloned()
+                        .collect(),
                 });
             }
             return;
@@ -1187,6 +1580,15 @@ impl Engine {
                     }
                 }
             }
+        }
+
+        // Grouped targets (`&:`) must provide a recipe.
+        if rule.is_grouped && rule.recipe.is_empty() {
+            eprintln!(
+                "{}:{}: *** grouped targets must provide a recipe.  Stop.",
+                rule.source_name, rule.line_no
+            );
+            std::process::exit(2);
         }
 
         // Store explicit rules. For `&:` grouped rules, tag each
@@ -1247,6 +1649,16 @@ impl Engine {
     }
 
     pub fn load_file(&self, path: &str, silent: bool) {
+        self.load_file_with_loc(path, silent, None);
+    }
+
+    /// Load a file with optional source location for error messages.
+    pub fn load_file_with_loc(
+        &self,
+        path: &str,
+        silent: bool,
+        loc: Option<(String, usize)>,
+    ) -> bool {
         // Resolve path: if it doesn't exist at the given (possibly relative)
         // location, search `include_dirs` in order (populated by `-I`).
         let resolved = if std::path::Path::new(path).exists() {
@@ -1265,11 +1677,8 @@ impl Engine {
         match std::fs::read_to_string(&resolved) {
             Ok(content) => {
                 self.append_makefile_list(&resolved);
-                // Strip UTF-8 BOM if present — GNU make reads the file
-                // byte-by-byte and treats the BOM as whitespace-ish,
-                // leaving the first real character unmolested.
                 let content = content.strip_prefix('\u{FEFF}').unwrap_or(&content);
-                let mut parser = crate::parser::Parser::new_with_source(content, resolved.clone());
+                let mut parser = crate::parser::Parser::new_with_source(content, path.to_string());
                 match parser.parse() {
                     Ok(directives) => self.load_makefile(&directives),
                     Err(e) => {
@@ -1278,11 +1687,18 @@ impl Engine {
                         }
                     }
                 }
+                true
             }
             Err(e) => {
                 if !silent {
-                    eprintln!("make: {}: {}", resolved, e);
+                    let msg = clean_io_error(&format!("{}", e));
+                    if let Some((ref src, ln)) = loc {
+                        eprintln!("{}:{}: {}: {}", src, ln, path, msg);
+                    } else {
+                        eprintln!("make: {}: {}", path, msg);
+                    }
                 }
+                false
             }
         }
     }
@@ -1332,7 +1748,13 @@ impl Engine {
         if should_print {
             println!("{make_tag}: Entering directory '{}'", cwd_for_msg.display());
         }
-        self.finalize_includes();
+        let inc_rc = self.finalize_includes();
+        if inc_rc != 0 {
+            if should_print {
+                println!("{make_tag}: Leaving directory '{}'", cwd_for_msg.display());
+            }
+            return inc_rc;
+        }
 
         let targets = if targets.is_empty() {
             match self.default_goal.borrow().as_ref() {
@@ -1365,20 +1787,21 @@ impl Engine {
             *self.recipe_executed.borrow_mut() = false;
             *self.target_had_recipe.borrow_mut() = true;
             let before_built = self.built_targets.borrow().contains(&target_expanded);
+            let is_group_built = self.group_built_targets.borrow().contains(&target_expanded);
             match self.build_target(&target_expanded) {
                 Ok(()) => {
                     // If build_target returned Ok without running any recipe,
                     // emit GNU make's diagnostic. Not under -s/-q.
                     if !*self.recipe_executed.borrow()
-                        && !before_built
+                        && (!before_built || is_group_built)
                         && !self.question
                         && !self.silent
                         && !had_error
                     {
-                        if *self.target_had_recipe.borrow() {
-                            println!("{make_tag}: '{target_expanded}' is up to date.");
-                        } else {
+                        if is_group_built || !*self.target_had_recipe.borrow() {
                             println!("{make_tag}: Nothing to be done for '{target_expanded}'.");
+                        } else {
+                            println!("{make_tag}: '{target_expanded}' is up to date.");
                         }
                     }
                 }
@@ -1463,6 +1886,10 @@ impl Engine {
             return Ok(());
         }
 
+        // Already failed in -k mode? Don't re-attempt.
+        if self.keep_going && self.failed_targets.borrow().contains(target) {
+            return Err(String::new());
+        }
         let is_phony = self.phony_targets.borrow().contains(target);
 
         // Find explicit rules
@@ -1474,7 +1901,26 @@ impl Engine {
         let any_double = rules.iter().any(|r| r.is_double_colon);
         if any_double {
             self.built_targets.borrow_mut().insert(target.to_string());
+            // Capture target mtime once BEFORE any rules run. Each
+            // double-colon rule is evaluated independently against the
+            // original state; a recipe in an earlier rule that creates or
+            // touches the target must not make later rules think the
+            // target is already up-to-date.
+            let initial_target_mtime = if is_phony {
+                None
+            } else {
+                std::fs::metadata(target)
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+            };
             for (idx, rule) in rules.iter().enumerate() {
+                // For grouped double-colon rules, skip if group recipe already ran.
+                if !rule.group.is_empty() {
+                    let key = rule.group.join("\\0");
+                    if self.group_recipe_done.borrow().contains(&key) {
+                        continue;
+                    }
+                }
                 let prereqs: Vec<String> = rule
                     .prerequisites
                     .iter()
@@ -1496,6 +1942,13 @@ impl Engine {
                     })
                     .collect();
                 for prereq in &prereqs {
+                    if prereq == target {
+                        eprintln!(
+                            "make: Circular {} <- {} dependency dropped.",
+                            target, prereq
+                        );
+                        continue;
+                    }
                     self.build_target_for(prereq, Some(target))?;
                 }
                 for prereq in &order_only {
@@ -1504,23 +1957,17 @@ impl Engine {
                 if rule.recipe.is_empty() {
                     continue;
                 }
-                // Mimic the single-rule rebuild decision per entry.
-                let target_mtime = if is_phony {
-                    None
-                } else {
-                    std::fs::metadata(target)
-                        .ok()
-                        .and_then(|m| m.modified().ok())
-                };
-                let mut needs = self.always_make || is_phony || target_mtime.is_none();
+                // Use the initial target mtime captured before the loop.
+                let mut needs =
+                    self.always_make.get() || is_phony || initial_target_mtime.is_none();
                 if !needs {
                     for p in &prereqs {
-                        let pm = std::fs::metadata(p).ok().and_then(|m| m.modified().ok());
+                        let pm = self.metadata_or_vpath(p).and_then(|m| m.modified().ok());
                         if pm.is_none() {
                             needs = true;
                             break;
                         }
-                        if let (Some(t), Some(pt)) = (target_mtime, pm)
+                        if let (Some(t), Some(pt)) = (initial_target_mtime, pm)
                             && pt > t
                         {
                             needs = true;
@@ -1532,13 +1979,13 @@ impl Engine {
                     continue;
                 }
                 let _ = idx;
-                self.rebuilt_targets.borrow_mut().insert(target.to_string());
                 if self.touch {
                     if !is_phony {
                         if !self.silent {
                             println!("touch {target}");
                         }
                         *self.recipe_executed.borrow_mut() = true;
+                        self.rebuilt_targets.borrow_mut().insert(target.to_string());
                         if !self.dry_run {
                             std::fs::OpenOptions::new()
                                 .create(true)
@@ -1550,19 +1997,33 @@ impl Engine {
                     }
                 } else if self.question {
                     *self.question_needs_update.borrow_mut() = true;
-                } else if let Err(e) = self.execute_recipe(
-                    target,
-                    &rule.recipe,
-                    &rule.recipe_lines,
-                    &rule.source_name,
-                    &prereqs,
-                    &order_only,
-                    &[],
-                    "",
-                ) {
-                    return Err(e);
                 } else {
-                    *self.recipe_executed.borrow_mut() = true;
+                    match self.execute_recipe(
+                        target,
+                        &rule.recipe,
+                        &rule.recipe_lines,
+                        &rule.source_name,
+                        &prereqs,
+                        &order_only,
+                        &[],
+                        "",
+                    ) {
+                        Err(e) => return Err(e),
+                        Ok(ran) => {
+                            if ran {
+                                self.rebuilt_targets.borrow_mut().insert(target.to_string());
+                            }
+                        }
+                    }
+                }
+                // Mark grouped rule as done so sibling targets skip it.
+                if !rule.group.is_empty() {
+                    let key = rule.group.join("\\0");
+                    self.group_recipe_done.borrow_mut().insert(key);
+                    let mut built = self.built_targets.borrow_mut();
+                    for sibling in &rule.group {
+                        built.insert(sibling.clone());
+                    }
                 }
             }
             *self.target_had_recipe.borrow_mut() = rules.iter().any(|r| !r.recipe.is_empty());
@@ -1576,6 +2037,20 @@ impl Engine {
         } else {
             None
         };
+
+        // For non-double-colon grouped targets, if the group's recipe
+        // was already executed by a sibling, mark this target as built
+        // and skip re-execution.
+        for rule in &rules {
+            if !rule.group.is_empty() {
+                let key = rule.group.join("\0");
+                if self.group_recipe_done.borrow().contains(&key) {
+                    *self.target_had_recipe.borrow_mut() = false;
+                    self.built_targets.borrow_mut().insert(target.to_string());
+                    return Ok(());
+                }
+            }
+        }
 
         // Collect all prerequisites
         let mut all_prereqs: Vec<String> = Vec::new();
@@ -1602,10 +2077,18 @@ impl Engine {
         let normal_set: HashSet<String> = all_prereqs.iter().cloned().collect();
         all_order_only.retain(|o| !normal_set.contains(o));
 
+        // Track prereqs that are derived from pattern substitution (`%`);
+        // these may be intermediate files that do not trigger a rebuild
+        // if the final target already exists and they are not
+        // explicitly mentioned elsewhere.
+        let mut pattern_derived_prereqs: HashSet<String> = HashSet::new();
         if let Some((pat_rule, pat_stem)) = &pattern_match {
             stem = pat_stem.clone();
             for pp in &pat_rule.prereq_patterns {
                 let prereq = pp.replace('%', &stem);
+                if pp.contains('%') {
+                    pattern_derived_prereqs.insert(prereq.clone());
+                }
                 implied_prereqs.push(prereq.clone());
                 all_prereqs.push(prereq);
             }
@@ -1724,7 +2207,7 @@ impl Engine {
             if self.rebuilt_targets.borrow().contains(prereq) {
                 has_rebuilt_prereq = true;
             }
-            if let Ok(meta) = std::fs::metadata(prereq)
+            if let Some(meta) = self.metadata_or_vpath(prereq)
                 && let Ok(mtime) = meta.modified()
             {
                 newest_prereq = Some(match newest_prereq {
@@ -1737,6 +2220,17 @@ impl Engine {
             {
                 // Prereq has a rule but no resulting file — phony / FORCE.
                 has_phony_prereq = true;
+            } else {
+                // Prereq was built (e.g. by a pattern rule) but no file
+                // exists.  If the prereq is NOT “intermediate” (i.e. it
+                // was not derived purely from a %-pattern, or it is
+                // explicitly mentioned elsewhere in the makefile), then
+                // the missing file triggers a rebuild of the parent.
+                let is_intermediate =
+                    pattern_derived_prereqs.contains(prereq) && !self.is_mentioned_file(prereq);
+                if !is_intermediate {
+                    has_phony_prereq = true;
+                }
             }
         }
 
@@ -1744,6 +2238,7 @@ impl Engine {
         // empty error now so the outer driver knows this target didn't
         // remake. Skip the remaining prereq work for this target.
         if first_err.is_some() {
+            self.failed_targets.borrow_mut().insert(target.to_string());
             pop_scope(self);
             return Err(String::new());
         }
@@ -1769,6 +2264,7 @@ impl Engine {
                 }
             }
             if first_err.is_some() {
+                self.failed_targets.borrow_mut().insert(target.to_string());
                 pop_scope(self);
                 return Err(String::new());
             }
@@ -1788,17 +2284,49 @@ impl Engine {
         let target_mtime = if is_phony {
             None
         } else {
-            std::fs::metadata(target)
-                .ok()
+            self.metadata_or_vpath(target)
                 .and_then(|m| m.modified().ok())
         };
 
-        let needs_rebuild = self.always_make
+        // For grouped targets, check whether any sibling is missing or
+        // older than the newest prerequisite.  If so, the group needs
+        // rebuilding even when *this* target is up to date.
+        let mut group_needs_rebuild = false;
+        if !is_phony {
+            for rule in &rules {
+                if !rule.group.is_empty() {
+                    for sibling in &rule.group {
+                        if sibling == target {
+                            continue;
+                        }
+                        let sibling_mtime = std::fs::metadata(sibling)
+                            .ok()
+                            .and_then(|m| m.modified().ok());
+                        if sibling_mtime.is_none() {
+                            group_needs_rebuild = true;
+                            break;
+                        }
+                        if let (Some(s), Some(p)) = (sibling_mtime, newest_prereq)
+                            && p > s
+                        {
+                            group_needs_rebuild = true;
+                            break;
+                        }
+                    }
+                    if group_needs_rebuild {
+                        break;
+                    }
+                }
+            }
+        }
+
+        let needs_rebuild = self.always_make.get()
             || is_phony
             || has_phony_prereq
             || has_assume_new_prereq
             || has_rebuilt_prereq
             || target_mtime.is_none()
+            || group_needs_rebuild
             || match (target_mtime, newest_prereq) {
                 (Some(t), Some(p)) => p > t,
                 _ => false,
@@ -1814,7 +2342,7 @@ impl Engine {
         // No recipe and target doesn't exist?
         if recipe.is_empty() {
             *self.target_had_recipe.borrow_mut() = false;
-            if is_phony || Path::new(target).exists() || !rules.is_empty() {
+            if is_phony || self.file_exists_or_vpath(target) || !rules.is_empty() {
                 self.built_targets.borrow_mut().insert(target.to_string());
                 pop_scope(self);
                 return Ok(());
@@ -1825,13 +2353,10 @@ impl Engine {
                 }
                 None => format!("No rule to make target '{target}'"),
             };
+            self.failed_targets.borrow_mut().insert(target.to_string());
             pop_scope(self);
             return Err(msg);
         }
-
-        // Mark this target as rebuilt so dependents see it as updated
-        // (needed in dry-run where file mtime doesn't actually change).
-        self.rebuilt_targets.borrow_mut().insert(target.to_string());
 
         // Execute recipe
         if self.touch {
@@ -1840,6 +2365,7 @@ impl Engine {
                     println!("touch {target}");
                 }
                 *self.recipe_executed.borrow_mut() = true;
+                self.rebuilt_targets.borrow_mut().insert(target.to_string());
                 // Dry-run + touch: print only, don't actually touch.
                 if !self.dry_run {
                     std::fs::OpenOptions::new()
@@ -1869,48 +2395,96 @@ impl Engine {
             if has_real_recipe {
                 *self.question_needs_update.borrow_mut() = true;
             }
-        } else if let Err(e) = self.execute_recipe(
-            target,
-            &recipe,
-            &recipe_lines,
-            &recipe_source,
-            &all_prereqs,
-            &all_order_only,
-            &implied_prereqs,
-            &stem,
-        ) {
-            // `.DELETE_ON_ERROR:` removes the target file so a partial
-            // build isn't mistaken for a successful one next time.
-            // GNU emits the error diagnostic first, then the deletion notice.
-            if *self.delete_on_error.borrow() && !is_phony && Path::new(target).exists() {
-                // Emit diagnostics in the correct order and consume the
-                // error so the outer caller doesn't print it again.
-                if e.starts_with('[') {
-                    eprintln!("make: *** {e}");
-                } else {
-                    eprintln!("make: *** {e}.  Stop.");
+        } else {
+            match self.execute_recipe(
+                target,
+                &recipe,
+                &recipe_lines,
+                &recipe_source,
+                &all_prereqs,
+                &all_order_only,
+                &implied_prereqs,
+                &stem,
+            ) {
+                Err(e) => {
+                    // `.DELETE_ON_ERROR:` removes the target file so a partial
+                    // build isn't mistaken for a successful one next time.
+                    // GNU emits the error diagnostic first, then the deletion notice.
+                    if *self.delete_on_error.borrow() && !is_phony && Path::new(target).exists() {
+                        // Emit diagnostics in the correct order and consume the
+                        // error so the outer caller doesn't print it again.
+                        if e.starts_with('[') {
+                            eprintln!("make: *** {e}");
+                        } else {
+                            eprintln!("make: *** {e}.  Stop.");
+                        }
+                        eprintln!("make: *** Deleting file '{target}'");
+                        let _ = std::fs::remove_file(target);
+                        // Mark pattern rule siblings as built so they don't
+                        // re-run the same recipe.
+                        if let Some((ref pat_rule, _)) = pattern_match {
+                            for sibling_pat in &pat_rule.sibling_patterns {
+                                let sibling = sibling_pat.replace('%', &stem);
+                                self.built_targets.borrow_mut().insert(sibling);
+                            }
+                        }
+                        self.failed_targets.borrow_mut().insert(target.to_string());
+                        pop_scope(self);
+                        return Err(String::new());
+                    }
+                    // Mark pattern rule siblings as built so they don't
+                    // re-run the same recipe.
+                    if let Some((ref pat_rule, _)) = pattern_match {
+                        for sibling_pat in &pat_rule.sibling_patterns {
+                            let sibling = sibling_pat.replace('%', &stem);
+                            self.built_targets.borrow_mut().insert(sibling);
+                        }
+                    }
+                    pop_scope(self);
+                    return Err(e);
                 }
-                eprintln!("make: *** Deleting file '{target}'");
-                let _ = std::fs::remove_file(target);
-                pop_scope(self);
-                // Return an empty marker error; outer build() will treat
-                // the empty string as "already reported".
-                return Err(String::new());
+                Ok(ran) => {
+                    if ran {
+                        // Mark this target as rebuilt so dependents see it
+                        // as updated (needed in dry-run where file mtime
+                        // doesn't actually change).
+                        self.rebuilt_targets.borrow_mut().insert(target.to_string());
+                    }
+                }
             }
-            pop_scope(self);
-            return Err(e);
         }
 
         self.built_targets.borrow_mut().insert(target.to_string());
         // Mark sibling targets in the same `&:` group as built too —
         // the single recipe we just ran is considered to have updated
-        // the whole group.
+        // the whole group.  Also mark the group recipe as done and
+        // add siblings to group_built_targets so the top-level build
+        // loop can emit the correct diagnostic.
         for rule in &rules {
             if !rule.group.is_empty() {
+                let key = rule.group.join("\0");
+                self.group_recipe_done.borrow_mut().insert(key);
                 let mut built = self.built_targets.borrow_mut();
                 for sibling in &rule.group {
-                    built.insert(sibling.clone());
+                    if sibling != target {
+                        built.insert(sibling.clone());
+                        self.group_built_targets
+                            .borrow_mut()
+                            .insert(sibling.clone());
+                        self.rebuilt_targets.borrow_mut().insert(sibling.clone());
+                    }
                 }
+            }
+        }
+        // Multi-target pattern rules: mark sibling targets (other
+        // target patterns with the same stem) as built.
+        if let Some((pat_rule, _)) = &pattern_match
+            && !pat_rule.sibling_patterns.is_empty()
+        {
+            for sibling_pat in &pat_rule.sibling_patterns {
+                let sibling = sibling_pat.replace('%', &stem);
+                self.built_targets.borrow_mut().insert(sibling.clone());
+                self.rebuilt_targets.borrow_mut().insert(sibling.clone());
             }
         }
         pop_scope(self);
@@ -1945,13 +2519,33 @@ impl Engine {
         first.unwrap_or_else(|| name.to_string())
     }
 
+    /// Check if a file is "mentioned" in the makefile — either as an
+    /// explicit target or as a prerequisite of a non-pattern (explicit)
+    /// rule. Such files "should exist" for terminal pattern rule matching.
+    fn is_mentioned_file(&self, file: &str) -> bool {
+        let rules = self.rules.borrow();
+        // Check if it is an explicit target.
+        if rules.contains_key(file) {
+            return true;
+        }
+        // Check if it appears as a prerequisite of any explicit rule.
+        for entries in rules.values() {
+            for entry in entries {
+                if entry.prerequisites.iter().any(|p| p == file) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     fn find_pattern_rule(&self, target: &str) -> Option<(PatternRuleEntry, String)> {
         let suffixes_cleared = *self.suffixes_cleared.borrow();
         let pattern_rules = self.pattern_rules.borrow();
-        // Fallback candidate: the last user-defined pattern rule whose
-        // target matches, used when no rule has an existing/buildable
-        // prereq. GNU make still applies *some* matching rule even when
-        // the prereq is missing; we pick the most-recently-declared.
+        // Fallback candidate: the last user-defined non-terminal pattern
+        // rule whose target matches, used when no rule has an
+        // existing/buildable prereq. Terminal rules are never used as
+        // fallbacks.
         let mut fallback: Option<(PatternRuleEntry, String)> = None;
         for rule in pattern_rules.iter().rev() {
             // `.SUFFIXES:` (empty) disables built-in suffix-based pattern
@@ -1959,8 +2553,35 @@ impl Engine {
             if suffixes_cleared && rule.source_name == "<built-in>" {
                 continue;
             }
+            // A pattern rule with NO recipe at all is a cancellation
+            // rule — it removes the implicit rule for this target
+            // pattern.  A rule with an empty inline recipe (`%.x: ;`)
+            // is NOT a cancellation; it is a valid rule whose recipe
+            // simply does nothing.
             if let Some(stem) = expand::pattern_stem(target, &rule.target_pattern) {
-                // Check that at least one prerequisite exists or can be built
+                if rule.recipe.is_empty() {
+                    // Cancellation: skip this rule but continue searching
+                    // other patterns.
+                    continue;
+                }
+                if rule.is_terminal {
+                    // Terminal (double-colon) pattern rule: only match if
+                    // every prerequisite actually exists as a file on disk.
+                    // Per GNU make docs, terminal rules never chain to
+                    // build prerequisites.  Never used as fallback.
+                    let prereqs_ok = rule.prereq_patterns.is_empty()
+                        || rule.prereq_patterns.iter().all(|pp| {
+                            let prereq = pp.replace('%', &stem);
+                            Path::new(&prereq).exists()
+                        });
+                    if prereqs_ok {
+                        return Some((rule.clone(), stem));
+                    }
+                    // Terminal rule does not match — skip (no fallback).
+                    continue;
+                }
+                // Non-terminal rule: check that at least one prereq exists
+                // or can be built.
                 let prereqs_ok = rule.prereq_patterns.is_empty()
                     || rule.prereq_patterns.iter().any(|pp| {
                         let prereq = pp.replace('%', &stem);
@@ -1988,7 +2609,7 @@ impl Engine {
         order_only: &[String],
         implied_prereqs: &[String],
         stem: &str,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         // Apply target-specific variable assignments (including those
         // inherited from ancestor targets currently being built). Save
         // prior values so we can restore them afterwards.
@@ -2076,7 +2697,9 @@ impl Engine {
         order_only: &[String],
         implied_prereqs: &[String],
         stem: &str,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
+        *self.in_recipe.borrow_mut() = true;
+        let mut any_commands = false;
         // `.WAIT` is a synchronization barrier, never a real file — exclude
         // it from all automatic variables.
         let filter_wait = |v: &[String]| -> Vec<String> {
@@ -2176,6 +2799,10 @@ impl Engine {
                     break;
                 }
             }
+            // Clear expand_chain_source before each recipe line so
+            // direct function errors report the recipe line, not a
+            // stale variable definition location.
+            *self.expand_chain_source.borrow_mut() = None;
             let expanded_raw = expand::expand_with_auto(raw, self, &auto_vars);
             // Split on newline, but keep `\<newline>` joined — the
             // backslash is an intentional shell line continuation that
@@ -2239,6 +2866,7 @@ impl Engine {
             }
 
             *self.recipe_executed.borrow_mut() = true;
+            any_commands = true;
 
             // In dry-run mode (-n), GNU make ignores the `@` silence prefix
             // so every recipe line is echoed, even silenced ones.
@@ -2347,19 +2975,26 @@ impl Engine {
                             // swallows the failure.
                             eprintln!("make: [{loc}{target}] Error {code} (ignored)");
                         } else {
-                            return Err(format!("[{loc}{target}] Error {code}"));
+                            {
+                                *self.in_recipe.borrow_mut() = false;
+                                return Err(format!("[{loc}{target}] Error {code}"));
+                            }
                         }
                     }
                 }
                 Err(e) => {
                     if !ignore_error && !self.ignore_errors {
-                        return Err(format!("{target}: {e}"));
+                        {
+                            *self.in_recipe.borrow_mut() = false;
+                            return Err(format!("{target}: {e}"));
+                        }
                     }
                 }
             }
         }
 
-        Ok(())
+        *self.in_recipe.borrow_mut() = false;
+        Ok(any_commands)
     }
 }
 
@@ -2426,4 +3061,14 @@ fn dedup_join(items: &[String]) -> String {
         }
     }
     result.join(" ")
+}
+
+/// Clean up Rust IO error messages to match GNU make's format.
+/// e.g. "Permission denied (os error 13)" -> "Permission denied"
+fn clean_io_error(msg: &str) -> String {
+    if let Some(idx) = msg.find(" (os error ") {
+        msg[..idx].to_string()
+    } else {
+        msg.to_string()
+    }
 }

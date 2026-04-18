@@ -6,7 +6,26 @@ mod parser;
 use engine::Engine;
 
 fn main() {
+    // Exit gracefully on stdout write errors (e.g. /dev/full, broken pipe)
+    // instead of panicking with exit code 101.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let msg = info.to_string();
+        if msg.contains("failed printing to") {
+            eprintln!("make: write error");
+            std::process::exit(1);
+        }
+        default_hook(info);
+    }));
+
     let code = run();
+
+    // Flush stdout; exit 1 on write error (e.g. /dev/full).
+    use std::io::Write;
+    if std::io::stdout().flush().is_err() {
+        eprintln!("make: write error");
+        std::process::exit(1);
+    }
     std::process::exit(code);
 }
 
@@ -39,6 +58,7 @@ fn run() -> i32 {
             }
         }
     }
+    let prepend_count = prepend.len();
     if !prepend.is_empty() {
         let mut new_args = Vec::with_capacity(args.len() + prepend.len());
         new_args.push(args.remove(0));
@@ -46,6 +66,8 @@ fn run() -> i32 {
         new_args.extend(args);
         args = new_args;
     }
+    // Index where real command-line args start (after argv[0] and prepended MAKEFLAGS entries).
+    let cmdline_start: usize = 1 + prepend_count;
     let mut engine = Engine::new();
 
     // Set $(MAKE) to argv[0] so recursive make and tests can locate this
@@ -67,6 +89,9 @@ fn run() -> i32 {
     let mut mflags_long: Vec<String> = Vec::new();
     // `--eval=TEXT` strings, evaluated before the primary makefile.
     let mut eval_strings: Vec<String> = Vec::new();
+    // Track command-line variable overrides for MAKEOVERRIDES.
+    // Only real command-line args (not inherited from MAKEFLAGS) go here.
+    let mut makeoverrides: Vec<String> = Vec::new();
 
     let mut targets = Vec::new();
     let mut makefiles: Vec<String> = Vec::new();
@@ -95,8 +120,10 @@ fn run() -> i32 {
                     // GNU make's convention for removing the defaults.
                     if args[i] == "-" {
                         engine.include_dirs.borrow_mut().clear();
+                        mflags_long.push("-I-".to_string());
                     } else {
                         engine.include_dirs.borrow_mut().push(args[i].clone());
+                        mflags_long.push(format!("-I{}", args[i]));
                     }
                 }
             }
@@ -104,16 +131,20 @@ fn run() -> i32 {
                 let rest = &arg[2..];
                 if rest == "-" {
                     engine.include_dirs.borrow_mut().clear();
+                    mflags_long.push("-I-".to_string());
                 } else {
                     engine.include_dirs.borrow_mut().push(rest.to_string());
+                    mflags_long.push(format!("-I{rest}"));
                 }
             }
             arg if arg.starts_with("--include-dir=") => {
                 let rest = &arg["--include-dir=".len()..];
                 if rest == "-" {
                     engine.include_dirs.borrow_mut().clear();
+                    mflags_long.push("-I-".to_string());
                 } else {
                     engine.include_dirs.borrow_mut().push(rest.to_string());
+                    mflags_long.push(format!("-I{rest}"));
                 }
             }
             "-W" | "--what-if" | "--new-file" | "--assume-new" => {
@@ -191,7 +222,7 @@ fn run() -> i32 {
                 mflags_short.push('q');
             }
             "-B" | "--always-make" => {
-                engine.always_make = true;
+                engine.always_make.set(true);
                 mflags_short.push('B');
             }
             "-i" | "--ignore-errors" => {
@@ -237,7 +268,7 @@ fn run() -> i32 {
             arg if arg.starts_with("--eval=") => {
                 eval_strings.push(arg["--eval=".len()..].to_string());
             }
-            "--eval" => {
+            "-E" | "--eval" => {
                 i += 1;
                 if i < args.len() {
                     eval_strings.push(args[i].clone());
@@ -299,6 +330,7 @@ fn run() -> i32 {
                 //   VAR:=val / VAR::=val → simple
                 //   VAR?=val → conditional (skip if already defined)
                 //   VAR+=val → append
+                let is_real_cmdline = i >= cmdline_start;
                 let (name, op, value) = if let Some(idx) = arg.find("::=") {
                     (&arg[..idx], engine::VarFlavor::Simple, &arg[idx + 3..])
                 } else if let Some(idx) = arg.find(":=") {
@@ -319,6 +351,9 @@ fn run() -> i32 {
                         engine::VarFlavor::Recursive,
                         engine::VarOrigin::CommandLine,
                     );
+                    if is_real_cmdline {
+                        makeoverrides.push(format!("{name}={combined}"));
+                    }
                     i += 1;
                     continue;
                 } else if let Some(idx) = arg.find("?=") {
@@ -334,6 +369,9 @@ fn run() -> i32 {
                     continue;
                 };
                 engine.set_var_with_origin(name, value, op, engine::VarOrigin::CommandLine);
+                if is_real_cmdline {
+                    makeoverrides.push(format!("{name}={value}"));
+                }
             }
             arg if arg.starts_with("--") => {
                 // Unknown long options — accept silently (or warn) rather
@@ -368,7 +406,7 @@ fn run() -> i32 {
                         'k' => engine.keep_going = true,
                         't' => engine.touch = true,
                         'q' => engine.question = true,
-                        'B' => engine.always_make = true,
+                        'B' => engine.always_make.set(true),
                         'i' => engine.ignore_errors = true,
                         'e' => engine.env_overrides = true,
                         'w' => {}
@@ -397,7 +435,13 @@ fn run() -> i32 {
                         }
                         'I' => {
                             if let Some(v) = take_arg(&flags, idx, &mut i) {
-                                engine.include_dirs.borrow_mut().push(v);
+                                if v == "-" {
+                                    engine.include_dirs.borrow_mut().clear();
+                                    mflags_long.push("-I-".to_string());
+                                } else {
+                                    engine.include_dirs.borrow_mut().push(v.clone());
+                                    mflags_long.push(format!("-I{v}"));
+                                }
                             }
                             break;
                         }
@@ -444,9 +488,13 @@ fn run() -> i32 {
         vec!["makefile".to_string()]
     } else if std::path::Path::new("Makefile").exists() {
         vec!["Makefile".to_string()]
-    } else {
+    } else if eval_strings.is_empty() {
         eprintln!("make: *** No makefile found.  Stop.");
         return 2;
+    } else {
+        // -E/--eval provided but no default makefile — will try
+        // them as -include later (after eval strings are processed).
+        vec![]
     };
 
     // Populate MAKECMDGOALS before loading the makefile so user
@@ -458,14 +506,21 @@ fn run() -> i32 {
         engine::VarOrigin::Default,
     );
 
+    // Populate MAKEOVERRIDES from real command-line variable assignments.
+    // GNU make stores these so sub-makes can inherit command-line overrides.
+    engine.set_var_with_origin(
+        "MAKEOVERRIDES",
+        &makeoverrides.join(" "),
+        engine::VarFlavor::Recursive,
+        engine::VarOrigin::Default,
+    );
+
     // Build MAKEFLAGS: short flags concatenated (no leading '-'), then
-    // long flags as separate `--opt` tokens, then command-line var
-    // assignments. GNU make format: sub-makes re-apply these when they
-    // inherit MAKEFLAGS through the environment.
-    // GNU make: when there are only long options (no short flag
-    // cluster), MAKEFLAGS still begins with a space — e.g.
-    // `MAKEFLAGS= --no-silent`. This lets scripts like `ifeq
-    // ($(firstword $(MAKEFLAGS)),)` detect the long-only case.
+    // long flags as separate `--opt` tokens. GNU make includes
+    // $(MAKEOVERRIDES) after a `--` separator so sub-makes inherit
+    // command-line variable assignments. MAKEFLAGS is recursive so
+    // changes to MAKEOVERRIDES (even from inside a makefile) are
+    // reflected when MAKEFLAGS is exported to child processes.
     let mut mflags = mflags_short.clone();
     if mflags_short.is_empty() && !mflags_long.is_empty() {
         mflags.push(' ');
@@ -476,30 +531,15 @@ fn run() -> i32 {
         }
         mflags.push_str(long);
     }
-    // Append command-line var assignments (so sub-makes inherit them).
-    // GNU make separates flags from assignments with ` -- ` — this lets
-    // it know where variable assignments begin when re-parsing MAKEFLAGS.
-    let cmdline_vars: Vec<String> = {
-        let vars = engine.vars.borrow();
-        let mut v: Vec<String> = vars
-            .iter()
-            .filter(|(_, var)| var.origin == engine::VarOrigin::CommandLine)
-            .map(|(name, var)| format!("{name}={}", var.value))
-            .collect();
-        v.sort();
-        v
-    };
-    if !cmdline_vars.is_empty() {
-        mflags.push_str(" --");
-        for assign in &cmdline_vars {
-            mflags.push(' ');
-            mflags.push_str(assign);
-        }
-    }
+    // Use $(MAKEOVERRIDES) so the value is resolved dynamically -- if
+    // the makefile appends to MAKEOVERRIDES, MAKEFLAGS picks it up.
+    // Only include the " -- " separator when MAKEOVERRIDES is non-empty,
+    // otherwise MAKEFLAGS would always end with " --".
+    mflags.push_str("$(if $(MAKEOVERRIDES), -- $(MAKEOVERRIDES))");
     engine.set_var_with_origin(
         "MAKEFLAGS",
         &mflags,
-        engine::VarFlavor::Simple,
+        engine::VarFlavor::Recursive,
         engine::VarOrigin::Default,
     );
 
@@ -508,19 +548,38 @@ fn run() -> i32 {
     // set via env or command-line assignment; by the time we get here
     // both have been absorbed into engine state, so reading the engine
     // var covers both.
+    // Evaluate any `--eval=TEXT` strings before the primary makefile
+    // and before MAKEFILES env loading (GNU make processes -E first).
+    for text in &eval_strings {
+        engine.load_string(text);
+    }
+
+    // Auto-include any makefiles listed in the MAKEFILES variable.
     let makefiles_list = engine.lookup_var("MAKEFILES");
     if !makefiles_list.trim().is_empty() {
         *engine.suppress_default_goal.borrow_mut() = true;
         for path in makefiles_list.split_whitespace() {
-            engine.load_file(path, true);
+            if !engine.load_file_with_loc(path, true, None) {
+                engine.pending_includes.borrow_mut().push((
+                    path.to_string(),
+                    true,
+                    String::new(),
+                    0,
+                ));
+            }
         }
         *engine.suppress_default_goal.borrow_mut() = false;
     }
 
-    // Evaluate any `--eval=TEXT` strings before the primary makefile
-    // (GNU make processes these first).
-    for text in &eval_strings {
-        engine.load_string(text);
+    // When no explicit makefile is given (-E only mode), the default
+    // makefile names are subject to include remaking.
+    if makefile_paths.is_empty() && !eval_strings.is_empty() {
+        for name in &["GNUmakefile", "makefile", "Makefile"] {
+            engine
+                .pending_includes
+                .borrow_mut()
+                .push((name.to_string(), true, String::new(), 0));
+        }
     }
 
     let mut stdin_read = false;
@@ -540,6 +599,53 @@ fn run() -> i32 {
             engine.load_string(&content);
         } else {
             engine.load_file(path, false);
+        }
+    }
+
+    // After loading all makefiles, re-check MAKEFLAGS for -r / -R flags
+    // that were set inside the makefile (e.g. `MAKEFLAGS += -r`). GNU
+    // make honours these the same way as command-line flags.
+    {
+        let mflags_post = engine.lookup_var("MAKEFLAGS");
+        // Split on whitespace; stop at "--" (separator before var
+        // assignments). Each token that starts with "-" is a flag
+        // cluster or long option; bare tokens (no leading dash) are
+        // also short-flag clusters in MAKEFLAGS format.
+        let mut has_r = false;
+        let mut has_big_r = false;
+        for tok in mflags_post.split_whitespace() {
+            // Don't break at "--" — flags appended via
+            // `MAKEFLAGS += -r` may appear after the separator.
+            if tok == "--no-builtin-rules" {
+                has_r = true;
+                continue;
+            }
+            if tok == "--no-builtin-variables" {
+                has_big_r = true;
+                continue;
+            }
+            // Short-flag cluster: may or may not start with '-'
+            let chars: &str = if let Some(rest) = tok.strip_prefix('-') {
+                rest
+            } else {
+                tok
+            };
+            for ch in chars.chars() {
+                match ch {
+                    'r' => has_r = true,
+                    'R' => {
+                        has_r = true;
+                        has_big_r = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if has_r {
+            engine.disable_builtin_rules();
+        }
+        if has_big_r {
+            engine.disable_builtin_vars();
         }
     }
 

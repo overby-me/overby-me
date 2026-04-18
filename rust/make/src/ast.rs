@@ -7,8 +7,8 @@ pub type Makefile = Vec<Directive>;
 #[derive(Debug, Clone)]
 pub enum Directive {
     Rule(Rule),
-    Assignment(Assignment),
-    Include(Vec<String>, bool), // (files, is_sinclude/-include)
+    Assignment(Assignment, String, usize), // (assignment, source_name, line_no)
+    Include(Vec<String>, bool, String, usize), // (files, is_sinclude/-include, source_name, line_no)
     Conditional(Conditional),
     /// `export` (no args) → export all. `export VAR ...` → export the
     /// listed vars.
@@ -19,10 +19,10 @@ pub enum Directive {
     #[allow(dead_code)]
     Vpath(Option<(String, String)>),
     Override(Box<Assignment>),
-    Define(String, AssignOp, Vec<String>), // multi-line variable
-    OverrideDefine(String, AssignOp, Vec<String>), // override define NAME…endef
-    Undefine(String),
-    OverrideUndefine(String), // override undefine VAR — force-remove
+    Define(String, AssignOp, Vec<String>, String, usize), // multi-line variable (name, op, body, source, line_no)
+    OverrideDefine(String, AssignOp, Vec<String>, String, usize), // override define NAME…endef
+    Undefine(String, String, usize),                      // (name, source, line_no)
+    OverrideUndefine(String, String, usize), // (name, source, line_no) // override undefine VAR — force-remove
     /// Target-specific variable assignment: `targets: VAR OP value`.
     /// `targets` is the raw (possibly space-separated, unexpanded) list;
     /// the engine expands it at load time.
@@ -57,6 +57,8 @@ pub struct Rule {
     /// `&:` grouped-target rule. Each target is considered updated
     /// after the recipe runs once for any one of them.
     pub is_grouped: bool,
+    /// 1-based line number of the rule definition in its source file.
+    pub line_no: usize,
 }
 
 /// Pattern rule info (e.g., %.o: %.c).
