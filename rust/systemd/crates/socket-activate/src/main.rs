@@ -622,18 +622,16 @@ fn accept_and_spawn(
             unsafe { libc::close(listen_fd) };
 
             if inetd {
-                if unsafe { libc::dup2(conn_fd, 0) } < 0
-                    || unsafe { libc::dup2(conn_fd, 1) } < 0
-                {
-                    eprintln!(
-                        "dup2 of accepted fd failed: {}",
-                        io::Error::last_os_error()
-                    );
+                if unsafe { libc::dup2(conn_fd, 0) } < 0 || unsafe { libc::dup2(conn_fd, 1) } < 0 {
+                    eprintln!("dup2 of accepted fd failed: {}", io::Error::last_os_error());
                     process::exit(1);
                 }
                 unsafe { libc::close(conn_fd) };
                 if let Err(e) = exec_command(command, 0, fd_names) {
-                    eprintln!("exec {} failed: {e}", command.first().map(|s| s.as_str()).unwrap_or(""));
+                    eprintln!(
+                        "exec {} failed: {e}",
+                        command.first().map(|s| s.as_str()).unwrap_or("")
+                    );
                     process::exit(1);
                 }
             } else {
@@ -642,7 +640,10 @@ fn accept_and_spawn(
                     process::exit(1);
                 }
                 if let Err(e) = exec_command(command, 1, fd_names) {
-                    eprintln!("exec {} failed: {e}", command.first().map(|s| s.as_str()).unwrap_or(""));
+                    eprintln!(
+                        "exec {} failed: {e}",
+                        command.first().map(|s| s.as_str()).unwrap_or("")
+                    );
                     process::exit(1);
                 }
             }

@@ -311,11 +311,7 @@ fn main() {
 /// sends the given notification parts (with an added `MAINPID=<child>`
 /// line) to `$NOTIFY_SOCKET`, then prints the child's PID on stdout and
 /// exits 0.  If fork or exec fails, exits 1.
-fn fork_exec_and_notify(
-    cmd: &[String],
-    parts: &[String],
-    notify_socket: Option<&str>,
-) -> ! {
+fn fork_exec_and_notify(cmd: &[String], parts: &[String], notify_socket: Option<&str>) -> ! {
     use std::ffi::CString;
     match unsafe { libc::fork() } {
         -1 => {
@@ -331,8 +327,8 @@ fn fork_exec_and_notify(
             // gets EOF as soon as the parent exits — otherwise the
             // subshell keeps blocking on the child's open stdout.
             unsafe {
-                let devnull_ro = libc::open(b"/dev/null\0".as_ptr().cast(), libc::O_RDONLY);
-                let devnull_wr = libc::open(b"/dev/null\0".as_ptr().cast(), libc::O_WRONLY);
+                let devnull_ro = libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY);
+                let devnull_wr = libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY);
                 if devnull_ro >= 0 {
                     libc::dup2(devnull_ro, 0);
                     libc::close(devnull_ro);
@@ -360,7 +356,11 @@ fn fork_exec_and_notify(
                 .chain(std::iter::once(std::ptr::null()))
                 .collect();
             unsafe { libc::execvp(prog.as_ptr(), ptrs.as_ptr()) };
-            eprintln!("exec {} failed: {}", cmd[0], std::io::Error::last_os_error());
+            eprintln!(
+                "exec {} failed: {}",
+                cmd[0],
+                std::io::Error::last_os_error()
+            );
             process::exit(1);
         }
         pid => {

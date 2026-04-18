@@ -169,11 +169,7 @@ mod inner {
             // We store as hex — decode back to bytes.
             let mut out = Vec::with_capacity(16);
             let mut iter = id.chars().filter(|c| c.is_ascii_hexdigit());
-            loop {
-                let (a, b) = match (iter.next(), iter.next()) {
-                    (Some(a), Some(b)) => (a, b),
-                    _ => break,
-                };
+            while let (Some(a), Some(b)) = (iter.next(), iter.next()) {
                 if let Ok(byte) = u8::from_str_radix(&format!("{a}{b}"), 16) {
                     out.push(byte);
                 }
@@ -438,11 +434,7 @@ mod inner {
     /// Resolve a `MemoryLimit` into a `u64` (the D-Bus wire type for
     /// MemoryMax=, MemoryMin=, etc.).  Absent or infinity limits map to
     /// `u64::MAX` — matching upstream's "-1 / infinity" encoding.
-    fn memory_limit_bytes<F>(
-        run_info: &ArcMutRuntimeInfo,
-        unit_name: &str,
-        select: F,
-    ) -> u64
+    fn memory_limit_bytes<F>(run_info: &ArcMutRuntimeInfo, unit_name: &str, select: F) -> u64
     where
         F: Fn(&crate::units::SliceConfig) -> &Option<crate::units::MemoryLimit>,
     {
@@ -580,10 +572,7 @@ mod inner {
                 .values()
                 .find(|u| u.id.name == self.unit_name)
                 .map(|u| {
-                    let pid = u
-                        .common
-                        .main_pid
-                        .load(std::sync::atomic::Ordering::Acquire);
+                    let pid = u.common.main_pid.load(std::sync::atomic::Ordering::Acquire);
                     if pid > 0 { pid as u32 } else { 0 }
                 })
                 .unwrap_or(0)
@@ -626,9 +615,9 @@ mod inner {
                 .values()
                 .find(|u| u.id.name == self.unit_name)
                 .and_then(|u| match &u.specific {
-                    crate::units::Specific::Service(srvc) => Some(service_type_string(
-                        &srvc.conf.srcv_type,
-                    )),
+                    crate::units::Specific::Service(srvc) => {
+                        Some(service_type_string(&srvc.conf.srcv_type))
+                    }
                     _ => None,
                 })
                 .unwrap_or_else(|| "simple".to_string())
@@ -1020,11 +1009,8 @@ mod inner {
 
         /// Reset all failed units (clears stored errors everywhere).
         fn reset_failed(&self) -> zbus::fdo::Result<()> {
-            invoke_command(
-                &self.run_info,
-                crate::control::Command::ResetFailed(None),
-            )
-            .map_err(zbus::fdo::Error::Failed)?;
+            invoke_command(&self.run_info, crate::control::Command::ResetFailed(None))
+                .map_err(zbus::fdo::Error::Failed)?;
             Ok(())
         }
 
@@ -1039,11 +1025,7 @@ mod inner {
         /// CacheDirectory/LogsDirectory/ConfigurationDirectory as requested
         /// by the `what` list (values: "configuration", "runtime", "state",
         /// "cache", "logs", "all").  Empty list defaults to runtime+cache.
-        fn clean_unit(
-            &self,
-            name: String,
-            what: Vec<String>,
-        ) -> zbus::fdo::Result<()> {
+        fn clean_unit(&self, name: String, what: Vec<String>) -> zbus::fdo::Result<()> {
             let what_str = if what.is_empty() {
                 None
             } else {
@@ -1079,22 +1061,14 @@ mod inner {
 
         /// Find the unit that owns the given PID.  Returns the unit's
         /// object path, or an error if the PID isn't tracked.
-        fn get_unit_by_pid(
-            &self,
-            pid: u32,
-        ) -> zbus::fdo::Result<zbus::zvariant::OwnedObjectPath> {
+        fn get_unit_by_pid(&self, pid: u32) -> zbus::fdo::Result<zbus::zvariant::OwnedObjectPath> {
             let ri = self.run_info.read_poisoned();
             let pid_i32 = pid as i32;
             // Fast path: check per-unit atomic MainPID.
             let owner = ri
                 .unit_table
                 .values()
-                .find(|u| {
-                    u.common
-                        .main_pid
-                        .load(std::sync::atomic::Ordering::Acquire)
-                        == pid_i32
-                })
+                .find(|u| u.common.main_pid.load(std::sync::atomic::Ordering::Acquire) == pid_i32)
                 .map(|u| u.id.name.clone());
             match owner {
                 Some(name) => Ok(unit_object_path(&name)),
@@ -1286,8 +1260,9 @@ mod inner {
                 // matching `systemd.service(5)`'s quoting rules.
                 if key == "ExecStart" {
                     let shell_quote = |s: &str| -> String {
-                        let needs_quoting =
-                            s.is_empty() || s.chars().any(|c| c.is_whitespace() || c == '"' || c == '\\' || c == '\'');
+                        let needs_quoting = s.is_empty()
+                            || s.chars()
+                                .any(|c| c.is_whitespace() || c == '"' || c == '\\' || c == '\'');
                         if !needs_quoting {
                             return s.to_owned();
                         }
@@ -1424,9 +1399,7 @@ mod inner {
                     registered += 1;
                 }
             }
-            info!(
-                "dbus-server: registered {registered} per-unit objects"
-            );
+            info!("dbus-server: registered {registered} per-unit objects");
         }
 
         // Periodically reconcile per-unit D-Bus objects with the unit
@@ -1448,9 +1421,7 @@ mod inner {
             };
             // Additions
             for name in &current_names {
-                if !known.contains(name)
-                    && register_unit_object(&conn, &run_info, name).is_ok()
-                {
+                if !known.contains(name) && register_unit_object(&conn, &run_info, name).is_ok() {
                     trace!("dbus-server: registered new unit object {name}");
                     known.insert(name.clone());
                 }

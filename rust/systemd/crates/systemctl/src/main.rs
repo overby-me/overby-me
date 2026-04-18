@@ -1588,16 +1588,17 @@ fn main() {
         // bind <unit> <source> <destination> [--read-only] [--mkdir]
         if positional.len() < 4 {
             if !quiet {
-                eprintln!(
-                    "Error: bind requires <unit> <source> <destination> arguments."
-                );
+                eprintln!("Error: bind requires <unit> <source> <destination> arguments.");
             }
             std::process::exit(1);
         }
         let mut obj = serde_json::Map::new();
         obj.insert("unit".to_string(), Value::String(positional[1].clone()));
         obj.insert("source".to_string(), Value::String(positional[2].clone()));
-        obj.insert("destination".to_string(), Value::String(positional[3].clone()));
+        obj.insert(
+            "destination".to_string(),
+            Value::String(positional[3].clone()),
+        );
         obj.insert("read_only".to_string(), Value::Bool(bind_read_only));
         obj.insert("mkdir".to_string(), Value::Bool(bind_mkdir));
         Some(Value::Object(obj))

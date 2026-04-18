@@ -143,7 +143,10 @@ fn helper_mount_ns_from_conf(conf: &ServiceConfig) -> Option<HelperMountNs> {
 fn parse_bind_entry(entry: &str) -> Option<(String, String)> {
     let mut parts = entry.splitn(3, ':');
     let src = parts.next()?.to_owned();
-    let dst = parts.next().map(|s| s.to_owned()).unwrap_or_else(|| src.clone());
+    let dst = parts
+        .next()
+        .map(|s| s.to_owned())
+        .unwrap_or_else(|| src.clone());
     if src.is_empty() || dst.is_empty() {
         return None;
     }
@@ -229,7 +232,9 @@ fn apply_helper_mount_namespace(ns: &HelperMountNs) -> std::io::Result<()> {
     // the helper cannot bypass the block via earlier bind mounts or the
     // PrivateTmp tmpfs.
     for p in &ns.inaccessible_paths {
-        let Ok(dst) = CString::new(p.as_str()) else { continue };
+        let Ok(dst) = CString::new(p.as_str()) else {
+            continue;
+        };
         let tmpfs_name = c"tmpfs";
         let ret = unsafe {
             libc::mount(
@@ -269,8 +274,12 @@ fn apply_bind_list(entries: &[PreparedBindPath], read_only: bool) -> std::io::Re
                 let _ = std::fs::File::create(dst);
             }
         }
-        let Ok(c_src) = CString::new(src.as_str()) else { continue };
-        let Ok(c_dst) = CString::new(dst.as_str()) else { continue };
+        let Ok(c_src) = CString::new(src.as_str()) else {
+            continue;
+        };
+        let Ok(c_dst) = CString::new(dst.as_str()) else {
+            continue;
+        };
         let ret = unsafe {
             libc::mount(
                 c_src.as_ptr(),
@@ -800,6 +809,7 @@ impl Service {
             if conf.srcv_type == ServiceType::OneShot && conf.exec.len() > 1 {
                 let timeout = self.get_start_timeout(conf);
                 let mut idx: usize = 0;
+                #[allow(clippy::while_let_loop)]
                 loop {
                     let (exec_list, working_dir) = match run_info
                         .unit_table
@@ -830,16 +840,22 @@ impl Service {
 
                     let cmd = exec_list[idx].clone();
                     self.current_exec_argv = Some(cmd.to_string());
-                    self.run_cmd(&cmd, id.clone(), name, timeout, run_info, working_dir.as_ref())
-                        .map_err(|start_err| {
-                            match self.run_poststop(conf, id.clone(), name, run_info) {
-                                Ok(()) => ServiceErrorReason::StartFailed(start_err),
-                                Err(poststop_err) => ServiceErrorReason::StartAndPoststopFailed(
-                                    start_err,
-                                    poststop_err,
-                                ),
+                    self.run_cmd(
+                        &cmd,
+                        id.clone(),
+                        name,
+                        timeout,
+                        run_info,
+                        working_dir.as_ref(),
+                    )
+                    .map_err(|start_err| {
+                        match self.run_poststop(conf, id.clone(), name, run_info) {
+                            Ok(()) => ServiceErrorReason::StartFailed(start_err),
+                            Err(poststop_err) => {
+                                ServiceErrorReason::StartAndPoststopFailed(start_err, poststop_err)
                             }
-                        })?;
+                        }
+                    })?;
                 }
                 self.current_exec_argv = None;
             }
@@ -1428,9 +1444,7 @@ impl Service {
                         _,
                         crate::signal_handler::ChildTermination::Exit(code),
                     )) if code != 255 => {
-                        trace!(
-                            "ExecCondition {cmd:?} exited with {code}, skipping service {name}"
-                        );
+                        trace!("ExecCondition {cmd:?} exited with {code}, skipping service {name}");
                         return Ok(false);
                     }
                     Err(e) => {

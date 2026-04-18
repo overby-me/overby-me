@@ -503,7 +503,9 @@ fn device_id_to_syspath(id: &str) -> Option<PathBuf> {
     // n<ifname>: network interface.
     if let Some(ifname) = id.strip_prefix('n')
         && !ifname.is_empty()
-        && ifname.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        && ifname
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     {
         let p = PathBuf::from(format!("/sys/class/net/{ifname}"));
         if p.exists() {
@@ -535,6 +537,7 @@ fn device_id_to_syspath(id: &str) -> Option<PathBuf> {
     None
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_info(
     name: &Option<String>,
     path: &Option<String>,
@@ -564,11 +567,7 @@ fn cmd_info(
     // `udevadm info --export / -e` without a specific device dumps every
     // udev-database entry.  With a device, it exports that device's
     // properties (handled below alongside the normal query path).
-    if export
-        && name.is_none()
-        && path.is_none()
-        && devices.is_empty()
-    {
+    if export && name.is_none() && path.is_none() && devices.is_empty() {
         return cmd_info_export_db();
     }
 
@@ -1526,7 +1525,6 @@ fn cmd_test(action: &str, devpath: &str) -> i32 {
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 fn cmd_control(
     stop_exec_queue: bool,
     start_exec_queue: bool,
@@ -1547,8 +1545,22 @@ fn cmd_control(
     if let Some(level) = log_level
         && !matches!(
             level.as_str(),
-            "emerg" | "alert" | "crit" | "err" | "warning" | "notice" | "info" | "debug" | "0"
-                | "1" | "2" | "3" | "4" | "5" | "6" | "7"
+            "emerg"
+                | "alert"
+                | "crit"
+                | "err"
+                | "warning"
+                | "notice"
+                | "info"
+                | "debug"
+                | "0"
+                | "1"
+                | "2"
+                | "3"
+                | "4"
+                | "5"
+                | "6"
+                | "7"
         )
     {
         eprintln!("udevadm control: invalid log-level: {level}");
@@ -1994,12 +2006,7 @@ fn cmd_wait(timeout: u64, wait_until: &str, _settle: bool, devices: &[String]) -
 /// a `DEVICE_ID` field — systemd's canonical per-device identifier that
 /// feeds back into `udevadm info` invocations (e.g. `udevadm info n1`
 /// resolves to the `eth0`-like interface).
-fn cmd_info_json(
-    mode: &str,
-    name: Option<&str>,
-    path: Option<&str>,
-    devices: &[String],
-) -> i32 {
+fn cmd_info_json(mode: &str, name: Option<&str>, path: Option<&str>, devices: &[String]) -> i32 {
     // Build a combined list of targets to query.
     let mut targets: Vec<String> = Vec::new();
     if let Some(n) = name {
@@ -2027,10 +2034,11 @@ fn cmd_info_json(
         //   * `n<index>` — network interface id (DEVICE_ID for netifs).
         //   * `b<maj>:<min>` / `c<maj>:<min>` — block/char major:minor.
         let syspath = if target.starts_with("/dev/") {
-            devname_to_syspath(target)
-                .unwrap_or_else(|| normalize_syspath(target))
+            devname_to_syspath(target).unwrap_or_else(|| normalize_syspath(target))
         } else if let Some(ifname) = target.strip_prefix('n')
-            && ifname.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && ifname
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
         {
             // n<ifname> network interface lookup.
             PathBuf::from(format!("/sys/class/net/{ifname}"))
@@ -2072,7 +2080,11 @@ fn cmd_info_json(
                 format!("c{maj}:{min}")
             }
         } else if !target.starts_with('/')
-            && target.chars().next().map(|c| c == 'n' || c == 'b' || c == 'c').unwrap_or(false)
+            && target
+                .chars()
+                .next()
+                .map(|c| c == 'n' || c == 'b' || c == 'c')
+                .unwrap_or(false)
         {
             target.clone()
         } else {
@@ -2086,8 +2098,7 @@ fn cmd_info_json(
 
         // Assemble the JSON map.  Start with the standard fields, then
         // merge the uevent properties.
-        let mut map: std::collections::BTreeMap<String, String> =
-            std::collections::BTreeMap::new();
+        let mut map: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
         map.insert("DEVICE_ID".to_string(), device_id);
         if !devname.is_empty() {
             map.insert("DEVNAME".to_string(), devname);
@@ -2099,10 +2110,7 @@ fn cmd_info_json(
             map.entry(k).or_insert(v);
         }
         // DEVPATH is canonical from our path mapper.
-        map.insert(
-            "DEVPATH".to_string(),
-            syspath_to_devpath(&syspath),
-        );
+        map.insert("DEVPATH".to_string(), syspath_to_devpath(&syspath));
 
         outputs.push(render_json_object(&map, mode));
     }
@@ -2128,7 +2136,11 @@ fn render_json_object(map: &std::collections::BTreeMap<String, String>, mode: &s
     let sep = if mode == "short" { "," } else { ",\n" };
     let colon = if mode == "short" { ":" } else { ": " };
     for (k, v) in map {
-        entries.push(format!("{indent}{}{colon}{}", json_escape(k), json_escape(v)));
+        entries.push(format!(
+            "{indent}{}{colon}{}",
+            json_escape(k),
+            json_escape(v)
+        ));
     }
     let body = entries.join(sep);
     if mode == "short" {
@@ -2136,6 +2148,60 @@ fn render_json_object(map: &std::collections::BTreeMap<String, String>, mode: &s
     } else {
         format!("{{\n{body}\n}}")
     }
+}
+
+/// Emit `udevadm info -e --json=short|pretty` — a JSON array of every
+/// udev database entry.
+fn cmd_info_json_export(mode: &str) -> i32 {
+    let db_dir = Path::new(DB_DIR);
+    if !db_dir.is_dir() {
+        println!("[]");
+        return 0;
+    }
+    let mut entries: Vec<PathBuf> = match std::fs::read_dir(db_dir) {
+        Ok(rd) => rd.filter_map(|e| e.ok()).map(|e| e.path()).collect(),
+        Err(_) => {
+            println!("[]");
+            return 0;
+        }
+    };
+    entries.sort();
+
+    let mut outputs: Vec<String> = Vec::new();
+    for entry in &entries {
+        if let Some(name) = entry.file_name().and_then(|n| n.to_str())
+            && (name.starts_with('.') || name.ends_with(".tmp"))
+        {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(entry) else {
+            continue;
+        };
+        let mut map: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+        map.insert(
+            "_DB_ENTRY".to_string(),
+            entry
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string(),
+        );
+        // Very simple parse: lines of the form `X:KEY=VALUE` where X is
+        // a single character.
+        for line in content.lines() {
+            if let Some((_tag, rest)) = line.split_once(':')
+                && let Some((k, v)) = rest.split_once('=')
+            {
+                map.entry(k.to_string()).or_insert(v.to_string());
+            }
+        }
+        outputs.push(render_json_object(&map, mode));
+    }
+    match mode {
+        "short" => println!("[{}]", outputs.join(",")),
+        _ => println!("[\n{}\n]", outputs.join(",\n")),
+    }
+    0
 }
 
 fn json_escape(s: &str) -> String {
@@ -2259,8 +2325,7 @@ fn cmd_test_builtin(action: &str, command: &str, devpath: &str) -> i32 {
     }
 
     // Builtins that fail on non-device targets.
-    let looks_like_real_device =
-        devpath.starts_with("/sys/") || devpath.starts_with("/dev/");
+    let looks_like_real_device = devpath.starts_with("/sys/") || devpath.starts_with("/dev/");
     let requires_real_device = matches!(builtin, "net_id" | "net_driver" | "path_id" | "usb_id");
     if requires_real_device && (!looks_like_real_device || devpath.starts_with("/dev/null")) {
         eprintln!("udevadm test-builtin: {builtin}: {devpath} is not a suitable device");
@@ -2296,10 +2361,10 @@ fn cmd_test_builtin(action: &str, command: &str, devpath: &str) -> i32 {
 fn read_net_driver(devpath: &str) -> Option<String> {
     let syspath = normalize_syspath(devpath);
     let driver_link = syspath.join("device").join("driver");
-    if let Ok(tgt) = std::fs::read_link(&driver_link) {
-        if let Some(name) = tgt.file_name().and_then(|n| n.to_str()) {
-            return Some(name.to_owned());
-        }
+    if let Ok(tgt) = std::fs::read_link(&driver_link)
+        && let Some(name) = tgt.file_name().and_then(|n| n.to_str())
+    {
+        return Some(name.to_owned());
     }
     // Fallback for virtual interfaces like dummy: walk the ../driver link
     // from sysfs/class/net/<iface>.
@@ -2379,7 +2444,8 @@ fn cmd_cat(config: bool, args: &[String]) -> i32 {
                 }
             }
         }
-        return if any { 0 } else { 0 };
+        let _ = any;
+        return 0;
     }
 
     // With args: interpret each as a path, a dir, a basename (with or
@@ -2490,7 +2556,8 @@ fn cmd_cat_config() -> i32 {
             }
         }
     }
-    if any { 0 } else { 0 }
+    let _ = any;
+    0
 }
 
 // ---------------------------------------------------------------------------
@@ -2664,22 +2731,22 @@ fn main() -> ExitCode {
             }
 
             // Effective export-prefix: `-P` short-form wins over --export-prefix.
-            let effective_prefix: Option<String> =
-                prefix.clone().or_else(|| export_prefix.clone());
+            let effective_prefix: Option<String> = prefix.clone().or_else(|| export_prefix.clone());
 
             // JSON output: assemble property dict and emit as a single
             // JSON object (short=compact, pretty=indented).  Includes
             // `DEVICE_ID` — the sanity test pipes this back into
-            // subsequent `udevadm info` invocations.
+            // subsequent `udevadm info` invocations.  When `-e` is also
+            // set without a specific device, dump every database entry
+            // as a JSON array.
             if let Some(json_mode) = json.as_deref()
                 && matches!(json_mode, "short" | "pretty")
             {
-                let rc = cmd_info_json(
-                    json_mode,
-                    name.as_deref(),
-                    path.as_deref(),
-                    devices,
-                );
+                if export && name.is_none() && path.is_none() && devices.is_empty() {
+                    let rc = cmd_info_json_export(json_mode);
+                    return ExitCode::from(rc as u8);
+                }
+                let rc = cmd_info_json(json_mode, name.as_deref(), path.as_deref(), devices);
                 return ExitCode::from(rc as u8);
             }
 
@@ -2708,11 +2775,10 @@ fn main() -> ExitCode {
                 let targets: Vec<&String> = path
                     .as_ref()
                     .into_iter()
-                    .chain(name.as_ref().into_iter())
+                    .chain(name.as_ref())
                     .chain(devices.iter())
                     .collect();
-                let deadline = std::time::Instant::now()
-                    + std::time::Duration::from_secs(secs);
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
                 loop {
                     let all_initialized = targets.iter().all(|t| {
                         let sp = normalize_syspath(t);
@@ -2918,7 +2984,9 @@ fn main() -> ExitCode {
                     "true" | "yes" | "1" => "initialized".to_string(),
                     "false" | "no" | "0" => "added".to_string(),
                     other => {
-                        eprintln!("udevadm wait: --initialized must be true or false, got: {other}");
+                        eprintln!(
+                            "udevadm wait: --initialized must be true or false, got: {other}"
+                        );
                         return ExitCode::from(1);
                     }
                 }
@@ -2928,10 +2996,7 @@ fn main() -> ExitCode {
             cmd_wait(timeout, &effective, settle, devices)
         }
 
-        Commands::Cat {
-            config,
-            ref args,
-        } => cmd_cat(config, args),
+        Commands::Cat { config, ref args } => cmd_cat(config, args),
 
         Commands::Lock {
             ref device,
@@ -2939,7 +3004,13 @@ fn main() -> ExitCode {
             print,
             timeout,
             ref command,
-        } => cmd_lock(device.as_deref(), backing.as_deref(), print, timeout, command),
+        } => cmd_lock(
+            device.as_deref(),
+            backing.as_deref(),
+            print,
+            timeout,
+            command,
+        ),
 
         Commands::Version => {
             println!("udevadm (rust-systemd)");

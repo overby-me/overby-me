@@ -1059,9 +1059,7 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
             let get_str = |k: &str| -> Result<String, ParseError> {
                 obj.get(k)
                     .and_then(|v| v.as_str().map(|s| s.to_owned()))
-                    .ok_or_else(|| {
-                        ParseError::ParamsInvalid(format!("bind: missing {k}"))
-                    })
+                    .ok_or_else(|| ParseError::ParamsInvalid(format!("bind: missing {k}")))
             };
             let unit = get_str("unit")?;
             let source = get_str("source")?;
@@ -1070,10 +1068,7 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                 .get("read_only")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            let mkdir = obj
-                .get("mkdir")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
+            let mkdir = obj.get("mkdir").and_then(|v| v.as_bool()).unwrap_or(false);
             Command::Bind {
                 unit,
                 source,
@@ -2210,7 +2205,7 @@ fn create_transient_slice(
         let _ = std::fs::create_dir_all(transient_dir);
         unit.common.unit.fragment_path = Some(transient_dir.join(&slice_name));
 
-        return Ok(unit.id.clone());
+        Ok(unit.id.clone())
     }
 }
 
@@ -4899,8 +4894,8 @@ pub fn bind_mount_into_unit(
         pid
     };
 
-    let src_meta = std::fs::metadata(source)
-        .map_err(|e| format!("source {source} not accessible: {e}"))?;
+    let src_meta =
+        std::fs::metadata(source).map_err(|e| format!("source {source} not accessible: {e}"))?;
     let src_is_dir = src_meta.is_dir();
 
     use std::ffi::CString;
@@ -4948,8 +4943,7 @@ pub fn bind_mount_into_unit(
                 std::process::exit(13);
             }
             if read_only {
-                let remount = (libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY)
-                    as libc::c_ulong;
+                let remount = (libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY) as libc::c_ulong;
                 if unsafe {
                     libc::mount(
                         std::ptr::null(),
@@ -7490,10 +7484,7 @@ pub fn execute_command(
                 // dropins are present.
                 if unit_name.ends_with(".slice") {
                     let ri = run_info.read_poisoned();
-                    let unit = ri
-                        .unit_table
-                        .values()
-                        .find(|u| u.id.name == *unit_name);
+                    let unit = ri.unit_table.values().find(|u| u.id.name == *unit_name);
                     if let Some(unit) = unit {
                         let desc = unit.common.unit.description.clone();
                         return Ok(serde_json::json!({
@@ -9262,13 +9253,10 @@ pub fn execute_command(
                 create_or_update_implicit_slice(&name, run_info);
                 // Re-pin the transient fragment_path (the implicit-slice
                 // helper resets it to /run/systemd/system/...).
-                if let Some(unit) = run_info
-                    .unit_table
-                    .values_mut()
-                    .find(|u| u.id.name == name)
-                {
-                    unit.common.unit.fragment_path =
-                        Some(std::path::PathBuf::from(format!("/run/systemd/transient/{name}")));
+                if let Some(unit) = run_info.unit_table.values_mut().find(|u| u.id.name == name) {
+                    unit.common.unit.fragment_path = Some(std::path::PathBuf::from(format!(
+                        "/run/systemd/transient/{name}"
+                    )));
                 }
             }
 
