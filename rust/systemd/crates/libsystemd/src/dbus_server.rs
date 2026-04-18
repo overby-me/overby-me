@@ -337,6 +337,54 @@ mod inner {
         unit_name: String,
     }
 
+    /// Per-timer object exposing `org.freedesktop.systemd1.Timer` for
+    /// `.timer` units.
+    struct TimerObj {
+        run_info: ArcMutRuntimeInfo,
+        unit_name: String,
+    }
+
+    #[interface(name = "org.freedesktop.systemd1.Timer")]
+    impl TimerObj {
+        /// Unit that this timer activates when it fires.
+        #[zbus(property)]
+        fn unit(&self) -> String {
+            let ri = self.run_info.read_poisoned();
+            let Some(unit) = ri.unit_table.values().find(|u| u.id.name == self.unit_name) else {
+                return String::new();
+            };
+            // Convention: foo.timer triggers foo.service.
+            unit.id.name.replace(".timer", ".service")
+        }
+
+        /// OnCalendar= specifications as strings.
+        #[zbus(property)]
+        fn timers_calendar(&self) -> Vec<String> {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .and_then(|u| match &u.specific {
+                    crate::units::Specific::Timer(t) => Some(t.conf.on_calendar.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default()
+        }
+
+        #[zbus(property)]
+        fn persistent(&self) -> bool {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .and_then(|u| match &u.specific {
+                    crate::units::Specific::Timer(t) => Some(t.conf.persistent),
+                    _ => None,
+                })
+                .unwrap_or(false)
+        }
+    }
+
     /// Per-socket object exposing `org.freedesktop.systemd1.Socket` for
     /// `.socket` units.
     struct SocketObj {
@@ -1198,6 +1246,13 @@ mod inner {
                 unit_name: unit_name.to_owned(),
             };
             conn.object_server().at(&path, sock)?;
+        }
+        if unit_name.ends_with(".timer") {
+            let tmr = TimerObj {
+                run_info: run_info.clone(),
+                unit_name: unit_name.to_owned(),
+            };
+            conn.object_server().at(&path, tmr)?;
         }
         Ok(())
     }
