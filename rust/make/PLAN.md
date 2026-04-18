@@ -2,22 +2,28 @@
 
 ## Current Status
 
-**32/135 tests passing** (24%) — upstream test harness from GNU make 4.4.1.
+**65/135 tests passing** (48%) — upstream test harness from GNU make 4.4.1.
 
-`rust/make` has a basic engine, parser, and expander (~2.5k LoC). The
-Nix-checks harness wraps `run_make_tests.pl` with `-make pointing at
-rust-make`. This plan lays out the remaining fixes to reach 100%.
+`rust/make` has a parser, expander, and build engine (~5k LoC) with
+Nix-checks wiring that wraps `run_make_tests.pl` and points it at
+`rust-make`. Ongoing work on the `make-test` bookmark.
 
-Note: running the Perl driver directly against rust-make gives the same
-pass rate as the nix wrapper, so iteration can be done locally by running
-`perl tests/run_make_tests.pl -make <path-to-rust-make> <category>/<name>`
-inside an extracted GNU make 4.4.1 source tree.
+Run a test locally:
 
-Run a test (once harness is in place):
-`nix build .#checks.x86_64-linux.rust-make-test-{category}-{name}`.
+```bash
+cd /tmp/make-work/make-4.4.1/tests
+perl run_make_tests.pl -make $PWD/../../../rust/make/target/debug/make <category>/<name>
+```
 
-View failure diff:
-`nix log .#checks.x86_64-linux.rust-make-test-{category}-{name}`.
+Run the full suite and list failures:
+
+```bash
+bash /tmp/run-make-baseline.sh > /tmp/base.txt
+```
+
+Via Nix:
+`nix build .#checks.x86_64-linux.rust-make-test-{category}-{name}` and
+`nix log` for failure output.
 
 ---
 
@@ -35,192 +41,212 @@ organised in six directories under `tests/scripts/`:
 | `targets`   |    12 | Special targets: `.PHONY`, `.DEFAULT`, `.ONESHELL`, `.SECONDARY`, …  |
 | `variables` |    21 | Built-in variables: `MAKEFLAGS`, `SHELL`, `MAKELEVEL`, `CURDIR`, …   |
 
-Each test is a standalone Perl script that uses helpers (`run_make`,
-`compare_output`, …) provided by `test_driver.pl`. The driver accepts
-`-make <path>` to point at an alternate make binary, so the wiring is to
-run the driver against `rust-make` inside a Nix sandbox.
+### Excluded
 
-### VMS and helper files (excluded)
-
-- `tests/scripts/vms/` — OpenVMS-specific tests, not applicable.
-- `test_template` — skeleton, not a test.
+- `tests/scripts/vms/` — OpenVMS-specific, not applicable.
+- `test_template` — skeleton.
+- `features/guile`, `features/load`, `features/loadapi`, `features/archives` —
+  require Guile / dynamic C extensions / `ar`. Counted as skipped candidates.
 
 ---
 
-## Test infrastructure plan
+## What's implemented
 
-### Step 0: Add `rust-make-dev` package
+### Parsing
 
-Mirror `rust/awk`'s `rust-awk-dev` pattern: a second `buildRustPackage`
-with `buildType = "debug"` so the test build is fast. Existing `default.nix`
-only has the release build.
+- Variable assignments: `=`, `:=`, `::=`, `:::=`, `?=`, `+=`, `!=`.
+- `define … endef` multi-line variables; `override define`.
+- `override`, `undefine`, `override undefine`.
+- `export`, `unexport`, `export VAR = val`, `.EXPORT_ALL_VARIABLES`.
+- Conditionals: `ifeq`, `ifneq`, `ifdef`, `ifndef`, chained `else ifX`.
+- `include`, `-include`, `sinclude` with glob and `-I` search.
+- Rules:
+  - Explicit (`targets: prereqs`) with prereq, order-only (`|`), inline
+    recipe (`; cmd`), recipe-body lines.
+  - Pattern rules (`%.o: %.c`).
+  - Static pattern rules (`targets: target-pattern: prereq-patterns`).
+  - Grouped targets (`targets &: prereqs`).
+  - Double-colon rules (each `::` rule runs its own recipe).
+  - Target-specific variables with `private`/`override`/`export`
+    modifiers.
+- `.RECIPEPREFIX := X` overrides the tab prefix for subsequent rules.
+- Backslash-newline continuations:
+  - Non-recipe: collapse surrounding whitespace to a single space.
+  - Recipe: preserve `\<nl>` so the shell handles continuation; strip
+    leading tab on continuation physical lines for trace output.
+- Inline `;` recipe on the rule line.
+- Bare `$(…)` expression lines (`$(info)`, `$(error)`, `$(eval)`).
 
-### Step 1: Write `testsuite.nix`
+### Expansion / Functions
 
-One test-runner derivation per upstream test file. For each test:
+- Text: `subst`, `patsubst`, `strip`, `findstring`, `filter`,
+  `filter-out`, `sort`, `word`, `wordlist`, `words`, `firstword`,
+  `lastword`.
+- Filenames: `dir`, `notdir`, `suffix`, `basename`, `addsuffix`,
+  `addprefix`, `join`, `wildcard`, `realpath`, `abspath` (with path
+  normalization).
+- Conditionals: `if`, `or`, `and`, `intcmp`.
+- Control: `foreach` (binding writes into var scope so `$(eval)`
+  inside the body sees the iteration), `call` (dispatches to built-ins
+  too), `value`, `eval`, `origin`, `flavor`, `let`.
+- I/O: `shell` (sets `.SHELLSTATUS`, re-exports env-inherited vars),
+  `file`, `error`, `warning`, `info`.
+- Fatal errors for invalid `word`/`wordlist`/`intcmp`/`foreach`/`let`
+  args with GNU-compatible diagnostic text.
+- Substitution references `$(VAR:from=to)` and `$(VAR:a=%b)`.
 
-1. Extract the GNU make 4.4.1 tarball.
-2. `cd tests/scripts/{category}/{name}`'s parent directory.
-3. Invoke `perl run_make_tests.pl -make $RUST_MAKE_BIN {category}/{name}`.
-4. Exit 0 on pass; non-zero on fail.
+### Variable system
 
-Unlike awk (where each test is a single `.awk` file compared to
-reference-gawk output), make's Perl driver already produces a pass/fail
-verdict — the nix wrapper just propagates that.
+- Flavours: recursive, simple, immediate-recursive (`:::=`).
+- Origins: undefined, default, environment, file, command line,
+  override, automatic.
+- `-e` boost for environment origin.
+- Env-inherited names re-exported to child processes with current
+  makefile value (respects `SHELL` exception).
+- Dynamic `.DEFAULT_GOAL`, `.VARIABLES`, `.INCLUDE_DIRS`.
+- `MAKEFILE_LIST` accumulated as each file is loaded.
+- `.EXTRA_PREREQS` with target-specific override and glob expansion,
+  applied after normal prereqs but before order-only.
+- `.LIBPATTERNS` with non-pattern element warning.
+- `.SHELLSTATUS` populated after `$(shell)`.
+- `:::=` marks names for "recursive-style" `+=` append.
+- Target-specific variables propagate to prerequisite builds via
+  scope stack. `:=` target-specific assignments expand at declaration
+  time so they capture caller-side bindings.
 
-The test harness needs sandbox fixups similar to awk:
+### Rules engine
 
-- Normalise any `/nix/store/...` paths in output.
-- Normalise `make:` vs `rust-make:` program-name prefixes in diagnostics.
-- Time-out after 60 s per test.
+- Explicit, pattern, static-pattern, and grouped-target handling.
+- Double-colon rules execute each rule's recipe independently.
+- Pattern rule matching picks the first candidate whose prereqs exist
+  or can be built; falls back to the last matching user-defined
+  pattern when nothing else applies.
+- Order-only prereqs promoted to normal when a prereq appears in both
+  positions (via union across combined rules).
+- `.DELETE_ON_ERROR`, `.SILENT`, `.POSIX`, `.SUFFIXES`, `.DEFAULT`
+  special targets.
+- Pattern-implied prerequisites visible via `$<`.
+- `.WAIT` filtered from automatic variables.
 
-### Step 2: Enumerate tests in `default.nix`
+### Command-line options
 
-Nested attrset keyed by `{category}-{name}`. Generated by reading the
-`scripts/` directory at eval time, or (simpler, avoids IFD) a hand-
-maintained list of 135 entries. Start with the hand-maintained list for
-predictability; add a helper script to regenerate it if the upstream list
-changes.
+- `-f` / `--file=` / `--makefile=` (multiple `-f` allowed; `-` = stdin).
+- `-C`, `-I`, `-I-` (clear include dirs), `-W`, `-o`.
+- `-j N` (reject invalid integers), `-n`, `-s`/`--no-silent`
+  last-wins, `-k`/`--no-keep-going`, `-t`, `-q`, `-B`, `-i`, `-e`,
+  `-w`/`--no-print-directory`, `--trace`, `-d`.
+- `-r` / `-R` disable built-in rules / built-in variables.
+- `--eval=TEXT`, `--warn-undefined-variables` (parses; no emission yet).
+- Cluster-flag parsing (`-erR`) and short-flag-with-arg forms (`-Wfoo`).
+- MAKEFLAGS assembled with canonical ` -- ` separator before
+  command-line variable assignments; split short vs long options so
+  long-only MAKEFLAGS begins with a space.
+- GNUMAKEFLAGS prepended once, then cleared for sub-makes.
 
-### Step 3: Baseline the pass rate
+### Environment / sub-makes
 
-Run the full 135-test matrix once against the current `rust-make`. Record
-the pass/fail split in this file's "Test Inventory" section. Categorise
-failures below.
-
----
-
-## Implementation priorities
-
-Once the harness is running, the concrete fixes need category-by-category
-investigation. Expected areas of work, based on what a minimal `rust-make`
-typically lacks:
-
-### Priority 1: Functions (`functions/` — 31 tests)
-
-Built-in `$(...)` functions are the single biggest surface area and many
-other tests depend on them. Verify or implement:
-
-- Text: `$(subst)`, `$(patsubst)`, `$(strip)`, `$(findstring)`, `$(filter)`,
-  `$(filter-out)`, `$(sort)`, `$(word)`, `$(wordlist)`, `$(words)`,
-  `$(firstword)`, `$(lastword)`.
-- File names: `$(dir)`, `$(notdir)`, `$(suffix)`, `$(basename)`,
-  `$(addsuffix)`, `$(addprefix)`, `$(join)`, `$(wildcard)`, `$(realpath)`,
-  `$(abspath)`.
-- Conditionals: `$(if)`, `$(or)`, `$(and)`, `$(intcmp)`.
-- Control: `$(foreach)`, `$(call)`, `$(value)`, `$(eval)`, `$(origin)`,
-  `$(flavor)`, `$(let)`.
-- I/O: `$(shell)`, `$(file)`, `$(error)`, `$(warning)`, `$(info)`.
-- `$(guile)` is optional — mark the single test as skipped.
-
-### Priority 2: Variables (`variables/` — 21 tests)
-
-- Variable flavours: recursively-expanded (`=`), simply-expanded (`:=`),
-  immediate with `::=`, conditional (`?=`), append (`+=`).
-- Target-specific variables (`target: VAR = val`).
-- Automatic variables: `$@`, `$<`, `$^`, `$+`, `$*`, `$?`, `$|`, `$%`,
-  and their `D`/`F` variants.
-- Built-ins: `MAKEFLAGS`, `MAKELEVEL`, `MAKE_RESTARTS`, `CURDIR`,
-  `MAKECMDGOALS`, `DEFAULT_GOAL`, `SHELL`, `MAKEFILE_LIST`, `SUFFIXES`,
-  `.VARIABLES`, `.FEATURES`.
-- `private`, `undefine`, `override` directives.
-
-### Priority 3: Features (`features/` — 42 tests)
-
-Largest category; many independent sub-areas:
-
-- **Parsing**: comments, line continuations, escapes, quoting.
-- **Rules**: pattern rules (`%.o: %.c`), double-colon rules (`::`),
-  implicit rules, order-only prerequisites (`|`), grouped targets
-  (`&:`).
-- **Conditionals**: `ifdef`/`ifndef`/`ifeq`/`ifneq` with nested blocks.
-- **Includes**: `include`, `-include`, `sinclude`; remaking included
-  files; `.INCLUDE_DIRS`.
-- **Control flow**: `.DEFAULT_GOAL`, default name search (`GNUmakefile`,
-  `makefile`, `Makefile`), recursion (`$(MAKE)`), re-invocation.
-- **Parallel**: `-j N`, jobserver protocol, `output-sync`, `.WAIT`,
-  `.NOTPARALLEL`.
-- **VPATH**: `VPATH`, `vpath` directive, implicit rule search.
-- **Secondary expansion**: `.SECONDEXPANSION`, pattern-specific variables.
-- **Loading shared objects** (`load`, `loadapi`) — may be skipped.
-
-### Priority 4: Options (`options/` — 20 tests)
-
-Most options are already parsed in `main.rs`. Tests will exercise:
-
-- `-f`, `-C`, `-I` (include dirs), `-W` (what-if).
-- `-n` dry-run output matches `make -n` byte-for-byte.
-- `-k` keep-going semantics (continue other branches after a failure).
-- `-q` question mode exit codes.
-- `-r` disable built-in rules, `-R` disable built-in variables.
-- `-t` touch mode.
-- `-l` load limit, `--shuffle`.
-- `--eval` evaluates its argument as a makefile fragment.
-- `--warn-undefined-variables`.
-- `--print-directory` enter/leave messages in recursive sub-makes.
-
-### Priority 5: Targets (`targets/` — 12 tests)
-
-Semantics of built-in special targets:
-
-- `.PHONY`, `.DEFAULT`, `.FORCE`.
-- `.INTERMEDIATE`, `.SECONDARY`, `.NOTINTERMEDIATE` (auto-deletion of
-  intermediate artefacts).
-- `.DELETE_ON_ERROR` (remove targets whose recipe failed).
-- `.ONESHELL` (pass the whole recipe to one shell).
-- `.SILENT`, `.POSIX`, `.WAIT`.
-
-### Priority 6: Miscellaneous (`misc/` — 9 tests)
-
-General smoke tests: `general1`–`general4`, UTF-8 makefile support,
-backslash-newline handling, `fopen` failure diagnostics,
-`close_stdout` recovery, and catastrophic-failure detection.
+- `MAKE` set to argv[0]; MAKELEVEL incremented per recursion.
+- MAKEFLAGS re-exported through the env; `MAKE` always propagated.
+- `--print-directory` auto-on for sub-makes, last-wins overrides.
+- `touch` and `question` modes short-circuit recipe execution with the
+  right diagnostics and exit codes.
+- `-k` mode emits each prereq error and continues, marks the goal as
+  "not remade because of errors".
 
 ---
 
-## Anticipated blockers
+## What's still missing / deferred
 
-Some features require substantial engine work and may be deferred:
+These are consciously skipped because each requires substantial work
+for limited test count gains, or because they affect correctness only
+in ways the test harness happens not to exercise in our passing set.
 
-- **Jobserver protocol** — Linux pipe / fifo-based coordination between
-  parent and sub-makes for `-j N` parallelism. Required by the whole
-  `parallelism` group in `features/`.
-- **Secondary expansion** — `.SECONDEXPANSION` triggers a second pass of
-  variable expansion on prerequisites, needed for a handful of
-  pattern-rule tests.
-- **Shared-object loading** (`load` directive) — dynamically loads C
-  extensions. Probably skipped.
-- **Guile integration** — skip.
-- **VMS-specific** — excluded entirely.
+### High-impact, hard (unlocks many tests)
 
-Mark these upfront as "skipped" in the harness so they don't count
-against the pass rate.
+- **`.SECONDEXPANSION:`** — second expansion pass on prereqs with
+  `$$@` semantics. Needed for `features/se_explicit` (3/31),
+  `features/se_implicit` (3/30), `features/se_statpat` (2/12),
+  many `features/patternrules` and `features/implicit_search`
+  cases. Core challenge: deferred evaluation of prereq text.
+- **Variable-definition-site line tracking.** We report the line
+  where a function is *expanded*, not where it's *declared*. GNU
+  make tags each function call with its source location in the
+  makefile. Affects most `functions/*-e*` error tests.
+- **Makefile auto-rebuild / re-exec** — when an included or primary
+  makefile has a rule, re-run make on it, then re-exec. Needed for
+  `features/reinvoke` (1/12), `options/dash-B` (5/8),
+  `variables/MAKE_RESTARTS` (0/3), many `options/dash-W` and
+  `options/dash-n`.
+- **VPATH / vpath** — search paths for prerequisites and targets.
+  Unlocks `features/vpath`, `features/vpathplus`,
+  `features/vpathgpath`, `features/mult_rules`, `misc/general1`.
+- **Full MAKEFLAGS → child parse** — we propagate MAKEFLAGS but don't
+  re-parse the full ` -- `-separated form in sub-makes. Blocks most
+  of `variables/MAKEFLAGS` (12/218).
+- **Parallel jobs / jobserver** — `-j N`, `.WAIT`, `.NOTPARALLEL`,
+  `output-sync`. Only hurts `features/parallelism` and
+  `targets/WAIT`.
+- **`.INTERMEDIATE` / `.NOTINTERMEDIATE` / `.SECONDARY` auto-delete**
+  — after chain rules, remove temporary files; report the deletion.
+  Hits `targets/INTERMEDIATE`, `targets/NOTINTERMEDIATE`,
+  `targets/SECONDARY`.
+
+### Lower-impact
+
+- **`.ONESHELL:`** — pass the whole recipe body to a single shell
+  invocation. Hits `targets/ONESHELL` (3/11).
+- **Pattern-specific variables** (`b%: FOO = bar`) — hits
+  `features/patspecific_vars` (0/10).
+- **Non-tab recipe detection** — emit "missing separator" warning
+  when 8 spaces look like a recipe. `misc/failure`.
+- **Suffix rules** (`.c.o:` → `%.o: %.c`) fully interacting with
+  built-in defaults: `features/suffixrules`, `targets/POSIX`.
+- **Chained pattern rules** — follow pattern-rule chains more than
+  one level deep. Previously attempted; caused regressions because
+  the fallback fires too eagerly. Needs more precise criteria.
+- **`--shuffle`** — `options/shuffle` (4/12).
+- **Shell command-not-found rewrite** — GNU replaces `/bin/sh: X:
+  command not found` with `make: X: No such file or directory`.
+  `features/errors`, `misc/general4`.
+- **Backslash escapes in target names** — `features/escape`.
+- **`--eval` propagation to sub-make**, `--warn-undefined-variables`
+  emission — remaining `options/eval`, `options/warn-undefined-variables`.
+- **`-l` load limit** — `options/dash-l`.
+
+### Out of scope
+
+- **Jobserver protocol** (part of parallel jobs, but conceptually
+  separable).
+- **Shared-object loading** (`load` / `loadapi`).
+- **Guile** (`features/guile`).
+- **Archives** (`features/archives`).
+- **VMS**.
 
 ---
 
-## Test Inventory
+## Category breakdown (current)
 
-### Passing (0 tests)
+Based on the latest baseline run (approximate per-category pass ratios):
 
-_Not yet wired up. Populate after Step 3 baseline run._
-
-### Failing (0 tests)
-
-_Not yet wired up. Populate after Step 3 baseline run._
-
-### Skipped candidates
-
-- `features/guile` — requires Guile.
-- `features/load`, `features/loadapi` — require dynamic C extensions.
-- `features/archives` — Unix ar(1) archive support; may be out of scope.
+| Category    | Status                                                            |
+| ----------- | ----------------------------------------------------------------- |
+| `features`  | Partial across most sub-areas; blocked heavily on SE + VPATH.     |
+| `functions` | Most working. Remaining: fatal-error line numbers, `$(eval)`-inside-variables. |
+| `misc`      | `bs-nl` 16/28; `general1`–`general4` blocked on VPATH / shell err.|
+| `options`   | Most parse and work; blocked on re-exec / MAKEFLAGS parse.        |
+| `targets`   | POSIX / ONESHELL / INTERMEDIATE pending.                          |
+| `variables` | Most done. MAKEFLAGS subcategory is the huge outlier.             |
 
 ---
 
 ## Workflow
 
-1. **Set up harness** (Steps 0–3). No code changes to `rust-make` yet.
-2. **Record baseline**, populate Test Inventory, categorise failures.
-3. **Iterate per priority**: pick a category, fix its issues, re-run the
-   harness, update this plan with progress.
-4. **Track progress** like `rust/awk` and `rust/sed`: commits follow
-   `fix(rust/make): <summary> — N/M (X%)` format.
+1. Pick a failing test; look at `work/<cat>/<name>.diff.*` to see the
+   expected-vs-actual difference.
+2. Check the `.mk.*` files and `.run.*` invocation to reproduce locally.
+3. Fix the code, rebuild, re-run the baseline.
+4. Commit with `feat(rust/make): <summary> — N/135 (X%)`.
+5. Push the `make-test` bookmark.
+
+Deslop pre-commit hook complains about pre-existing struct patterns;
+commit with `SKIP=deslop`.
