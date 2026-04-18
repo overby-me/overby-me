@@ -2,80 +2,97 @@
 
 A GNU gzip-compatible compression tool written in Rust.
 
-## Status
-
-**30/30 tests passing (100%)** — upstream GNU gzip 1.14 test suite
-(`tests/TESTS`). Each test runs rust-gzip in a sandbox against the
-upstream shell script unchanged, using pre-built zdiff / zgrep / znew
-from `pkgs.gzip` for the companion tools (those scripts call `gzip` by
-name on PATH, so they pick up rust-gzip).
-
-### Passing
-
-`gzip-env`, `helin-segv`, `help-version`, `hufts`, `keep`, `list`,
-`list-big`, `memcpy-abuse`, `mixed`, `null-suffix-clobber`,
-`pipe-output`, `reference`, `reproducible`, `stdin`, `synchronous`,
-`timestamp`, `trailing-nul`, `two-files`, `unpack-invalid`, `unpack-valid`,
-`upper-suffix`, `write-error`, `z-suffix`, `zdiff`, `zgrep-abuse`,
-`zgrep-binary`, `zgrep-context`, `zgrep-f`, `zgrep-signal`, `znew-k`.
-
-All 30 tests pass.
+Passes **30/30** tests from the upstream GNU gzip 1.14 test suite, run
+unmodified against the rust-gzip binary in a Nix sandbox.
 
 ## Usage
-
-```sh
-# Single test
-nix build .#checks.x86_64-linux.rust-gzip-test-keep
-
-# View a failing test's log
-nix log .#checks.x86_64-linux.rust-gzip-test-keep
-
-# All tests, keep going on failures
-nix build .#checks.x86_64-linux.rust-gzip-test-* --keep-going --no-link
-```
 
 The binary is `gzip` from `pkgs.rust-gzip` (release) or
 `pkgs.rust-gzip-dev` (debug, faster compile). `gunzip` and `zcat` are
 installed as symlinks.
 
+```sh
+# Compress / decompress
+echo "hello" | gzip | gunzip
+
+# From a Nix shell
+nix run .#rust-gzip -- -d file.gz
+```
+
+## Features
+
+- Compress / decompress / test / list with stdin, single file, multiple
+  files, and directory recursion (`-r`).
+- Suffix handling: `-S <suffix>` / `--suffix`, default `.gz`, canonical
+  alternates (`.tgz`, `.z`, `.Z`, `-gz`, `-z`, `_z`).
+- Exit-code semantics: 0 success, 2 warning (out-of-range mtime),
+  1 hard error. Multi-file runs keep the worst code.
+- `--help` / `--version` write to stdout; exit 1 on write failure
+  (e.g. `/dev/full`), matching coreutils conventions.
+- `--synchronous`, `---presume-input-tty` accepted as no-ops.
+- Multi-member gzip streams; trailing NUL padding silently tolerated.
+- Legacy format decompression:
+  - **Pack** (magic `1f 1e`) — static Huffman, ported from `unpack.c`.
+  - **LZW / compress** (magic `1f 9d`) — variable-width codes, ported
+    from `unlzw.c`.
+
 ## Architecture
 
 Multi-module `src/` layout:
 
-- `main.rs` — thin entry point.
-- `cli.rs` — argument parsing, `Mode`/`Options`, `--help`/`--version`.
-- `compress.rs` — gzip compression with hand-rolled framing: writes the
-  10-byte header with OS=3 (Unix) and either a recorded source mtime
-  or 0, delegates deflate to `flate2::write::DeflateEncoder`, and emits
-  the CRC32 + ISIZE trailer.
-- `decompress.rs` — multi-format decompression (gzip, pack, LZW) with
-  CRC32 + ISIZE trailer verification. Walks member boundaries manually using
-  `flate2::Decompress` plus flag-aware header parsing. Handles
-  multi-member archives, trailing NUL padding (tape convention), and
-  `-cdf` cat-style pass-through for non-gzip content.
-- `ops.rs` — file operations (compress/decompress/test/list for files
-  and stdio).
-- `unpack.rs` — Pack format decoder (magic `1f 1e`, static Huffman).
-- `unlzw.rs` — LZW/compress decoder (magic `1f 9d`, variable-width
-  codes).
-- `util.rs` — `CountingReader`, suffix handling, output file creation.
+| Module | Purpose |
+|--------|---------|
+| `main.rs` | Entry point |
+| `cli.rs` | Argument parsing, `Mode` / `Options`, `--help` / `--version` |
+| `compress.rs` | Gzip compression with hand-rolled framing (OS=3, exact mtime) |
+| `decompress.rs` | Multi-format decompression (gzip, pack, LZW) with CRC32 + ISIZE trailer verification |
+| `ops.rs` | File operations — compress / decompress / test / list for files and stdio |
+| `unpack.rs` | Pack format decoder (magic `1f 1e`, static Huffman) |
+| `unlzw.rs` | LZW / compress decoder (magic `1f 9d`, variable-width codes) |
+| `util.rs` | `CountingReader`, suffix handling, output file creation |
 
-## Features
+### Implementation notes
 
-- Compress/decompress/test/list with stdin, single file, multiple
-  files, and directory recursion (`-r`).
-- Suffix handling: `-S <suffix>` / `--suffix`, default `.gz`, canonical
-  alternates (`.tgz`, `.z`, `.Z`, `-gz`, `-z`, `_z`). Empty suffix is
-  rejected with `invalid suffix ''`.
-- Exit-code semantics: 0 on success, 2 for warnings (out-of-range
-  source mtime), 1 on hard error. Multi-file runs keep the worst code.
-- `--help` / `--version` write to stdout and exit 1 if the write fails
-  (e.g. `/dev/full`), matching coreutils conventions.
-- `--synchronous`, `---presume-input-tty` accepted as no-ops (the
-  test harness relies on both being recognized).
-- Pack format decompression (legacy `.z` files, magic `1f 1e`, static
-  Huffman).
-- LZW/compress format decompression (legacy `.Z` files, magic `1f 9d`,
-  variable-width codes).
-- Multi-member gzip streams fully supported; trailing NUL padding
-  after a valid stream is silently tolerated.
+- **zlib-rs backend** — flate2 is configured with the `zlib-rs` feature
+  (pure Rust zlib rewrite) instead of the default miniz_oxide. This
+  gives deflate validation strictness matching GNU gzip's own inflate
+  (e.g. rejecting corrupt bitstreams that miniz_oxide silently accepts)
+  while keeping the dependency tree C-free.
+- **Hand-rolled gzip framing** — `compress_stream` writes the 10-byte
+  header directly (OS=3, source mtime or 0), delegates deflate to
+  `flate2::write::DeflateEncoder`, then appends the CRC32 + ISIZE
+  trailer. This byte-exact control is what passes the `reference` and
+  `reproducible` tests.
+- **Member-by-member decoding** — `decompress_stream` buffers the full
+  input and walks member boundaries using `flate2::Decompress` with a
+  flag-aware header parser, rather than using `MultiGzDecoder`. This
+  handles multi-member archives, trailing NUL padding, legacy format
+  dispatch, and `-cdf` cat-style pass-through.
+- **Deflate no-progress → format violated** — when zlib-rs consumes all
+  input without reaching `StreamEnd`, the error is reported as
+  `invalid compressed data--format violated` to match GNU gzip's own
+  `inflate.c` behavior (structural Huffman errors, not premature EOF).
+
+## Testing
+
+Each of the 30 upstream test scripts runs as its own Nix check:
+
+```sh
+# Single test
+nix build .#checks.x86_64-linux.rust-gzip-test-keep
+
+# View a failure log
+nix log .#checks.x86_64-linux.rust-gzip-test-keep
+
+# All tests (keep going on failures)
+nix build .#checks.x86_64-linux.rust-gzip-test-* --keep-going --no-link
+```
+
+### Test harness
+
+The harness (`testsuite.nix`) extracts `pkgs.gzip.src`, builds a shadow
+`$PATH` with `gzip` / `gunzip` / `zcat` pointing at `rust-gzip-dev` and
+companion scripts (`zdiff`, `zgrep`, `znew`, …) from the upstream tarball,
+exports the environment variables the gnulib `init.sh` framework expects
+(`LC_ALL=C`, `srcdir`, `VERSION`, etc.), then runs each test script and
+propagates its exit code. Exit 77 (automake "skip") is treated as pass.
