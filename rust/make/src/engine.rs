@@ -77,6 +77,7 @@ struct RuleEntry {
 struct PatternRuleEntry {
     target_pattern: String,
     prereq_patterns: Vec<String>,
+    order_only_patterns: Vec<String>,
     recipe: Vec<String>,
     recipe_lines: Vec<usize>,
     source_name: String,
@@ -367,6 +368,7 @@ impl Engine {
         self.pattern_rules.borrow_mut().push(PatternRuleEntry {
             target_pattern: target.to_string(),
             prereq_patterns: prereqs.iter().map(|s| s.to_string()).collect(),
+            order_only_patterns: Vec::new(),
             recipe: recipe.iter().map(|s| s.to_string()).collect(),
             recipe_lines: vec![0; recipe.len()],
             source_name: "<built-in>".to_string(),
@@ -895,12 +897,24 @@ impl Engine {
 
         // Join prereqs before expansion so `$<space>` and similar
         // single-char references span what the parser split apart.
-        let prereqs: Vec<String> = expand::expand(&rule.prerequisites.join(" "), self)
+        // A `|` in the expansion output (e.g. from
+        // `$(var)` where var contains a pipe) splits normal from
+        // order-only prereqs — GNU make re-parses the expanded text.
+        let prereq_text = expand::expand(&rule.prerequisites.join(" "), self);
+        let extra_order_only_text = expand::expand(&rule.order_only.join(" "), self);
+        let (prereq_text, post_pipe_order_only) = if let Some(idx) = prereq_text.find('|') {
+            (
+                prereq_text[..idx].to_string(),
+                prereq_text[idx + 1..].to_string(),
+            )
+        } else {
+            (prereq_text, String::new())
+        };
+        let prereqs: Vec<String> = prereq_text
             .split_whitespace()
             .map(|s| self.resolve_library_prereq(s))
             .collect();
-
-        let order_only: Vec<String> = expand::expand(&rule.order_only.join(" "), self)
+        let order_only: Vec<String> = format!("{post_pipe_order_only} {extra_order_only_text}")
             .split_whitespace()
             .map(|s| s.to_string())
             .collect();
@@ -986,6 +1000,7 @@ impl Engine {
                 self.pattern_rules.borrow_mut().push(PatternRuleEntry {
                     target_pattern: format!("%{dst_suffix}"),
                     prereq_patterns: vec![format!("%{src_suffix}")],
+                    order_only_patterns: Vec::new(),
                     recipe: rule.recipe.clone(),
                     recipe_lines: rule.recipe_lines.clone(),
                     source_name: rule.source_name.clone(),
@@ -1062,6 +1077,7 @@ impl Engine {
                                 .collect::<Vec<_>>()
                         })
                         .collect(),
+                    order_only_patterns: order_only.clone(),
                     recipe: rule.recipe.clone(),
                     recipe_lines: rule.recipe_lines.clone(),
                     source_name: rule.source_name.clone(),
@@ -1500,12 +1516,22 @@ impl Engine {
                 implied_prereqs.push(prereq.clone());
                 all_prereqs.push(prereq);
             }
+            for op in &pat_rule.order_only_patterns {
+                let oo = expand::expand(&op.replace('%', &stem), self);
+                for tok in oo.split_whitespace() {
+                    all_order_only.push(tok.to_string());
+                }
+            }
             if recipe.is_empty() {
                 recipe = pat_rule.recipe.clone();
                 recipe_lines = pat_rule.recipe_lines.clone();
                 recipe_source = pat_rule.source_name.clone();
             }
         }
+        // Re-apply the normal-vs-order-only promotion after pattern
+        // match injected new entries.
+        let normal_set2: HashSet<String> = all_prereqs.iter().cloned().collect();
+        all_order_only.retain(|o| !normal_set2.contains(o));
 
         // Fall back to `.DEFAULT`'s recipe if we still have nothing (and no
         // explicit rules exist for this target).

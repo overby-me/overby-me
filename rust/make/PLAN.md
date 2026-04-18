@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**65/135 tests passing** (48%) — upstream test harness from GNU make 4.4.1.
+**66/135 tests passing** (49%) — upstream test harness from GNU make 4.4.1.
 
 `rust/make` has a parser, expander, and build engine (~5k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -123,6 +123,13 @@ organised in six directories under `tests/scripts/`:
   pattern when nothing else applies.
 - Order-only prereqs promoted to normal when a prereq appears in both
   positions (via union across combined rules).
+- A `|` appearing in *expanded* prereq text (e.g. from `$(VAR)` whose
+  value contains `|`) splits normal from order-only prereqs after
+  expansion, matching GNU make's re-parse. Fully exercised only once
+  `.SECONDEXPANSION` lands.
+- Pattern rules carry order-only prereqs through match: `%.w: %.x | baz`
+  substitutes the stem into the order-only pattern and adds it to `$|`
+  for matched targets.
 - `.DELETE_ON_ERROR`, `.SILENT`, `.POSIX`, `.SUFFIXES`, `.DEFAULT`
   special targets.
 - Pattern-implied prerequisites visible via `$<`.
