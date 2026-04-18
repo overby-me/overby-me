@@ -2809,6 +2809,33 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
     let mut label_checked = args.label.is_none();
     let mut extract_had_error = false;
 
+    // Build a map of user path → effective chdir based on positional
+    // -C entries. Sequentially walk args.paths; each -C sentinel
+    // accumulates into the current chdir, then each real path binds
+    // that chdir (relative to the global args.directory if present).
+    let base_dir: PathBuf = args
+        .directory
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    let mut path_dirs: std::collections::HashMap<String, PathBuf> =
+        std::collections::HashMap::new();
+    {
+        let mut current = base_dir.clone();
+        for raw in &args.paths {
+            if let Some(dir) = raw.strip_prefix("\0-C\0") {
+                let d = Path::new(dir);
+                current = if d.is_absolute() {
+                    d.to_path_buf()
+                } else {
+                    current.join(d)
+                };
+            } else if !raw.starts_with('\0') {
+                path_dirs.insert(raw.clone(), current.clone());
+            }
+        }
+    }
+
     // Resolve --one-top-level target directory once.  If the user gave
     // an empty argument, derive from the archive's basename minus a
     // standard compression suffix.
@@ -2927,6 +2954,10 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
         // paths LITERALLY and ANCHORED by default; globbing kicks in only
         // when `--wildcards` is set and unanchored matching only when
         // `--no-anchored` is set.
+        // Remember which user path we matched so we can route the
+        // extraction destination through that path's positional -C
+        // directory.
+        let mut matched_user_path: Option<&str> = None;
         if !args.paths.is_empty() {
             // GNU matches user paths against the ORIGINAL archive path,
             // not the post-strip/transform path. Fall back to the
@@ -2939,7 +2970,7 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
                 let p_trim = p.trim_end_matches('/');
                 let unanchored = args.explicit_anchored == Some(false);
                 let candidates = [path_str.as_str(), final_path.as_str()];
-                candidates.iter().any(|cand| {
+                let hit = candidates.iter().any(|cand| {
                     let basename = Path::new(cand)
                         .file_name()
                         .and_then(|n| n.to_str())
@@ -2959,7 +2990,11 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
                             || eq_opt_ci(cand.trim_end_matches('/'), p_trim, ignore_case)
                             || (unanchored && eq_opt_ci(basename, p.as_str(), ignore_case))
                     }
-                })
+                });
+                if hit && matched_user_path.is_none() {
+                    matched_user_path = Some(p.as_str());
+                }
+                hit
             });
             if !matches_any {
                 continue;
@@ -2998,9 +3033,14 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
             }
         }
 
-        let dest = match &args.directory {
-            Some(dir) => PathBuf::from(dir).join(&final_path),
-            None => PathBuf::from(&final_path),
+        // Destination prefix is the matched path's positional -C dir
+        // when one is known, falling back to the global --directory.
+        let dest_prefix: Option<PathBuf> = matched_user_path
+            .and_then(|p| path_dirs.get(p).cloned())
+            .or_else(|| args.directory.as_ref().map(PathBuf::from));
+        let dest = match &dest_prefix {
+            Some(dir) if !dir.as_os_str().is_empty() => dir.join(&final_path),
+            _ => PathBuf::from(&final_path),
         };
 
         let entry_type = entry.header().entry_type();
