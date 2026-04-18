@@ -107,6 +107,10 @@ pub struct Engine {
     /// expanded but a later `+=` appends text verbatim (recursive
     /// semantics), matching GNU make.
     immediate_recursive: RefCell<HashSet<String>>,
+    /// Targets of the most recently processed explicit rule. Used to
+    /// attach `Directive::RecipeLine` entries that appear in a taken
+    /// conditional branch after a rule (e.g. `all:\nifeq…\n\t@echo\n…`).
+    last_rule_targets: RefCell<Option<Vec<String>>>,
     // Options
     pub jobs: usize,
     pub keep_going: bool,
@@ -196,6 +200,7 @@ impl Engine {
             pending_includes: RefCell::new(Vec::new()),
             env_inherited: RefCell::new(HashSet::new()),
             immediate_recursive: RefCell::new(HashSet::new()),
+            last_rule_targets: RefCell::new(None),
             jobs: 1,
             keep_going: false,
             dry_run: false,
@@ -795,6 +800,25 @@ impl Engine {
                 let _ = expand::expand(expr, self);
                 *self.current_source.borrow_mut() = None;
             }
+            Directive::RecipeLine(text, line_no) => {
+                // Append to the most recent explicit rule's latest entry
+                // (one per target, since `process_rule` pushes one entry
+                // per target in the rule). Silent no-op if no rule is
+                // in scope — GNU make would have warned already at
+                // parse time about a stray recipe line.
+                let targets = self.last_rule_targets.borrow().clone();
+                if let Some(targets) = targets {
+                    let mut rules = self.rules.borrow_mut();
+                    for t in &targets {
+                        if let Some(entries) = rules.get_mut(t)
+                            && let Some(last) = entries.last_mut()
+                        {
+                            last.recipe.push(text.clone());
+                            last.recipe_lines.push(*line_no);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1059,6 +1083,7 @@ impl Engine {
                     *default = Some(t.clone());
                 }
             }
+            *self.last_rule_targets.borrow_mut() = Some(targets.clone());
             return;
         }
 
@@ -1126,6 +1151,7 @@ impl Engine {
                 .or_default()
                 .push(entry.clone());
         }
+        *self.last_rule_targets.borrow_mut() = Some(targets.clone());
     }
 
     fn process_conditional(&self, cond: &Conditional) {

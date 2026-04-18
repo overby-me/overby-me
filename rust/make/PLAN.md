@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**66/135 tests passing** (49%) — upstream test harness from GNU make 4.4.1.
+**67/135 tests passing** (50%) — upstream test harness from GNU make 4.4.1.
 
 `rust/make` has a parser, expander, and build engine (~5k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -76,6 +76,9 @@ organised in six directories under `tests/scripts/`:
     leading tab on continuation physical lines for trace output.
 - Inline `;` recipe on the rule line.
 - Bare `$(…)` expression lines (`$(info)`, `$(error)`, `$(eval)`).
+- Recipe lines inside a conditional body (`ifeq … \t@cmd … endif`)
+  attach to the most recently declared rule — matching GNU make's
+  line-by-line splice when the taken branch is flattened.
 
 ### Expansion / Functions
 

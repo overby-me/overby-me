@@ -190,10 +190,32 @@ impl Parser {
                 }
             }
 
-            // Recipe lines (start with tab)
-            if line.starts_with('\t') {
-                // Stray recipe line outside a rule — skip
+            // Recipe-prefix lines (normally tab). At top level these
+            // are stray; inside a conditional body they belong to the
+            // rule that preceded the conditional, so emit a RecipeLine
+            // directive. Collapse `\<nl>` continuations like the rule
+            // recipe reader does.
+            let rp = self.recipe_prefix;
+            if let Some(stripped) = strip_recipe_prefix(line, rp) {
+                let line_no = self.current_line_no();
+                let mut combined = stripped.to_string();
                 self.advance();
+                while combined.ends_with('\\') {
+                    if let Some(next) = self.peek() {
+                        if let Some(next_stripped) = strip_recipe_prefix(next, rp) {
+                            combined.push('\n');
+                            combined.push_str(next_stripped);
+                            self.advance();
+                        } else if next.trim_start().starts_with('#') {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                directives.push(Directive::RecipeLine(combined, line_no));
                 continue;
             }
 

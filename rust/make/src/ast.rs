@@ -31,6 +31,13 @@ pub enum Directive {
     /// Carries `(expr, source_name, line_no)` so diagnostics from
     /// `$(error)` / `$(warning)` can include the source location.
     Expand(String, String, usize),
+    /// A tab-prefixed recipe line appearing in a conditional body (or
+    /// otherwise detached from a rule parse). Carries `(recipe_text,
+    /// line_no)`. The engine appends it to the most recently emitted
+    /// explicit rule's recipe when the enclosing conditional branch is
+    /// taken — matching GNU make's behavior where recipe lines inside
+    /// `ifeq…endif` blocks belong to the preceding rule.
+    RecipeLine(String, usize),
 }
 
 /// A make rule: targets, prerequisites, order-only prereqs, and recipe lines.
