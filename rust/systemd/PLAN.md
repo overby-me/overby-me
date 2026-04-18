@@ -97,10 +97,10 @@ Basic Type=notify (READY=1) works. NotifyAccess=all/main/exec/none enforcement w
 - 23-unit-file-extrafiledescriptors
 - Fix: Implement ExtraFileDescriptors= directive
 
-**BindPaths=/BindReadOnlyPaths= at runtime:** — DONE
+**BindPaths=/BindReadOnlyPaths= at runtime:** — DONE AND VERIFIED
 
-- 23-unit-file-runtime-bind-paths
-- Fix: Implemented `systemctl bind` (control protocol `bind` command) and D-Bus `BindMountUnit` method backed by a shared `bind_mount_into_unit` helper that forks + `setns`es into `/proc/<main_pid>/ns/mnt` of the target service, optionally creates the destination, and performs `mount(MS_BIND | MS_REC)` (plus optional `MS_REMOUNT | MS_RDONLY`). Paired with helper-command mount-namespace alignment (ExecStartPre/Post/StopPost unshare a new namespace and apply the service's BindPaths/InaccessiblePaths/PrivateTmp via `pre_exec`) so ExecStartPre sees the same filesystem as ExecStart.
+- 23-unit-file-runtime-bind-paths — **NOW PASSES** (VM test exit 0)
+- Fix: Implemented `systemctl bind` (control protocol `bind` command) and D-Bus `BindMountUnit` method backed by a shared `bind_mount_into_unit` helper that forks + `setns`es into `/proc/<main_pid>/ns/mnt` of the target service, optionally creates the destination, and performs `mount(MS_BIND | MS_REC)` (plus optional `MS_REMOUNT | MS_RDONLY`). Paired with helper-command mount-namespace alignment (ExecStartPre/Post/StopPost unshare a new namespace and apply the service's BindPaths/InaccessiblePaths/PrivateTmp via `pre_exec`, in the correct order — PrivateTmp first, then BindPaths with destination creation, then InaccessiblePaths last) so ExecStartPre sees the same filesystem as ExecStart.
 
 **PrivatePIDs=:**
 
