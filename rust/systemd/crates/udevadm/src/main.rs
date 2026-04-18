@@ -2119,7 +2119,14 @@ fn cmd_wait(timeout: u64, wait_until: &str, settle: bool, devices: &[String]) ->
     // per-device state — otherwise `udevadm wait --removed --settle`
     // can see the sysfs path disappear before udevd has a chance to
     // process the remove event and clean up `/run/udev/data/…`.
+    //
+    // A brief sleep first ensures the kernel's uevent has had time to
+    // land in udevd's netlink queue before we ask the daemon whether it
+    // is settled.  Without this the queue-length check races with
+    // netlink delivery and settle returns OK before the relevant event
+    // is even visible to the daemon.
     if settle {
+        std::thread::sleep(Duration::from_millis(200));
         let _ = cmd_settle(timeout, &None);
     }
 
