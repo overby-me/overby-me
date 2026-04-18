@@ -199,7 +199,7 @@ All 23 udev tests fail because the C `udevadm` binary in the overlay lacks featu
 - [x] Implement OpenFile= directive
 - [x] Implement ExtraFileDescriptors= directive (via D-Bus StartTransientUnit)
 - [x] Implement runtime BindPaths= / BindReadOnlyPaths= (`systemctl bind [--mkdir] [--read-only]` + D-Bus `BindMountUnit`, helper via setns into `/proc/<main_pid>/ns/mnt`)
-- [x] Align ExecStartPre= mount namespace with ExecStart= (applies BindPaths/InaccessiblePaths/PrivateTmp in per-helper child namespace via `pre_exec`)
+- [x] Align ExecStartPre= / ExecStartPost= / ExecStopPost= / ExecCondition= / ExecStop= mount namespace with ExecStart= (applies BindPaths/InaccessiblePaths/PrivateTmp in per-helper child namespace via `pre_exec`; ordering `PrivateTmp → BindPaths → InaccessiblePaths`; destinations created before bind; source-type probe precomputed in parent to avoid allocator reentry in `pre_exec`)
 - [x] Implement MessageQueue socket options
 - [x] Implement `systemd-socket-activate` `--inetd` / `--now` / validation flags
 - [x] Implement `systemd-notify --fork` (shell-captured daemon PID + MAINPID injection to `$NOTIFY_SOCKET`)
@@ -209,7 +209,8 @@ All 23 udev tests fail because the C `udevadm` binary in the overlay lacks featu
 
 - [x] D-Bus interface (org.freedesktop.systemd1):
   - Manager: `Version`, `Architecture`, `NNames`, `NJobs`, `NFailedUnits`, `ServiceWatchdogs`, `Features`, `Virtualization`, `ShowStatus` (properties); `ListUnits`, `GetUnit`, `GetUnitByPID`, `StartUnit`, `StopUnit`, `RestartUnit`, `Reload` (→ `Command::LoadAllNew`), `StartTransientUnit` (with `ExtraFileDescriptors a(hs)` dup-out), `BindMountUnit`, `KillUnit`, `FreezeUnit`, `ThawUnit`, `ResetFailedUnit`, `ResetFailed`, `Subscribe`, `Unsubscribe` (methods)
-  - Per-unit `/org/freedesktop/systemd1/unit/<escaped>` Unit interface: `Id`, `Description`, `ActiveState`, `SubState`, `LoadState`, `UnitFileState`, `CanStart`, `CanStop`, `CanReload`, `CanIsolate`, `CanFreeze`, `CanLiveMount`, `Names`, `FragmentPath`, `DropInPaths`, `InvocationID` (raw 16 bytes), `InactiveExitTimestamp`, `ActiveEnterTimestamp`, `ActiveExitTimestamp`, `InactiveEnterTimestamp`, `Wants`, `Requires`, `WantedBy`, `RequiredBy`, `After`, `Before`, `Conflicts`, `PartOf`, `BindsTo`
+  - Manager additions: `TryRestartUnit`, `ReloadOrRestartUnit`, transient `.slice` support in `StartTransientUnit` (Description, MemoryMax/Min/Low/High/SwapMax applied to the implicit-slice config); daemon-reload preserves transient units under `/run/systemd/transient`
+  - Per-unit `/org/freedesktop/systemd1/unit/<escaped>` Unit interface: `Id`, `Description`, `ActiveState`, `SubState`, `LoadState`, `UnitFileState`, `CanStart`, `CanStop`, `CanReload`, `CanIsolate` (from AllowIsolate=), `CanFreeze`, `CanLiveMount`, `DefaultDependencies`, `Names`, `FragmentPath`, `DropInPaths` (hierarchical — type-level `service.d`, prefix-level `a-.service.d`, exact-name), `InvocationID` (raw 16 bytes), `InactiveExitTimestamp`, `ActiveEnterTimestamp`, `ActiveExitTimestamp`, `InactiveEnterTimestamp`, `Wants`, `Requires`, `WantedBy`, `RequiredBy`, `After`, `Before`, `Conflicts`, `PartOf`, `BindsTo`
   - Same object also exposes Service interface for `.service` units: `MainPID`, `ExecMainPID`, `ExecMainStatus`, `Type`, `Result`, `NRestarts`
 - [ ] Rust udevadm reimplementation — blocks 23 tests
 
