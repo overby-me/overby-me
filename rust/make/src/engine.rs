@@ -162,6 +162,10 @@ pub struct Engine {
     /// Applied to each recipe's expansion scope when building that target.
     #[allow(clippy::type_complexity)]
     target_vars: RefCell<HashMap<String, Vec<(String, AssignOp, String)>>>,
+    /// Per-target variable names that were declared with `export`
+    /// (e.g. `two: export SHELL := …`). Added to `exports` only
+    /// while the owning target's recipe runs.
+    target_exports: RefCell<HashMap<String, Vec<String>>>,
     /// Stack of target-specific variable bindings active during the
     /// currently-recursing build. Prereq builds see the union of their
     /// ancestors' bindings so target-specific vars propagate downward.
@@ -227,6 +231,7 @@ impl Engine {
             suffixes_cleared: RefCell::new(false),
             question_needs_update: RefCell::new(false),
             target_vars: RefCell::new(HashMap::new()),
+            target_exports: RefCell::new(HashMap::new()),
             target_scope_stack: RefCell::new(Vec::new()),
             delete_on_error: RefCell::new(false),
             assume_new: RefCell::new(HashSet::new()),
@@ -784,13 +789,28 @@ impl Engine {
                     AssignOp::Simple => expand::expand(&assign.value, self),
                     _ => assign.value.clone(),
                 };
+                // Parser prefixes the name with `!` when the
+                // declaration had the `export` modifier; strip it
+                // back off and record the var as a target-specific
+                // export so the recipe's child env sees it when this
+                // target builds.
+                let (name, do_export) = match assign.name.strip_prefix('!') {
+                    Some(rest) => (rest.to_string(), true),
+                    None => (assign.name.clone(), false),
+                };
                 let mut tv = self.target_vars.borrow_mut();
                 for target in targets_expanded.split_whitespace() {
                     tv.entry(target.to_string()).or_default().push((
-                        assign.name.clone(),
+                        name.clone(),
                         assign.op,
                         value.clone(),
                     ));
+                }
+                if do_export {
+                    let mut te = self.target_exports.borrow_mut();
+                    for target in targets_expanded.split_whitespace() {
+                        te.entry(target.to_string()).or_default().push(name.clone());
+                    }
                 }
             }
             Directive::Vpath(_) => {
@@ -1958,6 +1978,23 @@ impl Engine {
         // inherited from ancestor targets currently being built). Save
         // prior values so we can restore them afterwards.
         let tv_entries: Vec<(String, AssignOp, String)> = self.collect_target_vars(target);
+        // Target-specific `export VAR := …` — add VAR to the export
+        // set for the duration of this recipe.
+        let export_names: Vec<String> = self
+            .target_exports
+            .borrow()
+            .get(target)
+            .cloned()
+            .unwrap_or_default();
+        let mut added_exports: Vec<String> = Vec::new();
+        {
+            let mut exports = self.exports.borrow_mut();
+            for n in &export_names {
+                if exports.insert(n.clone()) {
+                    added_exports.push(n.clone());
+                }
+            }
+        }
         let mut saved: Vec<(String, Option<Variable>)> = Vec::new();
         for (name, op, value) in &tv_entries {
             saved.push((name.clone(), self.vars.borrow().get(name).cloned()));
@@ -2001,6 +2038,13 @@ impl Engine {
                 None => {
                     vars.remove(&name);
                 }
+            }
+        }
+        // Remove the target-specific exports we added above.
+        {
+            let mut exports = self.exports.borrow_mut();
+            for n in &added_exports {
+                exports.remove(n);
             }
         }
         result
@@ -2238,9 +2282,11 @@ impl Engine {
                 // child would otherwise inherit our stale env entry.
                 // SHELL is special: `SHELL := …` changes the shell
                 // make uses internally but must not be exported to
-                // recipes (keeps the user's login shell visible there).
+                // recipes (keeps the user's login shell visible there)
+                // — unless SHELL has been explicitly `export`ed.
+                let shell_exported = self.exports.borrow().contains("SHELL");
                 for name in self.env_inherited.borrow().iter() {
-                    if name == "SHELL" {
+                    if name == "SHELL" && !shell_exported {
                         continue;
                     }
                     let value = self.lookup_var(name);

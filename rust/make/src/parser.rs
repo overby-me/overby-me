@@ -379,34 +379,39 @@ impl Parser {
             // Strip optional modifier prefixes on target-specific
             // assignments. GNU make accepts any combination of
             // `private`, `export`, and `override` in any order before
-            // the assignment; we accept them but currently ignore the
-            // distinction (the assignment itself is applied as a
-            // target-specific override regardless).
+            // the assignment. When `export` is present AND the
+            // assignment parses from the stripped text, mark the var
+            // name in the target string with a leading `!` sentinel
+            // so the engine adds it to the export set when the target
+            // is built. (An ordinary variable name cannot begin with
+            // `!`, so this is unambiguous.)
             let mut after_mod = after;
+            let mut had_export = false;
             loop {
+                if let Some(rest) = after_mod.strip_prefix("export ") {
+                    had_export = true;
+                    after_mod = rest.trim_start();
+                    continue;
+                }
                 let trimmed_mod = after_mod
                     .strip_prefix("private ")
-                    .or_else(|| after_mod.strip_prefix("override "))
-                    .or_else(|| after_mod.strip_prefix("export "));
+                    .or_else(|| after_mod.strip_prefix("override "));
                 match trimmed_mod {
                     Some(s) => after_mod = s.trim_start(),
                     None => break,
                 }
             }
-            // Prefer the original (un-stripped) text if it itself
-            // parses as an assignment — this handles the case where a
-            // modifier word (e.g. `private`) is actually the variable
-            // name, as in `a: private = a`.
-            let assign = try_parse_assignment(after).or_else(|| {
-                if after_mod.is_empty() {
-                    None
-                } else {
-                    try_parse_assignment(after_mod)
-                }
-            });
-            if let Some(assign) = assign {
+            let (assign, from_stripped) = match try_parse_assignment(after) {
+                Some(a) => (Some(a), false),
+                None if after_mod.is_empty() => (None, false),
+                None => (try_parse_assignment(after_mod), true),
+            };
+            if let Some(mut assign) = assign {
                 let targets_str = trimmed[..colon].to_string();
                 self.advance();
+                if had_export && from_stripped {
+                    assign.name = format!("!{}", assign.name);
+                }
                 return Ok(Some(Directive::TargetVarAssign(
                     targets_str,
                     Box::new(assign),

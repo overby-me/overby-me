@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**72/135 tests passing** (53%) — upstream test harness from GNU make 4.4.1.
+**73/135 tests passing** (54%) — upstream test harness from GNU make 4.4.1.
 
 `rust/make` has a parser, expander, and build engine (~5k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -68,7 +68,10 @@ organised in six directories under `tests/scripts/`:
   - Grouped targets (`targets &: prereqs`).
   - Double-colon rules (each `::` rule runs its own recipe).
   - Target-specific variables with `private`/`override`/`export`
-    modifiers.
+    modifiers; the `export` modifier scopes the export to the
+    owning target's recipe (added to `exports` on entry, removed
+    on exit) so `two: export SHELL := /.//bin/sh` doesn't leak to
+    sibling targets' recipes.
 - `.RECIPEPREFIX := X` overrides the tab prefix for subsequent rules.
 - UTF-8 BOM (`\u{FEFF}`) stripped from the start of a loaded makefile
   so it doesn't contaminate the first token.
