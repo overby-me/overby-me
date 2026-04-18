@@ -782,16 +782,38 @@ pub fn need_daemon_reload(unit: &Unit, unit_dirs: &[std::path::PathBuf]) -> bool
         }
     }
 
-    // Collect current set of drop-in .conf file paths across all unit dirs.
+    // Collect current set of drop-in .conf file paths across all unit
+    // dirs.  Include type-level ("service.d"), prefix-level
+    // ("a-.service.d", "a-b-.service.d"), and exact-name ("a-b-c.service.d"),
+    // matching the loader's hierarchy.
+    let unit_name = &unit.id.name;
+    let mut dropin_dirnames: Vec<String> = Vec::new();
+    if let Some(type_suffix) = unit_name.rsplit('.').next()
+        && !type_suffix.is_empty()
+    {
+        dropin_dirnames.push(format!("{type_suffix}.d"));
+    }
+    if let Some(dot_pos) = unit_name.rfind('.') {
+        let base = &unit_name[..dot_pos];
+        let suffix = &unit_name[dot_pos..];
+        let parts: Vec<&str> = base.split('-').collect();
+        for i in 1..parts.len() {
+            let prefix = parts[..i].join("-");
+            dropin_dirnames.push(format!("{prefix}-{suffix}.d"));
+        }
+    }
+    dropin_dirnames.push(format!("{unit_name}.d"));
+
     let mut current_dropins: Vec<std::path::PathBuf> = Vec::new();
-    let dropin_dirname = format!("{}.d", unit.id.name);
     for dir in unit_dirs {
-        let dropin_dir = dir.join(&dropin_dirname);
-        if let Ok(entries) = std::fs::read_dir(&dropin_dir) {
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                if name.to_string_lossy().ends_with(".conf") {
-                    current_dropins.push(entry.path());
+        for dropin_dirname in &dropin_dirnames {
+            let dropin_dir = dir.join(dropin_dirname);
+            if let Ok(entries) = std::fs::read_dir(&dropin_dir) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name();
+                    if name.to_string_lossy().ends_with(".conf") {
+                        current_dropins.push(entry.path());
+                    }
                 }
             }
         }
