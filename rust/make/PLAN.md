@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**67/135 tests passing** (50%) — upstream test harness from GNU make 4.4.1.
+**69/135 tests passing** (51%) — upstream test harness from GNU make 4.4.1.
 
 `rust/make` has a parser, expander, and build engine (~5k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -70,6 +70,8 @@ organised in six directories under `tests/scripts/`:
   - Target-specific variables with `private`/`override`/`export`
     modifiers.
 - `.RECIPEPREFIX := X` overrides the tab prefix for subsequent rules.
+- UTF-8 BOM (`\u{FEFF}`) stripped from the start of a loaded makefile
+  so it doesn't contaminate the first token.
 - Backslash-newline continuations:
   - Non-recipe: collapse surrounding whitespace to a single space.
   - Recipe: preserve `\<nl>` so the shell handles continuation; strip
@@ -88,7 +90,10 @@ organised in six directories under `tests/scripts/`:
 - Filenames: `dir`, `notdir`, `suffix`, `basename`, `addsuffix`,
   `addprefix`, `join`, `wildcard`, `realpath`, `abspath` (with path
   normalization).
-- Conditionals: `if`, `or`, `and`, `intcmp`.
+- Conditionals: `if`, `or`, `and`, `intcmp` (arbitrary-precision via
+  string comparison — handles integers exceeding `i64`; supports the
+  4-arg `lt,ge` form where the 4th argument covers both equal and
+  greater cases).
 - Control: `foreach` (binding writes into var scope so `$(eval)`
   inside the body sees the iteration), `call` (dispatches to built-ins
   too), `value`, `eval`, `origin`, `flavor`, `let`.

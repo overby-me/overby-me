@@ -1202,7 +1202,11 @@ impl Engine {
         match std::fs::read_to_string(&resolved) {
             Ok(content) => {
                 self.append_makefile_list(&resolved);
-                let mut parser = crate::parser::Parser::new_with_source(&content, resolved.clone());
+                // Strip UTF-8 BOM if present — GNU make reads the file
+                // byte-by-byte and treats the BOM as whitespace-ish,
+                // leaving the first real character unmolested.
+                let content = content.strip_prefix('\u{FEFF}').unwrap_or(&content);
+                let mut parser = crate::parser::Parser::new_with_source(content, resolved.clone());
                 match parser.parse() {
                     Ok(directives) => self.load_makefile(&directives),
                     Err(e) => {

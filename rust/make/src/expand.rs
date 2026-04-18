@@ -3,6 +3,41 @@
 use crate::engine::{Engine, VarFlavor, VarOrigin, Variable};
 use std::collections::HashMap;
 
+/// Parse a signed decimal integer for `intcmp`. Returns
+/// `Some((is_negative, digits_without_leading_zeros))` on success, or
+/// `None` for empty/malformed input. Zero normalizes to
+/// `(false, "0")` regardless of sign — GNU make treats `-0` as `0`.
+fn parse_integer(s: &str) -> Option<(bool, String)> {
+    if s.is_empty() {
+        return None;
+    }
+    let (sign, digits) = match s.as_bytes()[0] {
+        b'-' => (true, &s[1..]),
+        b'+' => (false, &s[1..]),
+        _ => (false, s),
+    };
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let trimmed = digits.trim_start_matches('0');
+    if trimmed.is_empty() {
+        Some((false, "0".to_string()))
+    } else {
+        Some((sign, trimmed.to_string()))
+    }
+}
+
+/// Compare two integers parsed by `parse_integer`.
+fn cmp_integer(a: &(bool, String), b: &(bool, String)) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (a.0, b.0) {
+        (false, true) => Ordering::Greater,
+        (true, false) => Ordering::Less,
+        (false, false) => a.1.len().cmp(&b.1.len()).then_with(|| a.1.cmp(&b.1)),
+        (true, true) => b.1.len().cmp(&a.1.len()).then_with(|| b.1.cmp(&a.1)),
+    }
+}
+
 /// Expand all variable references and function calls in a string.
 pub fn expand(s: &str, engine: &Engine) -> String {
     expand_with_auto(s, engine, &HashMap::new())
@@ -738,52 +773,59 @@ fn call_function(
             if args.len() >= 2 {
                 let lhs = expand_with_auto(&args[0], engine, auto_vars);
                 let rhs = expand_with_auto(&args[1], engine, auto_vars);
-                let lhs_n: Option<i64> = lhs.trim().parse().ok();
-                let rhs_n: Option<i64> = rhs.trim().parse().ok();
-                let check_nonnumeric = |val: &str, which: &str| {
-                    if lhs_n.is_none() && which == "first" || rhs_n.is_none() && which == "second" {
-                        let prefix = match engine.current_source.borrow().as_ref() {
-                            Some((file, line)) => format!("{file}:{line}: "),
-                            None => String::new(),
-                        };
-                        if val.trim().is_empty() {
-                            eprintln!(
-                                "{prefix}*** non-numeric {which} argument to 'intcmp' function: empty value.  Stop."
-                            );
-                        } else {
-                            eprintln!(
-                                "{prefix}*** non-numeric {which} argument to 'intcmp' function: '{}'.  Stop.",
-                                val.trim()
-                            );
-                        }
-                        std::process::exit(2);
+                let lhs_ord = parse_integer(lhs.trim());
+                let rhs_ord = parse_integer(rhs.trim());
+                let check_nonnumeric = |val: &str, which: &str, ok: bool| {
+                    if ok {
+                        return;
+                    }
+                    let prefix = match engine.current_source.borrow().as_ref() {
+                        Some((file, line)) => format!("{file}:{line}: "),
+                        None => String::new(),
+                    };
+                    if val.trim().is_empty() {
+                        eprintln!(
+                            "{prefix}*** non-numeric {which} argument to 'intcmp' function: empty value.  Stop."
+                        );
+                    } else {
+                        eprintln!(
+                            "{prefix}*** non-numeric {which} argument to 'intcmp' function: '{}'.  Stop.",
+                            val.trim()
+                        );
+                    }
+                    std::process::exit(2);
+                };
+                check_nonnumeric(&lhs, "first", lhs_ord.is_some());
+                check_nonnumeric(&rhs, "second", rhs_ord.is_some());
+                let (lhs_val, rhs_val) = (lhs_ord.unwrap(), rhs_ord.unwrap());
+                let ord = cmp_integer(&lhs_val, &rhs_val);
+                let pick = |idx: usize| {
+                    args.get(idx)
+                        .map(|a| expand_with_auto(a, engine, auto_vars))
+                        .unwrap_or_default()
+                };
+                // `$(intcmp L,R)` — empty unless equal (returns normalized L).
+                // `$(intcmp L,R,lt)` — lt / empty / empty.
+                // `$(intcmp L,R,lt,ne)` — lt / ne (used for eq+gt) / ne.
+                // `$(intcmp L,R,lt,eq,gt)` — three-way.
+                let format_int = |v: &(bool, String)| {
+                    if v.0 {
+                        format!("-{}", v.1)
+                    } else {
+                        v.1.clone()
                     }
                 };
-                check_nonnumeric(&lhs, "first");
-                check_nonnumeric(&rhs, "second");
-                match (lhs_n, rhs_n) {
-                    (Some(l), Some(r)) => {
-                        let ord = l.cmp(&r);
-                        let pick = |idx: usize| {
-                            args.get(idx)
-                                .map(|a| expand_with_auto(a, engine, auto_vars))
-                                .unwrap_or_default()
-                        };
-                        // `$(intcmp L,R)` — empty unless equal (returns L).
-                        // `$(intcmp L,R,lt)` — lt or empty.
-                        // `$(intcmp L,R,lt,eq)` — lt / eq / empty.
-                        // `$(intcmp L,R,lt,eq,gt)` — three-way.
-                        let result = match (ord, args.len()) {
-                            (std::cmp::Ordering::Equal, 2) => lhs.trim().to_string(),
-                            (std::cmp::Ordering::Equal, _) => pick(3),
-                            (std::cmp::Ordering::Less, n) if n >= 3 => pick(2),
-                            (std::cmp::Ordering::Greater, n) if n >= 5 => pick(4),
-                            _ => String::new(),
-                        };
-                        Some(result)
-                    }
-                    _ => Some(String::new()),
-                }
+                let result = match (ord, args.len()) {
+                    (std::cmp::Ordering::Equal, 2) => format_int(&lhs_val),
+                    (std::cmp::Ordering::Equal, 3) => String::new(),
+                    (std::cmp::Ordering::Equal, 4) => pick(3),
+                    (std::cmp::Ordering::Equal, _) => pick(3),
+                    (std::cmp::Ordering::Less, n) if n >= 3 => pick(2),
+                    (std::cmp::Ordering::Greater, 4) => pick(3),
+                    (std::cmp::Ordering::Greater, n) if n >= 5 => pick(4),
+                    _ => String::new(),
+                };
+                Some(result)
             } else {
                 Some(String::new())
             }
