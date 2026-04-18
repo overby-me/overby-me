@@ -548,6 +548,10 @@ struct Args {
     positional_options_seen: bool,
     /// --occurrence: only for list/extract/diff operations.
     occurrence: bool,
+    /// Per-option positional-warning messages to emit at program end
+    /// (in command-line order). Includes --exclude, positional -C, and
+    /// friends.
+    positional_warnings: Vec<String>,
     /// --backup: rename existing destination files to NAME~ before
     /// overwriting during extract.
     backup: bool,
@@ -907,14 +911,10 @@ fn parse_args() -> Args {
             "--exclude" => {
                 if let Some(v) = queue.pop_front() {
                     if !args.paths.is_empty() {
-                        if !args.positional_options_seen {
-                            eprintln!(
-                                "tar: The following options were used after non-option arguments.  These options are positional and affect only arguments that follow them.  Please, rearrange them properly."
-                            );
-                        }
                         args.positional_options_seen = true;
                         args.deferred_fatal = true;
-                        eprintln!("tar: --exclude '{v}' has no effect");
+                        args.positional_warnings
+                            .push(format!("tar: --exclude '{v}' has no effect"));
                     } else {
                         args.excludes.push(ExcludeEntry {
                             pattern: v,
@@ -1518,6 +1518,28 @@ fn parse_args() -> Args {
         }
     }
 
+    // Trailing positional -C entries (i.e. -C DIR with no path
+    // following it in args.paths) have no effect. Collect their
+    // warnings for emission at program end and strip them from paths.
+    let last_real_path = args.paths.iter().rposition(|p| !p.starts_with("\0-C\0"));
+    let tail_start = last_real_path.map(|i| i + 1).unwrap_or(0);
+    let trailing: Vec<String> = args.paths[tail_start..]
+        .iter()
+        .filter(|p| p.starts_with("\0-C\0"))
+        .map(|p| format!("tar: -C '{}' has no effect", p.trim_start_matches("\0-C\0")))
+        .collect();
+    if !trailing.is_empty() {
+        // Interleave with existing --exclude-style warnings in order,
+        // then bucket: -C warnings from positional first when they are
+        // earlier on the command line, followed by --exclude warnings.
+        // Since our parser records --exclude warnings as they happen,
+        // just prepend the trailing -Cs here.
+        args.positional_warnings.splice(0..0, trailing);
+        args.positional_options_seen = true;
+        args.deferred_fatal = true;
+        args.paths.truncate(tail_start);
+    }
+
     args
 }
 
@@ -1779,10 +1801,28 @@ fn add_paths_to_builder_filter<W: Write>(
 
         let exclude_filter = ExcludeFilter::new(&args.excludes);
         let mut reported_tag_dirs: std::collections::HashSet<PathBuf> = Default::default();
+        // Canonicalise the archive file to detect "archive cannot
+        // contain itself" so archiving `.` doesn't recurse into the
+        // growing tar file.
+        let archive_canonical = args
+            .file
+            .as_deref()
+            .filter(|p| *p != "-")
+            .and_then(|p| fs::canonicalize(p).ok());
+
         for path in &entries {
             let path_str = path.to_string_lossy();
 
             if exclude_filter.matches(&path_str) {
+                continue;
+            }
+
+            if let Some(arc) = &archive_canonical
+                && let Ok(candidate) = fs::canonicalize(path)
+                && &candidate == arc
+            {
+                eprintln!("tar: {path_str}: archive cannot contain itself; not dumped");
+                had_read_error = true;
                 continue;
             }
 
@@ -2117,7 +2157,11 @@ fn add_paths_to_builder_filter<W: Write>(
         }
     }
     if had_read_error {
-        eprintln!("tar: Exiting with failure status due to previous errors");
+        // Caller emits "Exiting with failure…" at end; don't duplicate
+        // it when positional warnings still need to print first.
+        if args.positional_warnings.is_empty() {
+            eprintln!("tar: Exiting with failure status due to previous errors");
+        }
         return Err(io::Error::other("read-error-exit"));
     }
     if file_changed {
@@ -3163,12 +3207,27 @@ fn main() {
         do_extract_or_list(&args)
     };
 
+    let emit_positional_warnings = || {
+        if !args.positional_warnings.is_empty() {
+            eprintln!(
+                "tar: The following options were used after non-option arguments.  These options are positional and affect only arguments that follow them.  Please, rearrange them properly."
+            );
+            for line in &args.positional_warnings {
+                eprintln!("{line}");
+            }
+        }
+    };
+
     if let Err(e) = result {
         let msg = e.to_string();
         if msg == "not-found-in-archive" {
             process::exit(2);
         }
         if msg == "read-error-exit" {
+            if !args.positional_warnings.is_empty() {
+                emit_positional_warnings();
+                eprintln!("tar: Exiting with failure status due to previous errors");
+            }
             process::exit(2);
         }
         if msg == "file-changed-exit" {
@@ -3204,6 +3263,9 @@ fn main() {
             process::exit(2);
         }
         process::exit(2);
+    }
+    if !args.positional_warnings.is_empty() {
+        emit_positional_warnings();
     }
     if args.deferred_fatal {
         if args.positional_options_seen {
