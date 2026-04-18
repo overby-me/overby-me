@@ -2,12 +2,12 @@
 
 ## Current status
 
-**210/225 tests passing (93%)**.
+**212/225 tests passing (94%)**.
 
 Trajectory: 92 → 172 → 182 → 187 → 191 → 195 → 200 → 206 → 209 →
-210. Each per-test derivation is wired as a flake check via the
-shared `gnutar-test-harness` (autom4te-built `testsuite` script +
-helper programs).
+210 → 212. Each per-test derivation is wired as a flake check via
+the shared `gnutar-test-harness` (autom4te-built `testsuite` script
++ helper programs).
 
 ## Running tests
 
@@ -200,11 +200,25 @@ Substantial implementation of the incremental feature:
   messages, and across-pass gating all check `args.incremental`
   instead so plain-incremental runs still get the dumpdir layout.
 
-### What remains (15 failing)
+### Recent: cyclic/chained rename extraction
+
+- Keep R/T rename pairs separate from ordinary Y/N/D kids when
+  building each directory's dumpdir, then concatenate with renames
+  first. The previous pass alphabetised all entries together,
+  which split renames across unrelated names and produced
+  `R d1 T d1 R d2 T d3` instead of `R d2 T d1 R d1 T d3`.
+- Extract-side R/T handling now stages every rename source under
+  a unique temp name first, then moves each temp into its target.
+  This survives cyclic shuffles (a→b→c→a) and chained ones
+  (d1→d3, d2→d1) where the original single-shot `fs::rename` would
+  refuse to overwrite an existing target or clobber a file the
+  next pair needed.
+
+### What remains (13 failing)
 
 | Bucket | Tests | Notes |
 | --- | --- | --- |
-| `--listed-incremental` — advanced | 8 | incr06/08/09/10, rename02/03/06, remfiles08b. Remaining gaps: multi-src dir-first walk invariant (dir args that also appear as children of another dir arg), cross-hierarchy moves (`mv foo/bar/baz foo`), and filename-normalization behaviour with mixed relative/absolute roots. |
+| `--listed-incremental` — advanced | 6 | incr06/08/09/10, rename02, remfiles08b. Remaining gaps: multi-src dir-first walk invariant (dir args that also appear as children of another dir arg), cross-hierarchy moves (`mv foo/bar/baz foo`), and filename-normalization behaviour with mixed relative/absolute roots. |
 | Multi-volume (`-M`, `--tape-length=N`, `--new-volume-script`) | 7 | multiv03/04/05/08/09, label02, sparsemvp — continuation headers, volume boundary handling. |
 
 ## Approach

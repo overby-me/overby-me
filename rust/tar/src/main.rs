@@ -2643,6 +2643,9 @@ fn add_paths_to_builder_filter<W: Write>(
                     files.push(p);
                 }
             }
+            // Sort dirs alphabetically so cyclic / chained renames
+            // emit in the same order GNU tar does.
+            dirs.sort();
             files.sort_by(|a, b| {
                 let ap = a.parent().unwrap_or(Path::new(""));
                 let bp = b.parent().unwrap_or(Path::new(""));
@@ -3004,6 +3007,10 @@ fn add_paths_to_builder_filter<W: Write>(
                     // pre-cache-tag block above so they stay ahead of
                     // any contains-tag note for the same directory.)
 
+                    // Keep renames (R/T pairs) separate from ordinary
+                    // Y/N/D entries so the alphabetical sort on the
+                    // latter doesn't interleave the pairs.
+                    let mut renames: Vec<(String, String)> = Vec::new();
                     let mut kids: Vec<(u8, String)> = Vec::new();
                     let mut skip_children: Vec<PathBuf> = Vec::new();
                     // Names we "consume" via rename so a leftover R
@@ -3046,8 +3053,7 @@ fn add_paths_to_builder_filter<W: Write>(
                                 }
                             }
                             if let Some(from) = rename_from {
-                                kids.push((b'R', from.clone()));
-                                kids.push((b'T', name.clone()));
+                                renames.push((from.clone(), name.clone()));
                                 consumed_prev_names.insert(from);
                                 continue;
                             }
@@ -3089,6 +3095,15 @@ fn add_paths_to_builder_filter<W: Write>(
                         }
                     }
                     kids.sort_by(|a, b| a.1.cmp(&b.1));
+                    // Assemble final entry list: R/T rename pairs
+                    // first (in the order renames were discovered),
+                    // then the alphabetically-sorted normal kids.
+                    let mut combined: Vec<(u8, String)> = Vec::new();
+                    for (from, to) in &renames {
+                        combined.push((b'R', from.clone()));
+                        combined.push((b'T', to.clone()));
+                    }
+                    combined.extend(kids);
                     // Record in the new-snapshot map so next run can
                     // spot entries that disappear between runs.
                     new_snapshot_dirs.insert(
@@ -3110,14 +3125,14 @@ fn add_paths_to_builder_filter<W: Write>(
                             dev: dev_ino.0,
                             inode: dev_ino.1,
                             name: PathBuf::from(path_str.to_string()),
-                            children: kids.clone(),
+                            children: combined.clone(),
                         },
                     );
                     for p in skip_children {
                         incremental_skip.insert(p);
                     }
                     let mut dumpdir: Vec<u8> = Vec::new();
-                    for (code, name) in kids {
+                    for (code, name) in combined {
                         dumpdir.push(code);
                         dumpdir.extend_from_slice(name.as_bytes());
                         dumpdir.push(0);
@@ -4469,22 +4484,43 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
                         let name = String::from_utf8_lossy(&field[1..]).into_owned();
                         entries.push((code, name));
                     }
-                    // Execute R/T renames first so the target name
-                    // ends up on disk before we compare against the
-                    // rest of the dumpdir.
+                    // Execute R/T renames in two passes so chained /
+                    // cyclic moves (a→b, b→c, c→a) don't clobber
+                    // each other. First move each source to a unique
+                    // temp name, then move temps into the targets.
+                    let mut pairs: Vec<(String, String)> = Vec::new();
                     let mut i = 0;
                     while i < entries.len() {
                         if entries[i].0 == b'R' && i + 1 < entries.len() && entries[i + 1].0 == b'T'
                         {
-                            let from = dest.join(&entries[i].1);
-                            let to = dest.join(&entries[i + 1].1);
-                            if from.exists() && !to.exists() {
-                                let _ = fs::rename(&from, &to);
-                            }
+                            pairs.push((entries[i].1.clone(), entries[i + 1].1.clone()));
                             i += 2;
                             continue;
                         }
                         i += 1;
+                    }
+                    let mut staged: Vec<(PathBuf, String)> = Vec::new();
+                    for (idx, (from, to)) in pairs.iter().enumerate() {
+                        let src_path = dest.join(from);
+                        if !src_path.exists() {
+                            continue;
+                        }
+                        let tmp_name = format!(".tar-rename-tmp-{idx}");
+                        let tmp_path = dest.join(&tmp_name);
+                        if fs::rename(&src_path, &tmp_path).is_ok() {
+                            staged.push((tmp_path, to.clone()));
+                        }
+                    }
+                    for (tmp_path, to_name) in staged {
+                        let to_path = dest.join(&to_name);
+                        if to_path.exists() {
+                            let _ = if to_path.is_dir() {
+                                fs::remove_dir_all(&to_path)
+                            } else {
+                                fs::remove_file(&to_path)
+                            };
+                        }
+                        let _ = fs::rename(&tmp_path, &to_path);
                     }
                     let kept: std::collections::HashSet<String> = entries
                         .iter()
