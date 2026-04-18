@@ -147,6 +147,7 @@ pub struct Engine {
     pub keep_going: bool,
     pub dry_run: bool,
     pub silent: bool,
+    pub trace: bool,
     pub touch: bool,
     pub question: bool,
     pub always_make: Cell<bool>,
@@ -227,6 +228,14 @@ pub struct Engine {
     /// Prevents re-attempting targets that already failed when they
     /// appear as prerequisites of different dependents.
     failed_targets: RefCell<HashSet<String>>,
+    /// When `--warn-undefined-variables` is set, emit a warning each
+    /// time an undefined variable is expanded.
+    pub warn_undefined_variables: Cell<bool>,
+    /// True when `.POSIX` special target has been seen.
+    posix_mode: RefCell<bool>,
+    /// Set to true by finalize_includes when an included makefile was
+    /// remade and the process should re-exec itself.
+    pub needs_reexec: Cell<bool>,
 }
 
 impl Engine {
@@ -262,6 +271,7 @@ impl Engine {
             keep_going: false,
             dry_run: false,
             silent: false,
+            trace: false,
             touch: false,
             question: false,
             always_make: Cell::new(false),
@@ -288,6 +298,9 @@ impl Engine {
             expand_chain_source: RefCell::new(None),
             in_recipe: RefCell::new(false),
             failed_targets: RefCell::new(HashSet::new()),
+            warn_undefined_variables: Cell::new(false),
+            posix_mode: RefCell::new(false),
+            needs_reexec: Cell::new(false),
         };
 
         // Set default variables
@@ -543,6 +556,7 @@ impl Engine {
                 VarFlavor::Undefined => String::new(),
             }
         } else {
+            self.warn_undefined(name);
             String::new()
         }
     }
@@ -562,6 +576,76 @@ impl Engine {
             .get(name)
             .map(|v| v.value.clone())
             .unwrap_or_default()
+    }
+
+    /// Emit a warning for an undefined variable reference when
+    /// `--warn-undefined-variables` is active. Skips automatic variables
+    /// and GNU make's built-in "no-warn" names.
+    fn warn_undefined(&self, name: &str) {
+        if !self.warn_undefined_variables.get() {
+            return;
+        }
+        // Automatic variables -- never warn.
+        if matches!(
+            name,
+            "@" | "<"
+                | "^"
+                | "*"
+                | "?"
+                | "+"
+                | "|"
+                | "%"
+                | "@D"
+                | "@F"
+                | "<D"
+                | "<F"
+                | "^D"
+                | "^F"
+                | "*D"
+                | "*F"
+                | "?D"
+                | "?F"
+                | "+D"
+                | "+F"
+                | "|D"
+                | "|F"
+                | "%D"
+                | "%F"
+        ) {
+            return;
+        }
+        // GNU make built-in "no-warn" list.
+        const NO_WARN: &[&str] = &[
+            "GNUMAKEFLAGS",
+            "MAKEFLAGS",
+            "MAKE_COMMAND",
+            "MAKECMDGOALS",
+            "MAKE_RESTARTS",
+            "MAKE_TERMERR",
+            "MAKE_TERMOUT",
+            "MAKELEVEL",
+            "MFLAGS",
+            "SUFFIXES",
+            ".DEFAULT",
+            ".DEFAULT_GOAL",
+            ".EXTRA_PREREQS",
+            ".FEATURES",
+            ".INCLUDE_DIRS",
+            ".LOADED",
+            ".RECIPEPREFIX",
+            ".SHELLFLAGS",
+            ".VARIABLES",
+            "-*-command-variables-*-",
+            "-*-eval-flags-*-",
+            "VPATH",
+            "GPATH",
+        ];
+        if NO_WARN.contains(&name) {
+            return;
+        }
+        if let Some((file, line)) = self.current_source.borrow().clone() {
+            eprintln!("{file}:{line}: warning: undefined variable '{name}'");
+        }
     }
 
     /// Resolve a filename through VPATH. Returns the VPATH-resolved path
@@ -660,6 +744,35 @@ impl Engine {
         let pending: Vec<(String, bool, String, usize)> =
             self.pending_includes.borrow_mut().drain(..).collect();
 
+        // Track whether any included makefile was remade.  If so, the
+        // process must re-exec so the rebuilt makefile is re-read from
+        // scratch (GNU make "restart" semantics).
+        let mut any_include_remade = false;
+
+        // Temporarily disable -B (always-make) during include remaking
+        // so we only rebuild includes that are genuinely out of date.
+        // Without this, -B would cause an infinite re-exec loop.
+        let saved_always_make = self.always_make.get();
+        self.always_make.set(false);
+
+        // On restart (MAKE_RESTARTS > 0), temporarily clear assume_new
+        // (-W files) during include remaking. GNU make only applies -W
+        // for include remaking on the first run; on restart, -W should
+        // only affect target building, not trigger another restart.
+        let saved_assume_new = {
+            let restarts: u32 = std::env::var("MAKE_RESTARTS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
+            if restarts > 0 {
+                let saved = self.assume_new.borrow().clone();
+                self.assume_new.borrow_mut().clear();
+                Some(saved)
+            } else {
+                None
+            }
+        };
+
         // Phase 0: Try to remake include files that were successfully loaded.
         // GNU make always tries to rebuild included files; if the recipe
         // runs but doesn't change the file, the build proceeds normally.
@@ -689,8 +802,11 @@ impl Engine {
             // If the file changed, re-read it
             let mtime_after = std::fs::metadata(file).ok().and_then(|m| m.modified().ok());
             if mtime_before != mtime_after {
-                // File was modified — re-read it
-                self.load_file_with_loc(file, true, None);
+                // File was modified — do NOT re-read it here.
+                // The re-exec'd process will re-read from scratch.
+                // Re-reading now would prematurely evaluate $(info ...)
+                // and similar before the restart.
+                any_include_remade = true;
             }
             // Mark as built so main build doesn't re-evaluate
             self.built_targets.borrow_mut().insert(file.clone());
@@ -726,6 +842,14 @@ impl Engine {
         }
 
         if to_build.is_empty() {
+            // Restore -B before returning.
+            self.always_make.set(saved_always_make);
+            if let Some(ref saved) = saved_assume_new {
+                *self.assume_new.borrow_mut() = saved.clone();
+            }
+            if any_include_remade {
+                self.needs_reexec.set(true);
+            }
             return 0;
         }
 
@@ -832,9 +956,21 @@ impl Engine {
             });
         }
 
+        // Restore -B before Phase 3 error reporting (but after all
+        // include remaking builds are done).
+        self.always_make.set(saved_always_make);
+
         // Phase 3: Try to load rebuilt files and report errors.
         let mut has_fatal = false;
         for res in &results {
+            // If the file was rebuilt (had a rule, build succeeded) and now
+            // exists, mark for restart without loading. The re-exec'd
+            // process will load it from scratch. Loading now would
+            // prematurely evaluate $(info ...) etc.
+            if res.had_rule && res.build_err.is_none() && std::path::Path::new(&res.file).exists() {
+                any_include_remade = true;
+                continue;
+            }
             if self.load_file_with_loc(&res.file, true, None) {
                 continue;
             }
@@ -908,7 +1044,19 @@ impl Engine {
             }
         }
 
-        if has_fatal { 2 } else { 0 }
+        // Restore assume_new (-W files) for the main build phase.
+        if let Some(saved) = saved_assume_new {
+            *self.assume_new.borrow_mut() = saved;
+        }
+
+        if has_fatal {
+            2
+        } else {
+            if any_include_remade {
+                self.needs_reexec.set(true);
+            }
+            0
+        }
     }
 
     #[allow(dead_code)]
@@ -1409,6 +1557,7 @@ impl Engine {
                 }
                 ".POSIX" => {
                     // POSIX mode changes .SHELLFLAGS to include -e so
+                    *self.posix_mode.borrow_mut() = true;
                     // each recipe line's shell stops at the first
                     // failing command. Lines prefixed with `-` have
                     // the `-e` stripped at exec time so the remaining
@@ -1465,21 +1614,43 @@ impl Engine {
         let targets = normal_targets;
 
         // Old-style suffix rules: .c.o: → %.o: %.c
-        // A target like ".XY" where .X and .Y are known suffixes
-        if targets.len() == 1 && prereqs.is_empty() && targets[0].starts_with('.') {
+        // A target like ".XY" where .X and .Y are known suffixes.
+        // In non-POSIX mode, a suffix rule with prerequisites still
+        // generates a pattern rule (prereqs are ignored) but we also
+        // warn and fall through to register the explicit rule.
+        if targets.len() == 1 && targets[0].starts_with('.') {
             let target = &targets[0];
             if let Some((src_suffix, dst_suffix)) = self.parse_suffix_rule(target) {
-                self.pattern_rules.borrow_mut().push(PatternRuleEntry {
-                    target_pattern: format!("%{dst_suffix}"),
-                    prereq_patterns: vec![format!("%{src_suffix}")],
-                    order_only_patterns: Vec::new(),
-                    recipe: rule.recipe.clone(),
-                    recipe_lines: rule.recipe_lines.clone(),
-                    source_name: rule.source_name.clone(),
-                    is_terminal: false,
-                    sibling_patterns: Vec::new(),
-                });
-                return;
+                if !prereqs.is_empty() && *self.posix_mode.borrow() {
+                    // POSIX mode: suffix rule with prereqs is just a
+                    // normal rule — no pattern rule, no warning.
+                    // Fall through to explicit-rule handling below.
+                } else {
+                    if !prereqs.is_empty() {
+                        // Non-POSIX mode: warn and still create the
+                        // pattern rule, then fall through to also
+                        // register the explicit rule.
+                        eprintln!(
+                            "{}:{}: warning: ignoring prerequisites on suffix rule definition",
+                            rule.source_name, rule.line_no
+                        );
+                    }
+                    self.pattern_rules.borrow_mut().push(PatternRuleEntry {
+                        target_pattern: format!("%{dst_suffix}"),
+                        prereq_patterns: vec![format!("%{src_suffix}")],
+                        order_only_patterns: Vec::new(),
+                        recipe: rule.recipe.clone(),
+                        recipe_lines: rule.recipe_lines.clone(),
+                        source_name: rule.source_name.clone(),
+                        is_terminal: false,
+                        sibling_patterns: Vec::new(),
+                    });
+                    if prereqs.is_empty() {
+                        return;
+                    }
+                    // Non-POSIX with prereqs: fall through to also
+                    // register `.src.dst: prereqs` as explicit rule.
+                }
             }
         }
 
@@ -1745,7 +1916,13 @@ impl Engine {
             format!("make[{level}]")
         };
         let cwd_for_msg = std::env::current_dir().unwrap_or_default();
-        if should_print {
+        // If this is a re-exec (MAKE_RESTARTS > 0), skip the Entering
+        // message — the previous invocation already printed it.
+        let restarts: i32 = std::env::var("MAKE_RESTARTS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        if should_print && restarts == 0 {
             println!("{make_tag}: Entering directory '{}'", cwd_for_msg.display());
         }
         let inc_rc = self.finalize_includes();
@@ -1754,6 +1931,14 @@ impl Engine {
                 println!("{make_tag}: Leaving directory '{}'", cwd_for_msg.display());
             }
             return inc_rc;
+        }
+
+        // If an included makefile was remade, signal the caller to
+        // re-exec the process (GNU make "restart" semantics).
+        // Don't print Leaving — the re-exec'd process will print
+        // Entering/Leaving from scratch.
+        if self.needs_reexec.get() {
+            return -1; // sentinel: caller should re-exec
         }
 
         let targets = if targets.is_empty() {
@@ -1998,6 +2183,41 @@ impl Engine {
                 } else if self.question {
                     *self.question_needs_update.borrow_mut() = true;
                 } else {
+                    // --trace: print trace line before executing recipe
+                    if self.trace {
+                        let trace_line_no = rule.recipe_lines.first().copied().unwrap_or(0);
+                        let reason = if initial_target_mtime.is_none() && !is_phony {
+                            "target does not exist".to_string()
+                        } else if self.always_make.get() {
+                            "always-make flag is set".to_string()
+                        } else if is_phony {
+                            "target is .PHONY".to_string()
+                        } else {
+                            let newer: Vec<&str> = prereqs
+                                .iter()
+                                .filter(|p| {
+                                    if let (Some(tm), Ok(pm)) = (
+                                        initial_target_mtime,
+                                        std::fs::metadata(p.as_str()).and_then(|m| m.modified()),
+                                    ) {
+                                        pm > tm
+                                    } else {
+                                        false
+                                    }
+                                })
+                                .map(|s| s.as_str())
+                                .collect();
+                            if newer.is_empty() {
+                                "target does not exist".to_string()
+                            } else {
+                                newer.join(" ")
+                            }
+                        };
+                        eprintln!(
+                            "{}:{}: update target '{}' due to: {}",
+                            rule.source_name, trace_line_no, target, reason
+                        );
+                    }
                     match self.execute_recipe(
                         target,
                         &rule.recipe,
@@ -2179,9 +2399,33 @@ impl Engine {
         let mut newest_prereq: Option<std::time::SystemTime> = None;
         let mut has_phony_prereq = false;
         let mut has_rebuilt_prereq = false;
-        let assume_new = self.assume_new.borrow();
-        let has_assume_new_prereq = all_prereqs.iter().any(|p| assume_new.contains(p));
-        drop(assume_new);
+        let has_assume_new_prereq = {
+            let assume_new = self.assume_new.borrow();
+            if assume_new.is_empty() {
+                false
+            } else {
+                all_prereqs.iter().any(|p| {
+                    let np = p.strip_prefix("./").unwrap_or(p);
+                    // Check the prereq name directly
+                    if assume_new.iter().any(|a| {
+                        let na = a.strip_prefix("./").unwrap_or(a);
+                        np == na
+                    }) {
+                        return true;
+                    }
+                    // Also check the VPATH-resolved path
+                    if let Some(resolved) = self.resolve_vpath(p) {
+                        let nr = resolved.strip_prefix("./").unwrap_or(&resolved);
+                        assume_new.iter().any(|a| {
+                            let na = a.strip_prefix("./").unwrap_or(a);
+                            nr == na
+                        })
+                    } else {
+                        false
+                    }
+                })
+            }
+        };
         let mut first_err: Option<String> = None;
         for prereq in &all_prereqs {
             if let Err(e) = self.build_target_for(prereq, Some(target)) {
@@ -2396,14 +2640,65 @@ impl Engine {
                 *self.question_needs_update.borrow_mut() = true;
             }
         } else {
+            // --trace: print trace line before executing recipe
+            if self.trace {
+                let trace_line_no = recipe_lines.first().copied().unwrap_or(0);
+                let reason = if target_mtime.is_none() && !is_phony {
+                    "target does not exist".to_string()
+                } else if self.always_make.get() {
+                    "always-make flag is set".to_string()
+                } else if is_phony {
+                    "target is .PHONY".to_string()
+                } else {
+                    // Find which prereqs are newer
+                    let newer: Vec<&str> = all_prereqs
+                        .iter()
+                        .filter(|p| {
+                            if let (Some(tm), Ok(pm)) = (
+                                target_mtime,
+                                std::fs::metadata(p.as_str()).and_then(|m| m.modified()),
+                            ) {
+                                pm > tm
+                            } else {
+                                false
+                            }
+                        })
+                        .map(|s| s.as_str())
+                        .collect();
+                    if newer.is_empty() {
+                        "target does not exist".to_string()
+                    } else {
+                        newer.join(" ")
+                    }
+                };
+                eprintln!(
+                    "{}:{}: update target '{}' due to: {}",
+                    recipe_source, trace_line_no, target, reason
+                );
+            }
+            // Resolve prerequisites through VPATH for automatic variables.
+            // GNU make replaces prereq names with VPATH-resolved paths
+            // in $<, $^, $?, $+, $|.
+            let vpath_prereqs: Vec<String> = all_prereqs
+                .iter()
+                .map(|p| self.resolve_vpath(p).unwrap_or_else(|| p.clone()))
+                .collect();
+            let vpath_order_only: Vec<String> = all_order_only
+                .iter()
+                .map(|p| self.resolve_vpath(p).unwrap_or_else(|| p.clone()))
+                .collect();
+            let vpath_implied: Vec<String> = implied_prereqs
+                .iter()
+                .map(|p| self.resolve_vpath(p).unwrap_or_else(|| p.clone()))
+                .collect();
             match self.execute_recipe(
                 target,
                 &recipe,
                 &recipe_lines,
                 &recipe_source,
-                &all_prereqs,
-                &all_order_only,
-                &implied_prereqs,
+                &vpath_prereqs,
+                &vpath_order_only,
+                &vpath_implied,
                 &stem,
             ) {
                 Err(e) => {
@@ -2728,25 +3023,31 @@ impl Engine {
         auto_vars.insert("+", prereqs_v.join(" "));
         auto_vars.insert("*", stem.to_string());
 
-        // $? = prerequisites newer than target
-        let target_mtime = std::fs::metadata(target)
-            .ok()
-            .and_then(|m| m.modified().ok());
-        let newer: Vec<&str> = prereqs_v
-            .iter()
-            .filter(|p| {
-                if let Some(t_mtime) = target_mtime {
-                    std::fs::metadata(p)
-                        .ok()
-                        .and_then(|m| m.modified().ok())
-                        .is_some_and(|p_mtime| p_mtime > t_mtime)
-                } else {
-                    true
-                }
-            })
-            .map(|s| s.as_str())
-            .collect();
-        auto_vars.insert("?", newer.join(" "));
+        // $? = prerequisites newer than target.
+        // With -B (always-make), all prerequisites are considered newer.
+        let newer_str = if self.always_make.get() {
+            prereqs_v.join(" ")
+        } else {
+            let target_mtime = std::fs::metadata(target)
+                .ok()
+                .and_then(|m| m.modified().ok());
+            let newer: Vec<&str> = prereqs_v
+                .iter()
+                .filter(|p| {
+                    if let Some(t_mtime) = target_mtime {
+                        std::fs::metadata(p)
+                            .ok()
+                            .and_then(|m| m.modified().ok())
+                            .is_some_and(|p_mtime| p_mtime > t_mtime)
+                    } else {
+                        true
+                    }
+                })
+                .map(|s| s.as_str())
+                .collect();
+            newer.join(" ")
+        };
+        auto_vars.insert("?", newer_str);
 
         // $| = order-only prerequisites.
         auto_vars.insert("|", dedup_join(&order_only_v));
@@ -2776,7 +3077,7 @@ impl Engine {
         // expansion. Prefix chars appearing within an expansion (e.g.
         // `$(V)echo hello` where `$(V)` is `@`) apply to that
         // sub-line only. This matches GNU make's behavior.
-        let mut expanded_lines: Vec<(String, usize, bool, bool)> = Vec::new();
+        let mut expanded_lines: Vec<(String, usize, bool, bool, bool)> = Vec::new();
         for (idx, line) in recipe.iter().enumerate() {
             let line_no = recipe_lines.get(idx).copied().unwrap_or(0);
             if line_no > 0 {
@@ -2784,6 +3085,7 @@ impl Engine {
             }
             let mut outer_silent = false;
             let mut outer_ignore = false;
+            let mut outer_force = false;
             let mut raw = line.as_str();
             loop {
                 raw = raw.trim_start();
@@ -2794,6 +3096,7 @@ impl Engine {
                     outer_ignore = true;
                     raw = rest;
                 } else if let Some(rest) = raw.strip_prefix('+') {
+                    outer_force = true;
                     raw = rest;
                 } else {
                     break;
@@ -2803,6 +3106,10 @@ impl Engine {
             // direct function errors report the recipe line, not a
             // stale variable definition location.
             *self.expand_chain_source.borrow_mut() = None;
+            // Detect $(MAKE) or ${MAKE} in the raw (unexpanded) line -- these
+            // lines are "recursive" and must be executed even in -n mode.
+            let has_make_ref = line.contains("$(MAKE)") || line.contains("${MAKE}");
+            let force_execute = outer_force || has_make_ref;
             let expanded_raw = expand::expand_with_auto(raw, self, &auto_vars);
             // Split on newline, but keep `\<newline>` joined — the
             // backslash is an intentional shell line continuation that
@@ -2827,7 +3134,7 @@ impl Engine {
             }
             for sub in pieces {
                 if !sub.is_empty() {
-                    expanded_lines.push((sub, line_no, outer_silent, outer_ignore));
+                    expanded_lines.push((sub, line_no, outer_silent, outer_ignore, force_execute));
                 }
             }
         }
@@ -2836,9 +3143,11 @@ impl Engine {
         let target_is_silent =
             *self.silent_all.borrow() || self.silent_targets.borrow().contains(target);
 
-        for (expanded_raw, line_no, outer_silent, outer_ignore) in &expanded_lines {
+        for (expanded_raw, line_no, outer_silent, outer_ignore, outer_force_exec) in &expanded_lines
+        {
             let mut silent = self.silent || target_is_silent || *outer_silent;
             let mut ignore_error = *outer_ignore;
+            let mut force_exec = *outer_force_exec;
 
             let mut expanded_str = expanded_raw.as_str();
 
@@ -2853,6 +3162,7 @@ impl Engine {
                     ignore_error = true;
                     expanded_str = rest;
                 } else if let Some(rest) = expanded_str.strip_prefix('+') {
+                    force_exec = true;
                     expanded_str = rest;
                 } else {
                     break;
@@ -2870,11 +3180,11 @@ impl Engine {
 
             // In dry-run mode (-n), GNU make ignores the `@` silence prefix
             // so every recipe line is echoed, even silenced ones.
-            if !silent || self.dry_run {
+            if !silent || self.dry_run || self.trace {
                 println!("{expanded}");
             }
 
-            if self.dry_run {
+            if self.dry_run && !force_exec {
                 continue;
             }
 

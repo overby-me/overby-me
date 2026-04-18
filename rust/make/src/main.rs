@@ -39,7 +39,7 @@ fn run() -> i32 {
     if let Ok(flags) = std::env::var("GNUMAKEFLAGS") {
         prepend.extend(flags.split_whitespace().map(|s| s.to_string()));
         unsafe {
-            std::env::remove_var("GNUMAKEFLAGS");
+            std::env::set_var("GNUMAKEFLAGS", "");
         }
     }
     if let Ok(flags) = std::env::var("MAKEFLAGS") {
@@ -47,12 +47,20 @@ fn run() -> i32 {
         // clusters (e.g. `erR`) or `VAR=value` assignments. The token
         // `--` is a separator GNU make inserts between flags and
         // command-line variable assignments — skip it.
-        for tok in flags.split_whitespace() {
+        // Use split_makeflags to handle `\ ` (backslash-space) escaping
+        // in --eval values.
+        for tok in split_makeflags(&flags) {
             if tok == "--" {
                 continue;
             }
-            if tok.starts_with('-') || tok.contains('=') {
-                prepend.push(tok.to_string());
+            // Decode --eval values from MAKEFLAGS encoding
+            if let Some(encoded) = tok.strip_prefix("--eval=") {
+                let decoded = decode_makeflags_eval(encoded);
+                prepend.push(format!("--eval={decoded}"));
+                continue;
+            }
+            if tok.starts_with("-") || tok.contains('=') {
+                prepend.push(tok);
             } else {
                 prepend.push(format!("-{tok}"));
             }
@@ -150,29 +158,35 @@ fn run() -> i32 {
             "-W" | "--what-if" | "--new-file" | "--assume-new" => {
                 i += 1;
                 if i < args.len() {
-                    engine.assume_new.borrow_mut().insert(args[i].clone());
+                    engine
+                        .assume_new
+                        .borrow_mut()
+                        .insert(normalize_path(&args[i]).to_string());
                 }
             }
             arg if arg.starts_with("-W") && arg.len() > 2 => {
-                engine.assume_new.borrow_mut().insert(arg[2..].to_string());
+                engine
+                    .assume_new
+                    .borrow_mut()
+                    .insert(normalize_path(&arg[2..]).to_string());
             }
             arg if arg.starts_with("--what-if=") => {
                 engine
                     .assume_new
                     .borrow_mut()
-                    .insert(arg["--what-if=".len()..].to_string());
+                    .insert(normalize_path(&arg["--what-if=".len()..]).to_string());
             }
             arg if arg.starts_with("--new-file=") => {
                 engine
                     .assume_new
                     .borrow_mut()
-                    .insert(arg["--new-file=".len()..].to_string());
+                    .insert(normalize_path(&arg["--new-file=".len()..]).to_string());
             }
             arg if arg.starts_with("--assume-new=") => {
                 engine
                     .assume_new
                     .borrow_mut()
-                    .insert(arg["--assume-new=".len()..].to_string());
+                    .insert(normalize_path(&arg["--assume-new=".len()..]).to_string());
             }
             "-o" | "--old-file" | "--assume-old" => {
                 // Opposite of -W: assume file is old, never rebuild.
@@ -244,17 +258,20 @@ fn run() -> i32 {
             }
             "-w" | "--print-directory" => {
                 engine.print_directory_opt = Some(true);
+                mflags_long.retain(|s| s != "--no-print-directory");
                 mflags_long.push("--print-directory".to_string());
             }
             "--no-print-directory" => {
                 engine.print_directory_opt = Some(false);
+                mflags_long.retain(|s| s != "--print-directory");
                 mflags_long.push("--no-print-directory".to_string());
             }
             "--trace" => {
                 mflags_long.push("--trace".to_string());
+                engine.trace = true;
             }
             "--warn-undefined-variables" => {
-                // No-op — we don't track undefined-var warnings yet.
+                engine.warn_undefined_variables.set(true);
                 mflags_long.push("--warn-undefined-variables".to_string());
             }
             "-d" | "--debug" | "--debug=a" | "--debug=b" | "--debug=basic" | "--debug=v"
@@ -522,6 +539,26 @@ fn run() -> i32 {
     // changes to MAKEOVERRIDES (even from inside a makefile) are
     // reflected when MAKEFLAGS is exported to child processes.
     let mut mflags = mflags_short.clone();
+    // Sort long flags in GNU make's switches-table order.
+    // Add --eval strings to mflags_long for MAKEFLAGS propagation.
+    // Encode: $ -> $$$$ (becomes $$ after one make expansion), space -> \\ (backslash-space).
+    for text in &eval_strings {
+        let encoded = encode_eval_for_makeflags(text);
+        mflags_long.push(format!("--eval={encoded}"));
+    }
+
+    mflags_long.sort_by_key(|f| {
+        let key = f.strip_prefix("--").unwrap_or(f);
+        match key {
+            _ if f.starts_with("-I") => 0,   // -I (include-dir)
+            "trace" => 1,                    // CHAR_MAX+1
+            "print-directory" => 2,          // -w
+            "no-print-directory" => 3,       // CHAR_MAX+2
+            "warn-undefined-variables" => 4, // CHAR_MAX+3
+            "no-silent" => 5,                // CHAR_MAX+4
+            _ => 6,
+        }
+    });
     if mflags_short.is_empty() && !mflags_long.is_empty() {
         mflags.push(' ');
     }
@@ -649,5 +686,99 @@ fn run() -> i32 {
         }
     }
 
-    engine.build(&targets)
+    let rc = engine.build(&targets);
+
+    // Sentinel -1 means an included makefile was remade and we need to
+    // re-exec the process (GNU make "restart" semantics).
+    if rc == -1 {
+        // Increment MAKE_RESTARTS in the environment before re-exec.
+        let restarts: u32 = std::env::var("MAKE_RESTARTS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        unsafe {
+            std::env::set_var("MAKE_RESTARTS", (restarts + 1).to_string());
+        }
+
+        // Flush stdout/stderr before exec() replaces the process;
+        // otherwise any buffered output (e.g. from $(info ...)) is lost.
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+        let _ = std::io::stderr().flush();
+
+        // Re-exec the same binary with the same arguments.
+        use std::os::unix::process::CommandExt;
+        let err = std::process::Command::new(&args[0]).args(&args[1..]).exec();
+        // exec() only returns on error
+        eprintln!("make: *** failed to re-exec: {err}");
+        return 2;
+    }
+
+    rc
+}
+
+/// Split a MAKEFLAGS string on whitespace, treating `\ ` (backslash-space)
+/// as an escaped space that does NOT split tokens.
+fn split_makeflags(s: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' && chars.peek() == Some(&' ') {
+            chars.next(); // consume space
+            current.push('\\');
+            current.push(' ');
+        } else if c.is_whitespace() {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+        } else {
+            current.push(c);
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+/// Decode a MAKEFLAGS-encoded --eval value: `$$` -> `$`, `\ ` -> ` `.
+fn decode_makeflags_eval(s: &str) -> String {
+    let mut result = String::new();
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '$' && chars.peek() == Some(&'$') {
+            chars.next();
+            result.push('$');
+        } else if c == '\\' && chars.peek() == Some(&' ') {
+            chars.next();
+            result.push(' ');
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+/// Encode an --eval text for MAKEFLAGS variable value.
+/// `$` -> `$$$$` (so after one make expansion it becomes `$$`),
+/// ` ` -> `\ ` (not affected by make expansion).
+fn encode_eval_for_makeflags(s: &str) -> String {
+    let mut result = String::new();
+    for c in s.chars() {
+        match c {
+            '$' => result.push_str("$$$$"),
+            ' ' => {
+                result.push('\\');
+                result.push(' ');
+            }
+            _ => result.push(c),
+        }
+    }
+    result
+}
+
+/// Normalize a file path by stripping a leading `./` prefix.
+fn normalize_path(s: &str) -> &str {
+    s.strip_prefix("./").unwrap_or(s)
 }
