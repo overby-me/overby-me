@@ -4146,6 +4146,13 @@ fn process_event(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) {
         event.devname
     );
 
+    // Inject global ENV properties set via `udevadm control -p KEY=VAL`
+    // before rules run, so `ENV{KEY}=="…"` tests see them.  Kernel-set
+    // event properties take precedence (we use `or_insert`).
+    for (k, v) in global_env_snapshot() {
+        event.env.entry(k).or_insert(v);
+    }
+
     let result = process_rules(rules, event, hwdb);
 
     match event.action.as_str() {
@@ -4388,6 +4395,75 @@ static EVENTS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static EVENTS_FINISHED: AtomicU64 = AtomicU64::new(0);
 
 // ---------------------------------------------------------------------------
+// Global ENV properties (`udevadm control -p KEY=VAL`)
+// ---------------------------------------------------------------------------
+
+/// Location of the persistent global-env store.  Kept under `/run`
+/// (tmpfs) so it clears on reboot but survives `systemctl restart
+/// systemd-udevd.service` — which is what 17-udev-global-property
+/// expects.
+const GLOBAL_ENV_FILE: &str = "/run/udev/control.conf";
+
+/// In-memory mirror of the persistent store, kept around to avoid a
+/// parse-on-every-event cost.
+static GLOBAL_ENV: std::sync::OnceLock<std::sync::Mutex<std::collections::BTreeMap<String, String>>> =
+    std::sync::OnceLock::new();
+
+fn global_env_cache() -> &'static std::sync::Mutex<std::collections::BTreeMap<String, String>> {
+    GLOBAL_ENV.get_or_init(|| {
+        let mut map = std::collections::BTreeMap::new();
+        if let Ok(content) = fs::read_to_string(GLOBAL_ENV_FILE) {
+            for line in content.lines() {
+                if let Some((k, v)) = line.split_once('=')
+                    && !k.is_empty()
+                {
+                    map.insert(k.to_string(), v.to_string());
+                }
+            }
+        }
+        std::sync::Mutex::new(map)
+    })
+}
+
+fn write_global_env_file(map: &std::collections::BTreeMap<String, String>) {
+    let mut s = String::new();
+    for (k, v) in map {
+        s.push_str(&format!("{k}={v}\n"));
+    }
+    if let Some(parent) = Path::new(GLOBAL_ENV_FILE).parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(GLOBAL_ENV_FILE, s);
+}
+
+/// Set or remove a global env property.  Empty `value` removes the key.
+fn set_global_env_property(key: &str, value: &str) {
+    let mut map = global_env_cache().lock().unwrap_or_else(|e| e.into_inner());
+    if value.is_empty() {
+        map.remove(key);
+    } else {
+        map.insert(key.to_string(), value.to_string());
+    }
+    write_global_env_file(&map);
+}
+
+fn clear_global_env_properties() {
+    let mut map = global_env_cache().lock().unwrap_or_else(|e| e.into_inner());
+    map.clear();
+    let _ = fs::remove_file(GLOBAL_ENV_FILE);
+}
+
+/// Read the current set of global ENV properties (for injection at
+/// event processing time).  Returns a cloned snapshot so the caller
+/// doesn't need to hold the lock.
+pub fn global_env_snapshot() -> std::collections::BTreeMap<String, String> {
+    global_env_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+// ---------------------------------------------------------------------------
 // Control socket handling
 // ---------------------------------------------------------------------------
 
@@ -4456,8 +4532,17 @@ fn handle_control_command(
             "OK\n".to_string()
         }
         "ENV" => {
-            // `ENV KEY=VALUE` — set a global property for subsequent
-            // events.  Stub: accepted without side effect.
+            // `ENV KEY=VALUE` sets a global property that is injected
+            // into every event's environment before rules run.  An empty
+            // VALUE unsets the property.  We persist the table to
+            // `/run/udev/control.conf` so properties survive
+            // systemctl restart.
+            if let Some((key, val)) = _arg.split_once('=') {
+                let key = key.trim();
+                if !key.is_empty() {
+                    set_global_env_property(key, val.trim());
+                }
+            }
             "OK\n".to_string()
         }
         "RELOAD_CREDS" => {
@@ -4465,6 +4550,8 @@ fn handle_control_command(
             "OK\n".to_string()
         }
         "REVERT" => {
+            // Revert global ENV properties set via `udevadm control -p`.
+            clear_global_env_properties();
             // Revert to startup configuration.  Trigger a rule reload to
             // approximate; a full revert would require snapshotting
             // state at startup.
