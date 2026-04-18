@@ -190,6 +190,16 @@ pub enum Command {
     Freeze(String),
     /// `thaw <unit>` — thaw a frozen unit's cgroup (resume all processes).
     Thaw(String),
+    /// `bind <unit> <source> <destination> [read-only] [mkdir]` — bind-mount
+    /// source onto destination inside the mount namespace of the running
+    /// service.  Used by `systemctl bind` to add BindPaths= at runtime.
+    Bind {
+        unit: String,
+        source: String,
+        destination: String,
+        read_only: bool,
+        mkdir: bool,
+    },
     /// `show-environment` — list the manager's environment variables.
     ShowEnvironment,
     /// `set-environment KEY=VALUE...` — set environment variables.
@@ -1035,6 +1045,42 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                 }
             };
             Command::Thaw(name)
+        }
+        "bind" => {
+            // params: { unit, source, destination, read_only, mkdir }
+            let obj = match &call.params {
+                Some(Value::Object(m)) => m,
+                _ => {
+                    return Err(ParseError::ParamsInvalid(
+                        "bind requires an object with unit/source/destination".to_string(),
+                    ));
+                }
+            };
+            let get_str = |k: &str| -> Result<String, ParseError> {
+                obj.get(k)
+                    .and_then(|v| v.as_str().map(|s| s.to_owned()))
+                    .ok_or_else(|| {
+                        ParseError::ParamsInvalid(format!("bind: missing {k}"))
+                    })
+            };
+            let unit = get_str("unit")?;
+            let source = get_str("source")?;
+            let destination = get_str("destination")?;
+            let read_only = obj
+                .get("read_only")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let mkdir = obj
+                .get("mkdir")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            Command::Bind {
+                unit,
+                source,
+                destination,
+                read_only,
+                mkdir,
+            }
         }
         "show-environment" => Command::ShowEnvironment,
         "set-environment" => {
@@ -4708,6 +4754,149 @@ fn parse_timespan(s: &str) -> Option<std::time::Duration> {
     }
 }
 
+/// Bind-mount `source` onto `destination` inside the mount namespace of the
+/// running service `unit`.  Used by both the control-socket `bind` command
+/// (invoked by `systemctl bind`) and the D-Bus `BindMountUnit` method.  A
+/// helper child enters the target's `/proc/<main_pid>/ns/mnt`, optionally
+/// creates the destination, and performs the bind.  Returns Ok on success
+/// or a human-readable error string otherwise.
+pub fn bind_mount_into_unit(
+    run_info: &ArcMutRuntimeInfo,
+    unit: &str,
+    source: &str,
+    destination: &str,
+    read_only: bool,
+    mkdir: bool,
+) -> Result<(), String> {
+    // Resolve the target's main PID and verify it's a service with a
+    // private mount namespace.
+    let main_pid = {
+        let ri = run_info.read_poisoned();
+        let found = ri
+            .unit_table
+            .values()
+            .find(|u| u.id.name == unit)
+            .ok_or_else(|| format!("Unit {unit} not found"))?;
+        let crate::units::Specific::Service(srvc) = &found.specific else {
+            return Err(format!("Unit {unit} is not a service — cannot bind-mount"));
+        };
+        let has_ns = srvc.conf.exec_config.private_tmp
+            || srvc.conf.exec_config.private_devices
+            || srvc.conf.exec_config.private_mounts
+            || srvc.conf.exec_config.private_users
+            || !srvc.conf.exec_config.bind_paths.is_empty()
+            || !srvc.conf.exec_config.bind_read_only_paths.is_empty()
+            || !srvc.conf.exec_config.read_only_paths.is_empty()
+            || !srvc.conf.exec_config.inaccessible_paths.is_empty();
+        if !has_ns {
+            return Err(format!(
+                "Unit {unit} has no private mount namespace — cannot live-mount"
+            ));
+        }
+        let pid = found
+            .common
+            .main_pid
+            .load(std::sync::atomic::Ordering::Acquire);
+        if pid <= 0 {
+            return Err(format!("Unit {unit} has no running main process"));
+        }
+        pid
+    };
+
+    let src_meta = std::fs::metadata(source)
+        .map_err(|e| format!("source {source} not accessible: {e}"))?;
+    let src_is_dir = src_meta.is_dir();
+
+    use std::ffi::CString;
+    let src_c = CString::new(source).map_err(|e| format!("bad source: {e}"))?;
+    let dst_c = CString::new(destination).map_err(|e| format!("bad destination: {e}"))?;
+
+    match unsafe { libc::fork() } {
+        -1 => Err(format!(
+            "fork for bind-mount helper failed: {}",
+            std::io::Error::last_os_error()
+        )),
+        0 => {
+            let ns_path = format!("/proc/{main_pid}/ns/mnt");
+            let ns_file = match std::fs::File::open(&ns_path) {
+                Ok(f) => f,
+                Err(_) => std::process::exit(11),
+            };
+            use std::os::unix::io::AsRawFd;
+            if unsafe { libc::setns(ns_file.as_raw_fd(), libc::CLONE_NEWNS) } != 0 {
+                std::process::exit(12);
+            }
+
+            if mkdir {
+                if src_is_dir {
+                    let _ = std::fs::create_dir_all(destination);
+                } else if let Some(parent) = std::path::Path::new(destination).parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                    let _ = std::fs::File::create(destination);
+                } else {
+                    let _ = std::fs::File::create(destination);
+                }
+            }
+
+            let flags = (libc::MS_BIND | libc::MS_REC) as libc::c_ulong;
+            if unsafe {
+                libc::mount(
+                    src_c.as_ptr(),
+                    dst_c.as_ptr(),
+                    std::ptr::null(),
+                    flags,
+                    std::ptr::null(),
+                )
+            } != 0
+            {
+                std::process::exit(13);
+            }
+            if read_only {
+                let remount = (libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY)
+                    as libc::c_ulong;
+                if unsafe {
+                    libc::mount(
+                        std::ptr::null(),
+                        dst_c.as_ptr(),
+                        std::ptr::null(),
+                        remount,
+                        std::ptr::null(),
+                    )
+                } != 0
+                {
+                    std::process::exit(14);
+                }
+            }
+            std::process::exit(0);
+        }
+        child_pid => {
+            let mut status: libc::c_int = 0;
+            if unsafe { libc::waitpid(child_pid, &mut status, 0) } < 0 {
+                return Err(format!(
+                    "waitpid for bind helper failed: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            if libc::WIFEXITED(status) {
+                match libc::WEXITSTATUS(status) {
+                    0 => Ok(()),
+                    11 => Err(format!("failed to open /proc/{main_pid}/ns/mnt")),
+                    12 => Err("setns(CLONE_NEWNS) failed".to_string()),
+                    13 => Err(format!(
+                        "bind mount {source} onto {destination} failed inside service namespace"
+                    )),
+                    14 => Err(format!(
+                        "read-only remount of {destination} failed inside service namespace"
+                    )),
+                    code => Err(format!("bind-mount helper exited with code {code}")),
+                }
+            } else {
+                Err("bind-mount helper terminated abnormally".to_string())
+            }
+        }
+    }
+}
+
 pub fn execute_command(
     cmd: Command,
     run_info: ArcMutRuntimeInfo,
@@ -6057,6 +6246,16 @@ pub fn execute_command(
 
             info!("clean {}: removed {:?}", unit_name, removed);
             return Ok(serde_json::json!({ "cleaned": unit_name }));
+        }
+        Command::Bind {
+            ref unit,
+            ref source,
+            ref destination,
+            read_only,
+            mkdir,
+        } => {
+            bind_mount_into_unit(&run_info, unit, source, destination, read_only, mkdir)?;
+            return Ok(serde_json::json!({ "bound": unit }));
         }
         Command::Freeze(ref unit_name) | Command::Thaw(ref unit_name) => {
             let freeze = matches!(cmd, Command::Freeze(_));

@@ -454,6 +454,31 @@ mod inner {
             Ok(())
         }
 
+        /// Bind-mount `source` onto `destination` inside the mount namespace
+        /// of the running service `name`.  If `mkdir` is true, the destination
+        /// is created (as a file or directory mirroring the source type)
+        /// inside the namespace before the mount.  Only works for services
+        /// that already have a private mount namespace (PrivateTmp=,
+        /// BindPaths=, PrivateMounts=, etc.) — i.e. `CanLiveMount=true`.
+        fn bind_mount_unit(
+            &self,
+            name: String,
+            source: String,
+            destination: String,
+            read_only: bool,
+            mkdir_flag: bool,
+        ) -> zbus::fdo::Result<()> {
+            crate::control::bind_mount_into_unit(
+                &self.run_info,
+                &name,
+                &source,
+                &destination,
+                read_only,
+                mkdir_flag,
+            )
+            .map_err(zbus::fdo::Error::Failed)
+        }
+
         /// Create a transient unit from the given name, mode, and property
         /// dictionary.  Properties are translated into `-p NAME=VALUE`
         /// strings and fed through the existing `StartTransient` control
