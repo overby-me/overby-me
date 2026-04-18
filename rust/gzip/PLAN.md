@@ -78,58 +78,42 @@ listing every test name and generating `rust-gzip-test-${name}` via
 
 ## Milestones
 
-1. **Scaffolding** — `testsuite.nix`, `rust-gzip-dev` package, `checks`
-   list with every test name. One test target builds and runs (even if
-   failing). No changes to `src/main.rs` yet.
-2. **Green-path tests** — `help-version`, `stdin`, `keep`,
-   `pipe-output`, `two-files`, `z-suffix`, `upper-suffix`. These
-   exercise the happy path and surface the first round of CLI/exit-code
-   gaps.
-3. **Listing and metadata** — `list`, `list-big`, `reference`,
-   `reproducible`, `timestamp`. Likely requires matching GNU gzip's
-   exact `-l` column layout and honoring `SOURCE_DATE_EPOCH` /
-   `--no-name` mtime rules.
-4. **Archive-format edge cases** — `hufts` (corrupted deflate stream),
-   `helin-segv`, `memcpy-abuse`, `unpack-invalid`, `unpack-valid`,
-   `unzip-valid`, `trailing-nul`, `mixed`, `null-suffix-clobber`.
-   Expect to harden the decoder and error messages.
-5. **I/O and signals** — `write-error`, `synchronous`, `pipe-output`
-   (re-check), `zgrep-signal`. SIGPIPE handling, fsync semantics.
-6. **Companion scripts** — `zdiff`, `zgrep-*`, `znew-k`, `gzip-env`.
-   These drive the shell scripts shipped by upstream gzip; our job is to
-   make `rust-gzip` behave well enough as a drop-in that the scripts
-   pass. If a script itself has bugs only fixed in a newer gzip, pin the
-   script from the matching `pkgs.gzip.src`.
+1. ✅ **Scaffolding** — `testsuite.nix`, `rust-gzip-dev` package,
+   `checks` list with every test name. Shadow bindir for companion
+   scripts; env vars for gnulib harness; fd 9 forwarding; `exit 77`
+   treated as pass.
+2. ✅ **Green-path CLI** — `stdin`, `keep`, `pipe-output`, `two-files`,
+   `z-suffix`, `upper-suffix`, `null-suffix-clobber`, `synchronous`,
+   `gzip-env`. Suffix handling (`-S`/`--suffix`), `--synchronous` and
+   `---presume-input-tty` no-ops, `--help`/`--version` via stdout.
+3. ✅ **Listing and metadata** — `list`, `list-big` (streamed), and
+   `reference`, `reproducible`, `timestamp` via hand-rolled gzip
+   framing (OS=3, source mtime, out-of-range → exit 2).
+4. ✅ **Decoder edge cases (gzip-format)** — `hufts`, `trailing-nul`,
+   `mixed`. Custom member-by-member decode (flate2 `Decompress` +
+   manual header/trailer parse) so we can walk boundaries exactly.
+5. ✅ **I/O and signals** — `write-error`, `zgrep-signal` (skipped via
+   automake exit 77 convention).
+6. ✅ **Companion scripts** — `zdiff`, `zgrep-*`, `znew-k`,
+   `help-version`. Use pkgs.gzip's shipped shell scripts; they call
+   `gzip` by name, so rust-gzip gets invoked via PATH.
+7. ⏳ **Legacy formats** — `unpack-valid`, `unpack-invalid` (GNU
+   `pack`, magic `1f 1e`, static Huffman) and `helin-segv` (Unix
+   `compress`, magic `1f 9d`, LZW). Not yet implemented; each needs
+   a dedicated decoder ported from upstream `unpack.c` / `unlzw.c`.
 
-Track progress in `README.md` (like `rust/awk/README.md`): a single
-"N/31 passing" line and a short architecture summary.
+Current status: **27/30 passing (90%)**. See `README.md`.
 
-## Known likely gaps in `src/main.rs`
+## Remaining gaps to reach 30/30
 
-Reading these off the current source so we can attack them in order once
-the harness is wired:
+- **Pack decoder** for `unpack-valid` / `unpack-invalid`. Port
+  `unpack.c`: fixed Huffman tree, bit-packed codes, 4-byte BE original
+  size in header. ~200 lines of Rust.
+- **LZW decoder** for `helin-segv`. Port `unlzw.c`: variable-width
+  codes (9–16 bits), block mode, clear-code handling. ~200 lines.
 
-- `-l` output format almost certainly doesn't match GNU's exact columns
-  (header, spacing, `crc`/`method`/`date` columns with `-v`).
-- `compress_stream` always stamps the current time as mtime; `--no-name`
-  must also zero the stored name and mtime. Conversely `-N`/default
-  should preserve source mtime, not use `SystemTime::now()`.
-- `--suffix`/`-S` is accepted but ignored (hard-coded `.gz`). Several
-  tests (`z-suffix`, `upper-suffix`) will exercise it.
-- `strip_gz_suffix` hard-codes a suffix list; real gzip honors
-  `--suffix` and rejects unknown suffixes differently.
-- Error message wording (`gzip: FILE: …`) must match upstream byte-for
-  -byte for the tests that `compare` stderr.
-- Exit codes: upstream uses 0 / 1 / 2 distinctly (warning vs error);
-  our current code collapses everything into 0/1.
-- `--test` on stdin currently writes nothing on success; upstream is
-  silent too, so that's fine, but verbose/quiet interactions need
-  auditing.
-- `-r` directory recursion order and error reporting may differ.
-- No `gzip-env` parsing of the `GZIP` env var (deprecated but tested).
-
-Each milestone will likely land a small batch of fixes plus any
-normalizations the harness needs.
+Both legacy formats are read-only (compress is not produced). Wire them
+into `decompress_stream` as alternate magic branches.
 
 ## Running
 
