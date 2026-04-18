@@ -1149,15 +1149,36 @@ pub fn apply_dropins(
 
         match new_unit {
             Ok(mut unit) => {
-                // Record the drop-in file paths for NeedDaemonReload detection.
-                let dropin_dirname = format!("{}.d", unit_name);
+                // Record the drop-in file paths for NeedDaemonReload
+                // detection and `systemctl show -P DropInPaths`. Match the
+                // loader hierarchy: type-level, hierarchical prefixes, and
+                // exact-name.
+                let mut candidate_dirnames: Vec<String> = Vec::new();
+                if let Some(type_suffix) = unit_name.rsplit('.').next()
+                    && !type_suffix.is_empty()
+                {
+                    candidate_dirnames.push(format!("{type_suffix}.d"));
+                }
+                if let Some(dot_pos) = unit_name.rfind('.') {
+                    let base = &unit_name[..dot_pos];
+                    let suffix = &unit_name[dot_pos..];
+                    let parts: Vec<&str> = base.split('-').collect();
+                    for i in 1..parts.len() {
+                        let prefix = parts[..i].join("-");
+                        candidate_dirnames.push(format!("{prefix}-{suffix}.d"));
+                    }
+                }
+                candidate_dirnames.push(format!("{unit_name}.d"));
+
                 let mut dropin_files = Vec::new();
                 for dir in unit_dirs {
-                    let dropin_dir = dir.join(&dropin_dirname);
-                    if let Ok(entries) = std::fs::read_dir(&dropin_dir) {
-                        for entry in entries.flatten() {
-                            if entry.file_name().to_string_lossy().ends_with(".conf") {
-                                dropin_files.push(entry.path());
+                    for dropin_dirname in &candidate_dirnames {
+                        let dropin_dir = dir.join(dropin_dirname);
+                        if let Ok(entries) = std::fs::read_dir(&dropin_dir) {
+                            for entry in entries.flatten() {
+                                if entry.file_name().to_string_lossy().ends_with(".conf") {
+                                    dropin_files.push(entry.path());
+                                }
                             }
                         }
                     }
