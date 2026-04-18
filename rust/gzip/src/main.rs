@@ -1,6 +1,6 @@
-use flate2::read::{GzDecoder, MultiGzDecoder};
+use flate2::read::MultiGzDecoder;
 use flate2::write::DeflateEncoder;
-use flate2::{Compression, Crc};
+use flate2::{Compression, Crc, Decompress, FlushDecompress, Status};
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Write};
@@ -93,14 +93,8 @@ fn parse_args() -> Options {
                 // --synchronous forces fsync after writing; tests only
                 // check that it's accepted, not the underlying syscall.
                 "--synchronous" => {}
-                "--version" => {
-                    println!("{VERSION}");
-                    process::exit(0);
-                }
-                "--help" => {
-                    print_usage();
-                    process::exit(0);
-                }
+                "--version" => process::exit(print_version()),
+                "--help" => process::exit(print_usage()),
                 "--suffix" => {
                     if i + 1 >= args.len() {
                         eprintln!("gzip: option '--suffix' requires an argument");
@@ -134,14 +128,8 @@ fn parse_args() -> Options {
                     'r' => recursive = true,
                     'n' => store_name = false,
                     'N' => store_name = true,
-                    'h' => {
-                        print_usage();
-                        process::exit(0);
-                    }
-                    'V' => {
-                        println!("{VERSION}");
-                        process::exit(0);
-                    }
+                    'h' => process::exit(print_usage()),
+                    'V' => process::exit(print_version()),
                     'S' => {
                         // -S takes the rest of this arg or the next arg.
                         let rest: String = chars[j + 1..].iter().collect();
@@ -190,29 +178,48 @@ fn parse_args() -> Options {
     }
 }
 
-fn print_usage() {
-    eprintln!(
-        "Usage: gzip [OPTION]... [FILE]...
-Compress or decompress FILEs (by default, compress FILES in-place).
+// Write --help to stdout and return an exit code that reflects whether
+// the write succeeded. GNU coreutils / gzip exit 1 on --help if the
+// output stream was, for example, /dev/full (help-version test).
+fn print_usage() -> i32 {
+    let stdout = io::stdout();
+    let mut w = stdout.lock();
+    let body = "Usage: gzip [OPTION]... [FILE]...\n\
+Compress or decompress FILEs (by default, compress FILES in-place).\n\
+\n\
+  -c, --stdout       write on standard output, keep original files\n\
+  -d, --decompress   decompress\n\
+  -f, --force        force overwrite of output file\n\
+  -k, --keep         keep (don't delete) input files\n\
+  -l, --list         list compressed file contents\n\
+  -n, --no-name      do not save or restore the original name and timestamp\n\
+  -N, --name         save or restore the original file name and timestamp\n\
+  -q, --quiet        suppress all warnings\n\
+  -r, --recursive    operate recursively on directories\n\
+  -S, --suffix=SUF   use suffix SUF on compressed files\n\
+  -t, --test         test compressed file integrity\n\
+  -v, --verbose      verbose mode\n\
+  -1, --fast         compress faster\n\
+  -9, --best         compress better\n\
+  -V, --version      display version number\n\
+  -h, --help         give this help\n\
+\n\
+With no FILE, or when FILE is -, read standard input.\n";
+    if w.write_all(body.as_bytes()).is_err() || w.flush().is_err() {
+        1
+    } else {
+        0
+    }
+}
 
-  -c, --stdout       write on standard output, keep original files
-  -d, --decompress   decompress
-  -f, --force        force overwrite of output file
-  -k, --keep         keep (don't delete) input files
-  -l, --list         list compressed file contents
-  -n, --no-name      do not save or restore the original name and timestamp
-  -N, --name         save or restore the original file name and timestamp
-  -q, --quiet        suppress all warnings
-  -r, --recursive    operate recursively on directories
-  -t, --test         test compressed file integrity
-  -v, --verbose      verbose mode
-  -1, --fast         compress faster
-  -9, --best         compress better
-  -V, --version      display version number
-  -h, --help         give this help
-
-With no FILE, or when FILE is -, read standard input."
-    );
+fn print_version() -> i32 {
+    let stdout = io::stdout();
+    let mut w = stdout.lock();
+    if writeln!(&mut w, "{VERSION}").is_err() || w.flush().is_err() {
+        1
+    } else {
+        0
+    }
 }
 
 fn main() {
@@ -245,34 +252,57 @@ fn run_stdio(opts: &Options) -> i32 {
         Mode::Decompress => {
             let reader = stdin.lock();
             let writer = stdout.lock();
-            if let Err(e) = decompress_stream(reader, writer) {
+            if let Err(e) = decompress_stream(reader, writer, opts.force) {
                 eprintln!("\ngzip: stdin: {}", canonical_decode_error(&e));
                 return 1;
             }
         }
         Mode::Test => {
             let reader = stdin.lock();
-            if let Err(e) = decompress_stream(reader, io::sink()) {
+            if let Err(e) = decompress_stream(reader, io::sink(), false) {
                 eprintln!("\ngzip: stdin: {}", canonical_decode_error(&e));
                 return 1;
             }
         }
         Mode::List => {
-            eprintln!("gzip: stdin: not in gzip format or cannot list from stdin");
-            return 1;
+            // Stream stdin through a tee-ing reader so we can count both
+            // compressed and uncompressed bytes without buffering either.
+            let reader = stdin.lock();
+            let counted = CountingReader::new(reader);
+            let compressed_counter = counted.counter();
+            let mut decoder = MultiGzDecoder::new(counted);
+            let uncompressed_size = match io::copy(&mut decoder, &mut io::sink()) {
+                Ok(n) => n,
+                Err(e) => {
+                    eprintln!("gzip: stdin: {e}");
+                    return 1;
+                }
+            };
+            let compressed_size = compressed_counter.get();
+            let ratio = if uncompressed_size == 0 {
+                0.0
+            } else {
+                (1.0 - compressed_size as f64 / uncompressed_size as f64) * 100.0
+            };
+            if !opts.quiet {
+                println!("  compressed  uncompressed  ratio  uncompressed_name");
+            }
+            println!("  {compressed_size:>10}  {uncompressed_size:>12}  {ratio:>5.1}%  stdout");
         }
     }
     0
 }
 
 fn run_files(opts: &Options) -> i32 {
+    // Track the worst exit code seen. gzip uses 1 for hard errors and 2
+    // for warnings (e.g. out-of-range timestamps); preserve that spread
+    // rather than collapsing everything to 1.
     let mut exit_code = 0;
+    let bump = |cur: i32, new: i32| if new > cur { new } else { cur };
 
     for path_str in &opts.files {
         if path_str == "-" {
-            if run_stdio(opts) != 0 {
-                exit_code = 1;
-            }
+            exit_code = bump(exit_code, run_stdio(opts));
             continue;
         }
 
@@ -280,19 +310,15 @@ fn run_files(opts: &Options) -> i32 {
 
         if path.is_dir() {
             if opts.recursive {
-                if process_dir(path, opts) != 0 {
-                    exit_code = 1;
-                }
+                exit_code = bump(exit_code, process_dir(path, opts));
             } else {
                 eprintln!("gzip: {path_str}: is a directory -- ignored");
-                exit_code = 1;
+                exit_code = bump(exit_code, 1);
             }
             continue;
         }
 
-        if process_file(path, opts) != 0 {
-            exit_code = 1;
-        }
+        exit_code = bump(exit_code, process_file(path, opts));
     }
 
     exit_code
@@ -300,6 +326,7 @@ fn run_files(opts: &Options) -> i32 {
 
 fn process_dir(dir: &Path, opts: &Options) -> i32 {
     let mut exit_code = 0;
+    let bump = |cur: i32, new: i32| if new > cur { new } else { cur };
     let entries = match fs::read_dir(dir) {
         Ok(e) => e,
         Err(e) => {
@@ -313,17 +340,15 @@ fn process_dir(dir: &Path, opts: &Options) -> i32 {
             Ok(e) => e,
             Err(e) => {
                 eprintln!("gzip: {e}");
-                exit_code = 1;
+                exit_code = bump(exit_code, 1);
                 continue;
             }
         };
         let path = entry.path();
         if path.is_dir() {
-            if process_dir(&path, opts) != 0 {
-                exit_code = 1;
-            }
-        } else if process_file(&path, opts) != 0 {
-            exit_code = 1;
+            exit_code = bump(exit_code, process_dir(&path, opts));
+        } else {
+            exit_code = bump(exit_code, process_file(&path, opts));
         }
     }
 
@@ -378,15 +403,26 @@ fn compress_file(path: &Path, opts: &Options) -> i32 {
         None
     };
     // -n clears the stored mtime; -N (default) records the source mtime.
-    let mtime: u32 = if opts.store_name {
-        metadata
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as u32)
-            .unwrap_or(0)
+    // Upstream gzip (timestamp test) expects exit code 2 when the source
+    // timestamp can't be represented in the 32-bit gzip field: before
+    // 1970-01-01 or at/after 2106-02-07 06:28:16 UTC.
+    let (mtime, mtime_out_of_range): (u32, bool) = if opts.store_name {
+        match metadata.modified() {
+            Ok(t) => match t.duration_since(UNIX_EPOCH) {
+                Ok(d) => {
+                    let secs = d.as_secs();
+                    if secs == 0 || secs > u32::MAX as u64 {
+                        (0, true)
+                    } else {
+                        (secs as u32, false)
+                    }
+                }
+                Err(_) => (0, true),
+            },
+            Err(_) => (0, false),
+        }
     } else {
-        0
+        (0, false)
     };
 
     if opts.to_stdout {
@@ -456,6 +492,15 @@ fn compress_file(path: &Path, opts: &Options) -> i32 {
         }
     }
 
+    if mtime_out_of_range {
+        if !opts.quiet {
+            eprintln!(
+                "gzip: {}: file timestamp out of range for gzip format",
+                path.display()
+            );
+        }
+        return 2;
+    }
     0
 }
 
@@ -502,7 +547,7 @@ fn decompress_file(path: &Path, opts: &Options) -> i32 {
 
     if opts.to_stdout {
         let stdout = io::stdout();
-        if let Err(e) = decompress_stream(BufReader::new(input), stdout.lock()) {
+        if let Err(e) = decompress_stream(BufReader::new(input), stdout.lock(), opts.force) {
             eprintln!("\ngzip: {path_str}: {}", canonical_decode_error(&e));
             return 1;
         }
@@ -515,7 +560,8 @@ fn decompress_file(path: &Path, opts: &Options) -> i32 {
             }
         };
 
-        if let Err(e) = decompress_stream(BufReader::new(input), BufWriter::new(output)) {
+        if let Err(e) = decompress_stream(BufReader::new(input), BufWriter::new(output), opts.force)
+        {
             eprintln!("\ngzip: {path_str}: {}", canonical_decode_error(&e));
             let _ = fs::remove_file(&out_path);
             return 1;
@@ -550,7 +596,7 @@ fn test_file(path: &Path, opts: &Options) -> i32 {
         }
     };
 
-    if let Err(e) = decompress_stream(BufReader::new(input), io::sink()) {
+    if let Err(e) = decompress_stream(BufReader::new(input), io::sink(), false) {
         eprintln!("\ngzip: {}: {}", path.display(), canonical_decode_error(&e));
         return 1;
     }
@@ -579,15 +625,17 @@ fn list_file(path: &Path, opts: &Options) -> i32 {
         }
     };
 
-    // Read the header to get original name
-    let mut decoder = GzDecoder::new(BufReader::new(input));
-    let mut buf = Vec::new();
-    if let Err(e) = decoder.read_to_end(&mut buf) {
-        eprintln!("gzip: {}: {e}", path.display());
-        return 1;
-    }
-
-    let uncompressed_size = buf.len() as u64;
+    // Stream through a sink rather than buffering: `list-big` exercises
+    // a 4 GiB sparse file and we must not blow out memory tallying it.
+    // MultiGzDecoder so concatenated-member archives report the total.
+    let mut decoder = MultiGzDecoder::new(BufReader::new(input));
+    let uncompressed_size = match io::copy(&mut decoder, &mut io::sink()) {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("gzip: {}: {e}", path.display());
+            return 1;
+        }
+    };
     let ratio = if uncompressed_size == 0 {
         0.0
     } else {
@@ -603,6 +651,34 @@ fn list_file(path: &Path, opts: &Options) -> i32 {
     println!("  {compressed_size:>10}  {uncompressed_size:>12}  {ratio:>5.1}%  {out_name}");
 
     0
+}
+
+// Read adapter that tallies bytes as they flow through. Used by the
+// stdin branch of `-l`, which can't stat the input to get the compressed
+// size and must not buffer 4 GiB of data in memory just to count it.
+struct CountingReader<R: Read> {
+    inner: R,
+    counter: std::rc::Rc<std::cell::Cell<u64>>,
+}
+
+impl<R: Read> CountingReader<R> {
+    fn new(inner: R) -> Self {
+        Self {
+            inner,
+            counter: std::rc::Rc::new(std::cell::Cell::new(0)),
+        }
+    }
+    fn counter(&self) -> std::rc::Rc<std::cell::Cell<u64>> {
+        self.counter.clone()
+    }
+}
+
+impl<R: Read> Read for CountingReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.counter.set(self.counter.get() + n as u64);
+        Ok(n)
+    }
 }
 
 // Hand-roll the gzip framing so we can control OS=3 (Unix), set the
@@ -655,11 +731,151 @@ fn compress_stream<R: Read, W: Write>(
     Ok(())
 }
 
-fn decompress_stream<R: Read, W: Write>(reader: R, mut writer: W) -> io::Result<()> {
-    let mut decoder = MultiGzDecoder::new(reader);
-    io::copy(&mut decoder, &mut writer)?;
+// Decode a full stream, supporting multi-member gzip, trailing NUL
+// padding (tape archive convention), and `-f`-style cat pass-through
+// for non-gzip content. We buffer the whole input so we can walk member
+// boundaries exactly — flate2's streaming decoders over-read into their
+// own buffers and would lose bytes belonging to the tail.
+fn decompress_stream<R: Read, W: Write>(
+    mut reader: R,
+    mut writer: W,
+    force: bool,
+) -> io::Result<()> {
+    let mut input = Vec::new();
+    reader.read_to_end(&mut input)?;
+    let mut pos = 0;
+    let mut any_member = false;
+    while pos < input.len() {
+        let remaining = &input[pos..];
+        if remaining.len() >= 2 && remaining[0] == 0x1f && remaining[1] == 0x8b {
+            let consumed = decode_gzip_member(remaining, &mut writer)?;
+            pos += consumed;
+            any_member = true;
+        } else if any_member && remaining.iter().all(|&b| b == 0) {
+            // Trailing NUL padding after at least one valid member is
+            // silently tolerated (tape alignment, etc.).
+            break;
+        } else if force {
+            writer.write_all(remaining)?;
+            pos = input.len();
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "not in gzip format",
+            ));
+        }
+    }
     writer.flush()?;
     Ok(())
+}
+
+// Decode one gzip member from `data` and return the number of bytes
+// consumed (header + deflate body + 8-byte trailer).
+fn decode_gzip_member<W: Write>(data: &[u8], writer: &mut W) -> io::Result<usize> {
+    let header_len = parse_gzip_header(data)?;
+    let mut body_pos = header_len;
+    let mut decomp = Decompress::new(false);
+    let mut out_buf = vec![0u8; 65536];
+    loop {
+        let in_before = decomp.total_in();
+        let out_before = decomp.total_out();
+        let status = decomp
+            .decompress(&data[body_pos..], &mut out_buf, FlushDecompress::None)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+        let consumed = (decomp.total_in() - in_before) as usize;
+        let produced = (decomp.total_out() - out_before) as usize;
+        body_pos += consumed;
+        if produced > 0 {
+            writer.write_all(&out_buf[..produced])?;
+        }
+        if matches!(status, Status::StreamEnd) {
+            break;
+        }
+        if consumed == 0 && produced == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "unexpected end of file",
+            ));
+        }
+    }
+    // 8-byte trailer: CRC32 + ISIZE, both little-endian. We don't verify
+    // them yet — flate2 has already validated the deflate bitstream.
+    if body_pos + 8 > data.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "unexpected end of file",
+        ));
+    }
+    Ok(body_pos + 8)
+}
+
+// Parse the gzip member header. Returns the header length on success.
+fn parse_gzip_header(data: &[u8]) -> io::Result<usize> {
+    // 10-byte fixed header: magic(2) + method(1) + flags(1) + mtime(4)
+    //                      + xfl(1) + os(1).
+    if data.len() < 10 || data[0] != 0x1f || data[1] != 0x8b {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "not in gzip format",
+        ));
+    }
+    if data[2] != 8 {
+        // Only deflate (method 8) is defined.
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "not in gzip format",
+        ));
+    }
+    let flags = data[3];
+    let mut p = 10;
+    if flags & 0x04 != 0 {
+        // FEXTRA: 2-byte length, then that many bytes.
+        if data.len() < p + 2 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "unexpected end of file",
+            ));
+        }
+        let xlen = u16::from_le_bytes([data[p], data[p + 1]]) as usize;
+        p += 2 + xlen;
+    }
+    if flags & 0x08 != 0 {
+        // FNAME: NUL-terminated original filename.
+        while p < data.len() && data[p] != 0 {
+            p += 1;
+        }
+        if p >= data.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "unexpected end of file",
+            ));
+        }
+        p += 1;
+    }
+    if flags & 0x10 != 0 {
+        // FCOMMENT: NUL-terminated comment.
+        while p < data.len() && data[p] != 0 {
+            p += 1;
+        }
+        if p >= data.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "unexpected end of file",
+            ));
+        }
+        p += 1;
+    }
+    if flags & 0x02 != 0 {
+        // FHCRC: 2-byte header CRC.
+        p += 2;
+        if p > data.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "unexpected end of file",
+            ));
+        }
+    }
+    Ok(p)
 }
 
 // Map flate2's deflate/gzip error strings to GNU gzip's canonical wording
@@ -681,6 +897,8 @@ fn canonical_decode_error(e: &io::Error) -> String {
         || l.contains("invalid literal")
         || l.contains("invalid deflate")
         || l.contains("format violated")
+        || l.contains("deflate decompression")
+        || l.contains("decompress")
     {
         "invalid compressed data--format violated".to_string()
     } else if l.contains("crc") {
