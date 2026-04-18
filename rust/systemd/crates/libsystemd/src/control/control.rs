@@ -9238,6 +9238,40 @@ pub fn execute_command(
                 }
             }
 
+            // Re-apply filesystem dropins to transient slices so new
+            // dropin files in /run/systemd/system/ (or /etc/) are picked
+            // up on reload.  Transient service units already pick up
+            // dropins via `apply_dropins_to_transient` during their
+            // creation path; slices use the implicit-slice path which we
+            // re-invoke here.
+            let transient_slice_names: Vec<String> = run_info
+                .unit_table
+                .values()
+                .filter(|u| {
+                    u.id.name.ends_with(".slice")
+                        && u.common
+                            .unit
+                            .fragment_path
+                            .as_ref()
+                            .map(|p| p.starts_with("/run/systemd/transient"))
+                            .unwrap_or(false)
+                })
+                .map(|u| u.id.name.clone())
+                .collect();
+            for name in transient_slice_names {
+                create_or_update_implicit_slice(&name, run_info);
+                // Re-pin the transient fragment_path (the implicit-slice
+                // helper resets it to /run/systemd/system/...).
+                if let Some(unit) = run_info
+                    .unit_table
+                    .values_mut()
+                    .find(|u| u.id.name == name)
+                {
+                    unit.common.unit.fragment_path =
+                        Some(std::path::PathBuf::from(format!("/run/systemd/transient/{name}")));
+                }
+            }
+
             let mut response_object = serde_json::Map::new();
             insert_new_units(new_units, run_info)?;
 

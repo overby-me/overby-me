@@ -69,8 +69,8 @@ rust-systemd's PID 1 now exposes `org.freedesktop.systemd1` on the system bus vi
 
 **Affected tests:**
 
-- 15-dropin (also has NixOS PATH issue with bare `sleep` in unit files)
-- 81-generators-fstab-generator
+- 15-dropin — **NOW PASSES** (D-Bus + hierarchical dropins + transient slice support + CleanUnit + Socket/Timer/Slice/Path D-Bus interfaces verified together)
+- 81-generators-fstab-generator (still blocked: needs `systemd-fstab-generator` binary)
 
 ### 2. Type=notify Service Lifecycle (Advanced)
 
