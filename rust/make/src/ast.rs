@@ -15,6 +15,7 @@ pub enum Directive {
     Export(Option<Vec<String>>),
     ExportAssign(Box<Assignment>), // export VAR = value: assign + export
     Unexport(Option<Vec<String>>), // unexport VAR ... or unexport
+    UnexportAssign(Box<Assignment>), // unexport VAR = value: assign + unexport
     #[allow(dead_code)]
     Vpath(Option<(String, String)>),
     Override(Box<Assignment>),

@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**73/135 tests passing** (54%) — upstream test harness from GNU make 4.4.1.
+**74/135 tests passing** (55%) — upstream test harness from GNU make 4.4.1.
 
 `rust/make` has a parser, expander, and build engine (~5k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -57,7 +57,10 @@ organised in six directories under `tests/scripts/`:
 - Variable assignments: `=`, `:=`, `::=`, `:::=`, `?=`, `+=`, `!=`.
 - `define … endef` multi-line variables; `override define`.
 - `override`, `undefine`, `override undefine`.
-- `export`, `unexport`, `export VAR = val`, `.EXPORT_ALL_VARIABLES`.
+- `export`, `unexport`, `export VAR = val`, `unexport VAR = val`,
+  `.EXPORT_ALL_VARIABLES`. An `unexports` set records explicit
+  `unexport` names so they're suppressed during `.EXPORT_ALL_VARIABLES`
+  / global export and also removed from env_inherited re-export.
 - Conditionals: `ifeq`, `ifneq`, `ifdef`, `ifndef`, chained `else ifX`.
 - `include`, `-include`, `sinclude` with glob and `-I` search.
 - Rules:

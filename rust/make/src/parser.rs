@@ -285,6 +285,9 @@ impl Parser {
         }
         if let Some(rest) = trimmed.strip_prefix("unexport ") {
             self.advance();
+            if let Some(assign) = try_parse_assignment(rest) {
+                return Ok(Some(Directive::UnexportAssign(Box::new(assign))));
+            }
             let names: Vec<String> = rest.split_whitespace().map(|s| s.to_string()).collect();
             return Ok(Some(Directive::Unexport(Some(names))));
         }

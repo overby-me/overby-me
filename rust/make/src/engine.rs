@@ -91,6 +91,11 @@ pub struct Engine {
     phony_targets: RefCell<HashSet<String>>,
     suffixes: RefCell<Vec<String>>,
     pub exports: RefCell<HashSet<String>>,
+    /// Names explicitly `unexport`ed. Only consulted when
+    /// `export_all` is true (global `export` / `.EXPORT_ALL_VARIABLES`)
+    /// so a later `unexport BOTZ` can suppress the blanket export
+    /// without affecting vars exported via an explicit `export`.
+    unexports: RefCell<HashSet<String>>,
     export_all: RefCell<bool>,
     built_targets: RefCell<HashSet<String>>,
     eval_queue: RefCell<Vec<String>>,
@@ -203,6 +208,7 @@ impl Engine {
                 ".S".into(),
             ]),
             exports: RefCell::new(HashSet::new()),
+            unexports: RefCell::new(HashSet::new()),
             export_all: RefCell::new(false),
             built_targets: RefCell::new(HashSet::new()),
             eval_queue: RefCell::new(Vec::new()),
@@ -738,15 +744,24 @@ impl Engine {
             Directive::Unexport(vars) => {
                 if let Some(names) = vars {
                     let mut exports = self.exports.borrow_mut();
+                    let mut unexports = self.unexports.borrow_mut();
                     for name in names {
                         let expanded = expand::expand(name, self);
                         for word in expanded.split_whitespace() {
                             exports.remove(word);
+                            unexports.insert(word.to_string());
                         }
                     }
                 } else {
                     *self.export_all.borrow_mut() = false;
                 }
+            }
+            Directive::UnexportAssign(assign) => {
+                // `unexport VAR = value` assigns and marks unexported.
+                self.process_assignment(assign, VarOrigin::File);
+                let expanded = expand::expand(&assign.name, self);
+                self.exports.borrow_mut().remove(&expanded);
+                self.unexports.borrow_mut().insert(expanded);
             }
             Directive::Override(assign) => {
                 self.process_assignment(assign, VarOrigin::Override);
@@ -2272,7 +2287,11 @@ impl Engine {
             cmd.arg(&expanded);
 
             if *self.export_all.borrow() {
+                let unexports = self.unexports.borrow();
                 for (name, var) in self.vars.borrow().iter() {
+                    if unexports.contains(name) {
+                        continue;
+                    }
                     cmd.env(name, &var.value);
                 }
             } else {
@@ -2285,8 +2304,13 @@ impl Engine {
                 // recipes (keeps the user's login shell visible there)
                 // — unless SHELL has been explicitly `export`ed.
                 let shell_exported = self.exports.borrow().contains("SHELL");
+                let unexports = self.unexports.borrow();
                 for name in self.env_inherited.borrow().iter() {
                     if name == "SHELL" && !shell_exported {
+                        continue;
+                    }
+                    if unexports.contains(name) {
+                        cmd.env_remove(name);
                         continue;
                     }
                     let value = self.lookup_var(name);
