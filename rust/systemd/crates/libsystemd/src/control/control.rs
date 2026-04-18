@@ -7442,6 +7442,25 @@ pub fn execute_command(
                 }
             }
             if out.is_empty() {
+                // Implicit / transient slice units have no fragment file.
+                // Emit a synthetic representation mirroring upstream's
+                // fallback so `systemctl cat a-b-c.slice` succeeds when no
+                // dropins are present.
+                if unit_name.ends_with(".slice") {
+                    let ri = run_info.read_poisoned();
+                    let unit = ri
+                        .unit_table
+                        .values()
+                        .find(|u| u.id.name == *unit_name);
+                    if let Some(unit) = unit {
+                        let desc = unit.common.unit.description.clone();
+                        return Ok(serde_json::json!({
+                            "cat": format!(
+                                "# /run/systemd/system/{unit_name}\n[Unit]\nDescription={desc}\n\n[Slice]\n"
+                            )
+                        }));
+                    }
+                }
                 return Err(format!(
                     "No fragment path recorded for {unit_name} (unit may have been generated at runtime)"
                 ));
