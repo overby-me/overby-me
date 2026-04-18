@@ -1370,14 +1370,20 @@ impl Service {
         }
         let timeout = self.get_stop_timeout(conf);
         let cmds = conf.stop.clone();
-        self.run_all_cmds(
+        // ExecStop= runs while the service's state directory / BindPaths
+        // are still set up, so it should see the same filesystem view as
+        // ExecStart=.
+        self.helper_mount_ns = helper_mount_ns_from_conf(conf);
+        let res = self.run_all_cmds(
             &cmds,
             id,
             name,
             timeout,
             run_info,
             conf.exec_config.working_directory.as_ref(),
-        )
+        );
+        self.helper_mount_ns = None;
+        res
     }
     /// Run ExecCondition= commands. Returns Ok(true) to proceed, Ok(false) to
     /// skip the service (condition not met), or Err on hard failure (exit 255
