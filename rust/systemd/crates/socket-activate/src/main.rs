@@ -82,6 +82,19 @@ struct Cli {
     #[arg(long)]
     foreground: bool,
 
+    /// Inetd-style activation: when used with --accept, the accepted
+    /// connection is passed to the child as stdin and stdout (fds 0/1)
+    /// rather than as fd 3.  Incompatible with multiple --listen sockets.
+    #[arg(long)]
+    inetd: bool,
+
+    /// Start the command immediately, without waiting for any data to
+    /// arrive on the listening sockets.  In non-accept mode the daemon
+    /// is always started right after binding, so this flag is mostly
+    /// for compatibility and to force the --accept/--now conflict check.
+    #[arg(short = 'n', long)]
+    now: bool,
+
     /// Set the environment variable name for the file descriptor count.
     /// Defaults to LISTEN_FDS.
     #[arg(short = 'E', long, value_name = "NAME", default_value = "LISTEN_FDS")]
@@ -581,6 +594,7 @@ fn accept_and_spawn(
     command: &[String],
     fd_names: Option<&str>,
     foreground: bool,
+    inetd: bool,
 ) -> io::Result<()> {
     let conn_fd = unsafe {
         libc::accept4(
@@ -601,23 +615,26 @@ fn accept_and_spawn(
             Err(io::Error::last_os_error())
         }
         0 => {
-            // Child process
-            // Close the listening socket
             unsafe { libc::close(listen_fd) };
 
-            // Move the connected socket to FD 3
-            move_fd(conn_fd, LISTEN_FDS_START)?;
-
-            // exec the command
-            exec_command(command, 1, fd_names)?;
+            if inetd {
+                if unsafe { libc::dup2(conn_fd, 0) } < 0
+                    || unsafe { libc::dup2(conn_fd, 1) } < 0
+                {
+                    return Err(io::Error::last_os_error());
+                }
+                unsafe { libc::close(conn_fd) };
+                exec_command(command, 0, fd_names)?;
+            } else {
+                move_fd(conn_fd, LISTEN_FDS_START)?;
+                exec_command(command, 1, fd_names)?;
+            }
             process::exit(1);
         }
         child_pid => {
-            // Parent process
             unsafe { libc::close(conn_fd) };
 
             if foreground {
-                // Wait for child to exit
                 let mut status: libc::c_int = 0;
                 unsafe {
                     libc::waitpid(child_pid, &mut status, 0);
@@ -640,6 +657,20 @@ fn cleanup_unix_sockets(sockets: &[ListeningSocket]) {
 
 fn main() {
     let cli = Cli::parse();
+
+    if cli.accept && cli.now {
+        eprintln!("--accept and --now may not be combined.");
+        process::exit(1);
+    }
+    if cli.inetd && cli.listen.len() > 1 {
+        eprintln!("--inetd requires exactly one --listen socket.");
+        process::exit(1);
+    }
+    if cli.inetd && !cli.accept {
+        // inetd semantics imply per-connection fork; mirror upstream.
+        eprintln!("--inetd requires --accept.");
+        process::exit(1);
+    }
 
     // Create all listening sockets
     let mut sockets: Vec<ListeningSocket> = Vec::new();
@@ -715,9 +746,13 @@ fn main() {
         );
 
         loop {
-            if let Err(e) =
-                accept_and_spawn(listen_fd, &cli.command, fd_names.as_deref(), cli.foreground)
-            {
+            if let Err(e) = accept_and_spawn(
+                listen_fd,
+                &cli.command,
+                fd_names.as_deref(),
+                cli.foreground,
+                cli.inetd,
+            ) {
                 eprintln!("Error accepting connection: {e}");
                 // Brief sleep to avoid tight error loop
                 std::thread::sleep(std::time::Duration::from_millis(100));

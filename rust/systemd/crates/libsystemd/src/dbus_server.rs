@@ -111,6 +111,48 @@ mod inner {
             true
         }
 
+        /// All names this unit answers to — primary id plus any aliases.
+        #[zbus(property)]
+        fn names(&self) -> Vec<String> {
+            let ri = self.run_info.read_poisoned();
+            let Some(unit) = ri.unit_table.values().find(|u| u.id.name == self.unit_name) else {
+                return vec![self.unit_name.clone()];
+            };
+            let mut out = vec![unit.id.name.clone()];
+            out.extend(unit.common.unit.aliases.iter().cloned());
+            out
+        }
+
+        /// Absolute path of the unit's source fragment file, if any.
+        #[zbus(property)]
+        fn fragment_path(&self) -> String {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .and_then(|u| u.common.unit.fragment_path.as_ref())
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default()
+        }
+
+        /// Drop-in config files merged into this unit.
+        #[zbus(property)]
+        fn drop_in_paths(&self) -> Vec<String> {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .find(|u| u.id.name == self.unit_name)
+                .map(|u| {
+                    u.common
+                        .unit
+                        .loaded_dropin_files
+                        .iter()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+
         /// Whether runtime bind mounts (`systemctl bind`) can be applied
         /// to this unit.  Only services that already have a private mount
         /// namespace (PrivateMounts=yes, PrivateTmp=yes, or similar) can
@@ -239,11 +281,8 @@ mod inner {
 
         /// Reload unit files from disk (equivalent to `systemctl daemon-reload`).
         fn reload(&self) -> zbus::fdo::Result<()> {
-            // Defer to the existing reload pathway — we don't execute it
-            // here because daemon-reload requires write locks and is
-            // non-trivial.  For now, signal that a reload is supported
-            // but return success without action.  TODO: wire up.
-            trace!("D-Bus Reload() called — no-op stub");
+            invoke_command(&self.run_info, crate::control::Command::LoadAllNew)
+                .map_err(zbus::fdo::Error::Failed)?;
             Ok(())
         }
 

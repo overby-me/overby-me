@@ -2349,6 +2349,52 @@ mod tests {
     }
 
     #[test]
+    fn test_collect_applicable_dropins_type_level() {
+        // Type-level dropin "service.d" should apply to all .service units
+        let mut dropins: HashMap<String, Vec<(String, String)>> = HashMap::new();
+        dropins.insert(
+            "service".to_owned(),
+            vec![(
+                "override.conf".to_owned(),
+                "[Service]\nExecCondition=echo %n\n".to_owned(),
+            )],
+        );
+        let result = collect_applicable_dropins("test15-a.service", &dropins);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0, "override.conf");
+        assert!(
+            result[0].1.contains("ExecCondition=echo test15-a.service"),
+            "Expected %n resolution to unit name, got: {}",
+            result[0].1
+        );
+    }
+
+    #[test]
+    fn test_collect_applicable_dropins_hierarchy() {
+        // All three tiers should apply in order: type, prefix, exact
+        let mut dropins: HashMap<String, Vec<(String, String)>> = HashMap::new();
+        dropins.insert(
+            "service".to_owned(),
+            vec![("10.conf".to_owned(), "TYPE\n".to_owned())],
+        );
+        dropins.insert(
+            "a-.service".to_owned(),
+            vec![("20.conf".to_owned(), "A-PREFIX\n".to_owned())],
+        );
+        dropins.insert(
+            "a-b-.service".to_owned(),
+            vec![("30.conf".to_owned(), "A-B-PREFIX\n".to_owned())],
+        );
+        dropins.insert(
+            "a-b-c.service".to_owned(),
+            vec![("40.conf".to_owned(), "EXACT\n".to_owned())],
+        );
+        let result = collect_applicable_dropins("a-b-c.service", &dropins);
+        let contents: Vec<&str> = result.iter().map(|(_, c)| c.trim()).collect();
+        assert_eq!(contents, vec!["TYPE", "A-PREFIX", "A-B-PREFIX", "EXACT"]);
+    }
+
+    #[test]
     fn test_parse_template_instance() {
         assert_eq!(
             parse_template_instance("serial-getty@ttyS0.service"),
