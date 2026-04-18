@@ -922,14 +922,25 @@ mod inner {
             Value::I64(i) => Some(i.to_string()),
             Value::U64(u) => Some(u.to_string()),
             Value::F64(f) => Some(f.to_string()),
-            _ => {
+            Value::Array(items) => {
+                // Handle arrays of strings ("as") — used by Documentation=,
+                // Environment=, PassEnvironment=, etc.  Join with spaces so
+                // the transient unit parser can split back into entries.
+                let strs: Vec<String> = items
+                    .iter()
+                    .filter_map(|a| match a {
+                        Value::Str(s) => Some(s.to_string()),
+                        _ => None,
+                    })
+                    .collect();
+                if !strs.is_empty() {
+                    return Some(strs.join(" "));
+                }
+
                 // Complex values — e.g. ExecStart as a(sasb).  Try to
                 // flatten into a space-separated argv string so the text
                 // parser can split it on whitespace.
-                if key == "ExecStart"
-                    && let Value::Array(items) = inner
-                {
-                    // Each item is a (path, argv, skip_on_fail) tuple.
+                if key == "ExecStart" {
                     let mut out = String::new();
                     for item in items.iter() {
                         if let Value::Structure(s) = item {
@@ -954,6 +965,7 @@ mod inner {
                     None
                 }
             }
+            _ => None,
         }
     }
 
