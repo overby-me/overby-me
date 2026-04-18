@@ -190,22 +190,32 @@ fn apply_helper_mount_namespace(ns: &HelperMountNs) -> std::io::Result<()> {
     }
 
     // PrivateTmp=yes FIRST so BindPaths targeting /tmp/... land in the
-    // fresh tmpfs.
+    // fresh tmpfs.  A failure to mount over /var/tmp (missing on minimal
+    // VMs) is non-fatal — /tmp is the main target BindPaths typically
+    // references.  /tmp itself must succeed.
     if ns.private_tmp {
         let tmpfs_name = c"tmpfs";
-        for dst in [c"/tmp", c"/var/tmp"] {
-            let ret = unsafe {
-                libc::mount(
-                    tmpfs_name.as_ptr(),
-                    dst.as_ptr(),
-                    tmpfs_name.as_ptr(),
-                    (libc::MS_NOSUID | libc::MS_NODEV) as libc::c_ulong,
-                    c"mode=01777".as_ptr().cast(),
-                )
-            };
-            if ret != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
+        let ret = unsafe {
+            libc::mount(
+                tmpfs_name.as_ptr(),
+                c"/tmp".as_ptr(),
+                tmpfs_name.as_ptr(),
+                (libc::MS_NOSUID | libc::MS_NODEV) as libc::c_ulong,
+                c"mode=01777".as_ptr().cast(),
+            )
+        };
+        if ret != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // /var/tmp: best-effort (may not exist on minimal VMs).
+        unsafe {
+            libc::mount(
+                tmpfs_name.as_ptr(),
+                c"/var/tmp".as_ptr(),
+                tmpfs_name.as_ptr(),
+                (libc::MS_NOSUID | libc::MS_NODEV) as libc::c_ulong,
+                c"mode=01777".as_ptr().cast(),
+            );
         }
     }
 
