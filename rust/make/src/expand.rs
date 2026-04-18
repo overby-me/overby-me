@@ -823,26 +823,36 @@ fn call_function(
                 let var = args[0].trim();
                 let list = expand_with_auto(&args[1], engine, auto_vars);
                 let body = &args[2];
+                // Save any existing binding so we can restore it after
+                // the foreach completes. This makes the binding visible
+                // to anything that looks up the variable via
+                // `engine.lookup_var` (e.g. `$(eval …)`).
+                let saved = engine.vars.borrow().get(var).cloned();
                 let result: Vec<String> = list
                     .split_whitespace()
                     .map(|word| {
-                        let mut inner_auto = auto_vars.clone();
                         let word_owned = word.to_string();
-                        // Temporarily set the variable
-                        // We use a trick: expand body with var set
-                        let body_replaced = body
-                            .replace(&format!("$({var})"), &word_owned)
-                            .replace(&format!("${{{var}}}"), &word_owned);
-                        // Also handle $X for single-char vars
-                        let body_replaced = if var.len() == 1 {
-                            body_replaced.replace(&format!("${var}"), &word_owned)
-                        } else {
-                            body_replaced
-                        };
+                        engine.vars.borrow_mut().insert(
+                            var.to_string(),
+                            Variable {
+                                value: word_owned.clone(),
+                                flavor: VarFlavor::Simple,
+                                origin: VarOrigin::Automatic,
+                            },
+                        );
+                        let mut inner_auto = auto_vars.clone();
                         inner_auto.insert(var, word_owned);
-                        expand_with_auto(&body_replaced, engine, &inner_auto)
+                        expand_with_auto(body, engine, &inner_auto)
                     })
                     .collect();
+                match saved {
+                    Some(v) => {
+                        engine.vars.borrow_mut().insert(var.to_string(), v);
+                    }
+                    None => {
+                        engine.vars.borrow_mut().remove(var);
+                    }
+                }
                 Some(result.join(" "))
             } else {
                 Some(String::new())

@@ -764,12 +764,19 @@ impl Engine {
             }
             Directive::TargetVarAssign(targets_str, assign) => {
                 let targets_expanded = expand::expand(targets_str, self);
+                // Simple (`:=` / `::=`) and shell (`!=`) target-specific
+                // assignments are expanded at declaration time so they
+                // capture the *current* binding (e.g. a foreach var).
+                let value = match assign.op {
+                    AssignOp::Simple => expand::expand(&assign.value, self),
+                    _ => assign.value.clone(),
+                };
                 let mut tv = self.target_vars.borrow_mut();
                 for target in targets_expanded.split_whitespace() {
                     tv.entry(target.to_string()).or_default().push((
                         assign.name.clone(),
                         assign.op,
-                        assign.value.clone(),
+                        value.clone(),
                     ));
                 }
             }
