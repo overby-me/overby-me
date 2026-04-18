@@ -1032,7 +1032,18 @@ fn parse_args() -> Args {
                 args.no_same_owner = true;
             }
             "--no-same-permissions" => args.no_same_permissions = true,
-            "--no-recursion" => args.no_recursion = true,
+            "--no-recursion" => {
+                if args.paths.is_empty() {
+                    args.no_recursion = true;
+                } else {
+                    args.paths.push("\0-no-recursion\0".to_string());
+                }
+            }
+            "--recursion" => {
+                if !args.paths.is_empty() {
+                    args.paths.push("\0-recursion\0".to_string());
+                }
+            }
             "-h" | "--dereference" => args.dereference = true,
             "-P" | "--absolute-names" => args.absolute_names = true,
             "--numeric-owner" => args.numeric_owner = true,
@@ -1351,7 +1362,6 @@ fn parse_args() -> Args {
                     || other == "--posix"
                     || other == "--old-archive"
                     || other == "--portability"
-                    || other == "--recursion"
                     || other == "--same-order"
                     || other == "--preserve-order"
                     || other == "-s"
@@ -1691,6 +1701,7 @@ fn add_paths_to_builder_filter<W: Write>(
         std::collections::HashMap::new();
     let mut had_read_error = false;
     let mut file_changed = false;
+    let mut current_no_recursion = args.no_recursion;
 
     for src in &args.paths {
         if let Some(dir) = src.strip_prefix("\0-C\0") {
@@ -1700,13 +1711,21 @@ fn add_paths_to_builder_filter<W: Write>(
             std::env::set_current_dir(dir)?;
             continue;
         }
+        if src == "\0-no-recursion\0" {
+            current_no_recursion = true;
+            continue;
+        }
+        if src == "\0-recursion\0" {
+            current_no_recursion = false;
+            continue;
+        }
         let src_path = Path::new(src);
 
         // Collect entries (for optional sorting)
         let mut entries: Vec<PathBuf> = Vec::new();
 
         if src_path.is_dir() {
-            if args.no_recursion {
+            if current_no_recursion {
                 // Only add the directory itself, not its contents.
                 entries.push(src_path.to_path_buf());
             } else {
