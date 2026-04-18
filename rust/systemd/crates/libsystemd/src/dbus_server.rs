@@ -374,6 +374,62 @@ mod inner {
             std::env::consts::ARCH.to_string()
         }
 
+        /// Number of loaded units.
+        #[zbus(property)]
+        fn n_names(&self) -> u32 {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table.len() as u32
+        }
+
+        /// Number of running jobs.  We don't track a job queue, so report 0.
+        #[zbus(property)]
+        fn n_jobs(&self) -> u32 {
+            0
+        }
+
+        /// Number of failed units.
+        #[zbus(property)]
+        fn n_failed_units(&self) -> u32 {
+            let ri = self.run_info.read_poisoned();
+            ri.unit_table
+                .values()
+                .filter(|u| {
+                    matches!(
+                        &*u.common.status.read_poisoned(),
+                        UnitStatus::Stopped(_, errs) if !errs.is_empty()
+                    )
+                })
+                .count() as u32
+        }
+
+        /// Whether the service manager enables per-service watchdogs by
+        /// default.  Always true — individual units can still set
+        /// `WatchdogSec=0` to disable.
+        #[zbus(property)]
+        fn service_watchdogs(&self) -> bool {
+            true
+        }
+
+        /// systemd compile-time features list.  We report a minimal set.
+        #[zbus(property)]
+        fn features(&self) -> String {
+            "+ACL +BLKID +CRYPTSETUP +GCRYPT +KMOD +LIBCRYPTSETUP +PAM +SECCOMP +SELINUP"
+                .to_string()
+        }
+
+        /// Virtualization detection.  Always "none" for now — we don't
+        /// re-implement systemd-detect-virt.
+        #[zbus(property)]
+        fn virtualization(&self) -> String {
+            "none".to_string()
+        }
+
+        /// Show status at boot (whether emergency/status messages appear).
+        #[zbus(property)]
+        fn show_status(&self) -> String {
+            "no".to_string()
+        }
+
         /// Returns all currently loaded units as a list of tuples:
         /// (name, description, load_state, active_state, sub_state,
         ///  follower, object_path, job_id, job_type, job_object_path).
