@@ -561,6 +561,17 @@ fn cmd_info(
         return cmd_info_export_db();
     }
 
+    // `udevadm info --export / -e` without a specific device dumps every
+    // udev-database entry.  With a device, it exports that device's
+    // properties (handled below alongside the normal query path).
+    if export
+        && name.is_none()
+        && path.is_none()
+        && devices.is_empty()
+    {
+        return cmd_info_export_db();
+    }
+
     // Collect device paths to query
     let mut syspaths: Vec<PathBuf> = Vec::new();
 
