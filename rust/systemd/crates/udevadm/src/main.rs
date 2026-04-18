@@ -620,8 +620,9 @@ fn cmd_info(
 
     for dev in devices {
         // Could be a /dev node, /sys path, a DEVICE_ID (n<ifindex>,
-        // b<maj>:<min>, c<maj>:<min>), or a systemd-escaped unit name
-        // (e.g. `sys-devices-virtual-net-hoge.device`).
+        // b<maj>:<min>, c<maj>:<min>), a systemd-escaped unit name
+        // (e.g. `sys-devices-virtual-net-hoge.device`), or a relative
+        // path that resolves under /dev (e.g. just `null` from /dev).
         if dev.starts_with("/dev/") {
             if let Some(sp) = devname_to_syspath(dev) {
                 syspaths.push(sp);
@@ -633,6 +634,13 @@ fn cmd_info(
             && unescaped.exists()
         {
             syspaths.push(unescaped);
+        } else if let Ok(canon) = std::fs::canonicalize(dev)
+            && canon.starts_with("/dev/")
+            && let Some(sp) = devname_to_syspath(&canon.to_string_lossy())
+        {
+            // Relative path under /dev — canonicalize first (handles `./null`,
+            // `null` from CWD=/dev, and `/usr/../dev/null`).
+            syspaths.push(sp);
         } else {
             let sp = normalize_syspath(dev);
             if sp.exists() {
