@@ -601,7 +601,14 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
                 }
             }
         }
-        let _ = std::fs::remove_file(&status_path);
+        // NOTE: the `.status` file is intentionally NOT deleted here.
+        // `rebuild_device_units_from_udev_db` (called later in PID 1
+        // startup, after helper threads are up) reads this file to
+        // learn which `.device` units were `Started` before the
+        // re-exec so transient udev state (ID_PROCESSING=1 during a
+        // change event) doesn't demote them to inactive on replay.
+        // Cleanup happens in the service_manager entrypoint after
+        // rebuild runs.
     }
 
     // Restore stored_fds from the .fds file. These are file descriptors

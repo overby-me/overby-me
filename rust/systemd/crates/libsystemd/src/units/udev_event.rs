@@ -203,6 +203,16 @@ pub fn rebuild_device_units_from_udev_db(run_info: &ArcMutRuntimeInfo) {
         }
     };
 
+    // Read the reexec status file (if present) to learn which device
+    // units were `Started` before the re-exec.  Those need to be
+    // forcibly re-activated on rebuild regardless of transient udev
+    // state (ID_PROCESSING=1 during an in-flight change event must
+    // NOT demote a previously-plugged device unit back to inactive).
+    // On a fresh boot the file doesn't exist, so `previously_started`
+    // is empty and new devices with ID_PROCESSING=1 correctly defer.
+    let previously_started: std::collections::HashSet<String> =
+        read_previously_started_device_units();
+
     let mut restored = 0usize;
     let mut skipped = 0usize;
     for entry in entries.flatten() {
@@ -226,20 +236,20 @@ pub fn rebuild_device_units_from_udev_db(run_info: &ArcMutRuntimeInfo) {
 
         // Only rebuild units the service manager would have tracked
         // (tag=systemd OR alias/symlink present).
-        if derive_unit_names(&params).is_empty() {
+        let names = derive_unit_names(&params);
+        if names.is_empty() {
             skipped += 1;
             continue;
         }
-        // Strip `ID_PROCESSING=1` / `ID_RENAMING=1` from the replayed
-        // env: those markers indicate udev's _internal_ transient
-        // state during event handling.  The fact that the entry is in
-        // the db at all means udev considers the device real; the
-        // service manager should treat it as ready on replay.  Without
-        // this, `daemon-reexec` in the middle of an active RUN= would
-        // demote previously-plugged device units back to inactive,
-        // breaking TEST-17-UDEV.device_is_processing Phase 2.
-        params.env.remove("ID_PROCESSING");
-        params.env.remove("ID_RENAMING");
+        // If ANY of the derived unit names were Started before the
+        // re-exec, strip transient udev markers from the replayed env
+        // so the device unit comes back as plugged rather than being
+        // deferred.  Only new devices (no reexec-state entry) retain
+        // the original ID_PROCESSING=1 / ID_RENAMING=1 semantics.
+        if names.iter().any(|n| previously_started.contains(n)) {
+            params.env.remove("ID_PROCESSING");
+            params.env.remove("ID_RENAMING");
+        }
         handle_udev_event(run_info, &params);
         restored += 1;
     }
@@ -249,6 +259,32 @@ pub fn rebuild_device_units_from_udev_db(run_info: &ArcMutRuntimeInfo) {
             restored, skipped
         );
     }
+}
+
+/// Read the reexec status file and collect the names of `.device`
+/// units that were in `Started` state before the re-exec.  Used by
+/// `rebuild_device_units_from_udev_db` to preserve `plugged` state
+/// for devices across re-exec when the udev db reports transient
+/// udev-internal state like `ID_PROCESSING=1`.
+fn read_previously_started_device_units() -> std::collections::HashSet<String> {
+    let status_path = std::path::Path::new("/run/systemd/rust-systemd-reexec-state.status");
+    let mut out = std::collections::HashSet::new();
+    let content = match std::fs::read_to_string(status_path) {
+        Ok(c) => c,
+        Err(_) => return out,
+    };
+    for line in content.lines() {
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let name = parts[0];
+        let status = parts[1];
+        if status == "Started" && name.ends_with(".device") {
+            out.insert(name.to_owned());
+        }
+    }
+    out
 }
 
 /// Parse one `/run/udev/data/<filename>` entry into an `UdevEventParams`

@@ -154,6 +154,10 @@ pub fn run_service_manager() {
     // triggered by the replay can reach the notification handler etc.
     // Matches upstream's `manager_enumerate_devices()` at boot.
     crate::units::rebuild_device_units_from_udev_db(&run_info);
+    // Cleanup the reexec .status file now that rebuild has consumed
+    // it (see note in check_and_restore_reexec_state about the
+    // deferred deletion).
+    let _ = std::fs::remove_file("/run/systemd/rust-systemd-reexec-state.status");
 
     trace!("Started all helper threads. Start activating units");
 
