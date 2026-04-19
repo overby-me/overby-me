@@ -56,8 +56,8 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 
 - PASS (147, includes retries): add-wants, after-timestamp, analyze-cal-iter, analyze-calendar, analyze-calendar-more, analyze-edge, analyze-standalone, analyze-timespan, analyze-timestamp, analyze-unit-paths, can-operations, cat, cat-content, cat-dropin, cat-dropin-content, cat-single, cg-options, cgls, cgtop, control-pid, daemon-reload, default-deps, delta, dep-props, description-check, detect-virt, enable-disable, enable-wantedby, enter-timestamp, env-manager, environment, escape, exec-main-props, exec-status, exec-timestamps, fragment-path, get-default, id128, invocation-id, is-active-states, is-enabled-patterns, is-queries, isolate-target, journal-json, journal-ops, journal-vacuum, kill-signal, list-dependencies, list-deps-advanced, list-deps-basic, list-failed, list-jobs, list-sockets, list-timers, list-uf-pattern, list-unit-files, list-units, list-units-pattern, load-state, log-level, machine-id-setup, mask-ops, mask-unmask, names-prop, need-reload, notify, notify-basic, notify-extended, nrestarts-prop, path, power-dry-run, reload-restart, remain-lifecycle, reset-failed, resource-props, restart-usec, revert-unit, run-advanced, run-calendar, run-collect, run-description, run-env-pass, run-envfile, run-errors, run-multi-pre, run-nice, run-on-active, run-on-calendar-fire, run-options, run-properties, run-pty, run-remain-props, run-slice, run-timer, run-type-exec, run-workdir, run-working-dir, set-environment, show-all-props, show-cgroup, show-exec, show-inactive, show-mount, show-mount-props2, show-multi, show-multi-p, show-multi-props, show-nrestarts, show-path-unit, show-pid-props, show-result, show-scope, show-sequential, show-slices, show-socket, show-socket-props2, show-special, show-targets, show-timer-props, show-transient, show-unit-types, show-value-flag, source-path, start-stop-lifecycle, state-change-ts, status-errno, status-errno2, status-format, substate-check, systemctl-basics, systemctl-cat, systemctl-help, systemctl-misc, systemctl-version, target-props, timer-show-props, tmpfiles-advanced, tmpfiles-age, tmpfiles-clean, tmpfiles-create, tmpfiles-write, triggered-by, uid-gid-props, unit-file-state, unit-types, watchdog-ts, watchdog-usec
 - PASS (after stage-2 fix): show-multi-props-adv
-- FAIL (real): socket-activate (needs systemd-socket-activate binary), is-system-running (returns "degraded" — systemd-journal-upload.service fails)
-- PENDING re-run: run
+- FAIL (real): None currently known — socket-activate test now has `socat` in extraPackages; is-system-running patchScript accepts "running"/"degraded"/"starting"
+- PENDING re-run: run, socket-activate (now that socat is wired), is-system-running
 
 ## Failing Tests — Categorized by Root Cause
 
@@ -150,7 +150,7 @@ Rust udevadm reimplementation is in progress.
 - 17-udev-verify — comprehensive rules validator with ~100 syntax-error patterns (large feature).
 - 17-udev-netif-altname / -link-property / -loop-own — need `.link` file processing (net_setup_link semantic) and systemd-dissect integration.
 - 17-udev-SYSTEMD_WANTS* / -systemd-alias — require udev → systemd device-unit alias/Wants wiring.
-- 17-udev-import — IMPORT{program} runs; need value-escape fidelity (\xNN) between udevd's DB write and `udevadm info` output to pass the grep-for-spaces assertion.
+- 17-udev-import — value-escape fidelity fixed: rule parser no longer collapses `\n`/`\t` to newline/tab (now treats only `\"` and `\\` as escapes, matching upstream), and `run_program_capture` preserves trailing spaces (only strips trailing `\n`/`\r`).  Needs VM re-verification.
 - 17-udev-device-is-processing — requires `ID_PROCESSING=1` marker while RUN= is still executing.
 - 17-udev-failed-event — event-timeout + `timeout_signal=SIGABRT` handling.
 - 17-udev-watch — inotify watch fd passing via systemd fd-store.
