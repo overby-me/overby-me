@@ -86,24 +86,15 @@ fn system_config_from_cmdline() -> Option<PathBuf> {
     None
 }
 
-/// Write a single line to /dev/console.  Used before the logger is up.
-/// A failed open is silent — we don't want to kernel-panic PID 1 over a
-/// missing console device.
+/// Write a line to stderr (inherited from bash wrapper; goes to
+/// /dev/console) AND to /dev/kmsg (kernel log buffer) so the message
+/// survives even if stderr is redirected.
 fn log(msg: &str) {
-    let fd = unsafe {
-        libc::open(
-            c"/dev/console".as_ptr(),
-            libc::O_WRONLY | libc::O_NOCTTY | libc::O_CLOEXEC,
-        )
-    };
-    if fd < 0 {
-        return;
-    }
     let line = format!("{msg}\n");
-    let bytes = line.as_bytes();
-    unsafe {
-        let _ = libc::write(fd, bytes.as_ptr().cast(), bytes.len());
-        libc::close(fd);
+    eprint!("{line}");
+    if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open("/dev/kmsg") {
+        use std::io::Write;
+        let _ = f.write_all(format!("<6>{line}").as_bytes());
     }
 }
 
