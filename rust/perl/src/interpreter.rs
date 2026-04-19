@@ -8251,6 +8251,25 @@ impl Interpreter {
         let raw_handle = self.eval_expr(&args[0]).to_str();
         let handle = self.resolve_fh(&raw_handle);
         let len = self.eval_expr(&args[2]).to_num() as usize;
+        // In-memory scalar-ref fh: read `len` bytes from the backing
+        // scalar starting at the stored cursor, advance the cursor,
+        // and write the slice into the target scalar.
+        if let Some((rc, offset)) = self.string_read_handles.get(&handle).cloned() {
+            let full = rc.borrow().to_str();
+            let bytes = full.as_bytes();
+            if offset >= bytes.len() {
+                self.assign_to(&args[1], Value::Str(String::new()));
+                return Value::Num(0.0);
+            }
+            let end = (offset + len).min(bytes.len());
+            let slice = &bytes[offset..end];
+            let consumed = slice.len();
+            let s = String::from_utf8_lossy(slice).into_owned();
+            self.string_read_handles
+                .insert(handle, (rc, offset + consumed));
+            self.assign_to(&args[1], Value::Str(s));
+            return Value::Num(consumed as f64);
+        }
         let reader = match self.read_handles.get_mut(&handle) {
             Some(r) => r,
             None => return Value::Undef,
