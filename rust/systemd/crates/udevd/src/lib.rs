@@ -4574,9 +4574,12 @@ fn rtm_getlink_altnames(ifindex: i32) -> io::Result<Vec<String>> {
     if n < NLMSG_HDR_LEN + IFINFOMSG_LEN {
         return Ok(Vec::new());
     }
-    // Check nlmsg_type — might be NLMSG_ERROR.
+    // Only RTM_NEWLINK responses carry the interface info we want.
+    // NLMSG_ERROR / NLMSG_DONE / ACKs get ignored so we don't parse
+    // their bytes as bogus IFLA attributes.
+    const RTM_NEWLINK: u16 = 16;
     let nlmsg_type = u16::from_ne_bytes(buf[4..6].try_into().unwrap());
-    if nlmsg_type == NLMSG_ERROR {
+    if nlmsg_type != RTM_NEWLINK {
         return Ok(Vec::new());
     }
 

@@ -289,35 +289,45 @@ fn apply_device_active(
     }
 
     // Now pull in SYSTEMD_WANTS= / .device-file-declared Wants= targets.
-    // We spawn this on a thread so the control-socket handler doesn't
-    // block if the activation subgraph is slow (e.g. waiting on a
-    // Type=notify service).
-    for name in unit_names {
-        let id = UnitId {
-            kind: UnitIdKind::Device,
-            name: name.clone(),
-        };
-        let run_info = run_info.clone();
-        let unit_name = name.clone();
-        std::thread::spawn(move || {
-            let deps_to_activate: Vec<UnitId> = {
-                let ri = run_info.read_poisoned();
-                match ri.unit_table.get(&id) {
-                    Some(unit) => unit
-                        .common
-                        .dependencies
-                        .wants
-                        .iter()
-                        .chain(unit.common.dependencies.requires.iter())
-                        .cloned()
-                        .collect(),
-                    None => Vec::new(),
-                }
+    // All unit_names for this event are aliases of the same physical
+    // device and share the same SYSTEMD_WANTS= list, so we collect
+    // their wants/requires into a de-duplicated set and dispatch each
+    // target once — spawning one thread per alias would dispatch the
+    // same dep multiple times.  The single thread keeps the control-
+    // socket handler responsive if the activation subgraph is slow
+    // (e.g. waiting on a Type=notify service).
+    let mut deps_to_activate: Vec<UnitId> = Vec::new();
+    {
+        let ri = run_info.read_poisoned();
+        for name in unit_names {
+            let id = UnitId {
+                kind: UnitIdKind::Device,
+                name: name.clone(),
             };
+            if let Some(unit) = ri.unit_table.get(&id) {
+                for dep in unit
+                    .common
+                    .dependencies
+                    .wants
+                    .iter()
+                    .chain(unit.common.dependencies.requires.iter())
+                {
+                    if !deps_to_activate.contains(dep) {
+                        deps_to_activate.push(dep.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    if !deps_to_activate.is_empty() {
+        let run_info = run_info.clone();
+        let first_name = unit_names[0].clone();
+        std::thread::spawn(move || {
             for dep in deps_to_activate {
                 trace!(
                     "udev-event: activating dependency {} of device unit {}",
-                    dep.name, unit_name
+                    dep.name, first_name
                 );
                 let errors = crate::units::activate_needed_units_with_source(
                     dep.clone(),
