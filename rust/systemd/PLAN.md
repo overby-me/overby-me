@@ -71,7 +71,7 @@ rust-systemd's PID 1 now exposes `org.freedesktop.systemd1` on the system bus vi
 
 **Affected tests:**
 
-- 15-dropin — implementation complete (D-Bus + hierarchical dropins + transient slice support + CleanUnit + Socket/Timer/Slice/Path D-Bus interfaces); VM test needs re-verification post-testsuite-fix (my previous "PASS" was a false positive)
+- 15-dropin — implementation complete (D-Bus + hierarchical dropins + transient slice support + CleanUnit + Socket/Timer/Slice/Path D-Bus interfaces); patchScript now rewrites bare `sleep` → `/run/current-system/sw/bin/sleep` to work around NixOS's compiled-in DEFAULT_PATH_NORMAL restriction on inline unit files.
 - 81-generators-fstab-generator (still blocked: needs `systemd-fstab-generator` binary)
 
 ### 2. Type=notify Service Lifecycle (Advanced)
