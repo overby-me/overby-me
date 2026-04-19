@@ -1124,6 +1124,16 @@ fn start_service_with_filedescriptors(
             let now = crate::units::UnitTimestamps::now_usec();
             srvc.exec_main_start_timestamp = Some(now);
             srvc.exec_main_handoff_timestamp = Some(now);
+
+            // For Accept=yes, release the parent's reference to the
+            // accepted connection fd.  The child inherited a duplicate
+            // via fork and dup2'd it onto stdin — if the parent keeps
+            // its own copy open, the kernel won't signal EOF on the
+            // peer socket when the child exits, so clients like
+            // `ncat -w1` hang waiting for the server to close.
+            if let Some(fd) = srvc.accepted_fd.take() {
+                unsafe { libc::close(fd) };
+            }
         }
         Ok(nix::unistd::ForkResult::Child) => {
             let stdout = {
@@ -1150,7 +1160,13 @@ fn start_service_with_filedescriptors(
                 exec_helper_conf_fd,
             );
         }
-        Err(e) => error!("Fork for service: {name} failed with: {e}"),
+        Err(e) => {
+            error!("Fork for service: {name} failed with: {e}");
+            // If fork failed, release the accepted fd (no child will own it).
+            if let Some(fd) = srvc.accepted_fd.take() {
+                unsafe { libc::close(fd) };
+            }
+        }
     }
     Ok(())
 }
