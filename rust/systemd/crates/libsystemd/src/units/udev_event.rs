@@ -23,7 +23,7 @@ use crate::control::UdevEventParams;
 use crate::lock_ext::RwLockExt;
 use crate::runtime_info::ArcMutRuntimeInfo;
 use crate::units::status::{StatusStarted, StatusStopped, UnitStatus};
-use crate::units::unit::Unit;
+use crate::units::unit::{Specific, Unit};
 use crate::units::{UnitId, UnitIdKind};
 use log::{debug, trace, warn};
 
@@ -89,6 +89,16 @@ pub fn handle_udev_event(run_info: &ArcMutRuntimeInfo, params: &UdevEventParams)
                     apply_device_inactive(run_info, &unit_names);
                 }
             } else {
+                // Alias lifecycle: before flipping the new aliases to
+                // active, find any OLD alias units that were created
+                // for this same sysfs_path by a previous event but
+                // aren't in the new alias set, and deactivate them.
+                // TEST-17-UDEV.SYSTEMD_ALIAS exercises this by
+                // alternating `add` and `change` rules that each set
+                // different SYMLINK/SYSTEMD_ALIAS entries — after an
+                // `add` the `-on-change` aliases must become inactive,
+                // and vice versa.
+                deactivate_stale_aliases(run_info, &params.sysfs_path, &unit_names);
                 apply_device_active(run_info, params, &unit_names);
             }
         }
@@ -343,6 +353,82 @@ fn apply_device_active(
             }
         });
     }
+}
+
+/// Scan the unit table for device units previously associated with this
+/// `sysfs_path` that are NOT in the new alias set, and mark them
+/// inactive.  Used on every add/change event to retire stale
+/// `SYMLINK+=` and `SYSTEMD_ALIAS=` aliases whose rule no longer fires
+/// for the current action.
+///
+/// The primary sysfs-derived unit name and the `sys-subsystem-...-devices-...`
+/// alias are always preserved — they're stable identifiers for the
+/// device itself, not per-event aliases.
+fn deactivate_stale_aliases(
+    run_info: &ArcMutRuntimeInfo,
+    sysfs_path: &str,
+    new_alias_names: &[String],
+) {
+    if sysfs_path.is_empty() {
+        return;
+    }
+    let primary_name = path_to_device_unit_name(sysfs_path);
+
+    // Collect stale unit names first (read lock), then flip status
+    // (still under read lock via per-unit write lock).
+    let stale: Vec<String> = {
+        let ri = run_info.read_poisoned();
+        ri.unit_table
+            .values()
+            .filter_map(|u| {
+                if u.id.kind != UnitIdKind::Device {
+                    return None;
+                }
+                // Preserve the primary sysfs-derived unit.
+                if u.id.name == primary_name {
+                    return None;
+                }
+                // Preserve subsystem-friendly alias
+                // (sys-subsystem-<X>-devices-<Y>.device).  We identify
+                // these heuristically by the `sys-subsystem-` prefix
+                // rather than recomputing, since we don't know the
+                // subsystem here.
+                if u.id.name.starts_with("sys-subsystem-") {
+                    return None;
+                }
+                // Only consider units that belong to the same sysfs
+                // path.  Without this filter we'd deactivate ALL
+                // aliases of ALL devices.
+                if let Specific::Device(dev) = &u.specific
+                    && dev.conf.sysfs_path.as_deref() != Some(sysfs_path)
+                {
+                    return None;
+                }
+                // Keep units that ARE in the new alias set.
+                if new_alias_names.contains(&u.id.name) {
+                    return None;
+                }
+                // Only transition units that are currently Started —
+                // avoid churn on already-inactive units.
+                let status = u.common.status.read_poisoned();
+                if !matches!(&*status, UnitStatus::Started(_)) {
+                    return None;
+                }
+                Some(u.id.name.clone())
+            })
+            .collect()
+    };
+
+    if stale.is_empty() {
+        return;
+    }
+    trace!(
+        "udev-event: deactivating {} stale alias(es) of {}: {:?}",
+        stale.len(),
+        sysfs_path,
+        stale
+    );
+    apply_device_inactive(run_info, &stale);
 }
 
 /// Mark the listed device units as inactive (stopped).  Does NOT remove
@@ -775,6 +861,80 @@ mod tests {
         assert_eq!(
             count_before, count_after,
             "repeat add duplicated units in unit_table"
+        );
+    }
+
+    #[test]
+    fn test_handle_udev_event_stale_aliases_deactivated_on_change() {
+        let ri = make_test_runtime();
+
+        // First event: add with symlink A.
+        let mut add_params = make_params(
+            "add",
+            "/sys/devices/virtual/mem/null",
+            "mem",
+            &["systemd"],
+            &["/dev/test/alias-add-only"],
+        );
+        add_params.env.insert(
+            "SYSTEMD_ALIAS".into(),
+            "/sys/test/env-alias-add-only".into(),
+        );
+        handle_udev_event(&ri, &add_params);
+
+        let add_only_unit = r"dev-test-alias\x2dadd\x2donly.device";
+        let env_add_only_unit = r"sys-test-env\x2dalias\x2dadd\x2donly.device";
+        assert!(
+            matches!(
+                unit_status(&ri, add_only_unit).unwrap(),
+                UnitStatus::Started(_)
+            ),
+            "add-only alias should be active after add event"
+        );
+        assert!(
+            matches!(
+                unit_status(&ri, env_add_only_unit).unwrap(),
+                UnitStatus::Started(_)
+            ),
+            "env-alias add-only should be active after add event"
+        );
+
+        // Second event: change with DIFFERENT symlink/alias.
+        let mut change_params = make_params(
+            "change",
+            "/sys/devices/virtual/mem/null",
+            "mem",
+            &["systemd"],
+            &["/dev/test/alias-change-only"],
+        );
+        change_params.env.insert(
+            "SYSTEMD_ALIAS".into(),
+            "/sys/test/env-alias-change-only".into(),
+        );
+        handle_udev_event(&ri, &change_params);
+
+        // The old aliases should be deactivated.
+        assert!(
+            !matches!(
+                unit_status(&ri, add_only_unit).unwrap(),
+                UnitStatus::Started(_)
+            ),
+            "add-only alias should be inactive after change event: {:?}",
+            unit_status(&ri, add_only_unit)
+        );
+        assert!(
+            !matches!(
+                unit_status(&ri, env_add_only_unit).unwrap(),
+                UnitStatus::Started(_)
+            ),
+            "env-alias add-only should be inactive after change event"
+        );
+
+        // Primary unit remains active.
+        let primary = "sys-devices-virtual-mem-null.device";
+        assert!(
+            matches!(unit_status(&ri, primary).unwrap(), UnitStatus::Started(_)),
+            "primary sysfs-derived unit must stay active across events"
         );
     }
 }
