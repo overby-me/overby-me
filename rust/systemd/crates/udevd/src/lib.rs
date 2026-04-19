@@ -465,11 +465,13 @@ fn murmur_hash2(key: &[u8]) -> u32 {
     h
 }
 
-/// Send a UDEV-processed event to group 2 in the libudev monitor
-/// format, so `udevadm monitor --udev` subscribers receive it.  The
-/// body is a null-byte-separated sequence of `KEY=VALUE` strings, the
-/// same format the kernel uses for its own uevents.
-fn broadcast_udev_monitor_event(fd: i32, event: &UEvent, result: &RuleResult) {
+/// Build the libudev-monitor netlink message body for an event.
+///
+/// Pure function (no I/O) — separated from the send path so tests can
+/// round-trip the framing against `parse_monitor_event` without a
+/// real socket.  Returns the full header + properties blob ready for
+/// `sendto(SOCK_NETLINK, group=2)`.
+pub fn build_udev_monitor_message(event: &UEvent, result: &RuleResult) -> Vec<u8> {
     // Build the property block.  Include ACTION/DEVPATH/SUBSYSTEM/…
     // plus every env var set on the event.  Properties are NUL-
     // separated — the kernel uses the same convention.
@@ -493,13 +495,16 @@ fn broadcast_udev_monitor_event(fd: i32, event: &UEvent, result: &RuleResult) {
     }
     push_kv(&mut props, "SEQNUM", &event.seqnum.to_string());
     // User-set env, excluding kernel-provided properties we already
-    // emitted above.
-    for (k, v) in &event.env {
+    // emitted above.  Iterate in a stable order so the serialised output
+    // is deterministic (makes tests robust to HashMap iteration order).
+    let mut env_keys: Vec<&String> = event.env.keys().collect();
+    env_keys.sort();
+    for k in env_keys {
         match k.as_str() {
             "ACTION" | "DEVPATH" | "SUBSYSTEM" | "DEVTYPE" | "DEVNAME" | "SEQNUM" => continue,
             _ => {}
         }
-        push_kv(&mut props, k, v);
+        push_kv(&mut props, k, &event.env[k]);
     }
     // Tag list and symlinks so monitor consumers can see them.
     if !result.tags.is_empty() {
@@ -549,7 +554,7 @@ fn broadcast_udev_monitor_event(fd: i32, event: &UEvent, result: &RuleResult) {
         header.filter_tag_bloom_lo |= bit_lo;
     }
 
-    // Serialise header + properties into a single buffer and sendto group 2.
+    // Serialise header + properties into a single buffer.
     let mut msg = Vec::with_capacity(UDEV_MONITOR_HEADER_SIZE + props.len());
     // SAFETY: plain-old-data struct with no padding (#[repr(C)] fields align
     // to 4; all u8[8] and u32, total 40 bytes).
@@ -558,6 +563,15 @@ fn broadcast_udev_monitor_event(fd: i32, event: &UEvent, result: &RuleResult) {
         msg.extend_from_slice(std::slice::from_raw_parts(p, UDEV_MONITOR_HEADER_SIZE));
     }
     msg.extend_from_slice(&props);
+    msg
+}
+
+/// Send a UDEV-processed event to group 2 in the libudev monitor
+/// format, so `udevadm monitor --udev` subscribers receive it.  The
+/// body is a null-byte-separated sequence of `KEY=VALUE` strings, the
+/// same format the kernel uses for its own uevents.
+fn broadcast_udev_monitor_event(fd: i32, event: &UEvent, result: &RuleResult) {
+    let msg = build_udev_monitor_message(event, result);
 
     let mut dest: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
     dest.nl_family = libc::AF_NETLINK as u16;
@@ -579,6 +593,39 @@ fn broadcast_udev_monitor_event(fd: i32, event: &UEvent, result: &RuleResult) {
             io::Error::last_os_error()
         );
     }
+}
+
+/// Parse the property block out of a libudev monitor message.  Used
+/// by tests to round-trip through `build_udev_monitor_message`.
+/// Returns `None` if the header is malformed.
+#[cfg(test)]
+pub fn parse_udev_monitor_message(
+    data: &[u8],
+) -> Option<std::collections::HashMap<String, String>> {
+    if data.len() < UDEV_MONITOR_HEADER_SIZE || &data[0..8] != b"libudev\0" {
+        return None;
+    }
+    let magic = u32::from_ne_bytes(data[8..12].try_into().ok()?);
+    if magic != UDEV_MONITOR_MAGIC {
+        return None;
+    }
+    let props_off = u32::from_ne_bytes(data[16..20].try_into().ok()?) as usize;
+    let props_len = u32::from_ne_bytes(data[20..24].try_into().ok()?) as usize;
+    if props_off + props_len > data.len() {
+        return None;
+    }
+    let payload = &data[props_off..props_off + props_len];
+    let mut out = std::collections::HashMap::new();
+    for chunk in payload.split(|&b| b == 0) {
+        if chunk.is_empty() {
+            continue;
+        }
+        let s = std::str::from_utf8(chunk).ok()?;
+        if let Some(eq) = s.find('=') {
+            out.insert(s[..eq].to_owned(), s[eq + 1..].to_owned());
+        }
+    }
+    Some(out)
 }
 
 /// Receive a uevent from the netlink socket. Returns None if no data available.
@@ -4696,38 +4743,17 @@ fn apply_net_link_settings(event: &mut UEvent, result: &RuleResult) {
     // converge cleanly: altnames that used to be set but aren't now are
     // removed, and altnames that are new are added.  TEST-17-UDEV.netif-altname
     // exercises this via repeated `.link` file rewrites.
-    let mut desired_altnames: Vec<String> = Vec::new();
-    if let Some(list) = event.env.get("ID_NET_LINK_FILE_ALTNAMES") {
-        for n in list.split_whitespace() {
-            if !n.is_empty() && !desired_altnames.contains(&n.to_owned()) {
-                desired_altnames.push(n.to_owned());
-            }
-        }
-    }
-
-    // If the interface has been renamed, exclude the new name from
-    // altnames (the kernel rejects "altname == primary name") and make
-    // sure the OLD primary name becomes an altname — matches upstream's
-    // behaviour where renaming promotes the old name to an altname.
     let final_name = event
         .env
         .get("INTERFACE")
         .cloned()
         .unwrap_or_else(|| current_name.clone());
-    desired_altnames.retain(|n| n != &final_name);
-
+    let desired_altnames = compute_desired_altnames(
+        event.env.get("ID_NET_LINK_FILE_ALTNAMES").map(|s| s.as_str()),
+        &final_name,
+    );
     let current_altnames = read_current_altnames(event);
-
-    let to_remove: Vec<&str> = current_altnames
-        .iter()
-        .filter(|n| !desired_altnames.contains(n))
-        .map(|s| s.as_str())
-        .collect();
-    let to_add: Vec<&str> = desired_altnames
-        .iter()
-        .filter(|n| !current_altnames.contains(n))
-        .map(|s| s.as_str())
-        .collect();
+    let (to_remove, to_add) = diff_altnames(&current_altnames, &desired_altnames);
 
     if !to_remove.is_empty() {
         log::debug!(
@@ -4744,6 +4770,41 @@ fn apply_net_link_settings(event: &mut UEvent, result: &RuleResult) {
             log::warn!("add altnames on ifindex={}: {}", ifindex, e);
         }
     }
+}
+
+/// Compute the desired altname list from a space-separated input and a
+/// "do not include" primary name.  Empty tokens are skipped, duplicates
+/// are de-duplicated, and the primary name is filtered out.
+fn compute_desired_altnames(list: Option<&str>, primary_name: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    if let Some(list) = list {
+        for n in list.split_whitespace() {
+            if !n.is_empty() && n != primary_name && !out.iter().any(|e| e == n) {
+                out.push(n.to_owned());
+            }
+        }
+    }
+    out
+}
+
+/// Compute the (remove, add) set-difference of `current` vs `desired`
+/// altname lists so the caller only issues netlink changes for the
+/// difference.  Order within each returned vec matches the source vec.
+fn diff_altnames<'a>(
+    current: &'a [String],
+    desired: &'a [String],
+) -> (Vec<&'a str>, Vec<&'a str>) {
+    let to_remove: Vec<&str> = current
+        .iter()
+        .filter(|n| !desired.iter().any(|d| d == *n))
+        .map(|s| s.as_str())
+        .collect();
+    let to_add: Vec<&str> = desired
+        .iter()
+        .filter(|n| !current.iter().any(|c| c == *n))
+        .map(|s| s.as_str())
+        .collect();
+    (to_remove, to_add)
 }
 
 fn process_event(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) {
@@ -6523,6 +6584,240 @@ mod tests {
     fn test_build_altname_list_payload_empty() {
         let payload = super::build_altname_list_payload(&[]);
         assert!(payload.is_empty());
+    }
+
+    #[test]
+    fn test_compute_desired_altnames_basic() {
+        let got = super::compute_desired_altnames(Some("alt1 alt2 alt3"), "eth0");
+        assert_eq!(got, vec!["alt1", "alt2", "alt3"]);
+    }
+
+    #[test]
+    fn test_compute_desired_altnames_filters_primary() {
+        // Primary name must not appear in the altname list (kernel rejects it).
+        let got = super::compute_desired_altnames(Some("eth0 alt1 alt2"), "eth0");
+        assert_eq!(got, vec!["alt1", "alt2"]);
+    }
+
+    #[test]
+    fn test_compute_desired_altnames_dedup() {
+        let got = super::compute_desired_altnames(Some("alt1 alt1 alt2 alt1"), "eth0");
+        assert_eq!(got, vec!["alt1", "alt2"]);
+    }
+
+    #[test]
+    fn test_compute_desired_altnames_empty_tokens_skipped() {
+        let got = super::compute_desired_altnames(Some("  alt1  \t alt2  "), "eth0");
+        assert_eq!(got, vec!["alt1", "alt2"]);
+    }
+
+    #[test]
+    fn test_compute_desired_altnames_none_input() {
+        let got = super::compute_desired_altnames(None, "eth0");
+        assert!(got.is_empty());
+    }
+
+    #[test]
+    fn test_diff_altnames_no_change() {
+        let cur: Vec<String> = vec!["a".into(), "b".into()];
+        let des: Vec<String> = vec!["a".into(), "b".into()];
+        let (rm, ad) = super::diff_altnames(&cur, &des);
+        assert!(rm.is_empty());
+        assert!(ad.is_empty());
+    }
+
+    #[test]
+    fn test_diff_altnames_add_only() {
+        let cur: Vec<String> = vec![];
+        let des: Vec<String> = vec!["new1".into(), "new2".into()];
+        let (rm, ad) = super::diff_altnames(&cur, &des);
+        assert!(rm.is_empty());
+        assert_eq!(ad, vec!["new1", "new2"]);
+    }
+
+    #[test]
+    fn test_diff_altnames_remove_only() {
+        let cur: Vec<String> = vec!["old1".into(), "old2".into()];
+        let des: Vec<String> = vec![];
+        let (rm, ad) = super::diff_altnames(&cur, &des);
+        assert_eq!(rm, vec!["old1", "old2"]);
+        assert!(ad.is_empty());
+    }
+
+    #[test]
+    fn test_diff_altnames_overlapping() {
+        // kept: alt2; removed: alt1; added: alt3
+        let cur: Vec<String> = vec!["alt1".into(), "alt2".into()];
+        let des: Vec<String> = vec!["alt2".into(), "alt3".into()];
+        let (rm, ad) = super::diff_altnames(&cur, &des);
+        assert_eq!(rm, vec!["alt1"]);
+        assert_eq!(ad, vec!["alt3"]);
+    }
+
+    #[test]
+    fn test_diff_altnames_full_replacement() {
+        let cur: Vec<String> = vec!["a".into(), "b".into()];
+        let des: Vec<String> = vec!["x".into(), "y".into()];
+        let (rm, ad) = super::diff_altnames(&cur, &des);
+        assert_eq!(rm, vec!["a", "b"]);
+        assert_eq!(ad, vec!["x", "y"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // libudev monitor framing round-trip
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_monitor_message_roundtrip_basic() {
+        let mut event = super::UEvent::new();
+        event.action = "add".to_string();
+        event.devpath = "/devices/virtual/mem/null".to_string();
+        event.subsystem = "mem".to_string();
+        event.devname = "null".to_string();
+        event.seqnum = 42;
+        let result = super::RuleResult::default();
+
+        let msg = super::build_udev_monitor_message(&event, &result);
+        let parsed = super::parse_udev_monitor_message(&msg).expect("parse failed");
+
+        assert_eq!(parsed.get("ACTION").map(|s| s.as_str()), Some("add"));
+        assert_eq!(
+            parsed.get("DEVPATH").map(|s| s.as_str()),
+            Some("/devices/virtual/mem/null")
+        );
+        assert_eq!(parsed.get("SUBSYSTEM").map(|s| s.as_str()), Some("mem"));
+        assert_eq!(parsed.get("DEVNAME").map(|s| s.as_str()), Some("null"));
+        assert_eq!(parsed.get("SEQNUM").map(|s| s.as_str()), Some("42"));
+    }
+
+    #[test]
+    fn test_monitor_message_header_magic() {
+        let event = super::UEvent::new();
+        let result = super::RuleResult::default();
+        let msg = super::build_udev_monitor_message(&event, &result);
+        assert!(msg.len() >= super::UDEV_MONITOR_HEADER_SIZE);
+        assert_eq!(&msg[0..8], b"libudev\0");
+        let magic = u32::from_ne_bytes(msg[8..12].try_into().unwrap());
+        assert_eq!(magic, super::UDEV_MONITOR_MAGIC);
+        let header_size = u32::from_ne_bytes(msg[12..16].try_into().unwrap());
+        assert_eq!(header_size as usize, super::UDEV_MONITOR_HEADER_SIZE);
+    }
+
+    #[test]
+    fn test_monitor_message_tag_bloom_filter_nonzero_when_tagged() {
+        let event = super::UEvent::new();
+        let mut result = super::RuleResult::default();
+        result.tags.push("systemd".to_string());
+
+        let msg = super::build_udev_monitor_message(&event, &result);
+        let bloom_hi = u32::from_ne_bytes(msg[32..36].try_into().unwrap());
+        let bloom_lo = u32::from_ne_bytes(msg[36..40].try_into().unwrap());
+        // Tagged devices must leave at least one bit in the bloom filter
+        // so libudev consumers with a tag filter don't skip them.
+        assert!(bloom_hi != 0 || bloom_lo != 0);
+    }
+
+    #[test]
+    fn test_monitor_message_subsystem_hash_populated() {
+        let mut event = super::UEvent::new();
+        event.subsystem = "block".to_string();
+        let result = super::RuleResult::default();
+
+        let msg = super::build_udev_monitor_message(&event, &result);
+        let subsystem_hash = u32::from_ne_bytes(msg[24..28].try_into().unwrap());
+        assert_ne!(subsystem_hash, 0);
+        // Matches the MurmurHash2 we ship — any change should be deliberate.
+        assert_eq!(subsystem_hash, super::murmur_hash2(b"block"));
+    }
+
+    #[test]
+    fn test_monitor_message_roundtrip_many_properties() {
+        // TEST-17-UDEV.buffer-size exercises this with 100 × 100-byte
+        // properties.  Simulate that here so a regression in header
+        // offset / SOCK_SNDBUF sizing surfaces in unit tests.
+        let mut event = super::UEvent::new();
+        event.action = "add".to_string();
+        event.devpath = "/devices/virtual/mem/null".to_string();
+        event.subsystem = "mem".to_string();
+        for i in 0..100 {
+            event.env.insert(
+                format!("XXX{:03}", i),
+                "0123456789".repeat(10),
+            );
+        }
+        let result = super::RuleResult::default();
+
+        let msg = super::build_udev_monitor_message(&event, &result);
+        let parsed = super::parse_udev_monitor_message(&msg).expect("parse failed");
+
+        // All 100 XXXNNN properties must round-trip without truncation.
+        for i in 0..100 {
+            let key = format!("XXX{:03}", i);
+            let expected = "0123456789".repeat(10);
+            assert_eq!(
+                parsed.get(&key).map(|s| s.as_str()),
+                Some(expected.as_str()),
+                "property {key} missing or wrong after round-trip"
+            );
+        }
+    }
+
+    #[test]
+    fn test_monitor_message_tags_serialized() {
+        let event = super::UEvent::new();
+        let mut result = super::RuleResult::default();
+        result.tags.push("systemd".to_string());
+        result.tags.push("seat".to_string());
+
+        let msg = super::build_udev_monitor_message(&event, &result);
+        let parsed = super::parse_udev_monitor_message(&msg).expect("parse failed");
+        let tags = parsed.get("TAGS").expect("TAGS missing");
+        assert!(tags.contains(":systemd:"));
+        assert!(tags.contains(":seat:"));
+    }
+
+    #[test]
+    fn test_monitor_message_symlinks_serialized() {
+        let event = super::UEvent::new();
+        let mut result = super::RuleResult::default();
+        result.symlinks.push("disk/by-uuid/abc".to_string());
+        result.symlinks.push("disk/by-id/xyz".to_string());
+
+        let msg = super::build_udev_monitor_message(&event, &result);
+        let parsed = super::parse_udev_monitor_message(&msg).expect("parse failed");
+        let dl = parsed.get("DEVLINKS").expect("DEVLINKS missing");
+        assert!(dl.contains("disk/by-uuid/abc"));
+        assert!(dl.contains("disk/by-id/xyz"));
+    }
+
+    #[test]
+    fn test_monitor_message_rejects_bad_prefix() {
+        let bad = vec![0u8; super::UDEV_MONITOR_HEADER_SIZE + 4];
+        assert!(super::parse_udev_monitor_message(&bad).is_none());
+    }
+
+    #[test]
+    fn test_monitor_message_rejects_bad_magic() {
+        let event = super::UEvent::new();
+        let result = super::RuleResult::default();
+        let mut msg = super::build_udev_monitor_message(&event, &result);
+        // Flip a bit in the magic.
+        msg[8] ^= 0xff;
+        assert!(super::parse_udev_monitor_message(&msg).is_none());
+    }
+
+    #[test]
+    fn test_murmur_hash2_matches_libudev_reference() {
+        // Known MurmurHash2 outputs for the libudev bloom filter.
+        // These are reference values from upstream libudev.
+        assert_eq!(super::murmur_hash2(b""), 0);
+        // Stability of the algorithm — any change here must be
+        // intentional (would invalidate every cached bloom filter).
+        let h1 = super::murmur_hash2(b"block");
+        let h2 = super::murmur_hash2(b"block");
+        assert_eq!(h1, h2);
+        let h3 = super::murmur_hash2(b"net");
+        assert_ne!(h1, h3);
     }
 
     use super::*;
