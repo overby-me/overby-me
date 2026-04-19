@@ -720,31 +720,15 @@ fn parse_rule_value(s: &str) -> Result<(String, &str), String> {
     while i < bytes.len() {
         let c = bytes[i] as char;
         if c == '\\' && i + 1 < bytes.len() {
-            // Escape sequences
+            // Only \" and \\ are unescaped inside udev rule values.
+            // \n, \t, etc. stay as literal backslash-char — they're
+            // passed through to any consumer (e.g. IMPORT{program}
+            // shell invocation) and may be interpreted there.  Upstream
+            // udev rule value parser behaves the same way.
             let next = bytes[i + 1] as char;
             match next {
                 '"' | '\\' => {
                     value.push(next);
-                    i += 2;
-                }
-                'a' => {
-                    value.push('\x07');
-                    i += 2;
-                }
-                'b' => {
-                    value.push('\x08');
-                    i += 2;
-                }
-                'n' => {
-                    value.push('\n');
-                    i += 2;
-                }
-                'r' => {
-                    value.push('\r');
-                    i += 2;
-                }
-                't' => {
-                    value.push('\t');
                     i += 2;
                 }
                 _ => {
@@ -3424,7 +3408,14 @@ fn run_program_capture(cmd: &str, event: &UEvent) -> Option<String> {
 
     match child_cmd.output() {
         Ok(output) if output.status.success() => {
-            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            // Strip only trailing newlines — leading/trailing SPACE inside
+            // the captured value is significant for IMPORT{program}
+            // (TEST-17-UDEV.IMPORT exercises this via echo -e
+            // "FOO=\x20aaa\x20" which must round-trip with both spaces
+            // preserved into the udev db as E:FOO=\x20aaa\x20).
+            let stdout = String::from_utf8_lossy(&output.stdout)
+                .trim_end_matches(['\n', '\r'])
+                .to_string();
             Some(stdout)
         }
         Ok(output) => {
@@ -7535,9 +7526,12 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn test_parse_rule_value_escape() {
+    fn test_parse_rule_value_escape_n_preserved() {
+        // \n is NOT interpreted as newline inside rule values — it stays
+        // as the 2-char sequence `\n` so downstream consumers (e.g.
+        // IMPORT{program} shell invocation) can interpret it themselves.
         let (val, rest) = parse_rule_value(r#""hello\nworld""#).unwrap();
-        assert_eq!(val, "hello\nworld");
+        assert_eq!(val, r"hello\nworld");
         assert!(rest.is_empty());
     }
 
@@ -7549,9 +7543,20 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_rule_value_tab() {
+    fn test_parse_rule_value_tab_preserved() {
+        // \t is NOT unescaped — kept as 2 chars `\t`.
         let (val, _) = parse_rule_value(r#""col1\tcol2""#).unwrap();
-        assert_eq!(val, "col1\tcol2");
+        assert_eq!(val, r"col1\tcol2");
+    }
+
+    #[test]
+    fn test_parse_rule_value_backslash_double_x() {
+        // \\x20 (source: 4 chars \ \ x 2 0) parses to \x20 (source: 2
+        // chars \ x 2 0).  This is the core round-trip behaviour
+        // exercised by TEST-17-UDEV.IMPORT where echo -e then
+        // interprets \x20 as a space character.
+        let (val, _) = parse_rule_value(r#""aa\\x20bb""#).unwrap();
+        assert_eq!(val, r"aa\x20bb");
     }
 
     // -----------------------------------------------------------------------
