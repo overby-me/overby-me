@@ -53,6 +53,8 @@ pub fn register(vm: &mut VM) {
         .insert(("list".to_string(), "length".to_string()), list_length);
     vm.method_registry
         .insert(("list".to_string(), "get".to_string()), list_get);
+    vm.method_registry
+        .insert(("list".to_string(), "flatten".to_string()), list_flatten);
 
     // Dict methods
     vm.method_registry
@@ -675,6 +677,23 @@ fn str_length(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, S
 
 // ---- List methods ----
 
+fn list_contains_recursive(arr: &[Object], item: &Object) -> bool {
+    for elem in arr {
+        if elem == item {
+            return true;
+        }
+        // Recursively search nested arrays for non-array items
+        if let Object::Array(nested) = elem {
+            if !matches!(item, Object::Array(_)) {
+                if list_contains_recursive(nested, item) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 fn list_contains(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Array(arr) = obj {
         let item = VM::get_positional_args(args)
@@ -682,7 +701,7 @@ fn list_contains(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object,
             .cloned()
             .cloned()
             .unwrap_or(Object::None);
-        Ok(Object::Bool(arr.contains(&item)))
+        Ok(Object::Bool(list_contains_recursive(arr, &item)))
     } else {
         Err("list.contains() called on non-list".to_string())
     }
@@ -727,6 +746,26 @@ fn list_get(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, Stri
 }
 
 // ---- Dict methods ----
+
+fn list_flatten_recursive(arr: &[Object], out: &mut Vec<Object>) {
+    for item in arr {
+        if let Object::Array(nested) = item {
+            list_flatten_recursive(nested, out);
+        } else {
+            out.push(item.clone());
+        }
+    }
+}
+
+fn list_flatten(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
+    if let Object::Array(arr) = obj {
+        let mut result = Vec::new();
+        list_flatten_recursive(arr, &mut result);
+        Ok(Object::Array(result))
+    } else {
+        Err("list.flatten() called on non-list".to_string())
+    }
+}
 
 fn dict_has_key(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Dict(entries) = obj {
@@ -1020,22 +1059,73 @@ fn dep_version(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, 
 
 fn dep_get_variable(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Dependency(d) = obj {
-        // Try positional first, then keyword args for different variable types
         let positional = VM::get_positional_args(args);
-        let name = positional
-            .first()
-            .map(|v| v.to_string_value())
-            .or_else(|| VM::get_arg_str(args, "pkgconfig", usize::MAX).map(String::from))
-            .or_else(|| VM::get_arg_str(args, "cmake", usize::MAX).map(String::from))
-            .or_else(|| VM::get_arg_str(args, "configtool", usize::MAX).map(String::from))
-            .or_else(|| VM::get_arg_str(args, "internal", usize::MAX).map(String::from));
 
-        if let Some(name) = name {
-            if let Some(val) = d.variables.get(&name) {
-                return Ok(Object::String(val.clone()));
+        // For internal dependencies, prefer 'internal' kwarg, then positional arg
+        if d.is_internal {
+            let var_name = VM::get_arg_str(args, "internal", usize::MAX)
+                .map(String::from)
+                .or_else(|| positional.first().map(|v| v.to_string_value()));
+
+            if let Some(name) = var_name {
+                if let Some(val) = d.variables.get(&name) {
+                    return Ok(Object::String(val.clone()));
+                }
+            }
+        } else {
+            // For external deps, try type-specific kwargs, falling back to stored variables
+            // Try pkgconfig kwarg
+            if let Some(var) = VM::get_arg_str(args, "pkgconfig", usize::MAX) {
+                if let Some(val) = d.variables.get(var) {
+                    return Ok(Object::String(val.clone()));
+                }
+                // Try running pkg-config
+                if let Ok(output) = std::process::Command::new("pkg-config")
+                    .args(["--variable", var, &d.name])
+                    .output()
+                {
+                    if output.status.success() {
+                        let val = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                        if !val.is_empty() {
+                            return Ok(Object::String(val));
+                        }
+                    }
+                }
+            }
+            // Try configtool kwarg
+            if let Some(var) = VM::get_arg_str(args, "configtool", usize::MAX) {
+                if let Some(val) = d.variables.get(var) {
+                    return Ok(Object::String(val.clone()));
+                }
+                let config_tool = format!("{}-config", d.name);
+                if let Ok(output) = std::process::Command::new(&config_tool)
+                    .arg(format!("--{}", var))
+                    .output()
+                {
+                    if output.status.success() {
+                        let val = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                        if !val.is_empty() {
+                            return Ok(Object::String(val));
+                        }
+                    }
+                }
+            }
+            // Try cmake kwarg
+            if let Some(var) = VM::get_arg_str(args, "cmake", usize::MAX) {
+                if let Some(val) = d.variables.get(var) {
+                    return Ok(Object::String(val.clone()));
+                }
+            }
+            // Try positional arg as generic lookup
+            if let Some(first) = positional.first() {
+                let var = first.to_string_value();
+                if let Some(val) = d.variables.get(&var) {
+                    return Ok(Object::String(val.clone()));
+                }
             }
         }
 
+        // Fall back to default_value
         let default = VM::get_arg_str(args, "default_value", usize::MAX)
             .map(|s| Object::String(s.to_string()));
         default.ok_or_else(|| "Variable not found in dependency".to_string())
@@ -1049,7 +1139,33 @@ fn dep_get_pkgconfig_variable(
     obj: &Object,
     args: &[CallArg],
 ) -> Result<Object, String> {
-    dep_get_variable(_vm, obj, args)
+    if let Object::Dependency(d) = obj {
+        let positional = VM::get_positional_args(args);
+        let var_name = positional.first().map(|v| v.to_string_value());
+
+        if let Some(var) = var_name {
+            // First check stored variables
+            if let Some(val) = d.variables.get(&var) {
+                return Ok(Object::String(val.clone()));
+            }
+            // Try running pkg-config
+            if let Ok(output) = std::process::Command::new("pkg-config")
+                .args(["--variable", &var, &d.name])
+                .output()
+            {
+                if output.status.success() {
+                    let val = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    return Ok(Object::String(val));
+                }
+            }
+        }
+
+        let default = VM::get_arg_str(args, "default_value", usize::MAX)
+            .map(|s| Object::String(s.to_string()));
+        default.ok_or_else(|| "Variable not found in dependency".to_string())
+    } else {
+        Err("Not a dependency".to_string())
+    }
 }
 
 fn dep_get_configtool_variable(
@@ -1057,7 +1173,37 @@ fn dep_get_configtool_variable(
     obj: &Object,
     args: &[CallArg],
 ) -> Result<Object, String> {
-    dep_get_variable(_vm, obj, args)
+    if let Object::Dependency(d) = obj {
+        let positional = VM::get_positional_args(args);
+        let var_name = positional
+            .first()
+            .map(|v| v.to_string_value())
+            .or_else(|| VM::get_arg_str(args, "configtool", usize::MAX).map(String::from));
+
+        if let Some(var) = var_name {
+            // First check stored variables
+            if let Some(val) = d.variables.get(&var) {
+                return Ok(Object::String(val.clone()));
+            }
+            // Try running the config tool
+            let config_tool = format!("{}-config", d.name);
+            if let Ok(output) = std::process::Command::new(&config_tool)
+                .arg(format!("--{}", var))
+                .output()
+            {
+                if output.status.success() {
+                    let val = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    return Ok(Object::String(val));
+                }
+            }
+        }
+
+        let default = VM::get_arg_str(args, "default_value", usize::MAX)
+            .map(|s| Object::String(s.to_string()));
+        default.ok_or_else(|| "Variable not found in dependency".to_string())
+    } else {
+        Err("Not a dependency".to_string())
+    }
 }
 
 fn dep_type_name(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
@@ -1396,7 +1542,6 @@ fn cfg_merge_from(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object
 
 fn env_set(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Environment(env) = obj {
-        let mut env = env.clone();
         let positional = VM::get_positional_args(args);
         let key = positional
             .first()
@@ -1406,8 +1551,8 @@ fn env_set(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, Strin
             .get(1)
             .map(|v| v.to_string_value())
             .unwrap_or_default();
-        env.values.insert(key, EnvOp::Set(value));
-        Ok(Object::Environment(env))
+        env.values.borrow_mut().push((key, EnvOp::Set(value)));
+        Ok(obj.clone())
     } else {
         Err("Not an environment".to_string())
     }
@@ -1415,7 +1560,6 @@ fn env_set(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, Strin
 
 fn env_prepend(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Environment(env) = obj {
-        let mut env = env.clone();
         let positional = VM::get_positional_args(args);
         let key = positional
             .first()
@@ -1428,8 +1572,10 @@ fn env_prepend(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, S
         let sep = VM::get_arg_str(args, "separator", usize::MAX)
             .unwrap_or(":")
             .to_string();
-        env.values.insert(key, EnvOp::Prepend(value, sep));
-        Ok(Object::Environment(env))
+        env.values
+            .borrow_mut()
+            .push((key, EnvOp::Prepend(value, sep)));
+        Ok(obj.clone())
     } else {
         Err("Not an environment".to_string())
     }
@@ -1437,7 +1583,6 @@ fn env_prepend(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, S
 
 fn env_append(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Environment(env) = obj {
-        let mut env = env.clone();
         let positional = VM::get_positional_args(args);
         let key = positional
             .first()
@@ -1450,8 +1595,10 @@ fn env_append(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, St
         let sep = VM::get_arg_str(args, "separator", usize::MAX)
             .unwrap_or(":")
             .to_string();
-        env.values.insert(key, EnvOp::Append(value, sep));
-        Ok(Object::Environment(env))
+        env.values
+            .borrow_mut()
+            .push((key, EnvOp::Append(value, sep)));
+        Ok(obj.clone())
     } else {
         Err("Not an environment".to_string())
     }
@@ -1852,6 +1999,64 @@ fn module_found(_vm: &mut VM, _obj: &Object, _args: &[CallArg]) -> Result<Object
 }
 // ---- Compiler methods (registered separately) ----
 
+/// Resolve include_directories kwarg to -I flags
+fn resolve_include_dirs(vm: &VM, args: &[CallArg]) -> Vec<String> {
+    let mut result = Vec::new();
+    let inc_value = VM::get_arg_value(args, "include_directories");
+
+    let process_dirs = |data: &IncludeDirsData, result: &mut Vec<String>| {
+        for dir in &data.dirs {
+            // Add both source and build directory variants
+            let source_dir = if vm.current_subdir.is_empty() {
+                format!("{}/{}", vm.source_root, dir)
+            } else {
+                format!("{}/{}/{}", vm.source_root, vm.current_subdir, dir)
+            };
+            let build_dir = if vm.current_subdir.is_empty() {
+                format!("{}/{}", vm.build_root, dir)
+            } else {
+                format!("{}/{}/{}", vm.build_root, vm.current_subdir, dir)
+            };
+            result.push(format!("-I{}", source_dir));
+            result.push(format!("-I{}", build_dir));
+        }
+    };
+
+    match inc_value {
+        Some(Object::Array(arr)) => {
+            for item in arr {
+                if let Object::IncludeDirs(data) = item {
+                    process_dirs(data, &mut result);
+                }
+            }
+        }
+        Some(Object::IncludeDirs(data)) => {
+            process_dirs(data, &mut result);
+        }
+        _ => {}
+    }
+    result
+}
+
+/// Flatten positional arguments into a list of strings.
+/// Handles both individual string args and array args containing strings.
+fn flatten_positional_strings(args: &[CallArg]) -> Vec<String> {
+    let mut result = Vec::new();
+    for obj in VM::get_positional_args(args) {
+        match obj {
+            Object::Array(arr) => {
+                for item in arr {
+                    result.push(item.to_string_value());
+                }
+            }
+            other => {
+                result.push(other.to_string_value());
+            }
+        }
+    }
+    result
+}
+
 fn register_compiler_methods(vm: &mut VM) {
     vm.method_registry.insert(
         ("compiler".to_string(), "get_id".to_string()),
@@ -2063,7 +2268,7 @@ fn compiler_has_header_symbol(
             .map(|v| v.to_string_value())
             .unwrap_or_default();
         Ok(Object::Bool(crate::compilers::check_header_symbol(
-            c, &header, &symbol,
+            c, &header, &symbol, args,
         )))
     } else {
         Err("Not a compiler".to_string())
@@ -2100,7 +2305,7 @@ fn compiler_has_member(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<O
             .map(|v| v.to_string_value())
             .unwrap_or_default();
         Ok(Object::Bool(crate::compilers::check_member(
-            c, &typename, &member,
+            c, &typename, &member, args,
         )))
     } else {
         Err("Not a compiler".to_string())
@@ -2108,7 +2313,23 @@ fn compiler_has_member(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<O
 }
 
 fn compiler_has_members(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
-    compiler_has_member(_vm, obj, args)
+    if let Object::Compiler(c) = obj {
+        let positional = VM::get_positional_args(args);
+        let typename = positional
+            .first()
+            .map(|v| v.to_string_value())
+            .unwrap_or_default();
+        // All remaining positional args are member names
+        for member_obj in positional.iter().skip(1) {
+            let member = member_obj.to_string_value();
+            if !crate::compilers::check_member(c, &typename, &member, args) {
+                return Ok(Object::Bool(false));
+            }
+        }
+        Ok(Object::Bool(true))
+    } else {
+        Err("Not a compiler".to_string())
+    }
 }
 
 fn compiler_has_type(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
@@ -2151,36 +2372,103 @@ fn compiler_alignment(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Ob
     }
 }
 
-fn compiler_compiles(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
+fn compiler_compiles(vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
-        let code = VM::get_positional_args(args)
-            .first()
-            .map(|v| v.to_string_value())
-            .unwrap_or_default();
-        Ok(Object::Bool(crate::compilers::try_compile(c, &code, args)))
+        let positional = VM::get_positional_args(args);
+        let first = positional.first().unwrap_or(&&Object::None);
+        // Handle files() returning Array of File objects
+        let resolved_first = match first {
+            Object::Array(arr) => arr.first().unwrap_or(&Object::None),
+            other => other,
+        };
+        let code = match resolved_first {
+            Object::File(f) => {
+                // Read code from file - resolve relative to source dir
+                let path = if std::path::Path::new(&f.path).is_absolute() {
+                    f.path.clone()
+                } else if vm.current_subdir.is_empty() {
+                    format!("{}/{}", vm.source_root, f.path)
+                } else {
+                    format!("{}/{}/{}", vm.source_root, vm.current_subdir, f.path)
+                };
+                std::fs::read_to_string(&path).unwrap_or_default()
+            }
+            other => other.to_string_value(),
+        };
+        // Resolve include_directories to -I flags and add as extra args
+        let inc_args = resolve_include_dirs(vm, args);
+        let mut augmented_args: Vec<CallArg> = args.to_vec();
+        if !inc_args.is_empty() {
+            // Merge include dir flags into the "args" kwarg
+            let mut extra = crate::compilers::extra_args_from_callargs(args);
+            extra.extend(inc_args);
+            // Remove existing "args" kwarg and add merged one
+            augmented_args.retain(|a| a.name.as_deref() != Some("args"));
+            augmented_args.push(CallArg {
+                name: Some("args".to_string()),
+                value: Object::Array(extra.into_iter().map(Object::String).collect()),
+            });
+        }
+        Ok(Object::Bool(crate::compilers::try_compile(
+            c,
+            &code,
+            &augmented_args,
+        )))
     } else {
         Err("Not a compiler".to_string())
     }
 }
 
-fn compiler_links(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
+fn compiler_links(vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
-        let code = VM::get_positional_args(args)
-            .first()
-            .map(|v| v.to_string_value())
-            .unwrap_or_default();
+        let positional = VM::get_positional_args(args);
+        let first = positional.first().unwrap_or(&&Object::None);
+        // Handle files() returning Array of File objects
+        let resolved_first = match first {
+            Object::Array(arr) => arr.first().unwrap_or(&Object::None),
+            other => other,
+        };
+        let code = match resolved_first {
+            Object::File(f) => {
+                let path = if std::path::Path::new(&f.path).is_absolute() {
+                    f.path.clone()
+                } else if vm.current_subdir.is_empty() {
+                    format!("{}/{}", vm.source_root, f.path)
+                } else {
+                    format!("{}/{}/{}", vm.source_root, vm.current_subdir, f.path)
+                };
+                std::fs::read_to_string(&path).unwrap_or_default()
+            }
+            other => other.to_string_value(),
+        };
         Ok(Object::Bool(crate::compilers::try_link(c, &code, args)))
     } else {
         Err("Not a compiler".to_string())
     }
 }
 
-fn compiler_runs(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
+fn compiler_runs(vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
-        let code = VM::get_positional_args(args)
-            .first()
-            .map(|v| v.to_string_value())
-            .unwrap_or_default();
+        let positional = VM::get_positional_args(args);
+        let first = positional.first().unwrap_or(&&Object::None);
+        // Handle files() returning Array of File objects
+        let resolved_first = match first {
+            Object::Array(arr) => arr.first().unwrap_or(&Object::None),
+            other => other,
+        };
+        let code = match resolved_first {
+            Object::File(f) => {
+                let path = if std::path::Path::new(&f.path).is_absolute() {
+                    f.path.clone()
+                } else if vm.current_subdir.is_empty() {
+                    format!("{}/{}", vm.source_root, f.path)
+                } else {
+                    format!("{}/{}/{}", vm.source_root, vm.current_subdir, f.path)
+                };
+                std::fs::read_to_string(&path).unwrap_or_default()
+            }
+            other => other.to_string_value(),
+        };
         let result = crate::compilers::try_run(c, &code, args);
         Ok(Object::RunResult(result))
     } else {
@@ -2206,10 +2494,7 @@ fn compiler_has_multi_arguments(
     args: &[CallArg],
 ) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
-        let test_args: Vec<String> = VM::get_positional_args(args)
-            .iter()
-            .map(|v| v.to_string_value())
-            .collect();
+        let test_args = flatten_positional_strings(args);
         Ok(Object::Bool(crate::compilers::has_multi_arguments(
             c, &test_args,
         )))
@@ -2240,10 +2525,7 @@ fn compiler_has_multi_link_arguments(
     args: &[CallArg],
 ) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
-        let test_args: Vec<String> = VM::get_positional_args(args)
-            .iter()
-            .map(|v| v.to_string_value())
-            .collect();
+        let test_args = flatten_positional_strings(args);
         Ok(Object::Bool(crate::compilers::has_multi_link_arguments(
             c, &test_args,
         )))
@@ -2258,10 +2540,7 @@ fn compiler_first_supported_argument(
     args: &[CallArg],
 ) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
-        let test_args: Vec<String> = VM::get_positional_args(args)
-            .iter()
-            .map(|v| v.to_string_value())
-            .collect();
+        let test_args = flatten_positional_strings(args);
         for arg in &test_args {
             if crate::compilers::has_argument(c, arg) {
                 return Ok(Object::Array(vec![Object::String(arg.clone())]));
@@ -2279,10 +2558,7 @@ fn compiler_first_supported_link_argument(
     args: &[CallArg],
 ) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
-        let test_args: Vec<String> = VM::get_positional_args(args)
-            .iter()
-            .map(|v| v.to_string_value())
-            .collect();
+        let test_args = flatten_positional_strings(args);
         for arg in &test_args {
             if crate::compilers::has_link_argument(c, arg) {
                 return Ok(Object::Array(vec![Object::String(arg.clone())]));
@@ -2300,10 +2576,7 @@ fn compiler_get_supported_arguments(
     args: &[CallArg],
 ) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
-        let test_args: Vec<String> = VM::get_positional_args(args)
-            .iter()
-            .map(|v| v.to_string_value())
-            .collect();
+        let test_args = flatten_positional_strings(args);
         let supported: Vec<Object> = test_args
             .into_iter()
             .filter(|a| crate::compilers::has_argument(c, a))
@@ -2321,10 +2594,7 @@ fn compiler_get_supported_link_arguments(
     args: &[CallArg],
 ) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
-        let test_args: Vec<String> = VM::get_positional_args(args)
-            .iter()
-            .map(|v| v.to_string_value())
-            .collect();
+        let test_args = flatten_positional_strings(args);
         let supported: Vec<Object> = test_args
             .into_iter()
             .filter(|a| crate::compilers::has_link_argument(c, a))
@@ -2458,12 +2728,31 @@ fn compiler_has_define(_vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<
     Ok(Object::Bool(result))
 }
 
-fn compiler_run(_vm: &mut VM, _obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
-    // For now, return a successful run result
-    // A proper implementation would compile and run the code
-    Ok(Object::RunResult(RunResultData {
-        returncode: 0,
-        stdout: String::new(),
-        stderr: String::new(),
-    }))
+fn compiler_run(vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
+    if let Object::Compiler(c) = obj {
+        let positional = VM::get_positional_args(args);
+        let first = positional.first().unwrap_or(&&Object::None);
+        // Handle files() returning Array of File objects
+        let resolved_first = match first {
+            Object::Array(arr) => arr.first().unwrap_or(&Object::None),
+            other => other,
+        };
+        let code = match resolved_first {
+            Object::File(f) => {
+                let path = if std::path::Path::new(&f.path).is_absolute() {
+                    f.path.clone()
+                } else if vm.current_subdir.is_empty() {
+                    format!("{}/{}", vm.source_root, f.path)
+                } else {
+                    format!("{}/{}/{}", vm.source_root, vm.current_subdir, f.path)
+                };
+                std::fs::read_to_string(&path).unwrap_or_default()
+            }
+            other => other.to_string_value(),
+        };
+        let result = crate::compilers::try_run(c, &code, args);
+        Ok(Object::RunResult(result))
+    } else {
+        Err("Not a compiler".to_string())
+    }
 }

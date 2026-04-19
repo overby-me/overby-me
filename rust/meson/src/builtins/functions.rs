@@ -702,8 +702,16 @@ fn builtin_dependency(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         _ => true,
     };
 
+    // Build cache key from name + method to avoid cross-method cache hits
+    let method = VM::get_arg_str(args, "method", usize::MAX).unwrap_or("auto");
+    let cache_key = if method != "auto" {
+        format!("{}:{}", name, method)
+    } else {
+        name.clone()
+    };
+
     // Check if already found
-    if let Some(dep) = vm.build_data.dependencies.get(&name) {
+    if let Some(dep) = vm.build_data.dependencies.get(&cache_key) {
         return Ok(dep.clone());
     }
 
@@ -715,7 +723,7 @@ fn builtin_dependency(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
     }
 
     let obj = dep.unwrap_or_else(|| Object::Dependency(DependencyData::not_found(&name)));
-    vm.build_data.dependencies.insert(name, obj.clone());
+    vm.build_data.dependencies.insert(cache_key, obj.clone());
     Ok(obj)
 }
 
@@ -751,10 +759,24 @@ fn builtin_declare_dependency(_vm: &mut VM, args: &[CallArg]) -> Result<Object, 
     }
 
     let mut variables = HashMap::new();
-    if let Some(Object::Dict(entries)) = VM::get_arg_value(args, "variables") {
-        for (k, v) in entries {
-            variables.insert(k.clone(), v.to_string_value());
+    match VM::get_arg_value(args, "variables") {
+        Some(Object::Dict(entries)) => {
+            for (k, v) in entries {
+                variables.insert(k.clone(), v.to_string_value());
+            }
         }
+        Some(Object::Array(arr)) => {
+            for item in arr {
+                if let Object::String(s) = item {
+                    if let Some(eq_pos) = s.find('=') {
+                        let key = s[..eq_pos].to_string();
+                        let val = s[eq_pos + 1..].to_string();
+                        variables.insert(key, val);
+                    }
+                }
+            }
+        }
+        _ => {}
     }
 
     Ok(Object::Dependency(DependencyData {
@@ -1018,11 +1040,60 @@ fn builtin_configure_file(vm: &mut VM, args: &[CallArg]) -> Result<Object, Strin
     let install_tag = VM::get_arg_str(args, "install_tag", usize::MAX).map(String::from);
     let capture = VM::get_arg_bool(args, "capture", false);
     let depfile = VM::get_arg_str(args, "depfile", usize::MAX).map(String::from);
+    let copy = VM::get_arg_bool(args, "copy", false);
 
     let mut command = Vec::new();
     if let Some(Object::Array(arr)) = VM::get_arg_value(args, "command") {
         for item in arr {
             command.push(item.to_string_value());
+        }
+    }
+
+    // Actually generate the output file during setup for configuration/copy modes
+    let build_subdir = if vm.current_subdir.is_empty() {
+        vm.build_root.clone()
+    } else {
+        format!("{}/{}", vm.build_root, vm.current_subdir)
+    };
+    let _ = std::fs::create_dir_all(&build_subdir);
+    let output_path = format!("{}/{}", build_subdir, output);
+
+    if copy {
+        // Copy mode: just copy the input file
+        if let Some(ref inp) = input {
+            let input_path = if vm.current_subdir.is_empty() {
+                format!("{}/{}", vm.source_root, inp)
+            } else {
+                format!("{}/{}/{}", vm.source_root, vm.current_subdir, inp)
+            };
+            let _ = std::fs::copy(&input_path, &output_path);
+        }
+    } else if configuration.is_some() && command.is_empty() {
+        // Configuration mode: read input, substitute @VAR@ patterns, write output
+        if let Some(ref inp) = input {
+            let input_path = if vm.current_subdir.is_empty() {
+                format!("{}/{}", vm.source_root, inp)
+            } else {
+                format!("{}/{}/{}", vm.source_root, vm.current_subdir, inp)
+            };
+            let mut content = std::fs::read_to_string(&input_path).unwrap_or_default();
+            // Substitute @VAR@ patterns from configuration data
+            if let Some(Object::ConfigurationData(ref cfg)) = configuration {
+                let values = cfg.values.borrow();
+                for (key, (val, _)) in values.iter() {
+                    let pattern = format!("@{}@", key);
+                    content = content.replace(&pattern, &val.to_string_value());
+                }
+            } else if let Some(Object::Dict(ref dict)) = configuration {
+                for (key, val) in dict {
+                    let pattern = format!("@{}@", key);
+                    content = content.replace(&pattern, &val.to_string_value());
+                }
+            }
+            let _ = std::fs::write(&output_path, &content);
+        } else {
+            // No input file, just create empty output
+            let _ = std::fs::write(&output_path, "");
         }
     }
 
@@ -1430,7 +1501,16 @@ fn builtin_subproject(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
 
     let required = match VM::get_arg_value(args, "required") {
         Some(Object::Bool(b)) => *b,
-        Some(Object::Feature(FeatureState::Disabled)) => false,
+        Some(Object::Feature(FeatureState::Disabled)) => {
+            let sp = Object::Subproject(SubprojectData {
+                name: name.clone(),
+                version: String::new(),
+                found: false,
+                variables: HashMap::new(),
+            });
+            vm.build_data.subprojects.insert(name, sp.clone());
+            return Ok(sp);
+        }
         _ => true,
     };
 
@@ -1513,12 +1593,12 @@ fn builtin_subproject(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
 }
 
 fn builtin_environment(_vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
-    let mut env = EnvData::new();
+    let env = EnvData::new();
     // Can be initialized with a dict
     if let Some(Object::Dict(entries)) = VM::get_positional_args(args).first() {
+        let mut values = env.values.borrow_mut();
         for (k, v) in entries {
-            env.values
-                .insert(k.clone(), EnvOp::Set(v.to_string_value()));
+            values.push((k.clone(), EnvOp::Set(v.to_string_value())));
         }
     }
     Ok(Object::Environment(env))
@@ -1547,6 +1627,7 @@ fn builtin_generator(_vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
 fn builtin_run_command(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
     let positional = VM::get_positional_args(args);
     let check = VM::get_arg_bool(args, "check", false);
+    let capture = VM::get_arg_bool(args, "capture", true);
 
     let mut cmd_parts = Vec::new();
     for arg in &positional {
@@ -1607,7 +1688,11 @@ fn builtin_run_command(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> 
     match result {
         Ok(output) => {
             let returncode = output.status.code().unwrap_or(-1) as i64;
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stdout = if capture {
+                String::from_utf8_lossy(&output.stdout).to_string()
+            } else {
+                String::new()
+            };
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
             if check && returncode != 0 {
@@ -1893,7 +1978,12 @@ fn builtin_assert(_vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         let msg = positional
             .get(1)
             .map(|v| v.to_display_string())
-            .unwrap_or_else(|| "Assertion failed".to_string());
+            .unwrap_or_else(|| {
+                format!(
+                    "Assertion failed (condition was: {})",
+                    condition.to_display_string()
+                )
+            });
         return Err(msg);
     }
     Ok(Object::None)

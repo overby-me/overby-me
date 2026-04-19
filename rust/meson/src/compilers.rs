@@ -139,31 +139,101 @@ pub fn check_header(compiler: &CompilerData, header: &str) -> bool {
 }
 
 /// Check if a symbol exists in a header
-pub fn check_header_symbol(compiler: &CompilerData, header: &str, symbol: &str) -> bool {
-    let code = format!(
-        "#include <{}>\nint main(void) {{ (void){}; return 0; }}",
-        header, symbol
+pub fn check_header_symbol(
+    compiler: &CompilerData,
+    header: &str,
+    symbol: &str,
+    args: &[CallArg],
+) -> bool {
+    let prefix = VM::get_arg_str(args, "prefix", usize::MAX).unwrap_or("");
+    let extra = extra_args_from_callargs(args);
+    // First try: use the symbol directly (works for functions, variables, macros in C)
+    let code1 = format!(
+        "{}\n#include <{}>\nint main(void) {{\n  #ifndef {}\n    {};\n  #endif\n  return 0;\n}}",
+        prefix, header, symbol, symbol
     );
-    try_compile_code(compiler, &code, &[])
+    if try_compile_code(compiler, &code1, &extra) {
+        return true;
+    }
+    // Second try: use sizeof (works for type names like int, FILE, etc.)
+    let code2 = format!(
+        "{}\n#include <{}>\nint main(void) {{\n  #ifndef {}\n    (void)sizeof({});\n  #endif\n  return 0;\n}}",
+        prefix, header, symbol, symbol
+    );
+    if try_compile_code(compiler, &code2, &extra) {
+        return true;
+    }
+    // Third try: for C++ templates like std::vector, try pointer instantiation
+    if compiler.language == "cpp" || compiler.language == "c++" {
+        let code3 = format!(
+            "{}\n#include <{}>\nint main(void) {{\n  {}< int > *_meson_p = nullptr;\n  (void)_meson_p;\n  return 0;\n}}",
+            prefix, header, symbol
+        );
+        if try_compile_code(compiler, &code3, &extra) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Check if a function exists
 pub fn check_function(compiler: &CompilerData, func: &str, args: &[CallArg]) -> bool {
     let prefix = VM::get_arg_str(args, "prefix", usize::MAX).unwrap_or("");
-    let code = format!(
-        "{}\nint main(void) {{ void *p = (void *){}; return p == 0; }}",
-        prefix, func
+
+    // First try: compile test for builtins and macros
+    let compile_code = format!(
+        "{}\n\
+         #ifdef __has_builtin\n\
+         #if __has_builtin ({})\n\
+         int main(void) {{ return 0; }}\n\
+         #else\n\
+         #error \"not a builtin\"\n\
+         #endif\n\
+         #elif defined({})\n\
+         int main(void) {{ return 0; }}\n\
+         #else\n\
+         #error \"not found\"\n\
+         #endif",
+        prefix, func, func
     );
-    try_link_code(compiler, &code, args)
+    let compile_result = try_compile_code(compiler, &compile_code, &extra_args_from_callargs(args));
+    if compile_result {
+        return true;
+    }
+
+    // Second try: link test
+    let link_code = if prefix.is_empty() {
+        // No prefix: declare the function ourselves and call it
+        // Use extern "C" for C++ compatibility (linker needs C linkage for libc functions)
+        format!(
+            "#ifdef __cplusplus\nextern \"C\"\n#endif\nchar {}(void);\nint main(void) {{ return {}(); }}",
+            func, func
+        )
+    } else {
+        // With prefix: the function is declared by the prefix header.
+        // Use address-of approach which works because the header provides
+        // the correct declaration (and undeclared names cause compile errors).
+        format!(
+            "{}\nint main(void) {{ void *p = (void *){}; return p == 0; }}",
+            prefix, func
+        )
+    };
+    try_link_code(compiler, &link_code, args)
 }
 
 /// Check if a type has a member
-pub fn check_member(compiler: &CompilerData, typename: &str, member: &str) -> bool {
+pub fn check_member(
+    compiler: &CompilerData,
+    typename: &str,
+    member: &str,
+    args: &[CallArg],
+) -> bool {
+    let prefix = VM::get_arg_str(args, "prefix", usize::MAX).unwrap_or("");
     let code = format!(
-        "int main(void) {{ {} x; (void)x.{}; return 0; }}",
-        typename, member
+        "{}\nint main(void) {{ {} x; (void)x.{}; return 0; }}",
+        prefix, typename, member
     );
-    try_compile_code(compiler, &code, &[])
+    try_compile_code(compiler, &code, &extra_args_from_callargs(args))
 }
 
 /// Check if a type exists
@@ -203,17 +273,29 @@ pub fn get_alignment(compiler: &CompilerData, typename: &str) -> i64 {
 
 /// Try to compile code
 pub fn try_compile(compiler: &CompilerData, code: &str, args: &[CallArg]) -> bool {
-    try_compile_code(compiler, code, &extra_args_from_callargs(args))
+    let mut extra = extra_args_from_callargs(args);
+    if VM::get_arg_bool(args, "werror", false) {
+        extra.push("-Werror".to_string());
+    }
+
+    try_compile_code(compiler, code, &extra)
 }
 
 /// Try to compile and link code
 pub fn try_link(compiler: &CompilerData, code: &str, args: &[CallArg]) -> bool {
-    try_link_code(compiler, code, args)
+    let werror = VM::get_arg_bool(args, "werror", false);
+    let extra = extra_args_from_callargs(args);
+    let mut link_extra: Vec<String> = Vec::new();
+    if werror {
+        link_extra.push("-Werror".to_string());
+    }
+    try_link_code_with_args(compiler, code, &extra, &link_extra)
 }
 
 /// Try to compile, link, and run code
 pub fn try_run(compiler: &CompilerData, code: &str, args: &[CallArg]) -> RunResultData {
-    match try_run_code(compiler, code, args) {
+    let werror = VM::get_arg_bool(args, "werror", false);
+    match try_run_code_werror(compiler, code, args, werror) {
         Some(stdout) => RunResultData {
             returncode: 0,
             stdout,
@@ -230,26 +312,66 @@ pub fn try_run(compiler: &CompilerData, code: &str, args: &[CallArg]) -> RunResu
 /// Check if the compiler supports an argument
 pub fn has_argument(compiler: &CompilerData, arg: &str) -> bool {
     let code = "int main(void) { return 0; }";
-    try_compile_code(compiler, code, &[arg.to_string()])
+    // GCC silently ignores unknown -Wno-* flags, so convert to positive form for testing
+    let test_arg = convert_wno_arg(compiler, arg);
+    try_compile_code(compiler, code, &[test_arg, "-Werror".to_string()])
+}
+
+/// Convert -Wno-foo to -Wfoo for testing (GCC silently ignores unknown -Wno- flags)
+fn convert_wno_arg(compiler: &CompilerData, arg: &str) -> String {
+    if (compiler.id == "gcc" || compiler.id == "clang") && arg.starts_with("-Wno-") {
+        let rest = &arg[5..]; // everything after "-Wno-"
+        // Special cases where the positive form is different or requires a value
+        // -Wno-attributes=foo -> not convertible (no -Wattributes=foo)
+        if rest.starts_with("attributes=") {
+            return arg.to_string();
+        }
+        // Some flags like -Wno-frame-larger-than don't have valid positive counterparts
+        // (the positive form requires a value like -Wframe-larger-than=N)
+        let special_negative_only = [
+            "frame-larger-than",
+            "stack-usage",
+            "alloc-size-larger-than",
+            "alloca-larger-than",
+            "vla-larger-than",
+        ];
+        for s in &special_negative_only {
+            if rest == *s {
+                return arg.to_string();
+            }
+        }
+        format!("-W{}", rest)
+    } else {
+        arg.to_string()
+    }
 }
 
 /// Check if the compiler supports multiple arguments
 pub fn has_multi_arguments(compiler: &CompilerData, args: &[String]) -> bool {
     let code = "int main(void) { return 0; }";
-    try_compile_code(compiler, code, args)
+    let mut all_args: Vec<String> = args.iter().map(|a| convert_wno_arg(compiler, a)).collect();
+    all_args.push("-Werror".to_string());
+    try_compile_code(compiler, code, &all_args)
 }
 
 /// Check if the linker supports an argument
 pub fn has_link_argument(compiler: &CompilerData, arg: &str) -> bool {
     let code = "int main(void) { return 0; }";
-    let args = [arg.to_string()];
+    let args = [
+        arg.to_string(),
+        "-Werror".to_string(),
+        "-Wl,--fatal-warnings".to_string(),
+    ];
     try_link_code_with_args(compiler, code, &[], &args)
 }
 
 /// Check if the linker supports multiple arguments
 pub fn has_multi_link_arguments(compiler: &CompilerData, args: &[String]) -> bool {
     let code = "int main(void) { return 0; }";
-    try_link_code_with_args(compiler, code, &[], args)
+    let mut all_args: Vec<String> = args.to_vec();
+    all_args.push("-Werror".to_string());
+    all_args.push("-Wl,--fatal-warnings".to_string());
+    try_link_code_with_args(compiler, code, &[], &all_args)
 }
 
 /// Get a preprocessor define value
@@ -327,12 +449,18 @@ pub fn compute_int(compiler: &CompilerData, expr: &str, args: &[CallArg]) -> i64
 
 // ---- Internal helpers ----
 
-fn extra_args_from_callargs(args: &[CallArg]) -> Vec<String> {
+pub fn extra_args_from_callargs(args: &[CallArg]) -> Vec<String> {
     let mut extra = Vec::new();
-    if let Some(Object::Array(arr)) = VM::get_arg_value(args, "args") {
-        for item in arr {
-            extra.push(item.to_string_value());
+    match VM::get_arg_value(args, "args") {
+        Some(Object::Array(arr)) => {
+            for item in arr {
+                extra.push(item.to_string_value());
+            }
         }
+        Some(Object::String(s)) => {
+            extra.push(s.clone());
+        }
+        _ => {}
     }
     extra
 }
@@ -363,7 +491,10 @@ fn try_compile_code(compiler: &CompilerData, code: &str, extra_args: &[String]) 
 
     let mut cmd = Command::new(&compiler.cmd[0]);
     cmd.arg("-c").arg(&src_path).arg("-o").arg(&obj_path);
-    cmd.arg("-w"); // suppress warnings
+    let has_werror = extra_args.iter().any(|a| a == "-Werror");
+    if !has_werror {
+        cmd.arg("-w"); // suppress warnings (but not when -Werror is requested)
+    }
     for arg in extra_args {
         cmd.arg(arg);
     }
@@ -404,13 +535,29 @@ fn try_link_code_with_args(
         cmd.arg(arg);
     }
 
-    let result = cmd.output().map(|o| o.status.success()).unwrap_or(false);
+    let output = cmd.output();
+    let result = output.as_ref().map(|o| o.status.success()).unwrap_or(false);
+    if !result {
+        if let Ok(ref o) = output {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            if !stderr.is_empty() && code.contains("statx") {}
+        }
+    }
     let _ = std::fs::remove_file(&src_path);
     let _ = std::fs::remove_file(&exe_path);
     result
 }
 
 fn try_run_code(compiler: &CompilerData, code: &str, args: &[CallArg]) -> Option<String> {
+    try_run_code_werror(compiler, code, args, false)
+}
+
+fn try_run_code_werror(
+    compiler: &CompilerData,
+    code: &str,
+    args: &[CallArg],
+    werror: bool,
+) -> Option<String> {
     let tmpdir = std::env::temp_dir();
     let suffix = get_source_suffix(compiler);
     let src_path = tmpdir.join(format!("meson_test{}", suffix));
@@ -420,7 +567,12 @@ fn try_run_code(compiler: &CompilerData, code: &str, args: &[CallArg]) -> Option
 
     let extra = extra_args_from_callargs(args);
     let mut cmd = Command::new(&compiler.cmd[0]);
-    cmd.arg(&src_path).arg("-o").arg(&exe_path).arg("-w");
+    cmd.arg(&src_path).arg("-o").arg(&exe_path);
+    if werror {
+        cmd.arg("-Werror");
+    } else {
+        cmd.arg("-w");
+    }
     for arg in &extra {
         cmd.arg(arg);
     }

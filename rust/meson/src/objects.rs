@@ -274,7 +274,7 @@ impl ConfigData {
 
 #[derive(Debug, Clone)]
 pub struct EnvData {
-    pub values: HashMap<String, EnvOp>,
+    pub values: Rc<RefCell<Vec<(String, EnvOp)>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -287,13 +287,14 @@ pub enum EnvOp {
 impl EnvData {
     pub fn new() -> Self {
         Self {
-            values: HashMap::new(),
+            values: Rc::new(RefCell::new(Vec::new())),
         }
     }
 
     pub fn to_map(&self) -> HashMap<String, String> {
         let mut map = HashMap::new();
-        for (k, op) in &self.values {
+        let values = self.values.borrow();
+        for (k, op) in values.iter() {
             match op {
                 EnvOp::Set(v) => {
                     map.insert(k.clone(), v.clone());

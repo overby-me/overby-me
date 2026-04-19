@@ -16,4 +16,4 @@ nix check. Tests are self-validating via assert() in meson.build.
     nix build .#checks.x86_64-linux.rust-meson-test-{number}-{slug}
     nix build .#checks.x86_64-linux.rust-meson-test-* --keep-going --no-link
 
-**Status: 207/285 passing (73%)**
+**Status: 219/285 passing (77%)**
