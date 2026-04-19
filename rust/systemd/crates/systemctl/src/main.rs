@@ -1963,6 +1963,10 @@ fn handle_response(
                 "enabled" | "enabled-runtime" | "static" | "indirect" | "generated" => {
                     std::process::exit(0)
                 }
+                // Matching upstream: "not-found" is exit 4 (distinct from
+                // exit 1 for "disabled" etc.) so shell scripts can branch
+                // on it.  TEST-17-UDEV.credentials relies on this.
+                "not-found" => std::process::exit(4),
                 _ => std::process::exit(1),
             }
         }

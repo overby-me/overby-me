@@ -8083,7 +8083,11 @@ pub fn execute_command(
                 }
             }
             match found_path {
-                None => return Err(format!("Unit {unit_name} not found.")),
+                // Matching upstream `systemctl is-enabled <missing>`: return
+                // "not-found" (no error) so callers can branch on the state
+                // string.  Tests like TEST-17-UDEV.credentials early-exit
+                // when a dependent service is missing, and rely on this.
+                None => return Ok(serde_json::json!("not-found")),
                 Some(path) => {
                     let state =
                         unit_file_state(&unit_name, &ri.unit_table, &path, &ri.config.unit_dirs);
