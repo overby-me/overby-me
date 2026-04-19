@@ -362,6 +362,225 @@ pub fn open_uevent_socket() -> io::Result<i32> {
     }
 }
 
+/// Open a netlink socket for sending UDEV-processed events to
+/// group 2 (libudev monitor group).  Clients like `udevadm monitor
+/// --udev` subscribe to this group.
+///
+/// Returns the fd on success; errors are surfaced to the caller so
+/// the daemon can log and continue (monitor broadcast is best-effort).
+pub fn open_udev_monitor_send_socket() -> io::Result<i32> {
+    unsafe {
+        let fd = libc::socket(
+            libc::AF_NETLINK,
+            libc::SOCK_DGRAM | libc::SOCK_CLOEXEC,
+            15, // NETLINK_KOBJECT_UEVENT
+        );
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        let mut addr: libc::sockaddr_nl = std::mem::zeroed();
+        addr.nl_family = libc::AF_NETLINK as u16;
+        // Source pid can be 0 — kernel will auto-assign.  We don't
+        // subscribe to any groups since we're send-only.
+        addr.nl_pid = 0;
+        addr.nl_groups = 0;
+
+        let ret = libc::bind(
+            fd,
+            &addr as *const libc::sockaddr_nl as *const libc::sockaddr,
+            std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t,
+        );
+        if ret < 0 {
+            let err = io::Error::last_os_error();
+            libc::close(fd);
+            return Err(err);
+        }
+
+        // Large send buffer so big UDEV events (100+ properties, as in
+        // TEST-17-UDEV.buffer-size) don't fail with ENOBUFS.
+        let buf_size: libc::c_int = 128 * 1024 * 1024; // 128 MiB
+        libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_SNDBUF,
+            &buf_size as *const libc::c_int as *const libc::c_void,
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        );
+
+        Ok(fd)
+    }
+}
+
+/// libudev monitor header (matches `struct udev_monitor_netlink_header`
+/// in upstream libudev-monitor.c).
+///
+/// Serialized in **native byte order** — upstream uses host byte order
+/// for the magic.  All offsets/lengths are in bytes from the start of
+/// the full message.
+#[repr(C)]
+struct UdevMonitorHeader {
+    prefix: [u8; 8],          // "libudev\0"
+    magic: u32,               // 0xfeedcafe
+    header_size: u32,         // sizeof(Self) = 40
+    properties_off: u32,      // offset to properties payload
+    properties_len: u32,      // length of properties payload
+    filter_subsystem_hash: u32,
+    filter_devtype_hash: u32,
+    filter_tag_bloom_hi: u32,
+    filter_tag_bloom_lo: u32,
+}
+
+const UDEV_MONITOR_MAGIC: u32 = 0xfeedcafe;
+const UDEV_MONITOR_HEADER_SIZE: usize = 40;
+
+/// MurmurHash2 used by libudev for monitor filter hashes.
+fn murmur_hash2(key: &[u8]) -> u32 {
+    const SEED: u32 = 0;
+    const M: u32 = 0x5bd1e995;
+    const R: u32 = 24;
+
+    let mut h: u32 = SEED ^ (key.len() as u32);
+    let mut chunks = key.chunks_exact(4);
+    for chunk in chunks.by_ref() {
+        let mut k = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        k = k.wrapping_mul(M);
+        k ^= k >> R;
+        k = k.wrapping_mul(M);
+        h = h.wrapping_mul(M);
+        h ^= k;
+    }
+    let remainder = chunks.remainder();
+    if !remainder.is_empty() {
+        let mut k: u32 = 0;
+        for (i, &b) in remainder.iter().enumerate().rev() {
+            k |= (b as u32) << (i * 8);
+        }
+        h ^= k;
+        h = h.wrapping_mul(M);
+    }
+    h ^= h >> 13;
+    h = h.wrapping_mul(M);
+    h ^= h >> 15;
+    h
+}
+
+/// Send a UDEV-processed event to group 2 in the libudev monitor
+/// format, so `udevadm monitor --udev` subscribers receive it.  The
+/// body is a null-byte-separated sequence of `KEY=VALUE` strings, the
+/// same format the kernel uses for its own uevents.
+fn broadcast_udev_monitor_event(fd: i32, event: &UEvent, result: &RuleResult) {
+    // Build the property block.  Include ACTION/DEVPATH/SUBSYSTEM/…
+    // plus every env var set on the event.  Properties are NUL-
+    // separated — the kernel uses the same convention.
+    let mut props: Vec<u8> = Vec::new();
+    let push_kv = |buf: &mut Vec<u8>, k: &str, v: &str| {
+        buf.extend_from_slice(k.as_bytes());
+        buf.push(b'=');
+        buf.extend_from_slice(v.as_bytes());
+        buf.push(0);
+    };
+    push_kv(&mut props, "ACTION", &event.action);
+    push_kv(&mut props, "DEVPATH", &event.devpath);
+    if !event.subsystem.is_empty() {
+        push_kv(&mut props, "SUBSYSTEM", &event.subsystem);
+    }
+    if !event.devtype.is_empty() {
+        push_kv(&mut props, "DEVTYPE", &event.devtype);
+    }
+    if !event.devname.is_empty() {
+        push_kv(&mut props, "DEVNAME", &event.devname);
+    }
+    push_kv(&mut props, "SEQNUM", &event.seqnum.to_string());
+    // User-set env, excluding kernel-provided properties we already
+    // emitted above.
+    for (k, v) in &event.env {
+        match k.as_str() {
+            "ACTION" | "DEVPATH" | "SUBSYSTEM" | "DEVTYPE" | "DEVNAME" | "SEQNUM" => continue,
+            _ => {}
+        }
+        push_kv(&mut props, k, v);
+    }
+    // Tag list and symlinks so monitor consumers can see them.
+    if !result.tags.is_empty() {
+        let joined = result
+            .tags
+            .iter()
+            .fold(String::from(":"), |mut a, t| {
+                a.push_str(t);
+                a.push(':');
+                a
+            });
+        push_kv(&mut props, "TAGS", &joined);
+    }
+    if !result.symlinks.is_empty() {
+        push_kv(&mut props, "DEVLINKS", &result.symlinks.join(" "));
+    }
+
+    // Build the header.
+    let subsystem_hash = if event.subsystem.is_empty() {
+        0
+    } else {
+        murmur_hash2(event.subsystem.as_bytes())
+    };
+    let devtype_hash = if event.devtype.is_empty() {
+        0
+    } else {
+        murmur_hash2(event.devtype.as_bytes())
+    };
+    let mut header = UdevMonitorHeader {
+        prefix: *b"libudev\0",
+        magic: UDEV_MONITOR_MAGIC,
+        header_size: UDEV_MONITOR_HEADER_SIZE as u32,
+        properties_off: UDEV_MONITOR_HEADER_SIZE as u32,
+        properties_len: props.len() as u32,
+        filter_subsystem_hash: subsystem_hash,
+        filter_devtype_hash: devtype_hash,
+        filter_tag_bloom_hi: 0,
+        filter_tag_bloom_lo: 0,
+    };
+    // Tag bloom filter: OR'd hashes of every tag.  Use the libudev
+    // convention of splitting 64 bits into hi/lo u32s.
+    for tag in &result.tags {
+        let h = murmur_hash2(tag.as_bytes());
+        let bit_hi = 1u32 << ((h >> 6) & 31);
+        let bit_lo = 1u32 << (h & 31);
+        header.filter_tag_bloom_hi |= bit_hi;
+        header.filter_tag_bloom_lo |= bit_lo;
+    }
+
+    // Serialise header + properties into a single buffer and sendto group 2.
+    let mut msg = Vec::with_capacity(UDEV_MONITOR_HEADER_SIZE + props.len());
+    // SAFETY: plain-old-data struct with no padding (#[repr(C)] fields align
+    // to 4; all u8[8] and u32, total 40 bytes).
+    unsafe {
+        let p = &header as *const UdevMonitorHeader as *const u8;
+        msg.extend_from_slice(std::slice::from_raw_parts(p, UDEV_MONITOR_HEADER_SIZE));
+    }
+    msg.extend_from_slice(&props);
+
+    let mut dest: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
+    dest.nl_family = libc::AF_NETLINK as u16;
+    dest.nl_groups = 2; // UDEV monitor group
+
+    let ret = unsafe {
+        libc::sendto(
+            fd,
+            msg.as_ptr() as *const libc::c_void,
+            msg.len(),
+            0,
+            &dest as *const libc::sockaddr_nl as *const libc::sockaddr,
+            std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t,
+        )
+    };
+    if ret < 0 {
+        log::debug!(
+            "udev-monitor broadcast send failed: {}",
+            io::Error::last_os_error()
+        );
+    }
+}
+
 /// Receive a uevent from the netlink socket. Returns None if no data available.
 ///
 /// Uses a 2 MiB stack buffer — upstream udevd allocates 2 MiB so events
@@ -4641,7 +4860,23 @@ fn process_event(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) {
     // deactivate `.device` units.  Fire-and-forget; errors are logged but
     // do not block rule processing.
     notify_systemd_device_event(event, &result);
+
+    // Broadcast the processed event on netlink group 2 so `udevadm
+    // monitor --udev` subscribers receive it.  This is the libudev
+    // monitor protocol — a fire-and-forget sendto() with the libudev
+    // header prefix.  If the global send socket isn't open (e.g. very
+    // early boot or socket() failed), skip silently.
+    let send_fd = UDEV_MONITOR_SEND_FD.load(std::sync::atomic::Ordering::Acquire);
+    if send_fd >= 0 {
+        broadcast_udev_monitor_event(send_fd, event, &result);
+    }
 }
+
+/// Shared netlink fd used by every worker thread to broadcast UDEV
+/// monitor events.  Initialised once by `main_loop()` at startup.
+/// -1 means "not yet opened"; broadcasts are skipped in that case.
+pub static UDEV_MONITOR_SEND_FD: std::sync::atomic::AtomicI32 =
+    std::sync::atomic::AtomicI32::new(-1);
 
 /// Path of PID 1's control socket (`SYSTEMCTL_ADDR` override for tests).
 fn systemd_control_socket_path() -> String {
@@ -5566,6 +5801,19 @@ pub fn run_daemon() {
     let children_max = args.children_max;
     let exec_delay = args.exec_delay;
     let _event_timeout = args.event_timeout;
+
+    // Open the send socket used to broadcast processed events to the
+    // libudev monitor group.  Best-effort — if this fails, workers
+    // simply skip the broadcast (see broadcast_udev_monitor_event).
+    match open_udev_monitor_send_socket() {
+        Ok(fd) => {
+            UDEV_MONITOR_SEND_FD.store(fd, std::sync::atomic::Ordering::Release);
+            log::debug!("udev monitor send socket opened (fd={fd})");
+        }
+        Err(e) => {
+            log::warn!("Failed to open udev monitor send socket: {e}");
+        }
+    }
 
     // Shared daemon state for D-Bus interface
     let daemon_state = Arc::new(Mutex::new(DaemonState {

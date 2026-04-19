@@ -1315,7 +1315,7 @@ fn cmd_monitor(
     }
     println!();
 
-    // Open netlink socket for kernel uevents
+    // Open netlink socket for kernel uevents (group 1).
     let nl_fd = match open_uevent_socket() {
         Ok(fd) => fd,
         Err(e) => {
@@ -1323,6 +1323,33 @@ fn cmd_monitor(
             return 1;
         }
     };
+
+    // For `--udev` (the libudev monitor stream, post-rule processing),
+    // also subscribe to group 2 via NETLINK_ADD_MEMBERSHIP.  The header
+    // of each message starts with "libudev\0" + a u32 magic so we can
+    // tell the two streams apart later.
+    if show_udev {
+        const SOL_NETLINK: libc::c_int = 270;
+        const NETLINK_ADD_MEMBERSHIP: libc::c_int = 1;
+        let group: libc::c_int = 2;
+        let ret = unsafe {
+            libc::setsockopt(
+                nl_fd,
+                SOL_NETLINK,
+                NETLINK_ADD_MEMBERSHIP,
+                &group as *const libc::c_int as *const libc::c_void,
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            )
+        };
+        if ret < 0 {
+            let err = io::Error::last_os_error();
+            eprintln!(
+                "udevadm monitor: failed to subscribe to udev monitor group: {}",
+                err
+            );
+            // Continue — kernel stream may still work.
+        }
+    }
 
     // Install signal handler for clean exit
     unsafe {
@@ -1359,6 +1386,12 @@ fn cmd_monitor(
         }
 
         let data = &buf[..n as usize];
+        // Detect libudev monitor framing so we can prefix the line
+        // with "UDEV" instead of "KERNEL" (matching upstream output
+        // exercised by TEST-17-UDEV.buffer-size).
+        let is_udev = data.len() >= 40
+            && &data[0..8] == b"libudev\0"
+            && u32::from_ne_bytes(data[8..12].try_into().unwrap_or([0; 4])) == 0xfeedcafe;
 
         // Parse the uevent
         if let Some(event) = parse_monitor_event(data) {
@@ -1367,6 +1400,14 @@ fn cmd_monitor(
                 && let Some(subsys) = event.get("SUBSYSTEM")
                 && !subsystem_match.iter().any(|s| s == subsys)
             {
+                continue;
+            }
+
+            // Respect --kernel / --udev gating.
+            if is_udev && !show_udev {
+                continue;
+            }
+            if !is_udev && !show_kernel {
                 continue;
             }
 
@@ -1379,14 +1420,13 @@ fn cmd_monitor(
                 .map(|d| format!("{}.{:06}", d.as_secs(), d.subsec_micros()))
                 .unwrap_or_else(|_| "0.000000".to_string());
 
-            if show_kernel {
-                println!("KERNEL[{}] {} {} ({})", ts, action, devpath, subsystem);
-                if property || environment {
-                    for (k, v) in &event {
-                        println!("{}={}", k, v);
-                    }
-                    println!();
+            let label = if is_udev { "UDEV" } else { "KERNEL" };
+            println!("{}[{}] {} {} ({})", label, ts, action, devpath, subsystem);
+            if property || environment {
+                for (k, v) in &event {
+                    println!("{}={}", k, v);
                 }
+                println!();
             }
         }
     }
@@ -1401,9 +1441,27 @@ fn cmd_monitor(
 /// Parse a raw uevent buffer into key=value pairs.
 fn parse_monitor_event(data: &[u8]) -> Option<HashMap<String, String>> {
     let mut props = HashMap::new();
-    let mut first = true;
 
-    for chunk in data.split(|&b| b == 0) {
+    // libudev-monitor framing: 8-byte "libudev\0" prefix, 4-byte u32
+    // magic (0xfeedcafe), then more header fields and finally a null-
+    // separated KEY=VALUE properties blob.  Skip the header and parse
+    // only the properties.
+    let payload = if data.len() >= 40 && &data[0..8] == b"libudev\0" {
+        let magic = u32::from_ne_bytes(data[8..12].try_into().unwrap_or([0; 4]));
+        let props_off = u32::from_ne_bytes(data[16..20].try_into().unwrap_or([0; 4])) as usize;
+        let props_len = u32::from_ne_bytes(data[20..24].try_into().unwrap_or([0; 4])) as usize;
+        if magic == 0xfeedcafe && props_off + props_len <= data.len() {
+            &data[props_off..props_off + props_len]
+        } else {
+            data
+        }
+    } else {
+        data
+    };
+
+    let mut first = !payload.starts_with(b"ACTION=");
+
+    for chunk in payload.split(|&b| b == 0) {
         if chunk.is_empty() {
             continue;
         }
@@ -1414,7 +1472,7 @@ fn parse_monitor_event(data: &[u8]) -> Option<HashMap<String, String>> {
 
         if first {
             first = false;
-            // First line is "action@devpath"
+            // Kernel uevent: first field is "action@devpath"
             if let Some(at) = s.find('@') {
                 props.insert("ACTION".to_string(), s[..at].to_string());
                 props.insert("DEVPATH".to_string(), s[at + 1..].to_string());
