@@ -4469,7 +4469,19 @@ fn notify_systemd_device_event(event: &UEvent, result: &RuleResult) {
         return;
     }
     let _ = stream.shutdown(std::net::Shutdown::Write);
-    // Don't wait for a response — the server may or may not produce one.
+    // Drain (and discard) the server's response so its write_all doesn't
+    // hit a broken pipe.  A short read timeout keeps this non-blocking if
+    // PID 1 is slow.
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+    let mut buf = [0u8; 4096];
+    use std::io::Read;
+    loop {
+        match stream.read(&mut buf) {
+            Ok(0) => break,
+            Ok(_) => continue,
+            Err(_) => break,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
