@@ -673,12 +673,6 @@ impl Cli {
         // Apply CLI options
         interp.set_options(&args.options);
 
-        // Load project options
-        interp.load_options_file(&source_dir);
-
-        // Apply CLI options again (override project defaults)
-        interp.set_options(&args.options);
-
         // Read and execute meson.build
         let source = match std::fs::read_to_string(&build_file) {
             Ok(s) => s,

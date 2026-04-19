@@ -187,6 +187,8 @@ impl Compiler {
         // Compile condition
         self.compile_expression(&if_stmt.condition)?;
         let false_jump = self.chunk.emit(OpCode::JumpIfFalse(0), line);
+        // Pop condition on true (fall-through) path
+        self.chunk.emit(OpCode::Pop, line);
 
         // Compile body
         for stmt in &if_stmt.body {
@@ -198,16 +200,22 @@ impl Compiler {
 
         // Patch false jump to here
         self.chunk.patch_jump(false_jump);
+        // Pop condition on false (jumped) path
+        self.chunk.emit(OpCode::Pop, line);
 
         // Compile elif clauses
         for (cond, body) in &if_stmt.elif_clauses {
             self.compile_expression(cond)?;
             let elif_false = self.chunk.emit(OpCode::JumpIfFalse(0), line);
+            // Pop elif condition on true (fall-through) path
+            self.chunk.emit(OpCode::Pop, line);
             for stmt in body {
                 self.compile_statement(stmt)?;
             }
             end_jumps.push(self.chunk.emit(OpCode::Jump(0), line));
             self.chunk.patch_jump(elif_false);
+            // Pop elif condition on false (jumped) path
+            self.chunk.emit(OpCode::Pop, line);
         }
 
         // Compile else
@@ -401,9 +409,13 @@ impl Compiler {
             Expression::Ternary(cond, true_val, false_val, _) => {
                 self.compile_expression(cond)?;
                 let false_jump = self.chunk.emit(OpCode::JumpIfFalse(0), line);
+                // Pop condition on true (fall-through) path
+                self.chunk.emit(OpCode::Pop, line);
                 self.compile_expression(true_val)?;
                 let end_jump = self.chunk.emit(OpCode::Jump(0), line);
                 self.chunk.patch_jump(false_jump);
+                // Pop condition on false (jumped) path
+                self.chunk.emit(OpCode::Pop, line);
                 self.compile_expression(false_val)?;
                 self.chunk.patch_jump(end_jump);
             }

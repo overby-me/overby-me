@@ -376,12 +376,93 @@ pub fn has_multi_link_arguments(compiler: &CompilerData, args: &[String]) -> boo
 
 /// Get a preprocessor define value
 pub fn get_define(compiler: &CompilerData, name: &str, args: &[CallArg]) -> String {
-    let prefix = VM::get_arg_str(args, "prefix", usize::MAX).unwrap_or("");
+    let prefix = get_prefix_from_args(args);
+    let extra = extra_args_from_callargs(args);
+    let delim = "MESON_GET_DEFINE_DELIMITER";
     let code = format!(
-        "{}\n#include <stdio.h>\nint main(void) {{\n#ifdef {}\nprintf(\"%s\", {} + 0 ? \"\" : \"\");\n#endif\nreturn 0;\n}}",
-        prefix, name, name
+        "{}\n#ifndef {}\n#define {}\n#endif\n{}\n{}\n",
+        prefix, name, name, delim, name
     );
-    try_run_code(compiler, &code, args).unwrap_or_default()
+    if let Some(output) = try_preprocess_code(compiler, &code, &extra) {
+        if let Some(pos) = output.find(delim) {
+            let after = &output[pos + delim.len()..];
+            let value = after.trim();
+            // Post-process: concatenate adjacent C string literals
+            return concatenate_string_literals(value);
+        }
+    }
+    String::new()
+}
+
+/// Concatenate adjacent C string literals in preprocessor output.
+/// e.g., \x22ab\x22 \x22cd\x22 → \x22abcd\x22
+fn concatenate_string_literals(input: &str) -> String {
+    if !input.contains('\x22') {
+        return input.to_string();
+    }
+    let mut result = String::new();
+    let mut chars = input.chars().peekable();
+    let mut in_string = false;
+    let mut current_string = String::new();
+    let mut pending_close = false;
+
+    while let Some(c) = chars.next() {
+        if pending_close {
+            // We just closed a string literal. Check if next non-space char is another quote.
+            if c == '\x20' || c == '\t' || c == '\n' {
+                // Skip whitespace between potential adjacent strings
+                continue;
+            } else if c == '\x22' {
+                // Another string literal follows — continue accumulating
+                pending_close = false;
+                in_string = true;
+                continue;
+            } else {
+                // Not an adjacent string — close the current string and emit
+                result.push('\x22');
+                result.push_str(&current_string);
+                result.push('\x22');
+                current_string.clear();
+                pending_close = false;
+                // Process this character normally
+                result.push(c);
+                continue;
+            }
+        }
+
+        if !in_string && c == '\x22' {
+            // Start of a string literal
+            in_string = true;
+            continue;
+        }
+
+        if in_string {
+            if c == '\x5c' {
+                // Backslash escape in string
+                current_string.push(c);
+                if let Some(next) = chars.next() {
+                    current_string.push(next);
+                }
+            } else if c == '\x22' {
+                // End of string literal — but might be followed by another
+                pending_close = true;
+                in_string = false;
+            } else {
+                current_string.push(c);
+            }
+        } else {
+            result.push(c);
+        }
+    }
+
+    if pending_close || in_string {
+        // Flush remaining string
+        result.push('\x22');
+        result.push_str(&current_string);
+        result.push('\x22');
+    }
+
+    result
 }
 
 /// Find a library
@@ -463,6 +544,65 @@ pub fn extra_args_from_callargs(args: &[CallArg]) -> Vec<String> {
         _ => {}
     }
     extra
+}
+
+/// Extract prefix from args, handling both string and array of strings.
+pub fn get_prefix_from_args(args: &[CallArg]) -> String {
+    if let Some(s) = VM::get_arg_str(args, "prefix", usize::MAX) {
+        return s.to_string();
+    }
+    if let Some(Object::Array(arr)) = VM::get_arg_value(args, "prefix") {
+        return arr
+            .iter()
+            .filter_map(|v| {
+                if let Object::String(s) = v {
+                    Some(s.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    String::new()
+}
+
+fn try_preprocess_code(
+    compiler: &CompilerData,
+    code: &str,
+    extra_args: &[String],
+) -> Option<String> {
+    let tmpdir = std::env::temp_dir();
+    let suffix = get_source_suffix(compiler);
+    let src_path = tmpdir.join(format!("meson_preprocess{}", suffix));
+
+    std::fs::write(&src_path, code).ok()?;
+
+    let mut cmd = Command::new(&compiler.cmd[0]);
+    cmd.arg("-E").arg("-P").arg("-w").arg(&src_path);
+    for arg in extra_args {
+        cmd.arg(arg);
+    }
+
+    let output = cmd.output().ok()?;
+    let _ = std::fs::remove_file(&src_path);
+
+    if output.status.success() {
+        Some(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        None
+    }
+}
+
+/// Check if a preprocessor define exists using the actual compiler.
+pub fn has_define(compiler: &CompilerData, name: &str, args: &[CallArg]) -> bool {
+    let prefix = get_prefix_from_args(args);
+    let extra = extra_args_from_callargs(args);
+    let code = format!(
+        "{}\n#ifndef {}\n#error \"not defined\"\n#endif\nint main(void) {{ return 0; }}\n",
+        prefix, name
+    );
+    try_compile_code(compiler, &code, &extra)
 }
 
 fn get_source_suffix(compiler: &CompilerData) -> &str {

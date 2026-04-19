@@ -29,6 +29,8 @@ pub fn register(vm: &mut VM) {
         .insert(("module".to_string(), "fs.stem".to_string()), fs_stem);
     vm.method_registry
         .insert(("module".to_string(), "fs.parent".to_string()), fs_parent);
+    vm.method_registry
+        .insert(("module".to_string(), "fs.suffix".to_string()), fs_suffix);
     vm.method_registry.insert(
         ("module".to_string(), "fs.replace_suffix".to_string()),
         fs_replace_suffix,
@@ -49,6 +51,10 @@ pub fn register(vm: &mut VM) {
         ("module".to_string(), "fs.relative_to".to_string()),
         fs_relative_to,
     );
+    vm.method_registry.insert(
+        ("module".to_string(), "fs.is_samepath".to_string()),
+        fs_is_samepath,
+    );
 }
 
 fn resolve_path(vm: &VM, path_str: &str) -> std::path::PathBuf {
@@ -62,30 +68,135 @@ fn resolve_path(vm: &VM, path_str: &str) -> std::path::PathBuf {
     }
 }
 
+/// Resolve a path from a CallArg, handling File objects with their own subdir context.
+fn resolve_path_from_arg(
+    vm: &VM,
+    args: &[CallArg],
+) -> Result<(std::path::PathBuf, String), String> {
+    let positional = VM::get_positional_args(args);
+    match positional.first() {
+        Some(Object::File(f)) => {
+            let base = if f.is_built {
+                &vm.build_root
+            } else {
+                &vm.source_root
+            };
+            let full = if f.subdir.is_empty() {
+                std::path::Path::new(base).join(&f.path)
+            } else {
+                std::path::Path::new(base).join(&f.subdir).join(&f.path)
+            };
+            Ok((full, f.path.clone()))
+        }
+        Some(Object::Array(arr)) => {
+            if let Some(Object::File(f)) = arr.first() {
+                let base = if f.is_built {
+                    &vm.build_root
+                } else {
+                    &vm.source_root
+                };
+                let full = if f.subdir.is_empty() {
+                    std::path::Path::new(base).join(&f.path)
+                } else {
+                    std::path::Path::new(base).join(&f.subdir).join(&f.path)
+                };
+                Ok((full, f.path.clone()))
+            } else {
+                let path_str = get_path_arg(args)?;
+                Ok((resolve_path(vm, &path_str), path_str))
+            }
+        }
+        _ => {
+            let path_str = get_path_arg(args)?;
+            Ok((resolve_path(vm, &path_str), path_str))
+        }
+    }
+}
+
+fn expand_path(path: &str, source_root: &str, current_subdir: &str) -> String {
+    if path.starts_with('~') {
+        if let Ok(home) = std::env::var("HOME") {
+            return path.replacen('~', &home, 1);
+        }
+    }
+    if path.starts_with('/') {
+        return path.to_string();
+    }
+    if current_subdir.is_empty() {
+        format!("{}/{}", source_root, path)
+    } else {
+        format!("{}/{}/{}", source_root, current_subdir, path)
+    }
+}
+
+/// Extract a path string from various Meson object types.
+/// Handles String, File, BuildTarget, CustomTarget, and CustomTargetIndex.
+fn object_to_path_str(obj: &Object) -> Result<String, String> {
+    match obj {
+        Object::String(s) => Ok(s.clone()),
+        Object::File(f) => Ok(f.path.clone()),
+        Object::Array(arr) => {
+            // files() returns an array; unwrap to the first File element
+            if let Some(first) = arr.first() {
+                object_to_path_str(first)
+            } else {
+                Err("fs method: empty array argument".to_string())
+            }
+        }
+        Object::BuildTarget(t) => {
+            if let Some(output) = t.outputs.first() {
+                Ok(output.clone())
+            } else {
+                Ok(t.name.clone())
+            }
+        }
+        Object::CustomTarget(ct) => {
+            if let Some(output) = ct.outputs.first() {
+                Ok(output.clone())
+            } else {
+                Ok(ct.name.clone())
+            }
+        }
+        Object::CustomTargetIndex(ct, idx) => {
+            if let Some(output) = ct.outputs.get(*idx) {
+                Ok(output.clone())
+            } else {
+                Err(format!("Custom target index {} out of bounds", idx))
+            }
+        }
+        _ => Err(format!(
+            "fs method requires a string, file, or target argument, got {}",
+            obj.type_name()
+        )),
+    }
+}
+
 fn get_path_arg(args: &[CallArg]) -> Result<String, String> {
     let positional = VM::get_positional_args(args);
     match positional.first() {
-        Some(Object::String(s)) => Ok(s.clone()),
-        Some(Object::File(f)) => Ok(f.path.clone()),
-        _ => Err("fs method requires a string or file argument".to_string()),
+        Some(obj) => object_to_path_str(obj),
+        None => Err("fs method requires at least one argument".to_string()),
     }
 }
 
 fn fs_exists(vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     let path_str = get_path_arg(args)?;
-    let full = resolve_path(vm, &path_str);
+    let expanded = expand_path(&path_str, &vm.source_root, &vm.current_subdir);
+    let full = std::path::Path::new(&expanded);
     Ok(Object::Bool(full.exists()))
 }
 
 fn fs_is_dir(vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     let path_str = get_path_arg(args)?;
-    let full = resolve_path(vm, &path_str);
+    let expanded = expand_path(&path_str, &vm.source_root, &vm.current_subdir);
+    let full = std::path::Path::new(&expanded);
     Ok(Object::Bool(full.is_dir()))
 }
 
 fn fs_is_file(vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     let path_str = get_path_arg(args)?;
-    let full = resolve_path(vm, &path_str);
+    let expanded = expand_path(&path_str, &vm.source_root, &vm.current_subdir);
+    let full = std::path::Path::new(&expanded);
     Ok(Object::Bool(full.is_file()))
 }
 
@@ -105,25 +216,62 @@ fn fs_is_absolute(_vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<Objec
 }
 
 fn fs_read(vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<Object, String> {
-    let path_str = get_path_arg(args)?;
-    let full = resolve_path(vm, &path_str);
+    let (full, path_str) = resolve_path_from_arg(vm, args)?;
     let encoding = VM::get_arg_str(args, "encoding", 1).unwrap_or("utf-8");
-    let _ = encoding; // Only utf-8 supported for now
-    std::fs::read_to_string(&full)
-        .map(Object::String)
-        .map_err(|e| format!("fs.read: cannot read '{}': {}", full.display(), e))
+
+    let text = if encoding == "utf-16" {
+        // Read raw bytes and decode as UTF-16
+        let data =
+            std::fs::read(&full).map_err(|_| format!("File {} does not exist.", path_str))?;
+        // Detect BOM and decode accordingly
+        if data.len() >= 2 && data[0] == 0xFF && data[1] == 0xFE {
+            // UTF-16 LE with BOM
+            let u16_data: Vec<u16> = data[2..]
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
+            String::from_utf16(&u16_data)
+                .map_err(|e| format!("fs.read: UTF-16 decode error: {}", e))?
+        } else if data.len() >= 2 && data[0] == 0xFE && data[1] == 0xFF {
+            // UTF-16 BE with BOM
+            let u16_data: Vec<u16> = data[2..]
+                .chunks_exact(2)
+                .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                .collect();
+            String::from_utf16(&u16_data)
+                .map_err(|e| format!("fs.read: UTF-16 decode error: {}", e))?
+        } else {
+            // No BOM, assume LE
+            let u16_data: Vec<u16> = data
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
+            String::from_utf16(&u16_data)
+                .map_err(|e| format!("fs.read: UTF-16 decode error: {}", e))?
+        }
+    } else {
+        std::fs::read_to_string(&full).map_err(|_| format!("File {} does not exist.", path_str))?
+    };
+
+    // Strip a single trailing newline (matching Meson behavior)
+    let text = text
+        .strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix('\n'))
+        .unwrap_or(&text);
+    Ok(Object::String(text.to_string()))
 }
 
 fn fs_hash(vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     let path_str = get_path_arg(args)?;
     let full = resolve_path(vm, &path_str);
-    let algorithm = VM::get_arg_str(args, "algorithm", 1).unwrap_or("sha256");
+    let positional = VM::get_positional_args(args);
+    let algorithm = match positional.get(1) {
+        Some(Object::String(s)) => s.as_str(),
+        _ => "sha256",
+    };
     let data = std::fs::read(&full)
         .map_err(|e| format!("fs.hash: cannot read '{}': {}", full.display(), e))?;
 
-    // Simple hash using std — for sha256 we use a basic implementation
-    // In practice, meson supports md5, sha1, sha256, etc.
-    // We'll shell out to sha256sum/md5sum for correctness.
     let cmd = match algorithm {
         "md5" => "md5sum",
         "sha1" => "sha1sum",
@@ -150,14 +298,11 @@ fn fs_hash(vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<Object, Strin
             let hash = hash.split_whitespace().next().unwrap_or("").to_string();
             Ok(Object::String(hash))
         }
-        Err(_) => {
-            // Fallback: return a placeholder
-            Ok(Object::String(format!(
-                "<{}:{}>",
-                algorithm,
-                full.display()
-            )))
-        }
+        Err(_) => Ok(Object::String(format!(
+            "<{}:{}>",
+            algorithm,
+            full.display()
+        ))),
     }
 }
 
@@ -194,23 +339,43 @@ fn fs_parent(_vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<Object, St
     let p = std::path::Path::new(&path_str);
     let parent = p
         .parent()
-        .map(|pp| pp.to_string_lossy().to_string())
-        .unwrap_or_default();
+        .map(|pp| {
+            let s = pp.to_string_lossy().to_string();
+            if s.is_empty() { ".".to_string() } else { s }
+        })
+        .unwrap_or_else(|| ".".to_string());
     Ok(Object::String(parent))
+}
+
+fn fs_suffix(_vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<Object, String> {
+    let path_str = get_path_arg(args)?;
+    let p = std::path::Path::new(&path_str);
+    // Meson returns the suffix INCLUDING the dot, e.g. ".txt"
+    // For no extension, return ""
+    // For "foo.", return "."
+    let name = p
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if let Some(dot_pos) = name.rfind('.') {
+        Ok(Object::String(name[dot_pos..].to_string()))
+    } else {
+        Ok(Object::String(String::new()))
+    }
 }
 
 fn fs_replace_suffix(_vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     let positional = VM::get_positional_args(args);
     let path_str = match positional.first() {
-        Some(Object::String(s)) => s.clone(),
-        _ => return Err("fs.replace_suffix: first argument must be a string".to_string()),
+        Some(obj) => object_to_path_str(obj)?,
+        None => return Err("fs.replace_suffix: requires at least one argument".to_string()),
     };
     let new_suffix = match positional.get(1) {
         Some(Object::String(s)) => s.clone(),
         _ => return Err("fs.replace_suffix: second argument must be a string".to_string()),
     };
     let p = std::path::Path::new(&path_str);
-    let mut result = p.with_extension("");
+    let result = p.with_extension("");
     let stem_str = result.to_string_lossy().to_string();
     // new_suffix includes the dot (e.g. ".h")
     Ok(Object::String(format!("{}{}", stem_str, new_suffix)))
@@ -284,15 +449,15 @@ fn fs_expanduser(_vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<Object
     Ok(Object::String(path_str))
 }
 
-fn fs_relative_to(_vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<Object, String> {
+fn fs_relative_to(vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     let positional = VM::get_positional_args(args);
     let path_str = match positional.first() {
-        Some(Object::String(s)) => s.clone(),
-        _ => return Err("fs.relative_to: first argument must be a string".to_string()),
+        Some(obj) => resolve_to_full_path(vm, obj)?,
+        _ => return Err("fs.relative_to: first argument required".to_string()),
     };
     let base_str = match positional.get(1) {
-        Some(Object::String(s)) => s.clone(),
-        _ => return Err("fs.relative_to: second argument must be a string".to_string()),
+        Some(obj) => resolve_to_full_path(vm, obj)?,
+        _ => return Err("fs.relative_to: second argument required".to_string()),
     };
 
     let path = std::path::Path::new(&path_str);
@@ -303,8 +468,8 @@ fn fs_relative_to(_vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<Objec
         Ok(Object::String(rel.to_string_lossy().to_string()))
     } else {
         // Compute relative path manually
-        let mut path_parts: Vec<_> = path.components().collect();
-        let mut base_parts: Vec<_> = base.components().collect();
+        let path_parts: Vec<_> = path.components().collect();
+        let base_parts: Vec<_> = base.components().collect();
 
         // Find common prefix length
         let common = path_parts
@@ -322,5 +487,116 @@ fn fs_relative_to(_vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<Objec
             result.push(part);
         }
         Ok(Object::String(result.to_string_lossy().to_string()))
+    }
+}
+
+/// Resolve a Meson object to a full filesystem path for is_samepath / relative_to.
+fn resolve_to_full_path(vm: &VM, obj: &Object) -> Result<String, String> {
+    match obj {
+        Object::Array(arr) => {
+            // files() returns an array; unwrap to the first element
+            if let Some(first) = arr.first() {
+                resolve_to_full_path(vm, first)
+            } else {
+                Err("fs method: empty array argument".to_string())
+            }
+        }
+        Object::String(s) => {
+            let p = std::path::Path::new(s);
+            if p.is_absolute() {
+                Ok(s.clone())
+            } else if vm.current_subdir.is_empty() {
+                Ok(format!("{}/{}", vm.source_root, s))
+            } else {
+                Ok(format!("{}/{}/{}", vm.source_root, vm.current_subdir, s))
+            }
+        }
+        Object::File(f) => {
+            let base = if f.is_built {
+                &vm.build_root
+            } else {
+                &vm.source_root
+            };
+            if f.subdir.is_empty() {
+                Ok(format!("{}/{}", base, f.path))
+            } else {
+                Ok(format!("{}/{}/{}", base, f.subdir, f.path))
+            }
+        }
+        Object::BuildTarget(t) => {
+            let output = t.outputs.first().map(|s| s.as_str()).unwrap_or(&t.name);
+            if t.subdir.is_empty() {
+                Ok(format!("{}/{}", vm.build_root, output))
+            } else {
+                Ok(format!("{}/{}/{}", vm.build_root, t.subdir, output))
+            }
+        }
+        Object::CustomTarget(ct) => {
+            let output = ct.outputs.first().map(|s| s.as_str()).unwrap_or(&ct.name);
+            if ct.subdir.is_empty() {
+                Ok(format!("{}/{}", vm.build_root, output))
+            } else {
+                Ok(format!("{}/{}/{}", vm.build_root, ct.subdir, output))
+            }
+        }
+        Object::CustomTargetIndex(ct, idx) => {
+            let output = ct.outputs.get(*idx).map(|s| s.as_str()).unwrap_or(&ct.name);
+            if ct.subdir.is_empty() {
+                Ok(format!("{}/{}", vm.build_root, output))
+            } else {
+                Ok(format!("{}/{}/{}", vm.build_root, ct.subdir, output))
+            }
+        }
+        _ => Err(format!(
+            "fs method: unsupported argument type: {}",
+            obj.type_name()
+        )),
+    }
+}
+
+/// Normalize a path by resolving `.` and `..` components without touching the filesystem.
+fn normalize_path(p: &std::path::Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut parts = Vec::new();
+    for c in p.components() {
+        match c {
+            Component::ParentDir => {
+                if !parts.is_empty() {
+                    parts.pop();
+                }
+            }
+            Component::CurDir => {}
+            other => parts.push(other),
+        }
+    }
+    parts.iter().collect()
+}
+
+fn fs_is_samepath(vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<Object, String> {
+    let positional = VM::get_positional_args(args);
+    let path1_str = match positional.first() {
+        Some(obj) => resolve_to_full_path(vm, obj)?,
+        _ => return Err("fs.is_samepath: first argument required".to_string()),
+    };
+    let path2_str = match positional.get(1) {
+        Some(obj) => resolve_to_full_path(vm, obj)?,
+        _ => return Err("fs.is_samepath: second argument required".to_string()),
+    };
+
+    let path1 = std::path::Path::new(&path1_str);
+    let path2 = std::path::Path::new(&path2_str);
+
+    // Try canonical comparison first (resolves symlinks + normalizes)
+    let canon1 = std::fs::canonicalize(path1);
+    let canon2 = std::fs::canonicalize(path2);
+
+    match (&canon1, &canon2) {
+        (Ok(c1), Ok(c2)) => Ok(Object::Bool(c1 == c2)),
+        _ => {
+            // Fallback: normalize paths without requiring them to exist
+            let n1 = canon1.unwrap_or_else(|_| normalize_path(path1));
+            let n2 = canon2.unwrap_or_else(|_| normalize_path(path2));
+            Ok(Object::Bool(n1 == n2))
+        }
     }
 }

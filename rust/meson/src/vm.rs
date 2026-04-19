@@ -1,7 +1,10 @@
 use crate::compiler::{Chunk, Constant, OpCode};
 use crate::objects::Object;
+use crate::objects::{ConfigData, EnvData};
+use std::cell::RefCell;
 /// Stack-based virtual machine for executing Meson bytecode.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 /// Represents a callable argument (positional or keyword)
 #[derive(Debug, Clone)]
@@ -99,6 +102,14 @@ pub struct VM {
     pub summary: Vec<(String, Vec<(String, String)>)>,
     /// Whether we are currently inside a subproject
     pub is_subproject: bool,
+    /// Top-level source root (for resolving subprojects)
+    pub top_source_root: String,
+    /// Top-level build root
+    pub top_build_root: String,
+    /// Top-level subproject directory name
+    pub top_subproject_dir: String,
+    /// Option keys explicitly set by the caller of subproject() (to prevent subproject own defaults from overriding them)
+    pub caller_option_keys: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -130,6 +141,7 @@ pub struct BuildData {
     pub subprojects: HashMap<String, Object>,
     pub generators: Vec<GeneratorDef>,
     pub run_targets: Vec<RunTarget>,
+    pub find_program_overrides: HashMap<String, Object>,
 }
 
 #[derive(Debug, Clone)]
@@ -321,6 +333,10 @@ impl VM {
             options: HashMap::new(),
             summary: Vec::new(),
             is_subproject: false,
+            top_source_root: String::new(),
+            top_build_root: String::new(),
+            top_subproject_dir: "subprojects".to_string(),
+            caller_option_keys: HashSet::new(),
         }
     }
 
@@ -375,6 +391,22 @@ impl VM {
             }
             OpCode::StoreVar(name) => {
                 let val = self.stack.pop().ok_or("Stack underflow on store")?;
+                // Deep-copy mutable objects on assignment (Meson semantics)
+                let val = match val {
+                    Object::ConfigurationData(ref cd) => {
+                        let new_values = cd.values.borrow().clone();
+                        Object::ConfigurationData(ConfigData {
+                            values: Rc::new(RefCell::new(new_values)),
+                        })
+                    }
+                    Object::Environment(ref env) => {
+                        let new_values = env.values.borrow().clone();
+                        Object::Environment(EnvData {
+                            values: Rc::new(RefCell::new(new_values)),
+                        })
+                    }
+                    other => other,
+                };
                 self.variables.insert(name.clone(), val);
             }
             OpCode::PlusAssignVar(name) => {
@@ -418,86 +450,126 @@ impl VM {
             OpCode::Sub => {
                 let b = self.stack.pop().ok_or("Stack underflow")?;
                 let a = self.stack.pop().ok_or("Stack underflow")?;
-                match (&a, &b) {
-                    (Object::Int(a), Object::Int(b)) => self.stack.push(Object::Int(a - b)),
-                    _ => return Err(format!("Cannot subtract {:?} and {:?}", a, b)),
+                if matches!(a, Object::Disabler) || matches!(b, Object::Disabler) {
+                    self.stack.push(Object::Disabler);
+                } else {
+                    match (&a, &b) {
+                        (Object::Int(a), Object::Int(b)) => self.stack.push(Object::Int(a - b)),
+                        _ => return Err(format!("Cannot subtract {:?} and {:?}", a, b)),
+                    }
                 }
             }
             OpCode::Mul => {
                 let b = self.stack.pop().ok_or("Stack underflow")?;
                 let a = self.stack.pop().ok_or("Stack underflow")?;
-                match (&a, &b) {
-                    (Object::Int(a), Object::Int(b)) => self.stack.push(Object::Int(a * b)),
-                    _ => return Err(format!("Cannot multiply {:?} and {:?}", a, b)),
+                if matches!(a, Object::Disabler) || matches!(b, Object::Disabler) {
+                    self.stack.push(Object::Disabler);
+                } else {
+                    match (&a, &b) {
+                        (Object::Int(a), Object::Int(b)) => self.stack.push(Object::Int(a * b)),
+                        _ => return Err(format!("Cannot multiply {:?} and {:?}", a, b)),
+                    }
                 }
             }
             OpCode::Div => {
                 let b = self.stack.pop().ok_or("Stack underflow")?;
                 let a = self.stack.pop().ok_or("Stack underflow")?;
-                match (&a, &b) {
-                    (Object::Int(a), Object::Int(b)) => {
-                        if *b == 0 {
-                            return Err("Division by zero".to_string());
+                if matches!(a, Object::Disabler) || matches!(b, Object::Disabler) {
+                    self.stack.push(Object::Disabler);
+                } else {
+                    match (&a, &b) {
+                        (Object::Int(a), Object::Int(b)) => {
+                            if *b == 0 {
+                                return Err("Division by zero".to_string());
+                            }
+                            self.stack.push(Object::Int(a / b));
                         }
-                        self.stack.push(Object::Int(a / b));
+                        (Object::String(a), Object::String(b)) => {
+                            let result = if b.starts_with('/') {
+                                b.clone()
+                            } else if b.is_empty() {
+                                format!("{}/", a)
+                            } else {
+                                format!("{}/{}", a, b)
+                            };
+                            self.stack.push(Object::String(result));
+                        }
+                        _ => return Err(format!("Cannot divide {:?} and {:?}", a, b)),
                     }
-                    (Object::String(a), Object::String(b)) => {
-                        let result = if b.starts_with('/') {
-                            b.clone()
-                        } else if b.is_empty() {
-                            format!("{}/", a)
-                        } else {
-                            format!("{}/{}", a, b)
-                        };
-                        self.stack.push(Object::String(result));
-                    }
-                    _ => return Err(format!("Cannot divide {:?} and {:?}", a, b)),
                 }
             }
             OpCode::Mod => {
                 let b = self.stack.pop().ok_or("Stack underflow")?;
                 let a = self.stack.pop().ok_or("Stack underflow")?;
-                match (&a, &b) {
-                    (Object::Int(a), Object::Int(b)) => {
-                        if *b == 0 {
-                            return Err("Modulo by zero".to_string());
+                if matches!(a, Object::Disabler) || matches!(b, Object::Disabler) {
+                    self.stack.push(Object::Disabler);
+                } else {
+                    match (&a, &b) {
+                        (Object::Int(a), Object::Int(b)) => {
+                            if *b == 0 {
+                                return Err("Modulo by zero".to_string());
+                            }
+                            self.stack.push(Object::Int(a % b));
                         }
-                        self.stack.push(Object::Int(a % b));
+                        _ => return Err(format!("Cannot modulo {:?} and {:?}", a, b)),
                     }
-                    _ => return Err(format!("Cannot modulo {:?} and {:?}", a, b)),
                 }
             }
             OpCode::Eq => {
                 let b = self.stack.pop().ok_or("Stack underflow")?;
                 let a = self.stack.pop().ok_or("Stack underflow")?;
-                self.stack.push(Object::Bool(a == b));
+                if matches!(a, Object::Disabler) || matches!(b, Object::Disabler) {
+                    self.stack.push(Object::Disabler);
+                } else {
+                    self.stack.push(Object::Bool(a == b));
+                }
             }
             OpCode::Neq => {
                 let b = self.stack.pop().ok_or("Stack underflow")?;
                 let a = self.stack.pop().ok_or("Stack underflow")?;
-                self.stack.push(Object::Bool(a != b));
+                if matches!(a, Object::Disabler) || matches!(b, Object::Disabler) {
+                    self.stack.push(Object::Disabler);
+                } else {
+                    self.stack.push(Object::Bool(a != b));
+                }
             }
             OpCode::Lt => {
                 let b = self.stack.pop().ok_or("Stack underflow")?;
                 let a = self.stack.pop().ok_or("Stack underflow")?;
-                self.stack.push(Object::Bool(self.compare_lt(&a, &b)?));
+                if matches!(a, Object::Disabler) || matches!(b, Object::Disabler) {
+                    self.stack.push(Object::Disabler);
+                } else {
+                    self.stack.push(Object::Bool(self.compare_lt(&a, &b)?));
+                }
             }
             OpCode::Gt => {
                 let b = self.stack.pop().ok_or("Stack underflow")?;
                 let a = self.stack.pop().ok_or("Stack underflow")?;
-                self.stack.push(Object::Bool(self.compare_lt(&b, &a)?));
+                if matches!(a, Object::Disabler) || matches!(b, Object::Disabler) {
+                    self.stack.push(Object::Disabler);
+                } else {
+                    self.stack.push(Object::Bool(self.compare_lt(&b, &a)?));
+                }
             }
             OpCode::Le => {
                 let b = self.stack.pop().ok_or("Stack underflow")?;
                 let a = self.stack.pop().ok_or("Stack underflow")?;
-                let lt = self.compare_lt(&a, &b)?;
-                self.stack.push(Object::Bool(lt || a == b));
+                if matches!(a, Object::Disabler) || matches!(b, Object::Disabler) {
+                    self.stack.push(Object::Disabler);
+                } else {
+                    let lt = self.compare_lt(&a, &b)?;
+                    self.stack.push(Object::Bool(lt || a == b));
+                }
             }
             OpCode::Ge => {
                 let b = self.stack.pop().ok_or("Stack underflow")?;
                 let a = self.stack.pop().ok_or("Stack underflow")?;
-                let lt = self.compare_lt(&b, &a)?;
-                self.stack.push(Object::Bool(lt || a == b));
+                if matches!(a, Object::Disabler) || matches!(b, Object::Disabler) {
+                    self.stack.push(Object::Disabler);
+                } else {
+                    let lt = self.compare_lt(&b, &a)?;
+                    self.stack.push(Object::Bool(lt || a == b));
+                }
             }
             OpCode::And | OpCode::Or => {
                 unreachable!("And/Or should be compiled as jumps");
@@ -505,20 +577,32 @@ impl VM {
             OpCode::In => {
                 let container = self.stack.pop().ok_or("Stack underflow")?;
                 let item = self.stack.pop().ok_or("Stack underflow")?;
-                let result = self.contains(&container, &item)?;
-                self.stack.push(Object::Bool(result));
+                if matches!(container, Object::Disabler) || matches!(item, Object::Disabler) {
+                    self.stack.push(Object::Disabler);
+                } else {
+                    let result = self.contains(&container, &item)?;
+                    self.stack.push(Object::Bool(result));
+                }
             }
             OpCode::NotIn => {
                 let container = self.stack.pop().ok_or("Stack underflow")?;
                 let item = self.stack.pop().ok_or("Stack underflow")?;
-                let result = self.contains(&container, &item)?;
-                self.stack.push(Object::Bool(!result));
+                if matches!(container, Object::Disabler) || matches!(item, Object::Disabler) {
+                    self.stack.push(Object::Disabler);
+                } else {
+                    let result = self.contains(&container, &item)?;
+                    self.stack.push(Object::Bool(!result));
+                }
             }
             OpCode::Not => {
                 let val = self.stack.pop().ok_or("Stack underflow")?;
-                match val {
-                    Object::Bool(b) => self.stack.push(Object::Bool(!b)),
-                    _ => return Err(format!("Cannot negate non-boolean: {:?}", val)),
+                if matches!(val, Object::Disabler) {
+                    self.stack.push(Object::Disabler);
+                } else {
+                    match val {
+                        Object::Bool(b) => self.stack.push(Object::Bool(!b)),
+                        _ => return Err(format!("Cannot negate non-boolean: {:?}", val)),
+                    }
                 }
             }
             OpCode::Negate => {
@@ -542,6 +626,32 @@ impl VM {
                     args.push(CallArg { name, value });
                 }
                 let func = self.stack.pop().ok_or("Stack underflow on call")?;
+                // Check for disabler in arguments - propagate through most functions
+                let has_disabler_arg = args.iter().any(|a| matches!(a.value, Object::Disabler));
+                if has_disabler_arg {
+                    let should_propagate = match &func {
+                        Object::BuiltinFunction(name) => !matches!(
+                            name.as_str(),
+                            "is_disabler"
+                                | "set_variable"
+                                | "get_variable"
+                                | "is_variable"
+                                | "assert"
+                                | "message"
+                                | "warning"
+                                | "error"
+                                | "summary"
+                                | "subdir"
+                                | "subdir_done"
+                                | "unset_variable"
+                        ),
+                        _ => true,
+                    };
+                    if should_propagate {
+                        self.stack.push(Object::Disabler);
+                        return Ok(StepResult::Next);
+                    }
+                }
                 let result = match func {
                     Object::BuiltinFunction(name) => {
                         if let Some(f) = self.builtins.get(&name) {
@@ -609,8 +719,12 @@ impl VM {
             OpCode::Index => {
                 let index = self.stack.pop().ok_or("Stack underflow")?;
                 let obj = self.stack.pop().ok_or("Stack underflow")?;
-                let result = self.index_into(&obj, &index)?;
-                self.stack.push(result);
+                if matches!(obj, Object::Disabler) || matches!(index, Object::Disabler) {
+                    self.stack.push(Object::Disabler);
+                } else {
+                    let result = self.index_into(&obj, &index)?;
+                    self.stack.push(result);
+                }
             }
             OpCode::Jump(target) => {
                 return Ok(StepResult::Jump(*target));
@@ -618,18 +732,26 @@ impl VM {
             OpCode::JumpIfFalse(target) => {
                 let target = *target;
                 let val = self.stack.last().ok_or("Stack underflow")?;
+                if matches!(val, Object::Disabler) {
+                    // Disabler always propagates — jump to skip right operand
+                    return Ok(StepResult::Jump(target));
+                }
                 if !val.is_truthy() {
                     return Ok(StepResult::Jump(target));
                 }
-                self.stack.pop();
+                // Peek-only: explicit Pop instructions handle cleanup
             }
             OpCode::JumpIfTrue(target) => {
                 let target = *target;
                 let val = self.stack.last().ok_or("Stack underflow")?;
+                if matches!(val, Object::Disabler) {
+                    // Disabler always propagates — jump to skip right operand
+                    return Ok(StepResult::Jump(target));
+                }
                 if val.is_truthy() {
                     return Ok(StepResult::Jump(target));
                 }
-                self.stack.pop();
+                // Peek-only: explicit Pop instructions handle cleanup
             }
             OpCode::IterSetup => {
                 let obj = self.stack.pop().ok_or("Stack underflow")?;
@@ -704,6 +826,10 @@ impl VM {
     }
 
     fn add_values(&self, a: &Object, b: &Object) -> Result<Object, String> {
+        // Disabler propagation
+        if matches!(a, Object::Disabler) || matches!(b, Object::Disabler) {
+            return Ok(Object::Disabler);
+        }
         match (a, b) {
             (Object::Int(a), Object::Int(b)) => Ok(Object::Int(a + b)),
             (Object::String(a), Object::String(b)) => Ok(Object::String(format!("{}{}", a, b))),
@@ -878,6 +1004,9 @@ impl VM {
                             .get(&varname)
                             .or_else(|| self.globals.get(&varname))
                             .ok_or(format!("Undefined variable '{}' in f-string", varname))?;
+                        if !val.is_printable_type() {
+                            return Err(format!("f-string: {}", Object::NON_PRINTABLE_ERROR));
+                        }
                         result.push_str(&val.to_display_string());
                         i = j + 1;
                         continue;

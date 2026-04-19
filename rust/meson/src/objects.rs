@@ -140,6 +140,24 @@ impl Object {
         }
     }
 
+    pub const NON_PRINTABLE_ERROR: &'static str =
+        "Value other than strings, integers, bools, options, dictionaries and lists thereof.";
+
+    /// Check if this value is a "printable" type for message()/f-strings.
+    /// Allowed: strings, integers, bools, options (Feature), dicts of printable, lists of printable.
+    pub fn is_printable_type(&self) -> bool {
+        match self {
+            Object::String(_)
+            | Object::Int(_)
+            | Object::Bool(_)
+            | Object::Feature(_)
+            | Object::None => true,
+            Object::Array(arr) => arr.iter().all(|v| v.is_printable_type()),
+            Object::Dict(d) => d.iter().all(|(_, v)| v.is_printable_type()),
+            _ => false,
+        }
+    }
+
     pub fn to_display_string(&self) -> String {
         match self {
             Object::None => String::new(),
@@ -282,6 +300,7 @@ pub enum EnvOp {
     Set(String),
     Prepend(String, String), // value, separator
     Append(String, String),  // value, separator
+    Unset,
 }
 
 impl EnvData {
@@ -314,6 +333,9 @@ impl EnvData {
                     } else {
                         map.insert(k.clone(), format!("{}{}{}", existing, sep, v));
                     }
+                }
+                EnvOp::Unset => {
+                    map.remove(k);
                 }
             }
         }

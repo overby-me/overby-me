@@ -161,7 +161,13 @@ fn parse_option_call(args: &[ast::Argument], options: &mut HashMap<String, Objec
             .first()
             .map(|f| Object::String(f.clone()))
             .unwrap_or(Object::String(String::new())),
-        "array" => Object::Array(Vec::new()),
+        "array" => {
+            if choices.is_empty() {
+                Object::Array(Vec::new())
+            } else {
+                Object::Array(choices.iter().map(|c| Object::String(c.clone())).collect())
+            }
+        }
         "feature" => Object::Feature(FeatureState::Auto),
         _ => Object::String(String::new()),
     });

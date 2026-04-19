@@ -19,6 +19,8 @@ pkgs.runCommand "rust-meson-test-${name}" {
     pkgs.pkg-config
     pkgs.coreutils
     pkgs.python3
+    pkgs.git
+    pkgs.unzip
   ];
   mesonSrc = pkgs.meson.src;
 } ''
@@ -43,6 +45,9 @@ pkgs.runCommand "rust-meson-test-${name}" {
   fi
 
   cd workdir
+
+  # Some tests (e.g. 220 fs module) need a valid home directory
+  export HOME=/tmp
 
   echo "Running meson test: ${name} (${testDir})"
 

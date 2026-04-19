@@ -226,9 +226,52 @@ fn builtin_project(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         }
     }
 
-    let version = VM::get_arg_str(args, "version", usize::MAX)
-        .unwrap_or("undefined")
-        .to_string();
+    let version = {
+        // First check for string value
+        if let Some(s) = VM::get_arg_str(args, "version", usize::MAX) {
+            s.to_string()
+        } else if let Some(val) = VM::get_arg_value(args, "version") {
+            // Handle files('VERSION') — version passed as a File array
+            match val {
+                Object::Array(arr) => {
+                    if let Some(Object::File(f)) = arr.first() {
+                        let file_path = if f.subdir.is_empty() {
+                            format!("{}/{}", vm.source_root, f.path)
+                        } else {
+                            format!("{}/{}/{}", vm.source_root, f.subdir, f.path)
+                        };
+                        match std::fs::read_to_string(&file_path) {
+                            Ok(s) => s.trim().to_string(),
+                            Err(e) => {
+                                return Err(format!(
+                                    "Cannot read version file '{}': {}",
+                                    file_path, e
+                                ));
+                            }
+                        }
+                    } else {
+                        "undefined".to_string()
+                    }
+                }
+                Object::File(f) => {
+                    let file_path = if f.subdir.is_empty() {
+                        format!("{}/{}", vm.source_root, f.path)
+                    } else {
+                        format!("{}/{}/{}", vm.source_root, f.subdir, f.path)
+                    };
+                    match std::fs::read_to_string(&file_path) {
+                        Ok(s) => s.trim().to_string(),
+                        Err(e) => {
+                            return Err(format!("Cannot read version file '{}': {}", file_path, e));
+                        }
+                    }
+                }
+                _ => "undefined".to_string(),
+            }
+        } else {
+            "undefined".to_string()
+        }
+    };
     let meson_version = VM::get_arg_str(args, "meson_version", usize::MAX)
         .unwrap_or("")
         .to_string();
@@ -247,7 +290,32 @@ fn builtin_project(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
     let subproject_dir = VM::get_arg_str(args, "subproject_dir", usize::MAX)
         .unwrap_or("subprojects")
         .to_string();
-    let default_options = VM::get_arg_string_array(args, "default_options");
+    let default_options = {
+        let mut result = VM::get_arg_string_array(args, "default_options");
+        // Also support dict form: default_options: {'key': value, ...}
+        if result.is_empty() {
+            if let Some(Object::Dict(entries)) = VM::get_arg_value(args, "default_options") {
+                for (k, v) in entries {
+                    let val_str = match v {
+                        Object::Bool(b) => b.to_string(),
+                        Object::Int(n) => n.to_string(),
+                        Object::String(s) => s.clone(),
+                        Object::Feature(FeatureState::Enabled) => "enabled".to_string(),
+                        Object::Feature(FeatureState::Disabled) => "disabled".to_string(),
+                        Object::Feature(FeatureState::Auto) => "auto".to_string(),
+                        other => other.to_display_string(),
+                    };
+                    result.push(format!("{}={}", k, val_str));
+                }
+            }
+        }
+        result
+    };
+
+    // Set top-level subproject dir if this is the main project
+    if !vm.is_subproject {
+        vm.top_subproject_dir = subproject_dir.clone();
+    }
 
     vm.project = Some(ProjectInfo {
         name,
@@ -265,7 +333,25 @@ fn builtin_project(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         crate::compilers::detect_compiler(vm, lang);
     }
 
-    // Apply default_options to vm.options (won't override CLI-set values)
+    // Load project options from meson_options.txt or meson.options FIRST.
+    // These use or_insert internally, so they set defaults without overriding CLI values.
+    let opts_file = format!("{}/meson.options", vm.source_root);
+    let opts_file2 = format!("{}/meson_options.txt", vm.source_root);
+    let opts_source = if Path::new(&opts_file).exists() {
+        std::fs::read_to_string(&opts_file).ok()
+    } else if Path::new(&opts_file2).exists() {
+        std::fs::read_to_string(&opts_file2).ok()
+    } else {
+        None
+    };
+    if let Some(src) = opts_source {
+        crate::options::parse_options_file(&src, &mut vm.options);
+    }
+
+    // Apply default_options AFTER loading option files.
+    // Priority: CLI > caller subproject() default_options > project() default_options > option file defaults.
+    // - For keys in caller_option_keys (set by caller subproject() kwargs): use or_insert to preserve.
+    // - For all other keys: use insert to override option file defaults and inherited parent values.
     // Known string-typed built-in options that should not be parsed as integers
     let string_typed_builtins = [
         "buildtype",
@@ -310,7 +396,13 @@ fn builtin_project(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
             } else {
                 crate::options::parse_option_value(val)
             };
-            vm.options.entry(key).or_insert(obj);
+            if vm.caller_option_keys.contains(&key) {
+                // Caller subproject() default_options take priority; don't override
+                vm.options.entry(key).or_insert(obj);
+            } else {
+                // Override option file defaults and inherited parent values
+                vm.options.insert(key, obj);
+            }
         }
     }
 
@@ -318,10 +410,13 @@ fn builtin_project(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
 }
 
 fn builtin_message(_vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
-    let parts: Vec<String> = VM::get_positional_args(args)
-        .iter()
-        .map(|v| v.to_display_string())
-        .collect();
+    let positional = VM::get_positional_args(args);
+    for arg in &positional {
+        if !arg.is_printable_type() {
+            return Err(format!("message(): {}", Object::NON_PRINTABLE_ERROR));
+        }
+    }
+    let parts: Vec<String> = positional.iter().map(|v| v.to_display_string()).collect();
     eprintln!("Message: {}", parts.join(" "));
     Ok(Object::None)
 }
@@ -669,19 +764,43 @@ fn builtin_shared_module(vm: &mut VM, args: &[CallArg]) -> Result<Object, String
 
 fn builtin_dependency(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
     let positional = VM::get_positional_args(args);
-    let name = positional
-        .first()
-        .and_then(|v| {
-            if let Object::String(s) = v {
-                Some(s.clone())
-            } else {
-                None
-            }
-        })
-        .unwrap_or_default();
 
-    // Threads is a virtual dependency - always succeeds
-    if name == "threads" {
+    // Check for disabler in positional args
+    if positional.iter().any(|a| matches!(a, Object::Disabler)) {
+        return Ok(Object::Disabler);
+    }
+
+    // Parse all positional string args as dependency names to try
+    let mut names: Vec<String> = Vec::new();
+    for arg in &positional {
+        if let Object::String(s) = arg {
+            if !s.is_empty() {
+                names.push(s.clone());
+            }
+        }
+    }
+    let name = names.first().cloned().unwrap_or_default();
+
+    let required_obj = VM::get_arg_value(args, "required");
+    let required = match required_obj {
+        Some(Object::Bool(b)) => *b,
+        Some(Object::Feature(FeatureState::Disabled)) => false,
+        Some(Object::Feature(FeatureState::Enabled)) => true,
+        Some(Object::Feature(FeatureState::Auto)) => false, // auto = don't hard-error
+        Some(Object::Disabler) => return Ok(Object::Disabler),
+        _ => true,
+    };
+
+    let is_feature_disabled = matches!(required_obj, Some(Object::Feature(FeatureState::Disabled)));
+
+    // Parse allow_fallback kwarg
+    let allow_fallback = match VM::get_arg_value(args, "allow_fallback") {
+        Some(Object::Bool(b)) => Some(*b),
+        _ => None,
+    };
+
+    // Threads is a virtual dependency - but respect required: disabled
+    if name == "threads" && !is_feature_disabled {
         return Ok(Object::Dependency(DependencyData {
             name: "threads".to_string(),
             found: true,
@@ -695,12 +814,6 @@ fn builtin_dependency(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
             is_internal: false,
         }));
     }
-    let required = match VM::get_arg_value(args, "required") {
-        Some(Object::Bool(b)) => *b,
-        Some(Object::Feature(FeatureState::Disabled)) => false,
-        Some(Object::Feature(FeatureState::Enabled)) => true,
-        _ => true,
-    };
 
     // Build cache key from name + method to avoid cross-method cache hits
     let method = VM::get_arg_str(args, "method", usize::MAX).unwrap_or("auto");
@@ -710,24 +823,473 @@ fn builtin_dependency(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         name.clone()
     };
 
-    // Check if already found
-    if let Some(dep) = vm.build_data.dependencies.get(&cache_key) {
-        return Ok(dep.clone());
+    // Parse fallback kwarg
+    let fallback_info = VM::get_arg_value(args, "fallback").and_then(|fallback| match fallback {
+        Object::Array(arr) => {
+            let sp = arr.first().map(|o| o.to_string_value()).unwrap_or_default();
+            let var = arr.get(1).map(|o| o.to_string_value());
+            if sp.is_empty() { None } else { Some((sp, var)) }
+        }
+        Object::String(s) if !s.is_empty() => Some((s.clone(), None)),
+        _ => None,
+    });
+
+    let has_fallback = fallback_info.is_some() || allow_fallback == Some(true);
+
+    // Parse version requirement for cache check
+    let version_req = VM::get_arg_str(args, "version", usize::MAX).unwrap_or("");
+
+    // Check if already found in cache - check all names
+    // Skip not-found cached deps when we have a fallback or allow_fallback available
+    for n in &names {
+        let ck = if method != "auto" {
+            format!("{}:{}", n, method)
+        } else {
+            n.clone()
+        };
+        if let Some(dep) = vm.build_data.dependencies.get(&ck) {
+            match dep {
+                Object::Dependency(d) if d.found => {
+                    // If a version requirement is specified, check it
+                    if !version_req.is_empty() && !d.version.is_empty() {
+                        if !crate::options::version_compare(&d.version, version_req) {
+                            // Version doesn't match - return not-found
+                            if !required {
+                                return Ok(Object::Dependency(DependencyData::not_found(&name)));
+                            }
+                            // With required=true, continue to try other methods
+                            continue;
+                        }
+                    }
+                    return Ok(dep.clone());
+                }
+                Object::Dependency(_) if !has_fallback && allow_fallback != Some(true) => {
+                    return Ok(dep.clone());
+                }
+                _ => {} // Skip not-found when fallback is available
+            }
+        }
     }
 
-    // Try to find the dependency
-    let dep = crate::dependencies::find_dependency(vm, &name, args);
+    // If disabled via feature, return not-found without trying
+    if is_feature_disabled {
+        let obj = Object::Dependency(DependencyData::not_found(&name));
+        vm.build_data.dependencies.insert(cache_key, obj.clone());
+        return Ok(obj);
+    }
 
-    if dep.is_none() && required {
+    // Check if fallback subproject is already loaded
+    let fallback_sp_already_loaded = fallback_info.as_ref().map_or(false, |(sp_name, _)| {
+        vm.build_data.subprojects.contains_key(sp_name)
+    });
+
+    let mut dep: Option<Object> = None;
+
+    // If fallback subproject is already loaded, use it directly (skip system search)
+    // If not, try system search first
+    if fallback_sp_already_loaded {
+        // Subproject already loaded - check if dep was overridden first
+        for n in &names {
+            if let Some(cached) = vm.build_data.dependencies.get(n) {
+                if matches!(cached, Object::Dependency(d) if d.found) {
+                    dep = Some(cached.clone());
+                    break;
+                }
+            }
+        }
+        // If not overridden, try its variable directly
+        if dep.is_none() {
+            let (sp_name, var_name) = fallback_info.as_ref().unwrap();
+            if let Some(Object::Subproject(sp_data)) = vm.build_data.subprojects.get(sp_name) {
+                if sp_data.found {
+                    let dep_var_name = var_name.clone().unwrap_or_else(|| format!("{}_dep", name));
+                    if let Some(dep_obj) = sp_data.variables.get(&dep_var_name) {
+                        match dep_obj {
+                            Object::Dependency(d) if d.found => {
+                                dep = Some(dep_obj.clone());
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // Try system search - try each name in order
+        for n in &names {
+            dep = crate::dependencies::find_dependency(vm, n, args);
+            let found = matches!(&dep, Some(Object::Dependency(d)) if d.found);
+            if found {
+                break;
+            }
+        }
+    }
+
+    // Check if the dep was found
+    let dep_found = match &dep {
+        Some(Object::Dependency(d)) => d.found,
+        Some(_) => true,
+        None => false,
+    };
+
+    // If not found and we have an explicit fallback that hasn't been loaded yet, try it
+    if !dep_found && !fallback_sp_already_loaded {
+        if let Some((sp_name, var_name)) = &fallback_info {
+            // Build args for subproject call, forwarding default_options
+            let mut sp_args = vec![CallArg {
+                name: None,
+                value: Object::String(sp_name.clone()),
+            }];
+            if let Some(default_opts) = VM::get_arg_value(args, "default_options") {
+                sp_args.push(CallArg {
+                    name: Some("default_options".to_string()),
+                    value: default_opts.clone(),
+                });
+            }
+            // required: false for subproject so we don't error on missing subprojects
+            sp_args.push(CallArg {
+                name: Some("required".to_string()),
+                value: Object::Bool(false),
+            });
+            match builtin_subproject(vm, &sp_args) {
+                Ok(Object::Subproject(ref sp_data)) if sp_data.found => {
+                    // Check if any of our dep names got overridden
+                    for n in &names {
+                        if let Some(cached) = vm.build_data.dependencies.get(n) {
+                            if matches!(cached, Object::Dependency(d) if d.found) {
+                                dep = Some(cached.clone());
+                                break;
+                            }
+                        }
+                    }
+                    // If still not found, try the variable
+                    if !matches!(&dep, Some(Object::Dependency(d)) if d.found) {
+                        let dep_var_name =
+                            var_name.clone().unwrap_or_else(|| format!("{}_dep", name));
+                        if let Some(dep_obj) = sp_data.variables.get(&dep_var_name) {
+                            match dep_obj {
+                                Object::Dependency(d) if d.found => {
+                                    dep = Some(dep_obj.clone());
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Auto-fallback: try implicit subproject fallback if no dep found yet
+    let dep_found_after_explicit = match &dep {
+        Some(Object::Dependency(d)) => d.found,
+        Some(_) => true,
+        None => false,
+    };
+
+    if !dep_found_after_explicit && !is_feature_disabled && allow_fallback != Some(false) {
+        // Helper: build subproject args with default_options and static forwarding
+        let build_sp_args = |sp_name: &str| -> Vec<CallArg> {
+            let mut sp_args = vec![
+                CallArg {
+                    name: None,
+                    value: Object::String(sp_name.to_string()),
+                },
+                CallArg {
+                    name: Some("required".to_string()),
+                    value: Object::Bool(false),
+                },
+            ];
+            // Forward default_options
+            let mut default_opts_strs = VM::get_arg_string_array(args, "default_options");
+            // Handle single string form
+            if default_opts_strs.is_empty() {
+                if let Some(Object::String(s)) = VM::get_arg_value(args, "default_options") {
+                    default_opts_strs.push(s.clone());
+                }
+            }
+            // If static: true, add default_library=static
+            if VM::get_arg_bool(args, "static", false) {
+                let has_default_library = default_opts_strs
+                    .iter()
+                    .any(|s| s.starts_with("default_library"));
+                if !has_default_library {
+                    default_opts_strs.push("default_library=static".to_string());
+                }
+            }
+            if !default_opts_strs.is_empty() {
+                sp_args.push(CallArg {
+                    name: Some("default_options".to_string()),
+                    value: Object::Array(
+                        default_opts_strs.into_iter().map(Object::String).collect(),
+                    ),
+                });
+            } else if let Some(Object::Dict(d)) = VM::get_arg_value(args, "default_options") {
+                sp_args.push(CallArg {
+                    name: Some("default_options".to_string()),
+                    value: Object::Dict(d.clone()),
+                });
+            }
+            sp_args
+        };
+
+        // Step 1: Try implicit fallback by subproject directory name matching a dep name
+        'implicit_dir: for n in &names {
+            let sp_dir = format!("{}/{}/{}", vm.top_source_root, vm.top_subproject_dir, n);
+            let sp_wrap = format!(
+                "{}/{}/{}.wrap",
+                vm.top_source_root, vm.top_subproject_dir, n
+            );
+            if Path::new(&format!("{}/meson.build", sp_dir)).exists()
+                || Path::new(&sp_wrap).exists()
+            {
+                // Check if already loaded
+                if let Some(Object::Subproject(sp_data)) = vm.build_data.subprojects.get(n) {
+                    if sp_data.found {
+                        // Check if any dep name was overridden
+                        for check_name in &names {
+                            if let Some(cached) = vm.build_data.dependencies.get(check_name) {
+                                if matches!(cached, Object::Dependency(d) if d.found) {
+                                    dep = Some(cached.clone());
+                                    break 'implicit_dir;
+                                }
+                            }
+                        }
+                        // Try default variable name
+                        let var_name = format!("{}_dep", n);
+                        if let Some(dep_obj) = sp_data.variables.get(&var_name) {
+                            if matches!(dep_obj, Object::Dependency(d) if d.found) {
+                                dep = Some(dep_obj.clone());
+                                break 'implicit_dir;
+                            }
+                        }
+                    }
+                } else {
+                    let sp_args = build_sp_args(n);
+                    if let Ok(Object::Subproject(sp_data)) = builtin_subproject(vm, &sp_args) {
+                        if sp_data.found {
+                            // Check if any dep name was overridden
+                            for check_name in &names {
+                                if let Some(cached) = vm.build_data.dependencies.get(check_name) {
+                                    if matches!(cached, Object::Dependency(d) if d.found) {
+                                        dep = Some(cached.clone());
+                                        break 'implicit_dir;
+                                    }
+                                }
+                            }
+                            // Try default variable name
+                            let var_name = format!("{}_dep", n);
+                            if let Some(dep_obj) = sp_data.variables.get(&var_name) {
+                                if matches!(dep_obj, Object::Dependency(d) if d.found) {
+                                    dep = Some(dep_obj.clone());
+                                    break 'implicit_dir;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 2: Scan wrap files for [provide] sections
+        if !matches!(&dep, Some(Object::Dependency(d)) if d.found) {
+            let sp_dir_path = format!("{}/{}", vm.top_source_root, vm.top_subproject_dir);
+
+            // Collect wrap files to scan (top-level and nested from loaded subprojects)
+            let mut wrap_files: Vec<std::path::PathBuf> = Vec::new();
+            if let Ok(entries) = std::fs::read_dir(&sp_dir_path) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) == Some("wrap") {
+                        wrap_files.push(path);
+                    } else if path.is_dir() {
+                        // Also scan nested subprojects for wraps (e.g. sub/subprojects/*.wrap)
+                        let nested_sp_dir = format!("{}/subprojects", path.display());
+                        if let Ok(nested_entries) = std::fs::read_dir(&nested_sp_dir) {
+                            for ne in nested_entries.flatten() {
+                                let np = ne.path();
+                                if np.extension().and_then(|e| e.to_str()) == Some("wrap") {
+                                    wrap_files.push(np);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            'wrap_scan: for wrap_path in &wrap_files {
+                if let Ok(content) = std::fs::read_to_string(wrap_path) {
+                    let mut in_provide = false;
+                    let mut provides_dep = false;
+                    let mut dep_var_name: Option<String> = None;
+                    for line in content.lines() {
+                        let trimmed = line.trim();
+                        if trimmed == "[provide]" {
+                            in_provide = true;
+                        } else if trimmed.starts_with('[') {
+                            in_provide = false;
+                        } else if in_provide {
+                            if let Some(eq) = trimmed.find('=') {
+                                let key = trimmed[..eq].trim();
+                                let val = trimmed[eq + 1..].trim();
+                                if key == "dependency_names" {
+                                    let deps: Vec<&str> =
+                                        val.split(',').map(|s| s.trim()).collect();
+                                    for n in &names {
+                                        if deps.contains(&n.as_str()) {
+                                            provides_dep = true;
+                                            break;
+                                        }
+                                    }
+                                } else {
+                                    for n in &names {
+                                        if key == n.as_str() {
+                                            provides_dep = true;
+                                            dep_var_name = Some(val.to_string());
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if provides_dep {
+                        let sp_name = wrap_path.file_stem().unwrap().to_string_lossy().to_string();
+
+                        // Check if subproject is already loaded
+                        if let Some(Object::Subproject(sp_data)) =
+                            vm.build_data.subprojects.get(&sp_name)
+                        {
+                            if sp_data.found {
+                                // Check if any dep name was overridden
+                                for n in &names {
+                                    if let Some(cached) = vm.build_data.dependencies.get(n) {
+                                        if matches!(cached, Object::Dependency(d) if d.found) {
+                                            dep = Some(cached.clone());
+                                            break 'wrap_scan;
+                                        }
+                                    }
+                                }
+                                // Try variable from wrap or default
+                                let var_name = dep_var_name
+                                    .clone()
+                                    .unwrap_or_else(|| format!("{}_dep", name));
+                                if let Some(dep_obj) = sp_data.variables.get(&var_name) {
+                                    if matches!(dep_obj, Object::Dependency(d) if d.found) {
+                                        dep = Some(dep_obj.clone());
+                                        break 'wrap_scan;
+                                    }
+                                }
+                            }
+                        } else {
+                            // Load subproject
+                            let sp_args = build_sp_args(&sp_name);
+                            if let Ok(Object::Subproject(sp_data)) =
+                                builtin_subproject(vm, &sp_args)
+                            {
+                                if sp_data.found {
+                                    // Check if any dep name was overridden
+                                    for n in &names {
+                                        if let Some(cached) = vm.build_data.dependencies.get(n) {
+                                            if matches!(cached, Object::Dependency(d) if d.found) {
+                                                dep = Some(cached.clone());
+                                                break 'wrap_scan;
+                                            }
+                                        }
+                                    }
+                                    // Try variable
+                                    let var_name = dep_var_name
+                                        .clone()
+                                        .unwrap_or_else(|| format!("{}_dep", name));
+                                    if let Some(dep_obj) = sp_data.variables.get(&var_name) {
+                                        if matches!(dep_obj, Object::Dependency(d) if d.found) {
+                                            dep = Some(dep_obj.clone());
+                                            break 'wrap_scan;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 3: Try nested subproject directories (sub-subprojects)
+        // Also handles deep nesting via builtin_subproject's recursive search
+        if !matches!(&dep, Some(Object::Dependency(d)) if d.found) {
+            'nested_scan: for n in &names {
+                // Just try loading the subproject - builtin_subproject will search
+                // nested locations recursively if needed
+                let already_loaded = vm.build_data.subprojects.contains_key(n);
+                if !already_loaded {
+                    let sp_args = build_sp_args(n);
+                    if let Ok(Object::Subproject(sp_data)) = builtin_subproject(vm, &sp_args) {
+                        if sp_data.found {
+                            // Check if any dep name was overridden
+                            for check_name in &names {
+                                if let Some(cached) = vm.build_data.dependencies.get(check_name) {
+                                    if matches!(cached, Object::Dependency(d) if d.found) {
+                                        dep = Some(cached.clone());
+                                        break 'nested_scan;
+                                    }
+                                }
+                            }
+                            // Try default variable name
+                            let var_name = format!("{}_dep", n);
+                            if let Some(dep_obj) = sp_data.variables.get(&var_name) {
+                                if matches!(dep_obj, Object::Dependency(d) if d.found) {
+                                    dep = Some(dep_obj.clone());
+                                    break 'nested_scan;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Final check
+    let dep_found_after = match &dep {
+        Some(Object::Dependency(d)) => d.found,
+        Some(_) => true,
+        None => false,
+    };
+
+    if !dep_found_after && required {
         return Err(format!("Dependency '{}' not found", name));
     }
 
     let obj = dep.unwrap_or_else(|| Object::Dependency(DependencyData::not_found(&name)));
-    vm.build_data.dependencies.insert(cache_key, obj.clone());
+
+    // Only cache found deps; not-found from system search should not be cached
+    // so that future calls with fallback can still try.
+    // Override deps are cached directly by meson.override_dependency().
+    let is_found = matches!(&obj, Object::Dependency(d) if d.found);
+    if is_found {
+        vm.build_data.dependencies.insert(cache_key, obj.clone());
+        // For multi-name deps, cache under all names so later lookups work
+        for n in &names {
+            if *n != name {
+                let ck = if method != "auto" {
+                    format!("{}:{}", n, method)
+                } else {
+                    n.clone()
+                };
+                vm.build_data
+                    .dependencies
+                    .entry(ck)
+                    .or_insert_with(|| obj.clone());
+            }
+        }
+    }
+
     Ok(obj)
 }
 
-fn builtin_declare_dependency(_vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
+fn builtin_declare_dependency(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
     let compile_args = VM::get_arg_string_array(args, "compile_args");
     let link_args = VM::get_arg_string_array(args, "link_args");
     let include_dirs_val = VM::get_arg_value(args, "include_directories");
@@ -743,8 +1305,14 @@ fn builtin_declare_dependency(_vm: &mut VM, args: &[CallArg]) -> Result<Object, 
     }
 
     let version = VM::get_arg_str(args, "version", usize::MAX)
-        .unwrap_or("")
-        .to_string();
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            // Default to project version when no version kwarg is given
+            vm.project
+                .as_ref()
+                .map(|p| p.version.clone())
+                .unwrap_or_default()
+        });
 
     let mut dependencies = Vec::new();
     if let Some(Object::Array(arr)) = VM::get_arg_value(args, "dependencies") {
@@ -793,70 +1361,239 @@ fn builtin_declare_dependency(_vm: &mut VM, args: &[CallArg]) -> Result<Object, 
     }))
 }
 
+/// Helper to check program version by running it with --version
+fn run_program_version(path: &str) -> Option<std::process::Output> {
+    // Try running directly first
+    let output = Command::new(path).arg("--version").output();
+    match output {
+        Ok(o) if o.status.success() => Some(o),
+        _ if path.ends_with(".py") => {
+            // If direct execution fails and it's a .py script, try with python3
+            Command::new("python3")
+                .arg(path)
+                .arg("--version")
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+        }
+        _ => None,
+    }
+}
+
+fn extract_version_from_output(output: &std::process::Output) -> Option<String> {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        for word in line.split_whitespace() {
+            let clean = word.trim_matches(|c: char| !c.is_ascii_digit() && c != '.');
+            if !clean.is_empty() && clean.contains('.') {
+                return Some(clean.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn check_program_version(path: &str, version_req: &str) -> Option<String> {
+    if version_req.is_empty() {
+        return Some(String::new());
+    }
+
+    let output = run_program_version(path)?;
+    let detected = extract_version_from_output(&output);
+
+    match detected {
+        Some(ver) if crate::options::version_compare(&ver, version_req) => Some(ver),
+        _ => None,
+    }
+}
+
 fn builtin_find_program(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
     let positional = VM::get_positional_args(args);
-    let required = match VM::get_arg_value(args, "required") {
+    let required_obj = VM::get_arg_value(args, "required");
+    let is_feature_disabled = matches!(required_obj, Some(Object::Feature(FeatureState::Disabled)));
+    let required = match required_obj {
         Some(Object::Bool(b)) => *b,
         Some(Object::Feature(FeatureState::Disabled)) => false,
+        Some(Object::Feature(FeatureState::Enabled)) => true,
         _ => true,
     };
-    let native = VM::get_arg_bool(args, "native", false);
-    let _version = VM::get_arg_str(args, "version", usize::MAX);
+
+    // If disabled via feature, return not-found without searching
+    if is_feature_disabled {
+        let name = positional
+            .first()
+            .map(|v| v.to_string_value())
+            .unwrap_or_else(|| "unknown".to_string());
+        return Ok(Object::ExternalProgram(ExternalProgramData {
+            name,
+            path: String::new(),
+            found: false,
+            version: None,
+        }));
+    }
+
+    let _native = VM::get_arg_bool(args, "native", false);
+    let version_req = VM::get_arg_str(args, "version", usize::MAX).unwrap_or("");
     let dirs = VM::get_arg_string_array(args, "dirs");
 
+    // Flatten positional args into a list of names to try
+    let mut names_to_try: Vec<String> = Vec::new();
     for arg in &positional {
-        if let Object::String(name) = arg {
-            // Search in specified dirs first
-            for dir in &dirs {
-                let path = format!("{}/{}", dir, name);
-                if Path::new(&path).exists() {
-                    return Ok(Object::ExternalProgram(ExternalProgramData {
-                        name: name.clone(),
-                        path,
-                        found: true,
-                        version: None,
-                    }));
+        match *arg {
+            Object::String(s) => names_to_try.push(s.clone()),
+            Object::Array(arr) => {
+                for item in arr {
+                    match item {
+                        Object::String(s) => names_to_try.push(s.clone()),
+                        Object::File(f) => names_to_try.push(f.path.clone()),
+                        _ => {}
+                    }
                 }
             }
-            // Search in source tree
-            let src_path = if vm.current_subdir.is_empty() {
-                format!("{}/{}", vm.source_root, name)
-            } else {
-                format!("{}/{}/{}", vm.source_root, vm.current_subdir, name)
-            };
-            if Path::new(&src_path).exists() {
-                return Ok(Object::ExternalProgram(ExternalProgramData {
-                    name: name.clone(),
-                    path: src_path,
-                    found: true,
-                    version: None,
-                }));
+            Object::File(f) => names_to_try.push(f.path.clone()),
+            Object::ExternalProgram(p) => {
+                if p.found {
+                    return Ok(Object::ExternalProgram(p.clone()));
+                }
+                names_to_try.push(p.name.clone());
             }
-            // Search on PATH
-            if let Ok(output) = Command::new("which").arg(name).output() {
-                if output.status.success() {
-                    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    return Ok(Object::ExternalProgram(ExternalProgramData {
-                        name: name.clone(),
-                        path,
-                        found: true,
-                        version: None,
-                    }));
+            _ => names_to_try.push(arg.to_display_string()),
+        }
+    }
+
+    for name in &names_to_try {
+        // Check overrides first
+        if let Some(prog) = vm.build_data.find_program_overrides.get(name) {
+            return Ok(prog.clone());
+        }
+
+        // Collect candidate paths
+        let mut candidates: Vec<String> = Vec::new();
+
+        // Search in specified dirs first
+        for dir in &dirs {
+            let path = format!("{}/{}", dir, name);
+            if Path::new(&path).exists() {
+                candidates.push(path);
+            }
+        }
+        // Search in source tree
+        let src_path = if vm.current_subdir.is_empty() {
+            format!("{}/{}", vm.source_root, name)
+        } else {
+            format!("{}/{}/{}", vm.source_root, vm.current_subdir, name)
+        };
+        if Path::new(&src_path).exists() {
+            candidates.push(src_path);
+        }
+        // Also search source root directly (not just current subdir)
+        if !vm.current_subdir.is_empty() {
+            let root_path = format!("{}/{}", vm.source_root, name);
+            if Path::new(&root_path).exists() {
+                candidates.push(root_path);
+            }
+        }
+        // Search on PATH manually
+        if let Ok(path_env) = std::env::var("PATH") {
+            for dir in path_env.split(':') {
+                let full_path = format!("{}/{}", dir, name);
+                if Path::new(&full_path).exists() {
+                    candidates.push(full_path);
                 }
             }
-        } else if let Object::ExternalProgram(p) = *arg {
-            if p.found {
-                return Ok(Object::ExternalProgram(p.clone()));
+        }
+
+        // Try each candidate, checking version if required
+        for candidate_path in candidates {
+            if !version_req.is_empty() {
+                if let Some(detected_ver) = check_program_version(&candidate_path, version_req) {
+                    return Ok(Object::ExternalProgram(ExternalProgramData {
+                        name: name.clone(),
+                        path: candidate_path,
+                        found: true,
+                        version: Some(detected_ver),
+                    }));
+                }
+                // Version didn't match, try next candidate
+                continue;
+            }
+            // No version requirement - still try to detect version
+            let detected_version =
+                run_program_version(&candidate_path).and_then(|o| extract_version_from_output(&o));
+            return Ok(Object::ExternalProgram(ExternalProgramData {
+                name: name.clone(),
+                path: candidate_path,
+                found: true,
+                version: detected_version,
+            }));
+        }
+    }
+
+    // Auto-load subproject from wrap files with [provide] program_names
+    {
+        let subproject_dir_path = format!("{}/{}", vm.top_source_root, vm.top_subproject_dir);
+        if let Ok(entries) = std::fs::read_dir(&subproject_dir_path) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("wrap") {
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        let mut in_provide = false;
+                        for line in content.lines() {
+                            let trimmed = line.trim();
+                            if trimmed == "[provide]" {
+                                in_provide = true;
+                            } else if trimmed.starts_with('[') {
+                                in_provide = false;
+                            } else if in_provide {
+                                if let Some(eq) = trimmed.find('=') {
+                                    let key = trimmed[..eq].trim();
+                                    let val = trimmed[eq + 1..].trim();
+                                    if key == "program_names" {
+                                        let programs: Vec<&str> =
+                                            val.split(',').map(|s| s.trim()).collect();
+                                        for try_name in &names_to_try {
+                                            if programs.contains(&try_name.as_str()) {
+                                                let sp_name = path
+                                                    .file_stem()
+                                                    .unwrap()
+                                                    .to_string_lossy()
+                                                    .to_string();
+                                                let sp_args = vec![
+                                                    CallArg {
+                                                        name: None,
+                                                        value: Object::String(sp_name),
+                                                    },
+                                                    CallArg {
+                                                        name: Some("required".to_string()),
+                                                        value: Object::Bool(false),
+                                                    },
+                                                ];
+                                                let _ = builtin_subproject(vm, &sp_args);
+                                                if let Some(prog) = vm
+                                                    .build_data
+                                                    .find_program_overrides
+                                                    .get(try_name)
+                                                {
+                                                    return Ok(prog.clone());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
-    let name = positional
+    let name = names_to_try
         .first()
-        .map(|v| v.to_display_string())
+        .cloned()
         .unwrap_or_else(|| "unknown".to_string());
 
-    if required && !native {
+    if required {
         return Err(format!("Program '{}' not found", name));
     }
 
@@ -1519,45 +2256,318 @@ fn builtin_subproject(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         return Ok(sp.clone());
     }
 
-    let subproject_dir = vm
-        .project
-        .as_ref()
-        .map(|p| p.subproject_dir.clone())
-        .unwrap_or_else(|| "subprojects".to_string());
-
-    let subproject_path = format!("{}/{}/{}", vm.source_root, subproject_dir, name);
+    // Always resolve subprojects relative to the top-level source root
+    let subproject_dir = vm.top_subproject_dir.clone();
+    let subproject_path = format!("{}/{}/{}", vm.top_source_root, subproject_dir, name);
     let build_file = format!("{}/meson.build", subproject_path);
+
+    // Track the actual subproject path (may differ from default if found in nested location)
+    let mut subproject_path = subproject_path;
+    let mut build_file = build_file;
 
     if !Path::new(&build_file).exists() {
         // Try to download via wrap
-        let wrap_file = format!("{}/{}/{}.wrap", vm.source_root, subproject_dir, name);
+        let wrap_file = format!("{}/{}/{}.wrap", vm.top_source_root, subproject_dir, name);
         if Path::new(&wrap_file).exists() {
             crate::wrap::download_wrap(&wrap_file, &subproject_path)?;
-        } else if required {
-            return Err(format!("Subproject '{}' not found", name));
+            // Check if wrap file specifies a different directory name
+            if !Path::new(&build_file).exists() {
+                if let Ok(wrap_content) = std::fs::read_to_string(&wrap_file) {
+                    if let Some(dir_name) = wrap_content
+                        .lines()
+                        .find(|l| l.trim().starts_with("directory"))
+                        .and_then(|l| l.find('=').map(|i| l[i + 1..].trim().to_string()))
+                    {
+                        let alt_path =
+                            format!("{}/{}/{}", vm.top_source_root, subproject_dir, dir_name);
+                        let alt_build = format!("{}/meson.build", alt_path);
+                        if Path::new(&alt_build).exists() {
+                            subproject_path = alt_path;
+                            build_file = alt_build;
+                        }
+                    }
+                }
+            }
         } else {
-            let sp = Object::Subproject(SubprojectData {
-                name: name.clone(),
-                version: String::new(),
-                found: false,
-                variables: HashMap::new(),
-            });
-            vm.build_data.subprojects.insert(name, sp.clone());
-            return Ok(sp);
+            // Try to find in nested subproject directories (sub-subprojects)
+            // Recursively search subprojects/*/subprojects/... for the subproject
+            let mut found_nested = false;
+            fn find_nested_subproject(
+                base: &str,
+                name: &str,
+                depth: u32,
+            ) -> Option<(String, String)> {
+                if depth > 5 {
+                    return None;
+                }
+                if let Ok(entries) = std::fs::read_dir(base) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        if p.is_dir() {
+                            // Check for direct meson.build
+                            let nested = format!("{}/subprojects/{}", p.display(), name);
+                            let nested_build = format!("{}/meson.build", nested);
+                            if Path::new(&nested_build).exists() {
+                                return Some((nested, nested_build));
+                            }
+                            // Check for wrap file
+                            let nested_wrap = format!("{}/subprojects/{}.wrap", p.display(), name);
+                            if Path::new(&nested_wrap).exists() {
+                                // Read wrap to check for directory key
+                                let wrap_dir_name =
+                                    std::fs::read_to_string(&nested_wrap).ok().and_then(|c| {
+                                        c.lines()
+                                            .find(|l| l.trim().starts_with("directory"))
+                                            .and_then(|l| {
+                                                l.find('=').map(|i| l[i + 1..].trim().to_string())
+                                            })
+                                    });
+                                let sp_dir_name = wrap_dir_name.as_deref().unwrap_or(name);
+                                let nested_sp =
+                                    format!("{}/subprojects/{}", p.display(), sp_dir_name);
+                                // Also pass the non-directory path for download
+                                let download_dest = format!("{}/subprojects/{}", p.display(), name);
+                                let _ = crate::wrap::download_wrap(&nested_wrap, &download_dest);
+                                let nb = format!("{}/meson.build", nested_sp);
+                                if Path::new(&nb).exists() {
+                                    return Some((nested_sp, nb));
+                                }
+                            }
+                            // Recurse into this directory's subprojects
+                            let sub_sp = format!("{}/subprojects", p.display());
+                            if Path::new(&sub_sp).is_dir() {
+                                if let Some(found) =
+                                    find_nested_subproject(&sub_sp, name, depth + 1)
+                                {
+                                    return Some(found);
+                                }
+                            }
+                        }
+                    }
+                }
+                None
+            }
+            let sp_base = format!("{}/{}", vm.top_source_root, subproject_dir);
+            if let Some((nested_path, nested_build_file)) =
+                find_nested_subproject(&sp_base, &name, 0)
+            {
+                subproject_path = nested_path;
+                build_file = nested_build_file;
+                found_nested = true;
+            }
+            if !found_nested {
+                if required {
+                    return Err(format!("Subproject '{}' not found", name));
+                } else {
+                    let sp = Object::Subproject(SubprojectData {
+                        name: name.clone(),
+                        version: String::new(),
+                        found: false,
+                        variables: HashMap::new(),
+                    });
+                    vm.build_data.subprojects.insert(name, sp.clone());
+                    return Ok(sp);
+                }
+            }
         }
     }
 
     // Save and set up subproject state
     let old_subdir = vm.current_subdir.clone();
     let old_source = vm.source_root.clone();
+    let old_build = vm.build_root.clone();
     let old_project = vm.project.clone();
     let old_vars = vm.variables.clone();
     let old_is_subproject = vm.is_subproject;
+    let old_options = vm.options.clone();
+    let old_caller_option_keys = vm.caller_option_keys.clone();
 
     vm.source_root = subproject_path;
+    vm.build_root = format!("{}/{}/{}", vm.top_build_root, subproject_dir, name);
     vm.current_subdir = String::new();
     vm.variables = HashMap::new();
     vm.is_subproject = true;
+
+    // Initialize subproject options: start fresh but inherit known built-in/base options.
+    // This prevents parent project-specific options from leaking into the subproject.
+    {
+        let mut new_options = HashMap::new();
+        let builtin_options = [
+            "prefix",
+            "bindir",
+            "libdir",
+            "libexecdir",
+            "includedir",
+            "datadir",
+            "mandir",
+            "infodir",
+            "localedir",
+            "sysconfdir",
+            "localstatedir",
+            "sharedstatedir",
+            "sbindir",
+            "buildtype",
+            "debug",
+            "optimization",
+            "warning_level",
+            "werror",
+            "default_library",
+            "strip",
+            "unity",
+            "unity_size",
+            "layout",
+            "wrap_mode",
+            "pkg_config_path",
+            "cmake_prefix_path",
+            "auto_features",
+            "backend",
+            "install_umask",
+            "stdsplit",
+            "errorlogs",
+        ];
+        // Keep built-in options
+        for key in &builtin_options {
+            if let Some(val) = vm.options.get(*key) {
+                new_options.insert(key.to_string(), val.clone());
+            }
+        }
+        // Keep base options (b_*)
+        for (k, v) in &vm.options {
+            if k.starts_with("b_") {
+                new_options.insert(k.clone(), v.clone());
+            }
+        }
+        // Keep prefixed options destined for deeper subprojects
+        let prefix_check = format!("{}:", name);
+        for (k, v) in &vm.options {
+            if k.starts_with(&prefix_check) {
+                new_options.insert(k.clone(), v.clone());
+            }
+        }
+        vm.options = new_options;
+    }
+
+    // Load subproject options
+    let opts_file = format!("{}/meson_options.txt", vm.source_root);
+    let opts_file2 = format!("{}/meson.options", vm.source_root);
+    let opts_source = if Path::new(&opts_file2).exists() {
+        std::fs::read_to_string(&opts_file2).ok()
+    } else if Path::new(&opts_file).exists() {
+        std::fs::read_to_string(&opts_file).ok()
+    } else {
+        None
+    };
+    if let Some(src) = opts_source {
+        crate::options::parse_options_file(&src, &mut vm.options);
+    }
+
+    // Apply parent options for this subproject (e.g., "subproject_name:opt=val")
+    let prefix = format!("{}:", name);
+    let parent_opts: Vec<(String, Object)> = old_project
+        .as_ref()
+        .map(|p| {
+            p.default_options
+                .iter()
+                .filter_map(|opt_str| {
+                    if let Some(eq_pos) = opt_str.find('=') {
+                        let key = opt_str[..eq_pos].trim();
+                        if key.starts_with(&prefix) {
+                            let sub_key = key[prefix.len()..].to_string();
+                            let val = opt_str[eq_pos + 1..].trim();
+                            Some((sub_key, crate::options::parse_option_value(val)))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    for (key, val) in parent_opts {
+        vm.options.insert(key, val);
+    }
+
+    // Also extract prefixed options from the parent's vm.options
+    // (for options passed via subproject() kwargs to nested subprojects)
+    let prefixed_from_parent: Vec<(String, Object)> = old_options
+        .iter()
+        .filter_map(|(k, v)| {
+            if k.starts_with(&prefix) {
+                Some((k[prefix.len()..].to_string(), v.clone()))
+            } else {
+                None
+            }
+        })
+        .collect();
+    for (key, val) in prefixed_from_parent {
+        vm.options.insert(key, val);
+    }
+
+    // Apply default_options from subproject() call kwargs
+    let mut sub_default_options = VM::get_arg_string_array(args, "default_options");
+    // Also handle single string form (e.g., subproject('x', default_options: 'opt=val'))
+    if sub_default_options.is_empty() {
+        if let Some(Object::String(s)) = VM::get_arg_value(args, "default_options") {
+            sub_default_options.push(s.clone());
+        }
+    }
+    for opt_str in &sub_default_options {
+        if let Some(eq_pos) = opt_str.find('=') {
+            let key = opt_str[..eq_pos].trim().to_string();
+            let val = opt_str[eq_pos + 1..].trim();
+            let obj = crate::options::parse_option_value(val);
+            vm.options.insert(key, obj);
+        }
+    }
+    // Also handle dict form for subproject() kwargs
+    if sub_default_options.is_empty() {
+        if let Some(Object::Dict(entries)) = VM::get_arg_value(args, "default_options") {
+            for (k, v) in entries {
+                let val_str = match v {
+                    Object::Bool(b) => b.to_string(),
+                    Object::Int(n) => n.to_string(),
+                    Object::String(s) => s.clone(),
+                    other => other.to_display_string(),
+                };
+                vm.options
+                    .insert(k.clone(), crate::options::parse_option_value(&val_str));
+            }
+        }
+    }
+
+    // Build the set of option keys explicitly set by the caller (parent prefixed + subproject() kwargs).
+    // These should NOT be overridden by the subproject's own project() default_options.
+    {
+        let mut caller_keys = std::collections::HashSet::new();
+        // Keys from parent prefixed options (e.g., "sub:opt=val" in parent's default_options)
+        if let Some(ref proj) = old_project {
+            for opt_str in &proj.default_options {
+                if let Some(eq_pos) = opt_str.find('=') {
+                    let key = opt_str[..eq_pos].trim();
+                    if key.starts_with(&prefix) {
+                        caller_keys.insert(key[prefix.len()..].to_string());
+                    }
+                }
+            }
+        }
+        // Keys from parent's vm.options that were prefixed for this subproject
+        for k in old_options.keys() {
+            if k.starts_with(&prefix) {
+                caller_keys.insert(k[prefix.len()..].to_string());
+            }
+        }
+        // Keys from subproject() call kwargs default_options
+        for opt_str in &sub_default_options {
+            if let Some(eq_pos) = opt_str.find('=') {
+                let key = opt_str[..eq_pos].trim().to_string();
+                caller_keys.insert(key);
+            }
+        }
+        vm.caller_option_keys = caller_keys;
+    }
 
     // Re-register builtins in new scope
     crate::builtins::functions::register(vm);
@@ -1570,17 +2580,38 @@ fn builtin_subproject(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
     let program = parser.parse()?;
     let mut compiler_obj = crate::compiler::Compiler::new();
     compiler_obj.compile(&program)?;
-    vm.execute(&compiler_obj.chunk)?;
+    let exec_result = vm.execute(&compiler_obj.chunk);
 
     let sp_project = vm.project.clone();
     let sp_vars = vm.variables.clone();
 
-    // Restore
+    // Restore state regardless of success/failure
     vm.current_subdir = old_subdir;
     vm.source_root = old_source;
+    vm.build_root = old_build;
     vm.project = old_project;
     vm.variables = old_vars;
     vm.is_subproject = old_is_subproject;
+    vm.options = old_options;
+    vm.caller_option_keys = old_caller_option_keys;
+
+    // Re-register builtins for the parent scope
+    crate::builtins::functions::register(vm);
+
+    // Handle execution failure
+    if let Err(e) = exec_result {
+        if required {
+            return Err(format!("Subproject '{}' failed: {}", name, e));
+        }
+        let sp = Object::Subproject(SubprojectData {
+            name: name.clone(),
+            version: String::new(),
+            found: false,
+            variables: HashMap::new(),
+        });
+        vm.build_data.subprojects.insert(name, sp.clone());
+        return Ok(sp);
+    }
 
     let sp = Object::Subproject(SubprojectData {
         name: name.clone(),
@@ -1755,7 +2786,70 @@ fn builtin_import(_vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
             }
         })
         .ok_or("import() requires module name")?;
-    Ok(Object::Module(name))
+
+    let required = VM::get_arg_bool(args, "required", true);
+
+    // Known stabilized modules (can be imported directly without unstable- prefix)
+    const STABILIZED_MODULES: &[&str] = &[
+        "python",
+        "python3",
+        "java",
+        "keyval",
+        "i18n",
+        "gnome",
+        "pkgconfig",
+        "windows",
+        "cmake",
+        "qt4",
+        "qt5",
+        "qt6",
+        "sourceset",
+        "fs",
+        "dlang",
+        "cuda",
+        "rust",
+        "hotdoc",
+        "wayland",
+        "external_project",
+    ];
+
+    // Known unstable-only modules (must be imported with unstable- prefix)
+    const UNSTABLE_ONLY_MODULES: &[&str] = &["icestorm", "simd"];
+
+    // Normalize: handle unstable_ (underscore) -> unstable- (dash)
+    let normalized = if name.starts_with("unstable_") {
+        format!("unstable-{}", &name["unstable_".len()..])
+    } else {
+        name.clone()
+    };
+
+    // Resolve the canonical module name
+    let canonical = if let Some(base) = normalized.strip_prefix("unstable-") {
+        // unstable- prefix: check if the base module is known (either stabilized or unstable-only)
+        if STABILIZED_MODULES.contains(&base) || UNSTABLE_ONLY_MODULES.contains(&base) {
+            Some(base.to_string())
+        } else {
+            None
+        }
+    } else if STABILIZED_MODULES.contains(&normalized.as_str()) {
+        // Direct import of a stabilized module
+        Some(normalized.clone())
+    } else {
+        // Not a known module (could be unstable-only without prefix -> invalid)
+        None
+    };
+
+    match canonical {
+        Some(resolved) => Ok(Object::Module(resolved)),
+        None => {
+            if required {
+                Err(format!("Module '{}' not found", name))
+            } else {
+                // Return a not-found module (empty name signals not-found)
+                Ok(Object::Module(String::new()))
+            }
+        }
+    }
 }
 
 fn builtin_files(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
@@ -1830,6 +2924,20 @@ fn builtin_get_option(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
     }
 
     if let Some(val) = vm.options.get(&name) {
+        // Apply auto_features override for feature options with Auto value
+        if let Object::Feature(FeatureState::Auto) = val {
+            if let Some(auto_feat) = vm.options.get("auto_features") {
+                match auto_feat {
+                    Object::Feature(FeatureState::Disabled) => {
+                        return Ok(Object::Feature(FeatureState::Disabled));
+                    }
+                    Object::Feature(FeatureState::Enabled) => {
+                        return Ok(Object::Feature(FeatureState::Enabled));
+                    }
+                    _ => {}
+                }
+            }
+        }
         return Ok(val.clone());
     }
 
@@ -1874,9 +2982,18 @@ fn builtin_get_option(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         "install_umask" => Ok(Object::String("0022".to_string())),
         "stdsplit" => Ok(Object::Bool(true)),
         "errorlogs" => Ok(Object::Bool(true)),
+        "c_args" | "cpp_args" | "c_link_args" | "cpp_link_args" | "rust_args" | "objc_args"
+        | "objcpp_args" => Ok(Object::Array(Vec::new())),
+        "c_std" | "cpp_std" => Ok(Object::String("none".to_string())),
+        "cpp_eh" => Ok(Object::String("default".to_string())),
+        "cpp_rtti" => Ok(Object::Bool(true)),
         _ => {
-            // Check for feature options — default to auto
-            Ok(Object::Feature(FeatureState::Auto))
+            // For unknown options in subprojects, check if auto_features applies
+            if let Some(auto_feat) = vm.options.get("auto_features") {
+                Ok(auto_feat.clone())
+            } else {
+                Ok(Object::Feature(FeatureState::Auto))
+            }
         }
     }
 }
@@ -2073,18 +3190,34 @@ fn builtin_add_global_link_arguments(_vm: &mut VM, _args: &[CallArg]) -> Result<
 
 fn builtin_add_languages(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
     let positional = VM::get_positional_args(args);
-    let required = VM::get_arg_bool(args, "required", true);
+    let required_obj = VM::get_arg_value(args, "required");
+    let is_feature_disabled = matches!(required_obj, Some(Object::Feature(FeatureState::Disabled)));
+    let required = match required_obj {
+        Some(Object::Bool(b)) => *b,
+        Some(Object::Feature(FeatureState::Disabled)) => false,
+        Some(Object::Feature(FeatureState::Enabled)) => true,
+        _ => true,
+    };
     let _native = VM::get_arg_bool(args, "native", false);
 
+    // If disabled via feature, skip detection entirely
+    if is_feature_disabled {
+        return Ok(Object::Bool(false));
+    }
+
+    let mut all_found = true;
     for arg in &positional {
         if let Object::String(lang) = arg {
             let found = crate::compilers::detect_compiler(vm, lang);
-            if !found && required {
-                return Err(format!("Language '{}' not found", lang));
+            if !found {
+                if required {
+                    return Err(format!("No compiler for language '{}'", lang));
+                }
+                all_found = false;
             }
         }
     }
-    Ok(Object::Bool(true))
+    Ok(Object::Bool(all_found))
 }
 
 fn builtin_add_test_setup(_vm: &mut VM, _args: &[CallArg]) -> Result<Object, String> {

@@ -249,6 +249,8 @@ pub fn register(vm: &mut VM) {
         .insert(("env".to_string(), "prepend".to_string()), env_prepend);
     vm.method_registry
         .insert(("env".to_string(), "append".to_string()), env_append);
+    vm.method_registry
+        .insert(("env".to_string(), "unset".to_string()), env_unset);
 
     // Meson object methods
     vm.method_registry
@@ -271,7 +273,7 @@ pub fn register(vm: &mut VM) {
     );
     vm.method_registry.insert(
         ("meson".to_string(), "source_root".to_string()),
-        meson_source_root,
+        meson_global_source_root,
     );
     vm.method_registry.insert(
         ("meson".to_string(), "project_source_root".to_string()),
@@ -279,11 +281,11 @@ pub fn register(vm: &mut VM) {
     );
     vm.method_registry.insert(
         ("meson".to_string(), "global_source_root".to_string()),
-        meson_source_root,
+        meson_global_source_root,
     );
     vm.method_registry.insert(
         ("meson".to_string(), "build_root".to_string()),
-        meson_build_root,
+        meson_global_build_root,
     );
     vm.method_registry.insert(
         ("meson".to_string(), "project_build_root".to_string()),
@@ -291,7 +293,7 @@ pub fn register(vm: &mut VM) {
     );
     vm.method_registry.insert(
         ("meson".to_string(), "global_build_root".to_string()),
-        meson_build_root,
+        meson_global_build_root,
     );
     vm.method_registry.insert(
         ("meson".to_string(), "current_source_dir".to_string()),
@@ -454,6 +456,41 @@ pub fn register(vm: &mut VM) {
     crate::modules::register_methods(vm);
 }
 
+// ---- Required feature check helper ----
+
+/// Check the `required` kwarg and wrap a boolean check result accordingly.
+/// - Feature(Disabled): return Ok(Bool(false)) without running the check
+/// - Feature(Enabled) + failed: return Err
+/// - Bool(true) + failed: return Err
+/// - otherwise: return Ok(Bool(result))
+///
+/// Returns Some(result) if handled early (disabled), None if the check should proceed.
+fn check_required_disabled(args: &[CallArg], method_name: &str) -> Option<Result<Object, String>> {
+    let required = VM::get_arg_value(args, "required");
+    match required {
+        Some(Object::Feature(FeatureState::Disabled)) => Some(Ok(Object::Bool(false))),
+        Some(Object::Bool(_)) | Some(Object::Feature(_)) | None => None,
+        Some(other) => Some(Err(format!(
+            "{} keyword argument 'required' was of type {} but should have been one of: bool, UserFeatureOption",
+            method_name,
+            other.type_name()
+        ))),
+    }
+}
+
+fn check_required_result(
+    args: &[CallArg],
+    result: bool,
+    error_msg: &str,
+) -> Result<Object, String> {
+    let required = VM::get_arg_value(args, "required");
+    match required {
+        Some(Object::Feature(FeatureState::Enabled)) if !result => Err(error_msg.to_string()),
+        Some(Object::Bool(true)) if !result => Err(error_msg.to_string()),
+        _ => Ok(Object::Bool(result)),
+    }
+}
+
 // ---- String methods ----
 
 fn str_contains(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
@@ -580,8 +617,35 @@ fn str_split(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, Str
 
 fn str_splitlines(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
     let s = obj.to_string_value();
-    let parts: Vec<Object> = s.lines().map(|l| Object::String(l.to_string())).collect();
-    Ok(Object::Array(parts))
+    // Custom splitlines that handles \r\n, \r, and \n as line separators
+    // (Rust's str::lines() does not treat lone \r as a separator)
+    // Trailing line separator does not produce an extra empty line.
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\r' {
+            lines.push(Object::String(std::mem::take(&mut current)));
+            // Consume \r\n as a single separator
+            if i + 1 < bytes.len() && bytes[i + 1] == b'\n' {
+                i += 2;
+            } else {
+                i += 1;
+            }
+        } else if bytes[i] == b'\n' {
+            lines.push(Object::String(std::mem::take(&mut current)));
+            i += 1;
+        } else {
+            current.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    // Only add the last segment if it's non-empty (trailing separator doesn't add empty line)
+    if !current.is_empty() {
+        lines.push(Object::String(current));
+    }
+    Ok(Object::Array(lines))
 }
 
 fn str_strip(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
@@ -633,42 +697,54 @@ fn str_underscorify(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Obj
 
 fn str_version_compare(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     let version = obj.to_string_value();
-    let constraint = VM::get_positional_args(args)
-        .first()
-        .map(|v| v.to_string_value())
-        .unwrap_or_default();
-    Ok(Object::Bool(crate::options::version_compare(
-        &version,
-        &constraint,
-    )))
+    let positional = VM::get_positional_args(args);
+    let result = positional
+        .iter()
+        .all(|constraint| crate::options::version_compare(&version, &constraint.to_string_value()));
+    Ok(Object::Bool(result))
 }
 
 fn str_substring(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     let s = obj.to_string_value();
+    let chars: Vec<char> = s.chars().collect();
+    let len = chars.len() as i64;
     let positional = VM::get_positional_args(args);
-    let start = positional
+    let start_raw = positional
         .first()
         .and_then(|v| {
             if let Object::Int(n) = v {
-                Some(*n as usize)
+                Some(*n)
             } else {
                 None
             }
         })
         .unwrap_or(0);
-    let end = positional
+    let end_raw = positional
         .get(1)
         .and_then(|v| {
             if let Object::Int(n) = v {
-                Some(*n as usize)
+                Some(*n)
             } else {
                 None
             }
         })
-        .unwrap_or(s.len());
-    let start = start.min(s.len());
-    let end = end.min(s.len());
-    Ok(Object::String(s[start..end].to_string()))
+        .unwrap_or(len);
+    // Handle negative indices
+    let start = if start_raw < 0 {
+        (len + start_raw).max(0)
+    } else {
+        start_raw.min(len)
+    } as usize;
+    let end = if end_raw < 0 {
+        (len + end_raw).max(0)
+    } else {
+        end_raw.min(len)
+    } as usize;
+    if start >= end {
+        Ok(Object::String(String::new()))
+    } else {
+        Ok(Object::String(chars[start..end].iter().collect()))
+    }
 }
 
 fn str_length(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
@@ -1398,14 +1474,26 @@ fn program_version(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Obje
 
 fn cfg_set(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     let positional = VM::get_positional_args(args);
-    let key = positional
-        .first()
-        .map(|v| v.to_string_value())
-        .unwrap_or_default();
-    let value = positional
-        .get(1)
-        .map(|v| (*v).clone())
-        .unwrap_or(Object::None);
+    // Deprecated: conf.set(['key', 'value']) - first arg is an array to be flattened
+    let (key, value) = if positional.len() == 1 {
+        if let Object::Array(arr) = positional[0] {
+            let k = arr.first().map(|v| v.to_string_value()).unwrap_or_default();
+            let v = arr.get(1).cloned().unwrap_or(Object::None);
+            (k, v)
+        } else {
+            (positional[0].to_string_value(), Object::None)
+        }
+    } else {
+        let k = positional
+            .first()
+            .map(|v| v.to_string_value())
+            .unwrap_or_default();
+        let v = positional
+            .get(1)
+            .map(|v| (*v).clone())
+            .unwrap_or(Object::None);
+        (k, v)
+    };
     let description = VM::get_arg_str(args, "description", usize::MAX).map(String::from);
 
     if let Object::ConfigurationData(data) = obj {
@@ -1551,6 +1639,18 @@ fn env_set(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, Strin
             .get(1)
             .map(|v| v.to_string_value())
             .unwrap_or_default();
+        // Check if the variable was previously unset
+        let values = env.values.borrow();
+        let was_unset = values
+            .iter()
+            .any(|(k, op)| k == &key && matches!(op, EnvOp::Unset));
+        drop(values);
+        if was_unset {
+            return Err(format!(
+                "You cannot set the already unset variable '{}'",
+                key
+            ));
+        }
         env.values.borrow_mut().push((key, EnvOp::Set(value)));
         Ok(obj.clone())
     } else {
@@ -1569,6 +1669,15 @@ fn env_prepend(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, S
             .get(1)
             .map(|v| v.to_string_value())
             .unwrap_or_default();
+        // Check if the variable was previously unset
+        let values = env.values.borrow();
+        let was_unset = values
+            .iter()
+            .any(|(k, op)| k == &key && matches!(op, EnvOp::Unset));
+        drop(values);
+        if was_unset {
+            return Err(format!("You cannot prepend to unset variable '{}'", key));
+        }
         let sep = VM::get_arg_str(args, "separator", usize::MAX)
             .unwrap_or(":")
             .to_string();
@@ -1592,6 +1701,15 @@ fn env_append(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, St
             .get(1)
             .map(|v| v.to_string_value())
             .unwrap_or_default();
+        // Check if the variable was previously unset
+        let values = env.values.borrow();
+        let was_unset = values
+            .iter()
+            .any(|(k, op)| k == &key && matches!(op, EnvOp::Unset));
+        drop(values);
+        if was_unset {
+            return Err(format!("You cannot append to unset variable '{}'", key));
+        }
         let sep = VM::get_arg_str(args, "separator", usize::MAX)
             .unwrap_or(":")
             .to_string();
@@ -1602,6 +1720,30 @@ fn env_append(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, St
     } else {
         Err("Not an environment".to_string())
     }
+}
+
+fn env_unset(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
+    if let Object::Environment(env) = obj {
+        let positional = VM::get_positional_args(args);
+        for arg in &positional {
+            if let Object::String(key) = arg {
+                // Check if the variable has already been set/appended/prepended
+                let values = env.values.borrow();
+                let already_set = values
+                    .iter()
+                    .any(|(k, op)| k == key && !matches!(op, EnvOp::Unset));
+                drop(values);
+                if already_set {
+                    return Err(format!(
+                        "You cannot unset the '{}' variable because it is already set",
+                        key
+                    ));
+                }
+                env.values.borrow_mut().push((key.clone(), EnvOp::Unset));
+            }
+        }
+    }
+    Ok(Object::None)
 }
 
 // ---- Meson object methods ----
@@ -1660,6 +1802,22 @@ fn meson_source_root(vm: &mut VM, _obj: &Object, _args: &[CallArg]) -> Result<Ob
 
 fn meson_build_root(vm: &mut VM, _obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
     Ok(Object::String(vm.build_root.clone()))
+}
+
+fn meson_global_source_root(
+    vm: &mut VM,
+    _obj: &Object,
+    _args: &[CallArg],
+) -> Result<Object, String> {
+    Ok(Object::String(vm.top_source_root.clone()))
+}
+
+fn meson_global_build_root(
+    vm: &mut VM,
+    _obj: &Object,
+    _args: &[CallArg],
+) -> Result<Object, String> {
+    Ok(Object::String(vm.top_build_root.clone()))
 }
 
 fn meson_current_source_dir(
@@ -1778,7 +1936,15 @@ fn meson_override_dependency(
         .map(|v| v.to_string_value())
         .unwrap_or_default();
     let dep = positional.get(1).cloned().cloned().unwrap_or(Object::None);
-    vm.build_data.dependencies.insert(name, dep);
+    // Clone the dependency and set its name to the override name
+    let dep_with_name = match dep {
+        Object::Dependency(mut d) => {
+            d.name = name.clone();
+            Object::Dependency(d)
+        }
+        other => other,
+    };
+    vm.build_data.dependencies.insert(name, dep_with_name);
     Ok(Object::None)
 }
 
@@ -1793,8 +1959,7 @@ fn meson_override_find_program(
         .map(|v| v.to_string_value())
         .unwrap_or_default();
     let prog = positional.get(1).cloned().cloned().unwrap_or(Object::None);
-    vm.globals
-        .insert(format!("__program_override_{}", name), prog);
+    vm.build_data.find_program_overrides.insert(name, prog);
     Ok(Object::None)
 }
 
@@ -1994,8 +2159,13 @@ fn file_full_path(vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object
     }
 }
 
-fn module_found(_vm: &mut VM, _obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
-    Ok(Object::Bool(true))
+fn module_found(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
+    if let Object::Module(name) = obj {
+        // Empty module name signals not-found (from import with required: false)
+        Ok(Object::Bool(!name.is_empty()))
+    } else {
+        Ok(Object::Bool(false))
+    }
 }
 // ---- Compiler methods (registered separately) ----
 
@@ -2242,11 +2412,23 @@ fn compiler_cmd_array(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<O
 
 fn compiler_has_header(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
+        if let Some(result) = check_required_disabled(args, "compiler.has_header") {
+            return result;
+        }
         let header = VM::get_positional_args(args)
             .first()
             .map(|v| v.to_string_value())
             .unwrap_or_default();
-        Ok(Object::Bool(crate::compilers::check_header(c, &header)))
+        let result = crate::compilers::check_header(c, &header);
+        check_required_result(
+            args,
+            result,
+            &format!(
+                "{} header '{}' not found",
+                c.language.to_uppercase(),
+                header
+            ),
+        )
     } else {
         Err("Not a compiler".to_string())
     }
@@ -2258,6 +2440,9 @@ fn compiler_has_header_symbol(
     args: &[CallArg],
 ) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
+        if let Some(result) = check_required_disabled(args, "compiler.has_header_symbol") {
+            return result;
+        }
         let positional = VM::get_positional_args(args);
         let header = positional
             .first()
@@ -2267,9 +2452,17 @@ fn compiler_has_header_symbol(
             .get(1)
             .map(|v| v.to_string_value())
             .unwrap_or_default();
-        Ok(Object::Bool(crate::compilers::check_header_symbol(
-            c, &header, &symbol, args,
-        )))
+        let result = crate::compilers::check_header_symbol(c, &header, &symbol, args);
+        check_required_result(
+            args,
+            result,
+            &format!(
+                "{} symbol {} not found in header {}",
+                c.language.to_uppercase(),
+                symbol,
+                header
+            ),
+        )
     } else {
         Err("Not a compiler".to_string())
     }
@@ -2281,13 +2474,23 @@ fn compiler_check_header(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result
 
 fn compiler_has_function(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
+        if let Some(result) = check_required_disabled(args, "compiler.has_function") {
+            return result;
+        }
         let func = VM::get_positional_args(args)
             .first()
             .map(|v| v.to_string_value())
             .unwrap_or_default();
-        Ok(Object::Bool(crate::compilers::check_function(
-            c, &func, args,
-        )))
+        let result = crate::compilers::check_function(c, &func, args);
+        check_required_result(
+            args,
+            result,
+            &format!(
+                "{} function '{}' not usable",
+                c.language.to_uppercase(),
+                func
+            ),
+        )
     } else {
         Err("Not a compiler".to_string())
     }
@@ -2295,6 +2498,9 @@ fn compiler_has_function(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result
 
 fn compiler_has_member(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
+        if let Some(result) = check_required_disabled(args, "compiler.has_member") {
+            return result;
+        }
         let positional = VM::get_positional_args(args);
         let typename = positional
             .first()
@@ -2304,9 +2510,17 @@ fn compiler_has_member(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<O
             .get(1)
             .map(|v| v.to_string_value())
             .unwrap_or_default();
-        Ok(Object::Bool(crate::compilers::check_member(
-            c, &typename, &member, args,
-        )))
+        let result = crate::compilers::check_member(c, &typename, &member, args);
+        check_required_result(
+            args,
+            result,
+            &format!(
+                "{} member '{}' of '{}' not found",
+                c.language.to_uppercase(),
+                member,
+                typename
+            ),
+        )
     } else {
         Err("Not a compiler".to_string())
     }
@@ -2314,15 +2528,39 @@ fn compiler_has_member(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<O
 
 fn compiler_has_members(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
+        if let Some(result) = check_required_disabled(args, "compiler.has_members") {
+            return result;
+        }
         let positional = VM::get_positional_args(args);
         let typename = positional
             .first()
             .map(|v| v.to_string_value())
             .unwrap_or_default();
-        // All remaining positional args are member names
+        // Collect all member names, flattening arrays
+        let mut members: Vec<String> = Vec::new();
         for member_obj in positional.iter().skip(1) {
-            let member = member_obj.to_string_value();
-            if !crate::compilers::check_member(c, &typename, &member, args) {
+            match member_obj {
+                Object::Array(arr) => {
+                    for item in arr {
+                        members.push(item.to_string_value());
+                    }
+                }
+                _ => members.push(member_obj.to_string_value()),
+            }
+        }
+        for member in &members {
+            if !crate::compilers::check_member(c, &typename, member, args) {
+                let required = VM::get_arg_value(args, "required");
+                if matches!(
+                    required,
+                    Some(Object::Feature(FeatureState::Enabled)) | Some(Object::Bool(true))
+                ) {
+                    return Err(format!(
+                        "{} members of '{}' not found",
+                        c.language.to_uppercase(),
+                        typename
+                    ));
+                }
                 return Ok(Object::Bool(false));
             }
         }
@@ -2334,13 +2572,23 @@ fn compiler_has_members(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<
 
 fn compiler_has_type(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
+        if let Some(result) = check_required_disabled(args, "compiler.has_type") {
+            return result;
+        }
         let typename = VM::get_positional_args(args)
             .first()
             .map(|v| v.to_string_value())
             .unwrap_or_default();
-        Ok(Object::Bool(crate::compilers::check_type(
-            c, &typename, args,
-        )))
+        let result = crate::compilers::check_type(c, &typename, args);
+        check_required_result(
+            args,
+            result,
+            &format!(
+                "{} type '{}' not found",
+                c.language.to_uppercase(),
+                typename
+            ),
+        )
     } else {
         Err("Not a compiler".to_string())
     }
@@ -2374,6 +2622,9 @@ fn compiler_alignment(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Ob
 
 fn compiler_compiles(vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
+        if let Some(result) = check_required_disabled(args, "compiler.compiles") {
+            return result;
+        }
         let positional = VM::get_positional_args(args);
         let first = positional.first().unwrap_or(&&Object::None);
         // Handle files() returning Array of File objects
@@ -2409,11 +2660,9 @@ fn compiler_compiles(vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Obje
                 value: Object::Array(extra.into_iter().map(Object::String).collect()),
             });
         }
-        Ok(Object::Bool(crate::compilers::try_compile(
-            c,
-            &code,
-            &augmented_args,
-        )))
+        let result = crate::compilers::try_compile(c, &code, &augmented_args);
+        let check_name = VM::get_arg_str(args, "name", usize::MAX).unwrap_or("code");
+        check_required_result(args, result, &format!("Could not compile {}", check_name))
     } else {
         Err("Not a compiler".to_string())
     }
@@ -2421,6 +2670,9 @@ fn compiler_compiles(vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Obje
 
 fn compiler_links(vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
+        if let Some(result) = check_required_disabled(args, "compiler.links") {
+            return result;
+        }
         let positional = VM::get_positional_args(args);
         let first = positional.first().unwrap_or(&&Object::None);
         // Handle files() returning Array of File objects
@@ -2441,7 +2693,9 @@ fn compiler_links(vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object,
             }
             other => other.to_string_value(),
         };
-        Ok(Object::Bool(crate::compilers::try_link(c, &code, args)))
+        let result = crate::compilers::try_link(c, &code, args);
+        let check_name = VM::get_arg_str(args, "name", usize::MAX).unwrap_or("code");
+        check_required_result(args, result, &format!("Could not link {}", check_name))
     } else {
         Err("Not a compiler".to_string())
     }
@@ -2449,6 +2703,14 @@ fn compiler_links(vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object,
 
 fn compiler_runs(vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
+        let required = VM::get_arg_value(args, "required");
+        if matches!(required, Some(Object::Feature(FeatureState::Disabled))) {
+            return Ok(Object::RunResult(RunResultData {
+                returncode: 0,
+                stdout: String::new(),
+                stderr: String::new(),
+            }));
+        }
         let positional = VM::get_positional_args(args);
         let first = positional.first().unwrap_or(&&Object::None);
         // Handle files() returning Array of File objects
@@ -2470,6 +2732,16 @@ fn compiler_runs(vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, 
             other => other.to_string_value(),
         };
         let result = crate::compilers::try_run(c, &code, args);
+        let required = VM::get_arg_value(args, "required");
+        if result.returncode != 0 {
+            if matches!(
+                required,
+                Some(Object::Feature(FeatureState::Enabled)) | Some(Object::Bool(true))
+            ) {
+                let check_name = VM::get_arg_str(args, "name", usize::MAX).unwrap_or("code");
+                return Err(format!("Could not run {}", check_name));
+            }
+        }
         Ok(Object::RunResult(result))
     } else {
         Err("Not a compiler".to_string())
@@ -2478,11 +2750,19 @@ fn compiler_runs(vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, 
 
 fn compiler_has_argument(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
+        if let Some(result) = check_required_disabled(args, "compiler.has_argument") {
+            return result;
+        }
         let arg = VM::get_positional_args(args)
             .first()
             .map(|v| v.to_string_value())
             .unwrap_or_default();
-        Ok(Object::Bool(crate::compilers::has_argument(c, &arg)))
+        let result = crate::compilers::has_argument(c, &arg);
+        check_required_result(
+            args,
+            result,
+            &format!("Compiler argument '{}' not supported", arg),
+        )
     } else {
         Err("Not a compiler".to_string())
     }
@@ -2494,10 +2774,12 @@ fn compiler_has_multi_arguments(
     args: &[CallArg],
 ) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
+        if let Some(result) = check_required_disabled(args, "compiler.has_multi_arguments") {
+            return result;
+        }
         let test_args = flatten_positional_strings(args);
-        Ok(Object::Bool(crate::compilers::has_multi_arguments(
-            c, &test_args,
-        )))
+        let result = crate::compilers::has_multi_arguments(c, &test_args);
+        check_required_result(args, result, "Compiler arguments not supported")
     } else {
         Err("Not a compiler".to_string())
     }
@@ -2509,11 +2791,19 @@ fn compiler_has_link_argument(
     args: &[CallArg],
 ) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
+        if let Some(result) = check_required_disabled(args, "compiler.has_link_argument") {
+            return result;
+        }
         let arg = VM::get_positional_args(args)
             .first()
             .map(|v| v.to_string_value())
             .unwrap_or_default();
-        Ok(Object::Bool(crate::compilers::has_link_argument(c, &arg)))
+        let result = crate::compilers::has_link_argument(c, &arg);
+        check_required_result(
+            args,
+            result,
+            &format!("Linker argument '{}' not supported", arg),
+        )
     } else {
         Err("Not a compiler".to_string())
     }
@@ -2525,10 +2815,12 @@ fn compiler_has_multi_link_arguments(
     args: &[CallArg],
 ) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
+        if let Some(result) = check_required_disabled(args, "compiler.has_multi_link_arguments") {
+            return result;
+        }
         let test_args = flatten_positional_strings(args);
-        Ok(Object::Bool(crate::compilers::has_multi_link_arguments(
-            c, &test_args,
-        )))
+        let result = crate::compilers::has_multi_link_arguments(c, &test_args);
+        check_required_result(args, result, "Linker arguments not supported")
     } else {
         Err("Not a compiler".to_string())
     }
@@ -2606,13 +2898,32 @@ fn compiler_get_supported_link_arguments(
     }
 }
 
-fn compiler_get_define(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
+fn compiler_get_define(vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
         let name = VM::get_positional_args(args)
             .first()
             .map(|v| v.to_string_value())
             .unwrap_or_default();
-        Ok(Object::String(crate::compilers::get_define(c, &name, args)))
+        // Resolve include_directories to -I flags and merge into args
+        let inc_args = resolve_include_dirs(vm, args);
+        let augmented_args = if !inc_args.is_empty() {
+            let mut extra = crate::compilers::extra_args_from_callargs(args);
+            extra.extend(inc_args);
+            let mut new_args: Vec<CallArg> = args.to_vec();
+            new_args.retain(|a| a.name.as_deref() != Some("args"));
+            new_args.push(CallArg {
+                name: Some("args".to_string()),
+                value: Object::Array(extra.into_iter().map(Object::String).collect()),
+            });
+            new_args
+        } else {
+            args.to_vec()
+        };
+        Ok(Object::String(crate::compilers::get_define(
+            c,
+            &name,
+            &augmented_args,
+        )))
     } else {
         Err("Not a compiler".to_string())
     }
@@ -2624,7 +2935,20 @@ fn compiler_find_library(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result
             .first()
             .map(|v| v.to_string_value())
             .unwrap_or_default();
-        let required = VM::get_arg_bool(args, "required", true);
+        let required_obj = VM::get_arg_value(args, "required");
+        let is_feature_disabled =
+            matches!(required_obj, Some(Object::Feature(FeatureState::Disabled)));
+        let required = match required_obj {
+            Some(Object::Bool(b)) => *b,
+            Some(Object::Feature(FeatureState::Disabled)) => false,
+            Some(Object::Feature(FeatureState::Enabled)) => true,
+            Some(Object::Feature(FeatureState::Auto)) => false,
+            _ => true,
+        };
+        // If disabled via feature, return not-found without trying
+        if is_feature_disabled {
+            return Ok(Object::Dependency(DependencyData::not_found(&name)));
+        }
         let dirs = VM::get_arg_string_array(args, "dirs");
         let result = crate::compilers::find_library(c, &name, &dirs);
         if result.is_none() && required {
@@ -2642,13 +2966,19 @@ fn compiler_has_function_attribute(
     args: &[CallArg],
 ) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
+        if let Some(result) = check_required_disabled(args, "compiler.has_function_attribute") {
+            return result;
+        }
         let attr = VM::get_positional_args(args)
             .first()
             .map(|v| v.to_string_value())
             .unwrap_or_default();
-        Ok(Object::Bool(crate::compilers::has_function_attribute(
-            c, &attr,
-        )))
+        let result = crate::compilers::has_function_attribute(c, &attr);
+        check_required_result(
+            args,
+            result,
+            &format!("Function attribute '{}' not supported", attr),
+        )
     } else {
         Err("Not a compiler".to_string())
     }
@@ -2706,30 +3036,30 @@ fn compiler_symbols_have_underscore_prefix(
     Ok(Object::Bool(false))
 }
 
-fn compiler_has_define(_vm: &mut VM, _obj: &Object, args: &[CallArg]) -> Result<Object, String> {
-    let positional = VM::get_positional_args(args);
-    let define = positional
-        .first()
-        .map(|v| v.to_string_value())
-        .unwrap_or_default();
-    // Common compiler defines that are typically always set
-    let result = matches!(
-        define.as_str(),
-        "__GNUC__"
-            | "__STDC__"
-            | "__linux__"
-            | "__unix__"
-            | "__x86_64__"
-            | "__amd64__"
-            | "__LP64__"
-            | "__SIZEOF_INT__"
-            | "__SIZEOF_POINTER__"
-    );
-    Ok(Object::Bool(result))
+fn compiler_has_define(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
+    if let Object::Compiler(c) = obj {
+        let positional = VM::get_positional_args(args);
+        let define = positional
+            .first()
+            .map(|v| v.to_string_value())
+            .unwrap_or_default();
+        let result = crate::compilers::has_define(c, &define, args);
+        Ok(Object::Bool(result))
+    } else {
+        Err("Not a compiler".to_string())
+    }
 }
 
 fn compiler_run(vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Compiler(c) = obj {
+        let required = VM::get_arg_value(args, "required");
+        if matches!(required, Some(Object::Feature(FeatureState::Disabled))) {
+            return Ok(Object::RunResult(RunResultData {
+                returncode: 0,
+                stdout: String::new(),
+                stderr: String::new(),
+            }));
+        }
         let positional = VM::get_positional_args(args);
         let first = positional.first().unwrap_or(&&Object::None);
         // Handle files() returning Array of File objects
@@ -2751,6 +3081,16 @@ fn compiler_run(vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, S
             other => other.to_string_value(),
         };
         let result = crate::compilers::try_run(c, &code, args);
+        let required = VM::get_arg_value(args, "required");
+        if result.returncode != 0 {
+            if matches!(
+                required,
+                Some(Object::Feature(FeatureState::Enabled)) | Some(Object::Bool(true))
+            ) {
+                let check_name = VM::get_arg_str(args, "name", usize::MAX).unwrap_or("code");
+                return Err(format!("Could not run {}", check_name));
+            }
+        }
         Ok(Object::RunResult(result))
     } else {
         Err("Not a compiler".to_string())

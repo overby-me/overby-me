@@ -7,19 +7,51 @@ use std::process::Command;
 pub fn download_wrap(wrap_file: &str, dest_dir: &str) -> Result<(), String> {
     let config = parse_wrap_file(wrap_file)?;
 
-    let wrap_type = config
-        .get("wrap")
-        .and_then(|s| s.get("type"))
-        .map(|s| s.as_str())
-        .unwrap_or("file");
+    // Determine wrap type from section name ([wrap-file], [wrap-git], etc.)
+    // or from explicit "type" key in [wrap] section
+    let wrap_type = if config.contains_key("wrap-file") {
+        "file"
+    } else if config.contains_key("wrap-git") {
+        "git"
+    } else if config.contains_key("wrap-hg") {
+        "hg"
+    } else if config.contains_key("wrap-svn") {
+        "svn"
+    } else {
+        config
+            .get("wrap")
+            .and_then(|s| s.get("type"))
+            .map(|s| s.as_str())
+            .unwrap_or("file")
+    };
+
+    // Normalize: get the wrap section data regardless of section naming style
+    let normalized = normalize_wrap_config(&config);
 
     match wrap_type {
-        "file" => download_file_wrap(&config, dest_dir),
-        "git" => download_git_wrap(&config, dest_dir),
-        "hg" => download_hg_wrap(&config, dest_dir),
-        "svn" => download_svn_wrap(&config, dest_dir),
+        "file" => download_file_wrap(&normalized, dest_dir),
+        "git" => download_git_wrap(&normalized, dest_dir),
+        "hg" => download_hg_wrap(&normalized, dest_dir),
+        "svn" => download_svn_wrap(&normalized, dest_dir),
         _ => Err(format!("Unknown wrap type: {}", wrap_type)),
     }
+}
+
+/// Normalize wrap config so that the main section is always accessible as "wrap"
+fn normalize_wrap_config(
+    config: &HashMap<String, HashMap<String, String>>,
+) -> HashMap<String, HashMap<String, String>> {
+    let mut normalized = config.clone();
+    // If there's a [wrap-file], [wrap-git], etc. section, merge it into "wrap"
+    for key in &["wrap-file", "wrap-git", "wrap-hg", "wrap-svn"] {
+        if let Some(section) = config.get(*key) {
+            let wrap = normalized.entry("wrap".to_string()).or_default();
+            for (k, v) in section {
+                wrap.entry(k.clone()).or_insert_with(|| v.clone());
+            }
+        }
+    }
+    normalized
 }
 
 fn parse_wrap_file(path: &str) -> Result<HashMap<String, HashMap<String, String>>, String> {
@@ -57,7 +89,7 @@ fn download_file_wrap(
 ) -> Result<(), String> {
     let wrap = config.get("wrap").ok_or("No [wrap] section")?;
 
-    let url = wrap.get("source_url").ok_or("No source_url in wrap file")?;
+    let url = wrap.get("source_url");
     let filename = wrap
         .get("source_filename")
         .ok_or("No source_filename in wrap file")?;
@@ -66,17 +98,32 @@ fn download_file_wrap(
     let parent = Path::new(dest_dir).parent().unwrap_or(Path::new("."));
     let archive_path = parent.join(filename);
 
-    // Download
-    eprintln!("Downloading {}...", filename);
-    let status = Command::new("curl")
-        .args(["-L", "-o"])
-        .arg(&archive_path)
-        .arg(url)
-        .status()
-        .map_err(|e| format!("Failed to download: {}", e))?;
+    // Check if the file already exists locally (e.g., in packagefiles/)
+    if !archive_path.exists() {
+        // Check in packagefiles/ directory next to the wrap file
+        let packagefiles_path = parent.join("packagefiles").join(filename);
+        if packagefiles_path.exists() {
+            std::fs::copy(&packagefiles_path, &archive_path)
+                .map_err(|e| format!("Failed to copy local archive: {}", e))?;
+        } else if let Some(url) = url {
+            // Download from URL
+            eprintln!("Downloading {}...", filename);
+            let status = Command::new("curl")
+                .args(["-L", "-o"])
+                .arg(&archive_path)
+                .arg(url)
+                .status()
+                .map_err(|e| format!("Failed to download: {}", e))?;
 
-    if !status.success() {
-        return Err("Download failed".to_string());
+            if !status.success() {
+                return Err("Download failed".to_string());
+            }
+        } else {
+            return Err(format!(
+                "No source_url in wrap file and local file not found: {}",
+                archive_path.display()
+            ));
+        }
     }
 
     // Extract

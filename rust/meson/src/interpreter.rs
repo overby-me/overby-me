@@ -17,6 +17,8 @@ impl Interpreter {
         let mut vm = VM::new();
         vm.source_root = source_root.to_string();
         vm.build_root = build_root.to_string();
+        vm.top_source_root = source_root.to_string();
+        vm.top_build_root = build_root.to_string();
         builtins::register_all(&mut vm);
         Self { vm }
     }
