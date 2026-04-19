@@ -333,9 +333,14 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<SysusersE
 }
 
 /// Parse a sysusers.d config file.
+///
+/// A path of `-` reads from stdin (matches upstream `systemd-sysusers -`).
 fn parse_config_file(path: &Path) -> io::Result<Vec<SysusersEntry>> {
-    let file = fs::File::open(path)?;
-    let reader = io::BufReader::new(file);
+    let reader: Box<dyn BufRead> = if path == Path::new("-") {
+        Box::new(io::BufReader::new(io::stdin()))
+    } else {
+        Box::new(io::BufReader::new(fs::File::open(path)?))
+    };
     let mut entries = Vec::new();
 
     for (line_idx, line) in reader.lines().enumerate() {
