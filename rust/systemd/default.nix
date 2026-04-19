@@ -189,6 +189,17 @@
                   fi
                 done
 
+                # Install our systemd-fstab-generator into the standard
+                # generator path.  Overrides the C version (if present)
+                # since NixOS' systemd package may not ship it, and
+                # TEST-81-GENERATORS.fstab-generator expects the binary
+                # at the canonical location.
+                if [ -e "${rust-systemd}/bin/systemd-fstab-generator" ]; then
+                  mkdir -p "$out/lib/systemd/system-generators"
+                  cp -a "${rust-systemd}/bin/systemd-fstab-generator" \
+                    "$out/lib/systemd/system-generators/systemd-fstab-generator"
+                fi
+
 
                 # Install systemd-bsod.service — C systemd doesn't build it without qrencode,
                 # but our Rust implementation doesn't need qrencode.

@@ -21,6 +21,7 @@ members = [
   "crates/modules-load",
   "crates/sysctl",
   "crates/binfmt",
+  "crates/fstab-generator",
   "crates/vconsole-setup",
   "crates/backlight",
   "crates/rfkill",

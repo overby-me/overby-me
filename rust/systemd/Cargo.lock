@@ -1774,6 +1774,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "systemd-fstab-generator"
+version = "0.1.0"
+dependencies = [
+ "libsystemd",
+ "tempfile",
+]
+
+[[package]]
 name = "systemd-homed"
 version = "0.1.0"
 dependencies = [
