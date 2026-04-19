@@ -104,10 +104,9 @@ Basic Type=notify (READY=1) works. NotifyAccess=all/main/exec/none enforcement w
 - 23-unit-file-runtime-bind-paths — implementation complete; VM test needs re-verification post-testsuite-fix (my previous "PASS" observation was a false positive from the inverted `machine.fail("test -f /testok")` assertion, which used to let missing-/testok silently pass)
 - Fix: Implemented `systemctl bind` (control protocol `bind` command) and D-Bus `BindMountUnit` method backed by a shared `bind_mount_into_unit` helper that forks + `setns`es into `/proc/<main_pid>/ns/mnt` of the target service, optionally creates the destination, and performs `mount(MS_BIND | MS_REC)` (plus optional `MS_REMOUNT | MS_RDONLY`). Paired with helper-command mount-namespace alignment (ExecStartPre/Post/StopPost unshare a new namespace and apply the service's BindPaths/InaccessiblePaths/PrivateTmp via `pre_exec`, in the correct order — PrivateTmp first, then BindPaths with destination creation, then InaccessiblePaths last) so ExecStartPre sees the same filesystem as ExecStart.
 
-**PrivatePIDs=:**
+**PrivatePIDs=:** — DONE
 
-- 07-pid1-private-pids
-- Fix: Implement PID namespace isolation
+- 07-pid1-private-pids (PASS — PID namespace isolation implemented, verified post-stage-2-fix)
 
 **MessageQueue socket options:**
 
@@ -148,12 +147,16 @@ Rust udevadm reimplementation is in progress.
 
 **FAIL (unimplemented features):** The remaining 17-udev-* tests exercise deeper udev semantics:
 
-- 17-udev-tag — `TAG+=` rule fires but tag file `/run/udev/tags/<tag>/c1:3` is not created after trigger/settle.  Rules load and parse (rule count increases as expected); `udevadm trigger --settle --action add /dev/null` reports "triggered 1 device(s)" but udevd processes nothing visible at INFO level afterwards.  Likely event-pipeline issue: kernel uevent from sysfs-write isn't reaching the worker.
-- 17-udev-database — similar event-pipeline dependency.
-- 17-udev-global-property — needs `udevadm control -p` persistence (implemented this session, unverified) plus rule-engine `ENV{…}` matching on injected globals.
 - 17-udev-verify — comprehensive rules validator with ~100 syntax-error patterns (large feature).
 - 17-udev-netif-altname / -link-property / -loop-own — need `.link` file processing (net_setup_link semantic) and systemd-dissect integration.
 - 17-udev-SYSTEMD_WANTS* / -systemd-alias — require udev → systemd device-unit alias/Wants wiring.
+- 17-udev-import — IMPORT{program} runs; need value-escape fidelity (\xNN) between udevd's DB write and `udevadm info` output to pass the grep-for-spaces assertion.
+- 17-udev-device-is-processing — requires `ID_PROCESSING=1` marker while RUN= is still executing.
+- 17-udev-failed-event — event-timeout + `timeout_signal=SIGABRT` handling.
+- 17-udev-watch — inotify watch fd passing via systemd fd-store.
+- 17-udev-credentials — needs `systemd-udev-load-credentials.service`.
+- 17-udev-queued-events-serialization — requires udevd to preserve rule→RUN marker across events.
+- 17-udev-diskseq / -buffer-size — test-framework / device-specific.
 
 ### 7. NixOS Framework Limitations
 
