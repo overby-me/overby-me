@@ -9,17 +9,17 @@
     TEST_MATCH_SUBTEST = "\\.device_is_processing\\.sh$";
   };
   # `killall sleep` reliably returns "no process found" on this
-  # NixOS test driver even though /proc/<pid>/comm reports "sleep"
-  # and udevd's `child.wait()` is still blocking — appears to be a
-  # quirk of psmisc's enumeration on this env.  Replace the
-  # killall invocations with a /proc-walk that finds any process
-  # with comm="sleep" owned by systemd-udevd and kills it directly.
-  # The meaningful test assertions (ID_PROCESSING=1 in db,
-  # `.device` units stay inactive across daemon-reexec/reload
-  # cycles) all pass BEFORE the killall step, so this only
-  # changes the teardown mechanism.
+  # NixOS test driver because `/proc/<pid>/comm` for a process
+  # exec'd via `Command::new("/usr/bin/sleep")` is set to the full
+  # path `/usr/bin/sleep` (14 chars, fits in TASK_COMM_LEN=16)
+  # rather than the basename `sleep`.  killall only matches the
+  # 15-char kernel comm exactly against the passed name, so it
+  # misses this process.  Replace the killall invocations with a
+  # /proc-walk that matches the BASENAME of comm, finding the
+  # process regardless of whether comm is `sleep` or
+  # `/usr/bin/sleep`.
   patchScript = ''
-    helper='for __p in /proc/[0-9]*; do [ "$(cat $__p/comm 2>/dev/null)" = sleep ] \&\& kill $(basename $__p) 2>/dev/null; done; :'
+    helper='for __p in /proc/[0-9]*; do __c=$(cat $__p/comm 2>/dev/null); [ "$(basename "$__c")" = sleep ] \&\& kill $(basename $__p) 2>/dev/null; done; :'
     sed -i \
       -e "s|^killall sleep$|$helper|" \
       -e "s|^    killall -KILL sleep$|    $helper|" \
