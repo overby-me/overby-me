@@ -9,8 +9,8 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 | Status | Count | Description |
 |--------|-------|-------------|
 | PASS | ~150 | Verified against `machine.succeed("test -f /testok")` (was `machine.fail` — an inverted assertion that silently accepted missing /testok; all previous PASS entries have been re-verified). |
-| FAIL (architectural) | ~15 | Missing features: `udevadm verify`, udev → systemd device-unit wiring (SYSTEMD_ALIAS / SYSTEMD_WANTS), `systemd-fstab-generator` binary, exec-deserialization across daemon-reload, /etc/fstab RW (framework), `systemctl whoami` (framework), main-PID-change (framework), prefix-shell (framework). |
-| FAIL (unimplemented udev) | ~10 | 17-udev tests needing `.link` processing, IMPORT value escaping, ID_PROCESSING marker, event-timeout signal handling, inotify watch fd-store, credentials-unit, rules validator. |
+| FAIL (architectural) | ~8 | Remaining: `udevadm verify` rules validator, exec-deserialization across daemon-reload, /etc/fstab RW (framework), `systemctl whoami` (framework), main-PID-change (framework), prefix-shell (framework). `systemd-fstab-generator` binary LANDED (MVP); udev → systemd device-unit wiring LANDED (iterating on VM-surfaced bugs). |
+| FAIL (unimplemented udev) | ~6 | Remaining: `.link` Property= / UnsetProperty= / ImportProperty= directives, inotify watch fd-store, credentials-unit, queued-events-serialization, owner-and-mode (After= deps), diskseq. Altname application, ID_PROCESSING, IMPORT value escaping, libudev monitor broadcast all LANDED. |
 | Boot hang (transient) | 0 | **FIXED** — was ~10 / ~30% rate; root cause was the bash `stage-2-init.sh` tee-pipe fd race.  `system.build.bootStage2` override in testsuite.nix strips the `if test -w /dev/kmsg; then exec > >(tee \| while read); fi` block.  See § 9. |
 
 ## Passing Tests
@@ -50,7 +50,7 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 ### 81-GENERATORS (4 of 5 pass)
 
 - PASS: debug-generator, getty-generator, run-generator (after --man=no fix), system-update-generator
-- FAIL: fstab-generator (D-Bus)
+- fstab-generator: MVP binary LANDED at `crates/fstab-generator/`. Covers: fstab parse, API-mount skip (proc/sys/dev/run, autofs), `[Mount]` / `[Swap]` emission, local-fs/remote-fs targeting by fstype, `nofail`→wants vs requires, `x-systemd.requires/.before/.after/.requires-mounts-for/.wanted-by/.required-by/.rw-only`, basic fsck dep, `systemd-sysroot-fstab-check` alias. Still TODO: `x-systemd.automount` companion unit, makefs/growfs/validatefs services, `x-systemd.device-timeout` drop-in, `x-initrd.mount` /sysroot prefix, default `sysroot.mount` from `root=` cmdline. 14 unit tests.
 
 ### 74-AUX-UTILS (150/151 pass, 1 real fail)
 
@@ -72,7 +72,7 @@ rust-systemd's PID 1 now exposes `org.freedesktop.systemd1` on the system bus vi
 **Affected tests:**
 
 - 15-dropin — implementation complete (D-Bus + hierarchical dropins + transient slice support + CleanUnit + Socket/Timer/Slice/Path D-Bus interfaces); patchScript now rewrites bare `sleep` → `/run/current-system/sw/bin/sleep` to work around NixOS's compiled-in DEFAULT_PATH_NORMAL restriction on inline unit files.
-- 81-generators-fstab-generator (still blocked: needs `systemd-fstab-generator` binary)
+- 81-generators-fstab-generator — MVP binary LANDED.
 
 ### 2. Type=notify Service Lifecycle (Advanced)
 
@@ -145,18 +145,25 @@ Rust udevadm reimplementation is in progress.
 - 17-udev-tag — `TAG+="…"` rules fire (tag files in `/run/udev/tags/<tag>/c1:3`); TAGS is the sticky union across events (accumulative) while CURRENT_TAGS is only this event's tag set — matching upstream's invariant that `E:TAGS=:added:` remains in the db even after a later `change` event whose rule only sets `changed`
 - 17-udev-global-property — `udevadm control -p KEY=VAL` / `-p KEY=` (unset) / `--revert` (clear all); persisted to `/run/udev/control.conf` so the table survives `systemctl restart systemd-udevd.service`; injected into every event's env before rule evaluation so `ENV{KEY}=="…"` matches the global value
 
-**FAIL (unimplemented features):** The remaining 17-udev-* tests exercise deeper udev semantics:
+**LANDED** (implementation complete, VM-iterated where possible):
+
+- 17-udev-SYSTEMD_WANTS* / -systemd-alias — udev → systemd device-unit wiring complete. See § 10 for details. VM-verified iteration progressed past add-phase assertions; change-phase stale-alias deactivation fixed.
+- 17-udev-import — value-escape fidelity fixed: rule parser no longer collapses `\n`/`\t` to newline/tab (now treats only `\"` and `\\` as escapes, matching upstream), and `run_program_capture` preserves trailing spaces (only strips trailing `\n`/`\r`).
+- 17-udev-device-is-processing — `ID_PROCESSING=1` marker implemented in udevd: set in the device db before RUN= executes, cleared and db rewritten after RUN completes. PID 1 defers activation of `.device` units while ID_PROCESSING=1 is set, creating placeholder (inactive) units so `BindsTo=` dependents don't fire prematurely.
+- 17-udev-netif-altname — altname application via RTM_NEWLINKPROP/DELLINKPROP with diff against current kernel altnames. `.link` Name=/MAC/MTU only applied on `add`, not `move` (matching upstream).
+- 17-udev-buffer-size — netlink recv buffers bumped to 2 MiB; udevd now broadcasts processed events via libudev monitor protocol (group 2, with 0xfeedcafe header, MurmurHash2 filter hashes, tag bloom filter).
+
+**FAIL (unimplemented):**
 
 - 17-udev-verify — comprehensive rules validator with ~100 syntax-error patterns (large feature).
-- 17-udev-netif-altname / -link-property / -loop-own — need `.link` file processing (net_setup_link semantic) and systemd-dissect integration.
-- 17-udev-SYSTEMD_WANTS* / -systemd-alias — udev → systemd device-unit wiring landed: udevd sends `udev-event` JSON-RPC to PID 1 control socket after each processed event with action, sysfs_path, env (SYSTEMD_ALIAS/WANTS), merged tags, symlinks. PID 1 handler creates/activates/deactivates `.device` units keyed on sysfs path, subsystem-friendly alias (`sys-subsystem-<X>-devices-<kern>.device`), `SYMLINK+=` paths, and SYSTEMD_ALIAS paths. Needs VM re-verification.
-- 17-udev-import — value-escape fidelity fixed: rule parser no longer collapses `\n`/`\t` to newline/tab (now treats only `\"` and `\\` as escapes, matching upstream), and `run_program_capture` preserves trailing spaces (only strips trailing `\n`/`\r`). Needs VM re-verification.
-- 17-udev-device-is-processing — `ID_PROCESSING=1` marker implemented in udevd: set in the device db before RUN= executes, cleared and db rewritten after RUN completes. PID 1 defers activation of `.device` units while ID_PROCESSING=1 is set, creating placeholder (inactive) units so `BindsTo=` dependents don't fire prematurely. Needs VM re-verification.
+- 17-udev-link-property — `.link` file `Property=` / `UnsetProperty=` / `ImportProperty=` directives + drop-in support.
+- 17-udev-loop-own — systemd-dissect `--attach --loop-ref=...` integration.
 - 17-udev-failed-event — event-timeout + `timeout_signal=SIGABRT` handling.
 - 17-udev-watch — inotify watch fd passing via systemd fd-store.
-- 17-udev-credentials — needs `systemd-udev-load-credentials.service`.
+- 17-udev-credentials — needs `systemd-udev-load-credentials.service` (systemctl is-enabled "not-found" exit 4 already returned, so test should early-exit if service is missing).
 - 17-udev-queued-events-serialization — requires udevd to preserve rule→RUN marker across events.
-- 17-udev-diskseq / -buffer-size — test-framework / device-specific.
+- 17-udev-diskseq — test-framework / device-specific.
+- 17-udev-owner-and-mode — After= ordering deps on systemd-tmpfiles-setup-dev services (NixOS unit-file question, not rust-systemd).
 
 ### 7. NixOS Framework Limitations
 
@@ -188,6 +195,47 @@ Upstream systemd-based NixOS avoids this code path entirely — `boot.initrd.sys
 **Fix:** `testsuite.nix` overrides `system.build.bootStage2` with a patched stage-2-init.sh that strips the whole `if test -w /dev/kmsg; then … fi` subshell pipeline. Stage-2 output still goes to /dev/console (inherited from stage-1); we just lose the `<7>stage-2-init:` kmsg re-log. All other stage-2 behavior (`/etc`/`/tmp` install, `$systemConfig/activate`, `/run/booted-system` symlink, exec systemd) is preserved verbatim.
 
 Verified: two back-to-back sanity-check runs now pass in 24s each (was failing ~30% before).
+
+### 10. udev → systemd Device-Unit Wiring — LANDED
+
+**Protocol:** udevd sends a `udev-event` JSON-RPC notification to PID 1's control socket (`/run/systemd/rust-systemd-notify/control.socket`) after every processed event. Payload:
+
+```json
+{"jsonrpc":"2.0","method":"udev-event","params":{
+  "action":"add|change|remove|move|online|offline|bind|unbind",
+  "sysfs_path":"/sys/devices/...",
+  "devname":"/dev/...",
+  "subsystem":"net|block|...",
+  "env":{"SYSTEMD_ALIAS":"...","SYSTEMD_WANTS":"...","SYSTEMD_READY":"0|1","ID_PROCESSING":"1","ID_RENAMING":"1",...},
+  "tags":["systemd",...],
+  "symlinks":["/dev/disk/by-uuid/...",...]
+}}
+```
+
+Fire-and-forget; udevd drains the response so PID 1's `write_all` doesn't hit EPIPE.
+
+**PID 1 handler** (`crates/libsystemd/src/units/udev_event.rs`):
+
+- Derives unit names from sysfs path, subsystem-friendly alias (`sys-subsystem-<X>-devices-<kernel>.device`), `/dev/` node, each `SYMLINK+=` entry, and every `SYSTEMD_ALIAS=` path. Uses `unit_name_path_escape` for proper `\xNN` escaping.
+- Only materialises units for devices tagged `systemd` OR with `SYSTEMD_ALIAS=` OR with symlinks.
+- On `add`/`change`: creates units via `insert_new_unit_lenient` (populates reverse `wanted_by` edges), flips status to `Started(Plugged)`, spawns a thread to activate `Wants=` / `Requires=` targets (SYSTEMD_WANTS-driven).
+- On `remove`: flips status to `Stopped(StoppedFinal)`.
+- `ID_PROCESSING=1` / `SYSTEMD_READY=0` / `ID_RENAMING=1` defer activation; units are created as placeholders (kept Stopped) so `BindsTo=` dependents don't fire prematurely.
+- **Stale-alias lifecycle**: before flipping new aliases active, scans existing device units whose `sysfs_path` matches and whose names aren't in the new alias set, deactivating them. Primary sysfs-derived and `sys-subsystem-...` names are preserved.
+
+**Device unit SubState** reports `plugged` (not `running`) when active — matches upstream.
+
+**`systemctl` path resolution**: `/sys/...` and `/dev/...` arguments are translated to the corresponding `.device` unit name via `unit_name_path_escape`. `is-active` returns `"inactive"` (exit 3) for unknown `.device` units, matching upstream where a device unit name can be constructed for any plausible path.
+
+**libudev monitor broadcast**: udevd also sends processed events to netlink group 2 with the libudev monitor header (`"libudev\0"` prefix, `0xfeedcafe` magic, MurmurHash2 subsystem/devtype filter hashes, tag bloom filter). `udevadm monitor --udev` subscribes via `NETLINK_ADD_MEMBERSHIP`.
+
+**Altnames**: applied via `RTM_NEWLINKPROP` / `RTM_DELLINKPROP` with `IFLA_PROP_LIST` + `IFLA_ALT_IFNAME`. Current kernel altnames queried via `RTM_GETLINK` (tightened to require `RTM_NEWLINK` response type) so the add/remove diff is minimal on repeated events.
+
+**Synthetic test infrastructure**: 35+ tests added this iteration covering:
+
+- `compute_desired_altnames` + `diff_altnames` (pure functions, 10 tests)
+- `build_udev_monitor_message` / `parse_udev_monitor_message` round-trip (10 tests — header magic, tag bloom, 100×100-byte properties, bad-prefix rejection)
+- `handle_udev_event` with mock `ArcMutRuntimeInfo` (9 tests — tagged/untagged, ID_PROCESSING defers, SYSTEMD_READY=0 keeps inactive, remove deactivates, ID_RENAMING flip, SYSTEMD_WANTS populates deps, symlink alias, repeat-add idempotence, stale aliases deactivated on change)
 
 ## Prioritized Fix Plan
 
@@ -263,3 +311,5 @@ Key architectural constraints:
 - **NixOS VM test framework:** Tests boot QEMU VMs with rust-systemd as PID 1. Tests run via `machine.execute()` shell commands, NOT as systemd services. This breaks tests that expect to run inside a service context.
 - **NixOS PATH for exec helper:** C systemd's exec helper uses a limited PATH that doesn't include `/run/current-system/sw/bin`. Tests creating inline unit files with bare commands need patchScript fixes.
 - **Transient boot hangs:** ~~Non-deterministic ~30% hang rate in QEMU.~~ **FIXED** — was the bash `stage-2-init.sh` tee-pipe fd race. `system.build.bootStage2` override in testsuite.nix strips the offending `if test -w /dev/kmsg; then exec > >(tee | while read); fi` block. See § 9.
+- **VM test iteration pattern:** VM tests are slow (5-15 min per run) and the background-task infrastructure can die silently. The productive pattern this session: spawn a test foreground in a background command, wait for the notification, then `nix log <drv>` to see the subtest trace. Each run typically surfaces one actionable bug — fix it, re-run, advance one more assertion. The `17-udev-SYSTEMD_ALIAS` arc went: (1) `is-active` on unknown `.device` returning exit 4 instead of 3 → fixed; (2) stale aliases staying Started across `add`→`change` transitions → fixed via `deactivate_stale_aliases`.
+- **udev device-unit wiring dispatch:** The udev-event RPC handler spawns ONE thread per event to dispatch SYSTEMD_WANTS activation (not N per alias — all aliases share the same wants list). The thread holds no lock when calling `activate_needed_units_with_source`, so it can't deadlock the control-socket handler.
