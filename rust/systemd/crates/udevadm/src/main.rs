@@ -1330,7 +1330,10 @@ fn cmd_monitor(
         libc::signal(libc::SIGTERM, libc::SIG_DFL);
     }
 
-    let mut buf = [0u8; 8192];
+    // 2 MiB buffer — uevents carrying many properties can exceed the
+    // default netlink SKB size.  Matches upstream systemd-udevd and our
+    // own recv_uevent path.  Heap-allocated to keep the stack small.
+    let mut buf = vec![0u8; 2 * 1024 * 1024];
     loop {
         // Poll with a 1 second timeout
         let mut pfd = libc::pollfd {

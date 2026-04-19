@@ -363,8 +363,14 @@ pub fn open_uevent_socket() -> io::Result<i32> {
 }
 
 /// Receive a uevent from the netlink socket. Returns None if no data available.
+///
+/// Uses a 2 MiB stack buffer — upstream udevd allocates 2 MiB so events
+/// carrying many properties (TEST-17-UDEV.buffer-size exercises this
+/// with 100 × 100-byte properties) don't get truncated.
 pub fn recv_uevent(fd: i32) -> Option<UEvent> {
-    let mut buf = [0u8; 8192];
+    // Heap-allocate the read buffer (2 MiB) instead of using the stack;
+    // avoids blowing the default thread stack.
+    let mut buf = vec![0u8; 2 * 1024 * 1024];
     let n = unsafe {
         libc::recv(
             fd,
