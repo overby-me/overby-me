@@ -4349,6 +4349,104 @@ fn process_event(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) {
             execute_run_programs(event, &result, hwdb);
         }
     }
+
+    // After all per-action bookkeeping (db/symlinks/RUN) has finished, tell
+    // PID 1 about the event so the service manager can create/activate/
+    // deactivate `.device` units.  Fire-and-forget; errors are logged but
+    // do not block rule processing.
+    notify_systemd_device_event(event, &result);
+}
+
+/// Path of PID 1's control socket (`SYSTEMCTL_ADDR` override for tests).
+fn systemd_control_socket_path() -> String {
+    std::env::var("SYSTEMCTL_ADDR")
+        .unwrap_or_else(|_| "/run/systemd/rust-systemd-notify/control.socket".to_owned())
+}
+
+/// Send a `udev-event` JSON-RPC notification to PID 1's control socket.
+///
+/// This is the udev → systemd integration hand-off: once udevd has
+/// finished processing rules (written the db, created symlinks, run
+/// RUN= programs), it tells PID 1 what happened so systemd can
+/// create/update/remove the corresponding `.device` units.
+///
+/// No response is expected; failures are logged at debug level since
+/// PID 1 may be rust-systemd (which understands the method), C systemd
+/// (which doesn't), or absent (in containers/tests).
+fn notify_systemd_device_event(event: &UEvent, result: &RuleResult) {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+
+    let sock_path = systemd_control_socket_path();
+    // Cheap check: if the socket file doesn't exist, skip without logging
+    // on every event.
+    if !std::path::Path::new(&sock_path).exists() {
+        return;
+    }
+
+    // Merge the sticky (G:) historical tag set with this event's tags so
+    // the server sees the full set of tags ever applied to this device,
+    // matching the `TAGS` pseudo-property in the udev db.
+    let merged_tags: Vec<String> = {
+        let mut tags: Vec<String> = Vec::new();
+        let db_path = device_db_path(event);
+        if let Ok(content) = std::fs::read_to_string(&db_path) {
+            for line in content.lines() {
+                if let Some(tag) = line.strip_prefix("G:")
+                    && !tag.is_empty()
+                    && !tags.contains(&tag.to_string())
+                {
+                    tags.push(tag.to_string());
+                }
+            }
+        }
+        for tag in &result.tags {
+            if !tags.contains(tag) {
+                tags.push(tag.clone());
+            }
+        }
+        tags
+    };
+
+    let sysfs_path = format!("/sys{}", event.devpath);
+    let devname = event
+        .devnode()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+
+    let payload = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "udev-event",
+        "params": {
+            "action": event.action,
+            "sysfs_path": sysfs_path,
+            "devname": devname,
+            "subsystem": event.subsystem,
+            "env": event.env,
+            "tags": merged_tags,
+            "symlinks": result.symlinks,
+        },
+        "id": null,
+    });
+    let payload_str = payload.to_string();
+
+    let mut stream = match UnixStream::connect(&sock_path) {
+        Ok(s) => s,
+        Err(e) => {
+            log::debug!(
+                "udev-event: connect {} failed ({e}); skipping notify",
+                sock_path
+            );
+            return;
+        }
+    };
+    let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(2)));
+    if let Err(e) = stream.write_all(payload_str.as_bytes()) {
+        log::debug!("udev-event: write failed: {e}");
+        return;
+    }
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+    // Don't wait for a response — the server may or may not produce one.
 }
 
 // ---------------------------------------------------------------------------

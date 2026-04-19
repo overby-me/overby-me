@@ -208,6 +208,32 @@ pub enum Command {
     UnsetEnvironment(Vec<String>),
     /// `import-environment KEY...` — import variables from the calling process.
     ImportEnvironment(Vec<String>),
+    /// `udev-event` — notification from systemd-udevd that a device event was
+    /// processed.  PID 1 uses this to create/activate/deactivate `.device`
+    /// units and fire dependencies like `BindsTo=sys-subsystem-net-devices-…`.
+    /// No response is sent back.
+    UdevEvent(UdevEventParams),
+}
+
+/// Parameters for the `udev-event` notification.
+#[derive(Debug, Clone)]
+pub struct UdevEventParams {
+    /// Kernel action: "add", "change", "remove", "move", "online", "offline", "bind", "unbind".
+    pub action: String,
+    /// Full sysfs path of the device (e.g. `/sys/devices/virtual/net/eth0`).
+    pub sysfs_path: String,
+    /// Primary device node (e.g. `/dev/sda1`) — empty for most sysfs-only devices.
+    pub devname: String,
+    /// Device subsystem (e.g. `net`, `block`, `tty`).
+    pub subsystem: String,
+    /// All udev env properties after rule processing, including `SYSTEMD_ALIAS=`,
+    /// `SYSTEMD_WANTS=`, `SYSTEMD_READY=`.
+    pub env: std::collections::HashMap<String, String>,
+    /// Merged sticky tag set for the device (includes `systemd` if
+    /// `TAG+="systemd"` ever fired for this device).
+    pub tags: Vec<String>,
+    /// Device nodes created from `SYMLINK+=` rules (e.g. `/dev/disk/by-uuid/…`).
+    pub symlinks: Vec<String>,
 }
 
 /// Parameters for creating a transient (in-memory) service unit.
@@ -1110,6 +1136,72 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                 Some(_) | None => vec![],
             };
             Command::ImportEnvironment(vars)
+        }
+        "udev-event" => {
+            let obj = match &call.params {
+                Some(Value::Object(o)) => o,
+                _ => {
+                    return Err(ParseError::ParamsInvalid(
+                        "udev-event requires an object".to_string(),
+                    ));
+                }
+            };
+            let action = obj
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_owned();
+            let sysfs_path = obj
+                .get("sysfs_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_owned();
+            let devname = obj
+                .get("devname")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_owned();
+            let subsystem = obj
+                .get("subsystem")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_owned();
+            let env = obj
+                .get("env")
+                .and_then(|v| v.as_object())
+                .map(|o| {
+                    o.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_owned())))
+                        .collect::<std::collections::HashMap<_, _>>()
+                })
+                .unwrap_or_default();
+            let tags = obj
+                .get("tags")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let symlinks = obj
+                .get("symlinks")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            Command::UdevEvent(UdevEventParams {
+                action,
+                sysfs_path,
+                devname,
+                subsystem,
+                env,
+                tags,
+                symlinks,
+            })
         }
         _ => {
             return Err(ParseError::MethodNotFound(format!(
@@ -6600,6 +6692,10 @@ pub fn execute_command(
                     env.insert(var.clone(), v);
                 }
             }
+            return Ok(serde_json::json!(null));
+        }
+        Command::UdevEvent(params) => {
+            crate::units::handle_udev_event(&run_info, &params);
             return Ok(serde_json::json!(null));
         }
         Command::ListTimers => {
