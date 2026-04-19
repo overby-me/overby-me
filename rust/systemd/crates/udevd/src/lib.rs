@@ -4185,8 +4185,11 @@ fn execute_run_programs(event: &mut UEvent, result: &RuleResult, hwdb: Option<&H
         match child_cmd.spawn() {
             Ok(mut child) => {
                 let pid = child.id();
+                let comm = fs::read_to_string(format!("/proc/{pid}/comm"))
+                    .map(|s| s.trim().to_owned())
+                    .unwrap_or_else(|e| format!("<unreadable: {e}>"));
                 log::info!(
-                    "RUN spawned pid={pid} {} args={:?} (resolved: {})",
+                    "RUN spawned pid={pid} comm={comm:?} {} args={:?} (resolved: {})",
                     parts[0],
                     &parts[1..],
                     prog.display()
