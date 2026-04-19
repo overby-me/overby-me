@@ -4163,13 +4163,6 @@ fn execute_run_programs(event: &mut UEvent, result: &RuleResult, hwdb: Option<&H
         }
 
         let prog = resolve_program_path(parts[0]);
-        log::info!(
-            "RUN: spawn {} args={:?} (resolved: {})",
-            parts[0],
-            &parts[1..],
-            prog.display()
-        );
-
         let mut child_cmd = Command::new(&prog);
         child_cmd
             .args(&parts[1..])
@@ -4186,17 +4179,34 @@ fn execute_run_programs(event: &mut UEvent, result: &RuleResult, hwdb: Option<&H
             child_cmd.env(k, v);
         }
 
-        match child_cmd.status() {
-            Ok(status) => {
+        // Use spawn()+wait() instead of status() so we can log the
+        // child PID up-front — useful diagnostic when a RUN= program
+        // appears to hang.
+        match child_cmd.spawn() {
+            Ok(mut child) => {
+                let pid = child.id();
                 log::info!(
-                    "RUN '{}' finished: status={}, success={}",
-                    expanded,
-                    status.code().unwrap_or(-1),
-                    status.success(),
+                    "RUN spawned pid={pid} {} args={:?} (resolved: {})",
+                    parts[0],
+                    &parts[1..],
+                    prog.display()
                 );
+                match child.wait() {
+                    Ok(status) => {
+                        log::info!(
+                            "RUN pid={pid} '{}' finished: status={}, success={}",
+                            expanded,
+                            status.code().unwrap_or(-1),
+                            status.success(),
+                        );
+                    }
+                    Err(e) => {
+                        log::warn!("RUN pid={pid} wait failed for '{}': {}", expanded, e);
+                    }
+                }
             }
             Err(e) => {
-                log::warn!("Failed to execute RUN '{}': {}", expanded, e);
+                log::warn!("Failed to spawn RUN '{}': {}", expanded, e);
             }
         }
     }
