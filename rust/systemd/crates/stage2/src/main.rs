@@ -39,35 +39,51 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() -> ! {
-    // current_exe()/proc/self/exe points to the actual binary in
-    // /nix/store/<rust-systemd-systemd>/lib/systemd/rust-systemd-stage2
-    // which is NOT the systemConfig.  Instead, parse argv[0] which the
-    // stage-1 init script sets to `/init` — a symlink to
-    // `<systemConfig>/init`.  Canonicalize that to get the real
-    // systemConfig path.
-    let argv0 = std::env::args()
-        .next()
-        .unwrap_or_else(|| "/init".to_string());
-    let argv0_path = PathBuf::from(&argv0);
-    let init_path = std::fs::canonicalize(&argv0_path).unwrap_or(argv0_path);
-    let system_config = init_path
-        .parent()
-        .map(|p| p.to_path_buf())
+    log("rust-systemd-stage2: entered main");
+
+    let system_config = system_config_from_cmdline()
         .unwrap_or_else(|| PathBuf::from("/run/current-system"));
 
     log(&format!(
-        "rust-systemd-stage2: starting (systemConfig={})",
+        "rust-systemd-stage2: systemConfig={}",
         system_config.display()
     ));
 
+    log("rust-systemd-stage2: remount_root_rw");
     remount_root_rw();
+    log("rust-systemd-stage2: ensure_api_mounts");
     ensure_api_mounts();
+    log("rust-systemd-stage2: apply_nix_store_mount_options");
     apply_nix_store_mount_options();
+    log("rust-systemd-stage2: install_initial_dirs");
     install_initial_dirs();
+    log("rust-systemd-stage2: run_activation");
     run_activation(&system_config);
+    log("rust-systemd-stage2: mark_booted_system");
     mark_booted_system(&system_config);
+    // /run/current-system is the primary symlink used by almost every
+    // tool on the system — set it alongside booted-system so the
+    // first-boot exec can find systemd via /run/current-system.
+    let cur = Path::new("/run/current-system");
+    let _ = std::fs::remove_file(cur);
+    let _ = std::os::unix::fs::symlink(&system_config, cur);
 
+    log("rust-systemd-stage2: exec_systemd");
     exec_systemd(&system_config);
+}
+
+/// Parse /proc/cmdline for `init=<path>` and return the parent dir as
+/// the systemConfig store path.  Kernel sets this from the bootloader
+/// entry; NixOS populates it as `/nix/store/<hash>-nixos-system-xxx/init`.
+fn system_config_from_cmdline() -> Option<PathBuf> {
+    let cmdline = std::fs::read_to_string("/proc/cmdline").ok()?;
+    for word in cmdline.split_whitespace() {
+        if let Some(path) = word.strip_prefix("init=") {
+            let init = PathBuf::from(path);
+            return init.parent().map(|p| p.to_path_buf());
+        }
+    }
+    None
 }
 
 /// Write a single line to /dev/console.  Used before the logger is up.
