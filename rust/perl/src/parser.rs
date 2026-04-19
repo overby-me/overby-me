@@ -2956,6 +2956,7 @@ impl Parser {
                         | Token::Eof
                         | Token::Delete
                         | Token::Exists
+                        | Token::Glob(_)
                 ) {
                     // Function call without parentheses: func arg, ...
                     // Perl prototype-`$` builtins only take a single scalar arg.

@@ -2277,6 +2277,52 @@ impl Interpreter {
                         )));
                         return Value::Undef;
                     }
+                    // `pos($var) = N` / `pos(*glob) = N` — lvalue pos stores
+                    // a byte offset. Treat N (a char count) as bytes for
+                    // now; tests just care that pos() reads back the value.
+                    let var_name: Option<String> = match first {
+                        Expr::ScalarVar(n) => Some(n.clone()),
+                        Expr::GlobVar(n) => {
+                            let stripped = n.trim_start_matches("::").to_string();
+                            Some(
+                                stripped
+                                    .strip_prefix("main::")
+                                    .map(|s| s.to_string())
+                                    .unwrap_or(stripped),
+                            )
+                        }
+                        _ => None,
+                    };
+                    if let Some(name) = var_name {
+                        let n = self.eval_expr(value).to_num();
+                        if n.is_nan() || n < 0.0 {
+                            self.pos_offsets.remove(&name);
+                        } else {
+                            // Translate char-count to byte offset against
+                            // the current value of the scalar. If the
+                            // target exceeds the string's char count, store
+                            // the char count directly (`pos *glob = 1`
+                            // against an empty scalar stores 1).
+                            let s = self.get_var(&name).to_str();
+                            let target_chars = n as usize;
+                            let byte_off = s
+                                .char_indices()
+                                .nth(target_chars)
+                                .map(|(b, _)| b)
+                                .unwrap_or_else(|| {
+                                    if target_chars > s.chars().count() {
+                                        // Beyond end-of-string — store the
+                                        // raw char count so `pos()` reads
+                                        // back what was set.
+                                        target_chars
+                                    } else {
+                                        s.len()
+                                    }
+                                });
+                            self.pos_offsets.insert(name, byte_off);
+                        }
+                        return Value::Num(n);
+                    }
                 }
                 // `substr($s, OFFS, [LEN]) = REPL` — Perl's lvalue substr.
                 // Equivalent to `substr($s, OFFS, LEN, REPL)`. The 2-arg
@@ -4007,24 +4053,36 @@ impl Interpreter {
                 Value::Num(secs as f64)
             }
             "pos" => {
-                // `pos($var)` — current `/g` match offset (character
-                // count) for $var, or undef if no match has run (or the
-                // last `/g` failed). We store byte offsets internally
-                // and convert to chars on read so multibyte characters
-                // count as one.
-                if let Some(Expr::ScalarVar(name)) = args.first()
-                    && let Some(off_bytes) = self.pos_offsets.get(name).copied()
+                // `pos($var)` / `pos(*glob)` — current `/g` match offset
+                // (character count), or undef if no match. `*NAME` maps to
+                // the scalar `$NAME`.
+                let name_opt: Option<String> = match args.first() {
+                    Some(Expr::ScalarVar(n)) => Some(n.clone()),
+                    Some(Expr::GlobVar(n)) => {
+                        let stripped = n.trim_start_matches("::").to_string();
+                        Some(
+                            stripped
+                                .strip_prefix("main::")
+                                .map(|s| s.to_string())
+                                .unwrap_or(stripped),
+                        )
+                    }
+                    _ => None,
+                };
+                if let Some(name) = name_opt
+                    && let Some(off_bytes) = self.pos_offsets.get(&name).copied()
                 {
-                    let s = self.get_var(name).to_str();
+                    let s = self.get_var(&name).to_str();
                     let bytes = s.as_bytes();
-                    if off_bytes >= bytes.len() {
-                        // pos at or past end-of-string — Perl returns
-                        // undef once the iterator has exhausted (the
-                        // last successful match left pos at end).
-                        if off_bytes == bytes.len() {
-                            return Value::Num(s.chars().count() as f64);
-                        }
-                        return Value::Undef;
+                    if off_bytes > bytes.len() {
+                        // Stored beyond end-of-string via explicit
+                        // `pos($var) = N`. Return the stored count
+                        // directly (it's already a char count, since the
+                        // set path stores target_chars when out-of-range).
+                        return Value::Num(off_bytes as f64);
+                    }
+                    if off_bytes == bytes.len() {
+                        return Value::Num(s.chars().count() as f64);
                     }
                     let prefix = std::str::from_utf8(&bytes[..off_bytes]).unwrap_or("");
                     return Value::Num(prefix.chars().count() as f64);

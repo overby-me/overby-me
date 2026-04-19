@@ -1281,7 +1281,8 @@ impl Lexer {
                     } else if (self.ch() == '_'
                         || self.ch().is_ascii_alphabetic()
                         || (!self.ch().is_ascii() && self.ch().is_alphabetic()))
-                        && tokens.last().map(|t| t.expects_operand()).unwrap_or(true)
+                        && (tokens.last().map(|t| t.expects_operand()).unwrap_or(true)
+                            || last_is_named_unary(tokens.last()))
                     {
                         // Typeglob like *FH / *pkg::name.
                         let name = self.read_ident();
