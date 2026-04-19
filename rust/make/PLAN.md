@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**102/135 tests passing** (75%) — upstream test harness from GNU make 4.4.1.
+**103/135 tests passing** (76%) — upstream test harness from GNU make 4.4.1.
 
 `rust/make` has a parser, expander, and build engine (~5k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -153,6 +153,9 @@ organised in six directories under `tests/scripts/`:
 - Pattern rule search: user-defined rules are tried first (definition
   order, first-wins), built-in rules tried only when no user rule
   matches.
+- Terminal pattern rule matching accepts explicitly-mentioned files
+  (targets or prereqs of explicit rules) and suppresses further
+  implicit rule chaining for those prereqs.
 - Order-only prereqs promoted to normal when a prereq appears in both
   positions (via union across combined rules).
 - A `|` appearing in *expanded* prereq text (e.g. from `$(VAR)` whose

@@ -245,6 +245,9 @@ pub struct Engine {
     /// (e.g. %: %.c matching hello -> hello.c -> hello.c.c -> ...).
     build_depth: Cell<usize>,
     pub printed_entering: Cell<bool>,
+    /// Targets for which implicit rule search should be skipped.
+    /// Used when building prereqs of terminal pattern rules.
+    skip_implicit: RefCell<HashSet<String>>,
 }
 
 impl Engine {
@@ -313,6 +316,7 @@ impl Engine {
             needs_reexec: Cell::new(false),
             build_depth: Cell::new(0),
             printed_entering: Cell::new(false),
+            skip_implicit: RefCell::new(HashSet::new()),
         };
 
         // Set default variables
@@ -2306,7 +2310,7 @@ impl Engine {
 
         // Find matching pattern rule if no explicit recipe
         let has_recipe = rules.iter().any(|r| !r.recipe.is_empty());
-        let pattern_match = if !has_recipe {
+        let pattern_match = if !has_recipe && !self.skip_implicit.borrow().contains(target) {
             self.find_pattern_rule(target)
         } else {
             None
@@ -2379,6 +2383,26 @@ impl Engine {
                 recipe_source = pat_rule.source_name.clone();
             }
         }
+        // For terminal pattern rules, prevent further implicit rule
+        // chaining for the derived prereqs.
+        if let Some((pat_rule, _)) = &pattern_match
+            && pat_rule.is_terminal
+        {
+            let mut si = self.skip_implicit.borrow_mut();
+            for prereq in &implied_prereqs {
+                si.insert(prereq.clone());
+            }
+        }
+        let clean_skip = |s: &Self| {
+            if let Some((pat_rule, _)) = &pattern_match
+                && pat_rule.is_terminal
+            {
+                let mut si = s.skip_implicit.borrow_mut();
+                for prereq in &implied_prereqs {
+                    si.remove(prereq);
+                }
+            }
+        };
         // Re-apply the normal-vs-order-only promotion after pattern
         // match injected new entries.
         let normal_set2: HashSet<String> = all_prereqs.iter().cloned().collect();
@@ -2488,6 +2512,7 @@ impl Engine {
                     }
                     continue;
                 }
+                clean_skip(self);
                 pop_scope(self);
                 return Err(e);
             }
@@ -2526,6 +2551,7 @@ impl Engine {
         // remake. Skip the remaining prereq work for this target.
         if first_err.is_some() {
             self.failed_targets.borrow_mut().insert(target.to_string());
+            clean_skip(self);
             pop_scope(self);
             return Err(String::new());
         }
@@ -2551,12 +2577,14 @@ impl Engine {
                         first_err = Some(String::new());
                         continue;
                     }
+                    clean_skip(self);
                     pop_scope(self);
                     return Err(e);
                 }
             }
             if first_err.is_some() {
                 self.failed_targets.borrow_mut().insert(target.to_string());
+                clean_skip(self);
                 pop_scope(self);
                 return Err(String::new());
             }
@@ -2567,10 +2595,12 @@ impl Engine {
         // the target's rebuild decision based on mtime.
         for prereq in &all_order_only {
             if let Err(e) = self.build_target_for(prereq, Some(target)) {
+                clean_skip(self);
                 pop_scope(self);
                 return Err(e);
             }
         }
+        clean_skip(self);
 
         // Determine if we need to rebuild
         let target_mtime = if is_phony {
@@ -2917,7 +2947,7 @@ impl Engine {
                     let prereqs_ok = rule.prereq_patterns.is_empty()
                         || rule.prereq_patterns.iter().all(|pp| {
                             let prereq = pp.replace('%', &stem);
-                            Path::new(&prereq).exists()
+                            Path::new(&prereq).exists() || self.is_mentioned_file(&prereq)
                         });
                     if prereqs_ok {
                         return Some((rule.clone(), stem));
@@ -2952,7 +2982,7 @@ impl Engine {
                         let prereqs_ok = rule.prereq_patterns.is_empty()
                             || rule.prereq_patterns.iter().all(|pp| {
                                 let prereq = pp.replace('%', &stem);
-                                Path::new(&prereq).exists()
+                                Path::new(&prereq).exists() || self.is_mentioned_file(&prereq)
                             });
                         if prereqs_ok {
                             return Some((rule.clone(), stem));
