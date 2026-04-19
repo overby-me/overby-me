@@ -744,6 +744,20 @@ fn main() {
         positional.push("list-units".to_string());
     }
 
+    // Path-to-unit translation: systemctl accepts absolute paths like
+    // `/sys/devices/virtual/net/eth0` or `/dev/sda1` and resolves them
+    // to the corresponding `.device` / `.mount` unit name.  Matches
+    // upstream systemd's `unit_name_mangle_with_suffix` behaviour.
+    // Skip positional[0] since that's the subcommand.
+    for arg in positional.iter_mut().skip(1) {
+        if arg.starts_with("/sys/") || arg.starts_with("/dev/") {
+            let trimmed = arg.trim_matches('/');
+            if !trimmed.is_empty() {
+                *arg = format!("{}.device", trimmed.replace('/', "-"));
+            }
+        }
+    }
+
     // Parse signal name from --signal / -s flag captured in first pass
     let kill_signal: Option<i32> = kill_signal_str.as_deref().and_then(|name| {
         if let Ok(sig) = name.parse::<i32>() {
