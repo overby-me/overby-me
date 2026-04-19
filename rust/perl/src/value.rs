@@ -30,9 +30,26 @@ pub enum Value {
     /// `local(*NAME) = @_` re-aliasing the current package's `NAME`
     /// filehandle to the glob's source name (and reverting on scope exit).
     Glob(String),
+    /// Transparent alias to a scalar slot, backed by `Rc<RefCell<Value>>`.
+    /// Used for Perl's `@_` argument aliasing: a sub sees shared storage
+    /// for each slot, so `$_[0] = X` writes through to the caller's lvalue
+    /// and `\$_[0] == \$_[1]` iff both slots point to the same Rc. Reads
+    /// transparently follow via `resolve()`; writes through `assign_to` a
+    /// slot that is itself an Alias update the RefCell contents. Distinct
+    /// from `ScalarRef` which is a user-visible Perl ref (`\$x`).
+    Alias(Rc<RefCell<Value>>),
 }
 
 impl Value {
+    /// Follow `Value::Alias` transparently: return the concrete value
+    /// the alias points at. Non-Alias values are returned by clone.
+    pub fn resolve(&self) -> Value {
+        match self {
+            Value::Alias(rc) => rc.borrow().clone(),
+            _ => self.clone(),
+        }
+    }
+
     pub fn to_str(&self) -> String {
         match self {
             Value::Undef => String::new(),
@@ -50,6 +67,7 @@ impl Value {
                     format!("*main::{name}")
                 }
             }
+            Value::Alias(rc) => rc.borrow().to_str(),
         }
     }
 
@@ -66,6 +84,7 @@ impl Value {
             | Value::CodeRef(_)
             | Value::Regex(_, _)
             | Value::Glob(_) => 0.0,
+            Value::Alias(rc) => rc.borrow().to_num(),
         }
     }
 
@@ -81,11 +100,16 @@ impl Value {
             | Value::CodeRef(_)
             | Value::Regex(_, _)
             | Value::Glob(_) => true,
+            Value::Alias(rc) => rc.borrow().to_bool(),
         }
     }
 
     pub fn is_undef(&self) -> bool {
-        matches!(self, Value::Undef)
+        match self {
+            Value::Undef => true,
+            Value::Alias(rc) => rc.borrow().is_undef(),
+            _ => false,
+        }
     }
 
     /// Returns the reference type name for `ref()` — `""` for non-refs.

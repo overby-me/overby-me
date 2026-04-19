@@ -2175,11 +2175,14 @@ impl Interpreter {
                 } else {
                     idx as usize
                 };
-                arr.get(real_idx).cloned().unwrap_or(Value::Undef)
+                let v = arr.get(real_idx).cloned().unwrap_or(Value::Undef);
+                // Auto-resolve `Value::Alias` — `@_` argument aliasing
+                // stores shared cells; reads transparently follow them.
+                v.resolve()
             }
             Expr::HashElement(name, key) => {
                 let key_str = self.eval_expr(key).to_str();
-                self.get_hash_element(name, &key_str)
+                self.get_hash_element(name, &key_str).resolve()
             }
             Expr::ArrayLen(name) => {
                 // `$#$ref` — the lexer marks the deref form with a leading
@@ -2953,6 +2956,30 @@ impl Interpreter {
                         self.aliased_vars.insert(key, rc.clone());
                         Value::ScalarRef(rc)
                     }
+                    // `\$_[i]` — if @_[i] is a `Value::Alias`, return a
+                    // ScalarRef pointing to the SAME Rc so `\$_[0] == \$_[1]`
+                    // holds when both slots share storage (Perl's @_
+                    // argument aliasing).
+                    Expr::ArrayElement(name, index) if name == "_" => {
+                        let idx = self.eval_expr(index).to_num() as i64;
+                        let arr = self.get_array(name);
+                        let real = if idx < 0 {
+                            let from_end = arr.len() as i64 + idx;
+                            if from_end < 0 {
+                                return Value::ScalarRef(std::rc::Rc::new(
+                                    std::cell::RefCell::new(Value::Undef),
+                                ));
+                            }
+                            from_end as usize
+                        } else {
+                            idx as usize
+                        };
+                        if let Some(Value::Alias(rc)) = arr.get(real) {
+                            return Value::ScalarRef(rc.clone());
+                        }
+                        let v = arr.get(real).cloned().unwrap_or(Value::Undef);
+                        Value::ScalarRef(std::rc::Rc::new(std::cell::RefCell::new(v)))
+                    }
                     // `\&name` — our BitAnd parser emits `Call(name, [])` for
                     // the `&name` half, so `Ref(Call(…, []))` shows up here.
                     // Return a CodeRef to the sub, NOT the result of calling
@@ -3041,7 +3068,9 @@ impl Interpreter {
                 Value::Glob(qualified)
             }
             Expr::ArrowElement(lhs, idx, kind) => {
-                let lhs_val = self.eval_expr(lhs);
+                // Resolve aliases on the LHS so `(list)[0]->{k}` works when
+                // the list slice returned a `Value::Alias`.
+                let lhs_val = self.eval_expr(lhs).resolve();
                 match (&lhs_val, kind) {
                     (Value::ArrayRef(r), ArrowKind::Array) => {
                         let i = self.eval_expr(idx).to_num() as i64;
@@ -3635,19 +3664,27 @@ impl Interpreter {
                 // Internal: `(LIST)[i1, i2, ...]` — list slice. Returns
                 // the selected elements; scalar context returns the last.
                 // Slicing an empty list yields the empty list (no undefs).
+                // Each list slot is stored in an Rc<RefCell<Value>> so the
+                // slice can emit `Value::Alias`es — repeated indices
+                // (`(X)[0,0]`) share the same Rc, so `\$_[0] == \$_[1]`
+                // when passed to a sub (matches Perl's list-slice aliasing).
                 if args.is_empty() {
                     return Value::Undef;
                 }
-                let list = self.eval_list(&args[0]);
-                let len = list.len() as i64;
+                let list_vals = self.eval_list(&args[0]);
+                let list_cells: Vec<std::rc::Rc<std::cell::RefCell<Value>>> = list_vals
+                    .into_iter()
+                    .map(|v| std::rc::Rc::new(std::cell::RefCell::new(v)))
+                    .collect();
+                let len = list_cells.len() as i64;
                 let mut out = Vec::with_capacity(args.len() - 1);
-                if !list.is_empty() {
+                if !list_cells.is_empty() {
                     for idx_e in &args[1..] {
                         for v in self.eval_list(idx_e) {
                             let raw = v.to_num() as i64;
                             let i = if raw < 0 { len + raw } else { raw };
-                            out.push(if i >= 0 && (i as usize) < list.len() {
-                                list[i as usize].clone()
+                            out.push(if i >= 0 && (i as usize) < list_cells.len() {
+                                Value::Alias(list_cells[i as usize].clone())
                             } else {
                                 Value::Undef
                             });
@@ -6141,6 +6178,10 @@ impl Interpreter {
                     Value::Glob(_) => {
                         Some("Setting $/ to a GLOB reference is forbidden\n".to_string())
                     }
+                    Value::Alias(_) => {
+                        // Follow the alias to check the underlying value.
+                        Self::validate_record_separator(&inner.resolve())
+                    }
                 }
             }
             _ => None,
@@ -6857,8 +6898,15 @@ impl Interpreter {
                 while arr.len() <= idx {
                     arr.push(Value::Undef);
                 }
-                arr[idx] = val;
-                self.set_array(name, arr);
+                // If the slot is a `Value::Alias` (@_'s argument-aliasing
+                // cell), write *through* the RefCell so the caller's slot
+                // sees the mutation — Perl's `sub { $_[0] = … }` idiom.
+                if let Value::Alias(rc) = &arr[idx] {
+                    *rc.borrow_mut() = val;
+                } else {
+                    arr[idx] = val;
+                    self.set_array(name, arr);
+                }
             }
             Expr::HashElement(name, key) => {
                 let key_str = self.eval_expr(key).to_str();
@@ -7331,9 +7379,19 @@ impl Interpreter {
                 if n <= 0 {
                     return Vec::new();
                 }
-                let mut out = Vec::with_capacity(items.len() * n as usize);
+                // Perl aliases repeated slots: `(X) x N` produces N refs to
+                // the same storage cell, so `\$_[0] == \$_[1]` when the
+                // repeated list is passed to a sub. Wrap each unique item
+                // once in an Rc<RefCell<Value>>, then emit Aliases.
+                let cells: Vec<std::rc::Rc<std::cell::RefCell<Value>>> = items
+                    .into_iter()
+                    .map(|v| std::rc::Rc::new(std::cell::RefCell::new(v)))
+                    .collect();
+                let mut out = Vec::with_capacity(cells.len() * n as usize);
                 for _ in 0..n {
-                    out.extend(items.iter().cloned());
+                    for rc in &cells {
+                        out.push(Value::Alias(rc.clone()));
+                    }
                 }
                 out
             }

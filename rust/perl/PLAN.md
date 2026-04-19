@@ -6,20 +6,29 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**60/79 Nix tests passing** (76%) — selected tests from the upstream Perl test suite.
+**61/79 Nix tests passing** (77%) — selected tests from the upstream Perl test suite.
 
 Passing: base/if, base/cond, base/while, base/pat, base/num, base/translate,
 base/term, base/rs, cmd/elsif, cmd/for, cmd/mod, cmd/subval, cmd/switch,
 opbasic/arith, opbasic/qq, opbasic/magic_phase, op/arith2, op/auto, op/bop,
 op/chop, op/closure, op/cond, op/context, op/defined, op/delete, op/die,
-op/do, op/each, op/grep, op/hash, op/inc, op/index, op/lc, op/my, op/not,
-op/oct, op/pack, op/push, op/quotemeta, op/range, op/ref, op/reverse,
+op/do, op/each, op/grep, op/hash, op/inc, op/index, op/lc, op/list, op/my,
+op/not, op/oct, op/pack, op/push, op/quotemeta, op/range, op/ref, op/reverse,
 op/sort, op/splice, op/split, op/sprintf, op/sub, op/substr, op/unshift,
 op/vec, op/wantarray, io/argv, io/fs, io/open, io/print, io/read, re/pat,
 re/subst, run/exit, run/switches.
 
 Major unlocks in this cycle:
 
+- **True `@_` aliasing via `Value::Alias`** (Rc<RefCell<Value>>): list
+  slices `(…)[i,j]` and list-repeat `(…) x N` build shared storage cells
+  and emit `Value::Alias(rc)` for each slot. Repeated indices or repeat
+  copies share the same Rc, so `\$_[0] == \$_[1]` holds when a sub is
+  passed `(X)[0,0]` or `(X) x 2`. `ArrayElement` reads auto-resolve
+  aliases; `\$_[i]` returns `ScalarRef(same_rc)`; `$_[i] = X` writes
+  through the RefCell. `Value` gained a `resolve()` helper and transparent
+  behaviour under `to_str/to_num/to_bool/is_undef`. Unlocks op/list
+  (test 67) and op/repeat test 46.
 - **Post-hoc `@_` aliasing** for user-sub calls: before the call,
   `ArrowElement` args (`$ref->{k}` / `$ref->[i]`) are autovivified so the
   slot exists on return; after the call, each final `@_` slot that differs
