@@ -7212,6 +7212,48 @@ pub fn execute_command(
                     props.insert("LimitNOFILESoft".to_string(), fmt(&rl.soft));
                 }
 
+                // Even for not-found units, reverse-dependency lookup
+                // still works in upstream systemd: a unit may be
+                // referenced by Wants=/Requires= edges from loaded
+                // units even if the target's own fragment is missing.
+                // This matters for SYSTEMD_WANTS= from udev rules that
+                // points at services that don't exist on disk.
+                let mut wanted_by = Vec::new();
+                let mut required_by = Vec::new();
+                let mut part_of_by = Vec::new();
+                let mut bound_by = Vec::new();
+                let mut upheld_by = Vec::new();
+                let mut conflicted_by = Vec::new();
+                for unit in ri.unit_table.values() {
+                    let matches_name = |id: &UnitId| id.name == full_name;
+                    let me_id = unit.id.clone();
+                    if unit.common.dependencies.wants.iter().any(matches_name) {
+                        wanted_by.push(me_id.name.clone());
+                    }
+                    if unit.common.dependencies.requires.iter().any(matches_name) {
+                        required_by.push(me_id.name.clone());
+                    }
+                    if unit.common.dependencies.part_of.iter().any(matches_name) {
+                        part_of_by.push(me_id.name.clone());
+                    }
+                    if unit.common.dependencies.binds_to.iter().any(matches_name) {
+                        bound_by.push(me_id.name.clone());
+                    }
+                    if unit.common.dependencies.upholds.iter().any(matches_name) {
+                        upheld_by.push(me_id.name.clone());
+                    }
+                    if unit.common.dependencies.conflicts.iter().any(matches_name) {
+                        conflicted_by.push(me_id.name.clone());
+                    }
+                }
+                let join_space = |v: &[String]| v.join(" ");
+                props.insert("WantedBy".to_string(), join_space(&wanted_by));
+                props.insert("RequiredBy".to_string(), join_space(&required_by));
+                props.insert("PartOfBy".to_string(), join_space(&part_of_by));
+                props.insert("BoundBy".to_string(), join_space(&bound_by));
+                props.insert("UpheldBy".to_string(), join_space(&upheld_by));
+                props.insert("ConflictedBy".to_string(), join_space(&conflicted_by));
+
                 let text = unit_properties::format_properties(&props, filter.as_deref());
                 return Ok(serde_json::json!({ "show": text }));
             }
