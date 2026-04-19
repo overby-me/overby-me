@@ -189,15 +189,6 @@
                   fi
                 done
 
-                # Install rust-systemd-stage2 so NixOS can use it as the
-                # stage-2 init (via `system.build.bootStage2` override).
-                # Replaces the upstream bash stage-2-init.sh whose racy
-                # `exec > >(tee | while read)` pipeline hangs the VM
-                # about 30% of the time.
-                if [ -e "${rust-systemd}/bin/rust-systemd-stage2" ]; then
-                  cp -a "${rust-systemd}/bin/rust-systemd-stage2" \
-                        "$out/lib/systemd/rust-systemd-stage2"
-                fi
 
                 # Install systemd-bsod.service — C systemd doesn't build it without qrencode,
                 # but our Rust implementation doesn't need qrencode.
