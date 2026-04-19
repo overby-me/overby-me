@@ -188,7 +188,7 @@ pub struct Engine {
     /// Target-specific variable assignments: target -> (var, op, value).
     /// Applied to each recipe's expansion scope when building that target.
     #[allow(clippy::type_complexity)]
-    target_vars: RefCell<HashMap<String, Vec<(String, AssignOp, String, bool)>>>,
+    target_vars: RefCell<HashMap<String, Vec<(String, AssignOp, String, bool, bool)>>>,
     /// Per-target variable names that were declared with `export`
     /// (e.g. `two: export SHELL := …`). Added to `exports` only
     /// while the owning target's recipe runs.
@@ -196,7 +196,8 @@ pub struct Engine {
     /// Stack of target-specific variable bindings active during the
     /// currently-recursing build. Prereq builds see the union of their
     /// ancestors' bindings so target-specific vars propagate downward.
-    target_scope_stack: RefCell<Vec<(String, AssignOp, String, bool)>>,
+    #[allow(clippy::type_complexity)]
+    target_scope_stack: RefCell<Vec<(String, AssignOp, String, bool, bool)>>,
     /// When `.DELETE_ON_ERROR:` is set, make removes the target file if
     /// its recipe fails.
     delete_on_error: RefCell<bool>,
@@ -248,6 +249,31 @@ pub struct Engine {
     /// Targets for which implicit rule search should be skipped.
     /// Used when building prereqs of terminal pattern rules.
     skip_implicit: RefCell<HashSet<String>>,
+    /// Global variables declared with `private` — their values are
+    /// temporarily removed from the variable map during recipe execution
+    /// so they are not visible in recipe contexts.
+    private_vars: RefCell<HashSet<String>>,
+    /// Global exports that came from `private export` declarations —
+    /// temporarily removed from the export set during recipe execution.
+    private_exports: RefCell<HashSet<String>>,
+    /// `.ONESHELL` special target: when set, all recipe lines are
+    /// combined and passed to a single shell invocation.
+    oneshell: Cell<bool>,
+    /// Targets listed as prerequisites of `.SECONDARY`. These intermediate
+    /// files are not automatically deleted after building.
+    secondary_targets: RefCell<HashSet<String>>,
+    /// Set by `.SECONDARY:` (no prereqs) — all targets are treated as secondary.
+    secondary_all: Cell<bool>,
+    /// Targets listed as prerequisites of `.INTERMEDIATE`. These files
+    /// are treated as intermediate even if they are mentioned elsewhere.
+    intermediate_targets: RefCell<HashSet<String>>,
+    /// Explicit file names listed as prerequisites of `.NOTINTERMEDIATE`.
+    notintermediate_files: RefCell<HashSet<String>>,
+    /// Patterns (containing `%`) listed as prerequisites of `.NOTINTERMEDIATE`.
+    notintermediate_patterns: RefCell<Vec<String>>,
+    /// Set by `.NOTINTERMEDIATE:` (no prereqs) — all targets are treated
+    /// as not-intermediate.
+    notintermediate_all: Cell<bool>,
 }
 
 impl Engine {
@@ -265,6 +291,8 @@ impl Engine {
                 ".cpp".into(),
                 ".s".into(),
                 ".S".into(),
+                ".f".into(),
+                ".F".into(),
             ]),
             exports: RefCell::new(HashSet::new()),
             unexports: RefCell::new(HashSet::new()),
@@ -317,6 +345,15 @@ impl Engine {
             build_depth: Cell::new(0),
             printed_entering: Cell::new(false),
             skip_implicit: RefCell::new(HashSet::new()),
+            private_vars: RefCell::new(HashSet::new()),
+            private_exports: RefCell::new(HashSet::new()),
+            oneshell: Cell::new(false),
+            secondary_targets: RefCell::new(HashSet::new()),
+            secondary_all: Cell::new(false),
+            intermediate_targets: RefCell::new(HashSet::new()),
+            notintermediate_files: RefCell::new(HashSet::new()),
+            notintermediate_patterns: RefCell::new(Vec::new()),
+            notintermediate_all: Cell::new(false),
         };
 
         // Set default variables
@@ -401,11 +438,24 @@ impl Engine {
         self.add_pattern_rule("%.o", &["%.cpp"], &["$(COMPILE.cpp) $(OUTPUT_OPTION) $<"]);
         self.add_pattern_rule("%.o", &["%.cc"], &["$(COMPILE.cc) $(OUTPUT_OPTION) $<"]);
         self.add_pattern_rule("%.o", &["%.s"], &["$(COMPILE.s) -o $@ $<"]);
+        // Fortran compilation
+        self.add_pattern_rule("%.o", &["%.f"], &["$(COMPILE.f) $(OUTPUT_OPTION) $<"]);
+        self.add_pattern_rule("%.o", &["%.F"], &["$(COMPILE.F) $(OUTPUT_OPTION) $<"]);
         // Linking
         self.add_pattern_rule(
             "%",
             &["%.o"],
             &["$(LINK.o) $^ $(LOADLIBES) $(LDLIBS) -o $@"],
+        );
+        self.add_pattern_rule(
+            "%",
+            &["%.f"],
+            &["$(LINK.f) $^ $(LOADLIBES) $(LDLIBS) -o $@"],
+        );
+        self.add_pattern_rule(
+            "%",
+            &["%.F"],
+            &["$(LINK.F) $^ $(LOADLIBES) $(LDLIBS) -o $@"],
         );
 
         self.set_var_default("CC", "cc");
@@ -434,6 +484,15 @@ impl Engine {
         );
         self.set_var_default("COMPILE.s", "$(AS) $(ASFLAGS)");
         self.set_var_default("LINK.o", "$(CC) $(LDFLAGS) $(TARGET_ARCH)");
+        self.set_var_default("FC", "f77");
+        self.set_var_default("FFLAGS", "");
+        self.set_var_default("COMPILE.f", "$(FC) $(FFLAGS) $(TARGET_ARCH) -c");
+        self.set_var_default("LINK.f", "$(FC) $(FFLAGS) $(LDFLAGS) $(TARGET_ARCH)");
+        self.set_var_default("COMPILE.F", "$(FC) $(FFLAGS) $(CPPFLAGS) $(TARGET_ARCH) -c");
+        self.set_var_default(
+            "LINK.F",
+            "$(FC) $(FFLAGS) $(CPPFLAGS) $(LDFLAGS) $(TARGET_ARCH)",
+        );
     }
 
     /// Check if a target name is an old-style suffix rule (e.g., ".c.o").
@@ -1346,6 +1405,11 @@ impl Engine {
                 } else {
                     (raw_name.to_string(), false, false)
                 };
+                let (name, is_private) = if let Some(rest) = name.strip_prefix('@') {
+                    (rest.to_string(), true)
+                } else {
+                    (name, false)
+                };
                 let mut tv = self.target_vars.borrow_mut();
                 for target in targets_expanded.split_whitespace() {
                     tv.entry(target.to_string()).or_default().push((
@@ -1353,6 +1417,7 @@ impl Engine {
                         assign.op,
                         value.clone(),
                         is_override,
+                        is_private,
                     ));
                 }
                 if do_export {
@@ -1374,6 +1439,20 @@ impl Engine {
                             .push(format!("~{}", name));
                     }
                 }
+            }
+            Directive::PrivateAssign(assign, source, line_no) => {
+                *self.current_source.borrow_mut() = Some((source.clone(), *line_no));
+                self.process_assignment(assign, VarOrigin::File);
+                let expanded_name = expand::expand(&assign.name, self);
+                self.private_vars.borrow_mut().insert(expanded_name);
+                *self.current_source.borrow_mut() = None;
+            }
+            Directive::PrivateExportAssign(assign) => {
+                self.process_assignment(assign, VarOrigin::File);
+                let expanded_name = expand::expand(&assign.name, self);
+                self.exports.borrow_mut().insert(expanded_name.clone());
+                self.private_vars.borrow_mut().insert(expanded_name.clone());
+                self.private_exports.borrow_mut().insert(expanded_name);
             }
             Directive::Vpath(_) => {
                 // TODO: VPATH support
@@ -1618,15 +1697,88 @@ impl Engine {
                 ".DELETE_ON_ERROR" => {
                     *self.delete_on_error.borrow_mut() = true;
                 }
+                ".SECONDARY" => {
+                    if prereqs.is_empty() {
+                        if self.notintermediate_all.get() {
+                            eprintln!(
+                                "make: *** .NOTINTERMEDIATE and .SECONDARY are mutually exclusive.  Stop."
+                            );
+                            std::process::exit(2);
+                        }
+                        self.secondary_all.set(true);
+                    } else {
+                        for p in &prereqs {
+                            if self.notintermediate_files.borrow().contains(p) {
+                                eprintln!(
+                                    "make: *** {} cannot be both .NOTINTERMEDIATE and .SECONDARY.  Stop.",
+                                    p
+                                );
+                                std::process::exit(2);
+                            }
+                        }
+                        self.secondary_targets.borrow_mut().extend(prereqs.clone());
+                    }
+                }
+                ".INTERMEDIATE" => {
+                    for p in &prereqs {
+                        if self.notintermediate_files.borrow().contains(p) {
+                            eprintln!(
+                                "make: *** {} cannot be both .NOTINTERMEDIATE and .INTERMEDIATE.  Stop.",
+                                p
+                            );
+                            std::process::exit(2);
+                        }
+                    }
+                    self.intermediate_targets
+                        .borrow_mut()
+                        .extend(prereqs.clone());
+                }
+                ".NOTINTERMEDIATE" => {
+                    if prereqs.is_empty() {
+                        // Global form: .NOTINTERMEDIATE:
+                        if self.secondary_all.get() {
+                            eprintln!(
+                                "make: *** .NOTINTERMEDIATE and .SECONDARY are mutually exclusive.  Stop."
+                            );
+                            std::process::exit(2);
+                        }
+                        self.notintermediate_all.set(true);
+                    } else {
+                        for p in &prereqs {
+                            if p.contains('%') {
+                                // Pattern form: .NOTINTERMEDIATE: %.x
+                                self.notintermediate_patterns.borrow_mut().push(p.clone());
+                            } else {
+                                // Explicit file form: .NOTINTERMEDIATE: hello.x
+                                if self.intermediate_targets.borrow().contains(p) {
+                                    eprintln!(
+                                        "make: *** {} cannot be both .NOTINTERMEDIATE and .INTERMEDIATE.  Stop.",
+                                        p
+                                    );
+                                    std::process::exit(2);
+                                }
+                                if self.secondary_targets.borrow().contains(p) {
+                                    eprintln!(
+                                        "make: *** {} cannot be both .NOTINTERMEDIATE and .SECONDARY.  Stop.",
+                                        p
+                                    );
+                                    std::process::exit(2);
+                                }
+                                self.notintermediate_files.borrow_mut().insert(p.clone());
+                            }
+                        }
+                    }
+                }
                 ".PRECIOUS"
-                | ".INTERMEDIATE"
-                | ".SECONDARY"
                 | ".IGNORE"
                 | ".EXPORT_ALL_VARIABLES"
                 | ".NOTPARALLEL"
                 | ".ONESHELL" => {
                     if target == ".EXPORT_ALL_VARIABLES" {
                         *self.export_all.borrow_mut() = true;
+                    }
+                    if target == ".ONESHELL" {
+                        self.oneshell.set(true);
                     }
                 }
                 _ => normal_targets.push(target.clone()),
@@ -1710,7 +1862,7 @@ impl Engine {
                 };
                 let resolved_prereqs: Vec<String> = expanded_prereq_patterns
                     .iter()
-                    .map(|p| p.replace('%', &stem))
+                    .map(|p| p.replacen('%', &stem, 1))
                     .collect();
                 let mut rules = self.rules.borrow_mut();
                 rules.entry(target.clone()).or_default().push(RuleEntry {
@@ -1772,7 +1924,7 @@ impl Engine {
             let mut default = self.default_goal.borrow_mut();
             if default.is_none() {
                 for t in &targets {
-                    if !t.starts_with('.') {
+                    if !t.starts_with('.') || t.contains('/') {
                         *default = Some(t.clone());
                         break;
                     }
@@ -2069,7 +2221,7 @@ impl Engine {
     /// Gather target-specific variables for a target *and* those inherited
     /// from any ancestors currently being built. GNU make propagates
     /// target-specific vars from a parent to all of its prereqs.
-    fn collect_target_vars(&self, _target: &str) -> Vec<(String, AssignOp, String, bool)> {
+    fn collect_target_vars(&self, _target: &str) -> Vec<(String, AssignOp, String, bool, bool)> {
         // The target_scope_stack already contains this target's own
         // vars (pushed by build_target_for) plus all ancestor vars.
         // Just return its contents — the order is parents-first,
@@ -2119,14 +2271,20 @@ impl Engine {
         // Push this target's own variable bindings onto the scope stack
         // so prereq builds inherit them (GNU make semantics). Popped
         // before any return path via `pop_scope`.
-        let own_vars: Vec<(String, AssignOp, String, bool)> = self
+        let own_vars: Vec<(String, AssignOp, String, bool, bool)> = self
             .target_vars
             .borrow()
             .get(target)
             .cloned()
             .unwrap_or_default();
-        let scope_push_count = own_vars.len();
-        self.target_scope_stack.borrow_mut().extend(own_vars);
+        // Only push non-private vars to the scope stack (inherited by prereqs)
+        let inheritable: Vec<_> = own_vars
+            .iter()
+            .filter(|(_, _, _, _, is_private)| !is_private)
+            .cloned()
+            .collect();
+        let scope_push_count = inheritable.len();
+        self.target_scope_stack.borrow_mut().extend(inheritable);
         let pop_scope = |s: &Self| {
             let mut stack = s.target_scope_stack.borrow_mut();
             let new_len = stack.len().saturating_sub(scope_push_count);
@@ -2159,26 +2317,8 @@ impl Engine {
                         continue;
                     }
                 }
-                let prereqs: Vec<String> = rule
-                    .prerequisites
-                    .iter()
-                    .flat_map(|p| {
-                        expand::expand(p, self)
-                            .split_whitespace()
-                            .map(|s| s.to_string())
-                            .collect::<Vec<_>>()
-                    })
-                    .collect();
-                let order_only: Vec<String> = rule
-                    .order_only
-                    .iter()
-                    .flat_map(|p| {
-                        expand::expand(p, self)
-                            .split_whitespace()
-                            .map(|s| s.to_string())
-                            .collect::<Vec<_>>()
-                    })
-                    .collect();
+                let prereqs: Vec<String> = rule.prerequisites.clone();
+                let order_only: Vec<String> = rule.order_only.clone();
                 for prereq in &prereqs {
                     if prereq == target {
                         eprintln!(
@@ -2347,8 +2487,8 @@ impl Engine {
         let mut implied_prereqs: Vec<String> = Vec::new();
 
         for rule in &rules {
-            all_prereqs.extend(rule.prerequisites.iter().map(|p| expand::expand(p, self)));
-            all_order_only.extend(rule.order_only.iter().map(|p| expand::expand(p, self)));
+            all_prereqs.extend(rule.prerequisites.iter().cloned());
+            all_order_only.extend(rule.order_only.iter().cloned());
             if recipe.is_empty() && !rule.recipe.is_empty() {
                 recipe_lines = rule.recipe_lines.clone();
                 recipe_source = rule.source_name.clone();
@@ -2369,7 +2509,7 @@ impl Engine {
         if let Some((pat_rule, pat_stem)) = &pattern_match {
             stem = pat_stem.clone();
             for pp in &pat_rule.prereq_patterns {
-                let prereq = pp.replace('%', &stem);
+                let prereq = pp.replacen('%', &stem, 1);
                 if pp.contains('%') {
                     pattern_derived_prereqs.insert(prereq.clone());
                 }
@@ -2377,7 +2517,7 @@ impl Engine {
                 all_prereqs.push(prereq);
             }
             for op in &pat_rule.order_only_patterns {
-                let oo = expand::expand(&op.replace('%', &stem), self);
+                let oo = expand::expand(&op.replacen('%', &stem, 1), self);
                 for tok in oo.split_whitespace() {
                     all_order_only.push(tok.to_string());
                 }
@@ -2425,6 +2565,19 @@ impl Engine {
             recipe_source = s.clone();
         }
 
+        // If the explicit rule provides the recipe but the target has a
+        // recognized suffix, compute the stem as the target minus the suffix.
+        // This matches GNU make behavior for suffix rules on explicit targets.
+        if stem.is_empty() && pattern_match.is_none() {
+            let suffixes = self.suffixes.borrow();
+            for suf in suffixes.iter() {
+                if target.ends_with(suf.as_str()) {
+                    stem = target[..target.len() - suf.len()].to_string();
+                    break;
+                }
+            }
+        }
+
         // .EXTRA_PREREQS: extra prereqs added to every target, built but
         // not visible in `$<`/`$^`/etc. Skip if the target being built
         // is itself one of the extra prereqs (avoid cycle).
@@ -2440,9 +2593,9 @@ impl Engine {
                     entries
                         .iter()
                         .rev()
-                        .find(|(n, _, _, _)| n == ".EXTRA_PREREQS")
+                        .find(|(n, _, _, _, _)| n == ".EXTRA_PREREQS")
                 })
-                .map(|(_, _, v, _)| expand::expand(v, self))
+                .map(|(_, _, v, _, _)| expand::expand(v, self))
                 .unwrap_or_else(|| self.lookup_var(".EXTRA_PREREQS"))
         };
         let extra_prereqs: Vec<String> = extra_raw
@@ -2549,7 +2702,7 @@ impl Engine {
                 // explicitly mentioned elsewhere in the makefile), then
                 // the missing file triggers a rebuild of the parent.
                 let is_intermediate =
-                    pattern_derived_prereqs.contains(prereq) && !self.is_mentioned_file(prereq);
+                    self.check_intermediate(prereq, pattern_derived_prereqs.contains(prereq));
                 if !is_intermediate {
                     has_phony_prereq = true;
                 }
@@ -2722,7 +2875,14 @@ impl Engine {
                 if s.trim().is_empty() {
                     return false;
                 }
-                !expand::expand(s, self).trim().is_empty()
+                let expanded = expand::expand(s, self);
+                // Collapse backslash-newline (shell continuations) before
+                // checking emptiness — they are not meaningful content.
+                let collapsed = expanded.replace(
+                    "\\\
+", " ",
+                );
+                !collapsed.trim().is_empty()
             });
             if has_real_recipe {
                 *self.question_needs_update.borrow_mut() = true;
@@ -2807,7 +2967,7 @@ impl Engine {
                         // re-run the same recipe.
                         if let Some((ref pat_rule, _)) = pattern_match {
                             for sibling_pat in &pat_rule.sibling_patterns {
-                                let sibling = sibling_pat.replace('%', &stem);
+                                let sibling = sibling_pat.replacen('%', &stem, 1);
                                 self.built_targets.borrow_mut().insert(sibling);
                             }
                         }
@@ -2819,7 +2979,7 @@ impl Engine {
                     // re-run the same recipe.
                     if let Some((ref pat_rule, _)) = pattern_match {
                         for sibling_pat in &pat_rule.sibling_patterns {
-                            let sibling = sibling_pat.replace('%', &stem);
+                            let sibling = sibling_pat.replacen('%', &stem, 1);
                             self.built_targets.borrow_mut().insert(sibling);
                         }
                     }
@@ -2865,7 +3025,7 @@ impl Engine {
             && !pat_rule.sibling_patterns.is_empty()
         {
             for sibling_pat in &pat_rule.sibling_patterns {
-                let sibling = sibling_pat.replace('%', &stem);
+                let sibling = sibling_pat.replacen('%', &stem, 1);
                 self.built_targets.borrow_mut().insert(sibling.clone());
                 self.rebuilt_targets.borrow_mut().insert(sibling.clone());
             }
@@ -2889,7 +3049,7 @@ impl Engine {
                 eprintln!("make: .LIBPATTERNS element '{pat}' is not a pattern");
                 continue;
             }
-            let candidate = pat.replace('%', lib);
+            let candidate = pat.replacen('%', lib, 1);
             if first.is_none() {
                 first = Some(candidate.clone());
             }
@@ -2922,6 +3082,56 @@ impl Engine {
         false
     }
 
+    /// Check whether a file matches any `.NOTINTERMEDIATE` pattern (e.g. `%.x`).
+    fn matches_notintermediate_pattern(&self, file: &str) -> bool {
+        for pat in self.notintermediate_patterns.borrow().iter() {
+            if expand::pattern_stem(file, pat).is_some() {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Determine whether a prereq file should be treated as intermediate
+    /// (its absence does NOT trigger a rebuild of the parent).
+    ///
+    /// Priority (highest to lowest):
+    /// 1. Per-file `.INTERMEDIATE: file`  → intermediate
+    /// 2. Per-file `.SECONDARY: file`     → intermediate (secondary)
+    /// 3. Per-file `.NOTINTERMEDIATE: file` → NOT intermediate
+    /// 4. Pattern `.NOTINTERMEDIATE: %.x`  → NOT intermediate
+    /// 5. Global `.NOTINTERMEDIATE:`       → NOT intermediate
+    /// 6. Global `.SECONDARY:`             → intermediate (secondary)
+    /// 7. Default: pattern-derived && !mentioned → intermediate
+    fn check_intermediate(&self, file: &str, is_pattern_derived: bool) -> bool {
+        // 1. Explicit .INTERMEDIATE on this file always wins
+        if self.intermediate_targets.borrow().contains(file) {
+            return true;
+        }
+        // 2. Explicit .SECONDARY on this file wins over patterns/global
+        if self.secondary_targets.borrow().contains(file) {
+            return true;
+        }
+        // 3. Explicit .NOTINTERMEDIATE on this file
+        if self.notintermediate_files.borrow().contains(file) {
+            return false;
+        }
+        // 4. Pattern .NOTINTERMEDIATE
+        if self.matches_notintermediate_pattern(file) {
+            return false;
+        }
+        // 5. Global .NOTINTERMEDIATE
+        if self.notintermediate_all.get() {
+            return false;
+        }
+        // 6. Global .SECONDARY
+        if self.secondary_all.get() {
+            return true;
+        }
+        // 7. Default intermediacy: pattern-derived and not explicitly mentioned
+        is_pattern_derived && !self.is_mentioned_file(file)
+    }
+
     fn find_pattern_rule(&self, target: &str) -> Option<(PatternRuleEntry, String)> {
         self.find_pattern_rule_inner(target, 0)
     }
@@ -2941,47 +3151,10 @@ impl Engine {
         }
         let suffixes_cleared = *self.suffixes_cleared.borrow();
         let pattern_rules = self.pattern_rules.borrow();
-        // First pass: user-defined rules (in definition order = first wins)
-        for rule in pattern_rules.iter() {
-            if rule.source_name == "<built-in>" {
-                continue;
-            }
-            if suffixes_cleared && rule.source_name == "<built-in>" {
-                continue;
-            }
-            if let Some(stem) = expand::pattern_stem(target, &rule.target_pattern) {
-                if rule.recipe.is_empty() {
-                    continue;
-                }
-                if rule.is_terminal {
-                    let prereqs_ok = rule.prereq_patterns.is_empty()
-                        || rule.prereq_patterns.iter().all(|pp| {
-                            let prereq = pp.replace('%', &stem);
-                            Path::new(&prereq).exists() || self.is_mentioned_file(&prereq)
-                        });
-                    if prereqs_ok {
-                        return Some((rule.clone(), stem));
-                    }
-                    continue;
-                }
-                let prereqs_ok = rule.prereq_patterns.is_empty()
-                    || rule.prereq_patterns.iter().all(|pp| {
-                        let prereq = pp.replace('%', &stem);
-                        Path::new(&prereq).exists()
-                            || self.is_mentioned_file(&prereq)
-                            || self.phony_targets.borrow().contains(&prereq)
-                            || self.rules.borrow().contains_key(prereq.as_str())
-                            || self.find_pattern_rule_inner(&prereq, depth + 1).is_some()
-                    });
-                if prereqs_ok {
-                    return Some((rule.clone(), stem));
-                }
-            }
-        }
-        // Second pass: built-in rules (in definition order)
-        if !suffixes_cleared {
+        for allow_chaining in [false, true] {
+            // First pass: user-defined rules (in definition order = first wins)
             for rule in pattern_rules.iter() {
-                if rule.source_name != "<built-in>" {
+                if rule.source_name == "<built-in>" {
                     continue;
                 }
                 if let Some(stem) = expand::pattern_stem(target, &rule.target_pattern) {
@@ -2991,7 +3164,7 @@ impl Engine {
                     if rule.is_terminal {
                         let prereqs_ok = rule.prereq_patterns.is_empty()
                             || rule.prereq_patterns.iter().all(|pp| {
-                                let prereq = pp.replace('%', &stem);
+                                let prereq = pp.replacen('%', &stem, 1);
                                 Path::new(&prereq).exists() || self.is_mentioned_file(&prereq)
                             });
                         if prereqs_ok {
@@ -3001,15 +3174,55 @@ impl Engine {
                     }
                     let prereqs_ok = rule.prereq_patterns.is_empty()
                         || rule.prereq_patterns.iter().all(|pp| {
-                            let prereq = pp.replace('%', &stem);
+                            let prereq = pp.replacen('%', &stem, 1);
                             Path::new(&prereq).exists()
                                 || self.is_mentioned_file(&prereq)
                                 || self.phony_targets.borrow().contains(&prereq)
                                 || self.rules.borrow().contains_key(prereq.as_str())
-                                || self.find_pattern_rule_inner(&prereq, depth + 1).is_some()
+                                || (allow_chaining
+                                    && self.find_pattern_rule_inner(&prereq, depth + 1).is_some())
                         });
                     if prereqs_ok {
                         return Some((rule.clone(), stem));
+                    }
+                }
+            }
+            // Second pass: built-in rules (in definition order)
+            if !suffixes_cleared {
+                for rule in pattern_rules.iter() {
+                    if rule.source_name != "<built-in>" {
+                        continue;
+                    }
+                    if let Some(stem) = expand::pattern_stem(target, &rule.target_pattern) {
+                        if rule.recipe.is_empty() {
+                            continue;
+                        }
+                        if rule.is_terminal {
+                            let prereqs_ok = rule.prereq_patterns.is_empty()
+                                || rule.prereq_patterns.iter().all(|pp| {
+                                    let prereq = pp.replacen('%', &stem, 1);
+                                    Path::new(&prereq).exists() || self.is_mentioned_file(&prereq)
+                                });
+                            if prereqs_ok {
+                                return Some((rule.clone(), stem));
+                            }
+                            continue;
+                        }
+                        let prereqs_ok = rule.prereq_patterns.is_empty()
+                            || rule.prereq_patterns.iter().all(|pp| {
+                                let prereq = pp.replacen('%', &stem, 1);
+                                Path::new(&prereq).exists()
+                                    || self.is_mentioned_file(&prereq)
+                                    || self.phony_targets.borrow().contains(&prereq)
+                                    || self.rules.borrow().contains_key(prereq.as_str())
+                                    || (allow_chaining
+                                        && self
+                                            .find_pattern_rule_inner(&prereq, depth + 1)
+                                            .is_some())
+                            });
+                        if prereqs_ok {
+                            return Some((rule.clone(), stem));
+                        }
                     }
                 }
             }
@@ -3032,7 +3245,18 @@ impl Engine {
         // Apply target-specific variable assignments (including those
         // inherited from ancestor targets currently being built). Save
         // prior values so we can restore them afterwards.
-        let tv_entries: Vec<(String, AssignOp, String, bool)> = self.collect_target_vars(target);
+        let mut tv_entries: Vec<(String, AssignOp, String, bool, bool)> =
+            self.collect_target_vars(target);
+        // Also include this target's own private vars (which were NOT
+        // pushed onto the scope stack)
+        if let Some(own) = self.target_vars.borrow().get(target) {
+            for entry in own {
+                if entry.4 {
+                    // is_private
+                    tv_entries.push(entry.clone());
+                }
+            }
+        }
         // Target-specific `export VAR := …` — add VAR to the export
         // set for the duration of this recipe.
         let export_names: Vec<String> = self
@@ -3066,16 +3290,28 @@ impl Engine {
                 }
             }
         }
+        let override_vars: std::collections::HashSet<String> = tv_entries
+            .iter()
+            .filter(|(_, _, _, is_override, _)| *is_override)
+            .map(|(name, _, _, _, _)| expand::expand(name, self))
+            .collect();
+
         let mut saved: Vec<(String, Option<Variable>)> = Vec::new();
-        for (name, op, value, is_override) in &tv_entries {
+        for (name, op, value, is_override, _is_private) in &tv_entries {
             let name = expand::expand(name, self);
             saved.push((name.clone(), self.vars.borrow().get(&name).cloned()));
 
-            // Target-specific vars can override file-level `override` vars, but must not
-            // replace command-line variables — unless the target-specific
-            // assignment itself had the `override` modifier.
-            let current_origin = self.vars.borrow().get(&name).map(|v| v.origin);
-            if matches!(current_origin, Some(VarOrigin::CommandLine)) && !is_override {
+            // Check the ORIGINAL origin (from the saved state) to avoid
+            // false negatives when a prior entry in this loop changed the origin.
+            let original_origin = saved.last().and_then(|(_, v)| v.as_ref().map(|v| v.origin));
+
+            // Skip non-override entries if:
+            // 1. The current var was originally a command-line variable, OR
+            // 2. Another target-specific entry for this var has `override`
+            if !is_override
+                && (matches!(original_origin, Some(VarOrigin::CommandLine))
+                    || override_vars.contains(&name))
+            {
                 continue;
             }
 
@@ -3134,6 +3370,43 @@ impl Engine {
                 );
             }
         }
+        // Temporarily remove global `private` variables that were NOT
+        // overridden by a target-specific assignment. This ensures
+        // private globals are invisible inside recipe execution while
+        // target-specific values remain.
+        let overridden_names: std::collections::HashSet<String> =
+            saved.iter().map(|(n, _)| n.clone()).collect();
+        let mut private_saved: Vec<(String, Option<Variable>)> = Vec::new();
+        for pname in self.private_vars.borrow().iter() {
+            if !overridden_names.contains(pname) {
+                let old = self.vars.borrow().get(pname).cloned();
+                if old.is_some() {
+                    private_saved.push((pname.clone(), old));
+                    self.vars.borrow_mut().remove(pname);
+                }
+            }
+        }
+        // Also temporarily remove private exports, but NOT if this
+        // target has its own (target-specific) export for the same var.
+        let target_export_set: std::collections::HashSet<&str> = export_names
+            .iter()
+            .filter_map(|n| {
+                if n.starts_with('~') {
+                    None
+                } else {
+                    Some(n.as_str())
+                }
+            })
+            .collect();
+        let mut private_export_saved: Vec<String> = Vec::new();
+        for pname in self.private_exports.borrow().iter() {
+            if !target_export_set.contains(pname.as_str()) && self.exports.borrow().contains(pname)
+            {
+                private_export_saved.push(pname.clone());
+                self.exports.borrow_mut().remove(pname);
+            }
+        }
+
         let result = self.execute_recipe_inner(
             target,
             recipe,
@@ -3144,6 +3417,17 @@ impl Engine {
             implied_prereqs,
             stem,
         );
+        // Restore private global variables.
+        for (name, prev) in private_saved {
+            if let Some(v) = prev {
+                self.vars.borrow_mut().insert(name, v);
+            }
+        }
+        // Restore private exports.
+        for name in private_export_saved {
+            self.exports.borrow_mut().insert(name);
+        }
+
         // Restore prior variable state.
         for (name, prev) in saved.into_iter().rev() {
             let mut vars = self.vars.borrow_mut();
@@ -3267,6 +3551,73 @@ impl Engine {
                 .unwrap_or_default(),
         );
 
+        // $(*D), $(*F)
+        {
+            let stem_val = auto_vars.get("*").cloned().unwrap_or_default();
+            auto_vars.insert("*D", {
+                let p = Path::new(&stem_val)
+                    .parent()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if p.is_empty() { ".".to_string() } else { p }
+            });
+            auto_vars.insert(
+                "*F",
+                Path::new(&stem_val)
+                    .file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+            );
+        }
+
+        // $(<D), $(<F)
+        {
+            let first_val = auto_vars.get("<").cloned().unwrap_or_default();
+            auto_vars.insert("<D", {
+                let p = Path::new(&first_val)
+                    .parent()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if p.is_empty() { ".".to_string() } else { p }
+            });
+            auto_vars.insert(
+                "<F",
+                Path::new(&first_val)
+                    .file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+            );
+        }
+
+        // D/F variants for list variables: $^, $+, $?, $|
+        {
+            fn dir_of(s: &str) -> String {
+                let p = Path::new(s)
+                    .parent()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if p.is_empty() { ".".to_string() } else { p }
+            }
+            fn file_of(s: &str) -> String {
+                Path::new(s)
+                    .file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            }
+            for (var, d_var, f_var) in &[
+                ("^", "^D", "^F"),
+                ("+", "+D", "+F"),
+                ("?", "?D", "?F"),
+                ("|", "|D", "|F"),
+            ] {
+                let val = auto_vars.get(*var).cloned().unwrap_or_default();
+                let dirs: Vec<String> = val.split_whitespace().map(dir_of).collect();
+                let files: Vec<String> = val.split_whitespace().map(file_of).collect();
+                auto_vars.insert(d_var, dirs.join(" "));
+                auto_vars.insert(f_var, files.join(" "));
+            }
+        }
+
         // Set up environment for subprocesses
         let shell = self.lookup_var_or("SHELL", "/bin/sh");
         let shell_flags = self.lookup_var_or(".SHELLFLAGS", "-c");
@@ -3286,19 +3637,24 @@ impl Engine {
             let mut outer_ignore = false;
             let mut outer_force = false;
             let mut raw = line.as_str();
-            loop {
-                raw = raw.trim_start();
-                if let Some(rest) = raw.strip_prefix('@') {
-                    outer_silent = true;
-                    raw = rest;
-                } else if let Some(rest) = raw.strip_prefix('-') {
-                    outer_ignore = true;
-                    raw = rest;
-                } else if let Some(rest) = raw.strip_prefix('+') {
-                    outer_force = true;
-                    raw = rest;
-                } else {
-                    break;
+            // In ONESHELL mode, only strip prefix chars from the first
+            // recipe line. Subsequent lines pass @/-/+ through as content
+            // (e.g. Perl's @array sigil).
+            if !self.oneshell.get() || idx == 0 {
+                loop {
+                    raw = raw.trim_start();
+                    if let Some(rest) = raw.strip_prefix('@') {
+                        outer_silent = true;
+                        raw = rest;
+                    } else if let Some(rest) = raw.strip_prefix('-') {
+                        outer_ignore = true;
+                        raw = rest;
+                    } else if let Some(rest) = raw.strip_prefix('+') {
+                        outer_force = true;
+                        raw = rest;
+                    } else {
+                        break;
+                    }
                 }
             }
             // Clear expand_chain_source before each recipe line so
@@ -3332,12 +3688,61 @@ impl Engine {
                 pieces.push(buf);
             }
             for sub in pieces {
-                if !sub.is_empty() {
+                // A piece is "effectively empty" if, after stripping
+                // backslash-newline sequences (shell continuations) and
+                // whitespace, nothing remains.
+                let stripped = sub.replace("\\\n", " ");
+                if !stripped.trim().is_empty() {
                     expanded_lines.push((sub, line_no, outer_silent, outer_ignore, force_execute));
                 }
             }
         }
         *self.current_source.borrow_mut() = None;
+
+        // `.ONESHELL`: combine all expanded recipe lines into a single
+        // shell invocation. Only the first line's prefix flags (@/-/+)
+        // control the whole combined script.
+        // For Bourne-compatible shells (.SHELLFLAGS contains `-c`),
+        // prefix chars on non-first lines are stripped from content.
+        // For other shells (e.g. Perl), non-first lines pass through as-is.
+        if self.oneshell.get() && expanded_lines.len() > 1 {
+            let (_, first_line_no, first_silent, first_ignore, first_force) = &expanded_lines[0];
+            let os_silent = *first_silent;
+            let os_ignore = *first_ignore;
+            let os_force = *first_force;
+            let os_line_no = *first_line_no;
+
+            // Bourne-compatible shells use `-c` in .SHELLFLAGS.
+            let is_bourne = shell_flags.split_whitespace().any(|f| f == "-c");
+
+            let mut combined_parts: Vec<String> = Vec::new();
+            for (i, (raw, _ln, _s, _i, _f)) in expanded_lines.iter().enumerate() {
+                let mut s = raw.as_str();
+                // For Bourne shells, strip prefix chars from non-first
+                // lines too. For non-Bourne shells (Perl, etc.), keep
+                // non-first lines as-is since @/-/+ may be part of the
+                // language syntax.
+                if i > 0 && is_bourne {
+                    loop {
+                        s = s.trim_start();
+                        if let Some(rest) = s.strip_prefix('@') {
+                            s = rest;
+                        } else if let Some(rest) = s.strip_prefix('-') {
+                            s = rest;
+                        } else if let Some(rest) = s.strip_prefix('+') {
+                            s = rest;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                if !s.trim().is_empty() {
+                    combined_parts.push(s.to_string());
+                }
+            }
+            let combined = combined_parts.join("\n");
+            expanded_lines = vec![(combined, os_line_no, os_silent, os_ignore, os_force)];
+        }
 
         let target_is_silent =
             *self.silent_all.borrow() || self.silent_targets.borrow().contains(target);
@@ -3395,7 +3800,7 @@ impl Engine {
             let use_shell = {
                 const SHELL_META: &[char] = &[
                     '#', ';', '"', '\'', '*', '?', '[', ']', '&', '|', '<', '>', '(', ')', '{',
-                    '}', '$', '`', '^', '~', '!', '\\', '\n',
+                    '}', '$', '`', '^', '~', '!', '\\', '\n', '=',
                 ];
                 if expanded.contains(SHELL_META) {
                     true
@@ -3525,6 +3930,16 @@ impl Engine {
                                 .arg("exit 127")
                                 .status()
                         }
+                    }
+                    Err(ref e) if e.raw_os_error() == Some(13) => {
+                        // EACCES — permission denied (non-executable file, directory, etc.)
+                        let cmd_name = expanded.split_whitespace().next().unwrap_or(&expanded);
+                        eprintln!("make: {cmd_name}: Permission denied");
+                        // Synthesize exit code 127, matching GNU make.
+                        std::process::Command::new("/bin/sh")
+                            .arg("-c")
+                            .arg("exit 127")
+                            .status()
                     }
                     other => other,
                 }

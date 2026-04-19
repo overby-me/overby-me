@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**104/135 tests passing** (77%) — upstream test harness from GNU make 4.4.1.
+**108/135 tests passing** (80%) — upstream test harness from GNU make 4.4.1.
 
 `rust/make` has a parser, expander, and build engine (~5k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -76,6 +76,8 @@ organised in six directories under `tests/scripts/`:
     on exit) so `two: export SHELL := /.//bin/sh` doesn't leak to
     sibling targets' recipes.
 - `.RECIPEPREFIX := X` overrides the tab prefix for subsequent rules.
+- `.RECIPEPREFIX` tracked during the preprocessing phase so custom-prefix
+  recipe lines correctly preserve backslash-newline for the shell.
 - UTF-8 BOM (`\u{FEFF}`) stripped from the start of a loaded makefile
   so it doesn't contaminate the first token.
 - Backslash-newline continuations:
@@ -143,6 +145,11 @@ organised in six directories under `tests/scripts/`:
 - Target-specific `override` modifier tracked and respected: overrides
   command-line vars. Variable names in target-specific assignments are
   expanded (e.g., `target: VAR$(X) = val`).
+- Target-specific `private` modifier: private vars are NOT inherited
+  by prerequisite targets (only applied to the owning target's recipe).
+- Global `private` variables (`private VAR = val`, `private export VAR = val`).
+- Target-specific `override +=` correctly suppresses non-override
+  entries for the same variable.
 - Target-specific `export` removes from the `unexports` set for the
   duration of the target's recipe.
 - Target-specific vars do not override command-line variables (unless
@@ -180,6 +187,12 @@ organised in six directories under `tests/scripts/`:
   behavior where user-assigned flags are respected verbatim.
 - Pattern-implied prerequisites visible via `$<`.
 - `.WAIT` filtered from automatic variables.
+- D/F directory variants for all automatic variables (`$(*D)`, `$(<D)`,
+  `$(^D)`, `$(+D)`, `$(?D)`, `$(|D)` and their `F` counterparts).
+- `$*` stem computed for explicit rules with recognized `.SUFFIXES`.
+- Default goal allows path-prefixed targets (e.g. `../dir/foo.x`).
+- Prerequisite double-expansion fix: prereqs no longer re-expanded
+  in `build_target_for` (already expanded in `process_rule`).
 
 ### Command-line options
 
@@ -209,6 +222,9 @@ organised in six directories under `tests/scripts/`:
   metacharacters or builtins) are exec'd directly; ENOEXEC falls back
   to `/bin/sh`, ENOENT falls back to `$SHELL` for custom shells or
   produces GNU make-style error for default shell.
+- `EACCES` (Permission denied) in direct-exec path prints
+  `make: {cmd}: Permission denied` and synthesizes exit 127.
+- `=` included in `SHELL_META` for shell detection.
 
 ### Environment / sub-makes
 
@@ -303,10 +319,10 @@ Based on the latest baseline run (approximate per-category pass ratios):
 | ----------- | ----------------------------------------------------------------- |
 | `features`  | Partial across most sub-areas; blocked heavily on SE + VPATH.     |
 | `functions` | Most working. Remaining: fatal-error line numbers, `$(eval)`-inside-variables. |
-| `misc`      | `bs-nl` 16/28; `general4` 7/10 blocked on `$$` prereq expansion. |
+| `misc`      | All passing (bs-nl 28/28, general4 10/10).                     |
 | `options`   | Most parse and work; blocked on re-exec / MAKEFLAGS parse. `dash-l` accepted. |
 | `targets`   | POSIX / ONESHELL / INTERMEDIATE pending.                          |
-| `variables` | Most done. MAKEFLAGS subcategory is the huge outlier.             |
+| `variables` | Most done. `special` fully passing. MAKEFLAGS subcategory is the huge outlier. |
 
 ---
 

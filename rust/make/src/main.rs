@@ -114,10 +114,7 @@ fn run() -> i32 {
                 if i < args.len() {
                     makefiles.push(args[i].clone());
                 } else {
-                    eprintln!(
-                        "make: the '{}' option requires a non-empty string argument",
-                        args[i - 1]
-                    );
+                    eprintln!("make: the '{}' option requires an argument", args[i - 1]);
                     return 2;
                 }
             }
@@ -126,10 +123,7 @@ fn run() -> i32 {
                 if i < args.len() {
                     directory = Some(args[i].clone());
                 } else {
-                    eprintln!(
-                        "make: the '{}' option requires a non-empty string argument",
-                        args[i - 1]
-                    );
+                    eprintln!("make: the '{}' option requires an argument", args[i - 1]);
                     return 2;
                 }
             }
@@ -147,10 +141,7 @@ fn run() -> i32 {
                         mflags_long.push(format!("-I{}", args[i]));
                     }
                 } else {
-                    eprintln!(
-                        "make: the '{}' option requires a non-empty string argument",
-                        args[i - 1]
-                    );
+                    eprintln!("make: the '{}' option requires an argument", args[i - 1]);
                     return 2;
                 }
             }

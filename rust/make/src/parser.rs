@@ -73,6 +73,28 @@ pub struct Parser {
     recipe_prefix: char,
 }
 
+/// Check if a line appears to have an inline recipe (`:` followed by `;`
+/// at the top level, not inside `$(...)` or `${...}`).
+fn has_inline_recipe(line: &str) -> bool {
+    let mut depth = 0usize;
+    let mut found_colon = false;
+    let mut prev = '\0';
+    for c in line.chars() {
+        match c {
+            '(' | '{' if prev == '$' => depth += 1,
+            ')' | '}' if depth > 0 => depth -= 1,
+            ':' if depth == 0 && !found_colon => {
+                found_colon = true;
+            }
+            '=' if depth == 0 && !found_colon => return false,
+            ';' if depth == 0 && found_colon => return true,
+            _ => {}
+        }
+        prev = c;
+    }
+    false
+}
+
 impl Parser {
     pub fn new(input: &str) -> Self {
         Self::new_with_source(input, "-".to_string())
@@ -87,10 +109,12 @@ impl Parser {
         let mut start_line = 0usize;
         let mut in_continuation = false;
         let mut logical_is_recipe = false;
+        let mut recipe_prefix = '\t';
+        let mut posix_mode = false;
         for (i, line) in input.lines().enumerate() {
             if current.is_empty() {
                 start_line = i + 1;
-                logical_is_recipe = line.starts_with('\t');
+                logical_is_recipe = line.starts_with(recipe_prefix) || has_inline_recipe(line);
             }
             // After a backslash-newline, leading whitespace on the
             // next physical line is collapsed — except inside a
@@ -104,7 +128,7 @@ impl Parser {
                 // recipe-prefix (tab) to match GNU make's trace output,
                 // where only the first physical line of a recipe is
                 // tab-indented.
-                line.strip_prefix('\t').unwrap_or(line)
+                line.strip_prefix(recipe_prefix).unwrap_or(line)
             } else {
                 line
             };
@@ -120,8 +144,18 @@ impl Parser {
                     // single space in non-recipe context. Trim trailing
                     // whitespace from the portion before `\` (the next
                     // line's leading whitespace is stripped above).
-                    current.push_str(stripped.trim_end());
-                    current.push(' ');
+                    let before_bs = if posix_mode {
+                        stripped
+                    } else {
+                        stripped.trim_end()
+                    };
+                    current.push_str(before_bs);
+                    // In POSIX mode, each backslash-newline contributes
+                    // exactly one space (they are not collapsed). In non-POSIX
+                    // mode, consecutive backslash-newlines collapse to a single space.
+                    if posix_mode || !current.ends_with(' ') {
+                        current.push(' ');
+                    }
                 }
                 in_continuation = true;
             } else {
@@ -129,6 +163,24 @@ impl Parser {
                 lines.push(std::mem::take(&mut current));
                 line_nos.push(start_line);
                 in_continuation = false;
+                // Track .RECIPEPREFIX changes so subsequent recipe
+                // lines use the correct prefix character.
+                let pushed = lines.last().unwrap();
+                let trimmed_pushed = pushed.trim();
+                if let Some(rest) = trimmed_pushed.strip_prefix(".RECIPEPREFIX") {
+                    let rest = rest.trim_start();
+                    if let Some(val) = rest
+                        .strip_prefix("=")
+                        .or_else(|| rest.strip_prefix(":="))
+                        .or_else(|| rest.strip_prefix("::="))
+                    {
+                        let val = val.trim();
+                        recipe_prefix = val.chars().next().unwrap_or('\t');
+                    }
+                }
+                if trimmed_pushed == ".POSIX:" {
+                    posix_mode = true;
+                }
             }
         }
         if !current.is_empty() {
@@ -393,6 +445,31 @@ impl Parser {
             return Ok(Some(Directive::Vpath(None)));
         }
 
+        // Global `private` variable directive:
+        // `private VAR = val` or `private export VAR = val`
+        if let Some(rest) = trimmed.strip_prefix("private ") {
+            let rest = rest.trim_start();
+            // `private export VAR = val`
+            if let Some(export_rest) = rest.strip_prefix("export ") {
+                let export_rest = export_rest.trim_start();
+                if let Some(assign) = try_parse_assignment(export_rest) {
+                    self.advance();
+                    return Ok(Some(Directive::PrivateExportAssign(Box::new(assign))));
+                }
+            }
+            // `private VAR = val`
+            if let Some(assign) = try_parse_assignment(rest) {
+                let line_no = self.current_line_no();
+                let source = self.source_name.clone();
+                self.advance();
+                return Ok(Some(Directive::PrivateAssign(
+                    Box::new(assign),
+                    source,
+                    line_no,
+                )));
+            }
+        }
+
         // Try assignment. Strip comments first (GNU make: `VAR = val #comment`
         // stores just "val"), then pass through — keeping any trailing
         // whitespace preceding the `#`.
@@ -439,6 +516,7 @@ impl Parser {
             let mut had_export = false;
             let mut had_unexport = false;
             let mut had_override = false;
+            let mut had_private = false;
             loop {
                 if let Some(rest) = after_mod.strip_prefix("export ") {
                     had_export = true;
@@ -457,7 +535,10 @@ impl Parser {
                 }
                 let trimmed_mod = after_mod.strip_prefix("private ");
                 match trimmed_mod {
-                    Some(s) => after_mod = s.trim_start(),
+                    Some(s) => {
+                        had_private = true;
+                        after_mod = s.trim_start();
+                    }
                     None => break,
                 }
             }
@@ -477,6 +558,9 @@ impl Parser {
                     prefix.push('!');
                 } else if had_unexport && from_stripped {
                     prefix.push('~');
+                }
+                if had_private && from_stripped {
+                    prefix.push('@');
                 }
                 if !prefix.is_empty() {
                     assign.name = format!("{}{}", prefix, assign.name);

@@ -163,6 +163,25 @@ fn read_balanced(chars: &[char], i: &mut usize, open: char, close: char) -> (Str
     let mut depth = 1;
     let mut result = String::new();
     while *i < chars.len() && depth > 0 {
+        // Collapse backslash-newline-whitespace inside variable/function
+        // references — matching GNU make’s behavior (job.c:1770). The
+        // backslash-newline and any following whitespace are replaced by
+        // a single space; any preceding whitespace is also collapsed.
+        if chars[*i] == '\\' && *i + 1 < chars.len() && chars[*i + 1] == '\n' {
+            // Skip backslash and newline
+            *i += 2;
+            // Skip following whitespace
+            while *i < chars.len() && (chars[*i] == ' ' || chars[*i] == '\t') {
+                *i += 1;
+            }
+            // Remove preceding whitespace from result
+            while result.ends_with(' ') || result.ends_with('\t') {
+                result.pop();
+            }
+            // Replace with a single space
+            result.push(' ');
+            continue;
+        }
         if chars[*i] == open {
             depth += 1;
             result.push(chars[*i]);
@@ -1225,7 +1244,7 @@ pub fn patsubst(text: &str, pattern: &str, replacement: &str) -> String {
                 {
                     let stem_end = word.len() - suffix.len();
                     let stem = &word[prefix.len()..stem_end];
-                    replacement.replace('%', stem)
+                    replacement.replacen('%', stem, 1)
                 } else {
                     word.to_string()
                 }

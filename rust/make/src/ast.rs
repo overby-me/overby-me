@@ -27,6 +27,11 @@ pub enum Directive {
     /// `targets` is the raw (possibly space-separated, unexpanded) list;
     /// the engine expands it at load time.
     TargetVarAssign(String, Box<Assignment>),
+    /// Global `private VAR = val` — assign and mark as private (not visible
+    /// in recipe execution contexts).
+    PrivateAssign(Box<Assignment>, String, usize),
+    /// Global `private export VAR = val` — assign, export, and mark as private.
+    PrivateExportAssign(Box<Assignment>),
     /// A bare expression line (e.g. `$(error msg)` / `$(info ...)` /
     /// `$(eval ...)`) evaluated at makefile-load time for its side effects.
     /// Carries `(expr, source_name, line_no)` so diagnostics from
