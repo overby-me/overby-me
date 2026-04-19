@@ -3665,6 +3665,28 @@ impl Interpreter {
             "undef" => {
                 // undef EXPR — clear the lvalue and return undef
                 if let Some(arg) = args.first() {
+                    // Constant-shaped args (bare string/number literals)
+                    // die with Perl's "Can't modify constant item in undef
+                    // operator" — reference perl also segfaulted on
+                    // `undef tcp` until that patch. Covers op/undef test 17.
+                    if matches!(
+                        arg,
+                        Expr::StringLit(_)
+                            | Expr::IntLit(_)
+                            | Expr::FloatLit(_)
+                            | Expr::Undef
+                    ) {
+                        let file = if self.current_file.is_empty() {
+                            "-e".to_string()
+                        } else {
+                            self.current_file.clone()
+                        };
+                        let line = self.current_line;
+                        self.pending_flow = Some(Flow::Die(format!(
+                            "Can't modify constant item in undef operator at {file} line {line}, at EOF\n"
+                        )));
+                        return Value::Undef;
+                    }
                     match arg {
                         Expr::ArrayVar(name) => self.set_array(name, Vec::new()),
                         Expr::HashVar(name) => self.set_hash_from_list(name, Vec::new()),
@@ -5950,6 +5972,23 @@ impl Interpreter {
         }
         // Read-only iterator var (e.g., `for (!0)`): die instead of writing.
         if self.readonly_vars.contains(&key) {
+            let file = if self.current_file.is_empty() {
+                "-e".to_string()
+            } else {
+                self.current_file.clone()
+            };
+            let line = self.current_line;
+            self.pending_flow = Some(Flow::Die(format!(
+                "Modification of a read-only value attempted at {file} line {line}.\n"
+            )));
+            return;
+        }
+        // Regex-capture vars ($1..$9, $+, $-) are read-only — writing to
+        // them dies with Perl's "Modification of a read-only value"
+        // message. Targeted at op/undef tests 15-16.
+        if key.chars().next().is_some_and(|c| c.is_ascii_digit())
+            && key.chars().all(|c| c.is_ascii_digit())
+        {
             let file = if self.current_file.is_empty() {
                 "-e".to_string()
             } else {

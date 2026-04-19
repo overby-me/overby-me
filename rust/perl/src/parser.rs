@@ -2332,6 +2332,14 @@ impl Parser {
                 ) {
                     let arg = self.parse_unary();
                     Expr::Call("undef".to_string(), vec![arg])
+                } else if matches!(self.tok(), Token::Ident(_) | Token::Integer(_) | Token::Float(_) | Token::StringLit(_)) {
+                    // `undef BAREWORD` / `undef NUMLIT` — constant-item
+                    // target that should die with Perl's "Can't modify
+                    // constant item in undef operator". Capture the arg
+                    // as a StringLit (for barewords) / NumLit so the
+                    // builtin's constant-check fires.
+                    let arg = self.parse_primary();
+                    Expr::Call("undef".to_string(), vec![arg])
                 } else {
                     Expr::Undef
                 }
