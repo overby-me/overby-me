@@ -10,7 +10,7 @@
 //! mounted at `/efi`, `/boot`, or `/boot/efi`, and optionally on the
 //! Extended Boot Loader Partition (XBOOTLDR) mounted at `/boot`.
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
@@ -115,6 +115,13 @@ struct Cli {
     /// Include entries from all accessible partitions
     #[arg(long, global = true)]
     all: bool,
+
+    /// Print the path to the device backing the root filesystem and
+    /// exit.  `-R` prints the partition (e.g. `/dev/sda1`), `-RR`
+    /// prints the backing block device (e.g. `/dev/sda`).
+    /// Matches upstream `bootctl --print-root-device` / `-R[R]`.
+    #[arg(short = 'R', long = "print-root-device", action = ArgAction::Count)]
+    print_root_device: u8,
 
     #[command(subcommand)]
     command: Option<Command>,
@@ -2457,10 +2464,133 @@ fn cmd_unlink(cli: &Cli, id: &str) {
     }
 }
 
+/// Find the block device backing `/`.
+///
+/// If `backing` is true, additionally strip the partition suffix to
+/// return the whole-disk device (e.g. `/dev/sda1` → `/dev/sda`, or
+/// `/dev/nvme0n1p3` → `/dev/nvme0n1`).  This mirrors upstream
+/// `bootctl -RR`.
+///
+/// Reads `/proc/self/mountinfo` — robust across btrfs subvols, overlay
+/// roots, and tmpfs-rooted containers (in which case we return None
+/// and the caller exits non-zero).
+fn find_root_device(backing: bool) -> Option<String> {
+    let content = std::fs::read_to_string("/proc/self/mountinfo").ok()?;
+    for line in content.lines() {
+        // mountinfo columns 4 (mount point) and 9 (fstype/source after `-`):
+        //   36 35 98:0 /mnt1 /mnt/sda1 rw,noatime master:1 - ext4 /dev/sda1 rw
+        let mut cols = line.split_whitespace();
+        let (_id, _parent, _dev_major_minor, _root, mount_point) =
+            (cols.next()?, cols.next()?, cols.next()?, cols.next()?, cols.next()?);
+        if mount_point != "/" {
+            continue;
+        }
+        // Walk to the separator `-`, then next field is fstype, then source.
+        let rest: Vec<&str> = cols.collect();
+        let sep_idx = rest.iter().position(|s| *s == "-")?;
+        let source = rest.get(sep_idx + 2)?;
+        // The source may be a non-block-device string (tmpfs, overlay,
+        // ...).  Only accept entries that look like /dev/... — otherwise
+        // the container/initrd scenarios would return garbage.
+        if !source.starts_with("/dev/") {
+            return None;
+        }
+        let dev = source.to_string();
+        if !backing {
+            return Some(dev);
+        }
+        return Some(strip_partition_suffix(&dev));
+    }
+    None
+}
+
+/// Strip the partition suffix from a /dev/ path to return the whole-
+/// disk device.  Handles the two common kernel naming schemes:
+///
+/// - `/dev/sdXN`, `/dev/hdXN`, `/dev/vdXN`, `/dev/xvdXN` → `/dev/sdX`.
+///   The partition is a trailing digit sequence directly appended to
+///   the letter-only device name.
+/// - `/dev/nvmeXnYpZ`, `/dev/mmcblkXpY`, `/dev/loopXpY` → the partition
+///   is prefixed with `p` followed by digits.  Note that `nvme0n1` is
+///   the whole-disk name (namespace 1) and has NO partition suffix —
+///   so we must not strip its trailing `1`.
+///
+/// If the input doesn't match either pattern, it's returned unchanged.
+fn strip_partition_suffix(dev: &str) -> String {
+    // Extract basename (everything after the last '/').
+    let (prefix, basename) = match dev.rfind('/') {
+        Some(i) => (&dev[..=i], &dev[i + 1..]),
+        None => return dev.to_string(),
+    };
+
+    // Pattern 1: nvme/mmcblk/loop — basename matches `<letters><digits>n<digits>p<digits>`
+    // (nvme: nvme0n1p3) or `<letters><digits>p<digits>` (mmcblk0p1, loop0p1).
+    // Heuristic: find the last `p` where the preceding char is a digit
+    // and everything after is digits; only strip then.
+    if let Some(p_pos) = basename.rfind('p') {
+        let tail = &basename[p_pos + 1..];
+        let before_p = &basename[..p_pos];
+        if !tail.is_empty()
+            && tail.chars().all(|c| c.is_ascii_digit())
+            && before_p
+                .chars()
+                .last()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false)
+        {
+            return format!("{prefix}{before_p}");
+        }
+    }
+
+    // Pattern 2: sd/hd/vd/xvd — basename is `<letters><digits>` where the
+    // letters part contains no digits.  Only then is the trailing digit
+    // sequence a partition suffix.  Protects nvme0n1 (letters contain
+    // digits) and similar whole-disk names.
+    let letter_end = basename
+        .char_indices()
+        .find(|(_, c)| c.is_ascii_digit())
+        .map(|(i, _)| i);
+    if let Some(split) = letter_end
+        && split > 0
+    {
+        let (letters, digits) = basename.split_at(split);
+        if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
+            // Only treat as partition suffix when letters match a known
+            // disk-driver prefix.  Otherwise leave alone.
+            let is_partitioned = matches!(letters, "sd" | "hd" | "vd" | "xvd")
+                || (letters.starts_with("sd")
+                    || letters.starts_with("hd")
+                    || letters.starts_with("vd")
+                    || letters.starts_with("xvd"));
+            if is_partitioned {
+                return format!("{prefix}{letters}");
+            }
+        }
+    }
+
+    dev.to_string()
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────
 
 fn main() {
     let cli = Cli::parse();
+
+    // `-R` / `-RR` short-circuits before any other work — it just
+    // prints the device backing / and exits.  Upstream behaviour used
+    // by TEST-17-UDEV.SYSTEMD_WANTS (`ROOTDEV="$(bootctl -RR)"`).
+    if cli.print_root_device > 0 {
+        match find_root_device(cli.print_root_device >= 2) {
+            Some(dev) => {
+                println!("{}", dev);
+                std::process::exit(0);
+            }
+            None => {
+                eprintln!("bootctl: failed to determine root device");
+                std::process::exit(1);
+            }
+        }
+    }
 
     match cli.command {
         None | Some(Command::Status) => cmd_status(&cli),
@@ -2500,6 +2630,45 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── strip_partition_suffix ───────────────────────────────────────
+
+    #[test]
+    fn test_strip_partition_suffix_sda() {
+        assert_eq!(strip_partition_suffix("/dev/sda1"), "/dev/sda");
+        assert_eq!(strip_partition_suffix("/dev/sda42"), "/dev/sda");
+    }
+
+    #[test]
+    fn test_strip_partition_suffix_nvme() {
+        assert_eq!(strip_partition_suffix("/dev/nvme0n1p3"), "/dev/nvme0n1");
+        assert_eq!(strip_partition_suffix("/dev/nvme0n1p42"), "/dev/nvme0n1");
+    }
+
+    #[test]
+    fn test_strip_partition_suffix_mmcblk() {
+        assert_eq!(strip_partition_suffix("/dev/mmcblk0p1"), "/dev/mmcblk0");
+        assert_eq!(strip_partition_suffix("/dev/mmcblk0p42"), "/dev/mmcblk0");
+    }
+
+    #[test]
+    fn test_strip_partition_suffix_loop() {
+        assert_eq!(strip_partition_suffix("/dev/loop0p1"), "/dev/loop0");
+    }
+
+    #[test]
+    fn test_strip_partition_suffix_whole_disk_unchanged() {
+        // No partition suffix — return as-is.
+        assert_eq!(strip_partition_suffix("/dev/sda"), "/dev/sda");
+        assert_eq!(strip_partition_suffix("/dev/nvme0n1"), "/dev/nvme0n1");
+    }
+
+    #[test]
+    fn test_strip_partition_suffix_weird_name_unchanged() {
+        // Unknown prefix — return as-is.
+        assert_eq!(strip_partition_suffix("/dev/123"), "/dev/123");
+        assert_eq!(strip_partition_suffix("/dev/ram0"), "/dev/ram0");
+    }
 
     // ── UTF-16LE encoding/decoding ───────────────────────────────────
 
