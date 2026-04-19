@@ -99,9 +99,12 @@ in
       # win.  All other stage-2 behavior (activation script, exec
       # systemd) is preserved verbatim.
       system.build.bootStage2 = let
+        # More specific start pattern so the sed range matches only
+        # the /proc/self/fd/$logOutFd subshell pipeline and not the
+        # `/run/log/stage-2-init.log` fallback further down.
         patchedSrc =
           pkgs.runCommand "stage-2-init-no-tee-pipe.sh" {} ''
-            sed '/^ *exec > >(tee -i/,/^ *done) 2>&1$/d' \
+            sed '/^ *exec > >(tee -i \/proc\/self\/fd\/"\$logOutFd"/,/^ *done) 2>&1$/d' \
                 ${pkgs.path}/nixos/modules/system/boot/stage-2-init.sh \
                 > $out
           '';
