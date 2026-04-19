@@ -76,10 +76,38 @@ pub fn handle_udev_event(run_info: &ArcMutRuntimeInfo, params: &UdevEventParams)
                 .get("ID_RENAMING")
                 .map(|v| v == "1")
                 .unwrap_or(false);
-            if is_processing || !systemd_ready || is_renaming {
+            // Check whether the primary unit was already Started before
+            // this event arrived.  If so, a transient `ID_PROCESSING=1`
+            // on a subsequent event (e.g. a change action that triggers
+            // a long-running RUN= program) does NOT demote it back to
+            // inactive — the device was usable before, it's still
+            // usable during the processing, and `BindsTo=` dependents
+            // should stay active.  Only brand-new devices with
+            // ID_PROCESSING=1 get deferred to placeholder state.
+            // TEST-17-UDEV.device_is_processing Phase 2 asserts this.
+            let already_plugged = if let Some(primary_name) = unit_names.first() {
+                let id = UnitId {
+                    kind: UnitIdKind::Device,
+                    name: primary_name.clone(),
+                };
+                let ri = run_info.read_poisoned();
+                ri.unit_table
+                    .get(&id)
+                    .map(|u| {
+                        matches!(
+                            &*u.common.status.read_poisoned(),
+                            UnitStatus::Started(_)
+                        )
+                    })
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+            let defer_for_processing = is_processing && !already_plugged;
+            if defer_for_processing || !systemd_ready || is_renaming {
                 trace!(
-                    "udev-event: {} deferred (ID_PROCESSING={}, SYSTEMD_READY={}, ID_RENAMING={}); placeholder units only",
-                    params.sysfs_path, is_processing, systemd_ready, is_renaming
+                    "udev-event: {} deferred (ID_PROCESSING={}, SYSTEMD_READY={}, ID_RENAMING={}, already_plugged={}); placeholder units only",
+                    params.sysfs_path, is_processing, systemd_ready, is_renaming, already_plugged
                 );
                 ensure_device_units_exist(run_info, params, &unit_names);
                 // When SYSTEMD_READY flipped to 0 or the device entered
@@ -188,7 +216,7 @@ pub fn rebuild_device_units_from_udev_db(run_info: &ArcMutRuntimeInfo) {
             continue;
         }
 
-        let params = match build_params_from_db_entry(name, &path) {
+        let mut params = match build_params_from_db_entry(name, &path) {
             Some(p) => p,
             None => {
                 skipped += 1;
@@ -202,6 +230,16 @@ pub fn rebuild_device_units_from_udev_db(run_info: &ArcMutRuntimeInfo) {
             skipped += 1;
             continue;
         }
+        // Strip `ID_PROCESSING=1` / `ID_RENAMING=1` from the replayed
+        // env: those markers indicate udev's _internal_ transient
+        // state during event handling.  The fact that the entry is in
+        // the db at all means udev considers the device real; the
+        // service manager should treat it as ready on replay.  Without
+        // this, `daemon-reexec` in the middle of an active RUN= would
+        // demote previously-plugged device units back to inactive,
+        // breaking TEST-17-UDEV.device_is_processing Phase 2.
+        params.env.remove("ID_PROCESSING");
+        params.env.remove("ID_RENAMING");
         handle_udev_event(run_info, &params);
         restored += 1;
     }
