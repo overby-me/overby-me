@@ -3361,59 +3361,42 @@ impl Engine {
                 continue;
             }
 
-            // Export variables
-            // SHELL may itself contain arguments (e.g. `SHELL := echo hi`);
-            // GNU make splits on whitespace, using the first word as
-            // the program and the rest as leading arguments — so a
-            // target-specific `SHELL := echo hi` with `.SHELLFLAGS :=
-            // ho ho` runs `echo hi ho ho <recipe>`.
-            let mut shell_parts = shell.split_whitespace();
-            let shell_prog = shell_parts.next().unwrap_or("/bin/sh");
-            let mut cmd = std::process::Command::new(shell_prog);
-            for extra in shell_parts {
-                cmd.arg(extra);
-            }
-            // Split .SHELLFLAGS on whitespace, honoring single- and
-            // double-quoted sections as single tokens (and stripping
-            // the quotes) — matches GNU make's shell-style split for
-            // flags like `'ho;ho'`. When this line has the
-            // ignore-errors prefix (`-`) AND the `-ec` came from
-            // implicit `.POSIX:` handling (origin Default), drop any
-            // `-e` so a `;`-separated command chain keeps running
-            // past a failing first command. If the user explicitly
-            // assigned `.SHELLFLAGS` to include `-e`, we respect it
-            // verbatim.
-            let posix_relax =
-                ignore_error && matches!(self.var_origin(".SHELLFLAGS"), VarOrigin::Default);
-            for flag in shell_split(&shell_flags) {
-                if posix_relax && flag.starts_with('-') && flag.contains('e') {
-                    let stripped: String = flag.chars().filter(|c| *c != 'e').collect();
-                    if stripped != "-" {
-                        cmd.arg(stripped);
-                    }
+            // GNU make direct-execution optimization: when a recipe line
+            // contains no shell metacharacters and the first word is not
+            // a shell builtin, execute the command directly (bypassing
+            // $SHELL). This lets libc's execvp() handle ENOEXEC (scripts
+            // without a shebang) by automatically retrying with /bin/sh.
+            let use_shell = {
+                const SHELL_META: &[char] = &[
+                    '#', ';', '"', '\'', '*', '?', '[', ']', '&', '|', '<', '>', '(', ')', '{',
+                    '}', '$', '`', '^', '~', '!', '\\', '\n',
+                ];
+                if expanded.contains(SHELL_META) {
+                    true
                 } else {
-                    cmd.arg(flag);
+                    const SHELL_BUILTINS: &[&str] = &[
+                        "cd", "eval", "exec", "exit", "login", "logout", "set", "umask", "wait",
+                        "while", "for", "case", "if", ":", ".", "break", "continue", "export",
+                        "read", "readonly", "shift", "times", "trap", "switch", "test",
+                    ];
+                    let first_word = expanded.split_whitespace().next().unwrap_or("");
+                    SHELL_BUILTINS.contains(&first_word)
                 }
-            }
-            cmd.arg(&expanded);
+            };
 
+            // Pre-compute environment variables so they can be applied
+            // to both a direct-execution attempt and a shell fallback.
+            let mut env_set: Vec<(String, String)> = Vec::new();
+            let mut env_remove: Vec<String> = Vec::new();
             if *self.export_all.borrow() {
                 let unexports = self.unexports.borrow();
                 for (name, var) in self.vars.borrow().iter() {
                     if unexports.contains(name) {
                         continue;
                     }
-                    cmd.env(name, &var.value);
+                    env_set.push((name.clone(), var.value.clone()));
                 }
             } else {
-                // Re-export any variable the make process inherited
-                // from its environment — even if a makefile assignment
-                // later changed the value (and thus the origin). The
-                // child would otherwise inherit our stale env entry.
-                // SHELL is special: `SHELL := …` changes the shell
-                // make uses internally but must not be exported to
-                // recipes (keeps the user's login shell visible there)
-                // — unless SHELL has been explicitly `export`ed.
                 let shell_exported = self.exports.borrow().contains("SHELL");
                 let unexports = self.unexports.borrow();
                 for name in self.env_inherited.borrow().iter() {
@@ -3421,26 +3404,91 @@ impl Engine {
                         continue;
                     }
                     if unexports.contains(name) {
-                        cmd.env_remove(name);
+                        env_remove.push(name.clone());
                         continue;
                     }
                     let value = self.lookup_var(name);
-                    cmd.env(name, &value);
+                    env_set.push((name.clone(), value));
                 }
                 for name in self.exports.borrow().iter() {
                     let value = self.lookup_var(name);
-                    cmd.env(name, &value);
+                    env_set.push((name.clone(), value));
                 }
             }
-            // Increment MAKELEVEL in the child environment so sub-makes
-            // see a bumped value, matching GNU make.
             let current_level: i32 = self.lookup_var_or("MAKELEVEL", "0").parse().unwrap_or(0);
-            cmd.env("MAKELEVEL", (current_level + 1).to_string());
-            cmd.env_remove("MAKE_RESTARTS");
-            // Always propagate MAKEFLAGS and MAKE to children so recipes
-            // can `$(MAKE)` recursively and see flag state.
-            cmd.env("MAKEFLAGS", self.lookup_var("MAKEFLAGS"));
-            cmd.env("MAKE", self.lookup_var("MAKE"));
+            env_set.push(("MAKELEVEL".into(), (current_level + 1).to_string()));
+            env_remove.push("MAKE_RESTARTS".into());
+            env_set.push(("MAKEFLAGS".into(), self.lookup_var("MAKEFLAGS")));
+            env_set.push(("MAKE".into(), self.lookup_var("MAKE")));
+
+            // Helper: apply pre-computed env to a Command.
+            let apply_env = |cmd: &mut std::process::Command| {
+                for (k, v) in &env_set {
+                    cmd.env(k, v);
+                }
+                for k in &env_remove {
+                    cmd.env_remove(k);
+                }
+            };
+
+            // Helper: build the shell-based Command.
+            let build_shell_cmd = |sh: &str, flags: &str, expanded: &str, ignore_error: bool| {
+                let mut shell_parts = sh.split_whitespace();
+                let shell_prog = shell_parts.next().unwrap_or("/bin/sh");
+                let mut c = std::process::Command::new(shell_prog);
+                for extra in shell_parts {
+                    c.arg(extra);
+                }
+                let posix_relax =
+                    ignore_error && matches!(self.var_origin(".SHELLFLAGS"), VarOrigin::Default);
+                for flag in shell_split(flags) {
+                    if posix_relax && flag.starts_with('-') && flag.contains('e') {
+                        let stripped: String = flag.chars().filter(|ch| *ch != 'e').collect();
+                        if stripped != "-" {
+                            c.arg(stripped);
+                        }
+                    } else {
+                        c.arg(flag);
+                    }
+                }
+                c.arg(expanded);
+                c
+            };
+
+            let status_result = if use_shell {
+                let mut cmd = build_shell_cmd(&shell, &shell_flags, &expanded, ignore_error);
+                apply_env(&mut cmd);
+                cmd.status()
+            } else {
+                // No shell metacharacters — try direct execution.
+                let parts: Vec<&str> = expanded.split_whitespace().collect();
+                let mut cmd = std::process::Command::new(parts[0]);
+                if parts.len() > 1 {
+                    cmd.args(&parts[1..]);
+                }
+                apply_env(&mut cmd);
+                match cmd.status() {
+                    Err(ref e) if e.raw_os_error() == Some(8) => {
+                        // ENOEXEC — script has no shebang. Fall back to
+                        // /bin/sh -c, matching GNU make / POSIX behavior.
+                        let mut sh = std::process::Command::new("/bin/sh");
+                        sh.arg("-c");
+                        sh.arg(&expanded);
+                        apply_env(&mut sh);
+                        sh.status()
+                    }
+                    Err(ref e) if e.raw_os_error() == Some(2) => {
+                        // ENOENT — command not found on PATH. Fall back to
+                        // $SHELL so custom shells (like `SHELL := echo`)
+                        // can handle the command.
+                        let mut cmd =
+                            build_shell_cmd(&shell, &shell_flags, &expanded, ignore_error);
+                        apply_env(&mut cmd);
+                        cmd.status()
+                    }
+                    other => other,
+                }
+            };
 
             // For diagnostics, include the source file:line of the failing
             // recipe line.
@@ -3449,29 +3497,22 @@ impl Engine {
             } else {
                 String::new()
             };
-            match cmd.status() {
+            match status_result {
                 Ok(status) => {
                     if !status.success() {
                         let code = status.code().unwrap_or(2);
                         if ignore_error || self.ignore_errors {
-                            // Emit GNU make's "(ignored)" diagnostic when a
-                            // recipe with `-` prefix (or `-i`) silently
-                            // swallows the failure.
                             eprintln!("make: [{loc}{target}] Error {code} (ignored)");
                         } else {
-                            {
-                                *self.in_recipe.borrow_mut() = false;
-                                return Err(format!("[{loc}{target}] Error {code}"));
-                            }
+                            *self.in_recipe.borrow_mut() = false;
+                            return Err(format!("[{loc}{target}] Error {code}"));
                         }
                     }
                 }
                 Err(e) => {
                     if !ignore_error && !self.ignore_errors {
-                        {
-                            *self.in_recipe.borrow_mut() = false;
-                            return Err(format!("{target}: {e}"));
-                        }
+                        *self.in_recipe.borrow_mut() = false;
+                        return Err(format!("{target}: {e}"));
                     }
                 }
             }
