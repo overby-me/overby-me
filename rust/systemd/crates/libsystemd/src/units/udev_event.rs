@@ -145,6 +145,298 @@ fn ensure_device_units_exist(
     }
 }
 
+/// Walk `/run/udev/data/*` and rebuild synthetic `.device` units from the
+/// persisted udev db entries.  Used on PID 1 startup (both fresh boot and
+/// `daemon-reexec`) to re-populate device-unit state that was previously
+/// created on-the-fly via `udev-event` RPC notifications and lost when
+/// the in-memory unit table was rebuilt.
+///
+/// Matches upstream systemd's `manager_enumerate_devices()` behaviour:
+/// the udev db is the source of truth for currently-present devices, so
+/// walking it gives us a consistent snapshot without waiting for udevd
+/// to re-broadcast events.  Entries without the `systemd` tag (and
+/// without `SYSTEMD_ALIAS=` / symlinks) are skipped — those aren't
+/// tracked as service-manager units.
+pub fn rebuild_device_units_from_udev_db(run_info: &ArcMutRuntimeInfo) {
+    let db_dir = std::path::Path::new("/run/udev/data");
+    let entries = match std::fs::read_dir(db_dir) {
+        Ok(e) => e,
+        Err(e) => {
+            // /run/udev/data not existing isn't an error — it just means
+            // udev hasn't written anything yet (e.g. fresh boot before
+            // udevd started).  The normal RPC path will populate the
+            // table as events arrive.
+            trace!(
+                "rebuild_device_units: cannot read {}: {} — skipping",
+                db_dir.display(),
+                e
+            );
+            return;
+        }
+    };
+
+    let mut restored = 0usize;
+    let mut skipped = 0usize;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = match path.file_name().and_then(|s| s.to_str()) {
+            Some(n) => n,
+            None => continue,
+        };
+        // Skip the lock file and any non-db artifacts.
+        if name.starts_with('.') || name.ends_with(".tmp") {
+            continue;
+        }
+
+        let params = match build_params_from_db_entry(name, &path) {
+            Some(p) => p,
+            None => {
+                skipped += 1;
+                continue;
+            }
+        };
+
+        // Only rebuild units the service manager would have tracked
+        // (tag=systemd OR alias/symlink present).
+        if derive_unit_names(&params).is_empty() {
+            skipped += 1;
+            continue;
+        }
+        handle_udev_event(run_info, &params);
+        restored += 1;
+    }
+    if restored > 0 || skipped > 0 {
+        debug!(
+            "rebuild_device_units_from_udev_db: restored={} skipped={}",
+            restored, skipped
+        );
+    }
+}
+
+/// Parse one `/run/udev/data/<filename>` entry into an `UdevEventParams`
+/// suitable for replay through `handle_udev_event`.  The filename encodes
+/// the device class (b/c/n/+); the contents have `E:KEY=VALUE` /
+/// `G:TAG` / `S:SYMLINK` lines (see udev db format).  sysfs_path is
+/// recovered via `/sys/dev/{block,char}/MAJ:MIN` or `/sys/class/net/*`
+/// readlinks.
+fn build_params_from_db_entry(
+    filename: &str,
+    file_path: &std::path::Path,
+) -> Option<UdevEventParams> {
+    let content = std::fs::read_to_string(file_path).ok()?;
+
+    let mut env: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut tags: Vec<String> = Vec::new();
+    let mut symlinks: Vec<String> = Vec::new();
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix("E:") {
+            if let Some(eq) = rest.find('=') {
+                let key = rest[..eq].to_owned();
+                let val = rest[eq + 1..].to_owned();
+                env.insert(key, udev_db_unescape(&val));
+            }
+        } else if let Some(tag) = line.strip_prefix("G:") {
+            if !tag.is_empty() && !tags.contains(&tag.to_owned()) {
+                tags.push(tag.to_owned());
+            }
+        } else if let Some(link) = line.strip_prefix("S:") {
+            if !link.is_empty() {
+                symlinks.push(link.to_owned());
+            }
+        }
+    }
+
+    // Derive sysfs_path, subsystem, and devname from the filename
+    // encoding.  Failures are soft (some odd db entries may not
+    // resolve) — we skip them.
+    let (sysfs_path, subsystem, devname) = resolve_device_from_db_name(filename)?;
+
+    Some(UdevEventParams {
+        action: "add".to_owned(),
+        sysfs_path,
+        devname,
+        subsystem,
+        env,
+        tags,
+        symlinks,
+    })
+}
+
+/// Resolve a udev db filename (e.g. `b8:1`, `n3`, `+net:eth0`) back to
+/// `(sysfs_path, subsystem, devname)` by consulting `/sys` symlinks.
+///
+/// Returns `None` if the device no longer exists in sysfs (i.e. the db
+/// entry is stale — the device was removed but udev hasn't cleaned up).
+fn resolve_device_from_db_name(filename: &str) -> Option<(String, String, String)> {
+    // Block: b<MAJ>:<MIN> → /sys/dev/block/MAJ:MIN → /sys/devices/...
+    if let Some(rest) = filename.strip_prefix('b')
+        && rest.contains(':')
+    {
+        let target = std::fs::read_link(format!("/sys/dev/block/{rest}")).ok()?;
+        return Some((
+            path_to_sysfs_path(&target)?,
+            "block".to_owned(),
+            devname_from_sysfs(&format!("/sys/dev/block/{rest}")),
+        ));
+    }
+    // Char: c<MAJ>:<MIN> → /sys/dev/char/MAJ:MIN → /sys/devices/...
+    if let Some(rest) = filename.strip_prefix('c')
+        && rest.contains(':')
+    {
+        let target = std::fs::read_link(format!("/sys/dev/char/{rest}")).ok()?;
+        // Also try subsystem = readlink /sys/dev/char/MAJ:MIN/subsystem
+        let subsystem = read_subsystem(&format!("/sys/dev/char/{rest}"));
+        return Some((
+            path_to_sysfs_path(&target)?,
+            subsystem,
+            devname_from_sysfs(&format!("/sys/dev/char/{rest}")),
+        ));
+    }
+    // Net: n<IFINDEX> → iterate /sys/class/net/* and find matching ifindex.
+    if let Some(rest) = filename.strip_prefix('n') {
+        if let Ok(ifindex) = rest.parse::<u32>()
+            && let Some(sysfs_path) = sysfs_path_from_ifindex(ifindex)
+        {
+            return Some((sysfs_path, "net".to_owned(), String::new()));
+        }
+        return None;
+    }
+    // Other subsystems: +<SUBSYS>:<SYSNAME>
+    if let Some(rest) = filename.strip_prefix('+')
+        && let Some(colon) = rest.find(':')
+    {
+        let subsys = &rest[..colon];
+        let sysname = &rest[colon + 1..];
+        // Try /sys/bus/<subsys>/devices/<sysname>, then /sys/class/<subsys>/<sysname>.
+        for candidate in [
+            format!("/sys/bus/{subsys}/devices/{sysname}"),
+            format!("/sys/class/{subsys}/{sysname}"),
+            format!("/sys/subsystem/{subsys}/devices/{sysname}"),
+        ] {
+            if let Ok(target) = std::fs::read_link(&candidate)
+                && let Some(sysfs) = path_to_sysfs_path(&target)
+            {
+                return Some((sysfs, subsys.to_owned(), String::new()));
+            }
+            // Also accept if the candidate itself is a real dir (some
+            // /sys/class entries are the actual path rather than a link).
+            if let Ok(md) = std::fs::metadata(&candidate)
+                && md.is_dir()
+            {
+                return Some((candidate, subsys.to_owned(), String::new()));
+            }
+        }
+    }
+    None
+}
+
+/// Normalize a readlink target into a canonical `/sys/...` sysfs path.
+/// Handles relative links like `../../devices/...` by joining with the
+/// `/sys` root directly (readlink under /sys is relative to the link's
+/// containing dir).
+fn path_to_sysfs_path(target: &std::path::Path) -> Option<String> {
+    let s = target.to_string_lossy();
+    // Strip any leading "../" hops; each hop climbs one level from
+    // /sys/dev/block/ (or similar) toward /sys.
+    let mut rest = s.as_ref();
+    let mut depth_from_sys = 3usize; // /sys/dev/block/ → 3 components below /sys
+    while let Some(r) = rest.strip_prefix("../") {
+        if depth_from_sys > 0 {
+            depth_from_sys -= 1;
+        }
+        rest = r;
+    }
+    // `rest` is now the tail relative to /sys (e.g. `devices/virtual/net/eth0`).
+    if rest.starts_with('/') {
+        return Some(rest.to_owned());
+    }
+    Some(format!("/sys/{rest}"))
+}
+
+/// Read /sys/dev/.../subsystem link basename to recover the subsystem
+/// name.  Returns empty string on failure (caller may then default).
+fn read_subsystem(sys_dir: &str) -> String {
+    let link = format!("{sys_dir}/subsystem");
+    if let Ok(target) = std::fs::read_link(&link)
+        && let Some(name) = target.file_name().and_then(|s| s.to_str())
+    {
+        return name.to_owned();
+    }
+    String::new()
+}
+
+/// Read the `uevent` file's `DEVNAME=` line to recover /dev/<node>
+/// (prefixed with /dev/).  Empty string if the device has no node.
+fn devname_from_sysfs(sys_dir: &str) -> String {
+    let uevent_path = format!("{sys_dir}/uevent");
+    if let Ok(content) = std::fs::read_to_string(&uevent_path) {
+        for line in content.lines() {
+            if let Some(rest) = line.strip_prefix("DEVNAME=") {
+                if rest.starts_with('/') {
+                    return rest.to_owned();
+                }
+                return format!("/dev/{rest}");
+            }
+        }
+    }
+    String::new()
+}
+
+/// For a net device, find its /sys/class/net/<iface> by matching
+/// /sys/class/net/*/ifindex against the given ifindex.
+fn sysfs_path_from_ifindex(ifindex: u32) -> Option<String> {
+    let entries = std::fs::read_dir("/sys/class/net").ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let ifindex_path = path.join("ifindex");
+        if let Ok(content) = std::fs::read_to_string(&ifindex_path)
+            && content.trim().parse::<u32>().ok() == Some(ifindex)
+        {
+            // Resolve the symlink to get the canonical /sys/devices/... path.
+            if let Ok(target) = std::fs::read_link(&path)
+                && let Some(canonical) = path_to_sysfs_path(&target)
+            {
+                return Some(canonical);
+            }
+            // Fall back to /sys/class/net/<name>.
+            return Some(path.to_string_lossy().into_owned());
+        }
+    }
+    None
+}
+
+/// Reverse of `escape_db_value` in udevd — convert `\xNN` escape
+/// sequences back into the raw byte.  Other characters pass through.
+fn udev_db_unescape(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if i + 3 < bytes.len() && bytes[i] == b'\\' && bytes[i + 1] == b'x' {
+            if let (Some(hi), Some(lo)) = (
+                hex_digit_value(bytes[i + 2]),
+                hex_digit_value(bytes[i + 3]),
+            ) {
+                out.push((hi << 4) | lo);
+                i += 4;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_digit_value(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
 /// Derive the set of `.device` unit names for this udev event.
 ///
 /// The primary name comes from `sysfs_path`.  Additional names come from:
@@ -981,6 +1273,103 @@ mod tests {
             count_before, count_after,
             "repeat add duplicated units in unit_table"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // udev db rebuild helpers
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_udev_db_unescape_basic() {
+        assert_eq!(udev_db_unescape("aa\\x20bb"), "aa bb");
+        assert_eq!(udev_db_unescape("\\x20foo\\x20"), " foo ");
+        assert_eq!(udev_db_unescape("no-escapes"), "no-escapes");
+        assert_eq!(udev_db_unescape(""), "");
+    }
+
+    #[test]
+    fn test_udev_db_unescape_preserves_unknown_escapes() {
+        // \z is not an \xNN sequence — pass through as-is.
+        assert_eq!(udev_db_unescape("a\\zb"), "a\\zb");
+        // Dangling \x at end — keep the slash and x as literals.
+        assert_eq!(udev_db_unescape("end\\x"), "end\\x");
+    }
+
+    #[test]
+    fn test_hex_digit_value() {
+        assert_eq!(hex_digit_value(b'0'), Some(0));
+        assert_eq!(hex_digit_value(b'9'), Some(9));
+        assert_eq!(hex_digit_value(b'a'), Some(10));
+        assert_eq!(hex_digit_value(b'F'), Some(15));
+        assert_eq!(hex_digit_value(b'z'), None);
+        assert_eq!(hex_digit_value(b' '), None);
+    }
+
+    #[test]
+    fn test_path_to_sysfs_path_relative() {
+        // A typical readlink of /sys/dev/block/8:1 gives
+        // `../../devices/pci0000:00/.../block/sda/sda1`.  After
+        // stripping `../` hops, we want `/sys/devices/...`.
+        let target = std::path::Path::new("../../devices/virtual/net/eth0");
+        let resolved = path_to_sysfs_path(target).unwrap();
+        assert_eq!(resolved, "/sys/devices/virtual/net/eth0");
+    }
+
+    #[test]
+    fn test_path_to_sysfs_path_absolute_unchanged() {
+        let target = std::path::Path::new("/sys/devices/virtual/net/eth0");
+        // Absolute paths pass through (`starts_with('/')` short-circuits).
+        let resolved = path_to_sysfs_path(target).unwrap();
+        assert_eq!(resolved, "/sys/devices/virtual/net/eth0");
+    }
+
+    #[test]
+    fn test_build_params_from_db_entry_parses_contents() {
+        // Write a synthetic db entry to a temp file and parse it,
+        // bypassing the resolve_device_from_db_name step (which needs
+        // real /sys).  We just test that E:/G:/S: lines decompose.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("n1");
+        let contents = "\
+S:disk/by-uuid/abcd\n\
+G:systemd\n\
+Q:systemd\n\
+L:0\n\
+E:ID_NET_NAME=eth0\n\
+E:SYSTEMD_WANTS=foo.service\n\
+E:HOGE=aa\\x20bb\n\
+E:TAGS=:systemd:\n\
+";
+        std::fs::write(&path, contents).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        let mut env: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        let mut tags: Vec<String> = Vec::new();
+        let mut symlinks: Vec<String> = Vec::new();
+        for line in content.lines() {
+            if let Some(rest) = line.strip_prefix("E:") {
+                if let Some(eq) = rest.find('=') {
+                    env.insert(rest[..eq].to_owned(), udev_db_unescape(&rest[eq + 1..]));
+                }
+            } else if let Some(tag) = line.strip_prefix("G:") {
+                if !tag.is_empty() && !tags.contains(&tag.to_owned()) {
+                    tags.push(tag.to_owned());
+                }
+            } else if let Some(link) = line.strip_prefix("S:") {
+                if !link.is_empty() {
+                    symlinks.push(link.to_owned());
+                }
+            }
+        }
+        assert_eq!(env.get("ID_NET_NAME").map(|s| s.as_str()), Some("eth0"));
+        assert_eq!(
+            env.get("SYSTEMD_WANTS").map(|s| s.as_str()),
+            Some("foo.service")
+        );
+        // HOGE with \x20 should round-trip to a single space.
+        assert_eq!(env.get("HOGE").map(|s| s.as_str()), Some("aa bb"));
+        assert!(tags.contains(&"systemd".to_owned()));
+        assert!(symlinks.iter().any(|s| s == "disk/by-uuid/abcd"));
     }
 
     #[test]

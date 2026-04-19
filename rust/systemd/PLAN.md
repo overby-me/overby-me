@@ -247,6 +247,22 @@ Fire-and-forget; udevd drains the response so PID 1's `write_all` doesn't hit EP
 
 - On this NixOS kernel + Rust stdlib combo, `/proc/<pid>/comm` for a child spawned via `Command::new("/usr/bin/sleep")` is the full path `/usr/bin/sleep` (14 chars, fits TASK_COMM_LEN=16) rather than the basename `sleep`.  This breaks psmisc's `killall sleep` (exact 15-char comm match).  Tests relying on `killall <basename>` need a patchScript workaround that matches against `basename(comm)` via a `/proc` walk.
 
+### Next Steps
+
+Three candidate directions for the next iteration, in decreasing order of expected leverage:
+
+**A. Rebuild device units from `/run/udev/data/*` on PID 1 startup** (unblocks 17-udev-device-is-processing Phase 2).
+
+Synthetic `.device` units are created from udev-event RPC notifications during normal operation, so they're absent from the unit table after `daemon-reexec` or fresh boot.  Fix: walk `/run/udev/data/*` on startup, parse each entry (E:KEY=VALUE lines + G: tags + S: symlinks), reconstruct the UdevEventParams-equivalent, and feed through `handle_udev_event` (or a restart-only code path).  Also matches upstream behaviour: real systemd's `manager_enumerate_devices()` runs at boot to seed device state from the udev db.  ~150-250 lines + tests, self-contained.  Expected 1-2 VM iteration cycles.
+
+**B. Run `17-udev-netif-altname` VM test** (validates the altname netlink code).
+
+Different code path — pure kernel-netlink interaction, no PID-1-state-machine.  Either passes outright (big validation) or surfaces one or two targeted bugs in RTM_NEWLINKPROP/RTM_DELLINKPROP framing, attribute alignment, or the sd/hd/vd pattern of `strip_partition_suffix`.  ~15 min per iteration, no code complexity added.
+
+**C. Run `17-udev-rename-netif` VM test** (validates ID_RENAMING lifecycle).
+
+Exercises `ID_RENAMING=1` flip → deactivate, then clear → reactivate semantics (see § 10).  Similar risk profile to B — likely either passes outright or surfaces one bug in the deactivate-on-rename path.
+
 ## Prioritized Fix Plan
 
 ### Priority 1: Quick Wins (test config fixes, CLI flags) — DONE

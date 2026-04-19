@@ -144,6 +144,17 @@ pub fn run_service_manager() {
     crate::watchdog::start_watchdog_thread(run_info.clone());
     crate::dbus_server::start_dbus_server_thread(run_info.clone());
 
+    // Rebuild synthetic `.device` units from the udev db.  Device
+    // units are created on-the-fly from `udev-event` RPC notifications
+    // and are NOT persisted in unit files, so after a daemon-reexec
+    // (or fresh boot where udev has already written its db) the in-
+    // memory unit table is missing them.  Walking /run/udev/data/*
+    // re-populates the table without waiting for udevd to re-broadcast.
+    // Runs AFTER all helper threads are up so Wants= activations
+    // triggered by the replay can reach the notification handler etc.
+    // Matches upstream's `manager_enumerate_devices()` at boot.
+    crate::units::rebuild_device_units_from_udev_db(&run_info);
+
     trace!("Started all helper threads. Start activating units");
 
     let target_id: units::UnitId = {
