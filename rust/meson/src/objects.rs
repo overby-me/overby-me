@@ -58,6 +58,10 @@ pub enum Object {
     GeneratedList(GeneratedListData),
     /// Custom target index (one output of a multi-output custom target)
     CustomTargetIndex(CustomTargetRef, usize),
+    /// Source set object from sourceset module
+    SourceSet(SourceSetData),
+    /// Result of source_set.apply()
+    SourceSetResult(SourceSetResultData),
 }
 
 impl PartialEq for Object {
@@ -79,6 +83,7 @@ impl PartialEq for Object {
             (Object::Dependency(a), Object::Dependency(b)) => {
                 a.name == b.name && a.found == b.found
             }
+            (Object::File(a), Object::File(b)) => a.path == b.path,
             _ => false,
         }
     }
@@ -116,6 +121,8 @@ impl Object {
             Object::BothLibraries(_, _) => "both_libs",
             Object::GeneratedList(_) => "generated_list",
             Object::CustomTargetIndex(_, _) => "custom_idx",
+            Object::SourceSet(_) => "source_set",
+            Object::SourceSetResult(_) => "source_set_result",
         }
     }
 
@@ -165,6 +172,8 @@ impl Object {
             Object::Compiler(c) => format!("<compiler '{}'>", c.id),
             Object::File(f) => f.path.clone(),
             Object::Module(name) => format!("<module '{}'>", name),
+            Object::SourceSet(_) => "<source set>".to_string(),
+            Object::SourceSetResult(_) => "<source set result>".to_string(),
             _ => format!("<{}>", self.type_name()),
         }
     }
@@ -431,4 +440,30 @@ pub struct FileData {
     pub path: String,
     pub subdir: String,
     pub is_built: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceSetData {
+    pub rules: Rc<RefCell<Vec<SourceSetRule>>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceSetRule {
+    pub when: Vec<Object>,
+    pub if_true: Vec<Object>,
+    pub if_false: Vec<Object>,
+}
+
+impl SourceSetData {
+    pub fn new() -> Self {
+        Self {
+            rules: Rc::new(RefCell::new(Vec::new())),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceSetResultData {
+    pub sources: Vec<Object>,
+    pub dependencies: Vec<Object>,
 }

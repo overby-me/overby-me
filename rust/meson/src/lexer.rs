@@ -403,16 +403,31 @@ impl Lexer {
                         Some('f') => s.push('\x0C'),
                         Some('0') => s.push('\0'),
                         Some('x') => {
-                            let hex = self.read_hex(2)?;
-                            s.push(char::from_u32(hex).unwrap_or('\u{FFFD}'));
+                            if self.has_hex_ahead(2) {
+                                let hex = self.read_hex(2).unwrap();
+                                s.push(char::from_u32(hex).unwrap_or('\u{FFFD}'));
+                            } else {
+                                s.push('\\');
+                                s.push('x');
+                            }
                         }
                         Some('u') => {
-                            let hex = self.read_hex(4)?;
-                            s.push(char::from_u32(hex).unwrap_or('\u{FFFD}'));
+                            if self.has_hex_ahead(4) {
+                                let hex = self.read_hex(4).unwrap();
+                                s.push(char::from_u32(hex).unwrap_or('\u{FFFD}'));
+                            } else {
+                                s.push('\\');
+                                s.push('u');
+                            }
                         }
                         Some('U') => {
-                            let hex = self.read_hex(8)?;
-                            s.push(char::from_u32(hex).unwrap_or('\u{FFFD}'));
+                            if self.has_hex_ahead(8) {
+                                let hex = self.read_hex(8).unwrap();
+                                s.push(char::from_u32(hex).unwrap_or('\u{FFFD}'));
+                            } else {
+                                s.push('\\');
+                                s.push('U');
+                            }
                         }
                         Some(c) => {
                             s.push('\\');
@@ -651,6 +666,14 @@ impl Lexer {
             _ => TokenKind::Identifier(s),
         };
         Ok(Token { kind, line, col })
+    }
+
+    fn has_hex_ahead(&self, count: usize) -> bool {
+        (0..count).all(|i| {
+            self.source
+                .get(self.pos + i)
+                .map_or(false, |c| c.is_ascii_hexdigit())
+        })
     }
 
     fn read_hex(&mut self, count: usize) -> Result<u32, String> {

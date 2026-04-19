@@ -1,3 +1,4 @@
+use crate::ast;
 use crate::objects::{FeatureState, Object};
 /// Options system: parsing meson_options.txt/meson.options, built-in options,
 /// cross/native files, and version comparison.
@@ -30,10 +31,75 @@ pub fn parse_option_value(value: &str) -> Object {
     }
 }
 
+/// Evaluate a constant expression from the options file AST.
+fn eval_const_expr(expr: &ast::Expression) -> Option<Object> {
+    match expr {
+        ast::Expression::StringLiteral(s, _) => Some(Object::String(s.clone())),
+        ast::Expression::IntLiteral(n, _) => Some(Object::Int(*n)),
+        ast::Expression::BoolLiteral(b, _) => Some(Object::Bool(*b)),
+        ast::Expression::Identifier(s, _) => match s.as_str() {
+            "true" => Some(Object::Bool(true)),
+            "false" => Some(Object::Bool(false)),
+            _ => Some(Object::String(s.clone())),
+        },
+        ast::Expression::Array(items, _) => {
+            let evaluated: Option<Vec<Object>> = items.iter().map(eval_const_expr).collect();
+            evaluated.map(Object::Array)
+        }
+        ast::Expression::UnaryOp(op, inner, _) => {
+            let val = eval_const_expr(inner)?;
+            match op {
+                ast::UnaryOp::Not => {
+                    if let Object::Bool(b) = val {
+                        Some(Object::Bool(!b))
+                    } else {
+                        None
+                    }
+                }
+                ast::UnaryOp::Negate => {
+                    if let Object::Int(n) = val {
+                        Some(Object::Int(-n))
+                    } else {
+                        None
+                    }
+                }
+            }
+        }
+        ast::Expression::BinaryOp(op, left, right, _) => {
+            let l = eval_const_expr(left)?;
+            let r = eval_const_expr(right)?;
+            match op {
+                ast::BinaryOp::Add => match (l, r) {
+                    (Object::String(a), Object::String(b)) => Some(Object::String(a + &b)),
+                    (Object::Int(a), Object::Int(b)) => Some(Object::Int(a + b)),
+                    _ => None,
+                },
+                ast::BinaryOp::Sub => match (l, r) {
+                    (Object::Int(a), Object::Int(b)) => Some(Object::Int(a - b)),
+                    _ => None,
+                },
+                ast::BinaryOp::Mul => match (l, r) {
+                    (Object::Int(a), Object::Int(b)) => Some(Object::Int(a * b)),
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn obj_to_string(obj: &Object) -> String {
+    match obj {
+        Object::String(s) => s.clone(),
+        Object::Int(n) => n.to_string(),
+        Object::Bool(b) => b.to_string(),
+        _ => String::new(),
+    }
+}
+
 /// Parse a meson_options.txt / meson.options file.
-/// These use the Meson DSL but in a restricted form with only option() calls.
 pub fn parse_options_file(source: &str, options: &mut HashMap<String, Object>) {
-    // Simple parser that handles option() calls
     let mut lexer = crate::lexer::Lexer::new(source);
     let tokens = match lexer.tokenize() {
         Ok(t) => t,
@@ -44,15 +110,9 @@ pub fn parse_options_file(source: &str, options: &mut HashMap<String, Object>) {
         Ok(p) => p,
         Err(_) => return,
     };
-
     for stmt in &program.statements {
-        if let crate::ast::Statement::Expression(crate::ast::Expression::FunctionCall(
-            func,
-            args,
-            _,
-        )) = stmt
-        {
-            if let crate::ast::Expression::Identifier(name, _) = func.as_ref() {
+        if let ast::Statement::Expression(ast::Expression::FunctionCall(func, args, _)) = stmt {
+            if let ast::Expression::Identifier(name, _) = func.as_ref() {
                 if name == "option" {
                     parse_option_call(args, options);
                 }
@@ -61,89 +121,80 @@ pub fn parse_options_file(source: &str, options: &mut HashMap<String, Object>) {
     }
 }
 
-fn parse_option_call(args: &[crate::ast::Argument], options: &mut HashMap<String, Object>) {
+fn parse_option_call(args: &[ast::Argument], options: &mut HashMap<String, Object>) {
     let mut name = String::new();
     let mut opt_type = String::new();
     let mut value = None;
-    let mut description = String::new();
     let mut choices = Vec::new();
-    let mut min_val = None;
-    let mut max_val = None;
-
     for (i, arg) in args.iter().enumerate() {
-        let val_str = expr_to_string(&arg.value);
         match arg.name.as_deref() {
-            None if i == 0 => name = val_str,
-            Some("type") => opt_type = val_str,
-            Some("value") => value = Some(expr_to_object(&arg.value)),
-            Some("description") => description = val_str,
-            Some("choices") => {
-                if let crate::ast::Expression::Array(items, _) = &arg.value {
-                    choices = items.iter().map(|e| expr_to_string(e)).collect();
+            None if i == 0 => {
+                if let Some(obj) = eval_const_expr(&arg.value) {
+                    name = obj_to_string(&obj);
                 }
             }
-            Some("min") => min_val = expr_to_int(&arg.value),
-            Some("max") => max_val = expr_to_int(&arg.value),
+            Some("type") => {
+                if let Some(obj) = eval_const_expr(&arg.value) {
+                    opt_type = obj_to_string(&obj);
+                }
+            }
+            Some("value") => {
+                value = eval_const_expr(&arg.value);
+            }
+            Some("choices") => {
+                if let Some(Object::Array(items)) = eval_const_expr(&arg.value) {
+                    choices = items.into_iter().map(|o| obj_to_string(&o)).collect();
+                }
+            }
             _ => {}
         }
     }
-
     if name.is_empty() {
         return;
     }
-
+    let value = value.map(|v| coerce_option_value(v, &opt_type));
     let default_value = value.unwrap_or_else(|| match opt_type.as_str() {
         "boolean" => Object::Bool(true),
         "integer" => Object::Int(0),
         "string" => Object::String(String::new()),
-        "combo" => {
-            if let Some(first) = choices.first() {
-                Object::String(first.clone())
-            } else {
-                Object::String(String::new())
-            }
-        }
+        "combo" => choices
+            .first()
+            .map(|f| Object::String(f.clone()))
+            .unwrap_or(Object::String(String::new())),
         "array" => Object::Array(Vec::new()),
         "feature" => Object::Feature(FeatureState::Auto),
         _ => Object::String(String::new()),
     });
-
-    // Only set if not already overridden
     options.entry(name).or_insert(default_value);
 }
 
-fn expr_to_string(expr: &crate::ast::Expression) -> String {
-    match expr {
-        crate::ast::Expression::StringLiteral(s, _) => s.clone(),
-        crate::ast::Expression::IntLiteral(n, _) => n.to_string(),
-        crate::ast::Expression::BoolLiteral(b, _) => b.to_string(),
-        crate::ast::Expression::Identifier(s, _) => s.clone(),
-        _ => String::new(),
-    }
-}
-
-fn expr_to_object(expr: &crate::ast::Expression) -> Object {
-    match expr {
-        crate::ast::Expression::StringLiteral(s, _) => Object::String(s.clone()),
-        crate::ast::Expression::IntLiteral(n, _) => Object::Int(*n),
-        crate::ast::Expression::BoolLiteral(b, _) => Object::Bool(*b),
-        crate::ast::Expression::Array(items, _) => {
-            Object::Array(items.iter().map(expr_to_object).collect())
-        }
-        crate::ast::Expression::Identifier(s, _) => match s.as_str() {
-            "true" => Object::Bool(true),
-            "false" => Object::Bool(false),
-            _ => Object::String(s.clone()),
+fn coerce_option_value(value: Object, opt_type: &str) -> Object {
+    match opt_type {
+        "boolean" => match &value {
+            Object::Bool(_) => value,
+            Object::String(s) => match s.as_str() {
+                "true" => Object::Bool(true),
+                "false" => Object::Bool(false),
+                _ => value,
+            },
+            _ => value,
         },
-        _ => Object::String(String::new()),
-    }
-}
-
-fn expr_to_int(expr: &crate::ast::Expression) -> Option<i64> {
-    if let crate::ast::Expression::IntLiteral(n, _) = expr {
-        Some(*n)
-    } else {
-        None
+        "integer" => match &value {
+            Object::Int(_) => value,
+            Object::String(s) => s.parse::<i64>().map(Object::Int).unwrap_or(value),
+            _ => value,
+        },
+        "feature" => match &value {
+            Object::Feature(_) => value,
+            Object::String(s) => match s.as_str() {
+                "enabled" => Object::Feature(FeatureState::Enabled),
+                "disabled" => Object::Feature(FeatureState::Disabled),
+                "auto" => Object::Feature(FeatureState::Auto),
+                _ => value,
+            },
+            _ => value,
+        },
+        _ => value,
     }
 }
 

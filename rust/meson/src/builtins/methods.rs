@@ -403,6 +403,10 @@ pub fn register(vm: &mut VM) {
         run_result_returncode,
     );
     vm.method_registry.insert(
+        ("runresult".to_string(), "compiled".to_string()),
+        run_result_compiled,
+    );
+    vm.method_registry.insert(
         ("runresult".to_string(), "stdout".to_string()),
         run_result_stdout,
     );
@@ -525,17 +529,21 @@ fn str_join(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, Stri
     let positional = VM::get_positional_args(args);
     let mut parts = Vec::new();
     for arg in &positional {
-        match arg {
-            Object::Array(arr) => {
-                for item in arr {
-                    parts.push(item.to_string_value());
-                }
-            }
-            Object::String(s) => parts.push(s.clone()),
-            _ => parts.push(arg.to_display_string()),
-        }
+        flatten_into(arg, &mut parts);
     }
     Ok(Object::String(parts.join(&sep)))
+}
+
+fn flatten_into(obj: &Object, out: &mut Vec<String>) {
+    match obj {
+        Object::Array(arr) => {
+            for item in arr {
+                flatten_into(item, out);
+            }
+        }
+        Object::String(s) => out.push(s.clone()),
+        other => out.push(other.to_display_string()),
+    }
 }
 
 fn str_replace(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
@@ -1054,7 +1062,9 @@ fn dep_get_configtool_variable(
 
 fn dep_type_name(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
     if let Object::Dependency(d) = obj {
-        let t = if d.is_internal {
+        let t = if !d.found {
+            "not-found"
+        } else if d.is_internal {
             "internal"
         } else {
             "pkgconfig"
@@ -1539,8 +1549,8 @@ fn meson_is_cross_build(_vm: &mut VM, _obj: &Object, _args: &[CallArg]) -> Resul
     Ok(Object::Bool(false))
 }
 
-fn meson_is_subproject(_vm: &mut VM, _obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
-    Ok(Object::Bool(false))
+fn meson_is_subproject(vm: &mut VM, _obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
+    Ok(Object::Bool(vm.is_subproject))
 }
 
 fn meson_backend(_vm: &mut VM, _obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
@@ -1726,6 +1736,14 @@ fn subproject_get_variable(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Resu
 fn run_result_returncode(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
     if let Object::RunResult(r) = obj {
         Ok(Object::Int(r.returncode))
+    } else {
+        Err("Not a run result".to_string())
+    }
+}
+
+fn run_result_compiled(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
+    if let Object::RunResult(_r) = obj {
+        Ok(Object::Bool(true))
     } else {
         Err("Not a run result".to_string())
     }

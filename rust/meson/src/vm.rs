@@ -97,6 +97,8 @@ pub struct VM {
     pub options: HashMap<String, Object>,
     /// Summary data
     pub summary: Vec<(String, Vec<(String, String)>)>,
+    /// Whether we are currently inside a subproject
+    pub is_subproject: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -274,8 +276,8 @@ pub struct RunTarget {
 fn glob_match(pattern: &str, text: &str) -> bool {
     let parts: Vec<&str> = pattern.split('*').collect();
     if parts.len() == 1 {
-        // No wildcards - exact match
-        return pattern == text;
+        // No wildcards - substring match (Meson behavior)
+        return text.contains(pattern);
     }
     let mut pos = 0;
     for (i, part) in parts.iter().enumerate() {
@@ -318,6 +320,7 @@ impl VM {
             project: None,
             options: HashMap::new(),
             summary: Vec::new(),
+            is_subproject: false,
         }
     }
 

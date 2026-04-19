@@ -232,7 +232,17 @@ fn builtin_project(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
     let meson_version = VM::get_arg_str(args, "meson_version", usize::MAX)
         .unwrap_or("")
         .to_string();
-    let license = VM::get_arg_string_array(args, "license");
+    // Handle license as either a single string or an array of strings
+    let license = {
+        let mut result = VM::get_arg_string_array(args, "license");
+        if result.is_empty() {
+            // Check if license was passed as a single string instead of an array
+            if let Some(s) = VM::get_arg_str(args, "license", usize::MAX) {
+                result = vec![s.to_string()];
+            }
+        }
+        result
+    };
     let license_files = VM::get_arg_string_array(args, "license_files");
     let subproject_dir = VM::get_arg_str(args, "subproject_dir", usize::MAX)
         .unwrap_or("subprojects")
@@ -247,12 +257,61 @@ fn builtin_project(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         meson_version,
         languages: languages.clone(),
         subproject_dir,
-        default_options,
+        default_options: default_options.clone(),
     });
 
     // Detect compilers for requested languages
     for lang in &languages {
         crate::compilers::detect_compiler(vm, lang);
+    }
+
+    // Apply default_options to vm.options (won't override CLI-set values)
+    // Known string-typed built-in options that should not be parsed as integers
+    let string_typed_builtins = [
+        "buildtype",
+        "optimization",
+        "warning_level",
+        "default_library",
+        "b_sanitize",
+        "b_pgo",
+        "b_ndebug",
+        "unity",
+        "layout",
+        "wrap_mode",
+        "backend",
+        "install_umask",
+        "prefix",
+        "bindir",
+        "libdir",
+        "libexecdir",
+        "includedir",
+        "datadir",
+        "mandir",
+        "infodir",
+        "localedir",
+        "sysconfdir",
+        "localstatedir",
+        "sharedstatedir",
+        "sbindir",
+        "cpp_std",
+        "c_std",
+        "cpp_eh",
+    ];
+    for opt_str in &default_options {
+        if let Some(eq_pos) = opt_str.find('=') {
+            let key = opt_str[..eq_pos].trim().to_string();
+            let val = opt_str[eq_pos + 1..].trim();
+            // Skip subproject options (key contains ':')
+            if key.contains(':') {
+                continue;
+            }
+            let obj = if string_typed_builtins.contains(&key.as_str()) {
+                crate::objects::Object::String(val.to_string())
+            } else {
+                crate::options::parse_option_value(val)
+            };
+            vm.options.entry(key).or_insert(obj);
+        }
     }
 
     Ok(Object::None)
@@ -315,6 +374,20 @@ fn build_target_common(
     args: &[CallArg],
     target_type: TargetType,
 ) -> Result<Object, String> {
+    // Disabler propagation: if any argument is a Disabler, return Disabler
+    for arg in args {
+        if matches!(arg.value, Object::Disabler) {
+            return Ok(Object::Disabler);
+        }
+        if let Object::Array(ref items) = arg.value {
+            for item in items {
+                if matches!(item, Object::Disabler) {
+                    return Ok(Object::Disabler);
+                }
+            }
+        }
+    }
+
     let positional = VM::get_positional_args(args);
     let name = positional
         .first()
@@ -607,6 +680,21 @@ fn builtin_dependency(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         })
         .unwrap_or_default();
 
+    // Threads is a virtual dependency - always succeeds
+    if name == "threads" {
+        return Ok(Object::Dependency(DependencyData {
+            name: "threads".to_string(),
+            found: true,
+            version: String::new(),
+            compile_args: Vec::new(),
+            link_args: vec!["-lpthread".to_string()],
+            sources: Vec::new(),
+            include_dirs: Vec::new(),
+            dependencies: Vec::new(),
+            variables: std::collections::HashMap::new(),
+            is_internal: false,
+        }));
+    }
     let required = match VM::get_arg_value(args, "required") {
         Some(Object::Bool(b)) => *b,
         Some(Object::Feature(FeatureState::Disabled)) => false,
@@ -759,6 +847,20 @@ fn builtin_find_program(vm: &mut VM, args: &[CallArg]) -> Result<Object, String>
 }
 
 fn builtin_custom_target(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
+    // Disabler propagation: if any argument is a Disabler, return Disabler
+    for arg in args {
+        if matches!(arg.value, Object::Disabler) {
+            return Ok(Object::Disabler);
+        }
+        if let Object::Array(ref items) = arg.value {
+            for item in items {
+                if matches!(item, Object::Disabler) {
+                    return Ok(Object::Disabler);
+                }
+            }
+        }
+    }
+
     let positional = VM::get_positional_args(args);
     let name = positional
         .first()
@@ -1370,10 +1472,12 @@ fn builtin_subproject(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
     let old_source = vm.source_root.clone();
     let old_project = vm.project.clone();
     let old_vars = vm.variables.clone();
+    let old_is_subproject = vm.is_subproject;
 
     vm.source_root = subproject_path;
     vm.current_subdir = String::new();
     vm.variables = HashMap::new();
+    vm.is_subproject = true;
 
     // Re-register builtins in new scope
     crate::builtins::functions::register(vm);
@@ -1396,6 +1500,7 @@ fn builtin_subproject(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
     vm.source_root = old_source;
     vm.project = old_project;
     vm.variables = old_vars;
+    vm.is_subproject = old_is_subproject;
 
     let sp = Object::Subproject(SubprojectData {
         name: name.clone(),
@@ -1467,6 +1572,24 @@ fn builtin_run_command(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> 
 
     if cmd_parts.is_empty() {
         return Err("run_command() requires at least one argument".to_string());
+    }
+
+    // Resolve command path: look in source directory if not absolute
+    if !cmd_parts[0].starts_with('/') && !cmd_parts[0].contains('/') {
+        let source_path = format!("{}/{}", vm.source_root, cmd_parts[0]);
+        if Path::new(&source_path).exists() {
+            cmd_parts[0] = source_path;
+        } else if !vm.current_subdir.is_empty() {
+            let subdir_path = format!("{}/{}/{}", vm.source_root, vm.current_subdir, cmd_parts[0]);
+            if Path::new(&subdir_path).exists() {
+                cmd_parts[0] = subdir_path;
+            }
+        }
+    }
+
+    // Python scripts need to be run with python3
+    if cmd_parts[0].ends_with(".py") {
+        cmd_parts.insert(0, "python3".to_string());
     }
 
     let env_data = if let Some(Object::Environment(e)) = VM::get_arg_value(args, "env") {
@@ -1616,6 +1739,11 @@ fn builtin_get_option(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         })
         .ok_or("get_option() requires option name")?;
 
+    // Validate option name: must not start with '.' and must have at most one '.'
+    if name.starts_with('.') || name.matches('.').count() > 1 {
+        return Err(format!("Invalid option name '{}'", name));
+    }
+
     if let Some(val) = vm.options.get(&name) {
         return Ok(val.clone());
     }
@@ -1644,6 +1772,7 @@ fn builtin_get_option(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         "b_staticpic" => Ok(Object::Bool(true)),
         "b_pie" => Ok(Object::Bool(false)),
         "b_lto" => Ok(Object::Bool(false)),
+        "b_pch" => Ok(Object::Bool(true)),
         "b_sanitize" => Ok(Object::String("none".to_string())),
         "b_coverage" => Ok(Object::Bool(false)),
         "b_pgo" => Ok(Object::String("off".to_string())),

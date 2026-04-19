@@ -6,11 +6,16 @@ use crate::lexer::{Token, TokenKind};
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    paren_depth: usize,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, pos: 0 }
+        Self {
+            tokens,
+            pos: 0,
+            paren_depth: 0,
+        }
     }
 
     pub fn parse(&mut self) -> Result<Program, String> {
@@ -250,6 +255,7 @@ impl Parser {
                 col: self.tokens[self.pos].col,
             };
             self.advance();
+            self.skip_newlines_in_parens();
             let right = self.parse_and()?;
             left = Expression::BinaryOp(BinaryOp::Or, Box::new(left), Box::new(right), loc);
         }
@@ -264,6 +270,7 @@ impl Parser {
                 col: self.tokens[self.pos].col,
             };
             self.advance();
+            self.skip_newlines_in_parens();
             let right = self.parse_comparison()?;
             left = Expression::BinaryOp(BinaryOp::And, Box::new(left), Box::new(right), loc);
         }
@@ -292,6 +299,7 @@ impl Parser {
                 col: self.tokens[self.pos].col,
             };
             self.advance();
+            self.skip_newlines_in_parens();
             let right = self.parse_addition()?;
             left = Expression::BinaryOp(op, Box::new(left), Box::new(right), loc);
         }
@@ -311,6 +319,7 @@ impl Parser {
                 col: self.tokens[self.pos].col,
             };
             self.advance();
+            self.skip_newlines_in_parens();
             let right = self.parse_multiplication()?;
             left = Expression::BinaryOp(op, Box::new(left), Box::new(right), loc);
         }
@@ -331,6 +340,7 @@ impl Parser {
                 col: self.tokens[self.pos].col,
             };
             self.advance();
+            self.skip_newlines_in_parens();
             let right = self.parse_unary()?;
             left = Expression::BinaryOp(op, Box::new(left), Box::new(right), loc);
         }
@@ -345,6 +355,7 @@ impl Parser {
                     col: self.tokens[self.pos].col,
                 };
                 self.advance();
+                self.skip_newlines_in_parens();
                 let expr = self.parse_unary()?;
                 Ok(Expression::UnaryOp(UnaryOp::Not, Box::new(expr), loc))
             }
@@ -354,6 +365,7 @@ impl Parser {
                     col: self.tokens[self.pos].col,
                 };
                 self.advance();
+                self.skip_newlines_in_parens();
                 let expr = self.parse_unary()?;
                 Ok(Expression::UnaryOp(UnaryOp::Negate, Box::new(expr), loc))
             }
@@ -486,7 +498,11 @@ impl Parser {
             }
             TokenKind::LParen => {
                 self.advance();
+                self.paren_depth += 1;
+                self.skip_newlines();
                 let expr = self.parse_expression()?;
+                self.skip_newlines();
+                self.paren_depth -= 1;
                 self.expect_kind(&TokenKind::RParen)?;
                 Ok(expr)
             }
@@ -557,6 +573,12 @@ impl Parser {
     fn skip_newlines(&mut self) {
         while self.check(&TokenKind::Newline) {
             self.advance();
+        }
+    }
+
+    fn skip_newlines_in_parens(&mut self) {
+        if self.paren_depth > 0 {
+            self.skip_newlines();
         }
     }
 
