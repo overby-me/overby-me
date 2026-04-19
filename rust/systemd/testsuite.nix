@@ -224,14 +224,19 @@ in
           systemd-networkd-wait-online.enable = lib.mkForce false;
           lvm-devices-import.enable = lib.mkForce false;
           uuidd.enable = lib.mkForce false;
-          # Disable systemd-journal-upload.service — it's pulled in by
-          # NixOS defaults but has no upload URL configured, so it
-          # fails and leaves `systemctl is-system-running` reporting
-          # "degraded".  Masking it keeps the system in the "running"
-          # state that the TEST-74-AUX-UTILS is-system-running test
-          # expects (mirrors what upstream NixOS tests do for optional
-          # services).
-          systemd-journal-upload.enable = lib.mkForce false;
+          # Override systemd-journal-upload — NixOS includes it even
+          # without `services.journald.upload.enable = true`, and since
+          # no URL is configured it immediately exits with "No URL
+          # specified", leaving `systemctl is-system-running` at
+          # "degraded" and tripping the TEST-74-AUX-UTILS
+          # is-system-running test.  Clear wantedBy so nothing pulls
+          # it in on default.target, and replace ExecStart with
+          # `/bin/true` so any explicit start call is a no-op.
+          systemd-journal-upload = {
+            wantedBy = lib.mkForce [];
+            serviceConfig.ExecStart = lib.mkForce "${pkgs.coreutils}/bin/true";
+            serviceConfig.Restart = lib.mkForce "no";
+          };
         };
       };
 
