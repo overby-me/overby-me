@@ -488,4 +488,283 @@ mod tests {
         let names = derive_unit_names(&p);
         assert!(names.contains(&"dev-sda1.device".to_owned()));
     }
+
+    // -----------------------------------------------------------------------
+    // handle_udev_event integration tests
+    //
+    // Construct a minimal ArcMutRuntimeInfo, fire a synthetic
+    // UdevEventParams at handle_udev_event, and assert the unit_table
+    // state afterwards.  These bypass the Wants=-activation background
+    // thread (which needs a full service-manager runtime) and focus on
+    // the synchronous unit-creation + status-transition logic.
+    // -----------------------------------------------------------------------
+
+    use crate::runtime_info::{ArcMutRuntimeInfo, PidTable, RuntimeInfo, UnitTable};
+    use std::sync::{Arc, Mutex, RwLock};
+
+    fn make_test_runtime() -> ArcMutRuntimeInfo {
+        Arc::new(RwLock::new(RuntimeInfo {
+            config: crate::config::Config {
+                notification_sockets_dir: "/tmp".into(),
+                target_unit: "".into(),
+                unit_dirs: vec![],
+                self_path: std::path::PathBuf::from("./rust-systemd"),
+            },
+            fd_store: RwLock::new(crate::fd_store::FDStore::default()),
+            pid_table: Arc::new(Mutex::new(PidTable::default())),
+            unit_table: UnitTable::default(),
+            stdout_eventfd: crate::platform::make_event_fd().unwrap(),
+            stderr_eventfd: crate::platform::make_event_fd().unwrap(),
+            notification_eventfd: crate::platform::make_event_fd().unwrap(),
+            socket_activation_eventfd: crate::platform::make_event_fd().unwrap(),
+            pending_activations: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            manager_environment: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            unit_markers: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            transactions_with_cycle: Arc::new(Mutex::new(Vec::new())),
+            units_in_cycles: Arc::new(Mutex::new(std::collections::HashSet::new())),
+        }))
+    }
+
+    fn unit_status(run_info: &ArcMutRuntimeInfo, name: &str) -> Option<UnitStatus> {
+        let ri = run_info.read().unwrap();
+        ri.unit_table.values().find_map(|u| {
+            if u.id.name == name {
+                Some(u.common.status.read().unwrap().clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    fn unit_exists(run_info: &ArcMutRuntimeInfo, name: &str) -> bool {
+        let ri = run_info.read().unwrap();
+        ri.unit_table.values().any(|u| u.id.name == name)
+    }
+
+    #[test]
+    fn test_handle_udev_event_add_untagged_noop() {
+        let ri = make_test_runtime();
+        let params = make_params("add", "/sys/devices/virtual/net/eth0", "net", &[], &[]);
+        handle_udev_event(&ri, &params);
+        // No unit should have been created for an untagged device.
+        let ri_guard = ri.read().unwrap();
+        assert!(ri_guard.unit_table.is_empty());
+    }
+
+    #[test]
+    fn test_handle_udev_event_add_tagged_creates_and_activates() {
+        let ri = make_test_runtime();
+        let params = make_params(
+            "add",
+            "/sys/devices/virtual/net/eth0",
+            "net",
+            &["systemd"],
+            &[],
+        );
+        handle_udev_event(&ri, &params);
+        assert!(unit_exists(&ri, "sys-devices-virtual-net-eth0.device"));
+        assert!(unit_exists(&ri, "sys-subsystem-net-devices-eth0.device"));
+        let s = unit_status(&ri, "sys-devices-virtual-net-eth0.device").unwrap();
+        assert!(
+            matches!(s, UnitStatus::Started(_)),
+            "expected Started, got {s:?}"
+        );
+    }
+
+    #[test]
+    fn test_handle_udev_event_id_processing_defers_activation() {
+        let ri = make_test_runtime();
+        let mut params = make_params(
+            "add",
+            "/sys/devices/virtual/net/eth0",
+            "net",
+            &["systemd"],
+            &[],
+        );
+        params.env.insert("ID_PROCESSING".into(), "1".into());
+        handle_udev_event(&ri, &params);
+        assert!(unit_exists(&ri, "sys-devices-virtual-net-eth0.device"));
+        let s = unit_status(&ri, "sys-devices-virtual-net-eth0.device").unwrap();
+        assert!(
+            !matches!(s, UnitStatus::Started(_)),
+            "expected placeholder (non-Started), got {s:?}"
+        );
+    }
+
+    #[test]
+    fn test_handle_udev_event_systemd_ready_zero_keeps_inactive() {
+        let ri = make_test_runtime();
+        // First: add with SYSTEMD_READY=0 — placeholder only.
+        let mut params = make_params(
+            "add",
+            "/sys/devices/virtual/mem/foo",
+            "mem",
+            &["systemd"],
+            &[],
+        );
+        params.env.insert("SYSTEMD_READY".into(), "0".into());
+        handle_udev_event(&ri, &params);
+        let s = unit_status(&ri, "sys-devices-virtual-mem-foo.device").unwrap();
+        assert!(!matches!(s, UnitStatus::Started(_)));
+    }
+
+    #[test]
+    fn test_handle_udev_event_remove_deactivates() {
+        let ri = make_test_runtime();
+        // add then remove.
+        let add_params = make_params(
+            "add",
+            "/sys/devices/virtual/net/eth0",
+            "net",
+            &["systemd"],
+            &[],
+        );
+        handle_udev_event(&ri, &add_params);
+        let s_before = unit_status(&ri, "sys-devices-virtual-net-eth0.device").unwrap();
+        assert!(matches!(s_before, UnitStatus::Started(_)));
+
+        let remove_params = make_params(
+            "remove",
+            "/sys/devices/virtual/net/eth0",
+            "net",
+            &["systemd"],
+            &[],
+        );
+        handle_udev_event(&ri, &remove_params);
+        let s_after = unit_status(&ri, "sys-devices-virtual-net-eth0.device").unwrap();
+        assert!(
+            matches!(s_after, UnitStatus::Stopped(_, _)),
+            "expected Stopped, got {s_after:?}"
+        );
+    }
+
+    #[test]
+    fn test_handle_udev_event_id_renaming_flips_to_inactive() {
+        let ri = make_test_runtime();
+        // add: active.
+        let add_params = make_params(
+            "add",
+            "/sys/devices/virtual/net/hoge",
+            "net",
+            &["systemd"],
+            &[],
+        );
+        handle_udev_event(&ri, &add_params);
+        let s1 = unit_status(&ri, "sys-devices-virtual-net-hoge.device").unwrap();
+        assert!(matches!(s1, UnitStatus::Started(_)));
+
+        // change with ID_RENAMING=1: should flip to inactive (per
+        // TEST-17-UDEV.rename-netif).
+        let mut rename_params = make_params(
+            "change",
+            "/sys/devices/virtual/net/hoge",
+            "net",
+            &["systemd"],
+            &[],
+        );
+        rename_params.env.insert("ID_RENAMING".into(), "1".into());
+        handle_udev_event(&ri, &rename_params);
+        let s2 = unit_status(&ri, "sys-devices-virtual-net-hoge.device").unwrap();
+        assert!(
+            !matches!(s2, UnitStatus::Started(_)),
+            "ID_RENAMING=1 must demote to non-Started, got {s2:?}"
+        );
+
+        // subsequent move without ID_RENAMING restores active state.
+        let restore_params = make_params(
+            "move",
+            "/sys/devices/virtual/net/hoge",
+            "net",
+            &["systemd"],
+            &[],
+        );
+        handle_udev_event(&ri, &restore_params);
+        let s3 = unit_status(&ri, "sys-devices-virtual-net-hoge.device").unwrap();
+        assert!(
+            matches!(s3, UnitStatus::Started(_)),
+            "after clear ID_RENAMING, expected Started, got {s3:?}"
+        );
+    }
+
+    #[test]
+    fn test_handle_udev_event_systemd_wants_populates_dep_edges() {
+        let ri = make_test_runtime();
+        let mut params = make_params(
+            "add",
+            "/sys/devices/virtual/net/eth0",
+            "net",
+            &["systemd"],
+            &[],
+        );
+        params
+            .env
+            .insert("SYSTEMD_WANTS".into(), "foo.service bar.service".into());
+        handle_udev_event(&ri, &params);
+
+        let ri_guard = ri.read().unwrap();
+        let device_unit = ri_guard
+            .unit_table
+            .values()
+            .find(|u| u.id.name == "sys-devices-virtual-net-eth0.device")
+            .expect("device unit not created");
+        let wants: Vec<&str> = device_unit
+            .common
+            .dependencies
+            .wants
+            .iter()
+            .map(|id| id.name.as_str())
+            .collect();
+        assert!(
+            wants.contains(&"foo.service"),
+            "Wants missing foo.service: {wants:?}"
+        );
+        assert!(
+            wants.contains(&"bar.service"),
+            "Wants missing bar.service: {wants:?}"
+        );
+    }
+
+    #[test]
+    fn test_handle_udev_event_symlink_creates_alias_unit() {
+        let ri = make_test_runtime();
+        let params = make_params(
+            "add",
+            "/sys/devices/virtual/mem/null",
+            "mem",
+            &["systemd"],
+            &["/dev/disk/by-uuid/abcdef"],
+        );
+        handle_udev_event(&ri, &params);
+        // Primary sysfs-derived name.
+        assert!(unit_exists(&ri, "sys-devices-virtual-mem-null.device"));
+        // Symlink-derived alias (unit_name_path_escape produces
+        // dev-disk-by\x2duuid-abcdef.device from /dev/disk/by-uuid/abcdef).
+        let alias_name = r"dev-disk-by\x2duuid-abcdef.device";
+        assert!(
+            unit_exists(&ri, alias_name),
+            "symlink alias unit {alias_name} not created"
+        );
+    }
+
+    #[test]
+    fn test_handle_udev_event_repeat_add_idempotent() {
+        let ri = make_test_runtime();
+        let params = make_params(
+            "add",
+            "/sys/devices/virtual/net/eth0",
+            "net",
+            &["systemd"],
+            &[],
+        );
+        handle_udev_event(&ri, &params);
+        let count_before = ri.read().unwrap().unit_table.len();
+
+        // Second identical event: should be a no-op on unit_table.
+        handle_udev_event(&ri, &params);
+        let count_after = ri.read().unwrap().unit_table.len();
+        assert_eq!(
+            count_before, count_after,
+            "repeat add duplicated units in unit_table"
+        );
+    }
 }
