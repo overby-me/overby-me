@@ -139,6 +139,13 @@ pub struct Interpreter {
     /// where the iterator variable aliases Perl's PL_sv_yes / PL_sv_no
     /// constants. Cleared when the foreach body ends.
     readonly_vars: std::collections::HashSet<String>,
+    /// `@_` captured at sub-exit (pop_scope before the sub frame is dropped).
+    /// `eval_call` reads this after the sub returns and, if the caller's
+    /// arg-expr list contained lvalue-shaped exprs (ArrowElement, HashElement,
+    /// ArrayElement, ScalarVar/MyVar), assigns back — approximating Perl's
+    /// `@_` aliasing with post-hoc writeback. Enough for
+    /// `autov($href->{b})` / `sub { $_[0] = 23 }`.
+    last_popped_underscore: Option<Vec<Value>>,
     /// Lexical `use bytes` depth. Incremented by `use bytes`, decremented
     /// by `no bytes` or scope exit; when > 0, builtins like `length`,
     /// `chr` behave in byte-mode (count/emit UTF-8 bytes rather than
@@ -309,6 +316,7 @@ impl Interpreter {
             deleted_slots: HashMap::new(),
             pos_offsets: HashMap::new(),
             readonly_vars: std::collections::HashSet::new(),
+            last_popped_underscore: None,
             bytes_mode_saves: Vec::new(),
             bytes_mode: false,
             strict_vars_saves: Vec::new(),
@@ -5421,10 +5429,89 @@ impl Interpreter {
                 for candidate in &candidates {
                     if let Some((params, body)) = self.subs.get(candidate).cloned() {
                         let arg_vals = self.eval_args_with_proto(args, &params);
-                        return self.call_sub_named(&body, &arg_vals, Some(candidate));
+                        // `@_` post-hoc aliasing: autovivify lvalue-shaped
+                        // args before the call (so `autov($h->{k})` creates
+                        // the slot), then after the sub returns, assign each
+                        // final `@_` slot back into its source expr.
+                        // Prototype-slurp entries (`@` / `%` params) consume
+                        // multiple args, so skip writeback past the 1:1 range.
+                        for arg in args.iter() {
+                            self.autoviv_lvalue_for_call(arg);
+                        }
+                        let ret = self.call_sub_named(&body, &arg_vals, Some(candidate));
+                        if let Some(final_u) = self.last_popped_underscore.take() {
+                            let pair_count = args.len().min(final_u.len()).min(arg_vals.len());
+                            for i in 0..pair_count {
+                                let arg_expr = &args[i];
+                                if !is_lvalue_shape(arg_expr) {
+                                    continue;
+                                }
+                                // Only write back if the sub actually
+                                // changed `$_[i]` — otherwise we'd extend
+                                // arrays and autoviv hashes needlessly.
+                                if !value_eq(&final_u[i], &arg_vals[i]) {
+                                    self.assign_to(arg_expr, final_u[i].clone());
+                                }
+                            }
+                        }
+                        return ret;
                     }
                 }
                 Value::Undef
+            }
+        }
+    }
+
+    /// Autovivify `$ref->{k}` / `$ref->[i]` / chained arrow lvalues so a
+    /// sub can write through `$_[0]` even when the slot didn't exist.
+    /// Matches Perl's autoviv-on-alias semantics for arg passing.
+    fn autoviv_lvalue_for_call(&mut self, e: &Expr) {
+        match e {
+            Expr::ArrowElement(lhs, idx, kind) => {
+                // Recurse outward first so `$h{a}->{b}` vivifies both levels.
+                self.autoviv_lvalue_for_call(lhs);
+                let lhs_val = self.eval_expr(lhs);
+                if lhs_val.is_undef() {
+                    // Create a fresh ref and write it back through the lhs.
+                    let new_ref = match kind {
+                        crate::ast::ArrowKind::Array => Value::ArrayRef(std::rc::Rc::new(
+                            std::cell::RefCell::new(Vec::new()),
+                        )),
+                        crate::ast::ArrowKind::Hash => Value::HashRef(std::rc::Rc::new(
+                            std::cell::RefCell::new(HashMap::new()),
+                        )),
+                    };
+                    self.assign_to(lhs, new_ref);
+                }
+                // Read it back (the assign may have replaced undef), then
+                // vivify the requested slot on that ref.
+                let lhs_val = self.eval_expr(lhs);
+                match (kind, lhs_val) {
+                    (crate::ast::ArrowKind::Array, Value::ArrayRef(r)) => {
+                        let i = self.eval_expr(idx).to_num() as i64;
+                        let mut b = r.borrow_mut();
+                        let real = if i < 0 {
+                            (b.len() as i64 + i).max(0) as usize
+                        } else {
+                            i as usize
+                        };
+                        while b.len() <= real {
+                            b.push(Value::Undef);
+                        }
+                    }
+                    (crate::ast::ArrowKind::Hash, Value::HashRef(r)) => {
+                        let k = self.eval_expr(idx).to_str();
+                        let mut b = r.borrow_mut();
+                        b.entry(k).or_insert(Value::Undef);
+                    }
+                    _ => {}
+                }
+            }
+            _ => {
+                // For bare `$h{k}` / `$arr[i]` we don't pre-vivify since
+                // that would make `exists` observable and `scalar(@arr)`
+                // grow. Post-hoc writeback still handles them when the
+                // slot already exists.
             }
         }
     }
@@ -6473,7 +6560,18 @@ impl Interpreter {
                 }
             }
         }
+        // Capture @_ from the popped scope so eval_call's post-hoc
+        // aliasing can write mutations back to the caller's arg exprs.
+        // Only subs install @_ in a freshly pushed scope, so for block
+        // pops this will be None and the caller will skip writeback.
+        let popped_underscore = self
+            .scopes
+            .last()
+            .and_then(|s| s.arrays.get("_").cloned());
         self.scopes.pop();
+        if popped_underscore.is_some() {
+            self.last_popped_underscore = popped_underscore;
+        }
         self.restore_locals();
         if let Some(prev) = self.bytes_mode_saves.pop() {
             self.bytes_mode = prev;
@@ -9000,6 +9098,35 @@ fn expr_introduces_my(expr: &Expr) -> bool {
         Expr::DoBlock(stmts) => stmts.iter().any(|s| matches!(s, Stmt::My(_, _))),
         _ => false,
     }
+}
+
+/// Compare two Values stringwise for "did this change" checks. Refs are
+/// compared by pointer so identical-content separate refs don't match.
+fn value_eq(a: &Value, b: &Value) -> bool {
+    // Pointer equality for any ref kind.
+    let pa = Interpreter::ref_ptr(a);
+    let pb = Interpreter::ref_ptr(b);
+    if pa != 0 || pb != 0 {
+        return pa == pb;
+    }
+    match (a, b) {
+        (Value::Undef, Value::Undef) => true,
+        (Value::Undef, _) | (_, Value::Undef) => false,
+        _ => a.to_str() == b.to_str(),
+    }
+}
+
+/// Lvalue shapes whose sub-call arg slot can be written back to after
+/// a sub mutates `$_[i]`. `ScalarVar` / `MyVar` are deliberately excluded
+/// — Perl's `@_` DOES alias them, but writeback there would break the
+/// far more common case where a sub copies a scalar argument value.
+/// Matches Perl's spirit closely for the hash/array/arrow-chain cases
+/// (what `autov($href->{b})` needs).
+fn is_lvalue_shape(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::ArrowElement(_, _, _) | Expr::HashElement(_, _) | Expr::ArrayElement(_, _)
+    )
 }
 
 fn expr_has_tail_call(expr: &Expr) -> bool {

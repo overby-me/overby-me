@@ -166,6 +166,16 @@ fn run_interpreter() -> i32 {
     let tokens = lexer.tokenize();
     let token_lines = std::mem::take(&mut lexer.token_lines);
 
+    if let Some(err) = lexer.error.take() {
+        let file_label = if script_file.is_empty() {
+            "-e"
+        } else {
+            script_file.as_str()
+        };
+        eprint!("{}", err.replace("{FILE}", file_label));
+        return 255;
+    }
+
     // Parse
     let mut parser = Parser::new_with_lines(tokens, token_lines);
     let program = parser.parse_program();

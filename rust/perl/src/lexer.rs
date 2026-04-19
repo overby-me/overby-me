@@ -341,6 +341,9 @@ pub struct Lexer {
     /// yet. When we hit end-of-line during tokenization we drain these in
     /// order, backfilling the placeholder StringLit tokens with their body.
     pending_heredocs: Vec<PendingHeredoc>,
+    /// Lex-time fatal error, e.g. an unterminated heredoc. main.rs checks
+    /// this after tokenize() and exits with reference perl's diagnostic.
+    pub error: Option<String>,
 }
 
 struct PendingHeredoc {
@@ -349,6 +352,9 @@ struct PendingHeredoc {
     interpolate: bool,
     /// Index into `tokens` of the placeholder StringLit we'll replace.
     placeholder_idx: usize,
+    /// Line number of the `<<TAG` opening marker. Reference perl reports
+    /// unterminated heredocs at this line.
+    start_line: usize,
 }
 
 impl Lexer {
@@ -459,6 +465,7 @@ impl Lexer {
             current_line: 1,
             keywords,
             pending_heredocs: Vec::new(),
+            error: None,
         }
     }
 
@@ -2166,12 +2173,14 @@ impl Lexer {
             indent,
             interpolate,
             placeholder_idx,
+            start_line: self.current_line,
         });
         interpolate
     }
 
     fn read_heredoc_body(&mut self, ph: &PendingHeredoc) -> String {
         let mut body = String::new();
+        let mut terminated = false;
         loop {
             if self.pos >= self.input.len() {
                 break;
@@ -2194,10 +2203,19 @@ impl Lexer {
                 cmp_line
             };
             if trimmed == ph.tag {
+                terminated = true;
                 break;
             }
             body.push_str(cmp_line);
             body.push('\n');
+        }
+        if !terminated && self.error.is_none() {
+            // Reference perl: `Can't find string terminator "TAG" anywhere
+            // before EOF at FILE line LINE.`
+            self.error = Some(format!(
+                "Can't find string terminator \"{}\" anywhere before EOF at {{FILE}} line {}.\n",
+                ph.tag, ph.start_line
+            ));
         }
         if ph.interpolate {
             process_escapes(&body)

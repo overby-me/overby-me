@@ -6,20 +6,37 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**59/79 Nix tests passing** (75%) — selected tests from the upstream Perl test suite.
+**60/79 Nix tests passing** (76%) — selected tests from the upstream Perl test suite.
 
 Passing: base/if, base/cond, base/while, base/pat, base/num, base/translate,
-base/term, base/rs, cmd/elsif, cmd/for, cmd/mod, cmd/switch, opbasic/arith,
-opbasic/qq, opbasic/magic_phase, op/arith2, op/auto, op/bop, op/chop,
-op/closure, op/cond, op/context, op/defined, op/delete, op/die, op/do,
-op/each, op/grep, op/hash, op/inc, op/index, op/lc, op/my, op/not, op/oct,
-op/pack, op/push, op/quotemeta, op/range, op/ref, op/reverse, op/sort,
-op/splice, op/split, op/sprintf, op/sub, op/substr, op/unshift, op/vec,
-op/wantarray, io/argv, io/fs, io/open, io/print, io/read, re/pat, re/subst,
-run/exit, run/switches.
+base/term, base/rs, cmd/elsif, cmd/for, cmd/mod, cmd/subval, cmd/switch,
+opbasic/arith, opbasic/qq, opbasic/magic_phase, op/arith2, op/auto, op/bop,
+op/chop, op/closure, op/cond, op/context, op/defined, op/delete, op/die,
+op/do, op/each, op/grep, op/hash, op/inc, op/index, op/lc, op/my, op/not,
+op/oct, op/pack, op/push, op/quotemeta, op/range, op/ref, op/reverse,
+op/sort, op/splice, op/split, op/sprintf, op/sub, op/substr, op/unshift,
+op/vec, op/wantarray, io/argv, io/fs, io/open, io/print, io/read, re/pat,
+re/subst, run/exit, run/switches.
 
 Major unlocks in this cycle:
 
+- **Post-hoc `@_` aliasing** for user-sub calls: before the call,
+  `ArrowElement` args (`$ref->{k}` / `$ref->[i]`) are autovivified so the
+  slot exists on return; after the call, each final `@_` slot that differs
+  from the value passed in is written back to its source expr via
+  `assign_to`. Handles `autov($href->{b})` / `sub { $_[0] = 23 }` — the
+  canonical Perl "modify-through-@_" idiom — without reifying true Perl
+  aliasing (which would require Rc<RefCell<Value>> slots). `ScalarVar`
+  and `MyVar` are deliberately excluded from writeback since the common
+  case is subs that just read-copy their scalar args. The writeback is
+  value-comparison gated so untouched args don't extend arrays or
+  autoviv hashes. Unlocks cmd/subval test 36 and similar.
+- Heredocs report unterminated bodies with Perl's exact "Can't find string
+  terminator \"TAG\" anywhere before EOF at FILE line N" diagnostic. Lexer
+  captures `start_line` per heredoc and sets a fatal `error` field when
+  the reader reaches EOF without matching; main.rs checks the field after
+  tokenize and exits. Unlocks op/heredoc tests 7-39 (the whole "must
+  start at newline" / "empty terminator still needs newline" cluster).
 - Heredoc terminator now matches CRLF-terminated source lines: a trailing
   `\r` is stripped before comparing the line to the tag, and also before
   pushing the line into the body. Previously the `\r` made the tag never
