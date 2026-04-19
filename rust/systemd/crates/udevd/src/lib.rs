@@ -4163,7 +4163,12 @@ fn execute_run_programs(event: &mut UEvent, result: &RuleResult, hwdb: Option<&H
         }
 
         let prog = resolve_program_path(parts[0]);
-        log::debug!("RUN: {} (resolved: {})", expanded, prog.display());
+        log::info!(
+            "RUN: spawn {} args={:?} (resolved: {})",
+            parts[0],
+            &parts[1..],
+            prog.display()
+        );
 
         let mut child_cmd = Command::new(&prog);
         child_cmd
@@ -4183,16 +4188,15 @@ fn execute_run_programs(event: &mut UEvent, result: &RuleResult, hwdb: Option<&H
 
         match child_cmd.status() {
             Ok(status) => {
-                if !status.success() {
-                    log::debug!(
-                        "RUN '{}' exited with status {}",
-                        expanded,
-                        status.code().unwrap_or(-1)
-                    );
-                }
+                log::info!(
+                    "RUN '{}' finished: status={}, success={}",
+                    expanded,
+                    status.code().unwrap_or(-1),
+                    status.success(),
+                );
             }
             Err(e) => {
-                log::debug!("Failed to execute RUN '{}': {}", expanded, e);
+                log::warn!("Failed to execute RUN '{}': {}", expanded, e);
             }
         }
     }
