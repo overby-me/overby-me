@@ -27,7 +27,6 @@ fn resolve_override(host: &str, port: u16, resolves: &[String]) -> Option<String
         }
         // Take first address (comma-separated list possible).
         let first_addr = entry_addrs.split(',').next().unwrap_or(entry_addrs);
-        // IPv6 may have colons — wrap in brackets if so and not already bracketed.
         let addr = if first_addr.contains(':') && !first_addr.starts_with('[') {
             format!("[{first_addr}]:{port}")
         } else {
@@ -78,7 +77,6 @@ pub(crate) fn parse_proxy(proxy: &str) -> Result<(String, u16), String> {
     } else if let Some(rest) = proxy.strip_prefix("https://") {
         rest
     } else if proxy.contains("://") {
-        // socks4://, socks5://, etc. — not supported
         return Err(format!("unsupported proxy scheme in '{}'", proxy));
     } else {
         proxy
@@ -116,7 +114,7 @@ pub(crate) fn parse_proxy(proxy: &str) -> Result<(String, u16), String> {
     Ok((stripped.to_string(), 1080))
 }
 
-pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<Connection, String> {
+pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Vec<u8>), String> {
     // RFC 7686: curl refuses to resolve `.onion` TLDs (preventing accidental
     // DNS leakage for Tor hidden services). --resolve overrides still work.
     let host_norm = url.host.trim_end_matches('.').to_ascii_lowercase();
@@ -126,14 +124,13 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<Connection, Str
         return Err("onion: Not resolving .onion address (RFC 7686)".into());
     }
 
-    // When an HTTP proxy is configured and the target is plain HTTP,
-    // connect to the proxy instead of the target.
+    // Determine whether we need a CONNECT tunnel through the proxy.
+    let use_tunnel = opts.proxy.is_some() && (opts.proxy_tunnel || url.scheme == "https");
+
+    // When a proxy is configured, always connect to the proxy.
+    // The decision about plain proxy vs CONNECT tunnel is handled separately.
     let (connect_host, connect_port) = if let Some(ref proxy) = opts.proxy {
-        if url.scheme == "http" {
-            parse_proxy(proxy)?
-        } else {
-            (url.host.clone(), url.port)
-        }
+        parse_proxy(proxy)?
     } else {
         (url.host.clone(), url.port)
     };
@@ -187,15 +184,94 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<Connection, Str
 
     // Apply --max-time when set; otherwise a 60s default read timeout prevents
     // indefinite hangs when a server keeps the connection open without sending
-    // Content-Length or chunked framing. curl's real behaviour is also bounded
-    // by SO_KEEPALIVE + OS defaults; 60s is a safe upper bound that still
-    // accommodates slow responses in integration tests.
+    // Content-Length or chunked framing.
     if let Some(timeout) = opts.max_time {
         let _ = tcp.set_read_timeout(Some(timeout));
         let _ = tcp.set_write_timeout(Some(timeout));
     } else {
         let _ = tcp.set_read_timeout(Some(std::time::Duration::from_secs(60)));
     }
+
+    // CONNECT tunnel: when tunneling through a proxy, perform the CONNECT
+    // handshake so the proxy opens a transparent tunnel to the target.
+    let mut connect_headers = Vec::new();
+    let tcp = if use_tunnel {
+        let http_ver = if opts.proxy_1_0 {
+            "HTTP/1.0"
+        } else {
+            "HTTP/1.1"
+        };
+        let target = format!("{}:{}", url.host, url.port);
+
+        let mut req = format!("CONNECT {target} {http_ver}\r\n");
+        req.push_str(&format!("Host: {target}\r\n"));
+
+        // Proxy-Authorization
+        if let Some(ref proxy_user) = opts.proxy_user {
+            let encoded = crate::format::base64_encode(proxy_user.as_bytes());
+            req.push_str(&format!("Proxy-Authorization: Basic {encoded}\r\n"));
+        }
+
+        // User-Agent (unless suppressed by custom header)
+        let has_ua = opts
+            .headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("user-agent"));
+        if !has_ua {
+            let ua = opts.user_agent.as_deref().unwrap_or("curl/8.0.0");
+            if !ua.is_empty() {
+                req.push_str(&format!("User-Agent: {ua}\r\n"));
+            }
+        }
+
+        req.push_str("Proxy-Connection: Keep-Alive\r\n");
+        req.push_str("\r\n");
+
+        use std::io::{BufRead, BufReader};
+        let mut tcp = tcp;
+        tcp.write_all(req.as_bytes())
+            .map_err(|e| format!("failed to send CONNECT: {e}"))?;
+        tcp.flush()
+            .map_err(|e| format!("failed to flush CONNECT: {e}"))?;
+
+        // Read CONNECT response headers.
+        let mut reader = BufReader::new(tcp);
+        let mut response_bytes = Vec::new();
+        let mut status_code = 0u16;
+        let mut first_line = true;
+        loop {
+            let mut line = String::new();
+            reader
+                .read_line(&mut line)
+                .map_err(|e| format!("failed to read CONNECT response: {e}"))?;
+            response_bytes.extend_from_slice(line.as_bytes());
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                break; // end of headers
+            }
+            if first_line {
+                // Parse status code from "HTTP/1.x NNN ..."
+                let parts: Vec<&str> = trimmed.splitn(3, ' ').collect();
+                if parts.len() >= 2 {
+                    status_code = parts[1].parse().unwrap_or(0);
+                }
+                first_line = false;
+            }
+        }
+
+        if status_code != 200 {
+            return Err(format!("CONNECT tunnel failed with status {status_code}"));
+        }
+
+        connect_headers = response_bytes;
+
+        // Unwrap the TcpStream from the BufReader to continue using it.
+        // The proxy should only send response headers then pass through,
+        // so no application data should be buffered beyond what we read.
+        reader.into_inner()
+    } else {
+        tcp
+    };
 
     if url.scheme == "https" {
         let tls_config = if opts.insecure {
@@ -216,8 +292,8 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<Connection, Str
         let conn = rustls::ClientConnection::new(tls_config, server_name)
             .map_err(|e| format!("TLS handshake failed: {e}"))?;
         let stream = rustls::StreamOwned::new(conn, tcp);
-        Ok(Connection::Tls(Box::new(stream)))
+        Ok((Connection::Tls(Box::new(stream)), connect_headers))
     } else {
-        Ok(Connection::Plain(tcp))
+        Ok((Connection::Plain(tcp), connect_headers))
     }
 }

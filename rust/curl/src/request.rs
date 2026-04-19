@@ -91,7 +91,7 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> Vec<u8> {
     }
 
     // When going through an HTTP proxy, use the full absolute URL in the request line.
-    let request_target = if opts.proxy.is_some() && url.scheme == "http" {
+    let request_target = if opts.proxy.is_some() && url.scheme == "http" && !opts.proxy_tunnel {
         let default_port: u16 = 80;
         if url.port == default_port {
             format!("http://{}{path}", url.host)
@@ -129,6 +129,7 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> Vec<u8> {
     // curl sends Proxy-Authorization before site Authorization.
     if let Some(ref proxy_user) = opts.proxy_user
         && opts.proxy.is_some()
+        && !opts.proxy_tunnel
     {
         let encoded = base64_encode(proxy_user.as_bytes());
         req.push_str(&format!("Proxy-Authorization: Basic {encoded}\r\n"));
@@ -193,7 +194,7 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> Vec<u8> {
     }
 
     // Proxy-Connection header — curl sends this for HTTP proxy requests.
-    if opts.proxy.is_some() && url.scheme == "http" && !opts.no_keepalive {
+    if opts.proxy.is_some() && url.scheme == "http" && !opts.proxy_tunnel && !opts.no_keepalive {
         req.push_str("Proxy-Connection: Keep-Alive\r\n");
     }
 
@@ -519,47 +520,160 @@ fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options)
         } else if std::path::Path::new(cookie).is_file()
             && let Ok(contents) = fs::read_to_string(cookie)
         {
-            for line in contents.split('\n') {
-                let line = line.trim_end_matches('\r');
-                let line = if let Some(rest) = line.strip_prefix("#HttpOnly_") {
-                    rest
-                } else if line.starts_with('#') {
-                    continue;
-                } else {
-                    line
-                };
-                if !line.contains('\t') {
-                    continue;
-                }
-                let fields: Vec<&str> = line.split('\t').collect();
-                if fields.len() < 7 {
-                    continue;
-                }
-                let domain = fields[0];
-                let cookie_path = fields[2];
-                let secure = fields[3].eq_ignore_ascii_case("TRUE");
-                let expiry: i64 = fields[4].parse().unwrap_or(0);
-                let name = fields[5];
-                let value = fields[6];
+            if contents.starts_with("HTTP/") {
+                // HTTP response header format: extract Set-Cookie lines and
+                // convert to Netscape format for matching.
+                for header_line in contents.split('\n') {
+                    let header_line = header_line.trim_end_matches('\r');
+                    // Match "Set-Cookie:" case-insensitively.
+                    if header_line.len() > 11
+                        && header_line[..11].eq_ignore_ascii_case("set-cookie:")
+                    {
+                        let rest = &header_line[11..];
+                        let cookie_str = rest.trim();
+                        // Parse the Set-Cookie value into a Netscape format line
+                        // using the request host as the default domain.
+                        let fake_url = ParsedUrl {
+                            scheme: if secure_req {
+                                "https".into()
+                            } else {
+                                "http".into()
+                            },
+                            host: host.to_string(),
+                            port: if secure_req { 443 } else { 80 },
+                            path: path.to_string(),
+                            raw: String::new(),
+                            userinfo: None,
+                        };
+                        if let Some(nline) =
+                            crate::cookie::format_cookie_line(cookie_str, &fake_url, &request_host)
+                        {
+                            // Now parse the Netscape format line for matching.
+                            let nline_ref = if let Some(r) = nline.strip_prefix("#HttpOnly_") {
+                                r
+                            } else {
+                                nline.as_str()
+                            };
+                            if nline_ref.contains('\t') {
+                                let fields: Vec<&str> = nline_ref.split('\t').collect();
+                                if fields.len() >= 7 {
+                                    let domain = fields[0];
+                                    let cookie_path = fields[2];
+                                    let secure_flag = fields[3].eq_ignore_ascii_case("TRUE");
+                                    let expiry: i64 = fields[4].parse().unwrap_or(0);
+                                    let name = fields[5];
+                                    let value = fields[6];
 
-                if expiry == 0 && opts.junk_session_cookies {
-                    continue;
+                                    if expiry == 0 && opts.junk_session_cookies {
+                                        continue;
+                                    }
+                                    if expiry > 0 && expiry < now {
+                                        continue;
+                                    }
+                                    if secure_flag && !secure_req {
+                                        continue;
+                                    }
+                                    if !domain_matches(&request_host, domain) {
+                                        continue;
+                                    }
+                                    if !path.starts_with(cookie_path) {
+                                        continue;
+                                    }
+                                    file_pairs.push((
+                                        cookie_path.len(),
+                                        domain.len(),
+                                        format!("{name}={value}"),
+                                    ));
+                                }
+                            }
+                        }
+                    }
                 }
-                if expiry > 0 && expiry < now {
-                    continue;
+            } else {
+                // Netscape cookie format
+                for line in contents.split('\n') {
+                    let line = line.trim_end_matches('\r');
+                    let line = if let Some(rest) = line.strip_prefix("#HttpOnly_") {
+                        rest
+                    } else if line.starts_with('#') {
+                        continue;
+                    } else {
+                        line
+                    };
+                    if !line.contains('\t') {
+                        continue;
+                    }
+                    let fields: Vec<&str> = line.split('\t').collect();
+                    if fields.len() < 7 {
+                        continue;
+                    }
+                    let domain = fields[0];
+                    let cookie_path = fields[2];
+                    let secure = fields[3].eq_ignore_ascii_case("TRUE");
+                    let expiry: i64 = fields[4].parse().unwrap_or(0);
+                    let name = fields[5];
+                    let value = fields[6];
+
+                    if expiry == 0 && opts.junk_session_cookies {
+                        continue;
+                    }
+                    if expiry > 0 && expiry < now {
+                        continue;
+                    }
+                    if secure && !secure_req {
+                        continue;
+                    }
+                    if !domain_matches(&request_host, domain) {
+                        continue;
+                    }
+                    if !path.starts_with(cookie_path) {
+                        continue;
+                    }
+                    file_pairs.push((cookie_path.len(), domain.len(), format!("{name}={value}")));
                 }
-                if secure && !secure_req {
-                    continue;
-                }
-                if !domain_matches(&request_host, domain) {
-                    continue;
-                }
-                if !path.starts_with(cookie_path) {
-                    continue;
-                }
-                file_pairs.push((cookie_path.len(), domain.len(), format!("{name}={value}")));
             }
         }
+    }
+
+    // Also check in-memory cookies accumulated from previous responses.
+    for line in &opts.memory_cookies {
+        let line = if let Some(rest) = line.strip_prefix("#HttpOnly_") {
+            rest
+        } else if line.starts_with('#') {
+            continue;
+        } else {
+            line.as_str()
+        };
+        if !line.contains('\t') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() < 7 {
+            continue;
+        }
+        let domain = fields[0];
+        let cookie_path = fields[2];
+        let secure = fields[3].eq_ignore_ascii_case("TRUE");
+        let expiry: i64 = fields[4].parse().unwrap_or(0);
+        let name = fields[5];
+        let value = fields[6];
+
+        if expiry == 0 && opts.junk_session_cookies {
+            continue;
+        }
+        if expiry > 0 && expiry < now {
+            continue;
+        }
+        if secure && !secure_req {
+            continue;
+        }
+        if !domain_matches(&request_host, domain) {
+            continue;
+        }
+        if !path.starts_with(cookie_path) {
+            continue;
+        }
+        file_pairs.push((cookie_path.len(), domain.len(), format!("{name}={value}")));
     }
 
     // curl stores cookies in a LIFO linked list (newest first). Among cookies
@@ -649,7 +763,7 @@ fn multipart_boundary() -> String {
 }
 
 fn execute_request(url: &ParsedUrl, opts: &Options) -> Result<Response, String> {
-    let mut conn = connect(url, opts)?;
+    let (mut conn, connect_response) = connect(url, opts)?;
     let request = build_request(url, opts);
 
     if opts.verbose {
@@ -676,7 +790,7 @@ fn execute_request(url: &ParsedUrl, opts: &Options) -> Result<Response, String> 
             .as_deref()
             .map(|m| m.eq_ignore_ascii_case("HEAD"))
             .unwrap_or(false);
-    let resp = read_response(&mut conn, is_head, opts.http09, opts.compressed)?;
+    let mut resp = read_response(&mut conn, is_head, opts.http09, opts.compressed)?;
 
     if opts.verbose
         && let Ok(hdr_str) = std::str::from_utf8(&resp.header_bytes)
@@ -687,6 +801,13 @@ fn execute_request(url: &ParsedUrl, opts: &Options) -> Result<Response, String> 
             }
         }
         eprintln!("<");
+    }
+
+    // Prepend CONNECT tunnel response headers so callers can see them.
+    if !connect_response.is_empty() {
+        let mut combined = connect_response;
+        combined.extend_from_slice(&resp.header_bytes);
+        resp.header_bytes = combined;
     }
 
     Ok(resp)
@@ -872,6 +993,15 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                     opts.form_fields.clear();
                     opts.upload_file = None;
                     opts.method = Some("GET".to_string());
+                }
+
+                // If the redirect target is on a different host, drop any
+                // custom Host header so it is not forwarded to the new host.
+                if let Ok(new_url) = parse_url(&current_url)
+                    && !url.host.eq_ignore_ascii_case(&new_url.host)
+                {
+                    opts.headers
+                        .retain(|(k, _)| !k.eq_ignore_ascii_case("host"));
                 }
 
                 if opts.verbose {

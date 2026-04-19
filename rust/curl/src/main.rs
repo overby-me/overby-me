@@ -253,6 +253,18 @@ fn main() {
                     eprintln!("curl: (8) weird server reply");
                     exit_code = 8;
                 }
+                if resp.timed_out && opts.max_time.is_some() {
+                    let ms = opts.max_time.map(|d| d.as_millis()).unwrap_or(0);
+                    eprintln!(
+                        "curl: (28) Operation timed out after {} milliseconds with {} bytes received",
+                        ms,
+                        resp.body.len()
+                    );
+                    exit_code = 28;
+                }
+                if resp.recv_error {
+                    exit_code = 56;
+                }
                 // status==0 means we consumed a 1xx interim response but the
                 // server closed the connection before sending a final response.
                 // Output the interim headers (handled below) but set exit 52.
@@ -306,6 +318,44 @@ fn main() {
                         .map(|(_, v)| v.split(':').next().unwrap_or(v).to_string())
                         .unwrap_or_else(|| url.host.clone());
                     save_cookie_jar(jar_path, &url, &host_for_jar, &resp.headers);
+                }
+
+                // Accumulate cookies from Set-Cookie headers for cross-URL cookie engine.
+                if opts.cookie_engine {
+                    let host_for_cookies = opts
+                        .headers
+                        .iter()
+                        .find(|(k, _)| k.eq_ignore_ascii_case("host"))
+                        .map(|(_, v)| v.split(':').next().unwrap_or(v).to_string())
+                        .unwrap_or_else(|| url.host.clone());
+                    for (key, value) in &resp.headers {
+                        if key == "set-cookie"
+                            && let Some(line) =
+                                cookie::format_cookie_line(value, &url, &host_for_cookies)
+                        {
+                            // Deduplicate by (domain, path, name) — same cookie from
+                            // a repeated Set-Cookie replaces the old entry.
+                            let fields: Vec<&str> = line.split('\t').collect();
+                            if fields.len() >= 7 {
+                                let new_domain =
+                                    fields[0].strip_prefix("#HttpOnly_").unwrap_or(fields[0]);
+                                let new_path = fields[2];
+                                let new_name = fields[5];
+                                opts.memory_cookies.retain(|existing| {
+                                    let ef: Vec<&str> = existing.split('\t').collect();
+                                    if ef.len() >= 7 {
+                                        let ed = ef[0].strip_prefix("#HttpOnly_").unwrap_or(ef[0]);
+                                        !(ed == new_domain
+                                            && ef[2] == new_path
+                                            && ef[5] == new_name)
+                                    } else {
+                                        true
+                                    }
+                                });
+                            }
+                            opts.memory_cookies.push(line);
+                        }
+                    }
                 }
 
                 // --etag-save: write the server's ETag header value to a file
@@ -545,6 +595,8 @@ fn main() {
                     exit_code = 6; // Could not resolve host
                 } else if e.contains("connection failed") || e.contains("Connection refused") {
                     exit_code = 7; // Failed to connect
+                } else if e.contains("CONNECT tunnel failed") {
+                    exit_code = 56; // CONNECT proxy tunnel failure
                 } else if e.contains("timed out") || e.contains("operation timed out") {
                     exit_code = 28; // Operation timeout
                 } else if e.contains("maximum redirects") {

@@ -37,7 +37,11 @@ pub(crate) fn save_cookie_jar(
     let _ = fs::write(path, lines.join("\n") + "\n");
 }
 
-fn format_cookie_line(cookie: &str, url: &ParsedUrl, request_host: &str) -> Option<String> {
+pub(crate) fn format_cookie_line(
+    cookie: &str,
+    url: &ParsedUrl,
+    request_host: &str,
+) -> Option<String> {
     let mut parts = cookie.split(';');
     let name_value = parts.next()?.trim();
     let (name, value) = name_value.split_once('=')?;

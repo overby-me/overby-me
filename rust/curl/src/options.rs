@@ -64,8 +64,12 @@ pub struct Options {
     pub(crate) time_cond: Option<TimeCond>,
     /// --stderr: redirect stderr to file; "-" means stdout.
     pub(crate) stderr_redirect: Option<PathBuf>,
-    pub(crate) proxy: Option<String>,      // -x / --proxy
-    pub(crate) proxy_user: Option<String>, // --proxy-user "user:pass"
+    pub(crate) proxy: Option<String>,       // -x / --proxy
+    pub(crate) proxy_user: Option<String>,  // --proxy-user "user:pass"
+    pub(crate) proxy_tunnel: bool,          // -p / --proxytunnel — force CONNECT tunnel
+    pub(crate) proxy_1_0: bool,             // --proxy1.0 — use HTTP/1.0 for CONNECT
+    pub(crate) cookie_engine: bool,         // true when -b is used (enables cookie accumulation)
+    pub(crate) memory_cookies: Vec<String>, // Netscape-format cookie lines accumulated from responses
 }
 
 #[derive(Clone, Debug)]
@@ -135,6 +139,10 @@ impl Default for Options {
             stderr_redirect: None,
             proxy: None,
             proxy_user: None,
+            proxy_tunnel: false,
+            proxy_1_0: false,
+            cookie_engine: false,
+            memory_cookies: Vec::new(),
         }
     }
 }

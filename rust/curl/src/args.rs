@@ -280,6 +280,7 @@ pub(crate) fn parse_args() -> Options {
                 i += 1;
                 let val = next_arg(&args, i, "-b");
                 opts.cookies.push(val);
+                opts.cookie_engine = true;
             }
             "-c" | "--cookie-jar" => {
                 i += 1;
@@ -477,6 +478,15 @@ pub(crate) fn parse_args() -> Options {
                 let val = next_arg(&args, i, "-U");
                 opts.proxy_user = Some(val);
             }
+            "-p" | "--proxytunnel" => {
+                opts.proxy_tunnel = true;
+            }
+            "--proxy1.0" => {
+                i += 1;
+                let val = next_arg(&args, i, "--proxy1.0");
+                opts.proxy = Some(val);
+                opts.proxy_1_0 = true;
+            }
             "--anyauth" | "--digest" | "--ntlm" | "--negotiate" => {
                 // We don't implement challenge/response auth. With these flags set,
                 // curl waits for a 401 challenge before sending credentials. For
@@ -626,6 +636,7 @@ pub(crate) fn parse_args() -> Options {
                             'j' => opts.junk_session_cookies = true,
                             'G' => opts.get = true,
                             'N' => {} // --no-buffer, ignored
+                            'p' => opts.proxy_tunnel = true,
                             '0' => opts.http_version = Some("1.0".into()),
                             c => {
                                 eprintln!("curl: unknown option '-{c}'");

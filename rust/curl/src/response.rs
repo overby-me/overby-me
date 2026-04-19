@@ -29,6 +29,10 @@ pub(crate) struct Response {
     /// Where a 3xx response pointed to that wasn't (or couldn't be) followed
     /// (for `%{redirect_url}`).
     pub(crate) redirect_url: Option<String>,
+    /// True if the body read timed out (maps to exit code 28).
+    pub(crate) timed_out: bool,
+    /// True if a recv/protocol error occurred during body reading (exit 56).
+    pub(crate) recv_error: bool,
 }
 
 pub(crate) fn read_response(
@@ -66,6 +70,8 @@ pub(crate) fn read_response(
                     weird_server_reply: false,
                     final_url: None,
                     redirect_url: None,
+                    timed_out: false,
+                    recv_error: false,
                 });
             }
             return Err("empty reply from server".into());
@@ -89,6 +95,8 @@ pub(crate) fn read_response(
                 weird_server_reply: false,
                 final_url: None,
                 redirect_url: None,
+                timed_out: false,
+                recv_error: false,
             });
         }
         header_bytes.extend_from_slice(line.as_bytes());
@@ -176,6 +184,8 @@ pub(crate) fn read_response(
                 weird_server_reply: true,
                 final_url: None,
                 redirect_url: None,
+                timed_out: false,
+                recv_error: false,
             });
         }
         let this_ending: &'static [u8] = if line.ends_with("\r\n") {
@@ -247,6 +257,8 @@ pub(crate) fn read_response(
                 weird_server_reply: true,
                 final_url: None,
                 redirect_url: None,
+                timed_out: false,
+                recv_error: false,
             });
         }
         pending_raw = Some(line.clone());
@@ -269,6 +281,8 @@ pub(crate) fn read_response(
             weird_server_reply: false,
             final_url: None,
             redirect_url: None,
+            timed_out: false,
+            recv_error: false,
         });
     }
 
@@ -313,23 +327,27 @@ pub(crate) fn read_response(
             weird_server_reply: true,
             final_url: None,
             redirect_url: None,
+            timed_out: false,
+            recv_error: false,
         });
     }
     let content_length: Option<usize> = cl_entry.and_then(|(_, v)| v.parse().ok());
 
-    let body = if is_chunked {
-        read_chunked_body(&mut reader)?
+    let (body, timed_out, recv_error_flag) = if is_chunked {
+        let (b, err) = read_chunked_body(&mut reader)?;
+        (b, false, err)
     } else if let Some(len) = content_length {
         let mut buf = vec![0u8; len];
         reader
             .read_exact(&mut buf)
             .map_err(|e| format!("failed to read body: {e}"))?;
-        buf
+        (buf, false, false)
     } else {
         // Read until EOF.
         let mut buf = Vec::new();
-        let _ = reader.read_to_end(&mut buf);
-        buf
+        let read_err = reader.read_to_end(&mut buf);
+        let timed_out = matches!(&read_err, Err(e) if e.kind() == std::io::ErrorKind::TimedOut || e.kind() == std::io::ErrorKind::WouldBlock);
+        (buf, timed_out, false)
     };
 
     // Decompress if Content-Encoding is present and --compressed was requested
@@ -385,21 +403,25 @@ pub(crate) fn read_response(
         weird_server_reply: false,
         final_url: None,
         redirect_url: None,
+        timed_out,
+        recv_error: recv_error_flag,
     })
 }
 
-fn read_chunked_body(reader: &mut impl BufRead) -> Result<Vec<u8>, String> {
+fn read_chunked_body(reader: &mut impl BufRead) -> Result<(Vec<u8>, bool), String> {
     let mut body = Vec::new();
     loop {
         let mut size_line = String::new();
-        reader
-            .read_line(&mut size_line)
-            .map_err(|e| format!("failed to read chunk size: {e}"))?;
+        if reader.read_line(&mut size_line).is_err() {
+            return Ok((body, true));
+        }
         let size_str = size_line.trim();
         // Strip chunk extensions.
         let size_str = size_str.split(';').next().unwrap_or(size_str);
-        let size = usize::from_str_radix(size_str, 16)
-            .map_err(|_| format!("bad chunk size: {size_str}"))?;
+        let size = match usize::from_str_radix(size_str, 16) {
+            Ok(s) => s,
+            Err(_) => return Ok((body, true)),
+        };
         if size == 0 {
             // Read trailing CRLF.
             let mut trailer = String::new();
@@ -407,13 +429,13 @@ fn read_chunked_body(reader: &mut impl BufRead) -> Result<Vec<u8>, String> {
             break;
         }
         let mut chunk = vec![0u8; size];
-        reader
-            .read_exact(&mut chunk)
-            .map_err(|e| format!("failed to read chunk: {e}"))?;
+        if reader.read_exact(&mut chunk).is_err() {
+            return Ok((body, true));
+        }
         body.extend_from_slice(&chunk);
         // Read trailing CRLF after chunk data.
         let mut crlf = [0u8; 2];
         let _ = reader.read_exact(&mut crlf);
     }
-    Ok(body)
+    Ok((body, false))
 }
