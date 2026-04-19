@@ -302,9 +302,15 @@ fn mark_booted_system(system_config: &Path) {
 /// Final step: `execv` the real systemd binary.  PID 1 stays the same
 /// process, just with new code — no fork, no wait.
 fn exec_systemd(system_config: &Path) -> ! {
+    // Try in order:
+    //   1. <systemConfig>/systemd/lib/systemd/systemd (makeBinaryWrapper)
+    //   2. /run/current-system/systemd/lib/systemd/systemd (post-activate)
+    //   3. <systemConfig>/systemd/bin/systemd (the wrapped rust-systemd
+    //      binary directly — argv[0] dispatch handles the branching)
     let candidates = [
         system_config.join("systemd/lib/systemd/systemd"),
         PathBuf::from("/run/current-system/systemd/lib/systemd/systemd"),
+        system_config.join("systemd/bin/systemd"),
     ];
     let systemd = candidates
         .iter()
@@ -324,17 +330,28 @@ fn exec_systemd(system_config: &Path) -> ! {
         .map(|s| s.as_ptr())
         .chain(std::iter::once(std::ptr::null()))
         .collect();
-    // Inherit the current environment — NixOS stage-1 already stripped
-    // it with `env -i`, so this is effectively empty which matches what
-    // bash stage-2 would hand off.
     unsafe {
         libc::execv(path_c.as_ptr(), argv_ptrs.as_ptr());
     }
     let err = std::io::Error::last_os_error();
-    log(&format!("rust-systemd-stage2: execv failed: {err}"));
-    // Fall back to using std::process::Command (which goes through the
-    // executor helper path) so PID 1 doesn't just exit silently.
+    log(&format!(
+        "rust-systemd-stage2: execv {} failed: {err}",
+        systemd.display()
+    ));
     let _ = Command::new(&systemd).arg0("systemd").exec();
-    // If that also fails, kernel will panic since PID 1 returned.
-    std::process::exit(1);
+    // Last resort: drop to a shell so the kernel has something to
+    // keep PID 1 alive while we debug.  A raw std::process::exit(1)
+    // causes an immediate kernel panic ("Attempted to kill init!").
+    log("rust-systemd-stage2: all exec attempts failed — dropping to /bin/sh");
+    for sh in ["/bin/sh", "/run/current-system/sw/bin/sh", "/bin/bash"] {
+        if Path::new(sh).exists() {
+            let _ = Command::new(sh).exec();
+        }
+    }
+    // If even that fails, loop forever rather than panic the kernel.
+    loop {
+        unsafe {
+            libc::pause();
+        }
+    }
 }
