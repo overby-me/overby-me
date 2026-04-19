@@ -100,6 +100,7 @@ pub enum Token {
     Close,
     Read,
     Eof,
+    Tell,
     Binmode,
     Unlink,
     Rename,
@@ -445,6 +446,7 @@ impl Lexer {
             "close",
             "read",
             "eof",
+            "tell",
             "binmode",
             "unlink",
             "rename",
@@ -806,6 +808,11 @@ impl Lexer {
                     } else if self.ch() == '!' {
                         self.pos += 1;
                         tokens.push(Token::ScalarVar("!".to_string()));
+                    } else if self.ch() == '.' && !self.peek(1).is_ascii_digit() {
+                        // $. — current line number for last read filehandle.
+                        // Don't consume `$.5` as `$.` to keep `\$. 5` etc safe.
+                        self.pos += 1;
+                        tokens.push(Token::ScalarVar(".".to_string()));
                     } else if self.ch() == '"' {
                         self.pos += 1;
                         tokens.push(Token::ScalarVar("\"".to_string()));
@@ -827,6 +834,12 @@ impl Lexer {
                     } else if self.ch() == '\'' {
                         self.pos += 1;
                         tokens.push(Token::ScalarVar("'".to_string()));
+                    } else if self.ch() == '-' {
+                        self.pos += 1;
+                        tokens.push(Token::ScalarVar("-".to_string()));
+                    } else if self.ch() == '+' {
+                        self.pos += 1;
+                        tokens.push(Token::ScalarVar("+".to_string()));
                     } else {
                         // Unknown special var, just treat as $_
                         tokens.push(Token::ScalarVar("_".to_string()));
@@ -1155,6 +1168,7 @@ impl Lexer {
                         "close" => Token::Close,
                         "read" => Token::Read,
                         "eof" => Token::Eof,
+                        "tell" => Token::Tell,
                         "binmode" => Token::Binmode,
                         "unlink" => Token::Unlink,
                         "rename" => Token::Rename,
@@ -2141,6 +2155,10 @@ impl Lexer {
         if self.ch() == '~' {
             indent = true;
             self.pos += 1;
+            // Perl allows whitespace between ~ and the delimiter
+            while self.ch() == ' ' || self.ch() == '\t' {
+                self.pos += 1;
+            }
         }
 
         if self.ch() == '\\' {
@@ -2187,8 +2205,10 @@ impl Lexer {
     }
 
     fn read_heredoc_body(&mut self, ph: &PendingHeredoc) -> String {
-        let mut body = String::new();
+        let mut raw_lines: Vec<String> = Vec::new();
         let mut terminated = false;
+        let mut saw_trailing_newline = false;
+        let mut indent_prefix = String::new();
         loop {
             if self.pos >= self.input.len() {
                 break;
@@ -2200,30 +2220,70 @@ impl Lexer {
             if self.pos < self.input.len() {
                 self.pos += 1;
                 self.current_line += 1;
+                saw_trailing_newline = true;
+            } else {
+                saw_trailing_newline = false;
             }
             // Strip a trailing \r so CRLF-terminated sources match the
             // tag and don't bleed \r into the captured body (reference
             // perl effectively reads source in text mode).
-            let cmp_line = line.strip_suffix('\r').unwrap_or(&line);
-            let trimmed = if ph.indent {
-                cmp_line.trim()
-            } else {
-                cmp_line
-            };
-            if trimmed == ph.tag {
+            let cmp_line = line.strip_suffix('\r').unwrap_or(&line).to_string();
+            if ph.indent {
+                // For indented heredocs (<<~), the terminator can be indented.
+                // We trim leading whitespace for comparison and record the
+                // terminator's indentation to strip from body lines.
+                let trimmed_start = cmp_line.trim_start();
+                if trimmed_start == ph.tag {
+                    indent_prefix = cmp_line[..cmp_line.len() - trimmed_start.len()].to_string();
+                    terminated = true;
+                    break;
+                }
+            } else if cmp_line == ph.tag {
                 terminated = true;
                 break;
             }
-            body.push_str(cmp_line);
-            body.push('\n');
+            raw_lines.push(cmp_line);
         }
         if !terminated && self.error.is_none() {
-            // Reference perl: `Can't find string terminator "TAG" anywhere
-            // before EOF at FILE line LINE.`
-            self.error = Some(format!(
-                "Can't find string terminator \"{}\" anywhere before EOF at {{FILE}} line {}.\n",
-                ph.tag, ph.start_line
-            ));
+            // Empty-tag heredoc (`<<""`): reference perl accepts EOF as
+            // a valid terminator *only* if the body ended on a newline
+            // (i.e. the last unterminated character was \n). Without a
+            // trailing newline, the heredoc is unterminated and should
+            // emit the same error as a non-empty tag.
+            if ph.tag.is_empty() && saw_trailing_newline {
+                // Strip trailing blank lines (the implicit terminator).
+                while raw_lines.last().is_some_and(|l| l.is_empty()) {
+                    raw_lines.pop();
+                }
+            } else {
+                // Reference perl: `Can't find string terminator "TAG" anywhere
+                // before EOF at FILE line LINE.`
+                self.error = Some(format!(
+                    "Can't find string terminator \"{}\" anywhere before EOF at {{FILE}} line {}.\n",
+                    ph.tag, ph.start_line
+                ));
+            }
+        }
+        // Build the body string, stripping indentation for <<~ heredocs.
+        let mut body = String::new();
+        if ph.indent && !indent_prefix.is_empty() {
+            for line in &raw_lines {
+                if let Some(stripped) = line.strip_prefix(&indent_prefix) {
+                    body.push_str(stripped);
+                } else if line.trim().is_empty() {
+                    // Blank lines don't need to match the indentation
+                } else {
+                    // Insufficient indentation — include as-is (Perl would
+                    // error, but being lenient here is safer).
+                    body.push_str(line);
+                }
+                body.push('\n');
+            }
+        } else {
+            for line in &raw_lines {
+                body.push_str(line);
+                body.push('\n');
+            }
         }
         if ph.interpolate {
             process_escapes(&body)

@@ -1609,6 +1609,10 @@ impl Parser {
                             Expr::StringLit(fl),
                         ],
                     )
+                } else if matches!(self.tok(), Token::ScalarVar(_) | Token::LParen) {
+                    // `$str !~ $pat` or `$str !~ (expr)` — dynamic negated pattern
+                    let pat_expr = self.parse_unary();
+                    Expr::Call("_regex_not_match_dyn".to_string(), vec![left, pat_expr])
                 } else {
                     left
                 }
@@ -1647,9 +1651,7 @@ impl Parser {
                 // match the "syntax error" substring so eval captures it.
                 if matches!(expr, Expr::Undef) && self.error.is_none() {
                     let line = self.current_line();
-                    self.error = Some(format!(
-                        "syntax error at {{FILE}} line {line}, at EOF\n"
-                    ));
+                    self.error = Some(format!("syntax error at {{FILE}} line {line}, at EOF\n"));
                 }
                 Expr::UnaryOp(UnaryOp::PreInc, Box::new(expr))
             }
@@ -1658,9 +1660,7 @@ impl Parser {
                 let expr = self.parse_postfix();
                 if matches!(expr, Expr::Undef) && self.error.is_none() {
                     let line = self.current_line();
-                    self.error = Some(format!(
-                        "syntax error at {{FILE}} line {line}, at EOF\n"
-                    ));
+                    self.error = Some(format!("syntax error at {{FILE}} line {line}, at EOF\n"));
                 }
                 Expr::UnaryOp(UnaryOp::PreDec, Box::new(expr))
             }
@@ -2353,7 +2353,10 @@ impl Parser {
                 ) {
                     let arg = self.parse_unary();
                     Expr::Call("undef".to_string(), vec![arg])
-                } else if matches!(self.tok(), Token::Ident(_) | Token::Integer(_) | Token::Float(_) | Token::StringLit(_)) {
+                } else if matches!(
+                    self.tok(),
+                    Token::Ident(_) | Token::Integer(_) | Token::Float(_) | Token::StringLit(_)
+                ) {
                     // `undef BAREWORD` / `undef NUMLIT` — constant-item
                     // target that should die with Perl's "Can't modify
                     // constant item in undef operator". Capture the arg
@@ -2495,6 +2498,7 @@ impl Parser {
             | Token::Shift
             | Token::Caller
             | Token::Eof
+            | Token::Tell
             | Token::Wantarray => {
                 let func = match self.tok() {
                     Token::Abs => "abs",
@@ -2515,6 +2519,7 @@ impl Parser {
                     Token::Shift => "shift",
                     Token::Caller => "caller",
                     Token::Eof => "eof",
+                    Token::Tell => "tell",
                     Token::Wantarray => {
                         return {
                             self.pos += 1;
@@ -2975,6 +2980,7 @@ impl Parser {
                         | Token::Close
                         | Token::Read
                         | Token::Eof
+                        | Token::Tell
                         | Token::Delete
                         | Token::Exists
                         | Token::Glob(_)
@@ -3006,9 +3012,34 @@ impl Parser {
             }
 
             _ => {
-                // Unknown token, skip and return undef
-                self.pos += 1;
-                Expr::Undef
+                // Unknown token in primary position. If we hit a
+                // statement/expression terminator (`;`, `}`, EOF) without
+                // having parsed anything yet, this is a syntax error
+                // (e.g. `$foo =;` or `($x,)`). Record it so `eval STRING`
+                // can surface it via `$@`.
+                let here = self.tok().clone();
+                // Only `;` and EOF are unambiguous: hitting them in
+                // primary position means an expression was abandoned
+                // mid-stream (e.g. `$foo =;`). Other "terminators"
+                // (`}`, `)`, `]`, `,`) appear validly in expressions
+                // we don't yet model (e.g. UTF-8 identifiers, attributes),
+                // so we keep the silent-skip fallback for those.
+                let is_terminator = matches!(here, Token::Semi | Token::EOF);
+                if is_terminator && self.error.is_none() {
+                    let line = self.current_line();
+                    let at_eof = matches!(here, Token::EOF);
+                    let where_ = if at_eof {
+                        ", at EOF".to_string()
+                    } else {
+                        format!(", near \"{}\"", token_display(&here))
+                    };
+                    self.error = Some(format!("syntax error at {{FILE}} line {line}{where_}\n"));
+                    Expr::Undef
+                } else {
+                    // Skip the bad token to make progress.
+                    self.pos += 1;
+                    Expr::Undef
+                }
             }
         }
     }
@@ -3117,8 +3148,9 @@ fn parse_interp_string(s: &str) -> Expr {
             // $| (autoflush), $& $` $' (regex matches).
             let is_punct_special = matches!(
                 chars[i + 1],
-                '@' | '!' | '/' | '\\' | ',' | '"' | ';' | '|' | '&' | '`' | '\'' | '?'
-            );
+                '@' | '!' | '/' | '\\' | ',' | '"' | ';' | '|' | '&' | '`' | '\'' | '?' | '-' | '+'
+            ) || (chars[i + 1] == '.'
+                && (i + 2 >= chars.len() || !chars[i + 2].is_ascii_digit()));
             // `$$name` — scalar deref interpolation. Detect `$$` followed
             // by an ident (otherwise `$$` is the pid var or literal).
             let is_scalar_deref = chars[i + 1] == '$'
@@ -3215,13 +3247,54 @@ fn parse_interp_string(s: &str) -> Expr {
                     parts.push(InterpPart::ScalarVar(format!("^{c}")));
                 } else if matches!(
                     chars[i],
-                    '@' | '!' | '/' | '\\' | ',' | '"' | ';' | '|' | '&' | '`' | '\'' | '?'
-                ) {
+                    '@' | '!'
+                        | '/'
+                        | '\\'
+                        | ','
+                        | '"'
+                        | ';'
+                        | '|'
+                        | '&'
+                        | '`'
+                        | '\''
+                        | '?'
+                        | '-'
+                        | '+'
+                ) || (chars[i] == '.'
+                    && (i + 1 >= chars.len() || !chars[i + 1].is_ascii_digit()))
+                {
                     // Single-char punctuation special variable.
                     // May be followed by an arrow-chain: `$@->{k}`, `$!->[0]`.
                     let c = chars[i];
                     i += 1;
-                    if i + 1 < chars.len()
+                    if (c == '-' || c == '+') && i < chars.len() && chars[i] == '[' {
+                        // `$-[N]` / `$+[N]` — match offset arrays, indexed by [N].
+                        i += 1;
+                        let mut idx_str = String::new();
+                        let mut depth = 1;
+                        while i < chars.len() && depth > 0 {
+                            if chars[i] == '[' {
+                                depth += 1;
+                            } else if chars[i] == ']' {
+                                depth -= 1;
+                                if depth == 0 {
+                                    break;
+                                }
+                            }
+                            idx_str.push(chars[i]);
+                            i += 1;
+                        }
+                        if i < chars.len() && chars[i] == ']' {
+                            i += 1;
+                        }
+                        let idx_expr = if let Ok(n) = idx_str.parse::<i64>() {
+                            Box::new(Expr::IntLit(n))
+                        } else {
+                            let v = idx_str.strip_prefix('$').unwrap_or(&idx_str);
+                            Box::new(Expr::ScalarVar(v.to_string()))
+                        };
+                        parts.push(InterpPart::ArrayElement(c.to_string(), idx_expr));
+                    } else if i + 1 < chars.len()
                         && chars[i] == '-'
                         && chars[i + 1] == '>'
                         && i + 2 < chars.len()
@@ -3605,20 +3678,72 @@ impl PartialEq for Token {
 /// before any local `sub NAME` declaration would put them in scope.
 fn scan_sub_names(tokens: &[Token]) -> HashSet<String> {
     let mut subs: HashSet<String> = [
+        // Subs declared by t/test.pl (loaded via `require './test.pl'`
+        // in BEGIN blocks). These need to be known up-front so that
+        // bareword statement forms like `pass;` / `note 'm';` parse as
+        // calls instead of bareword strings.
+        "BAIL_OUT",
+        "can_ok",
+        "capture_warnings",
+        "class_ok",
+        "cmp_ok",
+        "curr_test",
+        "diag",
+        "DIE",
+        "display",
+        "display_rx",
         "done_testing",
+        "eq_array",
+        "eq_hash",
+        "fail",
+        "find_git_or_skip",
+        "fresh_perl",
+        "fresh_perl_is",
+        "fresh_perl_like",
+        "is",
+        "isa_ok",
+        "is_linux_container",
+        "is_miniperl",
+        "isnt",
+        "like",
+        "like_yn",
+        "new_ok",
+        "next_test",
+        "note",
+        "object_ok",
+        "ok",
+        "pass",
         "plan",
+        "refcount_is",
+        "register_tempfile",
+        "require_ok",
+        "run_multiple_progs",
+        "runperl",
+        "runperl_and_capture",
+        "set_up_inc",
+        "setup_multiple_progs",
+        "skip",
         "skip_all",
         "skip_all_if_miniperl",
+        "skip_all_without_config",
         "skip_all_without_dynamic_extension",
         "skip_all_without_perlio",
-        "skip_all_without_config",
         "skip_all_without_unicode_tables",
-        "is_miniperl",
-        "curr_test",
-        "next_test",
-        "fresh_perl",
+        "skip_if_miniperl",
+        "skip_without_dynamic_extension",
+        "tempfile",
+        "todo_skip",
+        "unlike",
+        "unlink_all",
+        "unlink_tempfiles",
+        "untaint_path",
+        "use_ok",
+        "warning_is",
+        "warning_like",
+        "warnings_like",
+        "watchdog",
         "which_perl",
-        "set_up_inc",
+        "within",
     ]
     .iter()
     .map(|s| s.to_string())
@@ -3635,4 +3760,17 @@ fn scan_sub_names(tokens: &[Token]) -> HashSet<String> {
         }
     }
     subs
+}
+
+/// Best-effort short rendering of a token for error messages.
+fn token_display(t: &Token) -> String {
+    match t {
+        Token::Semi => ";".to_string(),
+        Token::RBrace => "}".to_string(),
+        Token::RParen => ")".to_string(),
+        Token::RBracket => "]".to_string(),
+        Token::Comma => ",".to_string(),
+        Token::EOF => "EOF".to_string(),
+        _ => format!("{t:?}"),
+    }
 }

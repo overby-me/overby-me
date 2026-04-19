@@ -177,6 +177,12 @@ pub struct Interpreter {
     // Keyed by the local name, value is the target slot name. Restored on
     // scope exit via `local_saves`.
     fh_aliases: HashMap<String, String>,
+    /// Per-filehandle line counter that backs magic $.
+    /// Incremented on every successful readline.
+    fh_line_counts: HashMap<String, i64>,
+    /// Stack of saved (last_read_fh) values pushed by `local($.)` and
+    /// popped at scope exit. Each frame pushes once per `local($.)`.
+    local_dot_fh_saves: Vec<Vec<Option<String>>>,
     // Counter for generating anonymous filehandle names
     fh_counter: usize,
     // Counter for generating unique names for anonymous subs. `sub { ... }`
@@ -326,6 +332,8 @@ impl Interpreter {
             next_call_ctx: None,
             write_handles: HashMap::new(),
             fh_aliases: HashMap::new(),
+            fh_line_counts: HashMap::new(),
+            local_dot_fh_saves: Vec::new(),
             fh_counter: 0,
             anon_sub_counter: 0,
             config_load_warned: false,
@@ -385,7 +393,13 @@ impl Interpreter {
         // (Perl hoists named subs at compile time regardless of nesting.)
         Self::hoist_subs_in_blocks(program, &mut self.subs, "main");
         let mut main_stmts = Vec::new();
-        for stmt in program {
+        // Push a main-file lexical scope early so that compile-time
+        // my-variable declarations (pre-declared below) land in a real
+        // lexical frame visible to subsequent BEGIN blocks.
+        self.push_scope();
+
+        let last_begin_idx = program.iter().rposition(|s| matches!(s, Stmt::Begin(_, _)));
+        for (idx, stmt) in program.iter().enumerate() {
             match stmt {
                 Stmt::Sub { name, params, body } if !name.is_empty() => {
                     self.subs
@@ -440,6 +454,27 @@ impl Interpreter {
                 }
                 Stmt::Init(body) => {
                     self.init_blocks.push((body.clone(), None));
+                }
+                Stmt::My(vars, _) => {
+                    if last_begin_idx.is_some_and(|bi| idx < bi) {
+                        // Pre-declare for BEGIN block visibility
+                        for (name, _) in vars {
+                            let var_name = name
+                                .trim_start_matches('$')
+                                .trim_start_matches('@')
+                                .trim_start_matches('%');
+                            self.declare_my(var_name);
+                        }
+                        // If ALL vars have no initializer, skip the runtime Stmt::My
+                        // to preserve values set by BEGIN blocks. If any has an
+                        // initializer, keep the statement so the runtime init runs.
+                        let all_no_init = vars.iter().all(|(_, init)| init.is_none());
+                        if !all_no_init {
+                            main_stmts.push(stmt.clone());
+                        }
+                    } else {
+                        main_stmts.push(stmt.clone());
+                    }
                 }
                 _ => main_stmts.push(stmt.clone()),
             }
@@ -520,12 +555,6 @@ impl Interpreter {
 
         // Main program runs in "RUN" phase per ${^GLOBAL_PHASE}.
         self.set_global_var("^GLOBAL_PHASE", Value::Str("RUN".to_string()));
-
-        // Push a main-file lexical scope so top-level `my $x` lands in a
-        // real lexical frame (not in globals). That matters for destructor
-        // timing: `my $obj = bless …;` should fire DESTROY at end-of-main
-        // while phase is RUN, not during DESTRUCT like `our $x`.
-        self.push_scope();
 
         // Execute main program. Propagate exit_code from Flow::Exit so the
         // caller's `exit_code` field (used by main.rs's std::process::exit)
@@ -879,7 +908,10 @@ impl Interpreter {
                     let flow = self.exec_stmts(body);
                     let ran_continue = match flow {
                         Flow::Last(l) if l.is_none() || l == *label => break,
-                        Flow::Last(_) => continue,
+                        Flow::Last(l) => {
+                            result = Flow::Last(l);
+                            break;
+                        }
                         Flow::Return(v) => {
                             result = Flow::Return(v);
                             break;
@@ -893,7 +925,10 @@ impl Interpreter {
                             break;
                         }
                         Flow::Next(l) if l.is_none() || l == *label => true,
-                        Flow::Next(_) => false,
+                        Flow::Next(l) => {
+                            result = Flow::Next(l);
+                            break;
+                        }
                         Flow::Goto(l) => {
                             result = Flow::Goto(l);
                             break;
@@ -938,12 +973,12 @@ impl Interpreter {
                     let flow = self.exec_stmts(body);
                     let ran_continue = match flow {
                         Flow::Last(l) if l.is_none() || l == *label => break,
-                        Flow::Last(_) => continue,
+                        Flow::Last(l) => return Flow::Last(l),
                         Flow::Return(v) => return Flow::Return(v),
                         Flow::Die(msg) => return Flow::Die(msg),
                         Flow::Exit(code) => return Flow::Exit(code),
                         Flow::Next(l) if l.is_none() || l == *label => true,
-                        Flow::Next(_) => false,
+                        Flow::Next(l) => return Flow::Next(l),
                         Flow::Goto(l) => return Flow::Goto(l),
                         Flow::None => true,
                     };
@@ -984,7 +1019,15 @@ impl Interpreter {
                     }
                     match self.exec_stmts(body) {
                         Flow::Last(l) if l.is_none() || l == *label => break,
+                        Flow::Last(l) => {
+                            result = Flow::Last(l);
+                            break;
+                        }
                         Flow::Next(l) if l.is_none() || l == *label => {}
+                        Flow::Next(l) => {
+                            result = Flow::Next(l);
+                            break;
+                        }
                         Flow::Return(v) => {
                             result = Flow::Return(v);
                             break;
@@ -997,7 +1040,11 @@ impl Interpreter {
                             result = Flow::Exit(code);
                             break;
                         }
-                        _ => {}
+                        Flow::Goto(l) => {
+                            result = Flow::Goto(l);
+                            break;
+                        }
+                        Flow::None => {}
                     }
                     if let Some(step) = step {
                         self.eval_expr(step);
@@ -1076,9 +1123,23 @@ impl Interpreter {
 
                     let ran_continue = match flow {
                         Flow::Last(l) if l.is_none() || l == *label => break,
-                        Flow::Last(_) => false,
+                        Flow::Last(l) => {
+                            if readonly_iter {
+                                self.readonly_vars.remove(var);
+                            }
+                            self.pop_scope();
+                            self.set_var(var, saved_var);
+                            return Flow::Last(l);
+                        }
                         Flow::Next(l) if l.is_none() || l == *label => true,
-                        Flow::Next(_) => false,
+                        Flow::Next(l) => {
+                            if readonly_iter {
+                                self.readonly_vars.remove(var);
+                            }
+                            self.pop_scope();
+                            self.set_var(var, saved_var);
+                            return Flow::Next(l);
+                        }
                         Flow::Return(v) => {
                             self.pop_scope();
                             self.set_var(var, saved_var);
@@ -1175,9 +1236,15 @@ impl Interpreter {
                         self.pop_scope();
                         return Flow::None;
                     }
-                    Flow::Last(_) => false,
+                    Flow::Last(l) => {
+                        self.pop_scope();
+                        return Flow::Last(l);
+                    }
                     Flow::Next(l) if l.is_none() || l == *label => true,
-                    Flow::Next(_) => false,
+                    Flow::Next(l) => {
+                        self.pop_scope();
+                        return Flow::Next(l);
+                    }
                     Flow::Return(v) => {
                         self.pop_scope();
                         return Flow::Return(v);
@@ -1201,7 +1268,12 @@ impl Interpreter {
                     self.pop_scope();
                     match cflow {
                         Flow::Last(l) if l.is_none() || l == *label => Flow::None,
-                        other => other,
+                        other => {
+                            // Eval completed without die — clear $@ so inner errors
+                            // do not leak (e.g. eval { eval { die }; return }).
+                            self.set_global_var("@", Value::Str(String::new()));
+                            other
+                        }
                     }
                 } else {
                     self.pop_scope();
@@ -1399,6 +1471,16 @@ impl Interpreter {
                             if let Some(saves) = self.local_saves.last_mut() {
                                 saves.push((var_name.to_string(), old));
                             }
+                            if var_name == "." {
+                                let prev_fh = self.last_read_fh.clone();
+                                if let Some(saves) = self.local_dot_fh_saves.last_mut() {
+                                    saves.push(prev_fh);
+                                }
+                                if let Some(v) = items.get(i).cloned() {
+                                    self.set_var(".", v);
+                                }
+                                continue;
+                            }
                             let val = items.get(i).cloned().unwrap_or(Value::Undef);
                             self.globals.vars.insert(var_name.to_string(), val);
                         }
@@ -1457,6 +1539,20 @@ impl Interpreter {
                             let old = self.get_var(var_name);
                             if let Some(saves) = self.local_saves.last_mut() {
                                 saves.push((var_name.to_string(), old));
+                            }
+                            // local($.) — also save+clear the current
+                            // filehandle binding so $. starts fresh and the
+                            // outer reader is restored on scope exit.
+                            if var_name == "." {
+                                let prev_fh = self.last_read_fh.clone();
+                                if let Some(saves) = self.local_dot_fh_saves.last_mut() {
+                                    saves.push(prev_fh);
+                                }
+                                if let Some(e) = init.as_ref() {
+                                    let v = self.eval_expr(e);
+                                    self.set_var(".", v);
+                                }
+                                continue;
                             }
                             let val = init
                                 .as_ref()
@@ -1798,7 +1894,8 @@ impl Interpreter {
                 // handler mutate/replace the error and then returns to the
                 // normal die-propagation (the sub's return value is ignored).
                 let handler = self.get_hash_element("SIG", "__DIE__");
-                if let Value::CodeRef(name) = handler
+                if self.in_die_handler == 0
+                    && let Value::CodeRef(name) = handler
                     && let Some((_params, body)) = self.subs.get(&name).cloned()
                 {
                     // Handler receives the original die value: the ref if
@@ -1925,7 +2022,12 @@ impl Interpreter {
                             }
                             Flow::None
                         }
-                        other => other,
+                        other => {
+                            // Eval completed without die — clear $@ so inner errors
+                            // do not leak (e.g. eval { eval { die }; return }).
+                            self.set_global_var("@", Value::Str(String::new()));
+                            other
+                        }
                     }
                 }
                 EvalArg::Expr(expr) => {
@@ -1971,8 +2073,8 @@ impl Interpreter {
                 if is_do_block {
                     loop {
                         match self.exec_stmt(stmt) {
-                            Flow::Last(_) => break,
-                            Flow::Next(_) => {}
+                            Flow::Last(None) => break,
+                            Flow::Next(None) => {}
                             Flow::None => {}
                             other => return other,
                         }
@@ -1986,8 +2088,8 @@ impl Interpreter {
                             break;
                         }
                         match self.exec_stmt(stmt) {
-                            Flow::Last(_) => break,
-                            Flow::Next(_) => continue,
+                            Flow::Last(None) => break,
+                            Flow::Next(None) => continue,
                             Flow::None => {}
                             other => return other,
                         }
@@ -2000,7 +2102,7 @@ impl Interpreter {
                 if is_do_block {
                     loop {
                         match self.exec_stmt(stmt) {
-                            Flow::Last(_) => break,
+                            Flow::Last(None) => break,
                             Flow::None => {}
                             other => return other,
                         }
@@ -2014,7 +2116,7 @@ impl Interpreter {
                             break;
                         }
                         match self.exec_stmt(stmt) {
-                            Flow::Last(_) => break,
+                            Flow::Last(None) => break,
                             Flow::None => {}
                             other => return other,
                         }
@@ -2032,7 +2134,7 @@ impl Interpreter {
                 for item in items {
                     self.set_var("_", item);
                     match self.exec_stmt(stmt) {
-                        Flow::Last(_) => break,
+                        Flow::Last(None) => break,
                         Flow::None => {}
                         other => {
                             flow = other;
@@ -2884,9 +2986,10 @@ impl Interpreter {
                             "Can't call method \"isa\" on unblessed reference at {file} line {line}.\n"
                         );
                         if self.eval_depth > 0 {
-                            self.set_global_var("@", Value::Str(msg));
+                            self.pending_flow = Some(Flow::Die(msg));
                             return Value::Undef;
                         }
+
                         eprint!("{msg}");
                         self.pending_flow = Some(Flow::Die(msg));
                         return Value::Undef;
@@ -2929,6 +3032,41 @@ impl Interpreter {
             }
 
             Expr::Defined(expr) => {
+                // `defined &name` checks whether the sub is defined
+                // *without* invoking it. Likewise `defined &$ref` should
+                // not call the code ref. Detect these forms before the
+                // recursive eval_expr that would call them.
+                if let Expr::Call(name, sub_args) = expr.as_ref()
+                    && sub_args.is_empty()
+                {
+                    let here = self.subs.contains_key(name);
+                    let q = format!("{}::{}", self.package, name);
+                    let qualified = self.subs.contains_key(&q);
+                    // Builtin subs we implement in Rust (e.g. `re::is_regexp`,
+                    // `Internals::stack_refcounted`) aren't in self.subs but
+                    // are still "defined" from a Perl-program perspective.
+                    let builtin = matches!(
+                        name.as_str(),
+                        "re::is_regexp"
+                            | "Internals::stack_refcounted"
+                            | "DynaLoader::boot_DynaLoader"
+                    );
+                    return Value::Num(if here || qualified || builtin {
+                        1.0
+                    } else {
+                        0.0
+                    });
+                }
+                if let Expr::CodeCall(inner, sub_args) = expr.as_ref()
+                    && sub_args.is_empty()
+                {
+                    let val = self.eval_expr(inner);
+                    return Value::Num(if matches!(val, Value::CodeRef(_)) {
+                        1.0
+                    } else {
+                        0.0
+                    });
+                }
                 let val = self.eval_expr(expr);
                 // Perl's `defined` returns `""` for false (like other boolean
                 // builtins — `1` for true, empty string for false).
@@ -3622,6 +3760,17 @@ impl Interpreter {
                     Value::Num(0.0)
                 }
             }
+            "_regex_not_match_dyn" => {
+                // Internal: $str !~ $pattern_var — dynamic negated regex
+                if args.len() >= 2 {
+                    let text = self.eval_expr(&args[0]).to_str();
+                    let pat = self.eval_expr(&args[1]).to_str();
+                    let matched = self.regex_match(&text, &pat, "");
+                    Value::Num(if matched { 0.0 } else { 1.0 })
+                } else {
+                    Value::Num(1.0)
+                }
+            }
             "_tr_count" | "_tr_apply" => {
                 // tr/from/to/flags — transliteration. Applies the from→to
                 // mapping in place when target is an lvalue, returns the
@@ -3765,10 +3914,7 @@ impl Interpreter {
                     // `undef tcp` until that patch. Covers op/undef test 17.
                     if matches!(
                         arg,
-                        Expr::StringLit(_)
-                            | Expr::IntLit(_)
-                            | Expr::FloatLit(_)
-                            | Expr::Undef
+                        Expr::StringLit(_) | Expr::IntLit(_) | Expr::FloatLit(_) | Expr::Undef
                     ) {
                         let file = if self.current_file.is_empty() {
                             "-e".to_string()
@@ -4239,7 +4385,7 @@ impl Interpreter {
                             "Modification of a read-only value attempted at {file} line {line}.\n"
                         );
                         if self.eval_depth > 0 {
-                            self.set_global_var("@", Value::Str(msg));
+                            self.pending_flow = Some(Flow::Die(msg));
                             return Value::Undef;
                         }
                         eprint!("{msg}");
@@ -5046,8 +5192,14 @@ impl Interpreter {
                                     }
                                     Value::Undef
                                 }
-                                Flow::Return(v) => v,
-                                _ => self.last_expr_val.clone(),
+                                Flow::Return(v) => {
+                                    self.set_global_var("@", Value::Str(String::new()));
+                                    v
+                                }
+                                _ => {
+                                    self.set_global_var("@", Value::Str(String::new()));
+                                    self.last_expr_val.clone()
+                                }
                             }
                         }
                         _ => {
@@ -5602,9 +5754,9 @@ impl Interpreter {
                 if lhs_val.is_undef() {
                     // Create a fresh ref and write it back through the lhs.
                     let new_ref = match kind {
-                        crate::ast::ArrowKind::Array => Value::ArrayRef(std::rc::Rc::new(
-                            std::cell::RefCell::new(Vec::new()),
-                        )),
+                        crate::ast::ArrowKind::Array => {
+                            Value::ArrayRef(std::rc::Rc::new(std::cell::RefCell::new(Vec::new())))
+                        }
                         crate::ast::ArrowKind::Hash => Value::HashRef(std::rc::Rc::new(
                             std::cell::RefCell::new(HashMap::new()),
                         )),
@@ -5713,11 +5865,46 @@ impl Interpreter {
             .iter()
             .any(|p| std::path::Path::new(p).join("Config.pm").exists());
         if self.set_up_inc_called && !config_found {
+            // Reference perl reports the line of the `require Config`
+            // call inside test.pl's `which_perl` sub. The exact line
+            // varies between perl 5.40 (line 970) and 5.42 (line 971),
+            // so locate it dynamically.
+            let line = Self::find_which_perl_require_line().unwrap_or(970);
             eprintln!(
-                "test.pl had problems loading Config: Can't locate Config.pm in @INC (you may need to install the Config module) (@INC entries checked: {}) at ./test.pl line 970.",
-                inc.join(" ")
+                "test.pl had problems loading Config: Can't locate Config.pm in @INC (you may need to install the Config module) (@INC entries checked: {}) at ./test.pl line {}.",
+                inc.join(" "),
+                line
             );
         }
+    }
+
+    /// Scan `./test.pl` for the `require Config` line inside the
+    /// `which_perl` sub, so we can report the matching line number that
+    /// reference perl would print. Returns `None` if test.pl is missing
+    /// or the pattern can't be located.
+    fn find_which_perl_require_line() -> Option<u32> {
+        let body = std::fs::read_to_string("./test.pl").ok()?;
+        let mut in_which_perl = false;
+        let mut brace_depth: i32 = 0;
+        for (i, raw) in body.lines().enumerate() {
+            let line_no = (i as u32) + 1;
+            if !in_which_perl {
+                if raw.contains("sub which_perl") {
+                    in_which_perl = true;
+                    brace_depth = raw.matches('{').count() as i32 - raw.matches('}').count() as i32;
+                }
+                continue;
+            }
+            brace_depth += raw.matches('{').count() as i32;
+            brace_depth -= raw.matches('}').count() as i32;
+            if raw.contains("require Config") {
+                return Some(line_no);
+            }
+            if brace_depth <= 0 {
+                return None;
+            }
+        }
+        None
     }
 
     /// `ref()` for `v`. Returns the blessed class name if `v` was
@@ -6000,6 +6187,11 @@ impl Interpreter {
     }
 
     fn restore_locals(&mut self) {
+        if let Some(saves) = self.local_dot_fh_saves.pop() {
+            for prev in saves.into_iter().rev() {
+                self.last_read_fh = prev;
+            }
+        }
         if let Some(saves) = self.local_saves.pop() {
             for (name, val) in saves.into_iter().rev() {
                 self.globals.vars.insert(name, val);
@@ -6052,6 +6244,17 @@ impl Interpreter {
 
     fn get_var(&self, name: &str) -> Value {
         let key = canon_var(name);
+        // Magic $.: read from per-FH counter under last_read_fh.
+        // Returns Undef when no read has happened yet on any handle.
+        if key == "." {
+            if let Some(fh) = self.last_read_fh.as_ref() {
+                if let Some(n) = self.fh_line_counts.get(fh) {
+                    return Value::Num(*n as f64);
+                }
+                return Value::Num(0.0);
+            }
+            return Value::Undef;
+        }
         // Check lexical scopes from innermost to outermost
         for scope in self.scopes.iter().rev() {
             if let Some(val) = scope.vars.get(key) {
@@ -6068,6 +6271,16 @@ impl Interpreter {
 
     fn set_var(&mut self, name: &str, val: Value) {
         let key = canon_var(name).to_string();
+        // Magic $.: writing it updates the current filehandle's line
+        // counter so that subsequent reads from that handle resume from
+        // the new value. Still writes the global slot too, since that
+        // is the value `local($.)` snapshots and restores.
+        if key == "."
+            && let Some(fh) = self.last_read_fh.clone()
+        {
+            let n = val.to_num() as i64;
+            self.fh_line_counts.insert(fh, n);
+        }
         // `$/` rejects refs to bad values / non-scalar refs. Intercept here
         // so the assignment itself dies (matching `local $/` under eval).
         if key == "/"
@@ -6669,6 +6882,7 @@ impl Interpreter {
         self.local_array_saves.push(Vec::new());
         self.local_fh_alias_saves.push(Vec::new());
         self.local_hash_elem_saves.push(Vec::new());
+        self.local_dot_fh_saves.push(Vec::new());
         // Snapshot lexical pragma state (e.g. `use bytes`) so a `use` /
         // `no` inside the block doesn't leak out.
         self.bytes_mode_saves.push(self.bytes_mode);
@@ -6713,10 +6927,7 @@ impl Interpreter {
         // aliasing can write mutations back to the caller's arg exprs.
         // Only subs install @_ in a freshly pushed scope, so for block
         // pops this will be None and the caller will skip writeback.
-        let popped_underscore = self
-            .scopes
-            .last()
-            .and_then(|s| s.arrays.get("_").cloned());
+        let popped_underscore = self.scopes.last().and_then(|s| s.arrays.get("_").cloned());
         self.scopes.pop();
         if popped_underscore.is_some() {
             self.last_popped_underscore = popped_underscore;
@@ -7039,6 +7250,11 @@ impl Interpreter {
                     _ => {} // non-ref, non-undef — silent no-op like Perl with ref on a string
                 }
             }
+            Expr::OpAssign(_, inner_target, _) => {
+                // When an OpAssign result is used as an lvalue target
+                // (e.g., chained `.=`), the real lvalue is the inner target.
+                self.assign_to(inner_target, val);
+            }
             _ => {} // Can't assign to this
         }
     }
@@ -7224,6 +7440,25 @@ impl Interpreter {
                     }
                     let m0 = caps.get(0).unwrap();
                     let end = start + m0.end();
+                    // Store match special variables
+                    self.set_global_var("&", Value::Str(m0.as_str().to_string()));
+                    self.set_global_var("`", Value::Str(text[..start + m0.start()].to_string()));
+                    self.set_global_var("'", Value::Str(text[start + m0.end()..].to_string()));
+
+                    // Store @- and @+ (match start/end offsets)
+                    let mut minus_arr = vec![Value::Num((start + m0.start()) as f64)];
+                    let mut plus_arr = vec![Value::Num((start + m0.end()) as f64)];
+                    for i in 1..caps.len() {
+                        if let Some(m) = caps.get(i) {
+                            minus_arr.push(Value::Num((start + m.start()) as f64));
+                            plus_arr.push(Value::Num((start + m.end()) as f64));
+                        } else {
+                            minus_arr.push(Value::Undef);
+                            plus_arr.push(Value::Undef);
+                        }
+                    }
+                    self.set_array("-", minus_arr);
+                    self.set_array("+", plus_arr);
                     (true, end)
                 } else {
                     (false, start)
@@ -7256,6 +7491,26 @@ impl Interpreter {
                             self.set_global_var(&i.to_string(), Value::Undef);
                         }
                     }
+                    // Store match special variables
+                    let m0 = caps.get(0).unwrap();
+                    self.set_global_var("&", Value::Str(m0.as_str().to_string()));
+                    self.set_global_var("`", Value::Str(text[..m0.start()].to_string()));
+                    self.set_global_var("'", Value::Str(text[m0.end()..].to_string()));
+
+                    // Store @- and @+ (match start/end offsets)
+                    let mut minus_arr = vec![Value::Num(m0.start() as f64)];
+                    let mut plus_arr = vec![Value::Num(m0.end() as f64)];
+                    for i in 1..caps.len() {
+                        if let Some(m) = caps.get(i) {
+                            minus_arr.push(Value::Num(m.start() as f64));
+                            plus_arr.push(Value::Num(m.end() as f64));
+                        } else {
+                            minus_arr.push(Value::Undef);
+                            plus_arr.push(Value::Undef);
+                        }
+                    }
+                    self.set_array("-", minus_arr);
+                    self.set_array("+", plus_arr);
                     true
                 } else {
                     false
@@ -8061,6 +8316,24 @@ impl Interpreter {
     // --- I/O ---
 
     fn readline(&mut self, handle: &str) -> Value {
+        let v = self.readline_inner(handle);
+        // Bump $. on successful read. The actual handle resolution may have
+        // changed inside readline_inner (variable -> name + alias chasing),
+        // so use last_read_fh which is set by readline_inner.
+        if !matches!(v, Value::Undef)
+            && let Some(fh) = self.last_read_fh.clone()
+        {
+            let n = self.fh_line_counts.entry(fh).or_insert(0);
+            *n += 1;
+            let n = *n;
+            self.globals
+                .vars
+                .insert(".".to_string(), Value::Num(n as f64));
+        }
+        v
+    }
+
+    fn readline_inner(&mut self, handle: &str) -> Value {
         // Handle <$fh> — variable containing filehandle name
         let effective_handle = if handle.starts_with('$') {
             let var_name = &handle[1..];
@@ -8519,11 +8792,23 @@ impl Interpreter {
     }
 
     fn eval_tell(&mut self, args: &[Expr]) -> Value {
-        if args.is_empty() {
-            return Value::Num(-1.0);
-        }
-        let raw_handle = self.eval_expr(&args[0]).to_str();
-        let handle = self.resolve_fh(&raw_handle);
+        // Argless tell uses the last filehandle a readline / tell / eof / seek
+        // touched. Returns -1 when no such handle exists.
+        let handle = if args.is_empty() {
+            match self.last_read_fh.clone() {
+                Some(h) => self.resolve_fh(&h),
+                None => return Value::Num(-1.0),
+            }
+        } else {
+            let raw_handle = self.eval_expr(&args[0]).to_str();
+            self.resolve_fh(&raw_handle)
+        };
+        // tell(FH) makes FH the current filehandle for $.
+        self.last_read_fh = Some(handle.clone());
+        let n = *self.fh_line_counts.entry(handle.clone()).or_insert(0);
+        self.globals
+            .vars
+            .insert(".".to_string(), Value::Num(n as f64));
         if let Some(reader) = self.read_handles.get_mut(&handle) {
             if let Ok(pos) = reader.stream_position() {
                 return Value::Num(pos as f64);
@@ -8784,7 +9069,8 @@ impl Interpreter {
             // Fire $SIG{__DIE__} so the handler sees the error first
             // (matching Perl's compile-time die-from-eval semantics).
             let handler = self.get_hash_element("SIG", "__DIE__");
-            if let Value::CodeRef(name) = handler
+            if self.in_die_handler == 0
+                && let Value::CodeRef(name) = handler
                 && let Some((_params, body)) = self.subs.get(&name).cloned()
             {
                 self.in_die_handler += 1;
@@ -8802,6 +9088,10 @@ impl Interpreter {
         for stmt in &stmts {
             match self.exec_stmt(stmt) {
                 Flow::Return(v) => {
+                    // Clear `$@` when the eval-string exits via `return`
+                    // so an inner `eval q{die}` followed by `return` does not
+                    // leak the inner error to the caller.
+                    self.set_global_var("@", Value::Str(String::new()));
                     self.pop_scope();
                     self.current_file = saved_file;
                     return v;

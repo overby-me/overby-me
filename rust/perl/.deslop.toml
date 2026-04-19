@@ -25,4 +25,7 @@ disabled_rules = [
   # `#[allow(dead_code)]` is on a single helper kept around for
   # future use; not a broad blanket.
   "rust_broad_allow_dead_code",
+  # `.lines()` in `find_which_perl_require_line` scans a small
+  # test-support file once at startup; not a hot path.
+  "rust_lines_allocate_per_line",
 ]
