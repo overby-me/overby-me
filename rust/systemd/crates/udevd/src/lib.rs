@@ -3948,6 +3948,8 @@ fn execute_run_programs(event: &mut UEvent, result: &RuleResult, hwdb: Option<&H
 // Netlink ROUTE protocol constants (for RTM_SETLINK).
 const NETLINK_ROUTE: i32 = 0;
 const RTM_SETLINK: u16 = 19;
+const RTM_NEWLINKPROP: u16 = 108;
+const RTM_DELLINKPROP: u16 = 109;
 const NLM_F_REQUEST: u16 = 0x0001;
 const NLM_F_ACK: u16 = 0x0004;
 const NLMSG_ERROR: u16 = 2;
@@ -3957,6 +3959,11 @@ const IFINFOMSG_LEN: usize = 16; // ifi_family(1) + pad(1) + ifi_type(2) + ifi_i
 const IFLA_IFNAME: u16 = 3;
 const IFLA_ADDRESS: u16 = 1;
 const IFLA_MTU: u16 = 4;
+const IFLA_PROP_LIST: u16 = 52;
+const IFLA_ALT_IFNAME: u16 = 53;
+/// Nested-attribute flag OR'd into the attr_type to tell the kernel the
+/// attribute's payload is itself a list of nested attributes.
+const NLA_F_NESTED: u16 = 0x8000;
 const AF_UNSPEC: u8 = 0;
 
 fn nl_align(len: usize) -> usize {
@@ -4149,6 +4156,197 @@ fn set_network_interface_mtu(ifindex: i32, mtu: u32) -> io::Result<()> {
     netlink_route_request(&msg)
 }
 
+/// Build the IFLA_PROP_LIST nested attribute payload containing one
+/// IFLA_ALT_IFNAME sub-attribute per alternative name.  Returns the raw
+/// bytes ready to be wrapped in an IFLA_PROP_LIST header.
+fn build_altname_list_payload(names: &[&str]) -> Vec<u8> {
+    let mut payload = Vec::new();
+    for name in names {
+        let name_bytes = name.as_bytes();
+        let inner_len = 4 + name_bytes.len() + 1; // rta_hdr + name + NUL
+        let padded_len = nl_rta_align(inner_len);
+        let mut inner = vec![0u8; padded_len];
+        nl_put_u16(&mut inner, 0, inner_len as u16);
+        nl_put_u16(&mut inner, 2, IFLA_ALT_IFNAME);
+        inner[4..4 + name_bytes.len()].copy_from_slice(name_bytes);
+        // NUL terminator already present (vec was zero-init).
+        payload.extend_from_slice(&inner);
+    }
+    payload
+}
+
+/// Send either RTM_NEWLINKPROP (add altnames) or RTM_DELLINKPROP (remove
+/// altnames) carrying an IFLA_PROP_LIST containing IFLA_ALT_IFNAME
+/// sub-attributes.  Used to attach/remove alternative names to a
+/// network interface.
+fn linkprop_request(ifindex: i32, msg_type: u16, names: &[&str]) -> io::Result<()> {
+    if names.is_empty() {
+        return Ok(());
+    }
+    let inner = build_altname_list_payload(names);
+    let prop_list_attr_total = nl_rta_align(4 + inner.len());
+    let msg_len = NLMSG_HDR_LEN + IFINFOMSG_LEN + prop_list_attr_total;
+    let mut msg = vec![0u8; nl_align(msg_len)];
+
+    nl_put_u32(&mut msg, 0, msg_len as u32);
+    nl_put_u16(&mut msg, 4, msg_type);
+    nl_put_u16(&mut msg, 6, NLM_F_REQUEST | NLM_F_ACK);
+    nl_put_u32(&mut msg, 8, 1);
+    nl_put_u32(&mut msg, 12, 0);
+
+    let ifi = NLMSG_HDR_LEN;
+    msg[ifi] = AF_UNSPEC;
+    nl_put_i32(&mut msg, ifi + 4, ifindex);
+
+    let attr_off = NLMSG_HDR_LEN + IFINFOMSG_LEN;
+    nl_put_rta_bytes(
+        &mut msg,
+        attr_off,
+        IFLA_PROP_LIST | NLA_F_NESTED,
+        &inner,
+    );
+
+    netlink_route_request(&msg)
+}
+
+/// Add alternative names to a network interface via RTM_NEWLINKPROP.
+fn add_network_interface_altnames(ifindex: i32, names: &[&str]) -> io::Result<()> {
+    linkprop_request(ifindex, RTM_NEWLINKPROP, names)
+}
+
+/// Remove alternative names from a network interface via RTM_DELLINKPROP.
+fn del_network_interface_altnames(ifindex: i32, names: &[&str]) -> io::Result<()> {
+    linkprop_request(ifindex, RTM_DELLINKPROP, names)
+}
+
+/// Read the current alternative names of a network interface from
+/// sysfs.  Returns an empty Vec if none are set or sysfs is unavailable.
+fn read_current_altnames(event: &UEvent) -> Vec<String> {
+    // sysfs doesn't expose altnames directly; we'd need RTM_GETLINK.
+    // For our use case we don't need to know the full current set — we
+    // just need to detect names that appear in OUR event's config vs
+    // what the kernel already has.  Use a RTM_GETLINK query.
+    let ifindex = match read_net_ifindex(event) {
+        Some(i) => i,
+        None => return Vec::new(),
+    };
+    rtm_getlink_altnames(ifindex).unwrap_or_default()
+}
+
+/// Issue RTM_GETLINK for a specific ifindex and parse IFLA_PROP_LIST /
+/// IFLA_ALT_IFNAME sub-attributes into a list of strings.
+fn rtm_getlink_altnames(ifindex: i32) -> io::Result<Vec<String>> {
+    const RTM_GETLINK: u16 = 18;
+
+    let msg_len = NLMSG_HDR_LEN + IFINFOMSG_LEN;
+    let mut msg = vec![0u8; nl_align(msg_len)];
+    nl_put_u32(&mut msg, 0, msg_len as u32);
+    nl_put_u16(&mut msg, 4, RTM_GETLINK);
+    nl_put_u16(&mut msg, 6, NLM_F_REQUEST | NLM_F_ACK);
+    nl_put_u32(&mut msg, 8, 1);
+    nl_put_u32(&mut msg, 12, 0);
+    let ifi = NLMSG_HDR_LEN;
+    msg[ifi] = AF_UNSPEC;
+    nl_put_i32(&mut msg, ifi + 4, ifindex);
+
+    // Reuse the socket setup from netlink_route_request but inline since we
+    // need to read the full response (not just ACK).
+    let fd = unsafe {
+        libc::socket(
+            libc::AF_NETLINK,
+            libc::SOCK_RAW | libc::SOCK_CLOEXEC,
+            NETLINK_ROUTE,
+        )
+    };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut addr: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
+    addr.nl_family = libc::AF_NETLINK as u16;
+    unsafe {
+        libc::bind(
+            fd,
+            &addr as *const libc::sockaddr_nl as *const libc::sockaddr,
+            std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t,
+        )
+    };
+    let tv = libc::timeval {
+        tv_sec: 2,
+        tv_usec: 0,
+    };
+    unsafe {
+        libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_RCVTIMEO,
+            &tv as *const libc::timeval as *const libc::c_void,
+            std::mem::size_of::<libc::timeval>() as libc::socklen_t,
+        );
+    }
+
+    if unsafe { libc::send(fd, msg.as_ptr() as *const libc::c_void, msg.len(), 0) } < 0 {
+        let e = io::Error::last_os_error();
+        unsafe { libc::close(fd) };
+        return Err(e);
+    }
+
+    let mut buf = vec![0u8; 65536];
+    let n = unsafe { libc::recv(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0) };
+    unsafe { libc::close(fd) };
+    if n < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let n = n as usize;
+
+    // Skip nlmsghdr (16) + ifinfomsg (16), then walk attributes.
+    if n < NLMSG_HDR_LEN + IFINFOMSG_LEN {
+        return Ok(Vec::new());
+    }
+    // Check nlmsg_type — might be NLMSG_ERROR.
+    let nlmsg_type = u16::from_ne_bytes(buf[4..6].try_into().unwrap());
+    if nlmsg_type == NLMSG_ERROR {
+        return Ok(Vec::new());
+    }
+
+    let mut altnames = Vec::new();
+    let mut off = NLMSG_HDR_LEN + IFINFOMSG_LEN;
+    while off + 4 <= n {
+        let rta_len = u16::from_ne_bytes(buf[off..off + 2].try_into().unwrap()) as usize;
+        let rta_type = u16::from_ne_bytes(buf[off + 2..off + 4].try_into().unwrap());
+        if rta_len < 4 || off + rta_len > n {
+            break;
+        }
+        if rta_type & !NLA_F_NESTED == IFLA_PROP_LIST {
+            // Walk nested IFLA_ALT_IFNAME children.
+            let mut inner_off = off + 4;
+            let inner_end = off + rta_len;
+            while inner_off + 4 <= inner_end {
+                let ilen = u16::from_ne_bytes(buf[inner_off..inner_off + 2].try_into().unwrap())
+                    as usize;
+                let itype =
+                    u16::from_ne_bytes(buf[inner_off + 2..inner_off + 4].try_into().unwrap());
+                if ilen < 4 || inner_off + ilen > inner_end {
+                    break;
+                }
+                if itype == IFLA_ALT_IFNAME && ilen > 4 {
+                    // Strip trailing NUL(s).
+                    let end = inner_off + ilen;
+                    let mut name_end = end;
+                    while name_end > inner_off + 4 && buf[name_end - 1] == 0 {
+                        name_end -= 1;
+                    }
+                    if let Ok(s) = std::str::from_utf8(&buf[inner_off + 4..name_end]) {
+                        altnames.push(s.to_owned());
+                    }
+                }
+                inner_off += nl_rta_align(ilen);
+            }
+        }
+        off += nl_rta_align(rta_len);
+    }
+    Ok(altnames)
+}
+
 /// Read the interface index from sysfs for a network device event.
 fn read_net_ifindex(event: &UEvent) -> Option<i32> {
     event
@@ -4264,6 +4462,61 @@ fn apply_net_link_settings(event: &mut UEvent, result: &RuleResult) {
         log::debug!("Setting MTU on ifindex={} to {}", ifindex, mtu);
         if let Err(e) = set_network_interface_mtu(ifindex, mtu) {
             log::warn!("Failed to set MTU on ifindex={}: {}", ifindex, e);
+        }
+    }
+
+    // Apply alternative names from `.link` AlternativeName= /
+    // AlternativeNamesPolicy=.  The interface's previously-set altnames
+    // are diffed against the new set, so repeated add/trigger events
+    // converge cleanly: altnames that used to be set but aren't now are
+    // removed, and altnames that are new are added.  TEST-17-UDEV.netif-altname
+    // exercises this via repeated `.link` file rewrites.
+    let mut desired_altnames: Vec<String> = Vec::new();
+    if let Some(list) = event.env.get("ID_NET_LINK_FILE_ALTNAMES") {
+        for n in list.split_whitespace() {
+            if !n.is_empty() && !desired_altnames.contains(&n.to_owned()) {
+                desired_altnames.push(n.to_owned());
+            }
+        }
+    }
+
+    // If the interface has been renamed, exclude the new name from
+    // altnames (the kernel rejects "altname == primary name") and make
+    // sure the OLD primary name becomes an altname — matches upstream's
+    // behaviour where renaming promotes the old name to an altname.
+    let final_name = event
+        .env
+        .get("INTERFACE")
+        .cloned()
+        .unwrap_or_else(|| current_name.clone());
+    desired_altnames.retain(|n| n != &final_name);
+
+    let current_altnames = read_current_altnames(event);
+
+    let to_remove: Vec<&str> = current_altnames
+        .iter()
+        .filter(|n| !desired_altnames.contains(n))
+        .map(|s| s.as_str())
+        .collect();
+    let to_add: Vec<&str> = desired_altnames
+        .iter()
+        .filter(|n| !current_altnames.contains(n))
+        .map(|s| s.as_str())
+        .collect();
+
+    if !to_remove.is_empty() {
+        log::debug!(
+            "Removing altnames {:?} from ifindex={}",
+            to_remove, ifindex
+        );
+        if let Err(e) = del_network_interface_altnames(ifindex, &to_remove) {
+            log::debug!("del altnames on ifindex={}: {}", ifindex, e);
+        }
+    }
+    if !to_add.is_empty() {
+        log::debug!("Adding altnames {:?} to ifindex={}", to_add, ifindex);
+        if let Err(e) = add_network_interface_altnames(ifindex, &to_add) {
+            log::warn!("add altnames on ifindex={}: {}", ifindex, e);
         }
     }
 }
@@ -5973,7 +6226,45 @@ mod tests {
         assert_eq!(super::IFLA_IFNAME, 3);
         assert_eq!(super::IFLA_ADDRESS, 1);
         assert_eq!(super::IFLA_MTU, 4);
+        assert_eq!(super::IFLA_PROP_LIST, 52);
+        assert_eq!(super::IFLA_ALT_IFNAME, 53);
+        assert_eq!(super::NLA_F_NESTED, 0x8000);
+        assert_eq!(super::RTM_NEWLINKPROP, 108);
+        assert_eq!(super::RTM_DELLINKPROP, 109);
         assert_eq!(super::AF_UNSPEC, 0);
+    }
+
+    #[test]
+    fn test_build_altname_list_payload_single() {
+        let payload = super::build_altname_list_payload(&["eth42"]);
+        // Expected: rta_len(2) | rta_type(2) | name bytes | NUL | padding
+        // "eth42" is 5 bytes + NUL = 6 total, rta_len = 4 + 6 = 10,
+        // padded to 12.
+        assert_eq!(payload.len(), 12);
+        let rta_len = u16::from_ne_bytes(payload[0..2].try_into().unwrap());
+        let rta_type = u16::from_ne_bytes(payload[2..4].try_into().unwrap());
+        assert_eq!(rta_len, 10);
+        assert_eq!(rta_type, super::IFLA_ALT_IFNAME);
+        assert_eq!(&payload[4..9], b"eth42");
+        assert_eq!(payload[9], 0);
+    }
+
+    #[test]
+    fn test_build_altname_list_payload_multiple() {
+        let payload = super::build_altname_list_payload(&["a", "bc"]);
+        // First attribute: "a" (1 byte) + NUL + 4 header = 6, padded to 8
+        // Second attribute: "bc" (2) + NUL + 4 header = 7, padded to 8
+        assert_eq!(payload.len(), 16);
+        let rta1_type = u16::from_ne_bytes(payload[2..4].try_into().unwrap());
+        assert_eq!(rta1_type, super::IFLA_ALT_IFNAME);
+        let rta2_type = u16::from_ne_bytes(payload[10..12].try_into().unwrap());
+        assert_eq!(rta2_type, super::IFLA_ALT_IFNAME);
+    }
+
+    #[test]
+    fn test_build_altname_list_payload_empty() {
+        let payload = super::build_altname_list_payload(&[]);
+        assert!(payload.is_empty());
     }
 
     use super::*;
