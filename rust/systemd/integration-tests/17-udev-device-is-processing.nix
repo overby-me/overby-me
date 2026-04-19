@@ -19,7 +19,7 @@
   # process regardless of whether comm is `sleep` or
   # `/usr/bin/sleep`.
   patchScript = ''
-    helper='for __p in /proc/[0-9]*; do __c=$(cat $__p/comm 2>/dev/null); [ "$(basename "$__c")" = sleep ] \&\& kill $(basename $__p) 2>/dev/null; done; :'
+    helper='{ for __p in /proc/[0-9]*; do __c=$(cat $__p/comm 2>/dev/null || :); [ "$(basename "$__c")" = sleep ] \&\& kill $(basename $__p) 2>/dev/null || :; done; } || :'
     sed -i \
       -e "s|^killall sleep$|$helper|" \
       -e "s|^    killall -KILL sleep$|    $helper|" \
