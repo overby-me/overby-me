@@ -39,12 +39,21 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() -> ! {
-    let exe = std::env::current_exe().expect("stage2: current_exe failed");
-    let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
-    let system_config = exe
+    // current_exe()/proc/self/exe points to the actual binary in
+    // /nix/store/<rust-systemd-systemd>/lib/systemd/rust-systemd-stage2
+    // which is NOT the systemConfig.  Instead, parse argv[0] which the
+    // stage-1 init script sets to `/init` — a symlink to
+    // `<systemConfig>/init`.  Canonicalize that to get the real
+    // systemConfig path.
+    let argv0 = std::env::args()
+        .next()
+        .unwrap_or_else(|| "/init".to_string());
+    let argv0_path = PathBuf::from(&argv0);
+    let init_path = std::fs::canonicalize(&argv0_path).unwrap_or(argv0_path);
+    let system_config = init_path
         .parent()
-        .expect("stage2: exe has no parent")
-        .to_path_buf();
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("/run/current-system"));
 
     log(&format!(
         "rust-systemd-stage2: starting (systemConfig={})",

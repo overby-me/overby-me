@@ -100,8 +100,15 @@ in
       # remount, /proc|/sys|/dev|/run setup, activate script execution,
       # /run/booted-system symlink) but writes directly to /dev/console
       # — no subshell, no pipe, no race.
+      # `exec -a /init` preserves argv[0] so rust-systemd-stage2's
+      # current_exe() canonicalizes to <systemConfig>/init and the
+      # binary can locate `$systemConfig/activate`.
       system.build.bootStage2 = lib.mkIf (!useUpstreamSystemd) (
-        lib.mkForce "${rustSystemdPackage}/lib/systemd/rust-systemd-stage2"
+        lib.mkForce (
+          pkgs.writeShellScript "stage-2-init" ''
+            exec -a /init ${rustSystemdPackage}/lib/systemd/rust-systemd-stage2
+          ''
+        )
       );
 
       # sudo-rs
