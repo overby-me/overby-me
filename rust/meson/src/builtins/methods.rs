@@ -1919,24 +1919,54 @@ fn meson_get_cross_property(
 }
 
 fn meson_get_external_property(
-    _vm: &mut VM,
+    vm: &mut VM,
     _obj: &Object,
     args: &[CallArg],
 ) -> Result<Object, String> {
     let positional = VM::get_positional_args(args);
-    positional
-        .get(1)
-        .cloned()
-        .cloned()
-        .ok_or("No external property found".to_string())
+    let name = positional
+        .first()
+        .and_then(|v| {
+            if let Object::String(s) = v {
+                Some(s.clone())
+            } else {
+                None
+            }
+        })
+        .ok_or("get_external_property() requires a property name")?;
+
+    let fallback = positional.get(1).cloned().cloned();
+
+    // Look up in native properties
+    if let Some(val) = vm.native_properties.get(&name) {
+        return Ok(val.clone());
+    }
+
+    // Return fallback if provided
+    if let Some(fb) = fallback {
+        return Ok(fb);
+    }
+
+    Err(format!("External property '{}' not found", name))
 }
 
 fn meson_has_external_property(
-    _vm: &mut VM,
+    vm: &mut VM,
     _obj: &Object,
-    _args: &[CallArg],
+    args: &[CallArg],
 ) -> Result<Object, String> {
-    Ok(Object::Bool(false))
+    let positional = VM::get_positional_args(args);
+    let name = positional
+        .first()
+        .and_then(|v| {
+            if let Object::String(s) = v {
+                Some(s.clone())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+    Ok(Object::Bool(vm.native_properties.contains_key(&name)))
 }
 
 fn meson_can_run_host_binaries(
@@ -2172,7 +2202,7 @@ fn run_result_stderr(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Ob
 
 // ---- Generator methods ----
 
-fn generator_process(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
+fn generator_process(vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
     if let Object::Generator(g) = obj {
         let positional = VM::get_positional_args(args);
         let mut sources = Vec::new();
@@ -2191,6 +2221,21 @@ fn generator_process(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Obj
         let extra_args = VM::get_arg_string_array(args, "extra_args");
         let preserve_path_from =
             VM::get_arg_str(args, "preserve_path_from", usize::MAX).map(String::from);
+
+        if let Some(ref base_dir) = preserve_path_from {
+            for source in &sources {
+                let full_source = if vm.current_subdir.is_empty() {
+                    format!("{}/{}", vm.source_root, source)
+                } else {
+                    format!("{}/{}/{}", vm.source_root, vm.current_subdir, source)
+                };
+                let base = std::path::Path::new(base_dir);
+                let src = std::path::Path::new(&full_source);
+                if !src.starts_with(base) {
+                    return Err("generator.process: When using preserve_path_from, all input files must be in a subdirectory of the given dir.".to_string());
+                }
+            }
+        }
 
         Ok(Object::GeneratedList(GeneratedListData {
             generator: g.clone(),
@@ -2309,7 +2354,12 @@ fn resolve_include_dirs(vm: &VM, args: &[CallArg]) -> Vec<String> {
     let process_dep = |dep: &Object, result: &mut Vec<String>| {
         if let Object::Dependency(d) = dep {
             for dir in &d.include_dirs {
-                result.push(format!("-I{}", dir));
+                if std::path::Path::new(dir).is_absolute() {
+                    result.push(format!("-I{}", dir));
+                } else {
+                    // Relative paths need to be resolved against the source root
+                    result.push(format!("-I{}/{}", vm.source_root, dir));
+                }
             }
         }
     };

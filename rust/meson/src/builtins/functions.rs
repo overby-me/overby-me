@@ -344,7 +344,7 @@ fn builtin_project(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
     } else {
         None
     };
-    if let Some(src) = opts_source {
+    if let Some(ref src) = opts_source {
         crate::options::parse_options_file(&src, &mut vm.options);
     }
 
@@ -387,10 +387,15 @@ fn builtin_project(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         if let Some(eq_pos) = opt_str.find('=') {
             let key = opt_str[..eq_pos].trim().to_string();
             let val = opt_str[eq_pos + 1..].trim();
-            // Skip subproject options (key contains ':')
-            if key.contains(':') {
+            // Handle ':option' syntax (this project's own option)
+            let key = if key.starts_with(':') {
+                key[1..].to_string()
+            } else if key.contains(':') {
+                // Skip subproject options (key contains ':' but not at start)
                 continue;
-            }
+            } else {
+                key
+            };
             let obj = if string_typed_builtins.contains(&key.as_str()) {
                 crate::objects::Object::String(val.to_string())
             } else {
@@ -402,6 +407,114 @@ fn builtin_project(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
             } else {
                 // Override option file defaults and inherited parent values
                 vm.options.insert(key, obj);
+            }
+        }
+    }
+
+    // Apply type coercion and deprecated option value remapping
+    if let Some(ref src) = opts_source {
+        let defs = crate::options::parse_options_file_defs(src);
+
+        // Pass 0: Coerce option values based on declared types from the options file
+        for def in &defs {
+            if let Some(val) = vm.options.get(&def.name).cloned() {
+                let coerced = match def.opt_type.as_str() {
+                    "array" => match &val {
+                        Object::Array(_) => val,
+                        Object::String(s) => {
+                            if s.is_empty() {
+                                Object::Array(Vec::new())
+                            } else {
+                                Object::Array(
+                                    s.split(',')
+                                        .map(|v| Object::String(v.trim().to_string()))
+                                        .collect(),
+                                )
+                            }
+                        }
+                        _ => val,
+                    },
+                    "feature" => match &val {
+                        Object::Feature(_) => val,
+                        Object::String(s) => match s.as_str() {
+                            "enabled" => Object::Feature(FeatureState::Enabled),
+                            "disabled" => Object::Feature(FeatureState::Disabled),
+                            "auto" => Object::Feature(FeatureState::Auto),
+                            _ => val,
+                        },
+                        Object::Bool(b) => {
+                            if *b {
+                                Object::Feature(FeatureState::Enabled)
+                            } else {
+                                Object::Feature(FeatureState::Disabled)
+                            }
+                        }
+                        _ => val,
+                    },
+                    "boolean" => match &val {
+                        Object::Bool(_) => val,
+                        Object::String(s) => match s.as_str() {
+                            "true" => Object::Bool(true),
+                            "false" => Object::Bool(false),
+                            _ => val,
+                        },
+                        _ => val,
+                    },
+                    _ => val,
+                };
+                vm.options.insert(def.name.clone(), coerced);
+            }
+        }
+
+        // Pass 1: Handle Renamed options (forward values to new option names)
+        for def in &defs {
+            if let Some(crate::options::DeprecatedInfo::Renamed(new_name)) = &def.deprecated {
+                if let Some(val) = vm.options.get(&def.name).cloned() {
+                    vm.options.insert(new_name.clone(), val);
+                }
+            }
+        }
+
+        // Pass 2: Handle ValueMap options (remap values)
+        for def in &defs {
+            if let Some(crate::options::DeprecatedInfo::ValueMap(map)) = &def.deprecated {
+                if let Some(val) = vm.options.get(&def.name).cloned() {
+                    match &val {
+                        Object::Array(arr) => {
+                            // For arrays, remap individual elements
+                            let new_arr: Vec<Object> = arr
+                                .iter()
+                                .map(|item| {
+                                    if let Object::String(s) = item {
+                                        if let Some(replacement) = map.get(s) {
+                                            Object::String(replacement.clone())
+                                        } else {
+                                            item.clone()
+                                        }
+                                    } else {
+                                        item.clone()
+                                    }
+                                })
+                                .collect();
+                            vm.options.insert(def.name.clone(), Object::Array(new_arr));
+                        }
+                        _ => {
+                            let val_str = match &val {
+                                Object::String(s) => s.clone(),
+                                Object::Bool(b) => b.to_string(),
+                                Object::Int(n) => n.to_string(),
+                                Object::Feature(FeatureState::Enabled) => "enabled".to_string(),
+                                Object::Feature(FeatureState::Disabled) => "disabled".to_string(),
+                                Object::Feature(FeatureState::Auto) => "auto".to_string(),
+                                other => other.to_display_string(),
+                            };
+                            if let Some(replacement) = map.get(&val_str) {
+                                let new_val = crate::options::parse_option_value(replacement);
+                                vm.options.insert(def.name.clone(), new_val);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -539,16 +652,23 @@ fn build_target_common(
         .to_string();
     let include_dirs_val = VM::get_arg_value(args, "include_directories");
     let mut include_dirs = Vec::new();
-    if let Some(Object::Array(arr)) = include_dirs_val {
-        for item in arr {
-            match item {
-                Object::IncludeDirs(d) => include_dirs.extend(d.dirs.clone()),
-                Object::String(s) => include_dirs.push(s.clone()),
-                _ => {}
+    match include_dirs_val {
+        Some(Object::Array(arr)) => {
+            for item in arr {
+                match item {
+                    Object::IncludeDirs(d) => include_dirs.extend(d.dirs.clone()),
+                    Object::String(s) => include_dirs.push(s.clone()),
+                    _ => {}
+                }
             }
         }
-    } else if let Some(Object::IncludeDirs(d)) = include_dirs_val {
-        include_dirs = d.dirs.clone();
+        Some(Object::IncludeDirs(d)) => {
+            include_dirs.extend(d.dirs.clone());
+        }
+        Some(Object::String(s)) => {
+            include_dirs.push(s.clone());
+        }
+        _ => {}
     }
 
     let c_args = VM::get_arg_string_array(args, "c_args");
@@ -1315,14 +1435,23 @@ fn builtin_declare_dependency(vm: &mut VM, args: &[CallArg]) -> Result<Object, S
     let link_args = VM::get_arg_string_array(args, "link_args");
     let include_dirs_val = VM::get_arg_value(args, "include_directories");
     let mut include_dirs = Vec::new();
-    if let Some(Object::Array(arr)) = include_dirs_val {
-        for item in arr {
-            match item {
-                Object::IncludeDirs(d) => include_dirs.extend(d.dirs.clone()),
-                Object::String(s) => include_dirs.push(s.clone()),
-                _ => {}
+    match include_dirs_val {
+        Some(Object::Array(arr)) => {
+            for item in arr {
+                match item {
+                    Object::IncludeDirs(d) => include_dirs.extend(d.dirs.clone()),
+                    Object::String(s) => include_dirs.push(s.clone()),
+                    _ => {}
+                }
             }
         }
+        Some(Object::IncludeDirs(d)) => {
+            include_dirs.extend(d.dirs.clone());
+        }
+        Some(Object::String(s)) => {
+            include_dirs.push(s.clone());
+        }
+        _ => {}
     }
 
     let version = VM::get_arg_str(args, "version", usize::MAX)
@@ -1881,6 +2010,34 @@ fn builtin_configure_file(vm: &mut VM, args: &[CallArg]) -> Result<Object, Strin
                         t.outputs.first().map(|s| s.as_str()).unwrap_or(&t.name)
                     ));
                 }
+                Object::Array(inner) => {
+                    for inner_item in inner {
+                        match inner_item {
+                            Object::File(f) => {
+                                if f.is_built {
+                                    if f.subdir.is_empty() {
+                                        command.push(format!("{}/{}", vm.build_root, f.path));
+                                    } else {
+                                        command.push(format!(
+                                            "{}/{}/{}",
+                                            vm.build_root, f.subdir, f.path
+                                        ));
+                                    }
+                                } else {
+                                    if f.subdir.is_empty() {
+                                        command.push(format!("{}/{}", vm.source_root, f.path));
+                                    } else {
+                                        command.push(format!(
+                                            "{}/{}/{}",
+                                            vm.source_root, f.subdir, f.path
+                                        ));
+                                    }
+                                }
+                            }
+                            _ => command.push(inner_item.to_string_value()),
+                        }
+                    }
+                }
                 _ => command.push(item.to_string_value()),
             }
         }
@@ -1972,15 +2129,28 @@ fn builtin_configure_file(vm: &mut VM, args: &[CallArg]) -> Result<Object, Strin
         if !resolved_command.is_empty() {
             let cmd = &resolved_command[0];
             let cmd_args = &resolved_command[1..];
-            let result = std::process::Command::new(cmd).args(cmd_args).output();
+            let result = std::process::Command::new(cmd)
+                .args(cmd_args)
+                .current_dir(&build_subdir)
+                .env("MESON_BUILD_ROOT", &vm.build_root)
+                .env("MESON_SOURCE_ROOT", &vm.source_root)
+                .env("MESON_SUBDIR", &vm.current_subdir)
+                .output();
             match result {
                 Ok(output_result) => {
                     if capture {
                         let _ = std::fs::write(&output_path, &output_result.stdout);
                     }
-                    if !output_result.status.success() && capture {
-                        let stderr = String::from_utf8_lossy(&output_result.stderr);
-                        return Err(format!("ERROR: Error running command:\n{}", stderr.trim()));
+                    if !output_result.status.success() {
+                        if capture {
+                            let stderr = String::from_utf8_lossy(&output_result.stderr);
+                            return Err(format!(
+                                "ERROR: Error running command:\n{}",
+                                stderr.trim()
+                            ));
+                        }
+                        // Non-capture mode: silently ignore execution failures
+                        // The backend (ninja) will handle the actual execution
                     }
                 }
                 Err(e) => {
@@ -2398,6 +2568,8 @@ fn builtin_subproject(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
 
     let required = match VM::get_arg_value(args, "required") {
         Some(Object::Bool(b)) => *b,
+        Some(Object::Feature(FeatureState::Enabled)) => true,
+        Some(Object::Feature(FeatureState::Auto)) => false,
         Some(Object::Feature(FeatureState::Disabled)) => {
             let sp = Object::Subproject(SubprojectData {
                 name: name.clone(),
@@ -2584,6 +2756,10 @@ fn builtin_subproject(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
             "install_umask",
             "stdsplit",
             "errorlogs",
+            "c_std",
+            "cpp_std",
+            "cpp_eh",
+            "cpp_rtti",
         ];
         // Keep built-in options
         for key in &builtin_options {
@@ -2860,9 +3036,17 @@ fn builtin_run_command(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> 
             Object::ExternalProgram(p) => cmd_parts.push(p.path.clone()),
             Object::File(f) => {
                 let path = if f.is_built {
-                    format!("{}/{}", vm.build_root, f.path)
+                    if f.subdir.is_empty() {
+                        format!("{}/{}", vm.build_root, f.path)
+                    } else {
+                        format!("{}/{}/{}", vm.build_root, f.subdir, f.path)
+                    }
                 } else {
-                    format!("{}/{}", vm.source_root, f.path)
+                    if f.subdir.is_empty() {
+                        format!("{}/{}", vm.source_root, f.path)
+                    } else {
+                        format!("{}/{}/{}", vm.source_root, f.subdir, f.path)
+                    }
                 };
                 cmd_parts.push(path);
             }
@@ -2957,7 +3141,13 @@ fn builtin_include_directories(vm: &mut VM, args: &[CallArg]) -> Result<Object, 
         if let Object::String(s) = arg {
             // Reject absolute paths that point inside the source tree
             if s.starts_with('/') {
-                if s.starts_with(&vm.source_root) || s.starts_with(&vm.top_source_root) {
+                let source_root_prefix = format!("{}/", vm.source_root);
+                let top_source_root_prefix = format!("{}/", vm.top_source_root);
+                if s == &vm.source_root
+                    || s.starts_with(&source_root_prefix)
+                    || s == &vm.top_source_root
+                    || s.starts_with(&top_source_root_prefix)
+                {
                     return Err(format!(
                         "Tried to form an absolute path to a dir in the source tree.
 You should not do that but use relative paths instead, for
@@ -3008,7 +3198,15 @@ fn builtin_import(_vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         })
         .ok_or("import() requires module name")?;
 
-    let required = VM::get_arg_bool(args, "required", true);
+    // Handle required: can be bool or Feature (from get_option)
+    let required_val = VM::get_arg_value(args, "required");
+    let (required, disabled_by_feature) = match required_val {
+        Some(Object::Bool(b)) => (*b, false),
+        Some(Object::Feature(FeatureState::Disabled)) => (false, true),
+        Some(Object::Feature(FeatureState::Auto)) => (false, false),
+        Some(Object::Feature(FeatureState::Enabled)) => (true, false),
+        _ => (true, false),
+    };
 
     // Known stabilized modules (can be imported directly without unstable- prefix)
     const STABILIZED_MODULES: &[&str] = &[
@@ -3032,6 +3230,7 @@ fn builtin_import(_vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         "hotdoc",
         "wayland",
         "external_project",
+        "modtest",
     ];
 
     // Known unstable-only modules (must be imported with unstable- prefix)
@@ -3060,11 +3259,26 @@ fn builtin_import(_vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         None
     };
 
+    let use_disabler = VM::get_arg_bool(args, "disabler", false);
+
     match canonical {
-        Some(resolved) => Ok(Object::Module(resolved)),
+        Some(resolved) => {
+            if disabled_by_feature {
+                // Feature is disabled, so return not-found module or disabler
+                if use_disabler {
+                    Ok(Object::Disabler)
+                } else {
+                    Ok(Object::Module(String::new()))
+                }
+            } else {
+                Ok(Object::Module(resolved))
+            }
+        }
         None => {
             if required {
                 Err(format!("Module '{}' not found", name))
+            } else if use_disabler {
+                Ok(Object::Disabler)
             } else {
                 // Return a not-found module (empty name signals not-found)
                 Ok(Object::Module(String::new()))

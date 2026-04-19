@@ -670,6 +670,36 @@ impl Cli {
             }
         }
 
+        // Load native file properties
+        if let Some(ref native) = args.native_file {
+            let native_path = if std::path::Path::new(native).is_absolute() {
+                native.clone()
+            } else {
+                format!("{}/{}", source_dir, native)
+            };
+            let machine_config = options::parse_machine_file(&native_path);
+            if let Some(properties) = machine_config.get("properties") {
+                for (key, value) in properties {
+                    interp
+                        .vm
+                        .native_properties
+                        .insert(key.clone(), options::parse_option_value(value));
+                }
+            }
+            // Apply other sections as options (e.g. [built-in options])
+            for (section, values) in &machine_config {
+                if section != "properties" {
+                    for (key, value) in values {
+                        let opt_key = format!("{}_{}", section, key);
+                        interp
+                            .vm
+                            .options
+                            .insert(opt_key, crate::objects::Object::String(value.clone()));
+                    }
+                }
+            }
+        }
+
         // Apply CLI options
         interp.set_options(&args.options);
 

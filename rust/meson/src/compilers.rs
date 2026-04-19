@@ -562,13 +562,28 @@ pub fn has_function_attribute(compiler: &CompilerData, attr: &str) -> bool {
         "fallthrough" => {
             "int func(void) { switch(0) { case 0: __attribute__((fallthrough)); default: break; } return 0; }"
         }
+        "null_terminated_string_arg" => {
+            "void __attribute__((null_terminated_string_arg(1))) func(const char *s);"
+        }
+        "retain" => "int __attribute__((retain)) x;",
         _ => {
             // Generic fallback: try to compile with the attribute
             let generic = format!("int __attribute__(({})) func(void) {{ return 0; }}", attr);
+            let generic = if compiler.language == "cpp" || compiler.language == "c++" {
+                format!("extern \"C\" {{ {} }}", generic)
+            } else {
+                generic
+            };
             return try_compile_code(compiler, &generic, &["-Werror".to_string()]);
         }
     };
-    try_compile_code(compiler, code, &["-Werror".to_string()])
+    // For C++ compilers, wrap in extern "C" to avoid name mangling issues
+    let code = if compiler.language == "cpp" || compiler.language == "c++" {
+        format!("extern \"C\" {{ {} }}", code)
+    } else {
+        code.to_string()
+    };
+    try_compile_code(compiler, &code, &["-Werror".to_string()])
 }
 
 /// Compute an integer expression
@@ -722,7 +737,13 @@ fn try_link_code_with_args(
 
     let mut cmd = Command::new(&compiler.cmd[0]);
     cmd.arg(&src_path).arg("-o").arg(&exe_path);
-    cmd.arg("-w");
+    let has_werror = compile_args
+        .iter()
+        .chain(link_args.iter())
+        .any(|a| a == "-Werror");
+    if !has_werror {
+        cmd.arg("-w");
+    }
     for arg in compile_args {
         cmd.arg(arg);
     }
@@ -763,7 +784,8 @@ fn try_run_code_werror(
     let extra = extra_args_from_callargs(args);
     let mut cmd = Command::new(&compiler.cmd[0]);
     cmd.arg(&src_path).arg("-o").arg(&exe_path);
-    if werror {
+    let has_werror = werror || extra.iter().any(|a| a == "-Werror");
+    if has_werror {
         cmd.arg("-Werror");
     } else {
         cmd.arg("-w");

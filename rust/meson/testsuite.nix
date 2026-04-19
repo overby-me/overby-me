@@ -82,6 +82,14 @@ pkgs.runCommand "rust-meson-test-${name}" {
     done < "$MESON_OPTS_FILE"
     rm -f "$MESON_OPTS_FILE"
 
+    # Auto-detect native file in test directory
+    for nf in nativefile.ini native.txt cross_file.txt; do
+      if [ -f "$nf" ]; then
+        MESON_CMD="$MESON_CMD --native-file $nf"
+        break
+      fi
+    done
+
     # Run meson setup, capturing output
     set +e
     output=$(eval $MESON_CMD 2>&1)

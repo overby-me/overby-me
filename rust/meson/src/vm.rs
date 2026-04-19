@@ -110,6 +110,8 @@ pub struct VM {
     pub top_subproject_dir: String,
     /// Option keys explicitly set by the caller of subproject() (to prevent subproject own defaults from overriding them)
     pub caller_option_keys: HashSet<String>,
+    /// Native file properties (from --native-file [properties] section)
+    pub native_properties: HashMap<String, Object>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -339,6 +341,7 @@ impl VM {
             top_build_root: String::new(),
             top_subproject_dir: "subprojects".to_string(),
             caller_option_keys: HashSet::new(),
+            native_properties: HashMap::new(),
         }
     }
 
@@ -350,25 +353,32 @@ impl VM {
                 Ok(StepResult::Jump(target)) => ip = target,
                 Ok(StepResult::Halt) => break,
                 Err(e) => {
-                    if let Some(ctx) = self.testcase_stack.last().cloned() {
-                        if glob_match(&ctx.expected_error, &e) {
-                            // Error matched expected pattern - testcase passes
-                            self.testcase_stack.pop();
-                            self.stack.truncate(ctx.saved_stack_len);
-                            ip = ctx.end_ip;
-                            continue;
+                    let mut current_error = e;
+                    loop {
+                        if let Some(ctx) = self.testcase_stack.last().cloned() {
+                            if glob_match(&ctx.expected_error, &current_error) {
+                                // Error matched expected pattern - testcase passes
+                                self.testcase_stack.pop();
+                                self.stack.truncate(ctx.saved_stack_len);
+                                ip = ctx.end_ip;
+                                break;
+                            } else {
+                                // Error caught but did not match - pop and create mismatch error
+                                self.testcase_stack.pop();
+                                self.stack.truncate(ctx.saved_stack_len);
+                                ip = ctx.end_ip;
+                                current_error = format!(
+                                    "Expecting error '{}' but got '{}'",
+                                    ctx.expected_error.trim(),
+                                    current_error.trim()
+                                );
+                                // Continue loop to check outer testcase
+                            }
                         } else {
-                            // Error caught but did not match - report mismatch
-                            self.testcase_stack.pop();
-                            self.stack.truncate(ctx.saved_stack_len);
-                            return Err(format!(
-                                "Expecting error '{}' but got '{}'",
-                                ctx.expected_error.trim(),
-                                e.trim()
-                            ));
+                            return Err(current_error);
                         }
                     }
-                    return Err(e);
+                    continue;
                 }
             }
         }
@@ -854,10 +864,7 @@ impl VM {
                     .testcase_stack
                     .pop()
                     .ok_or("TestcaseNoError without testcase context")?;
-                return Err(format!(
-                    "Testcase expected error matching '{}' but code succeeded",
-                    ctx.expected_error
-                ));
+                return Err("Expecting an error but code block succeeded".to_string());
             }
             OpCode::Halt => return Ok(StepResult::Halt),
         }

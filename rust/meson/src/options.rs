@@ -194,10 +194,14 @@ pub struct OptionDef {
 
 /// Information about deprecated option
 pub enum DeprecatedInfo {
+    /// Option is fully deprecated (deprecated: true)
+    Bool(bool),
     /// Renamed to another option
     Renamed(String),
     /// Value remapping
     ValueMap(std::collections::HashMap<String, String>),
+    /// List of deprecated values (warning only, no remapping)
+    DeprecatedValues(Vec<String>),
 }
 
 fn default_for_type(opt_type: &str, choices: &[String]) -> Object {
@@ -282,8 +286,15 @@ fn parse_option_call_def(args: &[ast::Argument]) -> Option<OptionDef> {
                 }
             }
             Some("deprecated") => match eval_const_expr(&arg.value) {
+                Some(Object::Bool(b)) => {
+                    deprecated = Some(DeprecatedInfo::Bool(b));
+                }
                 Some(Object::String(s)) => {
                     deprecated = Some(DeprecatedInfo::Renamed(s));
+                }
+                Some(Object::Array(items)) => {
+                    let vals: Vec<String> = items.iter().map(|o| obj_to_string(o)).collect();
+                    deprecated = Some(DeprecatedInfo::DeprecatedValues(vals));
                 }
                 Some(Object::Dict(entries)) => {
                     let map: std::collections::HashMap<String, String> = entries

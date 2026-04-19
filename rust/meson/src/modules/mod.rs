@@ -10,12 +10,15 @@ pub mod gnome;
 pub mod hotdoc;
 pub mod i18n;
 pub mod icestorm;
+pub mod modtest;
+
 pub mod java;
 pub mod keyval;
 pub mod pkgconfig;
 pub mod python;
 pub mod qt;
 pub mod rust_mod;
+pub mod simd;
 pub mod sourceset;
 pub mod wayland;
 pub mod windows;
@@ -41,4 +44,6 @@ pub fn register_methods(vm: &mut VM) {
     dlang::register(vm);
     external_project::register(vm);
     icestorm::register(vm);
+    modtest::register(vm);
+    simd::register(vm);
 }
