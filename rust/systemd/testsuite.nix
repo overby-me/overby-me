@@ -99,12 +99,20 @@ in
       # win.  All other stage-2 behavior (activation script, exec
       # systemd) is preserved verbatim.
       system.build.bootStage2 = let
-        # More specific start pattern so the sed range matches only
-        # the /proc/self/fd/$logOutFd subshell pipeline and not the
-        # `/run/log/stage-2-init.log` fallback further down.
+        # Delete the whole `if test -w /dev/kmsg; then ... fi` block
+        # that wraps the racy `exec > >(tee | while read) 2>&1` pipe.
+        # Deleting only the inner then-branch would leave bash with an
+        # empty `then`, which is a syntax error.  Stripping the entire
+        # if/fi chain makes stage-2 output go directly to inherited
+        # stdout (/dev/console from stage-1) — no subshell, no pipe,
+        # no race.
         patchedSrc =
           pkgs.runCommand "stage-2-init-no-tee-pipe.sh" {} ''
-            sed '/^ *exec > >(tee -i \/proc\/self\/fd\/"\$logOutFd"/,/^ *done) 2>&1$/d' \
+            # End pattern `^    fi$` (4 leading spaces, nothing else)
+            # deliberately matches the outer `fi` at column 4 closing
+            # the `if test -w /dev/kmsg; then … fi` block — not the
+            # deeper 12-space inner `fi` that closes `if test -n "$line"`.
+            sed '/^ *if test -w \/dev\/kmsg; then$/,/^    fi$/d' \
                 ${pkgs.path}/nixos/modules/system/boot/stage-2-init.sh \
                 > $out
           '';
