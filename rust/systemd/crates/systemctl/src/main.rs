@@ -746,15 +746,16 @@ fn main() {
 
     // Path-to-unit translation: systemctl accepts absolute paths like
     // `/sys/devices/virtual/net/eth0` or `/dev/sda1` and resolves them
-    // to the corresponding `.device` / `.mount` unit name.  Matches
-    // upstream systemd's `unit_name_mangle_with_suffix` behaviour.
+    // to the corresponding `.device` unit name using the systemd path-
+    // escape convention (each `/` → `-`, and other specials → `\xNN`).
+    // Matches upstream systemd's `unit_name_mangle_with_suffix`.
     // Skip positional[0] since that's the subcommand.
     for arg in positional.iter_mut().skip(1) {
         if arg.starts_with("/sys/") || arg.starts_with("/dev/") {
-            let trimmed = arg.trim_matches('/');
-            if !trimmed.is_empty() {
-                *arg = format!("{}.device", trimmed.replace('/', "-"));
-            }
+            *arg = format!(
+                "{}.device",
+                libsystemd::unit_name::unit_name_path_escape(arg),
+            );
         }
     }
 

@@ -156,14 +156,19 @@ pub fn derive_unit_names(params: &UdevEventParams) -> Vec<String> {
     }
 
     // Subsystem-based friendly alias, e.g. /sys/devices/virtual/net/eth0 →
-    // sys-subsystem-net-devices-eth0.device.
+    // sys-subsystem-net-devices-eth0.device.  Both the subsystem and the
+    // kernel name are run through unit_name_escape so that
+    // SUBSYSTEM=net KERNEL=test\x2dnetif\x2dfoo produces the properly
+    // escaped `sys-subsystem-net-devices-test\x2dnetif\x2dfoo.device`.
     if !params.subsystem.is_empty()
         && let Some(kernel_name) = params.sysfs_path.rsplit('/').next()
         && !kernel_name.is_empty()
     {
+        let subsys_esc = crate::unit_name::unit_name_escape(&params.subsystem);
+        let kernel_esc = crate::unit_name::unit_name_escape(kernel_name);
         let alias = format!(
             "sys-subsystem-{}-devices-{}.device",
-            params.subsystem, kernel_name
+            subsys_esc, kernel_esc
         );
         if !names.contains(&alias) {
             names.push(alias);
@@ -207,19 +212,16 @@ pub fn derive_unit_names(params: &UdevEventParams) -> Vec<String> {
     names
 }
 
-/// Simple sysfs-path to device-unit-name conversion.
+/// Convert a sysfs / device path into a `.device` unit name.
 ///
-/// Does NOT handle special-character escaping (dash, dot) — that would
-/// require `unit_name_path_escape` which we don't invoke here.  Every
-/// real-world sysfs path in tests uses only `[a-zA-Z0-9:_/]` so the
-/// plain `/` → `-` substitution is sufficient.
+/// Uses the systemd `unit_name_path_escape` convention: `/` separates
+/// path components as `-`, and any character outside `[a-zA-Z0-9:_.]`
+/// is escaped as `\xNN`.  This matches the output of
+/// `systemd-escape --path --suffix=device …` which
+/// TEST-17-UDEV.SYSTEMD_WANTS-escape uses to construct expected unit
+/// names.
 pub fn path_to_device_unit_name(path: &str) -> String {
-    let trimmed = path.trim_matches('/');
-    if trimmed.is_empty() {
-        "-.device".to_owned()
-    } else {
-        format!("{}.device", trimmed.replace('/', "-"))
-    }
+    format!("{}.device", crate::unit_name::unit_name_path_escape(path))
 }
 
 /// Mark the listed device units as plugged (started).  Creates the unit
@@ -440,8 +442,13 @@ mod tests {
             "/sys/test/alias-to-null-on-add".to_owned(),
         );
         let names = derive_unit_names(&p);
-        assert!(names.contains(&"sys-test-alias\u{2d}to\u{2d}null\u{2d}on\u{2d}add.device".to_owned())
-            || names.contains(&"sys-test-alias-to-null-on-add.device".to_owned()));
+        // unit_name_path_escape turns each literal `-` into `\x2d`, so
+        // /sys/test/alias-to-null-on-add →
+        // sys-test-alias\x2dto\x2dnull\x2don\x2dadd.device
+        assert!(
+            names.contains(&r"sys-test-alias\x2dto\x2dnull\x2don\x2dadd.device".to_owned()),
+            "expected escaped alias in {names:?}"
+        );
     }
 
     #[test]
