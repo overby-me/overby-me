@@ -259,4 +259,4 @@ Key architectural constraints:
 - **Lock contention during oneshot activation:** The service state write-lock is held for the entire ExecStart execution. Property queries use try_read() with atomic fallbacks for MainPID/ExecMainStatus.
 - **NixOS VM test framework:** Tests boot QEMU VMs with rust-systemd as PID 1. Tests run via `machine.execute()` shell commands, NOT as systemd services. This breaks tests that expect to run inside a service context.
 - **NixOS PATH for exec helper:** C systemd's exec helper uses a limited PATH that doesn't include `/run/current-system/sw/bin`. Tests creating inline unit files with bare commands need patchScript fixes.
-- **Transient boot hangs:** Non-deterministic ~30% hang rate in QEMU. Caused by timing-dependent race conditions during early boot. Retrying usually works.
+- **Transient boot hangs:** ~~Non-deterministic ~30% hang rate in QEMU.~~ **FIXED** — was the bash `stage-2-init.sh` tee-pipe fd race. `system.build.bootStage2` override in testsuite.nix strips the offending `if test -w /dev/kmsg; then exec > >(tee | while read); fi` block. See § 9.
