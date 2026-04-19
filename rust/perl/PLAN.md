@@ -6,18 +6,55 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**57/79 Nix tests passing** (72%) — selected tests from the upstream Perl test suite.
+**59/79 Nix tests passing** (75%) — selected tests from the upstream Perl test suite.
 
 Passing: base/if, base/cond, base/while, base/pat, base/num, base/translate,
 base/term, base/rs, cmd/elsif, cmd/for, cmd/mod, cmd/switch, opbasic/arith,
 opbasic/qq, opbasic/magic_phase, op/arith2, op/auto, op/bop, op/chop,
-op/closure, op/cond, op/context, op/defined, op/delete, op/do, op/each,
-op/grep, op/hash, op/inc, op/index, op/lc, op/my, op/oct, op/pack, op/push,
-op/quotemeta, op/range, op/ref, op/reverse, op/sort, op/splice, op/split,
-op/sprintf, op/sub, op/substr, op/unshift, op/vec, op/wantarray, io/argv,
-io/fs, io/open, io/print, io/read, re/pat, re/subst, run/exit, run/switches.
+op/closure, op/cond, op/context, op/defined, op/delete, op/die, op/do,
+op/each, op/grep, op/hash, op/inc, op/index, op/lc, op/my, op/not, op/oct,
+op/pack, op/push, op/quotemeta, op/range, op/ref, op/reverse, op/sort,
+op/splice, op/split, op/sprintf, op/sub, op/substr, op/unshift, op/vec,
+op/wantarray, io/argv, io/fs, io/open, io/print, io/read, re/pat, re/subst,
+run/exit, run/switches.
 
 Major unlocks in this cycle:
+
+- `DESTROY { … }` / `AUTOLOAD { … }` without the `sub` keyword — Perl's
+  parser hardcodes these two bareword-sub shortcuts (matches B::Deparse's
+  `sub DESTROY { … }` expansion). Parser at statement position now routes
+  `Ident("DESTROY"|"AUTOLOAD")` followed by `{` into `parse_sub_decl`
+  before the fall-through treats it as a bareword call with a hashref.
+- `pos @arr = N` / `pos %h = N` dies with Perl's compile-time message
+  "Can't modify array/hash dereference in match position at FILE line N".
+  Assign's Call-target special-case detects the form and surfaces a
+  Flow::Die so `eval 'pos @a = 1'` captures the error in `$@`.
+- Named-unary sigil lexing: `scalar %h` / `pos %h` / `keys %h` (no parens)
+  now lex as `Ident("scalar") HashVar("h")` instead of `Ident Percent Ident`
+  (which produced a spurious modulus). `last_is_named_unary` tags the
+  preceding ident so the `%` branch treats the sigil as a variable.
+- `scalar %h` returns the key count (empty-hash → "" for boolean-false,
+  non-empty → Num(N)). Matches Perl 5.25+'s `scalar HASH` semantics.
+- `$SIG{__DIE__}` + `PROPAGATE` — on bare `die;` re-raise, if `$@` is a
+  blessed object whose class implements `PROPAGATE`, invoke it with
+  (old-die-value, file, line) and promote the returned value to the new
+  die.
+- Hoist named subs inside `package NAME { BLOCK }` — pre-pass walks every
+  block body and registers `sub Foo` as `NAME::Foo` before main runs, so
+  forward-declared methods inside a package block resolve on first call.
+- `test.pl had problems loading Config` warning replay helper. Routed
+  through `maybe_emit_config_load_warning` so every builtin that stands in
+  for `test.pl` (e.g. the `runperl` shortcut) emits the same one-shot
+  warning reference perl's `which_perl` does when `Config.pm` is absent.
+- `for (!0) { … }` / `for (!1) { … }` — the negated-bool loop iterator
+  aliases Perl's read-only PL_sv_yes / PL_sv_no constants. `readonly_vars`
+  set is primed when the foreach-list is a UnaryOp::LogNot / UnaryOp::Not;
+  any `$_` write inside the body then dies with "Modification of a read-
+  only value …" and the set is cleared on body exit.
+- Inner-scope `use strict 'vars'` enforcement on `eval STRING`: if the
+  eval'd code itself declares `use strict`, enforce vars-checking even
+  when the surrounding scope didn't. Previously required the outer scope
+  to opt in first.
 
 - `@_` is now dynamically scoped per-call (was being written to globals
   and overwritten on every sub call — this broke every test that used

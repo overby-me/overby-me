@@ -739,7 +739,9 @@ impl Lexer {
                                 self.pos += 1;
                             }
                             tokens.push(Token::ScalarDeref(n));
-                        } else if (self.ch() == '_' || self.ch().is_ascii_alphabetic())
+                        } else if (self.ch() == '_'
+                            || self.ch().is_ascii_alphabetic()
+                            || (!self.ch().is_ascii() && self.ch().is_alphabetic()))
                             && self.lookahead_close_brace_after_ident()
                         {
                             let name = self.read_ident();
@@ -756,7 +758,10 @@ impl Lexer {
                         self.pos += 1;
                         let c = self.advance();
                         tokens.push(Token::ScalarVar(format!("^{c}")));
-                    } else if self.ch() == '_' || self.ch().is_ascii_alphabetic() {
+                    } else if self.ch() == '_'
+                        || self.ch().is_ascii_alphabetic()
+                        || (!self.ch().is_ascii() && self.ch().is_alphabetic())
+                    {
                         let name = self.read_ident();
                         // Check for $name::name
                         while self.ch() == ':' && self.peek(1) == ':' {
@@ -823,7 +828,10 @@ impl Lexer {
 
                 '@' => {
                     self.pos += 1;
-                    if self.ch() == '_' || self.ch().is_ascii_alphabetic() {
+                    if self.ch() == '_'
+                        || self.ch().is_ascii_alphabetic()
+                        || (!self.ch().is_ascii() && self.ch().is_alphabetic())
+                    {
                         let name = self.read_ident();
                         while self.ch() == ':' && self.peek(1) == ':' {
                             // @Pkg::name not needed yet, skip for simplicity
@@ -864,7 +872,9 @@ impl Lexer {
                                 self.pos += 1;
                             }
                             tokens.push(Token::ArrayDeref(n));
-                        } else if (self.ch() == '_' || self.ch().is_ascii_alphabetic())
+                        } else if (self.ch() == '_'
+                            || self.ch().is_ascii_alphabetic()
+                            || (!self.ch().is_ascii() && self.ch().is_alphabetic()))
                             && self.lookahead_close_brace_after_ident()
                         {
                             let name = self.read_ident();
@@ -910,8 +920,13 @@ impl Lexer {
                     {
                         // Could be hash variable or modulo
                         // Check context: if last token expects operand, it's a hash var
-                        let is_hash = tokens.last().map(|t| t.expects_operand()).unwrap_or(true);
-                        if is_hash && (self.ch() == '_' || self.ch().is_ascii_alphabetic()) {
+                        let is_hash = tokens.last().map(|t| t.expects_operand()).unwrap_or(true)
+                            || last_is_named_unary(tokens.last());
+                        if is_hash
+                            && (self.ch() == '_'
+                                || self.ch().is_ascii_alphabetic()
+                                || (!self.ch().is_ascii() && self.ch().is_alphabetic()))
+                        {
                             let name = self.read_ident();
                             tokens.push(Token::HashVar(name));
                         } else if is_hash && self.ch() == '{' {
@@ -948,7 +963,10 @@ impl Lexer {
                     tokens.push(self.read_number());
                 }
 
-                'a'..='z' | 'A'..='Z' | '_' => {
+                c if c.is_ascii_alphabetic()
+                    || c == '_'
+                    || (!c.is_ascii() && c.is_alphabetic()) =>
+                {
                     // Special case: `x` immediately after an expression-value
                     // token and followed by a digit is the repeat operator, not
                     // the start of an identifier like `x10`.
@@ -1253,7 +1271,9 @@ impl Lexer {
                     } else if self.ch() == '=' {
                         self.pos += 1;
                         tokens.push(Token::StarAssign);
-                    } else if (self.ch() == '_' || self.ch().is_ascii_alphabetic())
+                    } else if (self.ch() == '_'
+                        || self.ch().is_ascii_alphabetic()
+                        || (!self.ch().is_ascii() && self.ch().is_alphabetic()))
                         && tokens.last().map(|t| t.expects_operand()).unwrap_or(true)
                     {
                         // Typeglob like *FH / *pkg::name.
@@ -1514,7 +1534,10 @@ impl Lexer {
 
     fn read_ident(&mut self) -> String {
         let mut s = String::new();
-        while self.pos < self.input.len() && (self.ch().is_ascii_alphanumeric() || self.ch() == '_')
+        while self.pos < self.input.len()
+            && (self.ch().is_ascii_alphanumeric()
+                || self.ch() == '_'
+                || (!self.ch().is_ascii() && self.ch().is_alphabetic()))
         {
             s.push(self.advance());
         }
@@ -1523,7 +1546,9 @@ impl Lexer {
             s.push_str("::");
             self.pos += 2;
             while self.pos < self.input.len()
-                && (self.ch().is_ascii_alphanumeric() || self.ch() == '_')
+                && (self.ch().is_ascii_alphanumeric()
+                    || self.ch() == '_'
+                    || (!self.ch().is_ascii() && self.ch().is_alphabetic()))
             {
                 s.push(self.advance());
             }
@@ -2176,6 +2201,19 @@ impl Lexer {
             body
         }
     }
+}
+
+/// Idents that take an operand so `%` after them is a hash sigil,
+/// not modulus (e.g. `scalar %h` / `pos %h` without parens).
+fn last_is_named_unary(last: Option<&Token>) -> bool {
+    matches!(
+        last,
+        Some(Token::Ident(n)) if matches!(
+            n.as_str(),
+            "scalar" | "pos" | "defined" | "exists" | "delete" | "ref"
+            | "keys" | "values" | "each" | "wantarray"
+        )
+    )
 }
 
 fn process_escapes(s: &str) -> String {

@@ -134,6 +134,11 @@ pub struct Interpreter {
     /// the byte offset where the last match ended; `pos()` reads it; a
     /// failed `/g` match without `/c` clears it.
     pos_offsets: HashMap<String, usize>,
+    /// Names whose write should die with "Modification of a read-only
+    /// value attempted at FILE line N." — used by `for (!0) { … }`,
+    /// where the iterator variable aliases Perl's PL_sv_yes / PL_sv_no
+    /// constants. Cleared when the foreach body ends.
+    readonly_vars: std::collections::HashSet<String>,
     /// Lexical `use bytes` depth. Incremented by `use bytes`, decremented
     /// by `no bytes` or scope exit; when > 0, builtins like `length`,
     /// `chr` behave in byte-mode (count/emit UTF-8 bytes rather than
@@ -303,6 +308,7 @@ impl Interpreter {
             aliased_vars: HashMap::new(),
             deleted_slots: HashMap::new(),
             pos_offsets: HashMap::new(),
+            readonly_vars: std::collections::HashSet::new(),
             bytes_mode_saves: Vec::new(),
             bytes_mode: false,
             strict_vars_saves: Vec::new(),
@@ -366,6 +372,10 @@ impl Interpreter {
         // ${^GLOBAL_PHASE} starts as "START" while BEGIN blocks run.
         self.set_global_var("^GLOBAL_PHASE", Value::Str("START".to_string()));
         // First pass: collect sub definitions and BEGIN blocks
+        // Pre-pass: also walk `package NAME { sub … }` blocks so subs
+        // defined in a package block are registered before main runs.
+        // (Perl hoists named subs at compile time regardless of nesting.)
+        Self::hoist_subs_in_blocks(program, &mut self.subs, "main");
         let mut main_stmts = Vec::new();
         for stmt in program {
             match stmt {
@@ -1002,12 +1012,26 @@ impl Interpreter {
                     Expr::ArrayVar(name) => Some(name.clone()),
                     _ => None,
                 };
+                // Detect `for (!0)` / `for (!1)` / `for (not 0)` — the
+                // resulting list of one bool aliases Perl's read-only
+                // PL_sv_yes / PL_sv_no constants, so writes to the loop
+                // variable inside the body should die.
+                let readonly_iter = matches!(
+                    list,
+                    Expr::UnaryOp(UnaryOp::LogNot, _) | Expr::UnaryOp(UnaryOp::Not, _)
+                );
                 let items = self.eval_list(list);
 
                 // Save the loop variable's current value for restoration
                 let saved_var = self.get_var(var);
 
                 self.push_scope();
+                let was_readonly = if readonly_iter {
+                    self.readonly_vars.insert(var.clone())
+                } else {
+                    false
+                };
+                let _ = was_readonly;
                 // The loop variable is always scoped to the loop body —
                 // push it into the new lexical frame so `pop_scope` below
                 // can see it (and, for blessed refs, dispatch DESTROY
@@ -1022,7 +1046,14 @@ impl Interpreter {
                     .insert(var.clone(), Value::Undef);
                 let _ = is_my;
                 for (i, item) in items.into_iter().enumerate() {
-                    self.set_var(var, item);
+                    // Bypass set_var so the readonly_vars check (set
+                    // above for `for (!0)` etc.) doesn't fire on our own
+                    // iterator assignment.
+                    if let Some(scope) = self.scopes.last_mut() {
+                        scope.vars.insert(var.clone(), item);
+                    } else {
+                        self.globals.vars.insert(var.clone(), item);
+                    }
                     let flow = self.exec_stmts(body);
 
                     // If iterating over an array, write modifications back
@@ -1085,6 +1116,9 @@ impl Interpreter {
                             }
                         }
                     }
+                }
+                if readonly_iter {
+                    self.readonly_vars.remove(var);
                 }
                 self.pop_scope();
                 // Restore the loop variable to its pre-loop value
@@ -1776,6 +1810,35 @@ impl Interpreter {
                     self.call_sub_named(&body, &[arg], Some(&name));
                     self.in_die_handler -= 1;
                 }
+                // Bare `die;` re-raises $@. After the __DIE__ handler has
+                // had a chance to inspect/mutate the value, if $@ is a
+                // blessed object whose class has a PROPAGATE method,
+                // invoke it; the returned value (typically a fresh
+                // re-blessed copy) becomes the new die value.
+                if args.is_empty() {
+                    let prev = self.get_var("@");
+                    if Self::ref_ptr(&prev) != 0
+                        && let Some(class) = self.blessed_refs.get(&Self::ref_ptr(&prev)).cloned()
+                    {
+                        let mname = format!("{class}::PROPAGATE");
+                        if let Some((_p, body)) = self.subs.get(&mname).cloned() {
+                            let file = if self.current_file.is_empty() {
+                                "-e".to_string()
+                            } else {
+                                self.current_file.clone()
+                            };
+                            let line = self.current_line;
+                            let new_val = self.call_sub_named(
+                                &body,
+                                &[prev.clone(), Value::Str(file), Value::Num(line as f64)],
+                                Some(&mname),
+                            );
+                            self.pending_die_value = Some(new_val.clone());
+                            self.set_global_var("@", new_val.clone());
+                            return Flow::Die(new_val.to_str());
+                        }
+                    }
+                }
                 // Stash the ref (if any) so the eval that catches this die
                 // can reinstate `$@` as the real ref instead of its string.
                 // Bare `die;` with a ref in `$@` keeps the ref unchanged;
@@ -2080,8 +2143,15 @@ impl Interpreter {
                 Value::Num(arr.len() as f64)
             }
             Expr::HashVar(name) => {
-                // In scalar context, returns hash info string
-                Value::Str(String::new())
+                // Perl 5.25+: `scalar %h` is just the key count (formerly it
+                // was "M/N" usage stats). Empty hashes return "" which stays
+                // false under boolean context; non-empty returns the count.
+                let n = self.get_hash(name).len();
+                if n == 0 {
+                    Value::Str(String::new())
+                } else {
+                    Value::Num(n as f64)
+                }
             }
             Expr::ArrayElement(name, index) => {
                 let idx = self.eval_expr(index).to_num() as i64;
@@ -2161,6 +2231,35 @@ impl Interpreter {
                 {
                     self.exec_stmt(&stmts[0]);
                     return self.eval_expr(&Expr::Assign(Box::new(inner.clone()), value.clone()));
+                }
+                // `pos @arr = N` / `pos %h = N` — reference perl rejects
+                // these at compile time as "Can't modify array/hash
+                // dereference in match position." Our parser emits a
+                // `Call("pos", [ArrayVar|HashVar])` so we catch the
+                // mistake here and turn it into the same Flow::Die so
+                // `eval 'pos @a = 1'` captures the message in `$@`.
+                if let Expr::Call(n, sub_args) = target.as_ref()
+                    && n == "pos"
+                    && let Some(first) = sub_args.first()
+                {
+                    let kind = match first {
+                        Expr::ArrayVar(_) | Expr::ArrayDerefVar(_) => Some("array"),
+                        Expr::HashVar(_) | Expr::HashDerefVar(_) => Some("hash"),
+                        _ => None,
+                    };
+                    if let Some(kind) = kind {
+                        let file = if self.current_file.is_empty() {
+                            "-e".to_string()
+                        } else {
+                            self.current_file.clone()
+                        };
+                        let line = self.current_line;
+                        self.pending_flow = Some(Flow::Die(format!(
+                            "Can't modify {kind} dereference in match position at {file} line {line}, near \"= {}\"\n",
+                            self.eval_expr(value).to_str()
+                        )));
+                        return Value::Undef;
+                    }
                 }
                 // `substr($s, OFFS, [LEN]) = REPL` — Perl's lvalue substr.
                 // Equivalent to `substr($s, OFFS, LEN, REPL)`. The 2-arg
@@ -5117,6 +5216,10 @@ impl Interpreter {
                 // test.pl's runperl(prog => ..., stderr => 1, ...) wrapper.
                 // Bypass test.pl's implementation (which needs Config to
                 // construct the perl path) and run our own binary directly.
+                // test.pl's `which_perl` tries `require Config` once and
+                // warns if it fails — emit the same warning so byte-for-byte
+                // diffs against reference perl match.
+                self.maybe_emit_config_load_warning();
                 // Build %args from the call arguments.
                 let mut prog = String::new();
                 let mut switches: Vec<String> = Vec::new();
@@ -5212,23 +5315,7 @@ impl Interpreter {
                 //  loading Config: $@"` once on first call. Under a stripped
                 // @INC, reference perl's eval fails and the warning is
                 // emitted. Replay it here so the diff matches.
-                if !self.config_load_warned {
-                    self.config_load_warned = true;
-                    let inc: Vec<String> = self
-                        .get_array("INC")
-                        .into_iter()
-                        .map(|v| v.to_str())
-                        .collect();
-                    let config_found = inc
-                        .iter()
-                        .any(|p| std::path::Path::new(p).join("Config.pm").exists());
-                    if self.set_up_inc_called && !config_found {
-                        eprintln!(
-                            "test.pl had problems loading Config: Can't locate Config.pm in @INC (you may need to install the Config module) (@INC entries checked: {}) at ./test.pl line 970.",
-                            inc.join(" ")
-                        );
-                    }
-                }
+                self.maybe_emit_config_load_warning();
                 let prog = self
                     .eval_expr(args.first().unwrap_or(&Expr::StringLit(String::new())))
                     .to_str();
@@ -5390,6 +5477,31 @@ impl Interpreter {
             Value::HashRef(r) => std::rc::Rc::as_ptr(r) as usize,
             Value::ScalarRef(r) => std::rc::Rc::as_ptr(r) as usize,
             _ => 0,
+        }
+    }
+
+    /// Reference perl's test.pl `which_perl` does
+    /// `eval { require Config; 1 } or warn "test.pl had problems loading
+    /// Config: $@"` once on first use. Under a stripped @INC the warn
+    /// fires; replay it here so byte-for-byte diffs match.
+    fn maybe_emit_config_load_warning(&mut self) {
+        if self.config_load_warned {
+            return;
+        }
+        self.config_load_warned = true;
+        let inc: Vec<String> = self
+            .get_array("INC")
+            .into_iter()
+            .map(|v| v.to_str())
+            .collect();
+        let config_found = inc
+            .iter()
+            .any(|p| std::path::Path::new(p).join("Config.pm").exists());
+        if self.set_up_inc_called && !config_found {
+            eprintln!(
+                "test.pl had problems loading Config: Can't locate Config.pm in @INC (you may need to install the Config module) (@INC entries checked: {}) at ./test.pl line 970.",
+                inc.join(" ")
+            );
         }
     }
 
@@ -5749,6 +5861,19 @@ impl Interpreter {
             self.pending_flow = Some(Flow::Die(err));
             return;
         }
+        // Read-only iterator var (e.g., `for (!0)`): die instead of writing.
+        if self.readonly_vars.contains(&key) {
+            let file = if self.current_file.is_empty() {
+                "-e".to_string()
+            } else {
+                self.current_file.clone()
+            };
+            let line = self.current_line;
+            self.pending_flow = Some(Flow::Die(format!(
+                "Modification of a read-only value attempted at {file} line {line}.\n"
+            )));
+            return;
+        }
         // Modifying a scalar invalidates its `pos` for `/g` matches.
         // (Perl's "magic" — assignment clears the pos extender.)
         self.pos_offsets.remove(&key);
@@ -5799,6 +5924,38 @@ impl Interpreter {
     /// Matches reference perl's "Setting $/ to a … reference is forbidden"
     /// family of errors. Valid settings: any scalar string, `undef`, or a
     /// scalar ref to a positive integer (fixed-record-size mode).
+    /// Walk Block statements pre-registering any `sub NAME { … }` decl
+    /// found inside a `package NAME { … }` block. Tracks the current
+    /// package as we descend so the registered name gets the right
+    /// `Package::sub` qualification.
+    fn hoist_subs_in_blocks(
+        stmts: &[Stmt],
+        subs: &mut HashMap<String, (Vec<String>, Vec<Stmt>)>,
+        pkg: &str,
+    ) {
+        let mut current_pkg = pkg.to_string();
+        for stmt in stmts {
+            match stmt {
+                Stmt::Package(p) => current_pkg = p.clone(),
+                Stmt::Block(body) | Stmt::BareBlock(body) => {
+                    // Block has its own package scope (per parser's
+                    // `package NAME { … }` desugar). Recurse with main
+                    // initially; the inner Stmt::Package will switch it.
+                    Self::hoist_subs_in_blocks(body, subs, &current_pkg);
+                }
+                Stmt::Sub { name, params, body } if !name.is_empty() => {
+                    let qualified = if name.contains("::") || current_pkg == "main" {
+                        name.clone()
+                    } else {
+                        format!("{current_pkg}::{name}")
+                    };
+                    subs.insert(qualified, (params.clone(), body.clone()));
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn validate_record_separator(val: &Value) -> Option<String> {
         match val {
             Value::ArrayRef(_) => {
@@ -8284,7 +8441,10 @@ impl Interpreter {
             .chain(self.globals.hashes.keys().map(|n| format!("%{n}")))
             .chain(self.aliased_vars.keys().cloned())
             .collect();
-        if self.strict_vars
+        let inner_uses_strict = stmts
+            .iter()
+            .any(|s| matches!(s, Stmt::Use(m, _) if m == "strict"));
+        if (self.strict_vars || inner_uses_strict)
             && let Some(err) =
                 strict_vars_check_with_known(&stmts, &self.current_file, &known_outer)
         {

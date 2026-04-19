@@ -378,6 +378,17 @@ impl Parser {
                 };
                 return Some(self.maybe_postfix(stmt));
             }
+            // `DESTROY { ... }` / `AUTOLOAD { ... }` at statement position
+            // parse as `sub NAME { ... }` (Perl's parser hardcodes these two
+            // special subs so the `sub` keyword is optional). Other barewords
+            // followed by `{...}` are still call-with-hashref (matches B::Deparse
+            // output on reference perl).
+            Token::Ident(name)
+                if (name == "DESTROY" || name == "AUTOLOAD")
+                    && matches!(self.tokens.get(self.pos + 1), Some(Token::LBrace)) =>
+            {
+                return Some(self.parse_sub_decl());
+            }
             _ => {
                 // Expression statement. A top-level comma operator — e.g.
                 // `f(), last unless COND` — groups multiple expressions so a
@@ -3427,6 +3438,19 @@ fn parse_interp_string(s: &str) -> Expr {
                 }
             } else {
                 lit.push(chars[i]);
+                i += 1;
+            }
+        } else if chars[i] == '@' && i + 1 < chars.len() && chars[i + 1] == '\'' {
+            // `@'NAME` uses old Perl's apostrophe-as-namespace-separator
+            // (`'` ~= `::`). Bare `@'` is variable `@::` (empty).
+            // Consume `@'` plus any further ident-or-' chars; emit empty.
+            if !lit.is_empty() {
+                parts.push(InterpPart::Lit(std::mem::take(&mut lit)));
+            }
+            i += 2; // skip @'
+            while i < chars.len()
+                && (chars[i].is_ascii_alphanumeric() || chars[i] == '_' || chars[i] == '\'')
+            {
                 i += 1;
             }
         } else if chars[i] == '@'
