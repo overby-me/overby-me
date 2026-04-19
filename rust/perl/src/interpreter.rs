@@ -8576,6 +8576,7 @@ impl Interpreter {
 
         let mut lexer = Lexer::new(code);
         let tokens = lexer.tokenize();
+        let lex_error = lexer.error.take();
         let token_lines = std::mem::take(&mut lexer.token_lines);
         let mut parser = Parser::new_with_lines(tokens, token_lines);
         let stmts = parser.parse_program();
@@ -8588,6 +8589,16 @@ impl Interpreter {
             &mut self.current_file,
             format!("(eval {})", self.eval_counter),
         );
+
+        // Lex-time errors (unterminated heredoc/regex/etc.) captured by
+        // Lexer::error — surface as a Flow::Die captured in `$@` so the
+        // eval context can detect the syntax error like reference perl does.
+        if let Some(err) = lex_error {
+            let filled = err.replace("{FILE}", &self.current_file);
+            self.set_global_var("@", Value::Str(filled));
+            self.current_file = saved_file;
+            return Value::Undef;
+        }
 
         // Run the compile-time `use` check on eval'd strings too, so
         // `eval 'use SomeModule'` sets $@ the same way the top-level

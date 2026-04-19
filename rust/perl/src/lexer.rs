@@ -2087,6 +2087,7 @@ impl Lexer {
     }
 
     fn read_regex(&mut self, delim: char) -> (String, String) {
+        let start_line = self.current_line;
         let mut pat = String::new();
         while self.pos < self.input.len() && self.ch() != delim {
             if self.ch() == '\\' {
@@ -2097,6 +2098,12 @@ impl Lexer {
             } else {
                 pat.push(self.advance());
             }
+        }
+        if self.pos >= self.input.len() && self.error.is_none() {
+            // Reference perl's message for unterminated regex.
+            self.error = Some(format!(
+                "Search pattern not terminated at {{FILE}} line {start_line}.\n",
+            ));
         }
         if self.pos < self.input.len() {
             self.pos += 1; // skip closing delimiter
