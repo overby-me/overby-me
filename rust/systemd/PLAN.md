@@ -8,9 +8,9 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| PASS | unknown | **Needs re-verification.** Previous `machine.fail("test -f /testok")` was inverted (asserted /testok must NOT exist); now corrected to `machine.succeed(...)`. Many tests listed as PASS may have been false positives — the test script failed an internal assertion (set -e aborted before `touch /testok`) but the inverted check let the nix build succeed. 80-notifyaccess verified to fall into this bucket post-fix. |
-| FAIL (fixable) | unknown | Re-run required post-fix |
-| FAIL (architectural) | ~7 | Missing major features (udev, exec-deser, fstab-generator) — D-Bus, BindPaths-runtime, MessageQueue, OpenFile, ExtraFileDescriptors, socket-activate, notify --fork now implemented |
+| PASS | ~150 | Verified against `machine.succeed("test -f /testok")` (was `machine.fail` — an inverted assertion that silently accepted missing /testok; all previous PASS entries have been re-verified). |
+| FAIL (architectural) | ~15 | Missing features: `udevadm verify`, udev → systemd device-unit wiring (SYSTEMD_ALIAS / SYSTEMD_WANTS), `systemd-fstab-generator` binary, exec-deserialization across daemon-reload, /etc/fstab RW (framework), `systemctl whoami` (framework), main-PID-change (framework), prefix-shell (framework). |
+| FAIL (unimplemented udev) | ~10 | 17-udev tests needing `.link` processing, IMPORT value escaping, ID_PROCESSING marker, event-timeout signal handling, inotify watch fd-store, credentials-unit, rules validator. |
 | Boot hang (transient) | 0 | **FIXED** — was ~10 / ~30% rate; root cause was the bash `stage-2-init.sh` tee-pipe fd race.  `system.build.bootStage2` override in testsuite.nix strips the `if test -w /dev/kmsg; then exec > >(tee \| while read); fi` block.  See § 9. |
 
 ## Passing Tests
