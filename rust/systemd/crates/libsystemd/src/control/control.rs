@@ -8075,7 +8075,22 @@ pub fn execute_command(
             }
             // Try to find the unit in memory, or load it from disk.
             match find_or_load_unit(&unit_name, &run_info) {
-                Err(_) => return Err(format!("Unit {unit_name} not found.")),
+                Err(_) => {
+                    // For .device units specifically, upstream systemd
+                    // reports `inactive` (exit 3) for unknown device
+                    // names rather than `not-found` (exit 4), because
+                    // a device unit name can be constructed for any
+                    // plausible path even if the device doesn't exist.
+                    // TEST-17-UDEV.SYSTEMD_ALIAS relies on this via
+                    // `assert_rc 3 systemctl is-active
+                    // /dev/test/symlink-to-null-on-change` for a path
+                    // whose alias unit only materialises on `change`
+                    // events.
+                    if unit_name.ends_with(".device") {
+                        return Ok(serde_json::json!("inactive"));
+                    }
+                    return Err(format!("Unit {unit_name} not found."));
+                }
                 Ok(id) => {
                     let ri = run_info.read_poisoned();
                     let unit = ri
