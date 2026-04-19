@@ -83,6 +83,7 @@ members = [
   "crates/journal-remote",
   "crates/journal-upload",
   "crates/varlinkctl",
+  "crates/stage2",
 ]
 exclude = ["crates/sd-boot", "crates/sd-stub"]
 resolver = "2"

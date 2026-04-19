@@ -1,0 +1,13 @@
+[package]
+name = "rust-systemd-stage2"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition = "2024"
+
+[[bin]]
+name = "rust-systemd-stage2"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+nix = { version = "0.30", features = ["mount", "fs", "user"] }

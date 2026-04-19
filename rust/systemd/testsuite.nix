@@ -87,6 +87,23 @@ in
         else rustSystemdPackage;
       services.udev.packages = [udevRulesOverride];
 
+      # Replace the bash stage-2-init.sh with our rust-systemd-stage2
+      # binary.  The upstream script contains a bash process-substitution
+      # pipeline
+      #   exec > >(tee -i /proc/self/fd/"$logOutFd" | while read -r line; do
+      #       echo "<7>stage-2-init: $line" > /dev/kmsg
+      #   done) 2>&1
+      # whose fd-inheritance setup races with parallel kernel module
+      # loading (fuse/vmci/vsock auto-load) during early boot and hangs
+      # the VM about 30% of the time.  The rust-systemd-stage2 binary
+      # does the same work (root remount, /nix/store ro,nodev,nosuid
+      # remount, /proc|/sys|/dev|/run setup, activate script execution,
+      # /run/booted-system symlink) but writes directly to /dev/console
+      # — no subshell, no pipe, no race.
+      system.build.bootStage2 = lib.mkIf (!useUpstreamSystemd) (
+        "${rustSystemdPackage}/lib/systemd/rust-systemd-stage2"
+      );
+
       # sudo-rs
       security.sudo.enable = false;
       security.sudo-rs = {
