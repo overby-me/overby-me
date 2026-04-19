@@ -251,8 +251,15 @@ fn apply_device_active(
     unit_names: &[String],
 ) {
     // First, grab a write lock on the unit table and create any missing
-    // device units.  Keep the lock scope narrow so we don't deadlock the
-    // activation path.
+    // device units, OR refresh the Wants= of already-existing ones from
+    // the new event's SYSTEMD_WANTS= list.  Each udev event is a fresh
+    // snapshot of the device's properties, so subsequent events must
+    // replace the derived Wants= (e.g. a rule that used to set
+    // SYSTEMD_WANTS=foo and is changed to set =bar should remove foo
+    // from the device unit's Wants).  TEST-17-UDEV.SYSTEMD_WANTS
+    // exercises exactly this by swapping the rule's value between
+    // events.
+    let new_wants = parse_systemd_wants(params);
     {
         let mut ri = run_info.write_poisoned();
         for name in unit_names {
@@ -275,6 +282,12 @@ fn apply_device_active(
                         warn!("udev-event: failed to build device unit {}: {}", name, e);
                     }
                 }
+            } else {
+                // Unit already exists — update its Wants= to match the
+                // new event.  We compute the new target UnitIds and
+                // swap out the old ones; reverse wanted_by edges are
+                // updated on any loaded targets too.
+                refresh_device_wants(&mut ri, &id, &new_wants);
             }
         }
     }
@@ -451,6 +464,112 @@ fn apply_device_inactive(run_info: &ArcMutRuntimeInfo, unit_names: &[String]) {
                 *status = UnitStatus::Stopped(StatusStopped::StoppedFinal, Vec::new());
             }
         }
+    }
+}
+
+/// Extract the SYSTEMD_WANTS value from an event's env, split into a
+/// list of target unit names.  Empty entries are skipped.
+fn parse_systemd_wants(params: &UdevEventParams) -> Vec<String> {
+    params
+        .env
+        .get("SYSTEMD_WANTS")
+        .map(|v| {
+            v.split_whitespace()
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Replace a device unit's `Wants=` edges to match the new list, and
+/// update reverse `wanted_by` edges on any loaded target units.  Called
+/// on every add/change event to keep the derived dependency state in
+/// sync with the latest SYSTEMD_WANTS= value.
+fn refresh_device_wants(
+    ri: &mut crate::runtime_info::RuntimeInfo,
+    device_id: &UnitId,
+    new_wants: &[String],
+) {
+    // Compute the new Wants= UnitIds.  Targets get `.service` suffix if
+    // the name has no suffix, matching how fresh builds handle it.
+    let new_want_ids: Vec<UnitId> = new_wants
+        .iter()
+        .map(|name| UnitId {
+            kind: if name.ends_with(".service") {
+                UnitIdKind::Service
+            } else if name.ends_with(".target") {
+                UnitIdKind::Target
+            } else if name.ends_with(".socket") {
+                UnitIdKind::Socket
+            } else if name.ends_with(".timer") {
+                UnitIdKind::Timer
+            } else if name.ends_with(".path") {
+                UnitIdKind::Path
+            } else if name.ends_with(".mount") {
+                UnitIdKind::Mount
+            } else if name.ends_with(".slice") {
+                UnitIdKind::Slice
+            } else {
+                UnitIdKind::Service
+            },
+            name: if name.contains('.') {
+                name.clone()
+            } else {
+                format!("{name}.service")
+            },
+        })
+        .collect();
+
+    // Collect the old Wants= from the device so we can diff.
+    let old_wants: Vec<UnitId> = match ri.unit_table.get(device_id) {
+        Some(u) => u.common.dependencies.wants.clone(),
+        None => return,
+    };
+
+    // Remove the OLD wanted_by edge from any target units that used to
+    // be wanted but no longer are.
+    for old in &old_wants {
+        if new_want_ids.contains(old) {
+            continue;
+        }
+        if let Some(target) = ri.unit_table.get_mut(old) {
+            target
+                .common
+                .dependencies
+                .wanted_by
+                .retain(|id| id != device_id);
+        }
+    }
+
+    // Add the NEW wanted_by edge to any target units that are newly
+    // wanted.
+    for new_id in &new_want_ids {
+        if old_wants.contains(new_id) {
+            continue;
+        }
+        if let Some(target) = ri.unit_table.get_mut(new_id) {
+            if !target
+                .common
+                .dependencies
+                .wanted_by
+                .contains(device_id)
+            {
+                target
+                    .common
+                    .dependencies
+                    .wanted_by
+                    .push(device_id.clone());
+            }
+        }
+    }
+
+    // Finally, replace the device unit's own Wants= list.
+    if let Some(device) = ri.unit_table.get_mut(device_id) {
+        device.common.dependencies.wants = new_want_ids;
+        // Mirror into refs_by_name so persistence / query paths see
+        // the up-to-date set.
+        device.common.unit.refs_by_name = device.common.dependencies.wants.clone();
     }
 }
 
@@ -862,6 +981,79 @@ mod tests {
             count_before, count_after,
             "repeat add duplicated units in unit_table"
         );
+    }
+
+    #[test]
+    fn test_handle_udev_event_wants_refresh_across_events() {
+        let ri = make_test_runtime();
+
+        // First event: SYSTEMD_WANTS=foo.service.
+        let mut params1 = make_params(
+            "add",
+            "/sys/devices/virtual/block/vda",
+            "block",
+            &["systemd"],
+            &[],
+        );
+        params1
+            .env
+            .insert("SYSTEMD_WANTS".into(), "foo.service".into());
+        handle_udev_event(&ri, &params1);
+
+        let device_name = "sys-devices-virtual-block-vda.device";
+        {
+            let ri_guard = ri.read().unwrap();
+            let device = ri_guard
+                .unit_table
+                .values()
+                .find(|u| u.id.name == device_name)
+                .unwrap();
+            let wants: Vec<&str> = device
+                .common
+                .dependencies
+                .wants
+                .iter()
+                .map(|id| id.name.as_str())
+                .collect();
+            assert_eq!(wants, vec!["foo.service"]);
+        }
+
+        // Second event: SYSTEMD_WANTS=bar.service — must replace foo.
+        let mut params2 = make_params(
+            "change",
+            "/sys/devices/virtual/block/vda",
+            "block",
+            &["systemd"],
+            &[],
+        );
+        params2
+            .env
+            .insert("SYSTEMD_WANTS".into(), "bar.service".into());
+        handle_udev_event(&ri, &params2);
+
+        let ri_guard = ri.read().unwrap();
+        let device = ri_guard
+            .unit_table
+            .values()
+            .find(|u| u.id.name == device_name)
+            .unwrap();
+        let wants: Vec<&str> = device
+            .common
+            .dependencies
+            .wants
+            .iter()
+            .map(|id| id.name.as_str())
+            .collect();
+        assert_eq!(wants, vec!["bar.service"]);
+        // Also verify refs_by_name mirrors the new Wants.
+        let refs: Vec<&str> = device
+            .common
+            .unit
+            .refs_by_name
+            .iter()
+            .map(|id| id.name.as_str())
+            .collect();
+        assert_eq!(refs, vec!["bar.service"]);
     }
 
     #[test]
