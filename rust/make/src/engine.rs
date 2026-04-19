@@ -188,7 +188,7 @@ pub struct Engine {
     /// Target-specific variable assignments: target -> (var, op, value).
     /// Applied to each recipe's expansion scope when building that target.
     #[allow(clippy::type_complexity)]
-    target_vars: RefCell<HashMap<String, Vec<(String, AssignOp, String)>>>,
+    target_vars: RefCell<HashMap<String, Vec<(String, AssignOp, String, bool)>>>,
     /// Per-target variable names that were declared with `export`
     /// (e.g. `two: export SHELL := …`). Added to `exports` only
     /// while the owning target's recipe runs.
@@ -196,7 +196,7 @@ pub struct Engine {
     /// Stack of target-specific variable bindings active during the
     /// currently-recursing build. Prereq builds see the union of their
     /// ancestors' bindings so target-specific vars propagate downward.
-    target_scope_stack: RefCell<Vec<(String, AssignOp, String)>>,
+    target_scope_stack: RefCell<Vec<(String, AssignOp, String, bool)>>,
     /// When `.DELETE_ON_ERROR:` is set, make removes the target file if
     /// its recipe fails.
     delete_on_error: RefCell<bool>,
@@ -1329,25 +1329,30 @@ impl Engine {
                     AssignOp::Simple => expand::expand(&assign.value, self),
                     _ => assign.value.clone(),
                 };
-                // Parser prefixes the name with `!` when the
-                // declaration had the `export` modifier; strip it
-                // back off and record the var as a target-specific
-                // export so the recipe's child env sees it when this
-                // target builds.
-                let (name, do_export, do_unexport) =
-                    if let Some(rest) = assign.name.strip_prefix('!') {
-                        (rest.to_string(), true, false)
-                    } else if let Some(rest) = assign.name.strip_prefix('~') {
-                        (rest.to_string(), false, true)
-                    } else {
-                        (assign.name.clone(), false, false)
-                    };
+                // Parser prefixes the name with `^` for override and
+                // `!`/`~` for export/unexport. Strip them off and
+                // record in the appropriate data structures.
+                let is_override = assign.name.starts_with('^');
+                let raw_name = if is_override {
+                    &assign.name[1..]
+                } else {
+                    &assign.name
+                };
+                let (name, do_export, do_unexport) = if let Some(rest) = raw_name.strip_prefix('!')
+                {
+                    (rest.to_string(), true, false)
+                } else if let Some(rest) = raw_name.strip_prefix('~') {
+                    (rest.to_string(), false, true)
+                } else {
+                    (raw_name.to_string(), false, false)
+                };
                 let mut tv = self.target_vars.borrow_mut();
                 for target in targets_expanded.split_whitespace() {
                     tv.entry(target.to_string()).or_default().push((
                         name.clone(),
                         assign.op,
                         value.clone(),
+                        is_override,
                     ));
                 }
                 if do_export {
@@ -2064,7 +2069,7 @@ impl Engine {
     /// Gather target-specific variables for a target *and* those inherited
     /// from any ancestors currently being built. GNU make propagates
     /// target-specific vars from a parent to all of its prereqs.
-    fn collect_target_vars(&self, _target: &str) -> Vec<(String, AssignOp, String)> {
+    fn collect_target_vars(&self, _target: &str) -> Vec<(String, AssignOp, String, bool)> {
         // The target_scope_stack already contains this target's own
         // vars (pushed by build_target_for) plus all ancestor vars.
         // Just return its contents — the order is parents-first,
@@ -2114,7 +2119,7 @@ impl Engine {
         // Push this target's own variable bindings onto the scope stack
         // so prereq builds inherit them (GNU make semantics). Popped
         // before any return path via `pop_scope`.
-        let own_vars: Vec<(String, AssignOp, String)> = self
+        let own_vars: Vec<(String, AssignOp, String, bool)> = self
             .target_vars
             .borrow()
             .get(target)
@@ -2431,8 +2436,13 @@ impl Engine {
         let extra_raw = {
             let tv = self.target_vars.borrow();
             tv.get(target)
-                .and_then(|entries| entries.iter().rev().find(|(n, _, _)| n == ".EXTRA_PREREQS"))
-                .map(|(_, _, v)| expand::expand(v, self))
+                .and_then(|entries| {
+                    entries
+                        .iter()
+                        .rev()
+                        .find(|(n, _, _, _)| n == ".EXTRA_PREREQS")
+                })
+                .map(|(_, _, v, _)| expand::expand(v, self))
                 .unwrap_or_else(|| self.lookup_var(".EXTRA_PREREQS"))
         };
         let extra_prereqs: Vec<String> = extra_raw
@@ -3022,7 +3032,7 @@ impl Engine {
         // Apply target-specific variable assignments (including those
         // inherited from ancestor targets currently being built). Save
         // prior values so we can restore them afterwards.
-        let tv_entries: Vec<(String, AssignOp, String)> = self.collect_target_vars(target);
+        let tv_entries: Vec<(String, AssignOp, String, bool)> = self.collect_target_vars(target);
         // Target-specific `export VAR := …` — add VAR to the export
         // set for the duration of this recipe.
         let export_names: Vec<String> = self
@@ -3033,6 +3043,7 @@ impl Engine {
             .unwrap_or_default();
         let mut added_exports: Vec<String> = Vec::new();
         let mut added_unexports: Vec<String> = Vec::new();
+        let mut removed_from_unexports: Vec<String> = Vec::new();
         {
             let mut exports = self.exports.borrow_mut();
             let mut unexports = self.unexports.borrow_mut();
@@ -3043,33 +3054,41 @@ impl Engine {
                     if unexports.insert(uname.to_string()) {
                         added_unexports.push(uname.to_string());
                     }
-                } else if exports.insert(n.clone()) {
-                    added_exports.push(n.clone());
+                } else {
+                    // Target-specific export: also remove from unexports
+                    // in case a global `unexport` was in effect.
+                    if unexports.remove(n) {
+                        removed_from_unexports.push(n.clone());
+                    }
+                    if exports.insert(n.clone()) {
+                        added_exports.push(n.clone());
+                    }
                 }
             }
         }
         let mut saved: Vec<(String, Option<Variable>)> = Vec::new();
-        for (name, op, value) in &tv_entries {
-            saved.push((name.clone(), self.vars.borrow().get(name).cloned()));
+        for (name, op, value, is_override) in &tv_entries {
+            let name = expand::expand(name, self);
+            saved.push((name.clone(), self.vars.borrow().get(&name).cloned()));
 
             // Target-specific vars can override file-level `override` vars, but must not
-            // replace command-line variables.
-            // Check the current origin and skip if it's CommandLine.
-            let current_origin = self.vars.borrow().get(name).map(|v| v.origin);
-            if matches!(current_origin, Some(VarOrigin::CommandLine)) {
+            // replace command-line variables — unless the target-specific
+            // assignment itself had the `override` modifier.
+            let current_origin = self.vars.borrow().get(&name).map(|v| v.origin);
+            if matches!(current_origin, Some(VarOrigin::CommandLine)) && !is_override {
                 continue;
             }
 
-            if matches!(op, AssignOp::Conditional) && self.is_var_defined(name) {
+            if matches!(op, AssignOp::Conditional) && self.is_var_defined(&name) {
                 continue;
             }
 
             if matches!(op, AssignOp::Append) {
                 // `+=` — append to existing value, respecting flavor.
-                let existing_flavor = self.var_flavor(name);
-                let existing = self.lookup_var_raw(name);
+                let existing_flavor = self.var_flavor(&name);
+                let existing = self.lookup_var_raw(&name);
                 let keep_raw = existing_flavor != VarFlavor::Simple
-                    || self.immediate_recursive.borrow().contains(name);
+                    || self.immediate_recursive.borrow().contains(&name);
                 let rhs = if keep_raw {
                     value.clone()
                 } else {
@@ -3149,6 +3168,13 @@ impl Engine {
             let mut unexports = self.unexports.borrow_mut();
             for n in &added_unexports {
                 unexports.remove(n);
+            }
+        }
+        // Restore unexports that were removed by target-specific exports.
+        {
+            let mut unexports = self.unexports.borrow_mut();
+            for n in &removed_from_unexports {
+                unexports.insert(n.clone());
             }
         }
         result
@@ -3478,13 +3504,27 @@ impl Engine {
                         sh.status()
                     }
                     Err(ref e) if e.raw_os_error() == Some(2) => {
-                        // ENOENT — command not found on PATH. Fall back to
-                        // $SHELL so custom shells (like `SHELL := echo`)
-                        // can handle the command.
-                        let mut cmd =
-                            build_shell_cmd(&shell, &shell_flags, &expanded, ignore_error);
-                        apply_env(&mut cmd);
-                        cmd.status()
+                        // ENOENT — command not found.
+                        let shell_prog = shell.split_whitespace().next().unwrap_or("/bin/sh");
+                        let is_default_shell = shell_prog == "/bin/sh"
+                            || shell_prog == "sh"
+                            || shell_prog.ends_with("/sh");
+                        if !is_default_shell {
+                            // Custom shell: fall back to it.
+                            let mut cmd =
+                                build_shell_cmd(&shell, &shell_flags, &expanded, ignore_error);
+                            apply_env(&mut cmd);
+                            cmd.status()
+                        } else {
+                            // Default shell: report like GNU make.
+                            let cmd_name = expanded.split_whitespace().next().unwrap_or(&expanded);
+                            eprintln!("make: {cmd_name}: No such file or directory");
+                            // Synthesize exit code 127 via a tiny shell process.
+                            std::process::Command::new("/bin/sh")
+                                .arg("-c")
+                                .arg("exit 127")
+                                .status()
+                        }
                     }
                     other => other,
                 }

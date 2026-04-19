@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**103/135 tests passing** (76%) — upstream test harness from GNU make 4.4.1.
+**104/135 tests passing** (77%) — upstream test harness from GNU make 4.4.1.
 
 `rust/make` has a parser, expander, and build engine (~5k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -140,6 +140,11 @@ organised in six directories under `tests/scripts/`:
 - Target-specific `?=` skips assignment when the variable is defined.
 - Target-specific `unexport` marks variables for unexport during the
   target's recipe.
+- Target-specific `override` modifier tracked and respected: overrides
+  command-line vars. Variable names in target-specific assignments are
+  expanded (e.g., `target: VAR$(X) = val`).
+- Target-specific `export` removes from the `unexports` set for the
+  duration of the target's recipe.
 - Target-specific vars do not override command-line variables (unless
   the target-specific assignment has `override`).
 
@@ -200,6 +205,10 @@ organised in six directories under `tests/scripts/`:
 - `.SHELLFLAGS` is tokenized with shell-style quote handling — single-
   and double-quoted sections stay as a single token with the quotes
   stripped, so `'ho;ho'` becomes one arg containing a literal `;`.
+- Direct execution optimization: simple commands (no shell
+  metacharacters or builtins) are exec'd directly; ENOEXEC falls back
+  to `/bin/sh`, ENOENT falls back to `$SHELL` for custom shells or
+  produces GNU make-style error for default shell.
 
 ### Environment / sub-makes
 

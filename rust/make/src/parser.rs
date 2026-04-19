@@ -438,6 +438,7 @@ impl Parser {
             let mut after_mod = after;
             let mut had_export = false;
             let mut had_unexport = false;
+            let mut had_override = false;
             loop {
                 if let Some(rest) = after_mod.strip_prefix("export ") {
                     had_export = true;
@@ -449,9 +450,12 @@ impl Parser {
                     after_mod = rest.trim_start();
                     continue;
                 }
-                let trimmed_mod = after_mod
-                    .strip_prefix("private ")
-                    .or_else(|| after_mod.strip_prefix("override "));
+                if let Some(rest) = after_mod.strip_prefix("override ") {
+                    had_override = true;
+                    after_mod = rest.trim_start();
+                    continue;
+                }
+                let trimmed_mod = after_mod.strip_prefix("private ");
                 match trimmed_mod {
                     Some(s) => after_mod = s.trim_start(),
                     None => break,
@@ -465,10 +469,17 @@ impl Parser {
             if let Some(mut assign) = assign {
                 let targets_str = trimmed[..colon].to_string();
                 self.advance();
+                let mut prefix = String::new();
+                if had_override && from_stripped {
+                    prefix.push('^');
+                }
                 if had_export && from_stripped {
-                    assign.name = format!("!{}", assign.name);
+                    prefix.push('!');
                 } else if had_unexport && from_stripped {
-                    assign.name = format!("~{}", assign.name);
+                    prefix.push('~');
+                }
+                if !prefix.is_empty() {
+                    assign.name = format!("{}{}", prefix, assign.name);
                 }
                 return Ok(Some(Directive::TargetVarAssign(
                     targets_str,
