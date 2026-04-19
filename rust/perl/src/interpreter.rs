@@ -2164,12 +2164,18 @@ impl Interpreter {
             Expr::ArrayElement(name, index) => {
                 let idx = self.eval_expr(index).to_num() as i64;
                 let arr = self.get_array(name);
-                let idx = if idx < 0 {
-                    (arr.len() as i64 + idx).max(0) as usize
+                // Negative indices: resolve relative to end; undef when
+                // past the start (e.g. -6 on a 5-element array).
+                let real_idx = if idx < 0 {
+                    let from_end = arr.len() as i64 + idx;
+                    if from_end < 0 {
+                        return Value::Undef;
+                    }
+                    from_end as usize
                 } else {
                     idx as usize
                 };
-                arr.get(idx).cloned().unwrap_or(Value::Undef)
+                arr.get(real_idx).cloned().unwrap_or(Value::Undef)
             }
             Expr::HashElement(name, key) => {
                 let key_str = self.eval_expr(key).to_str();
@@ -6825,8 +6831,29 @@ impl Interpreter {
                 self.globals.vars.insert(name.clone(), val);
             }
             Expr::ArrayElement(name, index) => {
-                let idx = self.eval_expr(index).to_num() as usize;
+                let raw = self.eval_expr(index).to_num() as i64;
                 let mut arr = self.get_array(name);
+                let idx = if raw < 0 {
+                    let from_end = arr.len() as i64 + raw;
+                    if from_end < 0 {
+                        // Perl rejects writes past the array start with
+                        // "Modification of non-creatable array value
+                        // attempted, subscript -N".
+                        let file = if self.current_file.is_empty() {
+                            "-e".to_string()
+                        } else {
+                            self.current_file.clone()
+                        };
+                        let line = self.current_line;
+                        self.pending_flow = Some(Flow::Die(format!(
+                            "Modification of non-creatable array value attempted, subscript {raw} at {file} line {line}.\n"
+                        )));
+                        return;
+                    }
+                    from_end as usize
+                } else {
+                    raw as usize
+                };
                 while arr.len() <= idx {
                     arr.push(Value::Undef);
                 }
