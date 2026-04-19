@@ -3434,8 +3434,13 @@ impl Interpreter {
                 }
             }
             UnaryOp::BitNot => {
+                // Perl's `~N` is unsigned: `~1` yields max_u64 - 1, not -2.
+                // Reference perl under `use integer` stays signed, but we
+                // don't track that pragma yet — unsigned matches the
+                // default case used by almost all of the test suite
+                // (including `@a = (1) x ~1` → OOM).
                 let val = self.eval_expr(expr);
-                Value::Num(!(val.to_num() as i64) as f64)
+                Value::Num(!(val.to_num() as u64) as f64)
             }
             UnaryOp::PreInc => {
                 let val = self.eval_expr(expr);
@@ -7278,7 +7283,24 @@ impl Interpreter {
                 ) =>
             {
                 let items = self.eval_list(left);
-                let n = self.eval_expr(right).to_num() as isize;
+                let n_raw = self.eval_expr(right).to_num();
+                // Huge repeat counts (e.g. `(1) x ~1` — `~1` is max-unsigned)
+                // produce OOM in reference perl. Match that so fresh_perl
+                // tests for the message can observe it.
+                const REPEAT_LIMIT: f64 = 1_000_000_000.0;
+                if n_raw.is_finite() && n_raw > REPEAT_LIMIT {
+                    let file = if self.current_file.is_empty() {
+                        "-e".to_string()
+                    } else {
+                        self.current_file.clone()
+                    };
+                    let line = self.current_line;
+                    self.pending_flow = Some(Flow::Die(format!(
+                        "Out of memory during list extend at {file} line {line}.\n"
+                    )));
+                    return Vec::new();
+                }
+                let n = n_raw as isize;
                 if n <= 0 {
                     return Vec::new();
                 }
