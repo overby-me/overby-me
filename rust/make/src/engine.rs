@@ -236,6 +236,10 @@ pub struct Engine {
     /// Set to true by finalize_includes when an included makefile was
     /// remade and the process should re-exec itself.
     pub needs_reexec: Cell<bool>,
+    /// Recursion depth counter for build_target_for. Prevents stack
+    /// overflow when implicit rule search creates an infinite chain
+    /// (e.g. %: %.c matching hello -> hello.c -> hello.c.c -> ...).
+    build_depth: Cell<usize>,
 }
 
 impl Engine {
@@ -301,6 +305,7 @@ impl Engine {
             warn_undefined_variables: Cell::new(false),
             posix_mode: RefCell::new(false),
             needs_reexec: Cell::new(false),
+            build_depth: Cell::new(0),
         };
 
         // Set default variables
@@ -2075,6 +2080,27 @@ impl Engine {
         if self.keep_going && self.failed_targets.borrow().contains(target) {
             return Err(String::new());
         }
+
+        // Guard against infinite implicit-rule recursion.
+        // e.g. %: %.c matches hello -> hello.c -> hello.c.c -> ...
+        const MAX_BUILD_DEPTH: usize = 50;
+        let depth = self.build_depth.get();
+        if depth >= MAX_BUILD_DEPTH {
+            return Err(format!(
+                "Implicit rule recursion depth exceeded for target '{}'",
+                target
+            ));
+        }
+        self.build_depth.set(depth + 1);
+        // Scope guard: decrement build_depth on all return paths.
+        struct DepthGuard<'a>(&'a Cell<usize>);
+        impl<'a> Drop for DepthGuard<'a> {
+            fn drop(&mut self) {
+                self.0.set(self.0.get().saturating_sub(1));
+            }
+        }
+        let _depth_guard = DepthGuard(&self.build_depth);
+
         let is_phony = self.phony_targets.borrow().contains(target);
 
         // Find explicit rules
@@ -2835,35 +2861,33 @@ impl Engine {
     }
 
     fn find_pattern_rule(&self, target: &str) -> Option<(PatternRuleEntry, String)> {
+        self.find_pattern_rule_inner(target, 0)
+    }
+
+    /// Depth-limited implicit rule search. Recursively checks whether a
+    /// pattern rule's prerequisites can be satisfied (exist on disk, have
+    /// an explicit rule, or can be built by further implicit rule
+    /// chaining up to MAX_IMPLICIT_CHAIN_DEPTH).
+    fn find_pattern_rule_inner(
+        &self,
+        target: &str,
+        depth: usize,
+    ) -> Option<(PatternRuleEntry, String)> {
+        const MAX_IMPLICIT_CHAIN_DEPTH: usize = 3;
+        if depth >= MAX_IMPLICIT_CHAIN_DEPTH {
+            return None;
+        }
         let suffixes_cleared = *self.suffixes_cleared.borrow();
         let pattern_rules = self.pattern_rules.borrow();
-        // Fallback candidate: the last user-defined non-terminal pattern
-        // rule whose target matches, used when no rule has an
-        // existing/buildable prereq. Terminal rules are never used as
-        // fallbacks.
-        let mut fallback: Option<(PatternRuleEntry, String)> = None;
         for rule in pattern_rules.iter().rev() {
-            // `.SUFFIXES:` (empty) disables built-in suffix-based pattern
-            // rules. We tag built-ins with source_name "<built-in>".
             if suffixes_cleared && rule.source_name == "<built-in>" {
                 continue;
             }
-            // A pattern rule with NO recipe at all is a cancellation
-            // rule — it removes the implicit rule for this target
-            // pattern.  A rule with an empty inline recipe (`%.x: ;`)
-            // is NOT a cancellation; it is a valid rule whose recipe
-            // simply does nothing.
             if let Some(stem) = expand::pattern_stem(target, &rule.target_pattern) {
                 if rule.recipe.is_empty() {
-                    // Cancellation: skip this rule but continue searching
-                    // other patterns.
                     continue;
                 }
                 if rule.is_terminal {
-                    // Terminal (double-colon) pattern rule: only match if
-                    // every prerequisite actually exists as a file on disk.
-                    // Per GNU make docs, terminal rules never chain to
-                    // build prerequisites.  Never used as fallback.
                     let prereqs_ok = rule.prereq_patterns.is_empty()
                         || rule.prereq_patterns.iter().all(|pp| {
                             let prereq = pp.replace('%', &stem);
@@ -2872,25 +2896,27 @@ impl Engine {
                     if prereqs_ok {
                         return Some((rule.clone(), stem));
                     }
-                    // Terminal rule does not match — skip (no fallback).
                     continue;
                 }
-                // Non-terminal rule: check that at least one prereq exists
-                // or can be built.
+                // Non-terminal rule: check that ALL prereqs exist or
+                // can be built (via explicit rule, "ought to exist"
+                // mention, or implicit rule chaining with bounded
+                // depth).
                 let prereqs_ok = rule.prereq_patterns.is_empty()
-                    || rule.prereq_patterns.iter().any(|pp| {
+                    || rule.prereq_patterns.iter().all(|pp| {
                         let prereq = pp.replace('%', &stem);
-                        Path::new(&prereq).exists() || self.rules.borrow().contains_key(&prereq)
+                        Path::new(&prereq).exists()
+                            || self.is_mentioned_file(&prereq)
+                            || self.phony_targets.borrow().contains(&prereq)
+                            || self.rules.borrow().contains_key(prereq.as_str())
+                            || self.find_pattern_rule_inner(&prereq, depth + 1).is_some()
                     });
                 if prereqs_ok {
                     return Some((rule.clone(), stem));
                 }
-                if rule.source_name != "<built-in>" && fallback.is_none() {
-                    fallback = Some((rule.clone(), stem));
-                }
             }
         }
-        fallback
+        None
     }
 
     #[allow(clippy::too_many_arguments)]

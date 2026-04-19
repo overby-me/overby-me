@@ -696,6 +696,13 @@ fn run() -> i32 {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
+        // Safety guard: prevent infinite re-exec loops.
+        if restarts >= 10 {
+            eprintln!(
+                "make: *** Makefile re-exec loop detected (MAKE_RESTARTS={restarts}).  Stop."
+            );
+            return 2;
+        }
         unsafe {
             std::env::set_var("MAKE_RESTARTS", (restarts + 1).to_string());
         }
