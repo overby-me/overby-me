@@ -13,6 +13,10 @@ pub struct Parser {
     /// be recognised as no-arg sub calls (`done_testing;` after the sub
     /// is declared elsewhere).
     known_subs: HashSet<String>,
+    /// First parse error encountered, with `{FILE}` as a placeholder for
+    /// the filename. Main/eval_string reads this and surfaces it like the
+    /// Lexer::error path (into `$@` inside eval, to stderr at top level).
+    pub error: Option<String>,
 }
 
 impl Parser {
@@ -23,6 +27,7 @@ impl Parser {
             token_lines: Vec::new(),
             pos: 0,
             known_subs,
+            error: None,
         }
     }
 
@@ -33,6 +38,7 @@ impl Parser {
             token_lines,
             pos: 0,
             known_subs,
+            error: None,
         }
     }
 
@@ -1636,11 +1642,26 @@ impl Parser {
             Token::PlusPlus => {
                 self.pos += 1;
                 let expr = self.parse_postfix();
+                // `++` at end-of-input (or against a non-lvalue) is a
+                // syntax error. Perl emits "syntax error" with details;
+                // match the "syntax error" substring so eval captures it.
+                if matches!(expr, Expr::Undef) && self.error.is_none() {
+                    let line = self.current_line();
+                    self.error = Some(format!(
+                        "syntax error at {{FILE}} line {line}, at EOF\n"
+                    ));
+                }
                 Expr::UnaryOp(UnaryOp::PreInc, Box::new(expr))
             }
             Token::MinusMinus => {
                 self.pos += 1;
                 let expr = self.parse_postfix();
+                if matches!(expr, Expr::Undef) && self.error.is_none() {
+                    let line = self.current_line();
+                    self.error = Some(format!(
+                        "syntax error at {{FILE}} line {line}, at EOF\n"
+                    ));
+                }
                 Expr::UnaryOp(UnaryOp::PreDec, Box::new(expr))
             }
             Token::Backslash => {

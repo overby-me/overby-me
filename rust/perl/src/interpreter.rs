@@ -8723,6 +8723,7 @@ impl Interpreter {
         let token_lines = std::mem::take(&mut lexer.token_lines);
         let mut parser = Parser::new_with_lines(tokens, token_lines);
         let stmts = parser.parse_program();
+        let parse_error = parser.error.take();
 
         // Temporarily switch current_file to `(eval N)` so diagnostics
         // emitted while evaluating a string report the pseudo-file perl
@@ -8736,7 +8737,7 @@ impl Interpreter {
         // Lex-time errors (unterminated heredoc/regex/etc.) captured by
         // Lexer::error — surface as a Flow::Die captured in `$@` so the
         // eval context can detect the syntax error like reference perl does.
-        if let Some(err) = lex_error {
+        if let Some(err) = lex_error.or(parse_error) {
             let filled = err.replace("{FILE}", &self.current_file);
             self.set_global_var("@", Value::Str(filled));
             self.current_file = saved_file;
