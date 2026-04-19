@@ -119,7 +119,13 @@ fn ensure_device_units_exist(
             match build_device_unit(name, params) {
                 Ok(unit) => {
                     trace!("udev-event: creating placeholder device unit {}", name);
-                    ri.unit_table.insert(id, unit);
+                    // Use insert_new_unit_lenient so bidirectional
+                    // dependency edges (wanted_by, bound_by, etc.) are
+                    // populated against already-present units.  A plain
+                    // `unit_table.insert` would leave reverse edges
+                    // blank, breaking `systemctl show -p WantedBy
+                    // foo.service` on units pulled in via SYSTEMD_WANTS.
+                    crate::units::insert_new_unit_lenient(unit, &mut ri);
                 }
                 Err(e) => {
                     warn!("udev-event: failed to build device unit {}: {}", name, e);
@@ -248,7 +254,12 @@ fn apply_device_active(
                 match build_device_unit(name, params) {
                     Ok(unit) => {
                         trace!("udev-event: creating device unit {}", name);
-                        ri.unit_table.insert(id, unit);
+                        // Use insert_new_unit_lenient so the unit's
+                        // Wants= (from SYSTEMD_WANTS=) propagates a
+                        // corresponding `wanted_by` edge into the
+                        // target.  `systemctl show -p WantedBy` on the
+                        // target unit will then include this device.
+                        crate::units::insert_new_unit_lenient(unit, &mut ri);
                     }
                     Err(e) => {
                         warn!("udev-event: failed to build device unit {}: {}", name, e);
