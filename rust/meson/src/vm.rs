@@ -286,6 +286,8 @@ pub struct RunTarget {
 /// Simple glob matching for testcase error patterns.
 /// Supports '*' as a wildcard that matches any sequence of characters.
 fn glob_match(pattern: &str, text: &str) -> bool {
+    let pattern = pattern.trim();
+    let text = text.trim();
     let parts: Vec<&str> = pattern.split('*').collect();
     if parts.len() == 1 {
         // No wildcards - substring match (Meson behavior)
@@ -350,10 +352,20 @@ impl VM {
                 Err(e) => {
                     if let Some(ctx) = self.testcase_stack.last().cloned() {
                         if glob_match(&ctx.expected_error, &e) {
+                            // Error matched expected pattern - testcase passes
                             self.testcase_stack.pop();
                             self.stack.truncate(ctx.saved_stack_len);
                             ip = ctx.end_ip;
                             continue;
+                        } else {
+                            // Error caught but did not match - report mismatch
+                            self.testcase_stack.pop();
+                            self.stack.truncate(ctx.saved_stack_len);
+                            return Err(format!(
+                                "Expecting error '{}' but got '{}'",
+                                ctx.expected_error.trim(),
+                                e.trim()
+                            ));
                         }
                     }
                     return Err(e);
@@ -627,7 +639,23 @@ impl VM {
                 }
                 let func = self.stack.pop().ok_or("Stack underflow on call")?;
                 // Check for disabler in arguments - propagate through most functions
-                let has_disabler_arg = args.iter().any(|a| matches!(a.value, Object::Disabler));
+                let has_disabler_arg = args.iter().any(|a| {
+                    if matches!(a.value, Object::Disabler) {
+                        return true;
+                    }
+                    if let Object::Array(ref items) = a.value {
+                        return items.iter().any(|item| {
+                            if matches!(item, Object::Disabler) {
+                                return true;
+                            }
+                            if let Object::Array(inner) = item {
+                                return inner.iter().any(|i| matches!(i, Object::Disabler));
+                            }
+                            false
+                        });
+                    }
+                    false
+                });
                 if has_disabler_arg {
                     let should_propagate = match &func {
                         Object::BuiltinFunction(name) => !matches!(
@@ -636,7 +664,6 @@ impl VM {
                                 | "set_variable"
                                 | "get_variable"
                                 | "is_variable"
-                                | "assert"
                                 | "message"
                                 | "warning"
                                 | "error"
@@ -682,7 +709,11 @@ impl VM {
                 }
                 let obj = self.stack.pop().ok_or("Stack underflow on method call")?;
                 if matches!(obj, Object::Disabler) {
-                    self.stack.push(Object::Disabler);
+                    if method == "found" {
+                        self.stack.push(Object::Bool(false));
+                    } else {
+                        self.stack.push(Object::Disabler);
+                    }
                     return Ok(StepResult::Next);
                 }
                 let type_name = obj.type_name();
@@ -725,6 +756,14 @@ impl VM {
                     let result = self.index_into(&obj, &index)?;
                     self.stack.push(result);
                 }
+            }
+            OpCode::JumpIfDisablerPop(target) => {
+                let target = *target;
+                if matches!(self.stack.last(), Some(Object::Disabler)) {
+                    self.stack.pop();
+                    return Ok(StepResult::Jump(target));
+                }
+                // Not a disabler — fall through, let JumpIfFalse handle it
             }
             OpCode::Jump(target) => {
                 return Ok(StepResult::Jump(*target));

@@ -52,6 +52,8 @@ pub enum OpCode {
     JumpIfFalse(usize),
     /// Jump if top of stack is true (pop condition)
     JumpIfTrue(usize),
+    /// If top of stack is Disabler, pop and jump to target; otherwise do nothing (no pop)
+    JumpIfDisablerPop(usize),
     /// Push keyword argument name (None = positional)
     ArgName(Option<String>),
     /// Setup foreach: push iterator state
@@ -116,6 +118,7 @@ impl Chunk {
             OpCode::Jump(t)
             | OpCode::JumpIfFalse(t)
             | OpCode::JumpIfTrue(t)
+            | OpCode::JumpIfDisablerPop(t)
             | OpCode::IterNext(_, t)
             | OpCode::TestcaseStart(t) => *t = target,
             _ => panic!("Cannot patch non-jump instruction"),
@@ -186,6 +189,7 @@ impl Compiler {
 
         // Compile condition
         self.compile_expression(&if_stmt.condition)?;
+        let disabler_jump = self.chunk.emit(OpCode::JumpIfDisablerPop(0), line);
         let false_jump = self.chunk.emit(OpCode::JumpIfFalse(0), line);
         // Pop condition on true (fall-through) path
         self.chunk.emit(OpCode::Pop, line);
@@ -229,6 +233,9 @@ impl Compiler {
         for j in end_jumps {
             self.chunk.patch_jump(j);
         }
+
+        // Patch disabler jump to skip entire if/elif/else construct
+        self.chunk.patch_jump(disabler_jump);
 
         Ok(())
     }

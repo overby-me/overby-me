@@ -163,6 +163,10 @@ pub fn register(vm: &mut VM) {
         ("build_tgt".to_string(), "full_path".to_string()),
         target_full_path,
     );
+    vm.method_registry.insert(
+        ("build_tgt".to_string(), "path".to_string()),
+        target_full_path,
+    );
     vm.method_registry
         .insert(("build_tgt".to_string(), "name".to_string()), target_name);
     vm.method_registry
@@ -216,6 +220,13 @@ pub fn register(vm: &mut VM) {
     vm.method_registry.insert(
         ("external_program".to_string(), "version".to_string()),
         program_version,
+    );
+    vm.method_registry.insert(
+        (
+            "external_program".to_string(),
+            "install_sources".to_string(),
+        ),
+        program_install_sources,
     );
 
     // Configuration data methods
@@ -400,6 +411,10 @@ pub fn register(vm: &mut VM) {
         ("subproject".to_string(), "get_variable".to_string()),
         subproject_get_variable,
     );
+    vm.method_registry.insert(
+        ("subproject".to_string(), "dependency".to_string()),
+        subproject_dependency,
+    );
 
     // Run result methods
     vm.method_registry.insert(
@@ -444,6 +459,8 @@ pub fn register(vm: &mut VM) {
         ("file".to_string(), "full_path".to_string()),
         file_full_path,
     );
+    vm.method_registry
+        .insert(("file".to_string(), "found".to_string()), file_found);
 
     // Compiler methods
     register_compiler_methods(vm);
@@ -1470,6 +1487,15 @@ fn program_version(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Obje
     }
 }
 
+fn program_install_sources(
+    _vm: &mut VM,
+    _obj: &Object,
+    _args: &[CallArg],
+) -> Result<Object, String> {
+    // This is a Python module method; we accept and ignore it
+    Ok(Object::None)
+}
+
 // ---- Configuration data methods ----
 
 fn cfg_set(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
@@ -1958,7 +1984,31 @@ fn meson_override_find_program(
         .first()
         .map(|v| v.to_string_value())
         .unwrap_or_default();
-    let prog = positional.get(1).cloned().cloned().unwrap_or(Object::None);
+    let raw = positional.get(1).cloned().cloned().unwrap_or(Object::None);
+    let prog = match raw {
+        Object::File(ref f) => {
+            let path = if f.is_built {
+                if f.subdir.is_empty() {
+                    format!("{}/{}", vm.build_root, f.path)
+                } else {
+                    format!("{}/{}/{}", vm.build_root, f.subdir, f.path)
+                }
+            } else {
+                if f.subdir.is_empty() {
+                    format!("{}/{}", vm.source_root, f.path)
+                } else {
+                    format!("{}/{}/{}", vm.source_root, f.subdir, f.path)
+                }
+            };
+            Object::ExternalProgram(ExternalProgramData {
+                name: name.clone(),
+                path,
+                found: true,
+                version: None,
+            })
+        }
+        other => other,
+    };
     vm.build_data.find_program_overrides.insert(name, prog);
     Ok(Object::None)
 }
@@ -2037,6 +2087,49 @@ fn subproject_get_variable(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Resu
                 "Variable '{}' not found in subproject '{}'",
                 name, sp.name
             )),
+        }
+    } else {
+        Err("Not a subproject".to_string())
+    }
+}
+
+fn subproject_dependency(vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<Object, String> {
+    if let Object::Subproject(sp) = obj {
+        let positional = VM::get_positional_args(args);
+        let dep_name = positional
+            .first()
+            .map(|v| v.to_string_value())
+            .unwrap_or_default();
+
+        // Check if the dependency was cached in build_data
+        if let Some(dep) = vm.build_data.dependencies.get(&dep_name) {
+            if matches!(dep, Object::Dependency(d) if d.found) {
+                return Ok(dep.clone());
+            }
+        }
+
+        // Try to get it from subproject variables
+        let var_name = format!("{}_dep", dep_name);
+        if let Some(dep) = sp.variables.get(&var_name) {
+            return Ok(dep.clone());
+        }
+        if let Some(dep) = sp.variables.get(&dep_name) {
+            return Ok(dep.clone());
+        }
+
+        let required = match VM::get_arg_value(args, "required") {
+            Some(Object::Bool(b)) => *b,
+            Some(Object::Feature(FeatureState::Disabled)) => false,
+            _ => true,
+        };
+
+        if required {
+            Err(format!(
+                "Dependency '{}' not found in subproject '{}'",
+                dep_name, sp.name
+            ))
+        } else {
+            Ok(Object::Dependency(DependencyData::not_found(&dep_name)))
         }
     } else {
         Err("Not a subproject".to_string())
@@ -2159,6 +2252,11 @@ fn file_full_path(vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object
     }
 }
 
+fn file_found(_vm: &mut VM, _obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
+    // Files always exist (they are resolved at parse time)
+    Ok(Object::Bool(true))
+}
+
 fn module_found(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
     if let Object::Module(name) = obj {
         // Empty module name signals not-found (from import with required: false)
@@ -2169,7 +2267,7 @@ fn module_found(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object,
 }
 // ---- Compiler methods (registered separately) ----
 
-/// Resolve include_directories kwarg to -I flags
+/// Resolve include_directories and dependencies kwargs to -I flags
 fn resolve_include_dirs(vm: &VM, args: &[CallArg]) -> Vec<String> {
     let mut result = Vec::new();
     let inc_value = VM::get_arg_value(args, "include_directories");
@@ -2205,6 +2303,28 @@ fn resolve_include_dirs(vm: &VM, args: &[CallArg]) -> Vec<String> {
         }
         _ => {}
     }
+
+    // Also resolve include dirs from dependencies kwarg
+    let dep_value = VM::get_arg_value(args, "dependencies");
+    let process_dep = |dep: &Object, result: &mut Vec<String>| {
+        if let Object::Dependency(d) = dep {
+            for dir in &d.include_dirs {
+                result.push(format!("-I{}", dir));
+            }
+        }
+    };
+    match dep_value {
+        Some(Object::Array(arr)) => {
+            for item in arr {
+                process_dep(item, &mut result);
+            }
+        }
+        Some(dep @ Object::Dependency(_)) => {
+            process_dep(dep, &mut result);
+        }
+        _ => {}
+    }
+
     result
 }
 
@@ -2350,6 +2470,13 @@ fn register_compiler_methods(vm: &mut VM) {
         compiler_has_function_attribute,
     );
     vm.method_registry.insert(
+        (
+            "compiler".to_string(),
+            "get_supported_function_attributes".to_string(),
+        ),
+        compiler_get_supported_function_attributes,
+    );
+    vm.method_registry.insert(
         ("compiler".to_string(), "get_argument_syntax".to_string()),
         compiler_get_argument_syntax,
     );
@@ -2435,7 +2562,7 @@ fn compiler_has_header(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<O
 }
 
 fn compiler_has_header_symbol(
-    _vm: &mut VM,
+    vm: &mut VM,
     obj: &Object,
     args: &[CallArg],
 ) -> Result<Object, String> {
@@ -2452,7 +2579,22 @@ fn compiler_has_header_symbol(
             .get(1)
             .map(|v| v.to_string_value())
             .unwrap_or_default();
-        let result = crate::compilers::check_header_symbol(c, &header, &symbol, args);
+        // Resolve include_directories and dependencies kwargs into -I flags
+        let inc_args = resolve_include_dirs(vm, args);
+        let augmented_args = if !inc_args.is_empty() {
+            let mut extra = crate::compilers::extra_args_from_callargs(args);
+            extra.extend(inc_args);
+            let mut new_args: Vec<CallArg> = args.to_vec();
+            new_args.retain(|a| a.name.as_deref() != Some("args"));
+            new_args.push(CallArg {
+                name: Some("args".to_string()),
+                value: Object::Array(extra.into_iter().map(Object::String).collect()),
+            });
+            new_args
+        } else {
+            args.to_vec()
+        };
+        let result = crate::compilers::check_header_symbol(c, &header, &symbol, &augmented_args);
         check_required_result(
             args,
             result,
@@ -2951,8 +3093,14 @@ fn compiler_find_library(_vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result
         }
         let dirs = VM::get_arg_string_array(args, "dirs");
         let result = crate::compilers::find_library(c, &name, &dirs);
-        if result.is_none() && required {
-            return Err(format!("Library '{}' not found", name));
+        if result.is_none() {
+            // Handle disabler: true kwarg
+            if VM::get_arg_bool(args, "disabler", false) {
+                return Ok(Object::Disabler);
+            }
+            if required {
+                return Err(format!("Library '{}' not found", name));
+            }
         }
         Ok(result.unwrap_or(Object::Dependency(DependencyData::not_found(&name))))
     } else {
@@ -2979,6 +3127,29 @@ fn compiler_has_function_attribute(
             result,
             &format!("Function attribute '{}' not supported", attr),
         )
+    } else {
+        Err("Not a compiler".to_string())
+    }
+}
+
+fn compiler_get_supported_function_attributes(
+    _vm: &mut VM,
+    obj: &Object,
+    args: &[CallArg],
+) -> Result<Object, String> {
+    if let Object::Compiler(c) = obj {
+        let positional = VM::get_positional_args(args);
+        let attrs = if let Some(Object::Array(arr)) = positional.first() {
+            arr.iter().map(|v| v.to_string_value()).collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let supported: Vec<Object> = attrs
+            .into_iter()
+            .filter(|attr| crate::compilers::has_function_attribute(c, attr))
+            .map(Object::String)
+            .collect();
+        Ok(Object::Array(supported))
     } else {
         Err("Not a compiler".to_string())
     }

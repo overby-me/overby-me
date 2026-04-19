@@ -405,26 +405,29 @@ fn concatenate_string_literals(input: &str) -> String {
     let mut in_string = false;
     let mut current_string = String::new();
     let mut pending_close = false;
+    let mut pending_whitespace = String::new();
 
     while let Some(c) = chars.next() {
         if pending_close {
-            // We just closed a string literal. Check if next non-space char is another quote.
             if c == '\x20' || c == '\t' || c == '\n' {
-                // Skip whitespace between potential adjacent strings
+                // Buffer whitespace — might be between adjacent strings
+                pending_whitespace.push(c);
                 continue;
             } else if c == '\x22' {
-                // Another string literal follows — continue accumulating
+                // Another string literal follows — concatenate (discard whitespace)
+                pending_whitespace.clear();
                 pending_close = false;
                 in_string = true;
                 continue;
             } else {
-                // Not an adjacent string — close the current string and emit
+                // Not an adjacent string — emit the string + buffered whitespace
                 result.push('\x22');
                 result.push_str(&current_string);
                 result.push('\x22');
+                result.push_str(&pending_whitespace);
                 current_string.clear();
+                pending_whitespace.clear();
                 pending_close = false;
-                // Process this character normally
                 result.push(c);
                 continue;
             }
@@ -497,21 +500,73 @@ pub fn find_library(compiler: &CompilerData, name: &str, dirs: &[String]) -> Opt
 /// Check if a function attribute is supported
 pub fn has_function_attribute(compiler: &CompilerData, attr: &str) -> bool {
     let code = match attr {
+        "alias" => "int foo(void) { return 0; } int __attribute__((alias(\"foo\"))) bar(void);",
+        "aligned" => "int __attribute__((aligned(16))) x;",
+        "alloc_size" => "void *__attribute__((alloc_size(1))) func(int a);",
+        "always_inline" => "inline __attribute__((always_inline)) int func(void) { return 0; }",
+        "artificial" => "inline __attribute__((artificial)) int func(void) { return 0; }",
+        "cold" => "int __attribute__((cold)) func(void) { return 0; }",
+        "const" => "int __attribute__((const)) func(void);",
+        "constructor" => "int __attribute__((constructor)) func(void) { return 0; }",
+        "constructor_priority" => "int __attribute__((constructor(101))) func(void) { return 0; }",
+        "deprecated" => "int __attribute__((deprecated)) func(void);",
+        "destructor" => "void __attribute__((destructor)) func(void) {}",
+        "dllexport" => "__declspec(dllexport) int func(void) { return 0; }",
+        "dllimport" => "__declspec(dllimport) int func(void);",
+        "error" => "int __attribute__((error(\"msg\"))) func(void);",
+        "externally_visible" => "int __attribute__((externally_visible)) func(void) { return 0; }",
+        "flatten" => "int __attribute__((flatten)) func(void) { return 0; }",
+        "format" => "int __attribute__((format(printf, 1, 2))) func(const char *a, ...);",
+        "format_arg" => "char *__attribute__((format_arg(1))) func(const char *a);",
+        "force_align_arg_pointer" => "void __attribute__((force_align_arg_pointer)) func(void) {}",
+        "gnu_inline" => "inline __attribute__((gnu_inline)) int func(void) { return 0; }",
+        "hot" => "int __attribute__((hot)) func(void) { return 0; }",
+        "ifunc" => {
+            "static int my_foo(void) { return 0; } static int (*resolve_foo(void))(void) { return my_foo; } int foo(void) __attribute__((ifunc(\"resolve_foo\")));"
+        }
+        "malloc" => "void *__attribute__((malloc)) func(void);",
+        "noclone" => "int __attribute__((noclone)) func(void) { return 0; }",
+        "noinline" => "int __attribute__((noinline)) func(void) { return 0; }",
+        "nonnull" => "int __attribute__((nonnull)) func(int *a);",
+        "noreturn" => "void __attribute__((noreturn)) func(void) { while(1); }",
+        "nothrow" => "int __attribute__((nothrow)) func(void);",
+        "optimize" => "int __attribute__((optimize(\"O2\"))) func(void) { return 0; }",
+        "packed" => "struct __attribute__((packed)) foo { int x; };",
+        "pure" => "int __attribute__((pure)) func(void);",
+        "returns_nonnull" => "int *__attribute__((returns_nonnull)) func(void);",
+        "section" => "int __attribute__((section(\".mysection\"))) x;",
+        "sentinel" => "int __attribute__((sentinel)) func(int a, ...);",
+        "unused" => "int __attribute__((unused)) x;",
+        "used" => "int __attribute__((used)) x;",
         "visibility" | "visibility:default" => {
             "int __attribute__((visibility(\"default\"))) func(void) { return 0; }"
         }
-        "dllexport" => "__declspec(dllexport) int func(void) { return 0; }",
-        "dllimport" => "__declspec(dllimport) int func(void);",
-        "noreturn" => "void __attribute__((noreturn)) func(void) { while(1); }",
-        "unused" => "int __attribute__((unused)) x;",
-        "deprecated" => "int __attribute__((deprecated)) func(void);",
-        "aligned" => "int __attribute__((aligned(16))) x;",
-        "pure" => "int __attribute__((pure)) func(void);",
-        "const" => "int __attribute__((const)) func(void);",
-        "malloc" => "void *__attribute__((malloc)) func(void);",
+        "visibility:hidden" => {
+            "int __attribute__((visibility(\"hidden\"))) func(void) { return 0; }"
+        }
+        "visibility:internal" => {
+            "int __attribute__((visibility(\"internal\"))) func(void) { return 0; }"
+        }
+        "visibility:protected" => {
+            "int __attribute__((visibility(\"protected\"))) func(void) { return 0; }"
+        }
         "warn_unused_result" => "int __attribute__((warn_unused_result)) func(void);",
+        "warning" => "int __attribute__((warning(\"msg\"))) func(void);",
         "weak" => "int __attribute__((weak)) func(void) { return 0; }",
-        _ => return false,
+        "weakref" => "static int __attribute__((weakref(\"foo\"))) func(void);",
+        "vector_size" => "typedef int __attribute__((vector_size(16))) vec4;",
+        "leaf" => "int __attribute__((leaf)) func(void) { return 0; }",
+        "no_sanitize" | "no_sanitize_address" | "no_sanitize_thread" | "no_sanitize_undefined" => {
+            "int __attribute__((no_sanitize(\"address\"))) func(void) { return 0; }"
+        }
+        "fallthrough" => {
+            "int func(void) { switch(0) { case 0: __attribute__((fallthrough)); default: break; } return 0; }"
+        }
+        _ => {
+            // Generic fallback: try to compile with the attribute
+            let generic = format!("int __attribute__(({})) func(void) {{ return 0; }}", attr);
+            return try_compile_code(compiler, &generic, &["-Werror".to_string()]);
+        }
     };
     try_compile_code(compiler, code, &["-Werror".to_string()])
 }

@@ -815,6 +815,22 @@ fn builtin_dependency(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         }));
     }
 
+    // OpenMP is a virtual dependency provided by the compiler
+    if name == "openmp" && !is_feature_disabled {
+        return Ok(Object::Dependency(DependencyData {
+            name: "openmp".to_string(),
+            found: true,
+            version: String::new(),
+            compile_args: vec!["-fopenmp".to_string()],
+            link_args: vec!["-fopenmp".to_string()],
+            sources: Vec::new(),
+            include_dirs: Vec::new(),
+            dependencies: Vec::new(),
+            variables: std::collections::HashMap::new(),
+            is_internal: false,
+        }));
+    }
+
     // Build cache key from name + method to avoid cross-method cache hits
     let method = VM::get_arg_str(args, "method", usize::MAX).unwrap_or("auto");
     let cache_key = if method != "auto" {
@@ -1286,6 +1302,11 @@ fn builtin_dependency(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         }
     }
 
+    let use_disabler = VM::get_arg_bool(args, "disabler", false);
+    if use_disabler && !matches!(&obj, Object::Dependency(d) if d.found) {
+        return Ok(Object::Disabler);
+    }
+
     Ok(obj)
 }
 
@@ -1362,16 +1383,16 @@ fn builtin_declare_dependency(vm: &mut VM, args: &[CallArg]) -> Result<Object, S
 }
 
 /// Helper to check program version by running it with --version
-fn run_program_version(path: &str) -> Option<std::process::Output> {
+fn run_program_version(path: &str, version_arg: &str) -> Option<std::process::Output> {
     // Try running directly first
-    let output = Command::new(path).arg("--version").output();
+    let output = Command::new(path).arg(version_arg).output();
     match output {
         Ok(o) if o.status.success() => Some(o),
         _ if path.ends_with(".py") => {
             // If direct execution fails and it's a .py script, try with python3
             Command::new("python3")
                 .arg(path)
-                .arg("--version")
+                .arg(version_arg)
                 .output()
                 .ok()
                 .filter(|o| o.status.success())
@@ -1393,12 +1414,12 @@ fn extract_version_from_output(output: &std::process::Output) -> Option<String> 
     None
 }
 
-fn check_program_version(path: &str, version_req: &str) -> Option<String> {
+fn check_program_version(path: &str, version_req: &str, version_arg: &str) -> Option<String> {
     if version_req.is_empty() {
         return Some(String::new());
     }
 
-    let output = run_program_version(path)?;
+    let output = run_program_version(path, version_arg)?;
     let detected = extract_version_from_output(&output);
 
     match detected {
@@ -1434,6 +1455,7 @@ fn builtin_find_program(vm: &mut VM, args: &[CallArg]) -> Result<Object, String>
 
     let _native = VM::get_arg_bool(args, "native", false);
     let version_req = VM::get_arg_str(args, "version", usize::MAX).unwrap_or("");
+    let version_arg = VM::get_arg_str(args, "version_argument", usize::MAX).unwrap_or("--version");
     let dirs = VM::get_arg_string_array(args, "dirs");
 
     // Flatten positional args into a list of names to try
@@ -1445,12 +1467,42 @@ fn builtin_find_program(vm: &mut VM, args: &[CallArg]) -> Result<Object, String>
                 for item in arr {
                     match item {
                         Object::String(s) => names_to_try.push(s.clone()),
-                        Object::File(f) => names_to_try.push(f.path.clone()),
+                        Object::File(f) => {
+                            if f.is_built {
+                                let full = if f.subdir.is_empty() {
+                                    format!("{}/{}", vm.build_root, f.path)
+                                } else {
+                                    format!("{}/{}/{}", vm.build_root, f.subdir, f.path)
+                                };
+                                return Ok(Object::ExternalProgram(ExternalProgramData {
+                                    name: f.path.clone(),
+                                    path: full,
+                                    found: true,
+                                    version: None,
+                                }));
+                            }
+                            names_to_try.push(f.path.clone());
+                        }
                         _ => {}
                     }
                 }
             }
-            Object::File(f) => names_to_try.push(f.path.clone()),
+            Object::File(f) => {
+                if f.is_built {
+                    let full = if f.subdir.is_empty() {
+                        format!("{}/{}", vm.build_root, f.path)
+                    } else {
+                        format!("{}/{}/{}", vm.build_root, f.subdir, f.path)
+                    };
+                    return Ok(Object::ExternalProgram(ExternalProgramData {
+                        name: f.path.clone(),
+                        path: full,
+                        found: true,
+                        version: None,
+                    }));
+                }
+                names_to_try.push(f.path.clone());
+            }
             Object::ExternalProgram(p) => {
                 if p.found {
                     return Ok(Object::ExternalProgram(p.clone()));
@@ -1469,6 +1521,13 @@ fn builtin_find_program(vm: &mut VM, args: &[CallArg]) -> Result<Object, String>
 
         // Collect candidate paths
         let mut candidates: Vec<String> = Vec::new();
+
+        // Handle absolute paths directly
+        if name.starts_with('/') {
+            if std::path::Path::new(name).exists() {
+                candidates.push(name.clone());
+            }
+        }
 
         // Search in specified dirs first
         for dir in &dirs {
@@ -1506,7 +1565,9 @@ fn builtin_find_program(vm: &mut VM, args: &[CallArg]) -> Result<Object, String>
         // Try each candidate, checking version if required
         for candidate_path in candidates {
             if !version_req.is_empty() {
-                if let Some(detected_ver) = check_program_version(&candidate_path, version_req) {
+                if let Some(detected_ver) =
+                    check_program_version(&candidate_path, version_req, version_arg)
+                {
                     return Ok(Object::ExternalProgram(ExternalProgramData {
                         name: name.clone(),
                         path: candidate_path,
@@ -1518,8 +1579,8 @@ fn builtin_find_program(vm: &mut VM, args: &[CallArg]) -> Result<Object, String>
                 continue;
             }
             // No version requirement - still try to detect version
-            let detected_version =
-                run_program_version(&candidate_path).and_then(|o| extract_version_from_output(&o));
+            let detected_version = run_program_version(&candidate_path, version_arg)
+                .and_then(|o| extract_version_from_output(&o));
             return Ok(Object::ExternalProgram(ExternalProgramData {
                 name: name.clone(),
                 path: candidate_path,
@@ -1558,7 +1619,7 @@ fn builtin_find_program(vm: &mut VM, args: &[CallArg]) -> Result<Object, String>
                                                     .unwrap()
                                                     .to_string_lossy()
                                                     .to_string();
-                                                let sp_args = vec![
+                                                let mut sp_args = vec![
                                                     CallArg {
                                                         name: None,
                                                         value: Object::String(sp_name),
@@ -1568,6 +1629,15 @@ fn builtin_find_program(vm: &mut VM, args: &[CallArg]) -> Result<Object, String>
                                                         value: Object::Bool(false),
                                                     },
                                                 ];
+                                                // Forward default_options to subproject
+                                                if let Some(default_opts) =
+                                                    VM::get_arg_value(args, "default_options")
+                                                {
+                                                    sp_args.push(CallArg {
+                                                        name: Some("default_options".to_string()),
+                                                        value: default_opts.clone(),
+                                                    });
+                                                }
                                                 let _ = builtin_subproject(vm, &sp_args);
                                                 if let Some(prog) = vm
                                                     .build_data
@@ -1595,6 +1665,11 @@ fn builtin_find_program(vm: &mut VM, args: &[CallArg]) -> Result<Object, String>
 
     if required {
         return Err(format!("Program '{}' not found", name));
+    }
+
+    // Handle disabler: true kwarg
+    if VM::get_arg_bool(args, "disabler", false) {
+        return Ok(Object::Disabler);
     }
 
     Ok(Object::ExternalProgram(ExternalProgramData {
@@ -1782,7 +1857,32 @@ fn builtin_configure_file(vm: &mut VM, args: &[CallArg]) -> Result<Object, Strin
     let mut command = Vec::new();
     if let Some(Object::Array(arr)) = VM::get_arg_value(args, "command") {
         for item in arr {
-            command.push(item.to_string_value());
+            match item {
+                Object::ExternalProgram(p) => command.push(p.path.clone()),
+                Object::File(f) => {
+                    if f.is_built {
+                        if f.subdir.is_empty() {
+                            command.push(format!("{}/{}", vm.build_root, f.path));
+                        } else {
+                            command.push(format!("{}/{}/{}", vm.build_root, f.subdir, f.path));
+                        }
+                    } else {
+                        if f.subdir.is_empty() {
+                            command.push(format!("{}/{}", vm.source_root, f.path));
+                        } else {
+                            command.push(format!("{}/{}/{}", vm.source_root, f.subdir, f.path));
+                        }
+                    }
+                }
+                Object::BuildTarget(t) => {
+                    command.push(format!(
+                        "{}/{}",
+                        vm.build_root,
+                        t.outputs.first().map(|s| s.as_str()).unwrap_or(&t.name)
+                    ));
+                }
+                _ => command.push(item.to_string_value()),
+            }
         }
     }
 
@@ -1831,6 +1931,66 @@ fn builtin_configure_file(vm: &mut VM, args: &[CallArg]) -> Result<Object, Strin
         } else {
             // No input file, just create empty output
             let _ = std::fs::write(&output_path, "");
+        }
+    } else if !command.is_empty() {
+        // Command mode: execute command with substitutions
+        let mut resolved_command: Vec<String> = Vec::new();
+        let input_path = input.as_ref().map(|inp| {
+            if vm.current_subdir.is_empty() {
+                format!("{}/{}", vm.source_root, inp)
+            } else {
+                format!("{}/{}/{}", vm.source_root, vm.current_subdir, inp)
+            }
+        });
+        for arg in &command {
+            let mut s = arg.clone();
+            if let Some(ref ip) = input_path {
+                s = s.replace("@INPUT@", ip);
+            }
+            s = s.replace("@OUTPUT@", &output_path);
+            if let Some(ref inp) = input {
+                let basename = inp.rsplit('/').next().unwrap_or(inp);
+                s = s.replace("@BASENAME@", basename);
+                let plainname = basename.rsplit('.').next_back().unwrap_or(basename);
+                s = s.replace("@PLAINNAME@", plainname);
+            }
+            if let Some(ref dep) = depfile {
+                s = s.replace("@DEPFILE@", &format!("{}/{}", build_subdir, dep));
+            }
+            s = s.replace("@SOURCE_ROOT@", &vm.source_root);
+            s = s.replace("@BUILD_ROOT@", &vm.build_root);
+            s = s.replace(
+                "@CURRENT_SOURCE_DIR@",
+                &if vm.current_subdir.is_empty() {
+                    vm.source_root.clone()
+                } else {
+                    format!("{}/{}", vm.source_root, vm.current_subdir)
+                },
+            );
+            resolved_command.push(s);
+        }
+        if !resolved_command.is_empty() {
+            let cmd = &resolved_command[0];
+            let cmd_args = &resolved_command[1..];
+            let result = std::process::Command::new(cmd).args(cmd_args).output();
+            match result {
+                Ok(output_result) => {
+                    if capture {
+                        let _ = std::fs::write(&output_path, &output_result.stdout);
+                    }
+                    if !output_result.status.success() && capture {
+                        let stderr = String::from_utf8_lossy(&output_result.stderr);
+                        return Err(format!("ERROR: Error running command:\n{}", stderr.trim()));
+                    }
+                }
+                Err(e) => {
+                    if capture {
+                        return Err(format!("ERROR: Error running command:\n{}", e));
+                    }
+                    // Non-capture mode: silently ignore execution failures
+                    // The backend (ninja) will handle the actual execution
+                }
+            }
         }
     }
 
@@ -2458,7 +2618,40 @@ fn builtin_subproject(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         None
     };
     if let Some(src) = opts_source {
-        crate::options::parse_options_file(&src, &mut vm.options);
+        let defs = crate::options::parse_options_file_defs(&src);
+        for def in defs {
+            if def.yield_to_parent {
+                // Check if parent has the same option with compatible type
+                if let Some(parent_val) = old_options.get(&def.name) {
+                    let types_compatible = match (&def.opt_type[..], parent_val) {
+                        ("boolean", Object::Bool(_)) => true,
+                        ("integer", Object::Int(_)) => true,
+                        ("string", Object::String(_)) => true,
+                        ("combo", Object::String(_)) => true,
+                        ("array", Object::Array(_)) => true,
+                        ("feature", Object::Feature(_)) => true,
+                        // string and combo are interchangeable
+                        ("string", Object::Feature(_)) => false,
+                        ("combo", Object::Feature(_)) => false,
+                        _ => false,
+                    };
+                    if types_compatible {
+                        vm.options.entry(def.name).or_insert(parent_val.clone());
+                        continue;
+                    }
+                    // Types don't match — fall through to use subproject's own default
+                }
+            }
+            // Handle deprecated option renaming
+            if let Some(crate::options::DeprecatedInfo::Renamed(ref new_name)) = def.deprecated {
+                // This option was renamed — if the old option was set, apply to new name
+                if let Some(val) = vm.options.get(&def.name).cloned() {
+                    vm.options.entry(new_name.clone()).or_insert(val);
+                }
+            }
+            // Use subproject's own default for non-yielding options
+            vm.options.entry(def.name).or_insert(def.default_value);
+        }
     }
 
     // Apply parent options for this subproject (e.g., "subproject_name:opt=val")
@@ -2762,6 +2955,34 @@ fn builtin_include_directories(vm: &mut VM, args: &[CallArg]) -> Result<Object, 
     let mut dirs = Vec::new();
     for arg in &positional {
         if let Object::String(s) = arg {
+            // Reject absolute paths that point inside the source tree
+            if s.starts_with('/') {
+                if s.starts_with(&vm.source_root) || s.starts_with(&vm.top_source_root) {
+                    return Err(format!(
+                        "Tried to form an absolute path to a dir in the source tree.
+You should not do that but use relative paths instead, for
+directories that are part of your project.
+
+To get include path to any directory relative to the current dir do
+
+incdir = include_directories(dirname)
+
+After this incdir will contain both the current source dir as well as the
+corresponding build dir. It can then be used in any subdirectory and
+Meson will take care of all the busywork to make paths work.
+
+Dirname can even be '.' to mark the current directory. Though you should
+remember that the current source and build directories are always
+put in the include directories by default so you only need to do
+include_directories('.') if you intend to use the result in a
+different subdirectory.
+
+Note that this error message can also be triggered by
+external dependencies being installed within your source
+tree - it's not recommended to do this."
+                    ));
+                }
+            }
             let full = if vm.current_subdir.is_empty() {
                 s.clone()
             } else {
@@ -3026,6 +3247,11 @@ fn builtin_is_variable(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> 
 
 fn builtin_get_variable(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
     let positional = VM::get_positional_args(args);
+    // If the name argument is a disabler, propagate it
+    if matches!(positional.first(), Some(Object::Disabler)) {
+        return Ok(Object::Disabler);
+    }
+
     let name = positional
         .first()
         .and_then(|v| {
@@ -3095,12 +3321,7 @@ fn builtin_assert(_vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         let msg = positional
             .get(1)
             .map(|v| v.to_display_string())
-            .unwrap_or_else(|| {
-                format!(
-                    "Assertion failed (condition was: {})",
-                    condition.to_display_string()
-                )
-            });
+            .unwrap_or_else(|| format!("Assert failed: {}", condition.to_display_string()));
         return Err(msg);
     }
     Ok(Object::None)

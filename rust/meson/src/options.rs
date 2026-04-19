@@ -85,6 +85,15 @@ fn eval_const_expr(expr: &ast::Expression) -> Option<Object> {
                 _ => None,
             }
         }
+        ast::Expression::Dict(entries, _) => {
+            let mut map = Vec::new();
+            for (k, v) in entries {
+                let key = eval_const_expr(k)?;
+                let val = eval_const_expr(v)?;
+                map.push((obj_to_string(&key), val));
+            }
+            Some(Object::Dict(map))
+        }
         _ => None,
     }
 }
@@ -172,6 +181,134 @@ fn parse_option_call(args: &[ast::Argument], options: &mut HashMap<String, Objec
         _ => Object::String(String::new()),
     });
     options.entry(name).or_insert(default_value);
+}
+
+/// Option definition with metadata (including yield)
+pub struct OptionDef {
+    pub name: String,
+    pub opt_type: String,
+    pub default_value: Object,
+    pub yield_to_parent: bool,
+    pub deprecated: Option<DeprecatedInfo>,
+}
+
+/// Information about deprecated option
+pub enum DeprecatedInfo {
+    /// Renamed to another option
+    Renamed(String),
+    /// Value remapping
+    ValueMap(std::collections::HashMap<String, String>),
+}
+
+fn default_for_type(opt_type: &str, choices: &[String]) -> Object {
+    match opt_type {
+        "boolean" => Object::Bool(true),
+        "integer" => Object::Int(0),
+        "string" => Object::String(String::new()),
+        "combo" => choices
+            .first()
+            .map(|f| Object::String(f.clone()))
+            .unwrap_or(Object::String(String::new())),
+        "array" => {
+            if choices.is_empty() {
+                Object::Array(Vec::new())
+            } else {
+                Object::Array(choices.iter().map(|c| Object::String(c.clone())).collect())
+            }
+        }
+        "feature" => Object::Feature(FeatureState::Auto),
+        _ => Object::String(String::new()),
+    }
+}
+
+/// Parse a meson_options.txt / meson.options file and return structured defs.
+pub fn parse_options_file_defs(source: &str) -> Vec<OptionDef> {
+    let mut defs = Vec::new();
+    let mut lexer = crate::lexer::Lexer::new(source);
+    let tokens = match lexer.tokenize() {
+        Ok(t) => t,
+        Err(_) => return defs,
+    };
+    let mut parser = crate::parser::Parser::new(tokens);
+    let program = match parser.parse() {
+        Ok(p) => p,
+        Err(_) => return defs,
+    };
+    for stmt in &program.statements {
+        if let ast::Statement::Expression(ast::Expression::FunctionCall(func, args, _)) = stmt {
+            if let ast::Expression::Identifier(name, _) = func.as_ref() {
+                if name == "option" {
+                    if let Some(def) = parse_option_call_def(args) {
+                        defs.push(def);
+                    }
+                }
+            }
+        }
+    }
+    defs
+}
+
+fn parse_option_call_def(args: &[ast::Argument]) -> Option<OptionDef> {
+    let mut name = String::new();
+    let mut opt_type = String::new();
+    let mut value = None;
+    let mut choices = Vec::new();
+    let mut yield_to_parent = false;
+    let mut deprecated = None;
+
+    for (i, arg) in args.iter().enumerate() {
+        match arg.name.as_deref() {
+            None if i == 0 => {
+                if let Some(obj) = eval_const_expr(&arg.value) {
+                    name = obj_to_string(&obj);
+                }
+            }
+            Some("type") => {
+                if let Some(obj) = eval_const_expr(&arg.value) {
+                    opt_type = obj_to_string(&obj);
+                }
+            }
+            Some("value") => {
+                value = eval_const_expr(&arg.value);
+            }
+            Some("choices") => {
+                if let Some(Object::Array(items)) = eval_const_expr(&arg.value) {
+                    choices = items.into_iter().map(|o| obj_to_string(&o)).collect();
+                }
+            }
+            Some("yield") => {
+                if let Some(Object::Bool(b)) = eval_const_expr(&arg.value) {
+                    yield_to_parent = b;
+                }
+            }
+            Some("deprecated") => match eval_const_expr(&arg.value) {
+                Some(Object::String(s)) => {
+                    deprecated = Some(DeprecatedInfo::Renamed(s));
+                }
+                Some(Object::Dict(entries)) => {
+                    let map: std::collections::HashMap<String, String> = entries
+                        .into_iter()
+                        .map(|(k, v)| (k, obj_to_string(&v)))
+                        .collect();
+                    deprecated = Some(DeprecatedInfo::ValueMap(map));
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    if name.is_empty() {
+        return None;
+    }
+    let value = value.map(|v| coerce_option_value(v, &opt_type));
+    let default_value = value.unwrap_or_else(|| default_for_type(&opt_type, &choices));
+    Some(OptionDef {
+        name,
+        opt_type,
+        default_value,
+        yield_to_parent,
+        deprecated,
+    })
 }
 
 fn coerce_option_value(value: Object, opt_type: &str) -> Object {

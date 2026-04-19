@@ -24,8 +24,29 @@ impl Interpreter {
     }
 
     pub fn set_options(&mut self, opts: &[(String, String)]) {
+        // Options known to be array-typed in Meson
+        const ARRAY_OPTIONS: &[&str] = &[
+            "c_args",
+            "cpp_args",
+            "c_link_args",
+            "cpp_link_args",
+            "rust_args",
+            "objc_args",
+            "objcpp_args",
+            "objc_link_args",
+            "objcpp_link_args",
+        ];
         for (key, value) in opts {
             let obj = options::parse_option_value(value);
+            // Wrap scalar values in arrays for known array-type options
+            let obj = if ARRAY_OPTIONS.contains(&key.as_str()) {
+                match obj {
+                    crate::objects::Object::Array(_) => obj,
+                    single => crate::objects::Object::Array(vec![single]),
+                }
+            } else {
+                obj
+            };
             self.vm.options.insert(key.clone(), obj);
         }
     }
