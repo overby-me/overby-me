@@ -47,13 +47,59 @@ pub fn handle_udev_event(run_info: &ArcMutRuntimeInfo, params: &UdevEventParams)
 
     match params.action.as_str() {
         "add" | "change" | "bind" | "move" | "online" => {
-            apply_device_active(run_info, params, &unit_names);
+            // While a device is still being processed by udevd (RUN= program
+            // running), defer activation — upstream systemd waits for the
+            // RUN block to finish before considering the device plugged, and
+            // TEST-17-UDEV.device_is_processing asserts the associated
+            // .device units remain inactive during this window.
+            let is_processing = params
+                .env
+                .get("ID_PROCESSING")
+                .map(|v| v == "1")
+                .unwrap_or(false);
+            if is_processing {
+                trace!(
+                    "udev-event: {} still in ID_PROCESSING=1; ensuring units exist but leaving inactive",
+                    params.sysfs_path
+                );
+                ensure_device_units_exist(run_info, params, &unit_names);
+            } else {
+                apply_device_active(run_info, params, &unit_names);
+            }
         }
         "remove" | "unbind" | "offline" => {
             apply_device_inactive(run_info, &unit_names);
         }
         other => {
             debug!("udev-event: ignoring unknown action '{}'", other);
+        }
+    }
+}
+
+/// Create placeholder device units without activating them — used during
+/// ID_PROCESSING=1 so `systemctl show` / D-Bus object lookup work, but the
+/// units stay `Stopped` so `BindsTo=` dependents aren't fired prematurely.
+fn ensure_device_units_exist(
+    run_info: &ArcMutRuntimeInfo,
+    params: &UdevEventParams,
+    unit_names: &[String],
+) {
+    let mut ri = run_info.write_poisoned();
+    for name in unit_names {
+        let id = UnitId {
+            kind: UnitIdKind::Device,
+            name: name.clone(),
+        };
+        if !ri.unit_table.contains_key(&id) {
+            match build_device_unit(name, params) {
+                Ok(unit) => {
+                    trace!("udev-event: creating placeholder device unit {}", name);
+                    ri.unit_table.insert(id, unit);
+                }
+                Err(e) => {
+                    warn!("udev-event: failed to build device unit {}: {}", name, e);
+                }
+            }
         }
     }
 }

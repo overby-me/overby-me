@@ -4306,6 +4306,17 @@ fn process_event(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) {
                 create_device_symlinks(event, &result.symlinks);
             }
 
+            // Mark the device as still-being-processed if we will run
+            // any RUN programs.  Clients like systemd check
+            // ID_PROCESSING=1 in the db entry to know whether they
+            // should wait before activating `.device` units or firing
+            // BindsTo= dependents.
+            let has_run_programs =
+                !result.run_programs.is_empty() || !result.run_builtins.is_empty();
+            if has_run_programs {
+                event.env.insert("ID_PROCESSING".to_owned(), "1".to_owned());
+            }
+
             // Write device database
             if let Err(e) = write_device_db(event, &result) {
                 log::debug!("Failed to write device db: {}", e);
@@ -4317,6 +4328,18 @@ fn process_event(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) {
 
             // Execute RUN programs
             execute_run_programs(event, &result, hwdb);
+
+            // Clear the ID_PROCESSING marker and rewrite the db so
+            // downstream consumers see the device as done.
+            if has_run_programs {
+                event.env.remove("ID_PROCESSING");
+                if let Err(e) = write_device_db(event, &result) {
+                    log::debug!(
+                        "Failed to rewrite device db after RUN completion: {}",
+                        e
+                    );
+                }
+            }
         }
         "remove" | "unbind" | "offline" => {
             // Remove symlinks (read from database first, under shared lock)
