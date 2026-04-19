@@ -4547,10 +4547,14 @@ fn process_event(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) {
 
     match event.action.as_str() {
         "add" | "change" | "bind" | "move" | "online" => {
-            // Apply network link settings (rename, MAC, MTU) before other actions.
-            // This must happen early so that symlinks, database entries, and RUN
-            // programs see the final interface name.
-            if event.subsystem == "net" && matches!(event.action.as_str(), "add" | "move") {
+            // Apply network link settings (rename, MAC, MTU, altnames)
+            // ONLY on `add` — upstream intentionally skips .link
+            // application on `move`/`change`/`online`.  This matters
+            // for `ip link set dev X name Y`, which emits a `move`
+            // event that must NOT re-run NamePolicy= logic or re-add
+            // altnames that the manual rename just cleared.
+            // TEST-17-UDEV.netif-altname asserts this explicitly.
+            if event.subsystem == "net" && event.action == "add" {
                 apply_net_link_settings(event, &result);
             }
 
