@@ -66,16 +66,26 @@ pub fn handle_udev_event(run_info: &ArcMutRuntimeInfo, params: &UdevEventParams)
                 .get("SYSTEMD_READY")
                 .map(|v| v != "0")
                 .unwrap_or(true);
-            if is_processing || !systemd_ready {
+            // ID_RENAMING=1 is set by udev while a network interface is
+            // renaming.  Treat it like SYSTEMD_READY=0 — device is
+            // present but not usable, so BindsTo= dependents should see
+            // it as inactive.  TEST-17-UDEV.rename-netif uses this to
+            // drive .device unit deactivation during renames.
+            let is_renaming = params
+                .env
+                .get("ID_RENAMING")
+                .map(|v| v == "1")
+                .unwrap_or(false);
+            if is_processing || !systemd_ready || is_renaming {
                 trace!(
-                    "udev-event: {} deferred (ID_PROCESSING={}, SYSTEMD_READY={}); placeholder units only",
-                    params.sysfs_path, is_processing, systemd_ready
+                    "udev-event: {} deferred (ID_PROCESSING={}, SYSTEMD_READY={}, ID_RENAMING={}); placeholder units only",
+                    params.sysfs_path, is_processing, systemd_ready, is_renaming
                 );
                 ensure_device_units_exist(run_info, params, &unit_names);
-                // When SYSTEMD_READY just flipped from 1 to 0, we also
-                // need to deactivate any units that were previously
-                // marked plugged.
-                if !systemd_ready {
+                // When SYSTEMD_READY flipped to 0 or the device entered
+                // renaming, transition any previously-plugged units
+                // back to Stopped so BindsTo= dependents deactivate.
+                if !systemd_ready || is_renaming {
                     apply_device_inactive(run_info, &unit_names);
                 }
             } else {
