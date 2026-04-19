@@ -24,7 +24,7 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 - 59-reloading-restart, 73-locale, 76-sysctl, 34-dynamicusermigrate, 53-timer, 53-issue-16347
 - 80-notifyaccess
 - 17-udev-sanity-check, 17-udev-database, 17-udev-tag, 17-udev-global-property
-- 07-pid1-user-group, 07-pid1-protect-control-groups, 07-pid1-private-pids, 22-tmpfiles-06 (all previously flaky — deterministically pass post-stage-2-fix)
+- 07-pid1-user-group, 07-pid1-protect-control-groups, 07-pid1-private-pids, 22-tmpfiles-06, 74-aux-utils-show-multi-props-adv (all previously flaky — deterministically pass post-stage-2-fix)
 
 ### 04-JOURNAL (all 14 pass)
 
@@ -55,8 +55,9 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 ### 74-AUX-UTILS (150/151 pass, 1 real fail)
 
 - PASS (147, includes retries): add-wants, after-timestamp, analyze-cal-iter, analyze-calendar, analyze-calendar-more, analyze-edge, analyze-standalone, analyze-timespan, analyze-timestamp, analyze-unit-paths, can-operations, cat, cat-content, cat-dropin, cat-dropin-content, cat-single, cg-options, cgls, cgtop, control-pid, daemon-reload, default-deps, delta, dep-props, description-check, detect-virt, enable-disable, enable-wantedby, enter-timestamp, env-manager, environment, escape, exec-main-props, exec-status, exec-timestamps, fragment-path, get-default, id128, invocation-id, is-active-states, is-enabled-patterns, is-queries, isolate-target, journal-json, journal-ops, journal-vacuum, kill-signal, list-dependencies, list-deps-advanced, list-deps-basic, list-failed, list-jobs, list-sockets, list-timers, list-uf-pattern, list-unit-files, list-units, list-units-pattern, load-state, log-level, machine-id-setup, mask-ops, mask-unmask, names-prop, need-reload, notify, notify-basic, notify-extended, nrestarts-prop, path, power-dry-run, reload-restart, remain-lifecycle, reset-failed, resource-props, restart-usec, revert-unit, run-advanced, run-calendar, run-collect, run-description, run-env-pass, run-envfile, run-errors, run-multi-pre, run-nice, run-on-active, run-on-calendar-fire, run-options, run-properties, run-pty, run-remain-props, run-slice, run-timer, run-type-exec, run-workdir, run-working-dir, set-environment, show-all-props, show-cgroup, show-exec, show-inactive, show-mount, show-mount-props2, show-multi, show-multi-p, show-multi-props, show-nrestarts, show-path-unit, show-pid-props, show-result, show-scope, show-sequential, show-slices, show-socket, show-socket-props2, show-special, show-targets, show-timer-props, show-transient, show-unit-types, show-value-flag, source-path, start-stop-lifecycle, state-change-ts, status-errno, status-errno2, status-format, substate-check, systemctl-basics, systemctl-cat, systemctl-help, systemctl-misc, systemctl-version, target-props, timer-show-props, tmpfiles-advanced, tmpfiles-age, tmpfiles-clean, tmpfiles-create, tmpfiles-write, triggered-by, uid-gid-props, unit-file-state, unit-types, watchdog-ts, watchdog-usec
-- HANG (previously flaky, now deterministic post-stage-2-fix): is-system-running, run, show-multi-props-adv
-- FAIL (real): socket-activate (needs systemd-socket-activate binary)
+- PASS (after stage-2 fix): show-multi-props-adv
+- FAIL (real): socket-activate (needs systemd-socket-activate binary), is-system-running (returns "degraded" — systemd-journal-upload.service fails)
+- PENDING re-run: run
 
 ## Failing Tests — Categorized by Root Cause
 
