@@ -86,7 +86,7 @@ fn has_inline_recipe(line: &str) -> bool {
             ':' if depth == 0 && !found_colon => {
                 found_colon = true;
             }
-            '=' if depth == 0 && !found_colon => return false,
+            '=' if depth == 0 => return false,
             ';' if depth == 0 && found_colon => return true,
             _ => {}
         }
@@ -798,19 +798,69 @@ impl Parser {
             &trimmed[colon_pos + 1..]
         };
 
-        // Strip trailing comment from the prerequisites section (a `#` not
-        // escaped starts a comment that runs to the end of the logical line,
-        // which may include an inline `;` recipe separator).
-        let after_colon = strip_makefile_comment(after_colon);
-
-        // Split after-colon on semicolon for inline recipe
-        let (prereqs_str, inline_recipe) = if let Some(semi_pos) = after_colon.find(';') {
-            (
-                &after_colon[..semi_pos],
-                Some(after_colon[semi_pos + 1..].trim().to_string()),
-            )
-        } else {
-            (after_colon, None)
+        // Find the first unescaped, top-level (outside `$(...)`) `;` or
+        // `#`. A `;` first separates an inline recipe; a `#` first starts
+        // a trailing comment on the prerequisites. The inline recipe text
+        // itself is opaque to comment stripping (recipes may contain `#`).
+        let (prereqs_str, inline_recipe) = {
+            let bytes = after_colon.as_bytes();
+            let mut paren = 0i32;
+            let mut brace = 0i32;
+            let mut i = 0usize;
+            let mut split: Option<(usize, bool)> = None; // (pos, is_semi)
+            while i < bytes.len() {
+                let c = bytes[i];
+                if c == b'$' && i + 1 < bytes.len() {
+                    match bytes[i + 1] {
+                        b'(' => {
+                            paren += 1;
+                            i += 2;
+                            continue;
+                        }
+                        b'{' => {
+                            brace += 1;
+                            i += 2;
+                            continue;
+                        }
+                        b'$' => {
+                            // `$$` is two literal characters at this stage;
+                            // GNU make does not treat `$$(` as opening a
+                            // deferred function call when scanning for the
+                            // inline-recipe `;` separator.
+                            i += 2;
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+                if c == b'(' && paren > 0 {
+                    paren += 1;
+                } else if c == b')' && paren > 0 {
+                    paren -= 1;
+                } else if c == b'{' && brace > 0 {
+                    brace += 1;
+                } else if c == b'}' && brace > 0 {
+                    brace -= 1;
+                } else if paren == 0 && brace == 0 {
+                    if c == b';' {
+                        split = Some((i, true));
+                        break;
+                    }
+                    if c == b'#' && (i == 0 || bytes[i - 1] != b'\\') {
+                        split = Some((i, false));
+                        break;
+                    }
+                }
+                i += 1;
+            }
+            match split {
+                Some((pos, true)) => (
+                    &after_colon[..pos],
+                    Some(after_colon[pos + 1..].trim().to_string()),
+                ),
+                Some((pos, false)) => (&after_colon[..pos], None),
+                None => (after_colon, None),
+            }
         };
 
         // Detect static pattern rule: `targets : target-pattern : prereq-patterns`
@@ -825,16 +875,128 @@ impl Parser {
             (None, prereqs_str)
         };
 
-        // Split prerequisites on | for order-only
-        let (normal_prereqs, order_only) = if let Some(pipe_pos) = prereqs_str.find('|') {
+        // Split prerequisites on | for order-only.
+        // Skip `|` chars that are preceded by `$$` (literal `$|`
+        // auto-var reference for second expansion) or that are
+        // inside `$(...)` / `${...}` references.
+        let find_pipe = |s: &str| -> Option<usize> {
+            let bytes = s.as_bytes();
+            let mut i = 0;
+            let mut paren_depth: i32 = 0;
+            let mut brace_depth: i32 = 0;
+            while i < bytes.len() {
+                let c = bytes[i];
+                if c == b'$' && i + 1 < bytes.len() {
+                    let nxt = bytes[i + 1];
+                    if nxt == b'$' {
+                        // `$$` at parse time becomes `$` after first
+                        // expansion. If followed by `(` or `{`, treat
+                        // as opening a (deferred) function call so an
+                        // inner `|` is not mistaken for the order-only
+                        // separator.
+                        if i + 2 < bytes.len() && bytes[i + 2] == b'(' {
+                            paren_depth += 1;
+                            i += 3;
+                            continue;
+                        }
+                        if i + 2 < bytes.len() && bytes[i + 2] == b'{' {
+                            brace_depth += 1;
+                            i += 3;
+                            continue;
+                        }
+                        i += 2;
+                        continue;
+                    }
+                    if nxt == b'(' {
+                        paren_depth += 1;
+                        i += 2;
+                        continue;
+                    }
+                    if nxt == b'{' {
+                        brace_depth += 1;
+                        i += 2;
+                        continue;
+                    }
+                    i += 2;
+                    continue;
+                }
+                if c == b'(' && paren_depth > 0 {
+                    paren_depth += 1;
+                } else if c == b')' && paren_depth > 0 {
+                    paren_depth -= 1;
+                } else if c == b'{' && brace_depth > 0 {
+                    brace_depth += 1;
+                } else if c == b'}' && brace_depth > 0 {
+                    brace_depth -= 1;
+                } else if c == b'|' && paren_depth == 0 && brace_depth == 0 {
+                    // Skip `|` immediately after `$` (i.e. `$|` or `$$|`)
+                    // — it's an auto-var reference, not the order-only sep.
+                    if i > 0 && bytes[i - 1] == b'$' {
+                        i += 1;
+                        continue;
+                    }
+                    return Some(i);
+                }
+                i += 1;
+            }
+            None
+        };
+        let (normal_prereqs, order_only) = if let Some(pipe_pos) = find_pipe(prereqs_str) {
             (&prereqs_str[..pipe_pos], &prereqs_str[pipe_pos + 1..])
         } else {
             (prereqs_str, "")
         };
 
+        // GNU make strips backslash-escapes from `:` and `#` in
+        // target/prerequisite names. A run of N backslashes before `:`
+        // or `#` produces N/2 literal backslashes followed by the
+        // character (literal if N is odd, separator-eligible if even —
+        // separator-handling already happened during tokenization).
+        fn unescape_one(t: &str) -> String {
+            let bytes = t.as_bytes();
+            let mut out = String::with_capacity(t.len());
+            let mut i = 0;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' {
+                    let mut j = i;
+                    while j < bytes.len() && bytes[j] == b'\\' {
+                        j += 1;
+                    }
+                    let n = j - i;
+                    if j < bytes.len() && (bytes[j] == b':' || bytes[j] == b'#') {
+                        for _ in 0..(n / 2) {
+                            out.push('\\');
+                        }
+                        if n % 2 == 1 {
+                            out.push(bytes[j] as char);
+                            i = j + 1;
+                        } else {
+                            i = j;
+                        }
+                        continue;
+                    } else {
+                        for _ in 0..n {
+                            out.push('\\');
+                        }
+                        i = j;
+                        continue;
+                    }
+                }
+                out.push(bytes[i] as char);
+                i += 1;
+            }
+            out
+        }
+        fn unescape_target(toks: Vec<String>) -> Vec<String> {
+            toks.into_iter().map(|t| unescape_one(&t)).collect()
+        }
+        // NOTE: do NOT unescape `\\:` / `\\#` here — the engine does
+        // the unescape after variable expansion, so doing it twice would
+        // halve the backslash count.
         let targets: Vec<String> = split_whitespace_respecting_refs(targets_str);
         let prerequisites: Vec<String> = split_whitespace_respecting_refs(normal_prereqs);
         let order_only: Vec<String> = split_whitespace_respecting_refs(order_only);
+        let _ = unescape_target;
 
         // Detect pattern rules. A static pattern rule uses the middle
         // field (`target-pattern`) against the explicit target list,
@@ -923,7 +1085,78 @@ impl Parser {
     }
 }
 
-/// Try to parse an assignment from a line.
+/// Unescape `\\#` to `#` in a value string, but only outside of
+/// `$(...)` / `${...}` references. GNU make removes the comment-escape
+/// backslash from literal text but leaves it intact inside function
+/// call arguments.
+fn unescape_hash(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    let mut paren = 0i32;
+    let mut brace = 0i32;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c == b'$' && i + 1 < bytes.len() {
+            match bytes[i + 1] {
+                b'(' => {
+                    paren += 1;
+                    out.push('$');
+                    out.push('(');
+                    i += 2;
+                    continue;
+                }
+                b'{' => {
+                    brace += 1;
+                    out.push('$');
+                    out.push('{');
+                    i += 2;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        if paren > 0 || brace > 0 {
+            if c == b'(' {
+                paren += 1;
+            } else if c == b')' && paren > 0 {
+                paren -= 1;
+            } else if c == b'{' {
+                brace += 1;
+            } else if c == b'}' && brace > 0 {
+                brace -= 1;
+            }
+            out.push(c as char);
+            i += 1;
+            continue;
+        }
+        if c == b'\\' {
+            let mut j = i;
+            while j < bytes.len() && bytes[j] == b'\\' {
+                j += 1;
+            }
+            let n = j - i;
+            if j < bytes.len() && bytes[j] == b'#' {
+                for _ in 0..(n - 1) {
+                    out.push('\\');
+                }
+                out.push('#');
+                i = j + 1;
+                continue;
+            } else {
+                for _ in 0..n {
+                    out.push('\\');
+                }
+                i = j;
+                continue;
+            }
+        }
+        out.push(c as char);
+        i += 1;
+    }
+    out
+}
+
 pub fn try_parse_assignment(line: &str) -> Option<Assignment> {
     // Preserve trailing whitespace on the value (only strip leading).
     let line = line.trim_start();
@@ -943,7 +1176,11 @@ pub fn try_parse_assignment(line: &str) -> Option<Assignment> {
             // GNU make: strip leading whitespace from the value, but
             // preserve trailing whitespace — `VAR := foo ` stores "foo ".
             let raw_value = &line[eq_pos + suffix.len()..];
-            let value = raw_value.trim_start().to_string();
+            let trimmed = raw_value.trim_start();
+            // Unescape `\#` to `#` in assignment values. The leading
+            // backslash escapes the comment marker for parser purposes
+            // and is removed in the stored value (GNU make semantics).
+            let value = unescape_hash(trimmed);
             if is_valid_varname(&name) {
                 return Some(Assignment { name, op, value });
             }
@@ -996,7 +1233,7 @@ fn find_rule_colon(line: &str) -> Option<usize> {
             depth += 1;
         } else if bytes[i] == b')' && depth > 0 {
             depth -= 1;
-        } else if depth == 0 && bytes[i] == b':' {
+        } else if depth == 0 && bytes[i] == b':' && (i == 0 || bytes[i - 1] != b'\\') {
             // Make sure it's not := or ::= assignment
             if i + 1 < bytes.len() && bytes[i + 1] == b'=' {
                 return None; // It's :=
@@ -1073,7 +1310,9 @@ fn strip_quotes(s: &str) -> String {
 
 /// Splits a string on whitespace, but keeps `$(...)` and `${...}` groups intact.
 /// This is needed so that targets like `$(filter %.o,$(files))` are not broken apart.
-fn split_whitespace_respecting_refs(s: &str) -> Vec<String> {
+/// `\\<space>` is treated as a literal space character (not a token boundary)
+/// so target names with embedded spaces (`foo\\ bar:`) parse as one token.
+pub fn split_whitespace_respecting_refs(s: &str) -> Vec<String> {
     let mut result = Vec::new();
     let mut current = String::new();
     let mut depth = 0u32;
@@ -1088,12 +1327,38 @@ fn split_whitespace_respecting_refs(s: &str) -> Vec<String> {
                 current.push(chars.next().unwrap());
                 continue;
             }
+            // `$$(...)` / `${{...}}`: after first-pass expansion this
+            // becomes `$(...)` etc. Treat the deferred reference as a
+            // nested group so embedded whitespace doesn't split it.
+            if let Some(&next) = chars.peek()
+                && next == '$'
+            {
+                current.push(c);
+                current.push(chars.next().unwrap());
+                if let Some(&n2) = chars.peek()
+                    && (n2 == '(' || n2 == '{')
+                {
+                    depth += 1;
+                    current.push(chars.next().unwrap());
+                }
+                continue;
+            }
             current.push(c);
         } else if depth > 0 {
             if c == '(' || c == '{' {
                 depth += 1;
             } else if c == ')' || c == '}' {
                 depth = depth.saturating_sub(1);
+            }
+            current.push(c);
+        } else if c == '\\' {
+            if let Some(&next) = chars.peek()
+                && (next == ' ' || next == '\t')
+            {
+                // Escaped whitespace: consume the backslash, keep the
+                // next char literally as part of the current token.
+                current.push(chars.next().unwrap());
+                continue;
             }
             current.push(c);
         } else if c.is_whitespace() {

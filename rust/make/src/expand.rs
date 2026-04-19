@@ -90,12 +90,28 @@ pub fn expand_with_auto(s: &str, engine: &Engine, auto_vars: &HashMap<&str, Stri
                             .borrow()
                             .clone()
                             .or_else(|| engine.current_source.borrow().clone());
-                        if let Some((source, line_no)) = loc {
-                            eprintln!(
-                                "{source}:{line_no}: *** unterminated variable reference.  Stop."
-                            );
+                        // Detect if this looks like a function call so we can
+                        // emit GNU's specific "unterminated call to function"
+                        // error.  Function name is the first word, followed by
+                        // whitespace.
+                        let first_word = expr.split_whitespace().next().unwrap_or("");
+                        let is_func = is_builtin_function(first_word)
+                            && expr
+                                .chars()
+                                .nth(first_word.len())
+                                .map(|c| c.is_whitespace())
+                                .unwrap_or(false);
+                        let msg = if is_func {
+                            format!(
+                                "*** unterminated call to function '{first_word}': missing ')'.  Stop."
+                            )
                         } else {
-                            eprintln!("*** unterminated variable reference.  Stop.");
+                            "*** unterminated variable reference.  Stop.".to_string()
+                        };
+                        if let Some((source, line_no)) = loc {
+                            eprintln!("{source}:{line_no}: {msg}");
+                        } else {
+                            eprintln!("{msg}");
                         }
                         std::process::exit(2);
                     }
@@ -110,12 +126,24 @@ pub fn expand_with_auto(s: &str, engine: &Engine, auto_vars: &HashMap<&str, Stri
                             .borrow()
                             .clone()
                             .or_else(|| engine.current_source.borrow().clone());
-                        if let Some((source, line_no)) = loc {
-                            eprintln!(
-                                "{source}:{line_no}: *** unterminated variable reference.  Stop."
-                            );
+                        let first_word = expr.split_whitespace().next().unwrap_or("");
+                        let is_func = is_builtin_function(first_word)
+                            && expr
+                                .chars()
+                                .nth(first_word.len())
+                                .map(|c| c.is_whitespace())
+                                .unwrap_or(false);
+                        let msg = if is_func {
+                            format!(
+                                "*** unterminated call to function '{first_word}': missing '}}'.  Stop."
+                            )
                         } else {
-                            eprintln!("*** unterminated variable reference.  Stop.");
+                            "*** unterminated variable reference.  Stop.".to_string()
+                        };
+                        if let Some((source, line_no)) = loc {
+                            eprintln!("{source}:{line_no}: {msg}");
+                        } else {
+                            eprintln!("{msg}");
                         }
                         std::process::exit(2);
                     }
@@ -1167,7 +1195,7 @@ fn call_function(
     }
 }
 
-fn is_builtin_function(name: &str) -> bool {
+pub fn is_builtin_function(name: &str) -> bool {
     matches!(
         name,
         "subst"

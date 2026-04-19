@@ -333,6 +333,7 @@ fn run() -> i32 {
                 println!("  -t       Touch targets instead of building");
                 println!("  -q       Question mode (exit 1 if not up to date)");
                 println!("  -B       Always make all targets");
+                println!("\nThis program built for x86_64-pc-linux-gnu");
                 return 0;
             }
             arg if arg.starts_with("-j") => match arg[2..].parse::<usize>() {
@@ -360,6 +361,12 @@ fn run() -> i32 {
             arg if arg.starts_with("-C") => {
                 directory = Some(arg[2..].to_string());
             }
+            "--shuffle" => {
+                *engine.shuffle_mode.borrow_mut() = Some("random".to_string());
+            }
+            arg if arg.starts_with("--shuffle=") => {
+                *engine.shuffle_mode.borrow_mut() = Some(arg["--shuffle=".len()..].to_string());
+            }
             arg if arg.contains('=') => {
                 // Command-line variable assignment. Distinguish the
                 // operator so flavor matches GNU make:
@@ -368,9 +375,14 @@ fn run() -> i32 {
                 //   VAR?=val → conditional (skip if already defined)
                 //   VAR+=val → append
                 let is_real_cmdline = i >= cmdline_start;
+                // Track the original separator so MAKEOVERRIDES preserves it
+                // (`:=` stays as `:=` in MAKEFLAGS, GNU make convention).
+                let mut orig_sep: &str = "=";
                 let (name, op, value) = if let Some(idx) = arg.find("::=") {
+                    orig_sep = "::=";
                     (&arg[..idx], engine::VarFlavor::Simple, &arg[idx + 3..])
                 } else if let Some(idx) = arg.find(":=") {
+                    orig_sep = ":=";
                     (&arg[..idx], engine::VarFlavor::Simple, &arg[idx + 2..])
                 } else if let Some(idx) = arg.find("+=") {
                     // Append — combine with any existing value.
@@ -412,13 +424,17 @@ fn run() -> i32 {
                     // trigger unterminated variable reference errors for
                     // values like x=$(other.
                     let escaped = value.replace('$', "$$");
-                    makeoverrides.push(format!("{name}={escaped}"));
+                    makeoverrides.push(format!("{name}{orig_sep}{escaped}"));
                 }
             }
             arg if arg.starts_with("--") => {
-                // Unknown long options — accept silently (or warn) rather
-                // than splitting each char as a short flag.
-                mflags_long.push(arg.to_string());
+                // Unknown long option: GNU make prints an error and
+                // a usage banner that includes the "built for" line.
+                eprintln!("make: unrecognized option '{arg}'");
+                eprintln!("Usage: make [options] [target] ...");
+                eprintln!();
+                eprintln!("This program built for x86_64-pc-linux-gnu");
+                return 2;
             }
             arg if arg.starts_with('-') => {
                 // Combined short flags. Some flags (-f, -C, -I, -j, -W, -l, -o)
@@ -780,8 +796,14 @@ fn run() -> i32 {
         // Re-exec the same binary with the same arguments.
         use std::os::unix::process::CommandExt;
         let err = std::process::Command::new(&args[0]).args(&args[1..]).exec();
-        // exec() only returns on error
-        eprintln!("make: *** failed to re-exec: {err}");
+        // exec() only returns on error. Format the message like GNU make,
+        // which prints `make: <path>: <reason>` on EACCES / ENOENT.
+        let msg = match err.kind() {
+            std::io::ErrorKind::PermissionDenied => "Permission denied".to_string(),
+            std::io::ErrorKind::NotFound => "No such file or directory".to_string(),
+            _ => err.to_string(),
+        };
+        eprintln!("make: {}: {}", args[0], msg);
         return 2;
     }
 

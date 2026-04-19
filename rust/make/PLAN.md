@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**108/135 tests passing** (80%) — upstream test harness from GNU make 4.4.1.
+**120/135 tests passing** (89%) — upstream test harness from GNU make 4.4.1.
 
 `rust/make` has a parser, expander, and build engine (~5k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -78,6 +78,34 @@ organised in six directories under `tests/scripts/`:
 - `.RECIPEPREFIX := X` overrides the tab prefix for subsequent rules.
 - `.RECIPEPREFIX` tracked during the preprocessing phase so custom-prefix
   recipe lines correctly preserve backslash-newline for the shell.
+- `has_inline_recipe` detection: rule lines with `;` inline recipes
+  preserve `\<newline>` for the shell. Multiple consecutive
+  `\<newline>` in non-recipe context collapse to a single space.
+  `.POSIX` preserves trailing whitespace before `\`.
+- Inline-recipe detection on rule lines: scan `after-colon` text for the
+  first top-level `;` (inline-recipe separator) vs. `#` (trailing
+  comment), respecting `$(...)` / `${...}` nesting. The recipe text
+  itself is opaque to comment stripping, so `target: ; @echo "a#b"`
+  no longer truncates the recipe at `#`.
+- Backslash-escape unescaping in target / prerequisite name tokens:
+  `\\#` -> `#`, `\\:` -> `:`, `\\<space>` -> literal space.
+  Allows targets such as `foo\\#bar.ext`, `pre\\:foo`, and
+  `foo\\ bar` to parse as a single token. The default-goal
+  derived from a multi-word target preserves embedded spaces via a
+  sentinel byte so that `.DEFAULT_GOAL := foo bar` (literal space)
+  still produces the GNU 'more than one target' error.
+- Backslash-escape unescaping in target/prereq names is now
+  expansion-aware: `\:`, `\#` are unescaped post-expansion (so
+  `path = pre\:` then `$(path)foo` produces target `pre:foo`), and the
+  unescape correctly handles odd/even backslash runs (N backslashes
+  before `:` produce N/2 literal backslashes plus a literal/separator
+  colon depending on parity).
+- Embedded `:` in expanded target names (e.g. `path = pre:` then
+  `$(path)foo : ;`) triggers GNU's `target pattern contains no '%'`
+  static-pattern fatal error.
+- Variable assignment values: `\#` is unescaped to `#` outside of
+  `$(...)`/`${...}` references (preserved inside function call args
+  for re-expansion).
 - UTF-8 BOM (`\u{FEFF}`) stripped from the start of a loaded makefile
   so it doesn't contaminate the first token.
 - Backslash-newline continuations:
@@ -119,6 +147,9 @@ organised in six directories under `tests/scripts/`:
 - Fatal errors for invalid `word`/`wordlist`/`intcmp`/`foreach`/`let`
   args with GNU-compatible diagnostic text.
 - Substitution references `$(VAR:from=to)` and `$(VAR:a=%b)`.
+- `\<newline><whitespace>` sequences inside `$(…)` / `${…}` references
+  are collapsed to a single space during expansion (GNU make job.c
+  compatibility).
 
 ### Variable system
 
@@ -146,14 +177,23 @@ organised in six directories under `tests/scripts/`:
   command-line vars. Variable names in target-specific assignments are
   expanded (e.g., `target: VAR$(X) = val`).
 - Target-specific `private` modifier: private vars are NOT inherited
-  by prerequisite targets (only applied to the owning target's recipe).
-- Global `private` variables (`private VAR = val`, `private export VAR = val`).
-- Target-specific `override +=` correctly suppresses non-override
-  entries for the same variable.
+  by prerequisite builds. Global `private` (`private VAR = val`,
+  `private export VAR = val`) hides globals from recipe contexts.
+- Target-specific `override +=` suppresses non-override entries for
+  the same variable.
 - Target-specific `export` removes from the `unexports` set for the
   duration of the target's recipe.
 - Target-specific vars do not override command-line variables (unless
   the target-specific assignment has `override`).
+- **Pattern-specific variables** (`%.x: VAR = value`): match targets
+  by pattern; when multiple patterns match, shortest-stem wins.
+  Supports all modifiers: `override`, `private`, `export`, `unexport`,
+  and all operators (`:=`, `=`, `+=`, `?=`, `!=`).
+- Target-specific `:=` values are expanded at declaration time only
+  (no double-expansion at apply time).
+- Target-specific export/unexport propagates through the prerequisite
+  chain via scope push/pop in `build_target_for`; private exports
+  are excluded from propagation.
 
 ### Rules engine
 
@@ -172,8 +212,18 @@ organised in six directories under `tests/scripts/`:
   positions (via union across combined rules).
 - A `|` appearing in *expanded* prereq text (e.g. from `$(VAR)` whose
   value contains `|`) splits normal from order-only prereqs after
-  expansion, matching GNU make's re-parse. Fully exercised only once
-  `.SECONDEXPANSION` lands.
+  expansion, matching GNU make's re-parse.
+- **`.SECONDEXPANSION:`** (partial): each rule registered while the
+  flag is active stores raw (first-pass-expanded) prereq text. At
+  build time, `expand_with_auto` re-runs over that text with full
+  automatic variables (`$@`, `$<`, `$^`, `$+`, `$|`, `$*`, plus
+  `D`/`F` variants) and target/pattern-specific vars temporarily
+  applied. Pattern-rule SE pre-expansion is suppressed in the
+  matcher to avoid double-firing side-effect functions like
+  `$(info)`. Glob expansion runs on second-expanded prereqs.
+- Filesystem glob expansion in prerequisites and target names
+  (regular rules and pattern-rule resolved prereqs). Unmatched globs
+  retain their literal form so explicit rules can still build them.
 - Pattern rules carry order-only prereqs through match: `%.w: %.x | baz`
   substitutes the stem into the order-only pattern and adds it to `$|`
   for matched targets.
@@ -191,18 +241,50 @@ organised in six directories under `tests/scripts/`:
   `$(^D)`, `$(+D)`, `$(?D)`, `$(|D)` and their `F` counterparts).
 - `$*` stem computed for explicit rules with recognized `.SUFFIXES`.
 - Default goal allows path-prefixed targets (e.g. `../dir/foo.x`).
-- Prerequisite double-expansion fix: prereqs no longer re-expanded
-  in `build_target_for` (already expanded in `process_rule`).
+- Prerequisite double-expansion fixed: prereqs from `process_rule` no
+  longer re-expanded in `build_target_for`.
+- Two-pass implicit rule search: first pass requires prereqs to exist
+  directly; second pass allows chaining. Ensures direct-prereq rules
+  are preferred over chain-requiring rules.
+- `.ONESHELL` passes entire recipe body to a single shell invocation.
+  First line's prefix chars (`@`/`-`/`+`) control the whole recipe.
+- `.NOTINTERMEDIATE` special target (per-file, pattern `%.x`, and
+  global no-prereq forms). Conflict detection with `.INTERMEDIATE`
+  and `.SECONDARY`.
+- `.SECONDARY` and `.INTERMEDIATE` prerequisite lists tracked;
+  `secondary_all` flag for global `.SECONDARY:`.
+- `%` substitution in pattern rules uses `replacen` (first `%` only).
+- **Intermediate file auto-deletion**: after an implicit rule chain
+  builds a target, pattern-derived prerequisite files that are
+  intermediate (not mentioned, not `.SECONDARY`, not
+  `.NOTINTERMEDIATE`) are automatically removed. Explicitly
+  `.INTERMEDIATE:`-marked files are also deleted. Deletion is deferred
+  to after the top-level goal completes. Missing intermediates don't
+  trigger unnecessary rebuilds — their ultimate sources are checked
+  transitively.
+- Implicit rule chain depth increased to 6 (from 3) to support deeper
+  dependency chains.
+- **Intermediate deletion ordering** matches GNU make: pattern-derived
+  intermediates (chained via implicit rules) are deleted in reverse
+  build order, while explicit prereqs marked `.INTERMEDIATE` are
+  deleted in declaration order. Fixes `targets/SECONDARY` (Savannah
+  bug #15919) without regressing `targets/INTERMEDIATE`.
+- `.WAIT` declared as a target with prerequisites or a recipe emits
+  GNU's `.WAIT should not have prerequisites/commands` warning; an
+  empty `.WAIT:` declaration remains a harmless no-op.
 
 ### Command-line options
 
-- `-f` / `--file=` / `--makefile=` (multiple `-f` allowed; `-` = stdin).
+- `-f` / `--file=` / `--makefile=` (multiple `-f` allowed; `-` = stdin;
+  error message for missing file now matches GNU make format).
 - `-C`, `-I`, `-I-` (clear include dirs), `-W`, `-o`.
 - `-j N` (reject invalid integers), `-n`, `-s`/`--no-silent`
   last-wins, `-k`/`--no-keep-going`, `-t`, `-q`, `-B`, `-i`, `-e`,
   `-w`/`--no-print-directory`, `--trace`, `-d`.
 - `-l` / `--load-average` / `--max-load` (accepted, not implemented).
 - `-d` emits `GNU Make` banner to stderr for test compatibility.
+- `-h` / `--help` includes the GNU `This program built for ...`
+  banner so test harnesses that match `/uilt for /` accept us.
 - `-r` / `-R` disable built-in rules / built-in variables.
 - `--eval=TEXT`, `--warn-undefined-variables` (parses; no emission yet).
 - Cluster-flag parsing (`-erR`) and short-flag-with-arg forms (`-Wfoo`).
@@ -210,6 +292,13 @@ organised in six directories under `tests/scripts/`:
   command-line variable assignments; split short vs long options so
   long-only MAKEFLAGS begins with a space.
 - GNUMAKEFLAGS prepended once, then cleared for sub-makes.
+- `--shuffle[=MODE]` reorders prerequisites and goals. Modes: `reverse`,
+  `none`/`identity` (no-op), numeric seed (deterministic xorshift), and
+  `random`. Order-only prereqs participate in shuffle ordering. Top-level
+  goal list is also shuffled. Automatic variables (`$^`, `$<`, `$?`, `$+`,
+  `$|`) preserve original declaration order.
+- Unknown long options now produce GNU-compatible error and exit 2 with
+  the `built for` banner instead of being silently accepted.
 
 ### Shell / recipe execution
 
@@ -224,7 +313,7 @@ organised in six directories under `tests/scripts/`:
   produces GNU make-style error for default shell.
 - `EACCES` (Permission denied) in direct-exec path prints
   `make: {cmd}: Permission denied` and synthesizes exit 127.
-- `=` included in `SHELL_META` for shell detection.
+- `=` included in `SHELL_META` for direct-exec detection.
 
 ### Environment / sub-makes
 
@@ -250,11 +339,24 @@ in ways the test harness happens not to exercise in our passing set.
 
 ### High-impact, hard (unlocks many tests)
 
-- **`.SECONDEXPANSION:`** — second expansion pass on prereqs with
-  `$$@` semantics. Needed for `features/se_explicit` (3/31),
-  `features/se_implicit` (3/30), `features/se_statpat` (2/12),
-  many `features/patternrules` and `features/implicit_search`
-  cases. Core challenge: deferred evaluation of prereq text.
+- **`.SECONDEXPANSION:`** — partial implementation in place. Currently
+  passing: `variables/automatic`, `features/rule_glob`. Subtest counts:
+  `features/se_explicit` 26/31, `features/se_implicit` 24/30,
+  `features/se_statpat` 10/12, `features/statipattrules` 64/68,
+  `features/patternrules` 62/72. Infrastructure: `RuleEntry` /
+  `PatternRuleEntry` carry `second_expand` flag and `raw_prereq_text`;
+  `build_target_for` runs `expand_with_auto` with `$@`/`$*`/`$<`/`$^`/`$+`/`$|`
+  (and D/F variants) over the saved raw text under
+  `with_target_vars_applied(target)` so target/pattern-specific vars
+  are visible. `try_pattern_rule` accepts SE pattern rules without
+  pre-expanding (so side-effect functions like `$(info)` don't fire
+  twice). Remaining gaps: prereq ordering when multiple rules
+  contribute (recipe-rule first), grouped-target SE per-target
+  expansion, double-colon SE per-rule expansion, `$%` / archive
+  member auto-var, multi-percent + directory-transfer pattern
+  substitution semantics, parse-time eager expansion of `$$( ... )`
+  to detect unterminated function calls at the source line (affects
+  `se_explicit`/`se_implicit` `firstword` subtests).
 - **Variable-definition-site line tracking.** We report the line
   where a function is *expanded*, not where it's *declared*. GNU
   make tags each function call with its source location in the
@@ -273,17 +375,9 @@ in ways the test harness happens not to exercise in our passing set.
 - **Parallel jobs / jobserver** — `-j N`, `.WAIT`, `.NOTPARALLEL`,
   `output-sync`. Only hurts `features/parallelism` and
   `targets/WAIT`.
-- **`.INTERMEDIATE` / `.NOTINTERMEDIATE` / `.SECONDARY` auto-delete**
-  — after chain rules, remove temporary files; report the deletion.
-  Hits `targets/INTERMEDIATE`, `targets/NOTINTERMEDIATE`,
-  `targets/SECONDARY`.
 
 ### Lower-impact
 
-- **`.ONESHELL:`** — pass the whole recipe body to a single shell
-  invocation. Hits `targets/ONESHELL` (3/11).
-- **Pattern-specific variables** (`b%: FOO = bar`) — hits
-  `features/patspecific_vars` (0/10).
 - **Non-tab recipe detection** — emit "missing separator" warning
   when 8 spaces look like a recipe. `misc/failure`.
 - **Suffix rules** (`.c.o:` → `%.o: %.c`) fully interacting with
@@ -291,11 +385,12 @@ in ways the test harness happens not to exercise in our passing set.
 - **Chained pattern rules** — follow pattern-rule chains more than
   one level deep. Previously attempted; caused regressions because
   the fallback fires too eagerly. Needs more precise criteria.
-- **`--shuffle`** — `options/shuffle` (4/12).
+- **`--shuffle`** — `options/shuffle` fully passes. `.NOTPARALLEL`
+  disables shuffle reordering; SECONDEXPANSION-derived prereqs are
+  also shuffled.
 - **Shell command-not-found rewrite** — GNU replaces `/bin/sh: X:
   command not found` with `make: X: No such file or directory`.
   `features/errors`, `misc/general4`.
-- **Backslash escapes in target names** — `features/escape`.
 - **`--eval` propagation to sub-make**, `--warn-undefined-variables`
   emission — remaining `options/eval`, `options/warn-undefined-variables`.
 - **`-l` load limit** — `options/dash-l`.
@@ -311,18 +406,88 @@ in ways the test harness happens not to exercise in our passing set.
 
 ---
 
+## Currently failing top-level tests (15 of 135)
+
+Latest baseline (`bash /tmp/run-make-baseline.sh`):
+
+| Test | Notes |
+| --- | --- |
+| `features/mult_rules` | VPATH-dependent |
+| `features/parallelism` | Requires `-j` / jobserver |
+| `features/patternrules` | `.SECONDEXPANSION` / chained pattern rules |
+| `features/reinvoke` | Makefile auto-rebuild + re-exec |
+| `features/se_explicit` | 27/31 subtests pass; failing subtests 9, 10, 22, 27 (LIBPATTERNS library-pattern conflict warning #9, #10; SE prereq build ordering when recipe-bearing rule contributes SE prereqs #22, #27) |
+| `features/se_implicit` | 27/30 subtests pass; failing subtests 3, 9, 27 (implicit recursion guard for SE pattern rules; SE info ordering) |
+| `features/se_statpat` | 11/12 subtests pass; only subtest 3 fails (stem with embedded `$`) |
+| `features/statipattrules` | 58/68 subtests pass; complex multi-`%` substitution |
+| `features/temp_stdin` | `--debug=b` re-exec banner; stdin-as-makefile temp-file writeback failures; SIGTERM exit diagnostic |
+| `features/vpath` / `vpathgpath` / `vpathplus` | VPATH / `vpath` / `GPATH` |
+| `options/dash-f` | First failing subtest: prereq makefile rebuild before consuming stdin (`bye.mk: bye.mk.src`) — needs makefile auto-rebuild |
+| `targets/WAIT` | `.WAIT` requires parallel scheduling |
+| `variables/MAKEFLAGS` | Full MAKEFLAGS round-trip parse in sub-makes |
+
+The biggest remaining unlock is finishing **`.SECONDEXPANSION`**
+edge cases — would directly clear several `se_*` subtests,
+`patternrules` and `statipattrules` remainders. After that, **VPATH**
+(unlocks 4 tests) and **MAKEFLAGS round-trip** are the next two
+high-leverage items.
+
+---
+
+## Investigation notes (latest)
+
+Round of SE-focused fixes (still 120/135 categories, but +5 subtests
+across SE tests):
+
+1. Parser: stop treating `$$(`/`$${` as opening a deferred ref when
+   scanning for inline-recipe `;` separator. GNU treats them as literal
+   text. Fixes `foo: $$(bar; @echo recipe` parsing.
+2. Parse-time validation of SE `raw_prereq_text` for unbalanced
+   `$(...)`/`${...}` references — emits `unterminated call to function`
+   at definition site (matches GNU). Applied at all three SE storage
+   sites: explicit/static rules, static-pattern rules, pure pattern
+   rules.
+3. Per-rule prereq build ordering: `build_target_for` now iterates
+   `rule_build_groups` (recipe-bearing rule first), each grouping its
+   normal + order-only prereqs together. Replaces the previous SE/non-SE
+   split that lost the head/tail reorder. When `--shuffle` is active,
+   all rule groups are flattened into one list before shuffling so
+   shuffle treats prereqs across rules as one sequence.
+
+Subtest deltas:
+
+- `features/se_explicit`: 26 → 27 (subtest 18: unterminated firstword)
+- `features/se_implicit`: 24 → 27 (subtests default/Test #3, #18, #26)
+- `features/se_statpat`: 10 → 11 (subtest 4: unterminated firstword in
+  static-pattern rule)
+
+Remaining SE subtests are blocked by:
+
+- SE info side-effect ordering during pattern-rule recursion
+  (`se_explicit` #22, #27; `se_implicit` #27)
+- Library-pattern (`-l...`) handling and conflict warnings
+  (`se_explicit` #9, #10)
+- SE pattern rule with own recipe blocks chaining
+  (`se_explicit` #18)
+- SE-pattern matching when pattern has no recipe (`se_implicit` #9)
+- Implicit recursion guard for SE pattern rules with multiple expansions
+  (`se_implicit` #3)
+- Stem with embedded `$` (`se_statpat` #3)
+
+---
+
 ## Category breakdown (current)
 
 Based on the latest baseline run (approximate per-category pass ratios):
 
 | Category    | Status                                                            |
 | ----------- | ----------------------------------------------------------------- |
-| `features`  | Partial across most sub-areas; blocked heavily on SE + VPATH.     |
-| `functions` | Most working. Remaining: fatal-error line numbers, `$(eval)`-inside-variables. |
-| `misc`      | All passing (bs-nl 28/28, general4 10/10).                     |
-| `options`   | Most parse and work; blocked on re-exec / MAKEFLAGS parse. `dash-l` accepted. |
-| `targets`   | POSIX / ONESHELL / INTERMEDIATE pending.                          |
-| `variables` | Most done. `special` fully passing. MAKEFLAGS subcategory is the huge outlier. |
+| `features`  | Partial; SE infrastructure landed (`rule_glob` passes); blocked on SE edge cases + VPATH. |
+| `functions` | Most working. Remaining: fatal-error line numbers.                |
+| `misc`      | All passing (bs-nl 28/28, general4 10/10).                        |
+| `options`   | Most working; `dash-q` fully passing. Blocked on re-exec/MAKEFLAGS. |
+| `targets`   | `ONESHELL`+`NOTINTERMEDIATE`+`INTERMEDIATE`+`SECONDARY` fully passing. |
+| `variables` | All done except MAKEFLAGS (`automatic` now passes via SE). |
 
 ---
 
