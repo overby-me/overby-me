@@ -125,6 +125,11 @@ in
                 config.networking.resolvconf.enable
                 && config.networking.useHostResolvConf;
               inherit (config.system.build) earlyMountScript;
+              path = lib.makeBinPath [pkgs.coreutils pkgs.util-linux];
+              postBootCommands = pkgs.writeText "local-cmds" ''
+                ${config.boot.postBootCommands}
+                ${config.powerManagement.powerUpCommands}
+              '';
             };
           })
         );
