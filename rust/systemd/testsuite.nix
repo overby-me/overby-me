@@ -101,7 +101,7 @@ in
       # /run/booted-system symlink) but writes directly to /dev/console
       # — no subshell, no pipe, no race.
       system.build.bootStage2 = lib.mkIf (!useUpstreamSystemd) (
-        "${rustSystemdPackage}/lib/systemd/rust-systemd-stage2"
+        lib.mkForce "${rustSystemdPackage}/lib/systemd/rust-systemd-stage2"
       );
 
       # sudo-rs
