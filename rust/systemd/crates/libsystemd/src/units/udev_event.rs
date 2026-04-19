@@ -57,12 +57,27 @@ pub fn handle_udev_event(run_info: &ArcMutRuntimeInfo, params: &UdevEventParams)
                 .get("ID_PROCESSING")
                 .map(|v| v == "1")
                 .unwrap_or(false);
-            if is_processing {
+            // SYSTEMD_READY=0 explicitly marks a device as not-ready.  The
+            // device unit is created so units can still reference it via
+            // deps, but it's kept Stopped until a later change event with
+            // SYSTEMD_READY=1 (or absent) flips it to active.
+            let systemd_ready = params
+                .env
+                .get("SYSTEMD_READY")
+                .map(|v| v != "0")
+                .unwrap_or(true);
+            if is_processing || !systemd_ready {
                 trace!(
-                    "udev-event: {} still in ID_PROCESSING=1; ensuring units exist but leaving inactive",
-                    params.sysfs_path
+                    "udev-event: {} deferred (ID_PROCESSING={}, SYSTEMD_READY={}); placeholder units only",
+                    params.sysfs_path, is_processing, systemd_ready
                 );
                 ensure_device_units_exist(run_info, params, &unit_names);
+                // When SYSTEMD_READY just flipped from 1 to 0, we also
+                // need to deactivate any units that were previously
+                // marked plugged.
+                if !systemd_ready {
+                    apply_device_inactive(run_info, &unit_names);
+                }
             } else {
                 apply_device_active(run_info, params, &unit_names);
             }
@@ -198,7 +213,10 @@ pub fn path_to_device_unit_name(path: &str) -> String {
 }
 
 /// Mark the listed device units as plugged (started).  Creates the unit
-/// if not yet present in the unit table.
+/// if not yet present in the unit table.  After flipping the state,
+/// triggers activation of any `Wants=` / `Requires=` targets (e.g. from
+/// `SYSTEMD_WANTS=` or explicit `.device` unit files) so dependents
+/// registered via `BindsTo=<name>.device` actually start.
 fn apply_device_active(
     run_info: &ArcMutRuntimeInfo,
     params: &UdevEventParams,
@@ -230,19 +248,67 @@ fn apply_device_active(
 
     // Then flip each unit's status to Started(Plugged).  This is done
     // with the read lock held, via the unit's own status RwLock.
-    let ri = run_info.read_poisoned();
+    {
+        let ri = run_info.read_poisoned();
+        for name in unit_names {
+            let id = UnitId {
+                kind: UnitIdKind::Device,
+                name: name.clone(),
+            };
+            if let Some(unit) = ri.unit_table.get(&id) {
+                let mut status = unit.common.status.write_poisoned();
+                if !matches!(&*status, UnitStatus::Started(_)) {
+                    trace!("udev-event: marking {} as plugged", name);
+                    *status = UnitStatus::Started(StatusStarted::Running);
+                }
+            }
+        }
+    }
+
+    // Now pull in SYSTEMD_WANTS= / .device-file-declared Wants= targets.
+    // We spawn this on a thread so the control-socket handler doesn't
+    // block if the activation subgraph is slow (e.g. waiting on a
+    // Type=notify service).
     for name in unit_names {
         let id = UnitId {
             kind: UnitIdKind::Device,
             name: name.clone(),
         };
-        if let Some(unit) = ri.unit_table.get(&id) {
-            let mut status = unit.common.status.write_poisoned();
-            if !matches!(&*status, UnitStatus::Started(_)) {
-                trace!("udev-event: marking {} as plugged", name);
-                *status = UnitStatus::Started(StatusStarted::Running);
+        let run_info = run_info.clone();
+        let unit_name = name.clone();
+        std::thread::spawn(move || {
+            let deps_to_activate: Vec<UnitId> = {
+                let ri = run_info.read_poisoned();
+                match ri.unit_table.get(&id) {
+                    Some(unit) => unit
+                        .common
+                        .dependencies
+                        .wants
+                        .iter()
+                        .chain(unit.common.dependencies.requires.iter())
+                        .cloned()
+                        .collect(),
+                    None => Vec::new(),
+                }
+            };
+            for dep in deps_to_activate {
+                trace!(
+                    "udev-event: activating dependency {} of device unit {}",
+                    dep.name, unit_name
+                );
+                let errors = crate::units::activate_needed_units_with_source(
+                    dep.clone(),
+                    run_info.clone(),
+                    crate::units::ActivationSource::Regular,
+                );
+                for err in errors {
+                    warn!(
+                        "udev-event: failed to activate dependency {}: {}",
+                        dep.name, err.reason
+                    );
+                }
             }
-        }
+        });
     }
 }
 
