@@ -165,11 +165,25 @@ Rust udevadm reimplementation is in progress.
 
 - 78-sigqueue: Requires Type=notify with `systemd-notify --exec --ready` and signal value passing
 
-### 9. Transient Boot Hangs
+### 9. Transient Boot Hangs — FIXED (was ~30% flake)
 
-~30% of test runs experience a non-deterministic boot hang where backdoor.service never starts. Retrying usually succeeds.
+**Root cause:** upstream NixOS `stage-2-init.sh` has a bash process-substitution block
 
-**Affected (intermittent):** 07-pid1-user-group (passes on retry), 07-pid1-protect-control-groups (passes on retry), 07-pid1-private-pids (passes on retry), 07-pid1-issue-3171, 22-tmpfiles-06 (passes on retry)
+```bash
+if test -w /dev/kmsg; then
+    exec > >(tee -i /proc/self/fd/"$logOutFd" | while read -r line; do
+        echo "<7>stage-2-init: $line" > /dev/kmsg
+    done) 2>&1
+fi
+```
+
+whose fd-inheritance setup races with parallel kernel module auto-load (fuse/vmci/vsock) during early boot.  When the subshell's pipe-to-/dev/kmsg loop doesn't manage to hook up fd 1 before the parent blocks on its next write, the entire init bash process stalls — kernel's still alive (no panic), but nothing ever execs `systemd`.  Happened on ~30% of VM-test runs because the race outcome depends on kernel-module load ordering timing.
+
+Upstream systemd-based NixOS avoids this code path entirely — `boot.initrd.systemd.enable = true` sets `IN_NIXOS_SYSTEMD_STAGE1=true` which short-circuits past the offending bash block.  rust-systemd doesn't ship a stage-1 systemd initrd, so it fell through to the legacy bash stage-2 and hit the race.
+
+**Fix:** `testsuite.nix` overrides `system.build.bootStage2` with a patched stage-2-init.sh that strips the whole `if test -w /dev/kmsg; then … fi` subshell pipeline.  Stage-2 output still goes to /dev/console (inherited from stage-1); we just lose the `<7>stage-2-init:` kmsg re-log.  All other stage-2 behavior (`/etc`/`/tmp` install, `$systemConfig/activate`, `/run/booted-system` symlink, exec systemd) is preserved verbatim.
+
+Verified: two back-to-back sanity-check runs now pass in 24s each (was failing ~30% before).
 
 ## Prioritized Fix Plan
 
