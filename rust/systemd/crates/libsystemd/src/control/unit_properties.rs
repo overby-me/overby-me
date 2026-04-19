@@ -197,6 +197,16 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
         let status = unit.common.status.read_poisoned();
         insert_status(&mut props, &status);
 
+        // Device units use the `plugged` SubState when active (not the
+        // default `running`), and `tentative` when present-but-not-ready
+        // (SYSTEMD_READY=0).  TEST-17-UDEV.* asserts `SubState=plugged`
+        // explicitly.
+        if matches!(&unit.specific, Specific::Device(_))
+            && matches!(&*status, UnitStatus::Started(_))
+        {
+            insert(&mut props, "SubState", "plugged");
+        }
+
         // Override ActiveState for completed oneshot services with
         // RemainAfterExit=no: they are kept as Started for the boot
         // activation walker, but should report "inactive" (issue #27953).
