@@ -231,6 +231,10 @@ pub struct Engine {
     /// When `--warn-undefined-variables` is set, emit a warning each
     /// time an undefined variable is expanded.
     pub warn_undefined_variables: Cell<bool>,
+    /// When Some, keep-going error messages are collected here instead
+    /// of being printed immediately. Used by finalize_includes to
+    /// control output ordering (NSFD before build errors).
+    pub buffered_kgo_errors: RefCell<Option<Vec<String>>>,
     /// True when `.POSIX` special target has been seen.
     posix_mode: RefCell<bool>,
     /// Set to true by finalize_includes when an included makefile was
@@ -240,6 +244,7 @@ pub struct Engine {
     /// overflow when implicit rule search creates an infinite chain
     /// (e.g. %: %.c matching hello -> hello.c -> hello.c.c -> ...).
     build_depth: Cell<usize>,
+    pub printed_entering: Cell<bool>,
 }
 
 impl Engine {
@@ -303,9 +308,11 @@ impl Engine {
             in_recipe: RefCell::new(false),
             failed_targets: RefCell::new(HashSet::new()),
             warn_undefined_variables: Cell::new(false),
+            buffered_kgo_errors: RefCell::new(None),
             posix_mode: RefCell::new(false),
             needs_reexec: Cell::new(false),
             build_depth: Cell::new(0),
+            printed_entering: Cell::new(false),
         };
 
         // Set default variables
@@ -869,6 +876,7 @@ impl Engine {
             skip_reason: Option<&'static str>, // "phony" or "double_colon"
             #[allow(dead_code)]
             printed_nsfd: bool,
+            kgo_errors: Vec<String>,
         }
         let mut results: Vec<BuildResult> = Vec::new();
         for entry in &to_build {
@@ -897,32 +905,11 @@ impl Engine {
 
             let should_build = has_rule && skip_reason.is_none();
 
-            // Print "file not found" diagnostic before attempting build.
-            // GNU make prints NSFD first, then any build errors. However,
-            // only print it when:
-            //   1. It's a non-silent include
-            //   2. The file doesn't exist (not just unreadable)
-            //   3. There IS a rule to try building it (otherwise phase 3
-            //      handles the error for the no-rule case)
-            //   4. The build will actually be attempted (not skipped)
-            // Print NSFD before build only in keep-going mode, where the
-            // ordering matters (build errors appear during build, and
-            // NSFD must precede them). In non-keep-going mode, Phase 3
-            // handles the error after we know the outcome.
-            let printed_nsfd = if self.keep_going
-                && !entry.silent
-                && should_build
-                && !std::path::Path::new(&entry.file).exists()
-                && !entry.file_exists_unreadable
-            {
-                eprintln!(
-                    "{}:{}: {}: No such file or directory",
-                    entry.source, entry.line_no, entry.file
-                );
-                true
-            } else {
-                false
-            };
+            let printed_nsfd = false;
+
+            // Activate keep-going error buffering so we can print NSFD
+            // before any build errors in Phase 3.
+            *self.buffered_kgo_errors.borrow_mut() = Some(Vec::new());
 
             let build_err = if should_build {
                 // For unreadable files, force rebuild by temporarily setting
@@ -949,6 +936,12 @@ impl Engine {
                 None
             };
 
+            let kgo_errors = self
+                .buffered_kgo_errors
+                .borrow_mut()
+                .take()
+                .unwrap_or_default();
+
             results.push(BuildResult {
                 file: entry.file.clone(),
                 silent: entry.silent,
@@ -958,6 +951,7 @@ impl Engine {
                 had_rule: should_build,
                 skip_reason,
                 printed_nsfd,
+                kgo_errors,
             });
         }
 
@@ -1000,10 +994,12 @@ impl Engine {
             };
 
             if let Some(ref build_err) = res.build_err {
-                // Build attempted but failed. Print NSFD only if not
-                // already printed during Phase 2.
+                // Print NSFD first, then any buffered keep-going errors.
                 if !res.printed_nsfd {
                     eprintln!("{}:{}: {}: {}", res.source, res.line_no, res.file, err_msg);
+                }
+                for kgo_err in &res.kgo_errors {
+                    eprintln!("{kgo_err}");
                 }
                 if !build_err.is_empty() {
                     if build_err.starts_with('[') {
@@ -1334,10 +1330,14 @@ impl Engine {
                 // back off and record the var as a target-specific
                 // export so the recipe's child env sees it when this
                 // target builds.
-                let (name, do_export) = match assign.name.strip_prefix('!') {
-                    Some(rest) => (rest.to_string(), true),
-                    None => (assign.name.clone(), false),
-                };
+                let (name, do_export, do_unexport) =
+                    if let Some(rest) = assign.name.strip_prefix('!') {
+                        (rest.to_string(), true, false)
+                    } else if let Some(rest) = assign.name.strip_prefix('~') {
+                        (rest.to_string(), false, true)
+                    } else {
+                        (assign.name.clone(), false, false)
+                    };
                 let mut tv = self.target_vars.borrow_mut();
                 for target in targets_expanded.split_whitespace() {
                     tv.entry(target.to_string()).or_default().push((
@@ -1350,6 +1350,19 @@ impl Engine {
                     let mut te = self.target_exports.borrow_mut();
                     for target in targets_expanded.split_whitespace() {
                         te.entry(target.to_string()).or_default().push(name.clone());
+                    }
+                }
+                if do_unexport {
+                    // Target-specific `unexport` — record the names so
+                    // execute_recipe can add them to `unexports` for the
+                    // duration of the target's recipe.
+                    let mut te = self.target_exports.borrow_mut();
+                    for target in targets_expanded.split_whitespace() {
+                        // Use a `~` prefix to distinguish unexport entries
+                        // from export entries in the same map.
+                        te.entry(target.to_string())
+                            .or_default()
+                            .push(format!("~{}", name));
                     }
                 }
             }
@@ -1927,7 +1940,9 @@ impl Engine {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
-        if should_print && restarts == 0 {
+        if self.printed_entering.get() {
+            // Already printed in main before load_file
+        } else if should_print && restarts == 0 {
             println!("{make_tag}: Entering directory '{}'", cwd_for_msg.display());
         }
         let inc_rc = self.finalize_includes();
@@ -2045,26 +2060,12 @@ impl Engine {
     /// Gather target-specific variables for a target *and* those inherited
     /// from any ancestors currently being built. GNU make propagates
     /// target-specific vars from a parent to all of its prereqs.
-    fn collect_target_vars(&self, target: &str) -> Vec<(String, AssignOp, String)> {
-        let mut result: Vec<(String, AssignOp, String)> = Vec::new();
-        let mut seen: HashSet<String> = HashSet::new();
-        // Inherited vars from parent scopes (innermost last, already merged).
-        let parent_scope = self.target_scope_stack.borrow();
-        for (n, op, v) in parent_scope.iter() {
-            if seen.insert(n.clone()) {
-                result.push((n.clone(), *op, v.clone()));
-            }
-        }
-        // Target's own vars (take precedence — replace any inherited).
-        let tv = self.target_vars.borrow();
-        if let Some(entries) = tv.get(target) {
-            for (n, op, v) in entries {
-                // Remove any inherited entry with same name.
-                result.retain(|(existing, _, _)| existing != n);
-                result.push((n.clone(), *op, v.clone()));
-            }
-        }
-        result
+    fn collect_target_vars(&self, _target: &str) -> Vec<(String, AssignOp, String)> {
+        // The target_scope_stack already contains this target's own
+        // vars (pushed by build_target_for) plus all ancestor vars.
+        // Just return its contents — the order is parents-first,
+        // which execute_recipe applies sequentially.
+        self.target_scope_stack.borrow().clone()
     }
 
     fn build_target_for(&self, target: &str, needed_by: Option<&str>) -> Result<(), String> {
@@ -2105,6 +2106,23 @@ impl Engine {
 
         // Find explicit rules
         let rules = self.rules.borrow().get(target).cloned().unwrap_or_default();
+
+        // Push this target's own variable bindings onto the scope stack
+        // so prereq builds inherit them (GNU make semantics). Popped
+        // before any return path via `pop_scope`.
+        let own_vars: Vec<(String, AssignOp, String)> = self
+            .target_vars
+            .borrow()
+            .get(target)
+            .cloned()
+            .unwrap_or_default();
+        let scope_push_count = own_vars.len();
+        self.target_scope_stack.borrow_mut().extend(own_vars);
+        let pop_scope = |s: &Self| {
+            let mut stack = s.target_scope_stack.borrow_mut();
+            let new_len = stack.len().saturating_sub(scope_push_count);
+            stack.truncate(new_len);
+        };
 
         // Double-colon rules are independent: each rule is evaluated
         // separately, with its own prereqs and its own recipe. Fall
@@ -2160,10 +2178,16 @@ impl Engine {
                         );
                         continue;
                     }
-                    self.build_target_for(prereq, Some(target))?;
+                    if let Err(e) = self.build_target_for(prereq, Some(target)) {
+                        pop_scope(self);
+                        return Err(e);
+                    }
                 }
                 for prereq in &order_only {
-                    self.build_target_for(prereq, Some(target))?;
+                    if let Err(e) = self.build_target_for(prereq, Some(target)) {
+                        pop_scope(self);
+                        return Err(e);
+                    }
                 }
                 if rule.recipe.is_empty() {
                     continue;
@@ -2254,7 +2278,10 @@ impl Engine {
                         &[],
                         "",
                     ) {
-                        Err(e) => return Err(e),
+                        Err(e) => {
+                            pop_scope(self);
+                            return Err(e);
+                        }
                         Ok(ran) => {
                             if ran {
                                 self.rebuilt_targets.borrow_mut().insert(target.to_string());
@@ -2273,6 +2300,7 @@ impl Engine {
                 }
             }
             *self.target_had_recipe.borrow_mut() = rules.iter().any(|r| !r.recipe.is_empty());
+            pop_scope(self);
             return Ok(());
         }
 
@@ -2293,6 +2321,7 @@ impl Engine {
                 if self.group_recipe_done.borrow().contains(&key) {
                     *self.target_had_recipe.borrow_mut() = false;
                     self.built_targets.borrow_mut().insert(target.to_string());
+                    pop_scope(self);
                     return Ok(());
                 }
             }
@@ -2366,23 +2395,6 @@ impl Engine {
             recipe_lines = l.clone();
             recipe_source = s.clone();
         }
-
-        // Push this target's own variable bindings onto the scope stack
-        // so prereq builds inherit them (GNU make semantics). Popped
-        // before any return path via `pop_scope`.
-        let own_vars: Vec<(String, AssignOp, String)> = self
-            .target_vars
-            .borrow()
-            .get(target)
-            .cloned()
-            .unwrap_or_default();
-        let scope_push_count = own_vars.len();
-        self.target_scope_stack.borrow_mut().extend(own_vars);
-        let pop_scope = |s: &Self| {
-            let mut stack = s.target_scope_stack.borrow_mut();
-            let new_len = stack.len().saturating_sub(scope_push_count);
-            stack.truncate(new_len);
-        };
 
         // .EXTRA_PREREQS: extra prereqs added to every target, built but
         // not visible in `$<`/`$^`/etc. Skip if the target being built
@@ -2460,10 +2472,15 @@ impl Engine {
                     // of them, then remember the first error to bubble
                     // up after the loop.
                     if !e.is_empty() {
-                        if e.starts_with('[') {
-                            eprintln!("make: *** {e}");
+                        let msg = if e.starts_with('[') {
+                            format!("make: *** {e}")
                         } else {
-                            eprintln!("make: *** {e}.");
+                            format!("make: *** {e}.")
+                        };
+                        if let Some(ref mut buf) = *self.buffered_kgo_errors.borrow_mut() {
+                            buf.push(msg);
+                        } else {
+                            eprintln!("{msg}");
                         }
                     }
                     if first_err.is_none() {
@@ -2520,10 +2537,15 @@ impl Engine {
                 if let Err(e) = self.build_target_for(prereq, Some(target)) {
                     if self.keep_going {
                         if !e.is_empty() {
-                            if e.starts_with('[') {
-                                eprintln!("make: *** {e}");
+                            let msg = if e.starts_with('[') {
+                                format!("make: *** {e}")
                             } else {
-                                eprintln!("make: *** {e}.");
+                                format!("make: *** {e}.")
+                            };
+                            if let Some(ref mut buf) = *self.buffered_kgo_errors.borrow_mut() {
+                                buf.push(msg);
+                            } else {
+                                eprintln!("{msg}");
                             }
                         }
                         first_err = Some(String::new());
@@ -2879,7 +2901,11 @@ impl Engine {
         }
         let suffixes_cleared = *self.suffixes_cleared.borrow();
         let pattern_rules = self.pattern_rules.borrow();
-        for rule in pattern_rules.iter().rev() {
+        // First pass: user-defined rules (in definition order = first wins)
+        for rule in pattern_rules.iter() {
+            if rule.source_name == "<built-in>" {
+                continue;
+            }
             if suffixes_cleared && rule.source_name == "<built-in>" {
                 continue;
             }
@@ -2898,10 +2924,6 @@ impl Engine {
                     }
                     continue;
                 }
-                // Non-terminal rule: check that ALL prereqs exist or
-                // can be built (via explicit rule, "ought to exist"
-                // mention, or implicit rule chaining with bounded
-                // depth).
                 let prereqs_ok = rule.prereq_patterns.is_empty()
                     || rule.prereq_patterns.iter().all(|pp| {
                         let prereq = pp.replace('%', &stem);
@@ -2913,6 +2935,42 @@ impl Engine {
                     });
                 if prereqs_ok {
                     return Some((rule.clone(), stem));
+                }
+            }
+        }
+        // Second pass: built-in rules (in definition order)
+        if !suffixes_cleared {
+            for rule in pattern_rules.iter() {
+                if rule.source_name != "<built-in>" {
+                    continue;
+                }
+                if let Some(stem) = expand::pattern_stem(target, &rule.target_pattern) {
+                    if rule.recipe.is_empty() {
+                        continue;
+                    }
+                    if rule.is_terminal {
+                        let prereqs_ok = rule.prereq_patterns.is_empty()
+                            || rule.prereq_patterns.iter().all(|pp| {
+                                let prereq = pp.replace('%', &stem);
+                                Path::new(&prereq).exists()
+                            });
+                        if prereqs_ok {
+                            return Some((rule.clone(), stem));
+                        }
+                        continue;
+                    }
+                    let prereqs_ok = rule.prereq_patterns.is_empty()
+                        || rule.prereq_patterns.iter().all(|pp| {
+                            let prereq = pp.replace('%', &stem);
+                            Path::new(&prereq).exists()
+                                || self.is_mentioned_file(&prereq)
+                                || self.phony_targets.borrow().contains(&prereq)
+                                || self.rules.borrow().contains_key(prereq.as_str())
+                                || self.find_pattern_rule_inner(&prereq, depth + 1).is_some()
+                        });
+                    if prereqs_ok {
+                        return Some((rule.clone(), stem));
+                    }
                 }
             }
         }
@@ -2944,10 +3002,18 @@ impl Engine {
             .cloned()
             .unwrap_or_default();
         let mut added_exports: Vec<String> = Vec::new();
+        let mut added_unexports: Vec<String> = Vec::new();
         {
             let mut exports = self.exports.borrow_mut();
+            let mut unexports = self.unexports.borrow_mut();
             for n in &export_names {
-                if exports.insert(n.clone()) {
+                if let Some(uname) = n.strip_prefix('~') {
+                    // Target-specific unexport
+                    exports.remove(uname);
+                    if unexports.insert(uname.to_string()) {
+                        added_unexports.push(uname.to_string());
+                    }
+                } else if exports.insert(n.clone()) {
                     added_exports.push(n.clone());
                 }
             }
@@ -2955,25 +3021,69 @@ impl Engine {
         let mut saved: Vec<(String, Option<Variable>)> = Vec::new();
         for (name, op, value) in &tv_entries {
             saved.push((name.clone(), self.vars.borrow().get(name).cloned()));
-            let flavor = match op {
-                AssignOp::Simple | AssignOp::Shell => VarFlavor::Simple,
-                _ => VarFlavor::Recursive,
-            };
-            let final_value = if matches!(op, AssignOp::Simple) {
-                expand::expand(value, self)
+
+            // Target-specific vars can override file-level `override` vars, but must not
+            // replace command-line variables.
+            // Check the current origin and skip if it's CommandLine.
+            let current_origin = self.vars.borrow().get(name).map(|v| v.origin);
+            if matches!(current_origin, Some(VarOrigin::CommandLine)) {
+                continue;
+            }
+
+            if matches!(op, AssignOp::Conditional) && self.is_var_defined(name) {
+                continue;
+            }
+
+            if matches!(op, AssignOp::Append) {
+                // `+=` — append to existing value, respecting flavor.
+                let existing_flavor = self.var_flavor(name);
+                let existing = self.lookup_var_raw(name);
+                let keep_raw = existing_flavor != VarFlavor::Simple
+                    || self.immediate_recursive.borrow().contains(name);
+                let rhs = if keep_raw {
+                    value.clone()
+                } else {
+                    expand::expand(value, self)
+                };
+                let new_value = if existing.is_empty() {
+                    rhs
+                } else if rhs.is_empty() {
+                    existing
+                } else {
+                    format!("{existing} {rhs}")
+                };
+                let flavor = if existing_flavor == VarFlavor::Undefined {
+                    VarFlavor::Recursive
+                } else {
+                    existing_flavor
+                };
+                self.vars.borrow_mut().insert(
+                    name.clone(),
+                    Variable {
+                        value: new_value,
+                        flavor,
+                        origin: VarOrigin::Automatic,
+                    },
+                );
             } else {
-                value.clone()
-            };
-            // Store directly, bypassing origin precedence — target-specific
-            // assignments win within the target's scope.
-            self.vars.borrow_mut().insert(
-                name.clone(),
-                Variable {
-                    value: final_value,
-                    flavor,
-                    origin: VarOrigin::Automatic,
-                },
-            );
+                let flavor = match op {
+                    AssignOp::Simple | AssignOp::Shell => VarFlavor::Simple,
+                    _ => VarFlavor::Recursive,
+                };
+                let final_value = if matches!(op, AssignOp::Simple) {
+                    expand::expand(value, self)
+                } else {
+                    value.clone()
+                };
+                self.vars.borrow_mut().insert(
+                    name.clone(),
+                    Variable {
+                        value: final_value,
+                        flavor,
+                        origin: VarOrigin::Automatic,
+                    },
+                );
+            }
         }
         let result = self.execute_recipe_inner(
             target,
@@ -3002,6 +3112,13 @@ impl Engine {
             let mut exports = self.exports.borrow_mut();
             for n in &added_exports {
                 exports.remove(n);
+            }
+        }
+        // Remove the target-specific unexports we added above.
+        {
+            let mut unexports = self.unexports.borrow_mut();
+            for n in &added_unexports {
+                unexports.remove(n);
             }
         }
         result
@@ -3061,10 +3178,10 @@ impl Engine {
                 .iter()
                 .filter(|p| {
                     if let Some(t_mtime) = target_mtime {
-                        std::fs::metadata(p)
-                            .ok()
-                            .and_then(|m| m.modified().ok())
-                            .is_some_and(|p_mtime| p_mtime > t_mtime)
+                        match std::fs::metadata(p).ok().and_then(|m| m.modified().ok()) {
+                            Some(p_mtime) => p_mtime > t_mtime,
+                            None => true, // nonexistent prereq is always "newer"
+                        }
                     } else {
                         true
                     }
@@ -3289,6 +3406,7 @@ impl Engine {
             // see a bumped value, matching GNU make.
             let current_level: i32 = self.lookup_var_or("MAKELEVEL", "0").parse().unwrap_or(0);
             cmd.env("MAKELEVEL", (current_level + 1).to_string());
+            cmd.env_remove("MAKE_RESTARTS");
             // Always propagate MAKEFLAGS and MAKE to children so recipes
             // can `$(MAKE)` recursively and see flag state.
             cmd.env("MAKEFLAGS", self.lookup_var("MAKEFLAGS"));

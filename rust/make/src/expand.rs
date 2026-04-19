@@ -1115,11 +1115,7 @@ fn call_function(
             Some(engine.var_flavor(varname.trim()).to_string())
         }
         "error" => {
-            let msg = expand_with_auto(
-                args.first().map(|s| s.as_str()).unwrap_or(""),
-                engine,
-                auto_vars,
-            );
+            let msg = expand_with_auto(args_str, engine, auto_vars);
             let prefix = match engine.current_source.borrow().as_ref() {
                 Some((file, line)) => format!("{file}:{line}: "),
                 None => String::new(),
@@ -1128,11 +1124,7 @@ fn call_function(
             std::process::exit(2);
         }
         "warning" => {
-            let msg = expand_with_auto(
-                args.first().map(|s| s.as_str()).unwrap_or(""),
-                engine,
-                auto_vars,
-            );
+            let msg = expand_with_auto(args_str, engine, auto_vars);
             let prefix = match engine.current_source.borrow().as_ref() {
                 Some((file, line)) => format!("{file}:{line}: "),
                 None => String::new(),
@@ -1141,20 +1133,12 @@ fn call_function(
             Some(String::new())
         }
         "info" => {
-            let msg = expand_with_auto(
-                args.first().map(|s| s.as_str()).unwrap_or(""),
-                engine,
-                auto_vars,
-            );
+            let msg = expand_with_auto(args_str, engine, auto_vars);
             println!("{msg}");
             Some(String::new())
         }
         "eval" => {
-            let text = expand_with_auto(
-                args.first().map(|s| s.as_str()).unwrap_or(""),
-                engine,
-                auto_vars,
-            );
+            let text = expand_with_auto(args_str, engine, auto_vars);
             // eval re-parses and executes the text as makefile content
             // We return empty but the engine processes it
             engine.eval_text(&text);

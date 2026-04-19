@@ -437,9 +437,15 @@ impl Parser {
             // `!`, so this is unambiguous.)
             let mut after_mod = after;
             let mut had_export = false;
+            let mut had_unexport = false;
             loop {
                 if let Some(rest) = after_mod.strip_prefix("export ") {
                     had_export = true;
+                    after_mod = rest.trim_start();
+                    continue;
+                }
+                if let Some(rest) = after_mod.strip_prefix("unexport ") {
+                    had_unexport = true;
                     after_mod = rest.trim_start();
                     continue;
                 }
@@ -461,6 +467,8 @@ impl Parser {
                 self.advance();
                 if had_export && from_stripped {
                     assign.name = format!("!{}", assign.name);
+                } else if had_unexport && from_stripped {
+                    assign.name = format!("~{}", assign.name);
                 }
                 return Ok(Some(Directive::TargetVarAssign(
                     targets_str,
@@ -711,7 +719,7 @@ impl Parser {
         };
 
         // Detect static pattern rule: `targets : target-pattern : prereq-patterns`
-        // — a second top-level colon (outside `$(…)`) in the prereqs
+        // — a second top-level colon (outside `$(...)`) in the prereqs
         // section means the middle field is the target pattern and
         // everything after the second colon is the prereq pattern list.
         let (static_pat, prereqs_str) = if let Some(second_colon) = find_rule_colon(prereqs_str) {
@@ -729,18 +737,9 @@ impl Parser {
             (prereqs_str, "")
         };
 
-        let targets: Vec<String> = targets_str
-            .split_whitespace()
-            .map(|s| s.to_string())
-            .collect();
-        let prerequisites: Vec<String> = normal_prereqs
-            .split_whitespace()
-            .map(|s| s.to_string())
-            .collect();
-        let order_only: Vec<String> = order_only
-            .split_whitespace()
-            .map(|s| s.to_string())
-            .collect();
+        let targets: Vec<String> = split_whitespace_respecting_refs(targets_str);
+        let prerequisites: Vec<String> = split_whitespace_respecting_refs(normal_prereqs);
+        let order_only: Vec<String> = split_whitespace_respecting_refs(order_only);
 
         // Detect pattern rules. A static pattern rule uses the middle
         // field (`target-pattern`) against the explicit target list,
@@ -975,4 +974,43 @@ fn strip_quotes(s: &str) -> String {
     } else {
         s.to_string()
     }
+}
+
+/// Splits a string on whitespace, but keeps `$(...)` and `${...}` groups intact.
+/// This is needed so that targets like `$(filter %.o,$(files))` are not broken apart.
+fn split_whitespace_respecting_refs(s: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0u32;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '$' {
+            if let Some(&next) = chars.peek()
+                && (next == '(' || next == '{')
+            {
+                depth += 1;
+                current.push(c);
+                current.push(chars.next().unwrap());
+                continue;
+            }
+            current.push(c);
+        } else if depth > 0 {
+            if c == '(' || c == '{' {
+                depth += 1;
+            } else if c == ')' || c == '}' {
+                depth = depth.saturating_sub(1);
+            }
+            current.push(c);
+        } else if c.is_whitespace() {
+            if !current.is_empty() {
+                result.push(std::mem::take(&mut current));
+            }
+        } else {
+            current.push(c);
+        }
+    }
+    if !current.is_empty() {
+        result.push(current);
+    }
+    result
 }

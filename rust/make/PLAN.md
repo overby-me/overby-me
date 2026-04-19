@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**96/135 tests passing** (71%) — upstream test harness from GNU make 4.4.1.
+**102/135 tests passing** (75%) — upstream test harness from GNU make 4.4.1.
 
 `rust/make` has a parser, expander, and build engine (~5k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -84,6 +84,9 @@ organised in six directories under `tests/scripts/`:
     leading tab on continuation physical lines for trace output.
 - Inline `;` recipe on the rule line.
 - Bare `$(…)` expression lines (`$(info)`, `$(error)`, `$(eval)`).
+- Nesting-aware whitespace split for rule targets, prerequisites, and
+  order-only prereqs: `$(filter %.o,$(files))` is kept as a single
+  token instead of being split on internal spaces.
 - Recipe lines inside a conditional body (`ifeq … \t@cmd … endif`)
   attach to the most recently declared rule — matching GNU make's
   line-by-line splice when the taken branch is flattened.
@@ -109,6 +112,8 @@ organised in six directories under `tests/scripts/`:
   another `$(shell …)` to avoid infinite recursion; child stderr is
   re-emitted under the `make:` prefix with `<shell>:`/`line N:`
   noise stripped), `file`, `error`, `warning`, `info`.
+- `info`, `warning`, `error`, `eval` receive the full argument text
+  including commas (single-argument functions per GNU make semantics).
 - Fatal errors for invalid `word`/`wordlist`/`intcmp`/`foreach`/`let`
   args with GNU-compatible diagnostic text.
 - Substitution references `$(VAR:from=to)` and `$(VAR:a=%b)`.
@@ -131,6 +136,12 @@ organised in six directories under `tests/scripts/`:
 - Target-specific variables propagate to prerequisite builds via
   scope stack. `:=` target-specific assignments expand at declaration
   time so they capture caller-side bindings.
+- Target-specific `+=` appends to existing value (respecting flavor).
+- Target-specific `?=` skips assignment when the variable is defined.
+- Target-specific `unexport` marks variables for unexport during the
+  target's recipe.
+- Target-specific vars do not override command-line variables (unless
+  the target-specific assignment has `override`).
 
 ### Rules engine
 
@@ -139,6 +150,9 @@ organised in six directories under `tests/scripts/`:
 - Pattern rule matching picks the first candidate whose prereqs exist
   or can be built; falls back to the last matching user-defined
   pattern when nothing else applies.
+- Pattern rule search: user-defined rules are tried first (definition
+  order, first-wins), built-in rules tried only when no user rule
+  matches.
 - Order-only prereqs promoted to normal when a prereq appears in both
   positions (via union across combined rules).
 - A `|` appearing in *expanded* prereq text (e.g. from `$(VAR)` whose
@@ -166,6 +180,8 @@ organised in six directories under `tests/scripts/`:
 - `-j N` (reject invalid integers), `-n`, `-s`/`--no-silent`
   last-wins, `-k`/`--no-keep-going`, `-t`, `-q`, `-B`, `-i`, `-e`,
   `-w`/`--no-print-directory`, `--trace`, `-d`.
+- `-l` / `--load-average` / `--max-load` (accepted, not implemented).
+- `-d` emits `GNU Make` banner to stderr for test compatibility.
 - `-r` / `-R` disable built-in rules / built-in variables.
 - `--eval=TEXT`, `--warn-undefined-variables` (parses; no emission yet).
 - Cluster-flag parsing (`-erR`) and short-flag-with-arg forms (`-Wfoo`).
@@ -191,6 +207,10 @@ organised in six directories under `tests/scripts/`:
   right diagnostics and exit codes.
 - `-k` mode emits each prereq error and continues, marks the goal as
   "not remade because of errors".
+- `MAKE_RESTARTS` cleared from child environment to prevent spurious
+  suppression of "Entering directory" messages in sub-makes.
+- "Entering directory" printed before makefile loading so `$(info)`
+  directives in sub-makes appear after the directory banner.
 
 ---
 
@@ -271,8 +291,8 @@ Based on the latest baseline run (approximate per-category pass ratios):
 | ----------- | ----------------------------------------------------------------- |
 | `features`  | Partial across most sub-areas; blocked heavily on SE + VPATH.     |
 | `functions` | Most working. Remaining: fatal-error line numbers, `$(eval)`-inside-variables. |
-| `misc`      | `bs-nl` 16/28; `general1`–`general4` blocked on VPATH / shell err.|
-| `options`   | Most parse and work; blocked on re-exec / MAKEFLAGS parse.        |
+| `misc`      | `bs-nl` 16/28; `general4` 7/10 blocked on `$$` prereq expansion. |
+| `options`   | Most parse and work; blocked on re-exec / MAKEFLAGS parse. `dash-l` accepted. |
 | `targets`   | POSIX / ONESHELL / INTERMEDIATE pending.                          |
 | `variables` | Most done. MAKEFLAGS subcategory is the huge outlier.             |
 

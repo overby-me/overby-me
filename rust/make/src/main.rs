@@ -104,6 +104,7 @@ fn run() -> i32 {
     let mut targets = Vec::new();
     let mut makefiles: Vec<String> = Vec::new();
     let mut directory: Option<String> = None;
+    let mut debug_mode = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -112,12 +113,24 @@ fn run() -> i32 {
                 i += 1;
                 if i < args.len() {
                     makefiles.push(args[i].clone());
+                } else {
+                    eprintln!(
+                        "make: the '{}' option requires a non-empty string argument",
+                        args[i - 1]
+                    );
+                    return 2;
                 }
             }
             "-C" | "--directory" => {
                 i += 1;
                 if i < args.len() {
                     directory = Some(args[i].clone());
+                } else {
+                    eprintln!(
+                        "make: the '{}' option requires a non-empty string argument",
+                        args[i - 1]
+                    );
+                    return 2;
                 }
             }
             "-I" | "--include-dir" => {
@@ -133,6 +146,12 @@ fn run() -> i32 {
                         engine.include_dirs.borrow_mut().push(args[i].clone());
                         mflags_long.push(format!("-I{}", args[i]));
                     }
+                } else {
+                    eprintln!(
+                        "make: the '{}' option requires a non-empty string argument",
+                        args[i - 1]
+                    );
+                    return 2;
                 }
             }
             arg if arg.starts_with("-I") && arg.len() > 2 => {
@@ -204,6 +223,10 @@ fn run() -> i32 {
                 } else {
                     engine.jobs = 0; // unlimited
                 }
+            }
+            "-l" | "--load-average" | "--max-load" => {
+                // Accept -l with a float argument. TODO: implement load limiting.
+                i += 1;
             }
             "-n" | "--just-print" | "--dry-run" | "--recon" => {
                 engine.dry_run = true;
@@ -277,10 +300,10 @@ fn run() -> i32 {
             "-d" | "--debug" | "--debug=a" | "--debug=b" | "--debug=basic" | "--debug=v"
             | "--debug=verbose" | "--debug=i" | "--debug=implicit" | "--debug=j"
             | "--debug=jobs" | "--debug=m" | "--debug=makefile" | "--debug=n" | "--debug=none" => {
-                // Accept debug flags silently.
+                debug_mode = true;
             }
             arg if arg.starts_with("--debug=") => {
-                // Accept arbitrary --debug=... without splitting.
+                debug_mode = true;
             }
             arg if arg.starts_with("--eval=") => {
                 eval_strings.push(arg["--eval=".len()..].to_string());
@@ -328,6 +351,12 @@ fn run() -> i32 {
                     return 2;
                 }
             },
+            arg if arg.starts_with("-l") && arg.len() > 2 => {
+                // -l0.0001 form — accept and ignore.
+            }
+            arg if arg.starts_with("--load-average=") || arg.starts_with("--max-load=") => {
+                // Accept and ignore.
+            }
             arg if arg.starts_with("-f") => {
                 makefiles.push(arg[2..].to_string());
             }
@@ -369,7 +398,8 @@ fn run() -> i32 {
                         engine::VarOrigin::CommandLine,
                     );
                     if is_real_cmdline {
-                        makeoverrides.push(format!("{name}={combined}"));
+                        let escaped = combined.replace('$', "$$");
+                        makeoverrides.push(format!("{name}={escaped}"));
                     }
                     i += 1;
                     continue;
@@ -387,7 +417,11 @@ fn run() -> i32 {
                 };
                 engine.set_var_with_origin(name, value, op, engine::VarOrigin::CommandLine);
                 if is_real_cmdline {
-                    makeoverrides.push(format!("{name}={value}"));
+                    // Escape $ as $$ so MAKEOVERRIDES expansion doesn't
+                    // trigger unterminated variable reference errors for
+                    // values like x=$(other.
+                    let escaped = value.replace('$', "$$");
+                    makeoverrides.push(format!("{name}={escaped}"));
                 }
             }
             arg if arg.starts_with("--") => {
@@ -467,6 +501,11 @@ fn run() -> i32 {
                             let _ = take_arg(&flags, idx, &mut i);
                             break;
                         }
+                        'l' => {
+                            // -l takes a float argument (rest of cluster or next arg)
+                            let _ = take_arg(&flags, idx, &mut i);
+                            break;
+                        }
                         'o' => {
                             let _ = take_arg(&flags, idx, &mut i);
                             break;
@@ -485,6 +524,10 @@ fn run() -> i32 {
             }
         }
         i += 1;
+    }
+
+    if debug_mode {
+        eprintln!("GNU Make 4.4.1 (rust-make)");
     }
 
     // Change directory if requested
@@ -585,6 +628,32 @@ fn run() -> i32 {
     // set via env or command-line assignment; by the time we get here
     // both have been absorbed into engine state, so reading the engine
     // var covers both.
+    // Print "Entering directory" early (before load_file) so $(info) in
+    // makefiles appears after it. For sub-makes (MAKELEVEL > 0) this
+    // is the default; for top-level make only if -w is explicit.
+    let cwd_display = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let restarts: i32 = std::env::var("MAKE_RESTARTS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let makelevel: i32 = engine.lookup_var_or("MAKELEVEL", "0").parse().unwrap_or(0);
+    let should_print_dir = match engine.print_directory_opt {
+        Some(choice) => choice,
+        None => makelevel > 0,
+    };
+    let printed_entering_early = should_print_dir && restarts == 0;
+    if printed_entering_early {
+        let make_tag = if makelevel > 0 {
+            format!("make[{makelevel}]")
+        } else {
+            "make".to_string()
+        };
+        println!("{make_tag}: Entering directory '{cwd_display}'");
+    }
+    engine.printed_entering.set(printed_entering_early);
+
     // Evaluate any `--eval=TEXT` strings before the primary makefile
     // and before MAKEFILES env loading (GNU make processes -E first).
     for text in &eval_strings {
@@ -653,6 +722,10 @@ fn run() -> i32 {
         for tok in mflags_post.split_whitespace() {
             // Don't break at "--" — flags appended via
             // `MAKEFLAGS += -r` may appear after the separator.
+            // Skip variable assignments (contain '=') — they are not flags.
+            if tok.contains('=') {
+                continue;
+            }
             if tok == "--no-builtin-rules" {
                 has_r = true;
                 continue;
