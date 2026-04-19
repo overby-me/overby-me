@@ -2184,15 +2184,19 @@ impl Lexer {
                 self.pos += 1;
                 self.current_line += 1;
             }
+            // Strip a trailing \r so CRLF-terminated sources match the
+            // tag and don't bleed \r into the captured body (reference
+            // perl effectively reads source in text mode).
+            let cmp_line = line.strip_suffix('\r').unwrap_or(&line);
             let trimmed = if ph.indent {
-                line.trim().to_string()
+                cmp_line.trim()
             } else {
-                line.clone()
+                cmp_line
             };
             if trimmed == ph.tag {
                 break;
             }
-            body.push_str(&line);
+            body.push_str(cmp_line);
             body.push('\n');
         }
         if ph.interpolate {

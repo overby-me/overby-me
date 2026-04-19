@@ -20,6 +20,10 @@ run/exit, run/switches.
 
 Major unlocks in this cycle:
 
+- Heredoc terminator now matches CRLF-terminated source lines: a trailing
+  `\r` is stripped before comparing the line to the tag, and also before
+  pushing the line into the body. Previously the `\r` made the tag never
+  match, so the heredoc swallowed the rest of the file.
 - `DESTROY { … }` / `AUTOLOAD { … }` without the `sub` keyword — Perl's
   parser hardcodes these two bareword-sub shortcuts (matches B::Deparse's
   `sub DESTROY { … }` expansion). Parser at statement position now routes
