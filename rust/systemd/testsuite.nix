@@ -87,29 +87,44 @@ in
         else rustSystemdPackage;
       services.udev.packages = [udevRulesOverride];
 
-      # Replace the bash stage-2-init.sh with our rust-systemd-stage2
-      # binary.  The upstream script contains a bash process-substitution
-      # pipeline
-      #   exec > >(tee -i /proc/self/fd/"$logOutFd" | while read -r line; do
-      #       echo "<7>stage-2-init: $line" > /dev/kmsg
-      #   done) 2>&1
-      # whose fd-inheritance setup races with parallel kernel module
-      # loading (fuse/vmci/vsock auto-load) during early boot and hangs
-      # the VM about 30% of the time.  The rust-systemd-stage2 binary
-      # does the same work (root remount, /nix/store ro,nodev,nosuid
-      # remount, /proc|/sys|/dev|/run setup, activate script execution,
-      # /run/booted-system symlink) but writes directly to /dev/console
-      # — no subshell, no pipe, no race.
-      # `exec -a /init` preserves argv[0] so rust-systemd-stage2's
-      # current_exe() canonicalizes to <systemConfig>/init and the
-      # binary can locate `$systemConfig/activate`.
-      system.build.bootStage2 = lib.mkIf (!useUpstreamSystemd) (
-        lib.mkForce (
-          pkgs.writeShellScript "stage-2-init" ''
-            exec -a /init ${rustSystemdPackage}/lib/systemd/rust-systemd-stage2
-          ''
-        )
-      );
+      # Replace the upstream bash stage-2-init.sh with a version that
+      # strips the racy `exec > >(tee -i /proc/self/fd/"$logOutFd" |
+      # while read -r line; …) 2>&1` process-substitution pipeline.
+      # That bash-level fd-inheritance setup races with parallel
+      # kernel module loading (fuse/vmci/vsock auto-load) during
+      # early boot and hangs the VM about 30% of the time.  Taking
+      # the pipe out means stage-2 output goes straight to /dev/console
+      # instead of being re-logged to /dev/kmsg by a subshell, which
+      # is a small loss of diagnostic polish for a large boot-stability
+      # win.  All other stage-2 behavior (activation script, exec
+      # systemd) is preserved verbatim.
+      system.build.bootStage2 = let
+        patchedSrc =
+          pkgs.runCommand "stage-2-init-no-tee-pipe.sh" {} ''
+            sed '/^ *exec > >(tee -i/,/^ *done) 2>&1$/d' \
+                ${pkgs.path}/nixos/modules/system/boot/stage-2-init.sh \
+                > $out
+          '';
+      in
+        lib.mkIf (!useUpstreamSystemd) (
+          lib.mkForce (pkgs.replaceVarsWith {
+            src = patchedSrc;
+            isExecutable = true;
+            replacements = {
+              shell = "${pkgs.bash}/bin/bash";
+              systemConfig = null;
+              inherit (config.boot) systemdExecutable;
+              nixStoreMountOpts = lib.concatStringsSep " " (
+                map lib.escapeShellArg config.boot.nixStoreMountOpts
+              );
+              inherit (config.system.nixos) distroName;
+              useHostResolvConf =
+                config.networking.resolvconf.enable
+                && config.networking.useHostResolvConf;
+              inherit (config.system.build) earlyMountScript;
+            };
+          })
+        );
 
       # sudo-rs
       security.sudo.enable = false;
