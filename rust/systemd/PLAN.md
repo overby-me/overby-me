@@ -237,6 +237,16 @@ Fire-and-forget; udevd drains the response so PID 1's `write_all` doesn't hit EP
 - `build_udev_monitor_message` / `parse_udev_monitor_message` round-trip (10 tests — header magic, tag bloom, 100×100-byte properties, bad-prefix rejection)
 - `handle_udev_event` with mock `ArcMutRuntimeInfo` (9 tests — tagged/untagged, ID_PROCESSING defers, SYSTEMD_READY=0 keeps inactive, remove deactivates, ID_RENAMING flip, SYSTEMD_WANTS populates deps, symlink alias, repeat-add idempotence, stale aliases deactivated on change)
 
+**VM-validated tests**:
+
+- **17-udev-SYSTEMD_ALIAS** — PASSES end-to-end. Exercised: add-phase aliases, change-phase stale-alias deactivation (new feature), multiple alias transitions.
+- **17-udev-SYSTEMD_WANTS** — PASSES end-to-end.  Exercised: udev-event RPC, device-unit `Wants=` from `SYSTEMD_WANTS=`, stub reverse-dep lookup (`systemctl show -p WantedBy foobar.service` on a non-existent target unit finds the device via the device's wants).  Also drove `bootctl -R/-RR` implementation.
+- **17-udev-device-is-processing** — PARTIAL.  Phase 1 passes: `ID_PROCESSING=1` observed in db, device units stay `inactive` through 6× daemon-reexec/reload cycles, `/proc`-walk patch successfully finds sleep (comm is `/usr/bin/sleep` not `sleep` on this NixOS — psmisc's killall can't match), sleep killed, udev clears ID_PROCESSING, device units activate.  Phase 2 fails: after the test's 2nd-phase `daemon-reexec`, the `.device` unit is lost (not re-created by the new rust-systemd instance).  ROOT CAUSE: `serialize_reexec_state` doesn't include device units; they're synthetic (created from udev events) and absent from unit files on disk, so `load_all_units` in the new instance doesn't rebuild them.  Fix approach: walk `/run/udev/data/*` on startup to rebuild device units from the udev db (matches upstream systemd).
+
+**Environment quirks discovered**:
+
+- On this NixOS kernel + Rust stdlib combo, `/proc/<pid>/comm` for a child spawned via `Command::new("/usr/bin/sleep")` is the full path `/usr/bin/sleep` (14 chars, fits TASK_COMM_LEN=16) rather than the basename `sleep`.  This breaks psmisc's `killall sleep` (exact 15-char comm match).  Tests relying on `killall <basename>` need a patchScript workaround that matches against `basename(comm)` via a `/proc` walk.
+
 ## Prioritized Fix Plan
 
 ### Priority 1: Quick Wins (test config fixes, CLI flags) — DONE
