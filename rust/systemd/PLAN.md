@@ -89,15 +89,15 @@ Basic Type=notify (READY=1) works. NotifyAccess=all/main/exec/none enforcement w
 
 **Upholds= directive:** — DONE (already implemented and passing)
 
-**OpenFile=:**
+**OpenFile=:** — DONE
 
 - 23-unit-file-openfile
-- Fix: Implement OpenFile= directive for passing file descriptors
+- Fix: OpenFile= directive passes an fd named after `::NAME` segment to child via inherited fds+LISTEN_FDNAMES.
 
-**ExtraFileDescriptors=:**
+**ExtraFileDescriptors=:** — DONE
 
 - 23-unit-file-extrafiledescriptors
-- Fix: Implement ExtraFileDescriptors= directive
+- Fix: D-Bus StartTransientUnit gains `a(hs)` (fd, name) tuple; fds are dup'd out of the bus message and passed into the child.
 
 **BindPaths=/BindReadOnlyPaths= at runtime:** — DONE AND VERIFIED
 
@@ -108,10 +108,10 @@ Basic Type=notify (READY=1) works. NotifyAccess=all/main/exec/none enforcement w
 
 - 07-pid1-private-pids (PASS — PID namespace isolation implemented, verified post-stage-2-fix)
 
-**MessageQueue socket options:**
+**MessageQueue socket options:** — DONE
 
-- 07-pid1-mqueue-ownership
-- Fix: Implement POSIX message queue socket options
+- 07-pid1-mqueue-ownership (PASS)
+- Fix: POSIX message queue socket options implemented
 
 **systemd-socket-activate binary:** — DONE (`--inetd` / `--now` / validation of `--accept+--now` and `--inetd` with multiple `-l`)
 
