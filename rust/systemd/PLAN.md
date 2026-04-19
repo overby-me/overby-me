@@ -149,9 +149,9 @@ Rust udevadm reimplementation is in progress.
 
 - 17-udev-verify — comprehensive rules validator with ~100 syntax-error patterns (large feature).
 - 17-udev-netif-altname / -link-property / -loop-own — need `.link` file processing (net_setup_link semantic) and systemd-dissect integration.
-- 17-udev-SYSTEMD_WANTS* / -systemd-alias — require udev → systemd device-unit alias/Wants wiring.
-- 17-udev-import — value-escape fidelity fixed: rule parser no longer collapses `\n`/`\t` to newline/tab (now treats only `\"` and `\\` as escapes, matching upstream), and `run_program_capture` preserves trailing spaces (only strips trailing `\n`/`\r`).  Needs VM re-verification.
-- 17-udev-device-is-processing — requires `ID_PROCESSING=1` marker while RUN= is still executing.
+- 17-udev-SYSTEMD_WANTS* / -systemd-alias — udev → systemd device-unit wiring landed: udevd sends `udev-event` JSON-RPC to PID 1 control socket after each processed event with action, sysfs_path, env (SYSTEMD_ALIAS/WANTS), merged tags, symlinks. PID 1 handler creates/activates/deactivates `.device` units keyed on sysfs path, subsystem-friendly alias (`sys-subsystem-<X>-devices-<kern>.device`), `SYMLINK+=` paths, and SYSTEMD_ALIAS paths. Needs VM re-verification.
+- 17-udev-import — value-escape fidelity fixed: rule parser no longer collapses `\n`/`\t` to newline/tab (now treats only `\"` and `\\` as escapes, matching upstream), and `run_program_capture` preserves trailing spaces (only strips trailing `\n`/`\r`). Needs VM re-verification.
+- 17-udev-device-is-processing — `ID_PROCESSING=1` marker implemented in udevd: set in the device db before RUN= executes, cleared and db rewritten after RUN completes. PID 1 defers activation of `.device` units while ID_PROCESSING=1 is set, creating placeholder (inactive) units so `BindsTo=` dependents don't fire prematurely. Needs VM re-verification.
 - 17-udev-failed-event — event-timeout + `timeout_signal=SIGABRT` handling.
 - 17-udev-watch — inotify watch fd passing via systemd fd-store.
 - 17-udev-credentials — needs `systemd-udev-load-credentials.service`.
@@ -181,11 +181,11 @@ if test -w /dev/kmsg; then
 fi
 ```
 
-whose fd-inheritance setup races with parallel kernel module auto-load (fuse/vmci/vsock) during early boot.  When the subshell's pipe-to-/dev/kmsg loop doesn't manage to hook up fd 1 before the parent blocks on its next write, the entire init bash process stalls — kernel's still alive (no panic), but nothing ever execs `systemd`.  Happened on ~30% of VM-test runs because the race outcome depends on kernel-module load ordering timing.
+whose fd-inheritance setup races with parallel kernel module auto-load (fuse/vmci/vsock) during early boot. When the subshell's pipe-to-/dev/kmsg loop doesn't manage to hook up fd 1 before the parent blocks on its next write, the entire init bash process stalls — kernel's still alive (no panic), but nothing ever execs `systemd`. Happened on ~30% of VM-test runs because the race outcome depends on kernel-module load ordering timing.
 
-Upstream systemd-based NixOS avoids this code path entirely — `boot.initrd.systemd.enable = true` sets `IN_NIXOS_SYSTEMD_STAGE1=true` which short-circuits past the offending bash block.  rust-systemd doesn't ship a stage-1 systemd initrd, so it fell through to the legacy bash stage-2 and hit the race.
+Upstream systemd-based NixOS avoids this code path entirely — `boot.initrd.systemd.enable = true` sets `IN_NIXOS_SYSTEMD_STAGE1=true` which short-circuits past the offending bash block. rust-systemd doesn't ship a stage-1 systemd initrd, so it fell through to the legacy bash stage-2 and hit the race.
 
-**Fix:** `testsuite.nix` overrides `system.build.bootStage2` with a patched stage-2-init.sh that strips the whole `if test -w /dev/kmsg; then … fi` subshell pipeline.  Stage-2 output still goes to /dev/console (inherited from stage-1); we just lose the `<7>stage-2-init:` kmsg re-log.  All other stage-2 behavior (`/etc`/`/tmp` install, `$systemConfig/activate`, `/run/booted-system` symlink, exec systemd) is preserved verbatim.
+**Fix:** `testsuite.nix` overrides `system.build.bootStage2` with a patched stage-2-init.sh that strips the whole `if test -w /dev/kmsg; then … fi` subshell pipeline. Stage-2 output still goes to /dev/console (inherited from stage-1); we just lose the `<7>stage-2-init:` kmsg re-log. All other stage-2 behavior (`/etc`/`/tmp` install, `$systemConfig/activate`, `/run/booted-system` symlink, exec systemd) is preserved verbatim.
 
 Verified: two back-to-back sanity-check runs now pass in 24s each (was failing ~30% before).
 
