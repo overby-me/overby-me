@@ -62,21 +62,40 @@ fn parse_wrap_file(path: &str) -> Result<HashMap<String, HashMap<String, String>
     let mut current_section = "wrap".to_string();
     sections.insert(current_section.clone(), HashMap::new());
 
-    for line in content.lines() {
-        let line = line.trim();
+    let mut last_key: Option<String> = None;
+    for raw_line in content.lines() {
+        // Preserve original to detect indentation
+        let is_indented = raw_line.starts_with(' ') || raw_line.starts_with('\t');
+        let line = raw_line.trim();
         if line.is_empty() || line.starts_with('#') {
+            // blank/comment lines also break a continuation only if blank
+            if line.is_empty() {
+                last_key = None;
+            }
             continue;
         }
         if line.starts_with('[') && line.ends_with(']') {
             current_section = line[1..line.len() - 1].to_string();
             sections.entry(current_section.clone()).or_default();
+            last_key = None;
         } else if let Some(eq_pos) = line.find('=') {
             let key = line[..eq_pos].trim().to_string();
             let value = line[eq_pos + 1..].trim().to_string();
             sections
                 .entry(current_section.clone())
                 .or_default()
-                .insert(key, value);
+                .insert(key.clone(), value);
+            last_key = Some(key);
+        } else if is_indented {
+            if let Some(ref k) = last_key {
+                let sec = sections.entry(current_section.clone()).or_default();
+                if let Some(existing) = sec.get_mut(k) {
+                    if !existing.is_empty() && !existing.ends_with(',') {
+                        existing.push(',');
+                    }
+                    existing.push_str(line);
+                }
+            }
         }
     }
 
@@ -98,12 +117,16 @@ fn download_file_wrap(
     let parent = Path::new(dest_dir).parent().unwrap_or(Path::new("."));
     let archive_path = parent.join(filename);
 
-    // Check if the file already exists locally (e.g., in packagefiles/)
+    // Check if the file already exists locally (e.g., in packagefiles/ or packagecache/)
     if !archive_path.exists() {
         // Check in packagefiles/ directory next to the wrap file
         let packagefiles_path = parent.join("packagefiles").join(filename);
+        let packagecache_path = parent.join("packagecache").join(filename);
         if packagefiles_path.exists() {
             std::fs::copy(&packagefiles_path, &archive_path)
+                .map_err(|e| format!("Failed to copy local archive: {}", e))?;
+        } else if packagecache_path.exists() {
+            std::fs::copy(&packagecache_path, &archive_path)
                 .map_err(|e| format!("Failed to copy local archive: {}", e))?;
         } else if let Some(url) = url {
             // Download from URL
@@ -127,12 +150,27 @@ fn download_file_wrap(
     }
 
     // Extract
-    let extract_dir = if directory.is_empty() {
+    let _extract_dir = if directory.is_empty() {
         dest_dir
     } else {
         directory
     };
-    std::fs::create_dir_all(dest_dir).map_err(|e| format!("Cannot create dir: {}", e))?;
+    let lead_missing = wrap
+        .get("lead_directory_missing")
+        .map(|s| s == "true")
+        .unwrap_or(false);
+    // If lead_directory_missing=true, extract into the wrap-declared directory itself
+    // rather than the parent (since the archive has no top-level dir).
+    let extract_target: std::path::PathBuf = if lead_missing && !directory.is_empty() {
+        let p = parent.join(directory);
+        std::fs::create_dir_all(&p).ok();
+        p
+    } else {
+        // Create dest_dir as well (for archives that include their own top dir
+        // matching directory= or otherwise).
+        let _ = std::fs::create_dir_all(dest_dir);
+        parent.to_path_buf()
+    };
 
     eprintln!("Extracting {}...", filename);
     let fname = filename.to_lowercase();
@@ -141,7 +179,7 @@ fn download_file_wrap(
             .args(["xzf"])
             .arg(&archive_path)
             .arg("-C")
-            .arg(parent)
+            .arg(&extract_target)
             .status()
             .map_err(|e| format!("Extract failed: {}", e))?;
     } else if fname.ends_with(".tar.xz") || fname.ends_with(".txz") {
@@ -149,7 +187,7 @@ fn download_file_wrap(
             .args(["xJf"])
             .arg(&archive_path)
             .arg("-C")
-            .arg(parent)
+            .arg(&extract_target)
             .status()
             .map_err(|e| format!("Extract failed: {}", e))?;
     } else if fname.ends_with(".tar.bz2") {
@@ -157,58 +195,145 @@ fn download_file_wrap(
             .args(["xjf"])
             .arg(&archive_path)
             .arg("-C")
-            .arg(parent)
+            .arg(&extract_target)
             .status()
             .map_err(|e| format!("Extract failed: {}", e))?;
     } else if fname.ends_with(".zip") {
         Command::new("unzip")
+            .arg("-o")
             .arg(&archive_path)
             .arg("-d")
-            .arg(parent)
+            .arg(&extract_target)
             .status()
             .map_err(|e| format!("Extract failed: {}", e))?;
     }
 
-    // Apply patch if present
-    if let Some(patch_url) = wrap.get("patch_url") {
-        let patch_filename = wrap
-            .get("patch_filename")
-            .map(|s| s.as_str())
-            .unwrap_or("patch.tar.gz");
-        let patch_path = parent.join(patch_filename);
-
-        Command::new("curl")
-            .args(["-L", "-o"])
-            .arg(&patch_path)
-            .arg(patch_url)
-            .status()
-            .map_err(|e| format!("Failed to download patch: {}", e))?;
-
-        Command::new("tar")
-            .args(["xzf"])
-            .arg(&patch_path)
-            .arg("-C")
-            .arg(dest_dir)
-            .status()
-            .map_err(|e| format!("Patch extract failed: {}", e))?;
-
-        let _ = std::fs::remove_file(&patch_path);
+    // Apply patch_directory: copy contents of packagefiles/<patch_directory>/ into the extracted dir
+    if let Some(patch_dir) = wrap.get("patch_directory") {
+        let src = parent.join("packagefiles").join(patch_dir);
+        if src.is_dir() {
+            fn copy_dir_recursive(
+                src: &std::path::Path,
+                dst: &std::path::Path,
+            ) -> std::io::Result<()> {
+                std::fs::create_dir_all(dst)?;
+                for entry in std::fs::read_dir(src)? {
+                    let e = entry?;
+                    let to = dst.join(e.file_name());
+                    if e.file_type()?.is_dir() {
+                        copy_dir_recursive(&e.path(), &to)?;
+                    } else {
+                        std::fs::copy(e.path(), &to)?;
+                    }
+                }
+                Ok(())
+            }
+            let _ = copy_dir_recursive(&src, &extract_target);
+        }
     }
 
-    // Apply diff files
-    if let Some(diff_files) = wrap.get("diff_files") {
-        let wrap_dir = Path::new(dest_dir).parent().unwrap_or(Path::new("."));
-        for diff in diff_files.split(',') {
-            let diff = diff.trim();
-            let diff_path = wrap_dir.join(diff);
-            if diff_path.exists() {
-                Command::new("patch")
-                    .args(["-p1", "-i"])
-                    .arg(&diff_path)
-                    .current_dir(dest_dir)
+    // Apply patch if present
+    let patch_filename_explicit = wrap.get("patch_filename").map(|s| s.as_str());
+    if wrap.get("patch_url").is_some() || patch_filename_explicit.is_some() {
+        let patch_filename = patch_filename_explicit.unwrap_or("patch.tar.gz");
+        let mut patch_path = parent.join(patch_filename);
+
+        // Look for cached patch first
+        let pf_pc = parent.join("packagecache").join(patch_filename);
+        let pf_pf = parent.join("packagefiles").join(patch_filename);
+        let mut cleanup = false;
+        if !patch_path.exists() {
+            if pf_pf.exists() {
+                std::fs::copy(&pf_pf, &patch_path).ok();
+                cleanup = true;
+            } else if pf_pc.exists() {
+                std::fs::copy(&pf_pc, &patch_path).ok();
+                cleanup = true;
+            } else if let Some(patch_url) = wrap.get("patch_url") {
+                Command::new("curl")
+                    .args(["-L", "-o"])
+                    .arg(&patch_path)
+                    .arg(patch_url)
                     .status()
-                    .map_err(|e| format!("Patch failed: {}", e))?;
+                    .map_err(|e| format!("Failed to download patch: {}", e))?;
+                cleanup = true;
+            } else {
+                patch_path = std::path::PathBuf::new();
             }
+        }
+
+        if patch_path.as_os_str().len() > 0 && patch_path.exists() {
+            let pname = patch_path.to_string_lossy().to_lowercase();
+            let extract_dir_arg =
+                if wrap.get("patch_directory").is_some() || patch_filename_explicit.is_some() {
+                    // patches typically extract one level above
+                    parent.to_path_buf()
+                } else {
+                    std::path::PathBuf::from(dest_dir)
+                };
+            if pname.ends_with(".tar.xz") || pname.ends_with(".txz") {
+                Command::new("tar")
+                    .arg("xJf")
+                    .arg(&patch_path)
+                    .arg("-C")
+                    .arg(&extract_dir_arg)
+                    .status()
+                    .ok();
+            } else if pname.ends_with(".tar.bz2") {
+                Command::new("tar")
+                    .arg("xjf")
+                    .arg(&patch_path)
+                    .arg("-C")
+                    .arg(&extract_dir_arg)
+                    .status()
+                    .ok();
+            } else if pname.ends_with(".zip") {
+                Command::new("unzip")
+                    .arg("-o")
+                    .arg(&patch_path)
+                    .arg("-d")
+                    .arg(&extract_dir_arg)
+                    .status()
+                    .ok();
+            } else {
+                Command::new("tar")
+                    .arg("xzf")
+                    .arg(&patch_path)
+                    .arg("-C")
+                    .arg(&extract_dir_arg)
+                    .status()
+                    .ok();
+            }
+            if cleanup {
+                let _ = std::fs::remove_file(&patch_path);
+            }
+        }
+    }
+
+    // Apply diff files. Each entry is resolved relative to (in order):
+    //   subprojects/packagefiles/<entry>
+    //   subprojects/<entry>
+    if let Some(diff_files) = wrap.get("diff_files") {
+        for diff in diff_files.split([',', '\n']) {
+            let diff = diff.trim();
+            if diff.is_empty() {
+                continue;
+            }
+            let candidate1 = parent.join("packagefiles").join(diff);
+            let candidate2 = parent.join(diff);
+            let diff_path = if candidate1.is_file() {
+                candidate1
+            } else if candidate2.is_file() {
+                candidate2
+            } else {
+                continue;
+            };
+            Command::new("patch")
+                .args(["-p1", "-i"])
+                .arg(&diff_path)
+                .current_dir(&extract_target)
+                .status()
+                .map_err(|e| format!("Patch failed: {}", e))?;
         }
     }
 

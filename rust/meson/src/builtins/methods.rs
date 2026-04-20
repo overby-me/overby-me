@@ -1302,13 +1302,15 @@ fn dep_get_configtool_variable(
 fn dep_type_name(_vm: &mut VM, obj: &Object, _args: &[CallArg]) -> Result<Object, String> {
     if let Object::Dependency(d) = obj {
         let t = if !d.found {
-            "not-found"
+            "not-found".to_string()
+        } else if !d.kind.is_empty() {
+            d.kind.clone()
         } else if d.is_internal {
-            "internal"
+            "internal".to_string()
         } else {
-            "pkgconfig"
+            "pkgconfig".to_string()
         };
-        Ok(Object::String(t.to_string()))
+        Ok(Object::String(t))
     } else {
         Err("Not a dependency".to_string())
     }

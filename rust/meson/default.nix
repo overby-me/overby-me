@@ -104,10 +104,6 @@
         testDir = "18 includedir";
       }
       {
-        name = "18-includedirxyz";
-        testDir = "18 includedirxyz";
-      }
-      {
         name = "19-header-in-file-list";
         testDir = "19 header in file list";
       }

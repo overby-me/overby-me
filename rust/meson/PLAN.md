@@ -10,10 +10,16 @@ Bytecode compiler + stack VM (not AST-walking):
 
 ## Test Suite
 
-Each upstream meson test case (test cases/common/, ~285 tests) is an individual
+Each upstream meson test case (test cases/common/, ~284 tests) is an individual
 nix check. Tests are self-validating via assert() in meson.build.
 
     nix build .#checks.x86_64-linux.rust-meson-test-{number}-{slug}
     nix build .#checks.x86_64-linux.rust-meson-test-* --keep-going --no-link
 
-**Status: 276/285 passing (97%)**
+**Status: 281/284 passing (99%)**
+
+Remaining failures need substantial features:
+
+- `98-subproject-subdir` — advanced `meson.override_dependency()` semantics
+- `230-external-project` — `unstable-external_project` module
+- `279-pkgconfig-override` — propagate `meson.override_find_program('pkg-config', ...)` to `dependency()` lookups

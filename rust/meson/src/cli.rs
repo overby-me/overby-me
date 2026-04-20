@@ -661,11 +661,23 @@ impl Cli {
             // Apply cross file settings
             for (section, values) in &machine_config {
                 for (key, value) in values {
-                    let opt_key = format!("{}_{}", section, key);
+                    // Sections like "project options", "built-in options" hold
+                    // raw option names. "<sub>:project options" prefixes for subprojects.
+                    let opt_key = if section == "project options" || section == "built-in options" {
+                        key.clone()
+                    } else if section.ends_with(":project options")
+                        || section.ends_with(":built-in options")
+                    {
+                        // sub:project options -> sub:<key>
+                        let prefix = section.split(':').next().unwrap_or("");
+                        format!("{}:{}", prefix, key)
+                    } else {
+                        format!("{}_{}", section, key)
+                    };
                     interp
                         .vm
                         .options
-                        .insert(opt_key, crate::objects::Object::String(value.clone()));
+                        .insert(opt_key, crate::options::parse_option_value(value));
                 }
             }
         }
@@ -688,14 +700,24 @@ impl Cli {
             }
             // Apply other sections as options (e.g. [built-in options])
             for (section, values) in &machine_config {
-                if section != "properties" {
-                    for (key, value) in values {
-                        let opt_key = format!("{}_{}", section, key);
-                        interp
-                            .vm
-                            .options
-                            .insert(opt_key, crate::objects::Object::String(value.clone()));
-                    }
+                if section == "properties" || section == "binaries" {
+                    continue;
+                }
+                for (key, value) in values {
+                    let opt_key = if section == "project options" || section == "built-in options" {
+                        key.clone()
+                    } else if section.ends_with(":project options")
+                        || section.ends_with(":built-in options")
+                    {
+                        let prefix = section.split(':').next().unwrap_or("");
+                        format!("{}:{}", prefix, key)
+                    } else {
+                        format!("{}_{}", section, key)
+                    };
+                    interp
+                        .vm
+                        .options
+                        .insert(opt_key, crate::options::parse_option_value(value));
                 }
             }
         }

@@ -240,6 +240,9 @@ pub struct DependencyData {
     pub dependencies: Vec<Object>,
     pub variables: HashMap<String, String>,
     pub is_internal: bool,
+    /// Origin kind: "" (pkgconfig), "library" (compiler.find_library),
+    /// "internal", "system", etc. Used by type_name().
+    pub kind: String,
 }
 
 impl DependencyData {
@@ -255,6 +258,7 @@ impl DependencyData {
             dependencies: Vec::new(),
             variables: HashMap::new(),
             is_internal: false,
+            kind: String::new(),
         }
     }
 }

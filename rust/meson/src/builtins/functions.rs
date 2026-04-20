@@ -200,6 +200,89 @@ pub fn register(vm: &mut VM) {
     );
 }
 
+/// If `cmd` is a script with a shebang (e.g. `#!/usr/bin/env python3`),
+/// resolve the interpreter explicitly so the script runs even in sandboxed
+/// environments where /usr/bin/env may be missing or where the script lacks
+/// the executable bit.
+pub fn resolve_script_interp(cmd: String, mut args: Vec<String>) -> (String, Vec<String>) {
+    use std::os::unix::fs::PermissionsExt;
+    // Only consider regular files we can read
+    let meta = match std::fs::metadata(&cmd) {
+        Ok(m) => m,
+        Err(_) => return (cmd, args),
+    };
+    let executable = meta.permissions().mode() & 0o111 != 0;
+    let content = match std::fs::read_to_string(&cmd) {
+        Ok(c) => c,
+        Err(_) => return (cmd, args),
+    };
+    let first = match content.lines().next() {
+        Some(l) => l,
+        None => return (cmd, args),
+    };
+    let rest = match first.strip_prefix("#!") {
+        Some(r) => r.trim(),
+        None => return (cmd, args),
+    };
+    let mut parts: Vec<String> = rest.split_whitespace().map(|s| s.to_string()).collect();
+    if parts.is_empty() {
+        return (cmd, args);
+    }
+    let interp = parts.remove(0);
+    let uses_env = interp.ends_with("/env");
+    // If the script is executable AND the interpreter exists, kernel can handle it.
+    let interp_exists = std::path::Path::new(&interp).exists();
+    if executable && interp_exists && !uses_env {
+        return (cmd, args);
+    }
+    if executable && !uses_env && interp_exists {
+        return (cmd, args);
+    }
+    // Resolve interpreter
+    let real_interp = if uses_env {
+        if parts.is_empty() {
+            return (cmd, args);
+        }
+        let prog = parts.remove(0);
+        // Search PATH
+        std::env::var("PATH")
+            .ok()
+            .and_then(|p| {
+                p.split(':').find_map(|d| {
+                    let cand = format!("{}/{}", d, prog);
+                    if std::path::Path::new(&cand).exists() {
+                        Some(cand)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .unwrap_or(prog)
+    } else if interp_exists {
+        interp
+    } else {
+        // Fallback: try basename on PATH
+        let base = interp.rsplit('/').next().unwrap_or(&interp).to_string();
+        std::env::var("PATH")
+            .ok()
+            .and_then(|p| {
+                p.split(':').find_map(|d| {
+                    let cand = format!("{}/{}", d, base);
+                    if std::path::Path::new(&cand).exists() {
+                        Some(cand)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .unwrap_or(interp)
+    };
+    let mut new_args: Vec<String> = parts;
+    new_args.push(cmd);
+    new_args.append(&mut args);
+    (real_interp, new_args)
+}
+
 fn builtin_project(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
     let positional = VM::get_positional_args(args);
     let name = positional
@@ -932,6 +1015,7 @@ fn builtin_dependency(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
             dependencies: Vec::new(),
             variables: std::collections::HashMap::new(),
             is_internal: false,
+            kind: String::new(),
         }));
     }
 
@@ -948,6 +1032,7 @@ fn builtin_dependency(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
             dependencies: Vec::new(),
             variables: std::collections::HashMap::new(),
             is_internal: false,
+            kind: String::new(),
         }));
     }
 
@@ -1508,6 +1593,7 @@ fn builtin_declare_dependency(vm: &mut VM, args: &[CallArg]) -> Result<Object, S
         dependencies,
         variables,
         is_internal: true,
+        kind: String::new(),
     }))
 }
 
@@ -1962,7 +2048,40 @@ fn builtin_alias_target(_vm: &mut VM, _args: &[CallArg]) -> Result<Object, Strin
 }
 
 fn builtin_configure_file(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
-    let input = VM::get_arg_str(args, "input", usize::MAX).map(String::from);
+    // Resolve `input` to an absolute path. Accepts string, files() result, or
+    // array thereof (using the first element).
+    let input_resolved: Option<(String, bool)> = {
+        let val = VM::get_arg_value(args, "input");
+        let raw = match val {
+            Some(Object::Array(arr)) => arr.first(),
+            other => other,
+        };
+        match raw {
+            Some(Object::String(s)) => Some((s.clone(), false)),
+            Some(Object::File(f)) => {
+                let p = if f.is_built {
+                    if f.subdir.is_empty() {
+                        format!("{}/{}", vm.build_root, f.path)
+                    } else {
+                        format!("{}/{}/{}", vm.build_root, f.subdir, f.path)
+                    }
+                } else if f.subdir.is_empty() {
+                    format!("{}/{}", vm.source_root, f.path)
+                } else {
+                    format!("{}/{}/{}", vm.source_root, f.subdir, f.path)
+                };
+                Some((p, true))
+            }
+            _ => None,
+        }
+    };
+    let input = input_resolved
+        .as_ref()
+        .map(|(p, abs)| if *abs { p.clone() } else { p.clone() });
+    let input_is_absolute = input_resolved
+        .as_ref()
+        .map(|(_, abs)| *abs)
+        .unwrap_or(false);
     let output = VM::get_arg_str(args, "output", 0)
         .ok_or("configure_file() requires 'output'")?
         .to_string();
@@ -2053,19 +2172,31 @@ fn builtin_configure_file(vm: &mut VM, args: &[CallArg]) -> Result<Object, Strin
     let output_path = format!("{}/{}", build_subdir, output);
 
     if copy {
-        // Copy mode: just copy the input file
+        // Copy mode: just copy the input file (preserving mtime)
         if let Some(ref inp) = input {
-            let input_path = if vm.current_subdir.is_empty() {
+            let input_path = if input_is_absolute || std::path::Path::new(inp).is_absolute() {
+                inp.clone()
+            } else if vm.current_subdir.is_empty() {
                 format!("{}/{}", vm.source_root, inp)
             } else {
                 format!("{}/{}/{}", vm.source_root, vm.current_subdir, inp)
             };
-            let _ = std::fs::copy(&input_path, &output_path);
+            if std::fs::copy(&input_path, &output_path).is_ok() {
+                if let Ok(meta) = std::fs::metadata(&input_path) {
+                    if let Ok(mtime) = meta.modified() {
+                        if let Ok(f) = std::fs::OpenOptions::new().write(true).open(&output_path) {
+                            let _ = f.set_modified(mtime);
+                        }
+                    }
+                }
+            }
         }
     } else if configuration.is_some() && command.is_empty() {
         // Configuration mode: read input, substitute @VAR@ patterns, write output
         if let Some(ref inp) = input {
-            let input_path = if vm.current_subdir.is_empty() {
+            let input_path = if input_is_absolute || std::path::Path::new(inp).is_absolute() {
+                inp.clone()
+            } else if vm.current_subdir.is_empty() {
                 format!("{}/{}", vm.source_root, inp)
             } else {
                 format!("{}/{}/{}", vm.source_root, vm.current_subdir, inp)
@@ -2093,7 +2224,9 @@ fn builtin_configure_file(vm: &mut VM, args: &[CallArg]) -> Result<Object, Strin
         // Command mode: execute command with substitutions
         let mut resolved_command: Vec<String> = Vec::new();
         let input_path = input.as_ref().map(|inp| {
-            if vm.current_subdir.is_empty() {
+            if input_is_absolute || std::path::Path::new(inp).is_absolute() {
+                inp.clone()
+            } else if vm.current_subdir.is_empty() {
                 format!("{}/{}", vm.source_root, inp)
             } else {
                 format!("{}/{}/{}", vm.source_root, vm.current_subdir, inp)
@@ -2127,10 +2260,12 @@ fn builtin_configure_file(vm: &mut VM, args: &[CallArg]) -> Result<Object, Strin
             resolved_command.push(s);
         }
         if !resolved_command.is_empty() {
-            let cmd = &resolved_command[0];
-            let cmd_args = &resolved_command[1..];
-            let result = std::process::Command::new(cmd)
-                .args(cmd_args)
+            let (cmd, cmd_args) = crate::builtins::functions::resolve_script_interp(
+                resolved_command[0].clone(),
+                resolved_command[1..].to_vec(),
+            );
+            let result = std::process::Command::new(&cmd)
+                .args(&cmd_args)
                 .current_dir(&build_subdir)
                 .env("MESON_BUILD_ROOT", &vm.build_root)
                 .env("MESON_SOURCE_ROOT", &vm.source_root)
@@ -2601,15 +2736,28 @@ fn builtin_subproject(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
         // Try to download via wrap
         let wrap_file = format!("{}/{}/{}.wrap", vm.top_source_root, subproject_dir, name);
         if Path::new(&wrap_file).exists() {
-            crate::wrap::download_wrap(&wrap_file, &subproject_path)?;
-            // Check if wrap file specifies a different directory name
-            if !Path::new(&build_file).exists() {
-                if let Ok(wrap_content) = std::fs::read_to_string(&wrap_file) {
-                    if let Some(dir_name) = wrap_content
-                        .lines()
-                        .find(|l| l.trim().starts_with("directory"))
-                        .and_then(|l| l.find('=').map(|i| l[i + 1..].trim().to_string()))
-                    {
+            // First, see if the wrap declares a different directory that already
+            // exists on disk (e.g. pre-extracted source) - avoids re-downloading.
+            let wrap_dir_name = std::fs::read_to_string(&wrap_file).ok().and_then(|c| {
+                c.lines()
+                    .find(|l| l.trim().starts_with("directory"))
+                    .and_then(|l| l.find('=').map(|i| l[i + 1..].trim().to_string()))
+            });
+            let mut already_present = false;
+            if let Some(ref dir_name) = wrap_dir_name {
+                let alt_path = format!("{}/{}/{}", vm.top_source_root, subproject_dir, dir_name);
+                let alt_build = format!("{}/meson.build", alt_path);
+                if Path::new(&alt_build).exists() {
+                    subproject_path = alt_path;
+                    build_file = alt_build;
+                    already_present = true;
+                }
+            }
+            if !already_present {
+                crate::wrap::download_wrap(&wrap_file, &subproject_path)?;
+                // Check if wrap file specifies a different directory name
+                if !Path::new(&build_file).exists() {
+                    if let Some(dir_name) = wrap_dir_name {
                         let alt_path =
                             format!("{}/{}/{}", vm.top_source_root, subproject_dir, dir_name);
                         let alt_build = format!("{}/meson.build", alt_path);

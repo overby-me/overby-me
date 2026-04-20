@@ -1136,17 +1136,21 @@ impl VM {
     pub fn get_arg_string_array(args: &[CallArg], name: &str) -> Vec<String> {
         for arg in args {
             if arg.name.as_deref() == Some(name) {
-                if let Object::Array(ref arr) = arg.value {
-                    return arr
-                        .iter()
-                        .filter_map(|v| {
-                            if let Object::String(s) = v {
-                                Some(s.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
+                match &arg.value {
+                    Object::Array(arr) => {
+                        return arr
+                            .iter()
+                            .filter_map(|v| {
+                                if let Object::String(s) = v {
+                                    Some(s.clone())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+                    }
+                    Object::String(s) => return vec![s.clone()],
+                    _ => {}
                 }
             }
         }

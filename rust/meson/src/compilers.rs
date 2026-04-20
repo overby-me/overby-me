@@ -491,6 +491,7 @@ pub fn find_library(compiler: &CompilerData, name: &str, dirs: &[String]) -> Opt
             dependencies: Vec::new(),
             variables: std::collections::HashMap::new(),
             is_internal: false,
+            kind: "library".to_string(),
         }))
     } else {
         None

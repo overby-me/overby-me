@@ -134,6 +134,7 @@ fn find_pkgconfig(name: &str, version_req: Option<&str>, modules: &[String]) -> 
         dependencies: Vec::new(),
         variables,
         is_internal: false,
+        kind: String::new(),
     }))
 }
 
@@ -209,6 +210,7 @@ fn find_cmake(name: &str, version_req: Option<&str>, components: &[String]) -> O
         dependencies: Vec::new(),
         variables: HashMap::new(),
         is_internal: false,
+        kind: String::new(),
     }))
 }
 
@@ -263,6 +265,7 @@ fn find_config_tool(name: &str, version_req: Option<&str>) -> Option<Object> {
         dependencies: Vec::new(),
         variables: HashMap::new(),
         is_internal: false,
+        kind: String::new(),
     }))
 }
 
@@ -286,6 +289,7 @@ fn find_system_library(name: &str) -> Option<Object> {
             dependencies: Vec::new(),
             variables: HashMap::new(),
             is_internal: false,
+            kind: String::new(),
         })),
         _ => None,
     }
