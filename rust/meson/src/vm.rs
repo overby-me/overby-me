@@ -144,6 +144,9 @@ pub struct BuildData {
     pub generators: Vec<GeneratorDef>,
     pub run_targets: Vec<RunTarget>,
     pub find_program_overrides: HashMap<String, Object>,
+    /// meson.override_dependency() registry: name -> list of (static_flag, dep).
+    /// A `None` static_flag matches both static and shared lookups.
+    pub dependency_overrides: HashMap<String, Vec<(Option<bool>, Object)>>,
 }
 
 #[derive(Debug, Clone)]

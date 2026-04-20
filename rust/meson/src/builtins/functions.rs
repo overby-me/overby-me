@@ -1060,6 +1060,90 @@ fn builtin_dependency(vm: &mut VM, args: &[CallArg]) -> Result<Object, String> {
     // Parse version requirement for cache check
     let version_req = VM::get_arg_str(args, "version", usize::MAX).unwrap_or("");
 
+    // Determine the requested static-ness for this lookup, honoring both the
+    // explicit `static:` kwarg and the global `default_library` option.
+    let static_kw: Option<bool> = match VM::get_arg_value(args, "static") {
+        Some(Object::Bool(b)) => Some(*b),
+        _ => None,
+    };
+    let want_static: Option<bool> = static_kw.or_else(|| match vm.options.get("default_library") {
+        Some(Object::String(s)) if s == "static" => Some(true),
+        Some(Object::String(s)) if s == "shared" => Some(false),
+        _ => None,
+    });
+
+    // Check meson.override_dependency() registry first - this is consulted
+    // before the system search and respects the `static:` kwarg.
+    for n in &names {
+        if let Some(entries) = vm.build_data.dependency_overrides.get(n).cloned() {
+            // Pick the entry whose static_flag matches the requested static-ness.
+            // Priority: exact match > unqualified (None) > nothing.
+            let mut chosen: Option<&Object> = None;
+            if let Some(want) = static_kw {
+                for (sf, dep) in &entries {
+                    if *sf == Some(want) {
+                        chosen = Some(dep);
+                        break;
+                    }
+                }
+                if chosen.is_none() {
+                    // Only fall back to an unqualified override; do NOT fall back
+                    // to an opposite-static override.
+                    for (sf, dep) in &entries {
+                        if sf.is_none() {
+                            chosen = Some(dep);
+                            break;
+                        }
+                    }
+                }
+                if chosen.is_none() {
+                    // Override exists but only for the opposite static-ness:
+                    // treat the dependency as not found for this lookup.
+                    if !required {
+                        return Ok(Object::Dependency(DependencyData::not_found(&name)));
+                    } else {
+                        return Err(format!("Dependency '{}' not found", name));
+                    }
+                }
+            } else {
+                // No static kwarg: prefer the unqualified override; otherwise
+                // pick any qualified one (matches old behaviour).
+                for (sf, dep) in &entries {
+                    if sf.is_none() {
+                        chosen = Some(dep);
+                        break;
+                    }
+                }
+                if chosen.is_none() {
+                    chosen = entries.first().map(|(_, d)| d);
+                }
+            }
+            if let Some(dep) = chosen {
+                if let Object::Dependency(d) = dep {
+                    if !d.found {
+                        // Override registers as not-found.
+                        if !required {
+                            return Ok(dep.clone());
+                        } else {
+                            return Err(format!("Dependency '{}' not found", name));
+                        }
+                    }
+                    if !version_req.is_empty()
+                        && !d.version.is_empty()
+                        && !crate::options::version_compare(&d.version, version_req)
+                    {
+                        if !required {
+                            return Ok(Object::Dependency(DependencyData::not_found(&name)));
+                        }
+                        continue;
+                    }
+                }
+                return Ok(dep.clone());
+            }
+        }
+    }
+    let _ = want_static; // currently informational; reserved for future use
+
     // Check if already found in cache - check all names
     // Skip not-found cached deps when we have a fallback or allow_fallback available
     for n in &names {

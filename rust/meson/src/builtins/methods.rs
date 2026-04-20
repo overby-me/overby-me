@@ -1994,7 +1994,24 @@ fn meson_override_dependency(
         .map(|v| v.to_string_value())
         .unwrap_or_default();
     let dep = positional.get(1).cloned().cloned().unwrap_or(Object::None);
-    // Clone the dependency and set its name to the override name
+    let static_flag: Option<bool> = match VM::get_arg_value(args, "static") {
+        Some(Object::Bool(b)) => Some(*b),
+        _ => {
+            // If unspecified, inherit from the active project's default_library
+            // option. This mirrors upstream meson's behavior where an override
+            // declared inside a subproject built with `default_library=static`
+            // is implicitly tagged static.
+            if vm.is_subproject {
+                match vm.options.get("default_library") {
+                    Some(Object::String(s)) if s == "static" => Some(true),
+                    Some(Object::String(s)) if s == "shared" => Some(false),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        }
+    };
     let dep_with_name = match dep {
         Object::Dependency(mut d) => {
             d.name = name.clone();
@@ -2002,7 +2019,19 @@ fn meson_override_dependency(
         }
         other => other,
     };
-    vm.build_data.dependencies.insert(name, dep_with_name);
+    let entries = vm
+        .build_data
+        .dependency_overrides
+        .entry(name.clone())
+        .or_default();
+    if let Some(slot) = entries.iter_mut().find(|(s, _)| *s == static_flag) {
+        slot.1 = dep_with_name.clone();
+    } else {
+        entries.push((static_flag, dep_with_name.clone()));
+    }
+    if static_flag.is_none() || !vm.build_data.dependencies.contains_key(&name) {
+        vm.build_data.dependencies.insert(name, dep_with_name);
+    }
     Ok(Object::None)
 }
 
@@ -2154,6 +2183,27 @@ fn subproject_dependency(vm: &mut VM, obj: &Object, args: &[CallArg]) -> Result<
             Some(Object::Feature(FeatureState::Disabled)) => false,
             _ => true,
         };
+
+        // External-project subprojects (registered by the
+        // unstable-external_project module) don't expose meson-side variables
+        // for their products. Synthesise a placeholder dep so configure-time
+        // wiring (declare_dependency, executable links, etc.) succeeds.
+        if sp.name.starts_with("external_") {
+            let lib_flag = format!("-l{}", dep_name);
+            return Ok(Object::Dependency(DependencyData {
+                name: dep_name.clone(),
+                found: true,
+                version: String::new(),
+                compile_args: Vec::new(),
+                link_args: vec![lib_flag],
+                sources: Vec::new(),
+                include_dirs: Vec::new(),
+                dependencies: Vec::new(),
+                variables: std::collections::HashMap::new(),
+                is_internal: false,
+                kind: "external_project".to_string(),
+            }));
+        }
 
         if required {
             Err(format!(
