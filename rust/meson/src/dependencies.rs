@@ -4,6 +4,64 @@ use crate::vm::*;
 use std::collections::HashMap;
 use std::process::Command;
 
+/// Resolve the pkg-config command, honoring meson.override_find_program('pkg-config', ...).
+fn pkgconfig_command(vm: &VM) -> String {
+    if let Some(Object::ExternalProgram(p)) = vm.build_data.find_program_overrides.get("pkg-config")
+    {
+        if p.found && !p.path.is_empty() {
+            return p.path.clone();
+        }
+    }
+    "pkg-config".to_string()
+}
+
+/// Run a pkg-config invocation, working around missing shebang interpreters (e.g. in
+/// hermetic build sandboxes where `/usr/bin/env` is absent).
+fn run_pkgconfig(cmd: &str, args: &[&str]) -> Option<std::process::Output> {
+    match Command::new(cmd).args(args).output() {
+        Ok(o) => Some(o),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // Likely a script with a shebang we cannot resolve. Read the shebang
+            // and re-exec via the named interpreter found on PATH.
+            let mut buf = [0u8; 256];
+            use std::io::Read;
+            let mut f = std::fs::File::open(cmd).ok()?;
+            let n = f.read(&mut buf).ok()?;
+            let head = std::str::from_utf8(&buf[..n]).ok()?;
+            if !head.starts_with("#!") {
+                return None;
+            }
+            let line = head.lines().next()?.trim_start_matches("#!").trim();
+            // Examples:  /usr/bin/env python3   |   /usr/bin/python3   |   /bin/sh -e
+            let mut parts = line.split_whitespace();
+            let interp_path = parts.next()?;
+            let mut argv: Vec<String> = Vec::new();
+            // Strip /usr/bin/env wrapper - it's the most common reason this path fails.
+            if interp_path.ends_with("/env") {
+                if let Some(real) = parts.next() {
+                    argv.push(real.to_string());
+                }
+            } else {
+                let basename = std::path::Path::new(interp_path)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(interp_path);
+                argv.push(basename.to_string());
+            }
+            for extra in parts {
+                argv.push(extra.to_string());
+            }
+            let interp = argv.remove(0);
+            argv.push(cmd.to_string());
+            for a in args {
+                argv.push((*a).to_string());
+            }
+            Command::new(&interp).args(&argv).output().ok()
+        }
+        Err(_) => None,
+    }
+}
+
 /// Try to find a dependency using various methods.
 pub fn find_dependency(vm: &mut VM, name: &str, args: &[CallArg]) -> Option<Object> {
     let method = VM::get_arg_str(args, "method", usize::MAX).unwrap_or("auto");
@@ -24,13 +82,13 @@ pub fn find_dependency(vm: &mut VM, name: &str, args: &[CallArg]) -> Option<Obje
     }
 
     match method {
-        "pkg-config" => find_pkgconfig(name, version_req, &modules),
+        "pkg-config" => find_pkgconfig(vm, name, version_req, &modules),
         "cmake" => find_cmake(name, version_req, &components),
         "config-tool" => find_config_tool(name, version_req),
         "system" => find_system_library(name),
         "auto" | _ => {
             // Try methods in order
-            find_pkgconfig(name, version_req, &modules)
+            find_pkgconfig(vm, name, version_req, &modules)
                 .or_else(|| find_cmake(name, version_req, &components))
                 .or_else(|| find_config_tool(name, version_req))
                 .or_else(|| find_system_library(name))
@@ -38,17 +96,20 @@ pub fn find_dependency(vm: &mut VM, name: &str, args: &[CallArg]) -> Option<Obje
     }
 }
 
-fn find_pkgconfig(name: &str, version_req: Option<&str>, modules: &[String]) -> Option<Object> {
+fn find_pkgconfig(
+    vm: &VM,
+    name: &str,
+    version_req: Option<&str>,
+    modules: &[String],
+) -> Option<Object> {
     let pkg_name = if modules.is_empty() {
         name.to_string()
     } else {
         modules[0].clone()
     };
 
-    let output = Command::new("pkg-config")
-        .args(["--modversion", &pkg_name])
-        .output()
-        .ok()?;
+    let pkgconfig_cmd = pkgconfig_command(vm);
+    let output = run_pkgconfig(&pkgconfig_cmd, &["--modversion", &pkg_name])?;
 
     if !output.status.success() {
         return None;
@@ -66,10 +127,7 @@ fn find_pkgconfig(name: &str, version_req: Option<&str>, modules: &[String]) -> 
     // Get compile flags
     let mut compile_args = Vec::new();
     let mut include_dirs = Vec::new();
-    if let Ok(output) = Command::new("pkg-config")
-        .args(["--cflags", &pkg_name])
-        .output()
-    {
+    if let Some(output) = run_pkgconfig(&pkgconfig_cmd, &["--cflags", &pkg_name]) {
         if output.status.success() {
             let flags = String::from_utf8_lossy(&output.stdout);
             for flag in flags.split_whitespace() {
@@ -84,10 +142,7 @@ fn find_pkgconfig(name: &str, version_req: Option<&str>, modules: &[String]) -> 
 
     // Get link flags
     let mut link_args = Vec::new();
-    if let Ok(output) = Command::new("pkg-config")
-        .args(["--libs", &pkg_name])
-        .output()
-    {
+    if let Some(output) = run_pkgconfig(&pkgconfig_cmd, &["--libs", &pkg_name]) {
         if output.status.success() {
             let flags = String::from_utf8_lossy(&output.stdout);
             for flag in flags.split_whitespace() {
@@ -98,18 +153,14 @@ fn find_pkgconfig(name: &str, version_req: Option<&str>, modules: &[String]) -> 
 
     // Get variables
     let mut variables = HashMap::new();
-    if let Ok(output) = Command::new("pkg-config")
-        .args(["--print-variables", &pkg_name])
-        .output()
-    {
+    if let Some(output) = run_pkgconfig(&pkgconfig_cmd, &["--print-variables", &pkg_name]) {
         if output.status.success() {
             let vars_text = String::from_utf8_lossy(&output.stdout);
             for var in vars_text.lines() {
                 let var = var.trim();
                 if !var.is_empty() {
-                    if let Ok(val_output) = Command::new("pkg-config")
-                        .args(["--variable", var, &pkg_name])
-                        .output()
+                    if let Some(val_output) =
+                        run_pkgconfig(&pkgconfig_cmd, &["--variable", var, &pkg_name])
                     {
                         if val_output.status.success() {
                             let val = String::from_utf8_lossy(&val_output.stdout)
