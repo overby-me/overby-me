@@ -1039,6 +1039,25 @@ impl Parser {
                 // the literal "STDOUT".
                 let is_fh_name = matches!(fh_name.as_str(), "STDOUT" | "STDERR" | "STDIN")
                     || fh_name.chars().all(|c| c.is_ascii_uppercase() || c == '_');
+                // After consuming the bareword, if the next token is one
+                // that cleanly starts an expression *with no comma between*,
+                // treat the bareword as a filehandle. Perl's actual rule is
+                // "no comma between FH and first list element" — so anything
+                // that begins a valid expression (not a comma/operator)
+                // counts.
+                // After consuming the bareword, treat it as a filehandle
+                // only when the following token unambiguously starts a new
+                // expression that isn't a function-call paren. Specifically:
+                // `print fname(args)` should be `print(fname(args))`, not
+                // `print fname (args)`.
+                let next_starts_expr = matches!(
+                    self.tok(),
+                    Token::StringLit(_)
+                        | Token::InterpString(_)
+                        | Token::ScalarVar(_)
+                        | Token::ArrayVar(_)
+                        | Token::HashVar(_)
+                );
                 if self.at(&Token::FatComma) {
                     // `print FOO => …` — not a filehandle call, `FOO` is a
                     // bareword hash key.
@@ -1051,7 +1070,7 @@ impl Parser {
                         self.pos = saved;
                         None
                     }
-                } else if is_fh_name {
+                } else if is_fh_name || next_starts_expr {
                     Some(Expr::StringLit(fh_name))
                 } else {
                     self.pos = saved;

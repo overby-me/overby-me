@@ -3343,6 +3343,62 @@ impl Interpreter {
                 result
             }
 
+            Expr::DoFile(path_expr) => {
+                // `do FILE` — load and execute FILE as a Perl script. Sets
+                // `$@` to a parse error if compilation fails, `$!` if the
+                // file can't be opened. Returns the value of the last
+                // expression in the file (or undef on error).
+                use crate::lexer::Lexer;
+                use crate::parser::Parser;
+                let path = self.eval_expr(path_expr).to_str();
+                let body = match std::fs::read_to_string(&path) {
+                    Ok(b) => {
+                        self.set_global_var("@", Value::Str(String::new()));
+                        b
+                    }
+                    Err(e) => {
+                        self.set_global_var("!", Value::Str(e.to_string()));
+                        return Value::Undef;
+                    }
+                };
+                let mut lex = Lexer::new(&body);
+                let toks = lex.tokenize();
+                let lex_err = lex.error.take();
+                let tl = std::mem::take(&mut lex.token_lines);
+                let mut parser = Parser::new_with_lines(toks, tl);
+                let stmts = parser.parse_program();
+                let parse_err = parser.error.take();
+                if let Some(err) = lex_err.or(parse_err) {
+                    let filled = err.replace("{FILE}", &path);
+                    self.set_global_var("@", Value::Str(filled));
+                    return Value::Undef;
+                }
+                let saved_file = std::mem::replace(&mut self.current_file, path.clone());
+                self.push_scope();
+                let mut ret = Value::Undef;
+                for stmt in &stmts {
+                    match self.exec_stmt(stmt) {
+                        Flow::Return(v) => {
+                            ret = v;
+                            break;
+                        }
+                        Flow::Die(msg) => {
+                            self.set_global_var("@", Value::Str(msg));
+                            self.pop_scope();
+                            self.current_file = saved_file;
+                            return Value::Undef;
+                        }
+                        _ => {}
+                    }
+                }
+                if matches!(ret, Value::Undef) {
+                    ret = self.last_expr_val.clone();
+                }
+                self.pop_scope();
+                self.current_file = saved_file;
+                ret
+            }
+
             Expr::AnonSub(params, body) => {
                 self.anon_sub_counter += 1;
                 let name = format!("__anon_{}", self.anon_sub_counter);

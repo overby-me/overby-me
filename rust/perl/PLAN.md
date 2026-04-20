@@ -592,6 +592,21 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
 
 ### Recent fixes
 
+- **`do FILE`**: `Expr::DoFile` had no interpreter arm — `do "./script.pl"`
+  silently did nothing. Implemented: read the file, lex+parse, exec stmts
+  in a fresh scope while temporarily switching `current_file` so
+  diagnostics report the loaded path. Sets `$@` on parse failure and `$!`
+  on open failure (matching perl). Unblocks the eval/temp-file pattern
+  used in op/eval test 14 onward.
+- **`print fh EXPR` for non-all-caps barewords**: previously the parser
+  only treated all-caps barewords (`STDOUT`, `LOG`) as filehandles. After
+  `open(try, ">", $f); print try "x"`, the `try` was parsed as a function
+  call, dropping the print to the wrong target. The bareword now also
+  counts as a filehandle when it's directly followed by a token that
+  unambiguously starts an expression (string lit, scalar/array/hash var).
+  Function-call paren (`print foo1(...)`) is excluded so existing
+  bareword-sub-call patterns still parse correctly.
+
 - **`local($$ref)` / `local(@$ref)` / `local(%$ref)` raise**: at parse
   time we now detect a deref token immediately after `local` (or
   `local(`) and emit a `Stmt::Die("Can't localize through a reference")`
