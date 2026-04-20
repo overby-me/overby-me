@@ -209,6 +209,12 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> Vec<u8> {
         req.push_str("Accept-Encoding: gzip, deflate\r\n");
     }
 
+    // --tr-encoding: announce we accept gzip Transfer-Encoding via TE/Connection.
+    if opts.tr_encoding {
+        req.push_str("TE: gzip\r\n");
+        req.push_str("Connection: TE\r\n");
+    }
+
     // --etag-compare: send If-None-Match with the etag read from FILE.
     // If the file is missing or empty, curl still sends the header with an
     // empty quoted value (`""`) — downstream servers treat that as "no etag".
@@ -251,8 +257,12 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> Vec<u8> {
         .as_deref()
         .map(|h| h.split(':').next().unwrap_or(h))
         .unwrap_or(&url.host);
-    let cookie_header =
-        build_cookie_header(cookie_match_host, &url.path, url.scheme == "https", opts);
+    let cookie_header = build_cookie_header(
+        cookie_match_host,
+        &url.path,
+        url.scheme == "https" || is_loopback_host(&url.host),
+        opts,
+    );
     if !cookie_header.is_empty() {
         req.push_str(&format!("Cookie: {cookie_header}\r\n"));
     }
@@ -502,6 +512,10 @@ fn guess_content_type(filename: &str) -> &'static str {
 
 /// Build a combined Cookie header from -b flags (files and inline strings).
 /// File cookies apply domain/path matching; inline cookies are sent verbatim.
+fn is_loopback_host(host: &str) -> bool {
+    host == "127.0.0.1" || host == "::1" || host == "localhost" || host.ends_with(".localhost")
+}
+
 fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options) -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1020,11 +1034,19 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
 
                 // If the redirect target is on a different host, drop any
                 // custom Host header so it is not forwarded to the new host.
+                // Also drop credentials (Authorization header + -u user/pass)
+                // unless the user opted in via --location-trusted, mirroring
+                // curl's CURLOPT_UNRESTRICTED_AUTH semantics.
                 if let Ok(new_url) = parse_url(&current_url)
                     && !url.host.eq_ignore_ascii_case(&new_url.host)
                 {
                     opts.headers
                         .retain(|(k, _)| !k.eq_ignore_ascii_case("host"));
+                    if !opts.location_trusted {
+                        opts.headers
+                            .retain(|(k, _)| !k.eq_ignore_ascii_case("authorization"));
+                        opts.user = None;
+                    }
                 }
 
                 if opts.verbose {

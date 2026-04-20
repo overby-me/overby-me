@@ -294,7 +294,15 @@ fn main() {
                     exit_code = 28;
                 }
                 if resp.bad_content_encoding {
-                    eprintln!("curl: (61) Unrecognized or bad HTTP Content or Transfer-Encoding");
+                    if resp.bad_encoding_too_many {
+                        eprintln!(
+                            "curl: (61) Reject response due to more than 5 content encodings"
+                        );
+                    } else {
+                        eprintln!(
+                            "curl: (61) Unrecognized or bad HTTP Content or Transfer-Encoding"
+                        );
+                    }
                     exit_code = 61;
                 } else if resp.partial_file {
                     eprintln!("curl: (18) transfer closed with outstanding read data remaining");

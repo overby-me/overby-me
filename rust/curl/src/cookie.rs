@@ -261,8 +261,16 @@ pub(crate) fn parse_set_cookie_ex(
     };
 
     // Reject Secure cookies received over non-HTTPS (live responses only).
+    // Exception: treat 127.0.0.1, ::1 and *.localhost as trustworthy origins
+    // per W3C "Secure Contexts", matching curl's psl_loopback_p() exception.
     if validate_domain && secure && url.scheme != "https" {
-        return None;
+        let is_loopback = url.host == "127.0.0.1"
+            || url.host == "::1"
+            || url.host == "localhost"
+            || url.host.ends_with(".localhost");
+        if !is_loopback {
+            return None;
+        }
     }
 
     Some(Cookie {

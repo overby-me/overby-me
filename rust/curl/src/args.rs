@@ -243,6 +243,16 @@ pub(crate) fn parse_args() -> Options {
             "-L" | "--location" => {
                 opts.location = true;
             }
+            "--location-trusted" => {
+                opts.location = true;
+                opts.location_trusted = true;
+            }
+            "--tr-encoding" => {
+                opts.tr_encoding = true;
+            }
+            "--no-tr-encoding" => {
+                opts.tr_encoding = false;
+            }
             "--max-redirs" => {
                 i += 1;
                 opts.max_redirs = next_arg(&args, i, "--max-redirs").parse().unwrap_or(50);

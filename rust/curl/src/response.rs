@@ -35,6 +35,7 @@ pub(crate) struct Response {
     pub(crate) recv_error: bool,
     pub(crate) partial_file: bool,
     pub(crate) bad_content_encoding: bool,
+    pub(crate) bad_encoding_too_many: bool,
 }
 
 pub(crate) fn read_response(
@@ -76,6 +77,7 @@ pub(crate) fn read_response(
                     recv_error: false,
                     partial_file: false,
                     bad_content_encoding: false,
+                    bad_encoding_too_many: false,
                 });
             }
             return Err("empty reply from server".into());
@@ -103,6 +105,7 @@ pub(crate) fn read_response(
                 recv_error: false,
                 partial_file: false,
                 bad_content_encoding: false,
+                bad_encoding_too_many: false,
             });
         }
         header_bytes.extend_from_slice(line.as_bytes());
@@ -222,6 +225,7 @@ pub(crate) fn read_response(
                 recv_error: false,
                 partial_file: false,
                 bad_content_encoding: false,
+                bad_encoding_too_many: false,
             });
         }
         let this_ending: &'static [u8] = if line.ends_with("\r\n") {
@@ -297,6 +301,7 @@ pub(crate) fn read_response(
                 recv_error: false,
                 partial_file: false,
                 bad_content_encoding: false,
+                bad_encoding_too_many: false,
             });
         }
         pending_raw = Some(line.clone());
@@ -323,6 +328,7 @@ pub(crate) fn read_response(
             recv_error: false,
             partial_file: false,
             bad_content_encoding: false,
+            bad_encoding_too_many: false,
         });
     }
 
@@ -330,6 +336,37 @@ pub(crate) fn read_response(
     let is_chunked = headers
         .iter()
         .any(|(k, v)| k == "transfer-encoding" && v.contains("chunked"));
+
+    // Reject responses whose Transfer-Encoding stack has more than 5 layers,
+    // matching curl's MAX_ENCODING_STACK guard (test 387).
+    let te_layer_count: usize = headers
+        .iter()
+        .filter(|(k, _)| k == "transfer-encoding")
+        .flat_map(|(_, v)| v.split(','))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .count();
+    if te_layer_count > 5 {
+        return Ok(Response {
+            status,
+            status_text,
+            headers,
+            body: Vec::new(),
+            header_bytes,
+            redirect_headers: Vec::new(),
+            num_connects: 0,
+            num_redirects: 0,
+            max_redirects_reached: false,
+            weird_server_reply: false,
+            final_url: None,
+            redirect_url: None,
+            timed_out: false,
+            recv_error: false,
+            partial_file: false,
+            bad_content_encoding: true,
+            bad_encoding_too_many: true,
+        });
+    }
     // If Content-Length is present but fails to parse as a non-negative integer,
     // treat the response as malformed. curl writes the status + Date header
     // that came BEFORE the bad Content-Length, then exits 8 (weird_server_reply).
@@ -371,6 +408,7 @@ pub(crate) fn read_response(
             recv_error: false,
             partial_file: false,
             bad_content_encoding: false,
+            bad_encoding_too_many: false,
         });
     }
     let content_length: Option<usize> = cl_entry.and_then(|(_, v)| v.parse().ok());
@@ -416,10 +454,26 @@ pub(crate) fn read_response(
 
     // Apply each Content-Encoding layer in reverse (last-applied first).
     let mut bad_encoding = false;
+    let mut bad_encoding_too_many = false;
     let body = if let Some(enc) = content_encoding.as_deref() {
         let layers: Vec<&str> = enc.split(',').map(str::trim).collect();
+        // Mirror curl's MAX_ENCODING_STACK = 5; reject longer chains.
+        let real_layers = layers
+            .iter()
+            .filter(|l| !l.is_empty() && **l != "identity" && **l != "none")
+            .count();
+        if real_layers > 5 {
+            bad_encoding = true;
+            bad_encoding_too_many = true;
+        }
         let mut current = body;
+        if bad_encoding {
+            current.clear();
+        }
         for layer in layers.iter().rev() {
+            if bad_encoding {
+                break;
+            }
             if layer.is_empty() || *layer == "identity" || *layer == "none" {
                 continue;
             }
@@ -479,6 +533,7 @@ pub(crate) fn read_response(
         recv_error: recv_error_flag,
         partial_file: partial_flag,
         bad_content_encoding: bad_encoding,
+        bad_encoding_too_many,
     })
 }
 
