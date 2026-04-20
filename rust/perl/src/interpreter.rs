@@ -2464,8 +2464,18 @@ impl Interpreter {
                         return self.eval_expr(value);
                     }
                 }
+                // `+(LIST) = RHS` — unary `+` is a no-op that exists
+                // purely for parser disambiguation; it must NOT change the
+                // assignment's lvalue shape. Strip it so the array-literal
+                // list-assignment path below still triggers.
+                let unwrapped_target: &Expr =
+                    if let Expr::UnaryOp(UnaryOp::Pos, inner) = target.as_ref() {
+                        inner.as_ref()
+                    } else {
+                        target.as_ref()
+                    };
                 // Check for list assignment: ($a, $b, $c) = (list)
-                if let Expr::ArrayLit(targets) = target.as_ref() {
+                if let Expr::ArrayLit(targets) = unwrapped_target {
                     // Expand `(EXPR) x N` targets into N copies (so e.g.
                     // `(undef)x5` skips 5 RHS elements).
                     let mut expanded: Vec<&Expr> = Vec::with_capacity(targets.len());
@@ -5276,6 +5286,26 @@ impl Interpreter {
                             let v = self.eval_string(&code);
                             self.call_context.pop();
                             self.eval_depth -= 1;
+                            // If eval died (non-empty `$@`) AND we were
+                            // called in list context, signal an empty list
+                            // so `() = eval "die"` correctly counts to 0.
+                            // (Otherwise `Value::Undef` would propagate as a
+                            // single-element list.)
+                            if ctx == 2 {
+                                let at_empty = match self
+                                    .globals
+                                    .vars
+                                    .get("@")
+                                    .cloned()
+                                    .unwrap_or(Value::Undef)
+                                {
+                                    Value::Str(s) => s.is_empty(),
+                                    _ => true,
+                                };
+                                if !at_empty {
+                                    self.last_list_val = Some(Vec::new());
+                                }
+                            }
                             v
                         }
                     }

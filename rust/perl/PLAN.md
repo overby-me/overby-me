@@ -592,6 +592,19 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
 
 ### Recent fixes
 
+- **`+(LIST) = RHS` keeps list-assignment shape**: unary `+` is parser
+  noise, but our `Expr::Assign` arm only recognised the `(LHS) = RHS`
+  list form when target was bare `Expr::ArrayLit`, so `+()=eval STRING`
+  silently degraded to scalar assignment to a non-lvalue. Strip an outer
+  `UnaryOp::Pos` from the assignment target so the list-context path
+  triggers as written.
+- **`eval STRING` in list context returns `()` on die**: previously,
+  `() = eval "die"` counted as 1 (Undef-as-one-item) instead of 0.
+  After running `eval_string`, if `$@` is non-empty AND the surrounding
+  call is in list context, set `last_list_val = Some(vec![])` so the
+  list-eval wrapper returns an empty list. Matches reference perl:
+  `() = eval "die"` is 0.
+
 - **`do FILE`**: `Expr::DoFile` had no interpreter arm — `do "./script.pl"`
   silently did nothing. Implemented: read the file, lex+parse, exec stmts
   in a fresh scope while temporarily switching `current_file` so
