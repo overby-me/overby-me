@@ -10,7 +10,7 @@ in a Nix sandbox, mirroring the differential-testing pattern established by
 
 ## Current Status
 
-**18/18 tests passing (100%)** — `Output.test_*` methods from the upstream
+**18/18 upstream tests + 4/4 roundtrip checks passing** — `Output.test_*` methods from the upstream
 ninja v1.13.1 `misc/output_test.py` run against the rust-ninja binary in a
 Nix sandbox.
 
@@ -149,12 +149,27 @@ GNU make jobserver protocol (`--jobserver-auth=fifo:...` and the legacy
 pipe form). Required for proper `-j` cooperation when ninja is invoked
 from `make`.
 
-### Phase 4: Differential roundtrip tests
+### Phase 4: Differential roundtrip tests ✅ (initial)
 
-Beyond `output_test.py`, add nix checks that build a small real-world
-project (e.g. a CMake-generated `build.ninja` for a tiny C program) with
-both rust-ninja and reference `pkgs.ninja`, then `cmp` the resulting
-artifacts. This is analogous to the rust-bzip2 roundtrip checks.
+Implemented in `roundtrip.nix`. Each scenario builds a small two-TU
+C project (`src/greet.c`, `src/main.c`, `inc/greet.h`) with both
+rust-ninja and reference `pkgs.ninja` and compares observable
+behavior (gcc embeds absolute build paths in object files, so a strict
+`cmp` of artifacts isn’t meaningful — the checks instead validate
+file existence, exit message, mtime stability, and that the built
+binary actually runs):
+
+| Scenario | Validates |
+|----------|-----------|
+| `cold-build` | both runners produce all expected outputs and `app` prints `hello` |
+| `incremental-noop` | both runners say `ninja: no work to do.` on a re-run |
+| `incremental-modify` | touching `src/main.c` rebuilds `main.o` + `app`, leaves `greet.o` mtime stable |
+| `depfile-header-change` | reference ninja rebuilds via `gcc -MMD` depfiles — documents that rust-ninja still lacks depfile parsing |
+
+The first iteration surfaced one real bug: when every edge in the plan
+is up to date, rust-ninja exited silently instead of printing
+`ninja: no work to do.` Fixed by tracking `any_real_work` in the
+scheduler.
 
 ---
 

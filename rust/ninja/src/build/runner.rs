@@ -113,6 +113,10 @@ fn schedule(
     let (tx, rx) = mpsc::channel::<EdgeOutcome>();
     let mut hard_failure: Option<u8> = None;
     let mut interrupted = false;
+    // Tracks whether we actually dispatched any subprocess work. If
+    // every edge in the plan was skipped (clean / phony) we still owe
+    // the user the canonical "ninja: no work to do." message.
+    let mut any_real_work = false;
     // Per-edge mutable copies so dyndep merges (extra outputs/inputs)
     // can land on the right edge before dispatch.
     let mut edges: Vec<Edge> = state.edges.to_vec();
@@ -252,6 +256,7 @@ fn schedule(
                     continue;
                 }
                 in_flight += 1;
+                any_real_work = true;
                 let prepared = prepare(state, &edge, opts)?;
                 // Capture explain lines for dirty inputs of this edge.
                 let explain_lines: Vec<String> = if explain {
@@ -388,6 +393,12 @@ fn schedule(
     if let Some(code) = hard_failure {
         eprintln!("ninja: build stopped: subcommand failed.");
         return Ok(code);
+    }
+    if !any_real_work && !opts.quiet {
+        // Every edge in the plan was either phony or skipped because
+        // its outputs were already up to date — match reference ninja
+        // and tell the user there's nothing to do.
+        println!("ninja: no work to do.");
     }
     Ok(0)
 }

@@ -81,10 +81,27 @@
       "test_issue_2586"
       "test_issue_2621"
     ];
+    # Phase 4 differential roundtrip checks: build a small C project
+    # with both rust-ninja and the reference `pkgs.ninja` and `cmp` the
+    # produced artifacts. Catches scheduling/depfile bugs that
+    # output_test.py can't surface.
+    roundtripNames = [
+      "cold-build"
+      "incremental-noop"
+      "incremental-modify"
+      "depfile-header-change"
+    ];
   in
-    builtins.listToAttrs (map (name: {
-        name = "rust-ninja-test-${name}";
-        value = pkgs: import ./testsuite.nix {inherit pkgs name;};
-      })
-      testNames);
+    builtins.listToAttrs (
+      (map (name: {
+          name = "rust-ninja-test-${name}";
+          value = pkgs: import ./testsuite.nix {inherit pkgs name;};
+        })
+        testNames)
+      ++ (map (name: {
+          name = "rust-ninja-roundtrip-${name}";
+          value = pkgs: import ./roundtrip.nix {inherit pkgs name;};
+        })
+        roundtripNames)
+    );
 }
