@@ -1,4 +1,4 @@
-use flate2::read::{DeflateDecoder, GzDecoder};
+use flate2::read::{DeflateDecoder, GzDecoder, ZlibDecoder};
 use std::io::{BufRead, BufReader, Read};
 
 use crate::connection::Connection;
@@ -33,6 +33,7 @@ pub(crate) struct Response {
     pub(crate) timed_out: bool,
     /// True if a recv/protocol error occurred during body reading (exit 56).
     pub(crate) recv_error: bool,
+    pub(crate) partial_file: bool,
 }
 
 pub(crate) fn read_response(
@@ -72,6 +73,7 @@ pub(crate) fn read_response(
                     redirect_url: None,
                     timed_out: false,
                     recv_error: false,
+                    partial_file: false,
                 });
             }
             return Err("empty reply from server".into());
@@ -97,6 +99,7 @@ pub(crate) fn read_response(
                 redirect_url: None,
                 timed_out: false,
                 recv_error: false,
+                partial_file: false,
             });
         }
         header_bytes.extend_from_slice(line.as_bytes());
@@ -186,6 +189,7 @@ pub(crate) fn read_response(
                 redirect_url: None,
                 timed_out: false,
                 recv_error: false,
+                partial_file: false,
             });
         }
         let this_ending: &'static [u8] = if line.ends_with("\r\n") {
@@ -259,6 +263,7 @@ pub(crate) fn read_response(
                 redirect_url: None,
                 timed_out: false,
                 recv_error: false,
+                partial_file: false,
             });
         }
         pending_raw = Some(line.clone());
@@ -283,6 +288,7 @@ pub(crate) fn read_response(
             redirect_url: None,
             timed_out: false,
             recv_error: false,
+            partial_file: false,
         });
     }
 
@@ -329,25 +335,26 @@ pub(crate) fn read_response(
             redirect_url: None,
             timed_out: false,
             recv_error: false,
+            partial_file: false,
         });
     }
     let content_length: Option<usize> = cl_entry.and_then(|(_, v)| v.parse().ok());
 
-    let (body, timed_out, recv_error_flag) = if is_chunked {
+    let (body, timed_out, recv_error_flag, partial_flag) = if is_chunked {
         let (b, err) = read_chunked_body(&mut reader)?;
-        (b, false, err)
+        (b, false, err == ChunkErr::Recv, err == ChunkErr::Partial)
     } else if let Some(len) = content_length {
         let mut buf = vec![0u8; len];
         reader
             .read_exact(&mut buf)
             .map_err(|e| format!("failed to read body: {e}"))?;
-        (buf, false, false)
+        (buf, false, false, false)
     } else {
         // Read until EOF.
         let mut buf = Vec::new();
         let read_err = reader.read_to_end(&mut buf);
         let timed_out = matches!(&read_err, Err(e) if e.kind() == std::io::ErrorKind::TimedOut || e.kind() == std::io::ErrorKind::WouldBlock);
-        (buf, timed_out, false)
+        (buf, timed_out, false, false)
     };
 
     // Decompress if Content-Encoding is present and --compressed was requested
@@ -373,9 +380,16 @@ pub(crate) fn read_response(
             }
         }
         Some(enc) if enc.contains("deflate") => {
-            let mut decoder = DeflateDecoder::new(&body[..]);
+            // Try zlib (RFC 1950) first — what most servers actually send.
+            // Fall back to raw deflate (RFC 1951) if that fails.
             let mut decompressed = Vec::new();
-            decoder.read_to_end(&mut decompressed).unwrap_or_default();
+            let zlib_ok = ZlibDecoder::new(&body[..])
+                .read_to_end(&mut decompressed)
+                .is_ok();
+            if !zlib_ok || (decompressed.is_empty() && !body.is_empty()) {
+                decompressed.clear();
+                let _ = DeflateDecoder::new(&body[..]).read_to_end(&mut decompressed);
+            }
             if decompressed.is_empty() && !body.is_empty() {
                 body
             } else {
@@ -405,22 +419,40 @@ pub(crate) fn read_response(
         redirect_url: None,
         timed_out,
         recv_error: recv_error_flag,
+        partial_file: partial_flag,
     })
 }
 
-fn read_chunked_body(reader: &mut impl BufRead) -> Result<(Vec<u8>, bool), String> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChunkErr {
+    None,
+    /// Truncated transfer (connection closed mid-chunk) -> CURLE_PARTIAL_FILE (18).
+    Partial,
+    /// Malformed framing (bad size, overflow, etc.) -> CURLE_RECV_ERROR (56).
+    Recv,
+}
+
+fn read_chunked_body(reader: &mut impl BufRead) -> Result<(Vec<u8>, ChunkErr), String> {
     let mut body = Vec::new();
     loop {
         let mut size_line = String::new();
-        if reader.read_line(&mut size_line).is_err() {
-            return Ok((body, true));
+        let n = match reader.read_line(&mut size_line) {
+            Ok(n) => n,
+            Err(_) => return Ok((body, ChunkErr::Partial)),
+        };
+        if n == 0 {
+            // EOF before terminator chunk.
+            return Ok((body, ChunkErr::Partial));
         }
         let size_str = size_line.trim();
         // Strip chunk extensions.
-        let size_str = size_str.split(';').next().unwrap_or(size_str);
+        let size_str = size_str.split(';').next().unwrap_or(size_str).trim();
+        if size_str.is_empty() {
+            return Ok((body, ChunkErr::Recv));
+        }
         let size = match usize::from_str_radix(size_str, 16) {
             Ok(s) => s,
-            Err(_) => return Ok((body, true)),
+            Err(_) => return Ok((body, ChunkErr::Recv)),
         };
         if size == 0 {
             // Read trailing CRLF.
@@ -430,12 +462,12 @@ fn read_chunked_body(reader: &mut impl BufRead) -> Result<(Vec<u8>, bool), Strin
         }
         let mut chunk = vec![0u8; size];
         if reader.read_exact(&mut chunk).is_err() {
-            return Ok((body, true));
+            return Ok((body, ChunkErr::Partial));
         }
         body.extend_from_slice(&chunk);
         // Read trailing CRLF after chunk data.
         let mut crlf = [0u8; 2];
         let _ = reader.read_exact(&mut crlf);
     }
-    Ok((body, false))
+    Ok((body, ChunkErr::None))
 }

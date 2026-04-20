@@ -293,7 +293,10 @@ fn main() {
                     );
                     exit_code = 28;
                 }
-                if resp.recv_error {
+                if resp.partial_file {
+                    eprintln!("curl: (18) transfer closed with outstanding read data remaining");
+                    exit_code = 18;
+                } else if resp.recv_error {
                     exit_code = 56;
                 }
                 // status==0 means we consumed a 1xx interim response but the
