@@ -371,7 +371,11 @@ impl Interpreter {
     /// `local(*F) = *G` adds an F -> G alias; the IO ops consult this so
     /// the alias stays transparent to the rest of the interpreter.
     fn resolve_fh(&self, name: &str) -> String {
-        let stripped = name.strip_prefix("main::").unwrap_or(name);
+        // A coercible glob value stringifies as `*main::NAME` — strip the
+        // leading `*` so the rest of the IO machinery (which keys handles
+        // by bare name) finds it. Also strip the `main::` package prefix.
+        let stripped = name.strip_prefix('*').unwrap_or(name);
+        let stripped = stripped.strip_prefix("main::").unwrap_or(stripped);
         if let Some(target) = self.fh_aliases.get(stripped) {
             return target.clone();
         }
@@ -5125,7 +5129,11 @@ impl Interpreter {
                 // a `while (<FH>)` loop).
                 let name = if let Some(arg) = args.first() {
                     let raw = self.eval_expr(arg).to_str();
-                    Some(self.resolve_fh(&raw))
+                    let fh = self.resolve_fh(&raw);
+                    // `eof FH` makes FH the current filehandle for argless
+                    // tell/eof and `$.` (matches reference perl).
+                    self.last_read_fh = Some(fh.clone());
+                    Some(fh)
                 } else {
                     self.last_read_fh.clone()
                 };
@@ -8770,6 +8778,8 @@ impl Interpreter {
         }
         let raw_handle = self.eval_expr(&args[0]).to_str();
         let handle = self.resolve_fh(&raw_handle);
+        // seek(FH, ...) makes FH the current filehandle for argless tell.
+        self.last_read_fh = Some(handle.clone());
         let pos = self.eval_expr(&args[1]).to_num() as i64;
         let whence = self.eval_expr(&args[2]).to_num() as i32;
         let seek_from = match whence {

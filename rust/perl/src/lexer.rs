@@ -679,7 +679,7 @@ impl Lexer {
 
                 '$' => {
                     self.pos += 1;
-                    if self.ch() == '#' {
+                    if self.ch() == '#' && self.peek(1) != '[' {
                         // $#array, $#$ref, or $#{ ... }
                         self.pos += 1;
                         if self.ch() == '$' {
@@ -840,6 +840,13 @@ impl Lexer {
                     } else if self.ch() == '+' {
                         self.pos += 1;
                         tokens.push(Token::ScalarVar("+".to_string()));
+                    } else if self.ch() == '#' {
+                        // `$#` followed by `[` / `{` is `$` + name `#` —
+                        // i.e. element/key access on `@#` / `%#` (the
+                        // anonymous-name array/hash). Treat the `#` as the
+                        // var name; the [/{ is consumed by parse_postfix.
+                        self.pos += 1;
+                        tokens.push(Token::ScalarVar("#".to_string()));
                     } else {
                         // Unknown special var, just treat as $_
                         tokens.push(Token::ScalarVar("_".to_string()));

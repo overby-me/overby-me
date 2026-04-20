@@ -592,6 +592,20 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
 
 ### Recent fixes
 
+- **Coercible globs and tracking through `eof` / `seek`**: `$fh = *FH; tell($fh)`
+  was returning -1 because `resolve_fh` didn't strip the `*` prefix that
+  Glob values stringify to (`*main::FH`). Added a `strip_prefix('*')`
+  pass. Also wired `eof FH` and `seek FH, …` to update `last_read_fh`
+  the same way `tell FH` and `readline FH` do, so subsequent argless
+  `tell` / `eof` / `$.` reads target the right handle. Drops io/tell
+  from 9 to 4 sandbox failures.
+- **`$#[idx]` parses as `$` + name `#` + subscript**: `$#X` is "last
+  index of @X", but `$#[0]` is `$` `#` `[0]` — element 0 of `@#`. The
+  lexer was eating `$#[…]` as `ArrayLen("")` and then dropping the
+  subscript, returning `-1` instead of `undef`. Fixed by guarding the
+  ArrayLen branch on `peek(1) != '['`, then emitting `ScalarVar("#")`
+  for the `$#[…]` form so `parse_postfix` consumes the subscript.
+
 - **`$-` / `$+` and `$-[N]` / `$+[N]` lexing + interpolation**: the lexer
   was hitting the unknown-special-var fallback for `$-` and `$+`, which
   silently produced `$_`, so `$-[0]` became `$_[0]`. Added explicit
