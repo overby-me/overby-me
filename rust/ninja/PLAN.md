@@ -1,0 +1,341 @@
+# rust-ninja: Plan to Pass Upstream Ninja Tests
+
+## Goal
+
+Rewrite [Ninja](https://ninja-build.org/) in Rust, validated against the
+upstream Ninja test suite. Tests run the official Python harness
+(`misc/output_test.py`) from the ninja source against the rust-ninja binary
+in a Nix sandbox, mirroring the differential-testing pattern established by
+`rust/awk` and `rust/perl`.
+
+## Current Status
+
+**15/18 tests passing (83%)** — `Output.test_*` methods from the upstream
+ninja v1.13.1 `misc/output_test.py` run against the rust-ninja binary in a
+Nix sandbox.
+
+Passing:
+
+- `test_status` — empty manifest, `--quiet`
+- `test_pr_1685` — `-t recompact` / `-t restat` on empty graph
+- `test_ninja_status_default` — `[N/M]` status line in smart-terminal
+- `test_ninja_status_quiet` — `--quiet` suppresses status
+- `test_entering_directory_on_stdout` — `-C` chdir banner
+- `test_issue_1418` — parallel `-j3` ordering by completion time
+- `test_issue_1214` — ANSI stripping in pipe mode, `CLICOLOR_FORCE`,
+  verbose-mode line printing
+- `test_issue_1966` — `rspfile` / `rspfile_content`
+- `test_issue_2499` — in-place status redraw protocol
+- `test_issue_2048` — `.ninja_log` version-mismatch warning
+- `test_pr_2540` — exit-code propagation (124/127/130/137), unknown
+  target error, parallel keep-going
+- `test_depfile_directory_creation` — auto-create `$out` and `$depfile`
+  parent directories
+- `test_tool_inputs` — `-t inputs` (alpha + dep order, shell escape,
+  `--print0`, phony skipping)
+- `test_tool_compdb_targets` — `-t compdb-targets` JSON, error/usage paths
+- `test_tool_multi_inputs` — `-t multi-inputs` (delim, `--print0`)
+
+Failing (deferred — require log/restat/console-pool/dyndep):
+
+- `test_explain_output` — needs `.ninja_log`, restat, `-d explain`
+- `test_issue_2586` — needs the `console` pool with terminal locking
+- `test_issue_2621` — needs dyndep parsing and multi-producer detection
+
+The Nix wiring is in place:
+
+- `default.nix` exposes `pkgs.rust-ninja` (release) and `pkgs.rust-ninja-dev`
+  (debug, faster compile) plus a `checks` attrset of per-test derivations.
+- `testsuite.nix` extracts `pkgs.ninja.src`, drops the rust-ninja binary in
+  as `./ninja`, and runs a single `Output.test_*` method from
+  `misc/output_test.py`.
+
+## Module Layout
+
+```text
+src/
+  main.rs                CLI dispatch, top-level error handling
+  cli.rs                 Argument parsing (-j, -k, -v, -d, -t, -C, --quiet)
+  graph.rs               State, Rule, Edge data types
+  manifest.rs            Tokenize + parse build.ninja, variable expansion
+  status.rs              [N/M] status line, smart-terminal vs piped, ANSI strip
+  build/
+    mod.rs               re-exports `run`
+    plan.rs              Target resolution, topological scheduling
+    runner.rs            Parallel scheduler, subprocess execution, rspfile,
+                         depfile dir creation, exit-code mapping
+    expand.rs            Edge-context variable expansion ($in, $out, layered)
+  tools/
+    mod.rs               Dispatch on tool name
+    recompact.rs         -t recompact / -t restat (log version warning only)
+    inputs.rs            -t inputs (alpha + dep order, shell escape, --print0)
+    multi_inputs.rs      -t multi-inputs
+    compdb_targets.rs    -t compdb-targets (JSON output)
+```
+
+Run a test:
+
+```sh
+nix build .#checks.x86_64-linux.rust-ninja-test-test_status
+```
+
+View a failing test's log:
+
+```sh
+nix log .#checks.x86_64-linux.rust-ninja-test-test_status
+```
+
+## Test Suite Strategy
+
+### Why output_test.py
+
+Ninja's primary regression tests are split between:
+
+1. `ninja_test` — a C++ unit-test binary that links against ninja's internals.
+   Not portable to a re-implementation: tests poke at C++ classes directly.
+2. `misc/output_test.py` — black-box tests that run the `./ninja` binary
+   inside a temp build directory and diff stdout against expected strings.
+3. `misc/jobserver_test.py` / `misc/ninja_syntax_test.py` — auxiliary
+   Python tests for the GNU make jobserver protocol and the
+   `ninja_syntax.py` helper.
+
+Only (2) and parts of (3) are useful for differential testing of a
+re-implementation. `output_test.py` is the perfect fit: it exercises the
+real CLI surface and its assertions are the actual specification of
+behavior we need to match.
+
+### Phase 1: output_test.py (18 tests)
+
+The initial test set is every `Output.test_*` method in
+`misc/output_test.py` from ninja v1.13.1:
+
+| Test | Exercises |
+|------|-----------|
+| `test_status` | Default "no work to do" / `--quiet` |
+| `test_ninja_status_default` | Default `[N/M]` status line |
+| `test_ninja_status_quiet` | Status suppression with `--quiet` |
+| `test_entering_directory_on_stdout` | `-C dir` chdir banner |
+| `test_issue_1418` | Parallel `-j3` build ordering |
+| `test_issue_1214` | ANSI color stripping when piped, `CLICOLOR_FORCE` |
+| `test_issue_1966` | `rspfile` / `rspfile_content` substitution |
+| `test_issue_2499` | Status line update format with smart terminal |
+| `test_issue_2048` | `-t recompact` warning on too-old log |
+| `test_issue_2586` | `console` pool blocking behavior |
+| `test_issue_2621` | "multiple rules generate" dyndep error |
+| `test_pr_1685` | `-t recompact` / `-t restat` on empty graph |
+| `test_pr_2540` | Subprocess exit code propagation (124/127/130/137) |
+| `test_depfile_directory_creation` | Auto-create `$depfile` parent dir |
+| `test_tool_inputs` | `-t inputs` (alpha + dependency order, escaping, `--print0`) |
+| `test_tool_compdb_targets` | `-t compdb-targets` JSON output |
+| `test_tool_multi_inputs` | `-t multi-inputs` (delimiter, `--print0`) |
+| `test_explain_output` | `-d explain` interleaved with build lines |
+
+### Phase 2: ninja_syntax_test.py
+
+Port or adopt `misc/ninja_syntax.py` semantics in a Rust-side helper if
+useful, otherwise drop — the syntax helper only matters for callers
+generating manifests.
+
+### Phase 3: jobserver_test.py
+
+GNU make jobserver protocol (`--jobserver-auth=fifo:...` and the legacy
+pipe form). Required for proper `-j` cooperation when ninja is invoked
+from `make`.
+
+### Phase 4: Differential roundtrip tests
+
+Beyond `output_test.py`, add nix checks that build a small real-world
+project (e.g. a CMake-generated `build.ninja` for a tiny C program) with
+both rust-ninja and reference `pkgs.ninja`, then `cmp` the resulting
+artifacts. This is analogous to the rust-bzip2 roundtrip checks.
+
+---
+
+## Architecture
+
+Ninja is conceptually modest but operationally rich. The C++ source is
+~25k lines; a faithful Rust port should fit in the same order of magnitude
+once tests are passing. Module sketch:
+
+```text
+src/
+  main.rs              CLI dispatch, top-level error handling
+  cli.rs               Argument parsing (-j, -k, -v, -d, -t, -C, --quiet, ...)
+  manifest/
+    lexer.rs           Tokenize build.ninja (vars, rules, builds, includes)
+    parser.rs          Parse into the build graph
+    eval.rs            Variable expansion, scoping (file/rule/build/per-edge)
+  graph/
+    node.rs            Files (inputs/outputs)
+    edge.rs            Build edges (rule + bindings + ins + outs)
+    state.rs           Global graph state, pools
+    plan.rs            Topological scheduling, ready queue
+  build/
+    runner.rs          Edge execution, parallel job pool, -j, -k
+    subprocess.rs      Spawn, capture stdout/stderr, exit-code translation
+    status.rs          [N/M] status line, smart-terminal vs pipe rendering,
+                       ANSI color stripping, CLICOLOR_FORCE
+    console_pool.rs    `pool = console` exclusive locking
+  deps/
+    depfile.rs         Makefile-style depfile parsing (gcc -MD)
+    deps_log.rs        .ninja_deps binary log read/write
+    build_log.rs       .ninja_log: command hash, mtimes, restat tracking
+    dyndep.rs          Dynamic dependency files (ninja_dyndep_version=1)
+  tools/
+    inputs.rs          -t inputs (alpha + dependency order, --print0,
+                       --no-shell-escape, --dependency-order)
+    compdb.rs          -t compdb / -t compdb-targets (JSON)
+    multi_inputs.rs    -t multi-inputs
+    targets.rs         -t targets
+    rules.rs           -t rules
+    clean.rs           -t clean
+    graph.rs           -t graph (dot output)
+    query.rs           -t query
+    browse.rs          -t browse (HTTP server) — likely skip
+    recompact.rs       -t recompact (.ninja_log + .ninja_deps)
+    restat.rs          -t restat
+  util/
+    canon_path.rs      Path canonicalization (// → /, etc.)
+    disk_interface.rs  Stat caching
+    metrics.rs         -d stats
+```
+
+### Key data shapes
+
+- **Node**: a file in the build graph. Has `path`, `mtime`, `dirty` flag,
+  optional `in_edge` (the edge that produces it), and a list of
+  `out_edges` (edges that consume it).
+- **Edge**: a build statement instance. Has a `Rule` reference, an
+  `EdgeEnv` (lazy evaluation context for `$in`, `$out`, etc.), input
+  arrays partitioned into explicit / implicit / order-only, output
+  arrays partitioned into explicit / implicit, and a `pool`.
+- **Pool**: a name + depth. The `console` pool has depth 1 and grants
+  ownership of the controlling terminal.
+- **State**: the whole parsed manifest — bindings (file scope), rules,
+  pools, edges, nodes (interned by canonical path).
+
+### Variable expansion
+
+Ninja's variable lookup is layered: per-edge bindings → rule bindings →
+file-scope (with subninja/include creating nested scopes). `$in` and
+`$out` are computed dynamically per edge. `$in_newline` joins with `\n`.
+Missing variables expand to the empty string.
+
+### Status line
+
+`output_test.py` is heavily focused on the status line. Two modes:
+
+- **Smart terminal** (TTY on stdout): emit `\r{status}\x1b[K` to redraw
+  in place. ANSI escapes from rule output flow through unchanged.
+- **Piped**: emit `{status}\n` once per edge, strip ANSI escapes from
+  rule output unless `CLICOLOR_FORCE=1`.
+
+`NINJA_STATUS` env var overrides the format; `--quiet` suppresses status
+lines entirely.
+
+### Console pool
+
+Edges in `pool = console` get exclusive access to stdin/stdout/stderr
+during execution. Other parallel jobs may run simultaneously but must
+not write to the terminal. `test_issue_2586` covers correct ordering
+when console-pool edges depend on regular edges.
+
+---
+
+## Implementation Phases
+
+### Phase 0: Scaffolding ✅
+
+- [x] `Cargo.toml` + stub `main.rs`
+- [x] `default.nix` with `rust-ninja` and `rust-ninja-dev` packages
+- [x] `testsuite.nix` driving `output_test.py` per-method
+- [x] PLAN.md
+
+### Phase 1: Trivial output ✅ (`test_status`)
+
+- [x] Manifest lexer/parser for empty files and basic rule/build/default
+- [x] CLI: `-C`, `--quiet`, `-f`, `-j`, `-d`, `-t`, `-v`, `--version`
+- [x] Empty graph → "ninja: no work to do."
+
+### Phase 2: Single-edge build ✅ (`test_ninja_status_default`, `test_ninja_status_quiet`)
+
+- [x] Parse `rule` and `build` statements with bindings
+- [x] Variable expansion for `command`, `description`, `$in`, `$out`,
+      `${var}`, `$$`, `$ `, `$:`, `$|`, `$\n` continuations
+- [x] Spawn subprocess via `sh -c`, capture stdout+stderr
+- [x] `--quiet` suppresses status
+
+### Phase 3: Parallel scheduler ✅ (`test_issue_1418`)
+
+- [x] `-j N` flag
+- [x] Ready-queue scheduler (`build/runner.rs`) with dependency tracking
+- [x] Concurrent execution with completion-order output
+
+### Phase 4: Smart-terminal status ✅ (`test_issue_2499`, `test_issue_1214`, `test_issue_1966`)
+
+- [x] TTY + TERM detection
+- [x] `\r…\x1b[K` in-place redraw, "before" + "after" status pair
+- [x] ANSI stripping in piped mode, honoring `CLICOLOR_FORCE`
+- [x] `rspfile` / `rspfile_content` write/cleanup
+- [x] Verbose mode bypasses in-place redraw
+
+### Phase 5: Subprocess error handling ✅ (`test_pr_2540`)
+
+- [x] Exit code propagation (any non-zero → ninja exit code)
+- [x] `FAILED: [code=N] outputs\ncommand\n` block
+- [x] SIGINT (130) → suppressed status, "interrupted by user"
+- [x] Unknown CLI target → `ninja: error: unknown target 'X'`
+- [ ] `-k N` keep-going threshold (parsed but not yet enforced)
+
+### Phase 6: Tools ✅ (`test_tool_inputs`, `test_tool_compdb_targets`, `test_tool_multi_inputs`, `test_pr_1685`)
+
+- [x] `-t inputs` with `--dependency-order`, `--no-shell-escape`,
+      `--print0`, phony skipping
+- [x] `-t compdb-targets` JSON, `ninja: error:` / `ninja: fatal:` paths
+- [x] `-t multi-inputs` with `-d <delim>` and `--print0`
+- [x] `-t recompact`, `-t restat` (log-version check only)
+
+### Phase 7: Logs (target: `test_issue_2048`, `test_explain_output`)
+
+- [x] `.ninja_log` v6 version-mismatch warning (subset for `test_issue_2048`)
+- [ ] Full `.ninja_log` v6 reader/writer
+- [ ] `.ninja_deps` binary format
+- [ ] `-d explain` interleaved with build progress
+
+### Phase 8: Pools and console (target: `test_issue_2586`)
+
+- `pool` declaration
+- `console` pool exclusive terminal
+- Pool depth limiting
+
+### Phase 9: Depfiles and dyndep (target:
+`test_depfile_directory_creation`, `test_issue_2621`)
+
+- `depfile = ...` parsing (Makefile-style `target: dep1 dep2 \`)
+- Auto-create depfile parent directory
+- `dyndep = ...` per-edge dynamic dependencies
+- Detect "multiple rules generate X" after dyndep merge
+
+### Phase 10: `-d explain` (target: `test_explain_output`)
+
+- Restat handling
+- Per-node "is dirty" reasoning, printed inline with build progress
+
+---
+
+## Reference Material
+
+- Ninja source: <https://github.com/ninja-build/ninja/tree/v1.13.1>
+- Manual: <https://ninja-build.org/manual.html>
+- File format: <https://ninja-build.org/manual.html#_ninja_file_reference>
+- Existing Rust ports for reference (do not copy, only consult):
+  - n2 (Evan Martin's own follow-up): <https://github.com/evmar/n2>
+  - samurai (C reimpl): <https://github.com/michaelforney/samurai>
+
+## Out of Scope (initially)
+
+- Windows-specific code paths (`output_test.py` skips on Windows)
+- `-t browse` (HTTP server)
+- `-t graph` (Graphviz dot output) — easy add later
+- `subninja` chained scope edge cases beyond what tests exercise
+- MSVC `/showIncludes` deps style

@@ -1,0 +1,13 @@
+[package]
+name = "rust-ninja"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[[bin]]
+name = "ninja"
+path = "src/main.rs"
+
+[profile.release]
+lto = true
+strip = true

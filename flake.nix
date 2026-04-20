@@ -247,6 +247,7 @@
         ./rust/make
         ./rust/meson
         ./rust/nixos
+        ./rust/ninja
         ./rust/nixpkgs
         ./rust/patch
         ./rust/patchelf

@@ -12,6 +12,8 @@ tmp
 
 # Build artifacts
 build
+!rust/*/src/build
+!rust/*/src/build/**
 dist
 target/
 deployment.zip

@@ -1,0 +1,112 @@
+//! Argument parsing for the ninja CLI.
+//!
+//! Only the flags exercised by the upstream test suite are recognized.
+//! Anything else is rejected so tests notice missing functionality.
+
+#[derive(Debug, Default)]
+pub struct Options {
+    pub manifest_file: String,
+    pub chdir: Option<String>,
+    pub jobs: Option<usize>,
+    pub keep_going: bool,
+    pub quiet: bool,
+    pub verbose: bool,
+    pub show_version: bool,
+    pub debug: Vec<String>,
+    pub tool: Option<String>,
+    pub tool_args: Vec<String>,
+    pub targets: Vec<String>,
+}
+
+pub fn parse(argv: &[String]) -> Result<Options, String> {
+    let mut o = Options {
+        manifest_file: "build.ninja".into(),
+        ..Default::default()
+    };
+    let mut i = 1;
+    while i < argv.len() {
+        let a = &argv[i];
+        match a.as_str() {
+            "--version" => o.show_version = true,
+            "--quiet" => o.quiet = true,
+            "-v" | "--verbose" => o.verbose = true,
+            "-k" => {
+                o.keep_going = true;
+                i += 1;
+                continue;
+            }
+            "-C" => {
+                i += 1;
+                o.chdir = Some(
+                    argv.get(i)
+                        .ok_or_else(|| "-C needs an argument".to_string())?
+                        .clone(),
+                );
+            }
+            "-f" => {
+                i += 1;
+                o.manifest_file = argv
+                    .get(i)
+                    .ok_or_else(|| "-f needs an argument".to_string())?
+                    .clone();
+            }
+            "-j" => {
+                i += 1;
+                let n = argv
+                    .get(i)
+                    .ok_or_else(|| "-j needs an argument".to_string())?;
+                o.jobs = Some(n.parse().map_err(|_| format!("bad -j value: {n}"))?);
+            }
+            "-d" => {
+                i += 1;
+                o.debug.push(
+                    argv.get(i)
+                        .ok_or_else(|| "-d needs an argument".to_string())?
+                        .clone(),
+                );
+            }
+            "-t" => {
+                i += 1;
+                o.tool = Some(
+                    argv.get(i)
+                        .ok_or_else(|| "-t needs an argument".to_string())?
+                        .clone(),
+                );
+                // Everything after -t <name> is forwarded to the tool.
+                i += 1;
+                while i < argv.len() {
+                    o.tool_args.push(argv[i].clone());
+                    i += 1;
+                }
+                return Ok(o);
+            }
+            s if s.starts_with("-C") => {
+                o.chdir = Some(s[2..].to_string());
+            }
+            s if s.starts_with("-j") => {
+                let n = &s[2..];
+                o.jobs = Some(n.parse().map_err(|_| format!("bad -j value: {n}"))?);
+            }
+            s if s.starts_with("-f") => {
+                o.manifest_file = s[2..].to_string();
+            }
+            s if s.starts_with('-') => {
+                return Err(format!("unknown flag: {s}"));
+            }
+            _ => o.targets.push(a.clone()),
+        }
+        i += 1;
+    }
+    Ok(o)
+}
+
+impl Options {
+    #[allow(dead_code)]
+    pub fn jobs_count(&self) -> usize {
+        self.jobs.unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1)
+        })
+    }
+}
