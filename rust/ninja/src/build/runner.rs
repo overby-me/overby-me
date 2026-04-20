@@ -9,12 +9,13 @@
 //! Pools are not yet enforced; the `console` pool needs special handling
 //! and lands in a later phase.
 
+use super::dyndep;
 use super::expand::{expand_in_edge, lookup_either};
 use super::plan::{build_plan, resolve_targets};
 use crate::cli::Options;
 use crate::graph::{Edge, State};
 use crate::status::{Mode, Status};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::process::Command;
 use std::sync::mpsc;
 use std::thread;
@@ -79,18 +80,21 @@ fn schedule(
     }
     for (slot, &edge_idx) in plan.iter().enumerate() {
         let edge = &state.edges[edge_idx];
+        let dyndep_iter = edge.dyndep.iter();
+        let mut seen_dep = HashSet::new();
         for inp in edge
             .inputs
             .iter()
             .chain(&edge.implicit_inputs)
             .chain(&edge.order_only_inputs)
+            .chain(dyndep_iter)
         {
-            if let Some(&prod) = state.producers.get(inp) {
-                if in_plan.contains(&prod) {
-                    if let Some(&dep_slot) = idx_in_plan.get(&prod) {
-                        deps[slot].push(dep_slot);
-                    }
-                }
+            if let Some(&prod) = state.producers.get(inp)
+                && in_plan.contains(&prod)
+                && let Some(&dep_slot) = idx_in_plan.get(&prod)
+                && seen_dep.insert(dep_slot)
+            {
+                deps[slot].push(dep_slot);
             }
         }
     }
@@ -102,12 +106,71 @@ fn schedule(
     let (tx, rx) = mpsc::channel::<EdgeOutcome>();
     let mut hard_failure: Option<u8> = None;
     let mut interrupted = false;
+    // Per-edge mutable copies so dyndep merges (extra outputs/inputs)
+    // can land on the right edge before dispatch.
+    let mut edges: Vec<Edge> = state.edges.to_vec();
+    // Authoritative output → producing-edge map. Seeded from the
+    // manifest, then extended as dyndep files are loaded. A duplicate
+    // insert is the "multiple rules generate X" error.
+    let mut producers: HashMap<String, usize> = state.producers.clone();
+    // Cache of parsed dyndep files keyed by path so we only read each
+    // one once even if multiple edges reference the same file.
+    let mut dyndep_cache: HashMap<String, dyndep::DyndepFile> = HashMap::new();
+    let mut dyndep_failure: Option<String> = None;
+    // Edge indices whose dyndep file has already been merged in. Without
+    // this we'd re-merge (and re-collide-against-self) every loop turn.
+    let mut dyndep_loaded: HashSet<usize> = HashSet::new();
 
     loop {
         // Dispatch every ready edge up to the parallelism cap. We stop
         // launching new work once a hard failure or interruption fires
         // — let in-flight jobs drain so their output is preserved.
-        if hard_failure.is_none() && !interrupted {
+        if hard_failure.is_none() && !interrupted && dyndep_failure.is_none() {
+            // Eagerly merge every loadable dyndep file before deciding
+            // which edges to dispatch. Loading them up-front means a
+            // "multiple rules generate X" collision is detected as
+            // soon as the producing files exist on disk, and *before*
+            // either consumer commits to running.
+            for &edge_idx in plan.iter() {
+                if let Some(dd_path) = edges[edge_idx].dyndep.clone()
+                    && !dyndep_loaded.contains(&edge_idx)
+                    && std::path::Path::new(&dd_path).exists()
+                {
+                    match merge_dyndep(
+                        &mut edges,
+                        edge_idx,
+                        &dd_path,
+                        &mut producers,
+                        &mut dyndep_cache,
+                    ) {
+                        Ok(()) => {
+                            dyndep_loaded.insert(edge_idx);
+                        }
+                        Err(e) => {
+                            dyndep_failure = Some(e);
+                            break;
+                        }
+                    }
+                }
+            }
+            if dyndep_failure.is_some() {
+                continue;
+            }
+            // To reliably detect dyndep collisions, defer dispatching
+            // any consumer of a dyndep file until *every* dyndep-producing
+            // edge in this plan has finished — otherwise we can race a
+            // consumer ahead of the second producer's completion and miss
+            // the "multiple rules generate X" check.
+            let pending_dyndep_producers: HashSet<usize> = edges
+                .iter()
+                .filter_map(|e| e.dyndep.as_deref())
+                .filter_map(|p| state.producers.get(p))
+                .copied()
+                .filter(|prod| {
+                    in_plan.contains(prod) && idx_in_plan.get(prod).is_some_and(|s| !done[*s])
+                })
+                .collect();
+
             for slot in 0..plan.len() {
                 if started[slot] || remaining[slot] > 0 {
                     continue;
@@ -115,9 +178,12 @@ fn schedule(
                 if in_flight >= jobs {
                     break;
                 }
-                started[slot] = true;
                 let edge_idx = plan[slot];
-                let edge = state.edges[edge_idx].clone();
+                if edges[edge_idx].dyndep.is_some() && !pending_dyndep_producers.is_empty() {
+                    continue;
+                }
+                started[slot] = true;
+                let edge = edges[edge_idx].clone();
                 if edge.is_phony() {
                     // Phony "completes" instantly; mark done inline so we
                     // can dispatch its dependents on this same loop turn.
@@ -130,10 +196,7 @@ fn schedule(
                     continue;
                 }
                 in_flight += 1;
-                let prepared = match prepare(state, &edge, opts) {
-                    Ok(p) => p,
-                    Err(e) => return Err(e),
-                };
+                let prepared = prepare(state, &edge, opts)?;
                 status.build_started(&prepared.shown);
                 let tx = tx.clone();
                 thread::spawn(move || {
@@ -147,35 +210,44 @@ fn schedule(
             break;
         }
 
-        // Wait for the next completion. We process them strictly in
-        // arrival order so the status printer's interleaving is
-        // deterministic relative to wall-clock completion.
-        let outcome = match rx.recv() {
-            Ok(o) => o,
+        // Wait for the next completion, then opportunistically drain
+        // any other already-arrived completions before re-entering the
+        // dispatch loop. This keeps pacing deterministic and — more
+        // importantly — lets us load *all* freshly-written dyndep files
+        // before deciding which dependent edges to dispatch, so a
+        // "multiple rules generate X" collision is detected before
+        // either consumer commits to running.
+        let mut batch = match rx.recv() {
+            Ok(o) => vec![o],
             Err(_) => break,
         };
-        in_flight -= 1;
-        let slot = outcome.slot;
-        done[slot] = true;
-        for s2 in 0..plan.len() {
-            if deps[s2].contains(&slot) && !done[s2] {
-                remaining[s2] = remaining[s2].saturating_sub(1);
-            }
+        while let Ok(more) = rx.try_recv() {
+            batch.push(more);
         }
-        match outcome.kind {
-            OutcomeKind::Ok { combined } => {
-                status.build_finished(&outcome.shown, &combined);
-            }
-            OutcomeKind::Failed { code, combined } => {
-                status.build_finished(&outcome.shown, &combined);
-                if hard_failure.is_none() {
-                    hard_failure = Some(code);
+        for outcome in batch {
+            in_flight -= 1;
+            let slot = outcome.slot;
+            done[slot] = true;
+            for s2 in 0..plan.len() {
+                if deps[s2].contains(&slot) && !done[s2] {
+                    remaining[s2] = remaining[s2].saturating_sub(1);
                 }
             }
-            OutcomeKind::Interrupted => {
-                interrupted = true;
+            match outcome.kind {
+                OutcomeKind::Ok { combined } => {
+                    status.build_finished(&outcome.shown, &combined);
+                }
+                OutcomeKind::Failed { code, combined } => {
+                    status.build_finished(&outcome.shown, &combined);
+                    if hard_failure.is_none() {
+                        hard_failure = Some(code);
+                    }
+                }
+                OutcomeKind::Interrupted => {
+                    interrupted = true;
+                }
+                OutcomeKind::SpawnError(e) => return Err(e),
             }
-            OutcomeKind::SpawnError(e) => return Err(e),
         }
     }
 
@@ -184,11 +256,63 @@ fn schedule(
         println!("ninja: build stopped: interrupted by user.");
         return Ok(130);
     }
+    if let Some(msg) = dyndep_failure {
+        // Match upstream wording exactly:
+        //   ninja: build stopped: multiple rules generate X.
+        eprintln!("ninja: build stopped: {msg}.");
+        return Ok(1);
+    }
     if let Some(code) = hard_failure {
         eprintln!("ninja: build stopped: subcommand failed.");
         return Ok(code);
     }
     Ok(0)
+}
+
+/// Load (or fetch from cache) the dyndep file at `path`, locate the
+/// entry whose explicit output matches one of `edges[idx]`'s outputs,
+/// and merge the discovered implicit outputs + inputs into the edge.
+/// On a duplicate output a "multiple rules generate X" string is
+/// returned so the scheduler can short-circuit.
+fn merge_dyndep(
+    edges: &mut [Edge],
+    idx: usize,
+    path: &str,
+    producers: &mut HashMap<String, usize>,
+    cache: &mut HashMap<String, dyndep::DyndepFile>,
+) -> Result<(), String> {
+    if !cache.contains_key(path) {
+        let src =
+            std::fs::read_to_string(path).map_err(|e| format!("loading dyndep '{path}': {e}"))?;
+        let parsed = dyndep::parse(&src).map_err(|e| format!("dyndep '{path}': {e}"))?;
+        cache.insert(path.to_string(), parsed);
+    }
+    let ddf = &cache[path];
+    // Find the entry keyed by any of the edge's explicit outputs.
+    let edge = &mut edges[idx];
+    let key = edge
+        .outputs
+        .iter()
+        .find(|o| ddf.entries.contains_key(o.as_str()))
+        .cloned();
+    let Some(key) = key else {
+        return Ok(());
+    };
+    let entry = &ddf.entries[&key];
+    for new_out in &entry.implicit_outputs {
+        if producers.contains_key(new_out) {
+            return Err(format!("multiple rules generate {new_out}"));
+        }
+        producers.insert(new_out.clone(), idx);
+        edge.implicit_outputs.push(new_out.clone());
+    }
+    for new_in in &entry.implicit_inputs {
+        edge.implicit_inputs.push(new_in.clone());
+    }
+    if entry.restat {
+        edge.bindings.insert("restat".to_string(), "1".to_string());
+    }
+    Ok(())
 }
 
 /// Everything needed to run an edge in a worker thread, pre-resolved on
@@ -341,9 +465,9 @@ fn execute(slot: usize, p: Prepared) -> EdgeOutcome {
 }
 
 fn ensure_parent_dir(path: &str) {
-    if let Some(parent) = std::path::Path::new(path).parent() {
-        if !parent.as_os_str().is_empty() {
-            let _ = std::fs::create_dir_all(parent);
-        }
+    if let Some(parent) = std::path::Path::new(path).parent()
+        && !parent.as_os_str().is_empty()
+    {
+        let _ = std::fs::create_dir_all(parent);
     }
 }

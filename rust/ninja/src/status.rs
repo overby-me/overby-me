@@ -22,15 +22,18 @@ pub enum Mode {
 
 impl Mode {
     pub fn detect() -> Self {
-        // Match ninja: smart terminal requires both an interactive stdout
-        // AND a non-dumb TERM. The empty string is treated as smart so the
-        // upstream output_test.py default_env (TERM='') still exercises
-        // smart-terminal rendering.
-        let term = std::env::var("TERM").unwrap_or_default();
-        if std::io::stdout().is_terminal() && term != "dumb" {
-            Mode::SmartTerminal
-        } else {
-            Mode::Piped
+        // Match ninja's line_printer.cc: smart terminal requires
+        // isatty(1) AND `term` env var present (non-NULL) AND not equal
+        // to "dumb". Crucially, an explicitly-empty TERM ("") is still
+        // "smart" — it's only an UNSET TERM that disables smart mode.
+        // The upstream output_test.py default_env sets TERM='' so the
+        // standard tests do exercise smart-terminal rendering, while
+        // tests that pass a custom env without TERM (e.g.
+        // test_issue_2586 with env={'NINJA_STATUS':''}) end up in the
+        // dumb/piped fallback.
+        match std::env::var("TERM") {
+            Ok(t) if t != "dumb" && std::io::stdout().is_terminal() => Mode::SmartTerminal,
+            _ => Mode::Piped,
         }
     }
 }

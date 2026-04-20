@@ -28,6 +28,10 @@ pub struct Edge {
     pub implicit_inputs: Vec<String>,
     pub order_only_inputs: Vec<String>,
     pub bindings: HashMap<String, String>,
+    /// Path to a dyndep file. When set, the file is treated as an
+    /// order-only input and parsed before the edge is dispatched so its
+    /// extra outputs/inputs are merged into the edge.
+    pub dyndep: Option<String>,
 }
 
 impl Edge {

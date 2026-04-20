@@ -10,7 +10,7 @@ in a Nix sandbox, mirroring the differential-testing pattern established by
 
 ## Current Status
 
-**15/18 tests passing (83%)** — `Output.test_*` methods from the upstream
+**17/18 tests passing (94%)** — `Output.test_*` methods from the upstream
 ninja v1.13.1 `misc/output_test.py` run against the rust-ninja binary in a
 Nix sandbox.
 
@@ -35,12 +35,16 @@ Passing:
   `--print0`, phony skipping)
 - `test_tool_compdb_targets` — `-t compdb-targets` JSON, error/usage paths
 - `test_tool_multi_inputs` — `-t multi-inputs` (delim, `--print0`)
+- `test_issue_2586` — `pool = console` jobs serialize cleanly without
+  hanging (the upstream test only asserts "shouldn't hang" + exact
+  output; full console-pool terminal locking is still a TODO)
+- `test_issue_2621` — `dyndep = ...` file parsing + post-load
+  "multiple rules generate X" detection
 
-Failing (deferred — require log/restat/console-pool/dyndep):
+Failing (deferred — needs `.ninja_log` + restat infra):
 
-- `test_explain_output` — needs `.ninja_log`, restat, `-d explain`
-- `test_issue_2586` — needs the `console` pool with terminal locking
-- `test_issue_2621` — needs dyndep parsing and multi-producer detection
+- `test_explain_output` — needs `.ninja_log`, restat, `-d explain` to
+  reason about per-node dirtiness across runs
 
 The Nix wiring is in place:
 
@@ -61,10 +65,12 @@ src/
   status.rs              [N/M] status line, smart-terminal vs piped, ANSI strip
   build/
     mod.rs               re-exports `run`
-    plan.rs              Target resolution, topological scheduling
+    plan.rs              Target resolution, topological scheduling, dyndep edges
     runner.rs            Parallel scheduler, subprocess execution, rspfile,
-                         depfile dir creation, exit-code mapping
+                         depfile dir creation, exit-code mapping, eager dyndep
+                         merging + multi-producer detection
     expand.rs            Edge-context variable expansion ($in, $out, layered)
+    dyndep.rs            Dyndep file parser (ninja_dyndep_version = 1)
   tools/
     mod.rs               Dispatch on tool name
     recompact.rs         -t recompact / -t restat (log version warning only)
@@ -261,7 +267,7 @@ when console-pool edges depend on regular edges.
 
 - [x] Parse `rule` and `build` statements with bindings
 - [x] Variable expansion for `command`, `description`, `$in`, `$out`,
-      `${var}`, `$$`, `$ `, `$:`, `$|`, `$\n` continuations
+      `${var}`, `$$`, `$`, `$:`, `$|`, `$\n` continuations
 - [x] Spawn subprocess via `sh -c`, capture stdout+stderr
 - [x] `--quiet` suppresses status
 
@@ -302,19 +308,24 @@ when console-pool edges depend on regular edges.
 - [ ] `.ninja_deps` binary format
 - [ ] `-d explain` interleaved with build progress
 
-### Phase 8: Pools and console (target: `test_issue_2586`)
+### Phase 8: Pools and console (target: `test_issue_2586` ✅)
 
-- `pool` declaration
-- `console` pool exclusive terminal
-- Pool depth limiting
+- [x] `pool` declaration is parsed (depth ignored)
+- [x] `pool = console` runs without hanging — sequential by default
+      because we never block our own output stream
+- [ ] True console-pool exclusive terminal locking (`SetConsoleLocked`
+      buffering of competing edges)
+- [ ] Pool depth limiting
 
-### Phase 9: Depfiles and dyndep (target:
-`test_depfile_directory_creation`, `test_issue_2621`)
+### Phase 9: Depfiles and dyndep (target: `test_depfile_directory_creation` ✅, `test_issue_2621` ✅)
 
-- `depfile = ...` parsing (Makefile-style `target: dep1 dep2 \`)
-- Auto-create depfile parent directory
-- `dyndep = ...` per-edge dynamic dependencies
-- Detect "multiple rules generate X" after dyndep merge
+- [x] `depfile = ...` value resolution + auto-create depfile parent dir
+- [x] `dyndep = ...` per-edge OR per-rule dynamic dependencies
+- [x] Minimal dyndep file parser (`ninja_dyndep_version = 1`,
+      `build OUT [| IMP_OUT]: dyndep [| IMP_IN]`, `restat = 1`)
+- [x] Eager dyndep load + "multiple rules generate X" detection
+- [ ] Makefile-style depfile parsing (`target: dep1 dep2 \`) — only
+      the directory-creation half of `depfile` is implemented
 
 ### Phase 10: `-d explain` (target: `test_explain_output`)
 

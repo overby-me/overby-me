@@ -4,6 +4,7 @@
 //!   - `expand`: edge-context variable expansion for `command`, `$in`,
 //!     `$out`, etc.
 
+mod dyndep;
 mod expand;
 mod plan;
 mod runner;

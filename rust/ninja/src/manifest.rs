@@ -343,6 +343,23 @@ impl<'a> Parser<'a> {
                 .map(|s| expand_simple(&s, &state.bindings, None, None))
                 .collect()
         };
+        // \`dyndep = ...\` may live on the edge OR be inherited from
+        // the rule (the test_issue_2621 plan declares it on the rule).
+        // Resolve via the standard layered lookup so per-edge bindings
+        // shadow rule bindings.
+        let rule_obj = state.rules.get(&rule);
+        let dyndep_raw = bindings
+            .get("dyndep")
+            .cloned()
+            .or_else(|| rule_obj.and_then(|r| r.bindings.get("dyndep").cloned()));
+        let dyndep = dyndep_raw.map(|s| {
+            expand_simple(
+                &s,
+                &state.bindings,
+                Some(&bindings),
+                rule_obj.map(|r| &r.bindings),
+            )
+        });
         Ok(Edge {
             rule,
             outputs: expand_all(outputs),
@@ -351,6 +368,7 @@ impl<'a> Parser<'a> {
             implicit_inputs: expand_all(implicit_inputs),
             order_only_inputs: expand_all(order_only_inputs),
             bindings,
+            dyndep,
         })
     }
 }
@@ -371,18 +389,18 @@ pub fn expand_simple(
     rule_bindings: Option<&HashMap<String, String>>,
 ) -> String {
     expand(s, &|name| {
-        if let Some(b) = edge_bindings {
-            if let Some(v) = b.get(name) {
-                return Some(v.clone());
-            }
+        if let Some(b) = edge_bindings
+            && let Some(v) = b.get(name)
+        {
+            return Some(v.clone());
         }
-        if let Some(b) = rule_bindings {
-            if let Some(v) = b.get(name) {
-                // Rule values may themselves reference file-scope vars, but
-                // not other rule vars at this level. Recurse against file
-                // scope only to avoid loops.
-                return Some(expand_simple(v, file_scope, None, None));
-            }
+        if let Some(b) = rule_bindings
+            && let Some(v) = b.get(name)
+        {
+            // Rule values may themselves reference file-scope vars, but
+            // not other rule vars at this level. Recurse against file
+            // scope only to avoid loops.
+            return Some(expand_simple(v, file_scope, None, None));
         }
         file_scope.get(name).cloned()
     })

@@ -79,6 +79,11 @@ fn visit(
     {
         visit(state, inp, order, seen, on_stack)?;
     }
+    // The dyndep file (if any) must be produced before this edge runs,
+    // so include its producer in the plan as a real dependency.
+    if let Some(dd) = &edge.dyndep {
+        visit(state, dd, order, seen, on_stack)?;
+    }
     on_stack.remove(&idx);
     order.push(idx);
     Ok(())

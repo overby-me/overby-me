@@ -23,11 +23,11 @@ pub fn expand_in_edge(state: &State, edge: &Edge, value: &str) -> String {
             if let Some(v) = edge.bindings.get(name) {
                 return Some(v.clone());
             }
-            if let Some(r) = rule {
-                if let Some(v) = r.bindings.get(name) {
-                    // Recursive expansion against file scope only.
-                    return Some(expand(v, &|n2| state.bindings.get(n2).cloned()));
-                }
+            if let Some(r) = rule
+                && let Some(v) = r.bindings.get(name)
+            {
+                // Recursive expansion against file scope only.
+                return Some(expand(v, &|n2| state.bindings.get(n2).cloned()));
             }
             state.bindings.get(name).cloned()
         }
