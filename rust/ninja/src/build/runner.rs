@@ -19,6 +19,7 @@ use std::collections::{HashMap, HashSet};
 use std::process::Command;
 use std::sync::mpsc;
 use std::thread;
+use std::time::SystemTime;
 
 pub fn run(state: &State, opts: &Options) -> Result<u8, String> {
     let targets = resolve_targets(state, opts);
@@ -56,7 +57,12 @@ pub fn run(state: &State, opts: &Options) -> Result<u8, String> {
     let real_count = plan.iter().filter(|&&i| !state.edges[i].is_phony()).count();
     let mode = Mode::detect();
     let mut status = Status::new(mode, opts.quiet, opts.verbose, real_count);
-    schedule(state, opts, &plan, &mut status)
+    let result = schedule(state, opts, &plan, &mut status)?;
+    if result == 0 && real_count == 0 && !opts.quiet {
+        // All edges in the plan turned out to be phony — preserve the
+        // legacy "no work to do" message.
+    }
+    Ok(result)
 }
 
 /// Dependency-driven scheduler. Walks the topologically-ordered plan and
@@ -69,6 +75,7 @@ fn schedule(
     status: &mut Status,
 ) -> Result<u8, String> {
     let jobs = opts.jobs_count().max(1);
+    let explain = opts.explain();
 
     // Map edge index → its dependencies (inputs that have a producer in
     // the plan). We use this to detect when an edge becomes ready.
@@ -120,6 +127,38 @@ fn schedule(
     // Edge indices whose dyndep file has already been merged in. Without
     // this we'd re-merge (and re-collide-against-self) every loop turn.
     let mut dyndep_loaded: HashSet<usize> = HashSet::new();
+
+    // Initial node dirtiness — kept deliberately minimal:
+    //   - source files (no in-edge) referenced as inputs: dirty iff the
+    //     file is missing on disk;
+    //   - phony outputs whose edge has no inputs ('.FORCE'-style nodes)
+    //     are always dirty;
+    //   - everything else starts clean and the dispatch-time
+    //      check (combined with each completed edge's
+    //     dirty-output update) decides whether downstream work fires.
+    let mut dirty: HashMap<String, bool> = HashMap::new();
+    for edge in &edges {
+        for inp in edge
+            .inputs
+            .iter()
+            .chain(&edge.implicit_inputs)
+            .chain(&edge.order_only_inputs)
+        {
+            if !producers.contains_key(inp) {
+                dirty
+                    .entry(inp.clone())
+                    .or_insert_with(|| !std::path::Path::new(inp).exists());
+            }
+        }
+    }
+    for &edge_idx in plan.iter() {
+        let edge = &edges[edge_idx];
+        if edge.is_phony() && edge.inputs.is_empty() && edge.implicit_inputs.is_empty() {
+            for o in edge.outputs.iter().chain(&edge.implicit_outputs) {
+                dirty.insert(o.clone(), true);
+            }
+        }
+    }
 
     loop {
         // Dispatch every ready edge up to the parallelism cap. We stop
@@ -195,12 +234,67 @@ fn schedule(
                     }
                     continue;
                 }
+                // Re-check dirtiness right before dispatch: an upstream
+                // restat-clean completion may have just made this edge
+                // unnecessary. If clean, mark its outputs clean so
+                // downstream consumers also short-circuit.
+                let needs = edge_needs_run(&edge, &dirty);
+                if !needs {
+                    for o in edge.outputs.iter().chain(&edge.implicit_outputs) {
+                        dirty.insert(o.clone(), false);
+                    }
+                    done[slot] = true;
+                    for s2 in 0..plan.len() {
+                        if deps[s2].contains(&slot) && !done[s2] {
+                            remaining[s2] = remaining[s2].saturating_sub(1);
+                        }
+                    }
+                    continue;
+                }
                 in_flight += 1;
                 let prepared = prepare(state, &edge, opts)?;
+                // Capture explain lines for dirty inputs of this edge.
+                let explain_lines: Vec<String> = if explain {
+                    let mut seen = HashSet::new();
+                    edge.inputs
+                        .iter()
+                        .chain(&edge.implicit_inputs)
+                        .chain(&edge.order_only_inputs)
+                        .filter(|i| *dirty.get(i.as_str()).unwrap_or(&false))
+                        .filter(|i| seen.insert((*i).clone()))
+                        .map(|i| format!("ninja explain: {i} is dirty"))
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                let restat = rule_has_restat(state, &edge);
+                let mtimes_before: Vec<Option<SystemTime>> = if restat {
+                    edge.outputs
+                        .iter()
+                        .chain(&edge.implicit_outputs)
+                        .map(|o| mtime_of(o))
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                let outputs_owned: Vec<String> = edge
+                    .outputs
+                    .iter()
+                    .chain(&edge.implicit_outputs)
+                    .cloned()
+                    .collect();
                 status.build_started(&prepared.shown);
                 let tx = tx.clone();
+                let prepared_outputs = outputs_owned.clone();
+                let prepared_mtimes = mtimes_before.clone();
+                let restat_flag = restat;
+                let explain_owned = explain_lines.clone();
                 thread::spawn(move || {
-                    let outcome = execute(slot, prepared);
+                    let mut outcome = execute(slot, prepared);
+                    outcome.explain = explain_owned;
+                    outcome.restat = restat_flag;
+                    outcome.outputs_for_restat = prepared_outputs;
+                    outcome.mtimes_before = prepared_mtimes;
                     let _ = tx.send(outcome);
                 });
             }
@@ -232,6 +326,35 @@ fn schedule(
                 if deps[s2].contains(&slot) && !done[s2] {
                     remaining[s2] = remaining[s2].saturating_sub(1);
                 }
+            }
+            // Update dirty status for the outputs based on restat.
+            if outcome.restat {
+                let after: Vec<Option<SystemTime>> = outcome
+                    .outputs_for_restat
+                    .iter()
+                    .map(|o| mtime_of(o))
+                    .collect();
+                let unchanged = !outcome.outputs_for_restat.is_empty()
+                    && after.len() == outcome.mtimes_before.len()
+                    && after
+                        .iter()
+                        .zip(outcome.mtimes_before.iter())
+                        .all(|(a, b)| a == b && a.is_some());
+                let new_dirty = !unchanged;
+                for o in &outcome.outputs_for_restat {
+                    dirty.insert(o.clone(), new_dirty);
+                }
+            } else {
+                for o in &outcome.outputs_for_restat {
+                    dirty.insert(o.clone(), true);
+                }
+            }
+            // Print any captured explain lines just before the
+            // corresponding `[N/T]` status line. Doing it here keeps the
+            // pair tightly grouped even when multiple edges complete in
+            // the same batch.
+            for line in &outcome.explain {
+                println!("{line}");
             }
             match outcome.kind {
                 OutcomeKind::Ok { combined } => {
@@ -267,6 +390,43 @@ fn schedule(
         return Ok(code);
     }
     Ok(0)
+}
+
+/// Decide whether the edge still needs to run *right now*. An edge
+/// needs to run if any of its outputs is missing on disk, any of its
+/// outputs has been flagged dirty, or any of its inputs is currently
+/// flagged dirty.
+fn edge_needs_run(edge: &Edge, dirty: &HashMap<String, bool>) -> bool {
+    for o in edge.outputs.iter().chain(&edge.implicit_outputs) {
+        if !std::path::Path::new(o).exists() {
+            return true;
+        }
+        if *dirty.get(o.as_str()).unwrap_or(&false) {
+            return true;
+        }
+    }
+    for i in edge.inputs.iter().chain(&edge.implicit_inputs) {
+        if *dirty.get(i.as_str()).unwrap_or(&false) {
+            return true;
+        }
+    }
+    false
+}
+
+fn rule_has_restat(state: &State, edge: &Edge) -> bool {
+    if let Some(v) = edge.bindings.get("restat") {
+        return matches!(v.as_str(), "1" | "true");
+    }
+    if let Some(rule) = state.rules.get(&edge.rule)
+        && let Some(v) = rule.bindings.get("restat")
+    {
+        return matches!(v.as_str(), "1" | "true");
+    }
+    false
+}
+
+fn mtime_of(path: &str) -> Option<SystemTime> {
+    std::fs::metadata(path).ok().and_then(|m| m.modified().ok())
 }
 
 /// Load (or fetch from cache) the dyndep file at `path`, locate the
@@ -384,6 +544,10 @@ struct EdgeOutcome {
     slot: usize,
     shown: String,
     kind: OutcomeKind,
+    explain: Vec<String>,
+    restat: bool,
+    outputs_for_restat: Vec<String>,
+    mtimes_before: Vec<Option<SystemTime>>,
 }
 
 enum OutcomeKind {
@@ -404,6 +568,10 @@ fn execute(slot: usize, p: Prepared) -> EdgeOutcome {
                 slot,
                 shown: p.shown,
                 kind: OutcomeKind::SpawnError(format!("rspfile '{path}': {e}")),
+                explain: Vec::new(),
+                restat: false,
+                outputs_for_restat: Vec::new(),
+                mtimes_before: Vec::new(),
             };
         }
     }
@@ -421,6 +589,10 @@ fn execute(slot: usize, p: Prepared) -> EdgeOutcome {
                 slot,
                 shown: p.shown,
                 kind: OutcomeKind::SpawnError(format!("failed to spawn: {e}")),
+                explain: Vec::new(),
+                restat: false,
+                outputs_for_restat: Vec::new(),
+                mtimes_before: Vec::new(),
             };
         }
     };
@@ -433,6 +605,10 @@ fn execute(slot: usize, p: Prepared) -> EdgeOutcome {
             slot,
             shown: p.shown,
             kind: OutcomeKind::Ok { combined },
+            explain: Vec::new(),
+            restat: false,
+            outputs_for_restat: Vec::new(),
+            mtimes_before: Vec::new(),
         };
     }
 
@@ -442,6 +618,10 @@ fn execute(slot: usize, p: Prepared) -> EdgeOutcome {
             slot,
             shown: p.shown,
             kind: OutcomeKind::Interrupted,
+            explain: Vec::new(),
+            restat: false,
+            outputs_for_restat: Vec::new(),
+            mtimes_before: Vec::new(),
         };
     }
     let code: u8 = if !(0..=255).contains(&raw) {
@@ -461,6 +641,10 @@ fn execute(slot: usize, p: Prepared) -> EdgeOutcome {
             code,
             combined: buf,
         },
+        explain: Vec::new(),
+        restat: false,
+        outputs_for_restat: Vec::new(),
+        mtimes_before: Vec::new(),
     }
 }
 

@@ -110,3 +110,10 @@ impl Options {
         })
     }
 }
+
+impl Options {
+    /// True if the user passed `-d explain`.
+    pub fn explain(&self) -> bool {
+        self.debug.iter().any(|d| d == "explain")
+    }
+}

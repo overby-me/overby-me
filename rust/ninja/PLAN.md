@@ -10,7 +10,7 @@ in a Nix sandbox, mirroring the differential-testing pattern established by
 
 ## Current Status
 
-**17/18 tests passing (94%)** — `Output.test_*` methods from the upstream
+**18/18 tests passing (100%)** — `Output.test_*` methods from the upstream
 ninja v1.13.1 `misc/output_test.py` run against the rust-ninja binary in a
 Nix sandbox.
 
@@ -41,10 +41,11 @@ Passing:
 - `test_issue_2621` — `dyndep = ...` file parsing + post-load
   "multiple rules generate X" detection
 
-Failing (deferred — needs `.ninja_log` + restat infra):
+Recently added:
 
-- `test_explain_output` — needs `.ninja_log`, restat, `-d explain` to
-  reason about per-node dirtiness across runs
+- `test_explain_output` — `-d explain` lines emitted before each
+  dispatched edge, plus rule-level `restat = true` semantics that prune
+  downstream edges when an output's mtime is unchanged across a re-run.
 
 The Nix wiring is in place:
 
@@ -301,7 +302,7 @@ when console-pool edges depend on regular edges.
 - [x] `-t multi-inputs` with `-d <delim>` and `--print0`
 - [x] `-t recompact`, `-t restat` (log-version check only)
 
-### Phase 7: Logs (target: `test_issue_2048`, `test_explain_output`)
+### Phase 7: Logs (target: `test_issue_2048` ✅, `test_explain_output` ✅ — partial)
 
 - [x] `.ninja_log` v6 version-mismatch warning (subset for `test_issue_2048`)
 - [ ] Full `.ninja_log` v6 reader/writer
@@ -327,10 +328,14 @@ when console-pool edges depend on regular edges.
 - [ ] Makefile-style depfile parsing (`target: dep1 dep2 \`) — only
       the directory-creation half of `depfile` is implemented
 
-### Phase 10: `-d explain` (target: `test_explain_output`)
+### Phase 10: `-d explain` ✅ (target: `test_explain_output`)
 
-- Restat handling
-- Per-node "is dirty" reasoning, printed inline with build progress
+- [x] Rule-level `restat = true` short-circuits downstream edges when
+      output mtime is unchanged across a re-run
+- [x] Per-node "is dirty" reasoning, printed inline with build progress
+      (`ninja explain: X is dirty` before each dispatched edge)
+- [ ] Full `.ninja_log` integration so dirtiness survives across
+      independent ninja invocations even without `restat`
 
 ---
 
