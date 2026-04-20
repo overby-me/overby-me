@@ -576,11 +576,22 @@ fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options)
                                     if !domain_matches(&request_host, domain) {
                                         continue;
                                     }
-                                    if !path.starts_with(cookie_path) {
+                                    // If no Path attribute was set, curl loads the cookie
+                                    // with NULL path (matches anything, sorts at length 0).
+                                    let had_path_attr = cookie_str.split(";").skip(1).any(|a| {
+                                        let a = a.trim();
+                                        let key = a.split("=").next().unwrap_or("").trim();
+                                        key.eq_ignore_ascii_case("path")
+                                    });
+                                    let effective_path: &str =
+                                        if had_path_attr { cookie_path } else { "" };
+                                    if !effective_path.is_empty()
+                                        && !path.starts_with(effective_path)
+                                    {
                                         continue;
                                     }
                                     file_pairs.push((
-                                        cookie_path.len(),
+                                        effective_path.len(),
                                         domain.len(),
                                         name.len(),
                                         format!("{name}={value}"),
