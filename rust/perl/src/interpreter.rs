@@ -7539,10 +7539,23 @@ impl Interpreter {
     ) -> (bool, usize) {
         let pattern = self.interp_regex_pattern(pattern);
         let (pattern, flags) = unwrap_qr(&pattern, flags);
+        let pattern = perl_backslash_n(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
-        let case_insensitive = flags.contains('i');
-        let pat = if case_insensitive {
-            format!("(?i){pattern}")
+        let mut prefix = String::new();
+        if flags.contains('i') {
+            prefix.push('i');
+        }
+        if flags.contains('s') {
+            prefix.push('s');
+        }
+        if flags.contains('x') {
+            prefix.push('x');
+        }
+        if flags.contains('m') {
+            prefix.push('m');
+        }
+        let pat = if !prefix.is_empty() {
+            format!("(?{prefix}){pattern}")
         } else {
             pattern.clone()
         };
@@ -7596,10 +7609,23 @@ impl Interpreter {
         // If the pattern came from a stringified qr// — format `(?^flags:pat)` —
         // peel it back out so the regex engine sees a plain pattern.
         let (pattern, flags) = unwrap_qr(&pattern, flags);
+        let pattern = perl_backslash_n(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
-        let case_insensitive = flags.contains('i');
-        let pat = if case_insensitive {
-            format!("(?i){pattern}")
+        let mut prefix = String::new();
+        if flags.contains('i') {
+            prefix.push('i');
+        }
+        if flags.contains('s') {
+            prefix.push('s');
+        }
+        if flags.contains('x') {
+            prefix.push('x');
+        }
+        if flags.contains('m') {
+            prefix.push('m');
+        }
+        let pat = if !prefix.is_empty() {
+            format!("(?{prefix}){pattern}")
         } else {
             pattern.clone()
         };
@@ -9951,6 +9977,73 @@ fn perl_dollar_anchor(pattern: &str, multiline: bool) -> String {
                 i += 1;
                 continue;
             }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Translate Perl's `\N` regex escape (any non-newline) into the rust-regex
+/// equivalent `[^\n]`. Supports bare `\N`, `\N{N}`, `\N{N,M}` (with optional
+/// inner whitespace under `/x`). Leaves `\N{NAME}` and `\N{U+XXXX}` alone —
+/// those are named characters / codepoints and need a different translation.
+/// Skips inside `[...]` character classes.
+fn perl_backslash_n(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if !in_class && c == '\\' && i + 1 < chars.len() && chars[i + 1] == 'N' {
+            // Distinguish bare `\N` from `\N{...}`.
+            let mut j = i + 2;
+            // Optional whitespace before `{` allowed under /x.
+            let ws_start = j;
+            while j < chars.len() && chars[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < chars.len() && chars[j] == '{' {
+                // Find matching `}`.
+                let body_start = j + 1;
+                let mut k = body_start;
+                while k < chars.len() && chars[k] != '}' {
+                    k += 1;
+                }
+                if k < chars.len() {
+                    let body: String = chars[body_start..k].iter().collect();
+                    let trimmed: String = body.split_whitespace().collect();
+                    // Decide: integer count `\N{N}` or `\N{N,M}` => repetition.
+                    let is_count = !trimmed.is_empty()
+                        && trimmed.chars().all(|c| c.is_ascii_digit() || c == ',');
+                    if is_count {
+                        out.push_str("[^\\n]{");
+                        out.push_str(&trimmed);
+                        out.push('}');
+                        i = k + 1;
+                        continue;
+                    }
+                    // Named char / codepoint — leave as-is for now.
+                    let _ = ws_start;
+                }
+            } else {
+                // Bare `\N`.
+                out.push_str("[^\\n]");
+                i += 2;
+                continue;
+            }
+        }
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+        } else if in_class && c == ']' {
+            in_class = false;
         }
         out.push(c);
         i += 1;

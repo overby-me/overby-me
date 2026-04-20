@@ -592,6 +592,14 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
 
 ### Recent fixes
 
+- **Regex `/s` `/x` `/m` flag prefixes + `\N` translator**: regex_match
+  and regex_match_pos now propagate `/s`, `/x`, `/m` flags into the
+  rust-regex `(?…)` flag prefix (case-insensitive `/i` was already
+  wired). Also added a `\N` → `[^\n]` translator that handles bare
+  `\N`, `\N{N}`, and `\N{N,M}` (with `/x` whitespace). `\N{NAME}` and
+  `\N{U+XXXX}` are still left alone. Improves re/regexp.t: ~106 fewer
+  diff lines vs reference perl in local runs.
+
 - **`do FILE` runs in its own lexical scope**: previously a `do FILE`
   call did `push_scope` on top of the caller's scope stack, so my-vars
   declared in the calling file were visible inside the loaded file.
