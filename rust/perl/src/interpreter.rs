@@ -8668,26 +8668,42 @@ impl Interpreter {
             }
             filename = file_val.to_str();
             match mode.as_str() {
-                ">" => write_mode = true,
-                ">>" => {
+                ">" | "+>" => write_mode = true,
+                ">>" | "+>>" => {
                     write_mode = true;
                     append_mode = true;
                 }
-                "<" | "" => {} // read mode (default)
+                "+<" => write_mode = true, // read+write
+                "<" | "" => {}             // read mode (default)
                 _ => {}
             }
         } else {
             // 2-arg form: open(FH, "mode+file")
             let raw = self.eval_expr(&args[1]).to_str();
-            if let Some(rest) = raw.strip_prefix(">>") {
-                filename = rest.to_string();
+            // Handle r/w forms first: "+>>file", "+>file", "+<file" map to
+            // append+read / write+truncate+read / read+write respectively.
+            // For our purposes (tell/seek) treat +>> as write-append, +> as
+            // write-truncate, +< as read+write through the read handle.
+            if let Some(rest) = raw.strip_prefix("+>>") {
+                filename = rest.trim_start().to_string();
+                write_mode = true;
+                append_mode = true;
+            } else if let Some(rest) = raw.strip_prefix("+>") {
+                filename = rest.trim_start().to_string();
+                write_mode = true;
+            } else if let Some(rest) = raw.strip_prefix("+<") {
+                filename = rest.trim_start().to_string();
+                // read+write — use write_mode so subsequent prints work.
+                write_mode = true;
+            } else if let Some(rest) = raw.strip_prefix(">>") {
+                filename = rest.trim_start().to_string();
                 write_mode = true;
                 append_mode = true;
             } else if let Some(rest) = raw.strip_prefix('>') {
-                filename = rest.to_string();
+                filename = rest.trim_start().to_string();
                 write_mode = true;
             } else if let Some(rest) = raw.strip_prefix('<') {
-                filename = rest.to_string();
+                filename = rest.trim_start().to_string();
             } else {
                 filename = raw;
             }
@@ -8704,7 +8720,13 @@ impl Interpreter {
             };
             let resolved = self.resolve_fh(&fh_name);
             match file {
-                Ok(f) => {
+                Ok(mut f) => {
+                    // For append mode, perl positions the file pointer at
+                    // end-of-file on open so an immediate `tell` returns
+                    // the existing file size (not 0).
+                    if append_mode {
+                        let _ = f.seek(SeekFrom::End(0));
+                    }
                     self.write_handles.insert(resolved, BufWriter::new(f));
                     Value::Num(1.0)
                 }

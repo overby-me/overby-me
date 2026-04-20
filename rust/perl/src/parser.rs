@@ -857,6 +857,48 @@ impl Parser {
     }
 
     fn parse_local_decl(&mut self) -> Stmt {
+        // `local($$ref)`, `local(@$ref)`, `local(%$ref)` — perl raises
+        // "Can't localize through a reference" at compile time. Detect
+        // this at parse time by looking for a deref token right after
+        // `local` or `local(`.
+        let tok_after_paren = if matches!(self.tok(), Token::LParen) {
+            self.peek(1)
+        } else {
+            self.tok()
+        };
+        if matches!(
+            tok_after_paren,
+            Token::ScalarDeref(_) | Token::ArrayDeref(_) | Token::HashDeref(_)
+        ) {
+            // Consume the whole local(...) / local ... form so the rest
+            // of the program still parses; then emit a Die at runtime.
+            if self.eat(&Token::LParen) {
+                let mut depth = 1;
+                while depth > 0 && !matches!(self.tok(), Token::Eof) {
+                    match self.tok() {
+                        Token::LParen => depth += 1,
+                        Token::RParen => depth -= 1,
+                        _ => {}
+                    }
+                    if depth > 0 {
+                        self.pos += 1;
+                    }
+                }
+                self.eat(&Token::RParen);
+                // Optional `= EXPR` after the paren group.
+                if self.eat(&Token::Assign) {
+                    let _ = self.parse_expr();
+                }
+            } else {
+                let _ = self.parse_unary();
+                if self.eat(&Token::Assign) {
+                    let _ = self.parse_expr();
+                }
+            }
+            return Stmt::Die(vec![Expr::StringLit(
+                "Can't localize through a reference".to_string(),
+            )]);
+        }
         // `local $NAME{KEY}` / `local $NAME[IDX]` — hash/array element
         // localisation. Peek before falling through to parse_var_list,
         // which only understands bare `$`/`@`/`%` vars.
@@ -2480,7 +2522,8 @@ impl Parser {
             }
 
             // Named unary builtins
-            Token::Abs
+            Token::Exists
+            | Token::Abs
             | Token::Int
             | Token::Length
             | Token::Chr
@@ -2501,6 +2544,7 @@ impl Parser {
             | Token::Tell
             | Token::Wantarray => {
                 let func = match self.tok() {
+                    Token::Exists => "exists",
                     Token::Abs => "abs",
                     Token::Int => "int",
                     Token::Length => "length",
@@ -2685,7 +2729,6 @@ impl Parser {
             | Token::Unshift
             | Token::Splice
             | Token::Delete
-            | Token::Exists
             | Token::Reverse
             | Token::Join
             | Token::Split

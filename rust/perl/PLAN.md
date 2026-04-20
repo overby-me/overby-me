@@ -592,6 +592,26 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
 
 ### Recent fixes
 
+- **`local($$ref)` / `local(@$ref)` / `local(%$ref)` raise**: at parse
+  time we now detect a deref token immediately after `local` (or
+  `local(`) and emit a `Stmt::Die("Can't localize through a reference")`
+  instead of silently accepting the localisation. This matches perl's
+  compile-time error and unblocks op/local tests 21–23.
+
+- **`exists` is named-unary, not list-op**: `exists $h{k} ? "" : "not "`
+  was being parsed as `exists($h{k} ? "" : "not ")` (greedy list-op
+  consumption of the whole ternary), so `exists` saw a non-hash-element
+  and returned 0. Moved `Token::Exists` from the list-builtins arm into
+  the named-unary arm, where parsing stops at `?` / `:` / boolean ops.
+  Net base-lex test 56 + 58 fix.
+- **2-arg/3-arg open: `+>>`, `+>`, `+<` modes; append seek-to-end on
+  open**: 2-arg `open(FH, "+>>file")` and 3-arg `open(FH, "+>>", file)`
+  now both recognise the read+write/append modes. After opening in
+  append mode, we explicitly `seek(End(0))` so an immediate `tell`
+  returns the existing file size (matching POSIX/perl behaviour rather
+  than the Rust default of position 0). Drops io/tell from 4 to 2
+  sandbox failures (fixes tests 27 and 28).
+
 - **Coercible globs and tracking through `eof` / `seek`**: `$fh = *FH; tell($fh)`
   was returning -1 because `resolve_fh` didn't strip the `*` prefix that
   Glob values stringify to (`*main::FH`). Added a `strip_prefix('*')`
