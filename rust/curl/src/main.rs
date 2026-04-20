@@ -105,6 +105,19 @@ fn main() {
         eprintln!("Warning: Got more output options than URLs");
     }
 
+    // Pre-flight: verify --etag-save path is writable. curl exits 26 (read/write
+    // error) if the etag file can't be created, before attempting any transfer.
+    if let Some(ref etag_path) = opts.etag_save
+        && let Err(e) = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(etag_path)
+    {
+        eprintln!("curl: (26) Failed to open {}: {}", etag_path.display(), e);
+        process::exit(26);
+    }
+
     // -C - (auto-resume):
     //   - GET: use the existing output file's size as the resume offset.
     //   - PUT (-T): curl can't know server-side size, so it always starts from
@@ -160,16 +173,25 @@ fn main() {
         let result = if opts.retry > 0 {
             let mut last_err = String::new();
             let mut resp = None;
+            let retry_start = std::time::Instant::now();
+            let mut next_delay_secs: u64 = 0;
             for attempt in 0..=opts.retry {
                 if attempt > 0 {
+                    // Check --retry-max-time: if the next sleep would push us past
+                    // the budget, abort the retry loop and return the last response.
+                    if let Some(budget) = opts.retry_max_time {
+                        let elapsed = retry_start.elapsed().as_secs();
+                        if elapsed + next_delay_secs > budget {
+                            break;
+                        }
+                    }
                     if !opts.silent {
                         eprintln!(
-                            "Warning: Transient problem. Will retry in {} seconds. ({attempt}/{} retries)",
-                            attempt * 2,
+                            "Warning: Transient problem. Will retry in {next_delay_secs} seconds. ({attempt}/{} retries)",
                             opts.retry,
                         );
                     }
-                    std::thread::sleep(Duration::from_secs((attempt * 2) as u64));
+                    std::thread::sleep(Duration::from_secs(next_delay_secs));
                 }
                 match perform(url_str, &opts) {
                     Ok(r) => {
@@ -180,6 +202,14 @@ fn main() {
                                 retry_prefix.extend_from_slice(&r.header_bytes);
                             }
                             retry_prefix.extend_from_slice(&r.body);
+                            // Honor Retry-After header (seconds) for the delay.
+                            next_delay_secs = r
+                                .headers
+                                .iter()
+                                .find(|(k, _)| k.eq_ignore_ascii_case("retry-after"))
+                                .and_then(|(_, v)| v.trim().parse::<u64>().ok())
+                                .unwrap_or((attempt as u64 + 1) * 2);
+                            resp = Some(r);
                             continue;
                         }
                         resp = Some(r);
@@ -187,6 +217,7 @@ fn main() {
                     }
                     Err(e) => {
                         last_err = e;
+                        next_delay_secs = (attempt as u64 + 1) * 2;
                         if attempt == opts.retry {
                             break;
                         }

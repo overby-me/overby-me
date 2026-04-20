@@ -247,6 +247,11 @@ pub(crate) fn parse_args() -> Options {
                 i += 1;
                 opts.max_redirs = next_arg(&args, i, "--max-redirs").parse().unwrap_or(50);
             }
+            "--max-filesize" => {
+                i += 1;
+                let val = next_arg(&args, i, "--max-filesize");
+                opts.max_filesize = val.parse().ok();
+            }
             "-v" | "--verbose" => {
                 opts.verbose = true;
             }
@@ -257,9 +262,17 @@ pub(crate) fn parse_args() -> Options {
                 opts.show_error = true;
             }
             "-f" | "--fail" => {
+                if opts.fail_with_body {
+                    eprintln!("Warning: --fail deselects --fail-with-body here");
+                    opts.fail_with_body = false;
+                }
                 opts.fail = true;
             }
             "--fail-with-body" => {
+                if opts.fail {
+                    eprintln!("Warning: --fail-with-body deselects --fail here");
+                    opts.fail = false;
+                }
                 opts.fail_with_body = true;
             }
             "-i" | "--include" => {
@@ -319,6 +332,36 @@ pub(crate) fn parse_args() -> Options {
             "--retry" => {
                 i += 1;
                 opts.retry = next_arg(&args, i, "--retry").parse().unwrap_or(0);
+            }
+            "--retry-max-time" => {
+                i += 1;
+                let val = next_arg(&args, i, "--retry-max-time");
+                match val.parse::<u32>() {
+                    Ok(n) => opts.retry_max_time = Some(n as u64),
+                    Err(_) => {
+                        eprintln!(
+                            "curl: option --retry-max-time: expected a proper numerical parameter"
+                        );
+                        eprintln!(
+                            "curl: try 'curl --help' or 'curl --manual' for more information"
+                        );
+                        process::exit(2);
+                    }
+                }
+            }
+            "--retry-delay" => {
+                i += 1;
+                let val = next_arg(&args, i, "--retry-delay");
+                if val.parse::<u32>().is_err() {
+                    eprintln!("curl: option --retry-delay: expected a proper numerical parameter");
+                    eprintln!("curl: try 'curl --help' or 'curl --manual' for more information");
+                    process::exit(2);
+                }
+            }
+            "--retry-connrefused" | "--retry-all-errors" => {}
+            "--expect100-timeout" => {
+                i += 1;
+                let _ = next_arg(&args, i, "--expect100-timeout");
             }
             "-r" | "--range" => {
                 i += 1;

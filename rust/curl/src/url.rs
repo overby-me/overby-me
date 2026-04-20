@@ -7,6 +7,18 @@ pub(crate) fn expand_glob(url: &str) -> Result<Vec<(String, Vec<String>)>, Strin
     let mut i = 0;
     while i < bytes.len() {
         let c = bytes[i];
+        // Backslash escapes glob metachars (\{, \}, \[, \]) — emit only the next char.
+        // For any other char, the backslash is preserved as-is.
+        if c == b'\\' && i + 1 < bytes.len() {
+            let next = bytes[i + 1];
+            if matches!(next, b'{' | b'}' | b'[' | b']') {
+                for item in out.iter_mut() {
+                    item.0.push(next as char);
+                }
+                i += 2;
+                continue;
+            }
+        }
         if c == b'{'
             && let Some(end) = find_matching(bytes, i, b'{', b'}')
         {
