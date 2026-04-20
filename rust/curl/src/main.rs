@@ -317,7 +317,14 @@ fn main() {
                         .find(|(k, _)| k.eq_ignore_ascii_case("host"))
                         .map(|(_, v)| v.split(':').next().unwrap_or(v).to_string())
                         .unwrap_or_else(|| url.host.clone());
-                    save_cookie_jar(jar_path, &url, &host_for_jar, &resp.headers);
+                    save_cookie_jar(
+                        jar_path,
+                        &url,
+                        &host_for_jar,
+                        &resp.headers,
+                        &opts.cookies,
+                        &opts.memory_cookies,
+                    );
                 }
 
                 // Accumulate cookies from Set-Cookie headers for cross-URL cookie engine.

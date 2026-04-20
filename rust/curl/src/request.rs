@@ -510,8 +510,8 @@ fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options)
 
     let request_host = host.to_lowercase();
 
-    // (path_length, domain_length, name=value) — kept for sort by specificity.
-    let mut file_pairs: Vec<(usize, usize, String)> = Vec::new();
+    // (path_length, domain_length, name_length, name=value) — kept for sort by specificity.
+    let mut file_pairs: Vec<(usize, usize, usize, String)> = Vec::new();
     let mut inline_pairs: Vec<String> = Vec::new();
 
     for cookie in &opts.cookies {
@@ -541,7 +541,7 @@ fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options)
                             },
                             host: host.to_string(),
                             port: if secure_req { 443 } else { 80 },
-                            path: path.to_string(),
+                            path: "/".to_string(), // file-loaded cookies default to path "/"
                             raw: String::new(),
                             userinfo: None,
                         };
@@ -582,6 +582,7 @@ fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options)
                                     file_pairs.push((
                                         cookie_path.len(),
                                         domain.len(),
+                                        name.len(),
                                         format!("{name}={value}"),
                                     ));
                                 }
@@ -629,7 +630,12 @@ fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options)
                     if !path.starts_with(cookie_path) {
                         continue;
                     }
-                    file_pairs.push((cookie_path.len(), domain.len(), format!("{name}={value}")));
+                    file_pairs.push((
+                        cookie_path.len(),
+                        domain.len(),
+                        name.len(),
+                        format!("{name}={value}"),
+                    ));
                 }
             }
         }
@@ -673,17 +679,23 @@ fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options)
         if !path.starts_with(cookie_path) {
             continue;
         }
-        file_pairs.push((cookie_path.len(), domain.len(), format!("{name}={value}")));
+        file_pairs.push((
+            cookie_path.len(),
+            domain.len(),
+            name.len(),
+            format!("{name}={value}"),
+        ));
     }
 
     // curl stores cookies in a LIFO linked list (newest first). Among cookies
     // with equal specificity it therefore emits them in reverse load order.
     // Reverse first so stable sort preserves the LIFO order within equal keys.
     file_pairs.reverse();
-    // Sort: longer path first, then longer domain (more specific) first.
-    file_pairs.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
+    // Sort: longer path first, then longer domain, then longer name (curl cookie_sort).
+    // Within equal specificity, the reverse() above preserves LIFO (creation-time desc) order.
+    file_pairs.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(b.2.cmp(&a.2)));
 
-    let mut all: Vec<String> = file_pairs.into_iter().map(|(_, _, p)| p).collect();
+    let mut all: Vec<String> = file_pairs.into_iter().map(|(_, _, _, p)| p).collect();
     all.extend(inline_pairs);
 
     // curl caps the Cookie header at MAX_COOKIE_HEADER_LEN bytes (8190). Drop
