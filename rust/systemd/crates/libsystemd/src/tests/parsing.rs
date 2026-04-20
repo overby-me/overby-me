@@ -21503,6 +21503,9 @@ fn test_capability_bounding_set_multiple_caps() {
 
 #[test]
 fn test_capability_bounding_set_deny_list() {
+    // systemd semantics: a leading `~` on the whole value inverts the
+    // ENTIRE line, so every token becomes a deny. `~CAP_SYS_ADMIN CAP_NET_RAW`
+    // means drop both caps from the default full set.
     let test_service_str = r#"
     [Service]
     ExecStart = /bin/myservice
@@ -21523,7 +21526,7 @@ fn test_capability_bounding_set_deny_list() {
     );
     assert_eq!(
         service.srvc.exec_section.capability_bounding_set[1],
-        "CAP_NET_RAW"
+        "~CAP_NET_RAW"
     );
 }
 

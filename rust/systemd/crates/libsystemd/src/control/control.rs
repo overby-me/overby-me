@@ -4035,10 +4035,27 @@ fn create_transient_unit(
                         Some(matches!(value, "yes" | "true" | "1"));
                 }
                 "CapabilityBoundingSet" => {
-                    service_conf
-                        .exec_config
-                        .capability_bounding_set
-                        .extend(value.split_whitespace().map(|s| s.to_string()));
+                    // systemd semantics: a leading `~` on the VALUE inverts
+                    // the whole line (every token becomes a deny).
+                    // `CapabilityBoundingSet=~CAP_SYS_TIME CAP_WAKE_ALARM`
+                    // drops both caps from the default full set, it does
+                    // NOT mean "keep only CAP_WAKE_ALARM and drop CAP_SYS_TIME".
+                    let trimmed = value.trim_start();
+                    let (invert, body) = if let Some(rest) = trimmed.strip_prefix('~') {
+                        (true, rest)
+                    } else {
+                        (false, trimmed)
+                    };
+                    service_conf.exec_config.capability_bounding_set.extend(
+                        body.split_whitespace().map(|s| {
+                            let stripped = s.strip_prefix('~').unwrap_or(s);
+                            if invert {
+                                format!("~{stripped}")
+                            } else {
+                                stripped.to_string()
+                            }
+                        }),
+                    );
                 }
                 "AmbientCapabilities" => {
                     service_conf

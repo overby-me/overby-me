@@ -176,26 +176,6 @@ pub(crate) fn path_to_mount_unit_name(path: &str) -> String {
     }
 }
 
-/// Convert a device path to the corresponding `.device` unit name.
-///
-/// This follows the same escaping convention as mount units:
-/// - `/dev/sda1` → `dev-sda1.device`
-/// - `/dev/disk/by-uuid/1234` → `dev-disk-by\x2duuid-1234.device`
-/// - `/sys/devices/pci0000:00/net/eth0` → `sys-devices-pci0000:00-net-eth0.device`
-///
-/// For simple `/dev/` and `/sys/` paths, the slash-to-dash replacement
-/// is sufficient. For paths containing characters outside `[a-zA-Z0-9:_.]`,
-/// full unit name escaping via `unit_name_path_escape` should be used instead.
-#[allow(dead_code)]
-pub(crate) fn path_to_device_unit_name(path: &str) -> String {
-    let trimmed = path.trim_matches('/');
-    if trimmed.is_empty() {
-        "-.device".to_owned()
-    } else {
-        format!("{}.device", trimmed.replace('/', "-"))
-    }
-}
-
 /// Return mount unit names for every prefix of the given absolute path,
 /// from `/` down to the path itself.
 ///
@@ -2499,20 +2479,23 @@ pub fn parse_exec_section(
             Some(vec) => {
                 // Each directive is a space-separated list of capability names
                 // (e.g. CAP_NET_ADMIN, CAP_SYS_PTRACE). A leading ~ on the
-                // whole value means deny-list mode. Multiple directives
-                // accumulate. An empty assignment resets the list.
+                // whole value means deny-list mode — every token on the
+                // line becomes a deny. Multiple directives accumulate. An
+                // empty assignment resets the list.
                 let mut entries = Vec::new();
                 for (_idx, line) in &vec {
                     let trimmed = line.trim();
                     if trimmed.is_empty() {
-                        // Empty string resets the list
                         entries.clear();
                         continue;
                     }
-                    // Split on whitespace, respecting double-quoted tokens
-                    let mut chars = trimmed.chars().peekable();
+                    let (invert, body) = if let Some(rest) = trimmed.strip_prefix('~') {
+                        (true, rest)
+                    } else {
+                        (false, trimmed)
+                    };
+                    let mut chars = body.chars().peekable();
                     while chars.peek().is_some() {
-                        // skip whitespace
                         while chars.peek().is_some_and(|c| c.is_whitespace()) {
                             chars.next();
                         }
@@ -2521,8 +2504,7 @@ pub fn parse_exec_section(
                         }
                         let mut token = String::new();
                         if chars.peek() == Some(&'"') {
-                            // quoted token — consume until closing quote
-                            chars.next(); // skip opening quote
+                            chars.next();
                             while let Some(&c) = chars.peek() {
                                 if c == '"' {
                                     chars.next();
@@ -2532,7 +2514,6 @@ pub fn parse_exec_section(
                                 chars.next();
                             }
                         } else {
-                            // unquoted token — consume until whitespace
                             while let Some(&c) = chars.peek() {
                                 if c.is_whitespace() {
                                     break;
@@ -2542,7 +2523,12 @@ pub fn parse_exec_section(
                             }
                         }
                         if !token.is_empty() {
-                            entries.push(token);
+                            let stripped = token.strip_prefix('~').unwrap_or(&token).to_string();
+                            if invert {
+                                entries.push(format!("~{stripped}"));
+                            } else {
+                                entries.push(stripped);
+                            }
                         }
                     }
                 }

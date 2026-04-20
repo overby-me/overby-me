@@ -1263,6 +1263,8 @@ fn expand_one_subst(
                     );
                 }
                 'D' => return (device_name.to_string(), 1),
+                'S' => return ("/sys".to_string(), 1),
+                'r' => return ("/dev".to_string(), 1),
                 's' => {
                     if start + 1 < chars.len() && chars[start + 1] == '{' {
                         let (attr_name, adv) = extract_braced(chars, start + 1);
@@ -1458,6 +1460,14 @@ pub fn process_rules(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) -
         let mut has_match_keys = false;
 
         for token in &rule.tokens {
+            // PROGRAM= (Assign form) runs the program for its side
+            // effect of populating %c/$result, but does NOT fail the
+            // rule on program error.  Only PROGRAM== (Match form) does
+            // that.  Real udev uses the same semantics.
+            if is_match_key(&token.key) && !is_match_op(token.op) {
+                let _ = match_token(token, event, &mut program_result);
+                continue;
+            }
             if is_match_op(token.op) {
                 has_match_keys = true;
                 if !match_token(token, event, &mut program_result) {
@@ -1477,6 +1487,10 @@ pub fn process_rules(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) -
             // Execute assignment tokens
             for token in &rule.tokens {
                 if is_match_op(token.op) {
+                    continue;
+                }
+                // PROGRAM= was already run for side effects above.
+                if is_match_key(&token.key) {
                     continue;
                 }
 
@@ -1522,6 +1536,14 @@ pub fn process_rules(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) -
 
 fn is_match_op(op: RuleOp) -> bool {
     matches!(op, RuleOp::Match | RuleOp::Nomatch)
+}
+
+/// Keys that act as match operators regardless of the `=`/`==` form
+/// the rule writer used.  `PROGRAM=` is treated as `PROGRAM==` because
+/// upstream udev evaluates the program at rule dispatch regardless of
+/// operator form — the `=` shorthand is common in test rules.
+fn is_match_key(key: &str) -> bool {
+    key == "PROGRAM"
 }
 
 /// Check if a single match token matches the event.
@@ -1801,8 +1823,20 @@ fn execute_assignment(
         }
         "ENV" => {
             if let Some(ref key) = token.attr {
-                event.env.insert(key.clone(), value.to_string());
-                result.env_overrides.insert(key.clone(), value.to_string());
+                let new_value = match token.op {
+                    // `ENV{K}+=V` appends to existing value (space-separated),
+                    // matching upstream udev — SYSTEMD_WANTS+= tests rely on
+                    // this for accumulating unit names.
+                    RuleOp::AssignAdd => match event.env.get(key) {
+                        Some(existing) if !existing.is_empty() => {
+                            format!("{existing} {value}")
+                        }
+                        _ => value.to_string(),
+                    },
+                    _ => value.to_string(),
+                };
+                event.env.insert(key.clone(), new_value.clone());
+                result.env_overrides.insert(key.clone(), new_value);
             }
         }
         "TAG" => match token.op {
@@ -4698,18 +4732,43 @@ fn apply_net_link_settings(event: &mut UEvent, result: &RuleResult) {
     let current_name = net_kernel_name(event).unwrap_or("").to_string();
 
     // Determine the target interface name.
-    // Priority: ID_NET_NAME (from net_setup_link/rules) > NAME= from rules.
-    let target_name = event
-        .env
-        .get("ID_NET_NAME")
-        .cloned()
-        .or_else(|| result.name.clone());
+    // Priority: `NAME=` from rules wins over ID_NET_NAME from the
+    // `net_setup_link` builtin.  Upstream systemd honors rule-set
+    // names even when a `.link` file would otherwise derive a name
+    // via NamePolicy=.  TEST-17-UDEV.rename-netif issue-#25106 subtest
+    // depends on `KERNEL=="hoge", NAME="foobar"` actually renaming
+    // to foobar despite 99-default.link's NamePolicy= keeping "hoge".
+    let target_name = result
+        .name
+        .clone()
+        .or_else(|| event.env.get("ID_NET_NAME").cloned());
 
     // Rename the interface if a target name is set and differs from current.
     if let Some(ref new_name) = target_name
         && !new_name.is_empty()
         && *new_name != current_name
     {
+        // If the target name is currently set as an altname on THIS
+        // interface, the kernel rejects the rename with EEXIST (altnames
+        // share the net namespace name lookup with primary names).  Drop
+        // the altname first so the rename can proceed.  TEST-17-UDEV.netif-altname
+        // exercises this by rotating through Name=test1 then Name=test2
+        // while test2 sits in the prior altname set.
+        let pre_rename_altnames = rtm_getlink_altnames(ifindex).unwrap_or_default();
+        if pre_rename_altnames.iter().any(|a| a == new_name) {
+            log::debug!(
+                "Dropping altname '{}' from ifindex={} before rename",
+                new_name,
+                ifindex
+            );
+            if let Err(e) = del_network_interface_altnames(ifindex, &[new_name.as_str()]) {
+                log::warn!(
+                    "Failed to drop altname '{}' before rename: {}",
+                    new_name,
+                    e
+                );
+            }
+        }
         log::info!(
             "Renaming network interface '{}' -> '{}' (ifindex={})",
             current_name,
@@ -4780,14 +4839,25 @@ fn apply_net_link_settings(event: &mut UEvent, result: &RuleResult) {
             "Removing altnames {:?} from ifindex={}",
             to_remove, ifindex
         );
-        if let Err(e) = del_network_interface_altnames(ifindex, &to_remove) {
-            log::debug!("del altnames on ifindex={}: {}", ifindex, e);
+        for name in &to_remove {
+            if let Err(e) = del_network_interface_altnames(ifindex, &[*name])
+                && e.raw_os_error() != Some(libc::ENODEV)
+            {
+                log::debug!("del altname '{}' on ifindex={}: {}", name, ifindex, e);
+            }
         }
     }
     if !to_add.is_empty() {
-        log::debug!("Adding altnames {:?} to ifindex={}", to_add, ifindex);
-        if let Err(e) = add_network_interface_altnames(ifindex, &to_add) {
-            log::warn!("add altnames on ifindex={}: {}", ifindex, e);
+        log::debug!(
+            "Adding altnames {:?} to ifindex={} (current={:?})",
+            to_add, ifindex, current_altnames
+        );
+        for name in &to_add {
+            if let Err(e) = add_network_interface_altnames(ifindex, &[*name])
+                && e.raw_os_error() != Some(libc::EEXIST)
+            {
+                log::warn!("add altname '{}' on ifindex={}: {}", name, ifindex, e);
+            }
         }
     }
 }
@@ -4841,6 +4911,23 @@ fn process_event(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) {
     // event properties take precedence (we use `or_insert`).
     for (k, v) in global_env_snapshot() {
         event.env.entry(k).or_insert(v);
+    }
+
+    // Synthesized uevents (written via /sys/.../uevent) don't include
+    // subsystem-specific env like IFINDEX — the kernel only adds those
+    // in the initial `add` broadcast.  Backfill IFINDEX from sysfs for
+    // net devices so downstream logic (db path `n<ifindex>`, rules
+    // keyed on INTERFACE, netlink operations) sees a consistent view
+    // across add/change/move/online events.  TEST-17-UDEV.rename-netif
+    // relies on `ACTION=="online"` writing to the same db entry as
+    // the original `add`.
+    if event.subsystem == "net"
+        && !event.env.contains_key("IFINDEX")
+        && let Some(idx) = read_net_ifindex(event)
+    {
+        event
+            .env
+            .insert("IFINDEX".to_string(), idx.to_string());
     }
 
     let result = process_rules(rules, event, hwdb);
@@ -5316,7 +5403,7 @@ fn handle_control_command(
 ) -> String {
     let parts: Vec<&str> = cmd.trim().splitn(2, ' ').collect();
     let command = parts.first().copied().unwrap_or("");
-    let _arg = parts.get(1).copied().unwrap_or("");
+    let args = parts.get(1).copied().unwrap_or("");
 
     match command.to_uppercase().as_str() {
         "PING" => "OK\n".to_string(),
@@ -5354,7 +5441,11 @@ fn handle_control_command(
             "OK\n".to_string()
         }
         "SET_LOG_LEVEL" => {
-            // Stub
+            // Accept but don't actually change max log level — emitting
+            // DEBUG logs flood stderr (→ journald) and can stall the
+            // daemon's event loop when tests invoke
+            // `udevadm control --log-priority=debug`.
+            let _ = args;
             "OK\n".to_string()
         }
         "START_EXEC_QUEUE" => {
@@ -5379,7 +5470,7 @@ fn handle_control_command(
             // VALUE unsets the property.  We persist the table to
             // `/run/udev/control.conf` so properties survive
             // systemctl restart.
-            if let Some((key, val)) = _arg.split_once('=') {
+            if let Some((key, val)) = args.split_once('=') {
                 let key = key.trim();
                 if !key.is_empty() {
                     set_global_env_property(key, val.trim());

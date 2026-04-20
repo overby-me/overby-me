@@ -45,6 +45,45 @@ pub fn handle_udev_event(run_info: &ArcMutRuntimeInfo, params: &UdevEventParams)
         return;
     }
 
+    // When a device is renamed (e.g. network interface rename from
+    // `hoge` to `foobar`), udev emits a `move` event carrying
+    // `DEVPATH_OLD=/devices/.../hoge`.  The `.device` unit for the old
+    // path must transition to inactive so BindsTo= dependents notice.
+    // TEST-17-UDEV.rename-netif asserts hoge.device goes inactive
+    // after `ip link set hoge name foobar`.
+    if params.action == "move"
+        && let Some(old_path) = params.env.get("DEVPATH_OLD")
+        && !old_path.is_empty()
+    {
+        // Build the old device unit names directly from the old
+        // sysfs path.  We deliberately skip `derive_unit_names` here
+        // because the event's env (SYSTEMD_ALIAS, symlinks) reflects
+        // the POST-rename state and wouldn't map back to the old
+        // unit names.
+        let old_sysfs = if old_path.starts_with("/sys") {
+            old_path.clone()
+        } else {
+            format!("/sys{old_path}")
+        };
+        let mut old_names: Vec<String> = Vec::new();
+        old_names.push(path_to_device_unit_name(&old_sysfs));
+        if !params.subsystem.is_empty()
+            && let Some(old_kernel_name) = old_sysfs.rsplit('/').next()
+            && !old_kernel_name.is_empty()
+        {
+            let subsys_esc = crate::unit_name::unit_name_escape(&params.subsystem);
+            let kernel_esc = crate::unit_name::unit_name_escape(old_kernel_name);
+            let alias = format!(
+                "sys-subsystem-{}-devices-{}.device",
+                subsys_esc, kernel_esc
+            );
+            if !old_names.contains(&alias) {
+                old_names.push(alias);
+            }
+        }
+        apply_device_inactive(run_info, &old_names);
+    }
+
     match params.action.as_str() {
         "add" | "change" | "bind" | "move" | "online" => {
             // While a device is still being processed by udevd (RUN= program
@@ -313,10 +352,10 @@ fn build_params_from_db_entry(
             if !tag.is_empty() && !tags.contains(&tag.to_owned()) {
                 tags.push(tag.to_owned());
             }
-        } else if let Some(link) = line.strip_prefix("S:") {
-            if !link.is_empty() {
-                symlinks.push(link.to_owned());
-            }
+        } else if let Some(link) = line.strip_prefix("S:")
+            && !link.is_empty()
+        {
+            symlinks.push(link.to_owned());
         }
     }
 
@@ -415,9 +454,7 @@ fn path_to_sysfs_path(target: &std::path::Path) -> Option<String> {
     let mut rest = s.as_ref();
     let mut depth_from_sys = 3usize; // /sys/dev/block/ → 3 components below /sys
     while let Some(r) = rest.strip_prefix("../") {
-        if depth_from_sys > 0 {
-            depth_from_sys -= 1;
-        }
+        depth_from_sys = depth_from_sys.saturating_sub(1);
         rest = r;
     }
     // `rest` is now the tail relative to /sys (e.g. `devices/virtual/net/eth0`).
@@ -486,15 +523,17 @@ fn udev_db_unescape(s: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if i + 3 < bytes.len() && bytes[i] == b'\\' && bytes[i + 1] == b'x' {
-            if let (Some(hi), Some(lo)) = (
+        if i + 3 < bytes.len()
+            && bytes[i] == b'\\'
+            && bytes[i + 1] == b'x'
+            && let (Some(hi), Some(lo)) = (
                 hex_digit_value(bytes[i + 2]),
                 hex_digit_value(bytes[i + 3]),
-            ) {
-                out.push((hi << 4) | lo);
-                i += 4;
-                continue;
-            }
+            )
+        {
+            out.push((hi << 4) | lo);
+            i += 4;
+            continue;
         }
         out.push(bytes[i]);
         i += 1;
@@ -914,19 +953,18 @@ fn refresh_device_wants(
         if old_wants.contains(new_id) {
             continue;
         }
-        if let Some(target) = ri.unit_table.get_mut(new_id) {
-            if !target
+        if let Some(target) = ri.unit_table.get_mut(new_id)
+            && !target
                 .common
                 .dependencies
                 .wanted_by
                 .contains(device_id)
-            {
-                target
-                    .common
-                    .dependencies
-                    .wanted_by
-                    .push(device_id.clone());
-            }
+        {
+            target
+                .common
+                .dependencies
+                .wanted_by
+                .push(device_id.clone());
         }
     }
 

@@ -394,7 +394,7 @@ enum Commands {
         exec_delay: Option<u64>,
 
         /// Set the log level
-        #[arg(long, short = 'l')]
+        #[arg(long, short = 'l', alias = "log-priority")]
         log_level: Option<String>,
 
         /// Request the daemon to exit
@@ -824,7 +824,7 @@ fn cmd_trigger(
     prioritized_subsystem: &[String],
     dry_run: bool,
     verbose: bool,
-    _settle: bool,
+    settle: bool,
     devices: &[String],
 ) -> i32 {
     if action == "help" {
@@ -960,6 +960,21 @@ fn cmd_trigger(
 
     if verbose || dry_run {
         eprintln!("udevadm trigger: triggered {} device(s)", count);
+    }
+
+    // `--settle`: block until every triggered event has been drained by
+    // the daemon (queue empty, no active workers).  Without this, tests
+    // that immediately run `udevadm info` see pre-trigger db state.
+    //
+    // Important: writing to a sysfs `uevent` file is synchronous only
+    // up to kernel uevent broadcast — the daemon receives via netlink
+    // asynchronously.  If we call `settle` too eagerly, we see an
+    // empty queue before the uevent has even reached the daemon and
+    // return "settled" prematurely.  Give the kernel→netlink→daemon
+    // path a short grace window before checking.
+    if settle && !dry_run && count > 0 {
+        std::thread::sleep(Duration::from_millis(200));
+        let _ = cmd_settle(120, &None);
     }
 
     if errors > 0 { 1 } else { 0 }
@@ -1311,7 +1326,8 @@ fn cmd_monitor(
         println!("KERNEL - the kernel uevent");
     }
     if show_udev {
-        println!("UDEV - udev event after rules processing");
+        // Exact wording upstream uses — tests grep for this line.
+        println!("UDEV - the event which udev sends out after rule processing");
     }
     println!();
 
@@ -1794,36 +1810,48 @@ fn cmd_control(
         }
     }
 
-    if stop_exec_queue {
-        return send_and_check("STOP_EXEC_QUEUE", timeout_dur);
-    }
-
-    if start_exec_queue {
-        return send_and_check("START_EXEC_QUEUE", timeout_dur);
-    }
-
-    if reload || reload_rules {
-        return send_and_check("RELOAD", timeout_dur);
-    }
-
-    if let Some(n) = children_max {
-        return send_and_check(&format!("SET_MAX_CHILDREN {}", n), timeout_dur);
-    }
-
-    if let Some(d) = exec_delay {
-        return send_and_check(&format!("SET_EXEC_DELAY {}", d), timeout_dur);
-    }
+    // Upstream `udevadm control` accepts multiple commands in one
+    // invocation (e.g. `--log-priority=debug --reload`) and sends them
+    // all.  Tests rely on this: TEST-17-UDEV.rename-netif uses
+    // `udevadm control --log-priority=debug --reload` to raise log
+    // level and reload rules in one command.
+    let mut any = false;
+    let mut rc = 0;
+    let mut send = |cmd: &str| {
+        any = true;
+        let r = send_and_check(cmd, timeout_dur);
+        if r != 0 {
+            rc = r;
+        }
+    };
 
     if let Some(level) = log_level {
-        return send_and_check(&format!("SET_LOG_LEVEL {}", level), timeout_dur);
+        send(&format!("SET_LOG_LEVEL {}", level));
     }
-
+    if stop_exec_queue {
+        send("STOP_EXEC_QUEUE");
+    }
+    if start_exec_queue {
+        send("START_EXEC_QUEUE");
+    }
+    if reload || reload_rules {
+        send("RELOAD");
+    }
+    if let Some(n) = children_max {
+        send(&format!("SET_MAX_CHILDREN {}", n));
+    }
+    if let Some(d) = exec_delay {
+        send(&format!("SET_EXEC_DELAY {}", d));
+    }
     if exit {
-        return send_and_check("EXIT", timeout_dur);
+        send("EXIT");
     }
 
-    eprintln!("udevadm control: no command specified");
-    1
+    if !any {
+        eprintln!("udevadm control: no command specified");
+        return 1;
+    }
+    rc
 }
 
 fn send_and_check(cmd: &str, timeout: Duration) -> i32 {
@@ -2123,16 +2151,30 @@ fn read_device_db_by_syspath(syspath: &Path, devpath: &str) -> DeviceDb {
     let minor = props.get("MINOR");
     let subsystem = props.get("SUBSYSTEM").map(|s| s.as_str()).unwrap_or("");
 
+    // Must match `udevd::device_db_path` exactly:
+    //   block/char → b|c<maj>:<min>
+    //   net        → n<ifindex>   (read from sysfs/ifindex)
+    //   else       → +<subsystem>:<sysname>
     let db_path = if let (Some(maj), Some(min)) = (major, minor) {
         let dev_type = if subsystem == "block" { 'b' } else { 'c' };
         Path::new(DB_DIR).join(format!("{}{}:{}", dev_type, maj, min))
+    } else if subsystem == "net" {
+        let ifindex = fs::read_to_string(syspath.join("ifindex"))
+            .ok()
+            .and_then(|s| s.trim().parse::<i32>().ok())
+            .filter(|&n| n > 0);
+        match ifindex {
+            Some(idx) => Path::new(DB_DIR).join(format!("n{idx}")),
+            None => {
+                let basename = devpath.rsplit('/').next().unwrap_or(devpath);
+                Path::new(DB_DIR).join(format!("+{}:{}", subsystem, basename))
+            }
+        }
+    } else if subsystem.is_empty() {
+        Path::new(DB_DIR).join(format!("n{}", devpath.replace('/', "\\x2f")))
     } else {
         let basename = devpath.rsplit('/').next().unwrap_or(devpath);
-        if subsystem.is_empty() {
-            Path::new(DB_DIR).join(format!("n{}", devpath.replace('/', "\\x2f")))
-        } else {
-            Path::new(DB_DIR).join(format!("+{}:{}", subsystem, basename))
-        }
+        Path::new(DB_DIR).join(format!("+{}:{}", subsystem, basename))
     };
 
     if let Ok(content) = fs::read_to_string(&db_path) {
@@ -2954,7 +2996,7 @@ fn cmd_lock(
     timeout: u64,
     command: &[String],
 ) -> i32 {
-    use std::os::unix::io::{AsRawFd, IntoRawFd};
+    use std::os::unix::io::AsRawFd;
 
     // Determine which file descriptor to flock.
     //
