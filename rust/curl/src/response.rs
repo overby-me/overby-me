@@ -172,6 +172,34 @@ pub(crate) fn read_response(
             .read_line(&mut line)
             .map_err(|e| format!("failed to read header: {e}"))?;
         if n == 0 {
+            // EOF mid-header block: flush whatever pending header we have so
+            // the caller still sees the last unterminated line, then exit
+            // with CURLE_PARTIAL_FILE (18). Matches upstream curl behaviour
+            // for tests like 1665 where the server omits the final CRLF.
+            if let Some(folded) = pending_folded.take() {
+                if let Some((key, val)) = folded.split_once(':') {
+                    let val_trim = val.trim();
+                    if val_trim.is_empty() {
+                        header_bytes.extend_from_slice(key.as_bytes());
+                        header_bytes.push(b':');
+                    } else {
+                        header_bytes.extend_from_slice(format!("{key}: {val_trim}").as_bytes());
+                    }
+                    header_bytes.extend_from_slice(pending_ending);
+                    headers.push((key.trim().to_lowercase(), val_trim.to_string()));
+                }
+            } else if let Some(raw) = pending_raw.take() {
+                header_bytes.extend_from_slice(raw.as_bytes());
+                // Make sure we end on a line terminator so downstream
+                // consumers see a well-formed header block.
+                if !raw.ends_with('\n') {
+                    header_bytes.push(b'\n');
+                }
+                let trimmed_raw = raw.trim_end_matches(['\r', '\n']);
+                if let Some((key, val)) = trimmed_raw.split_once(':') {
+                    headers.push((key.trim().to_lowercase(), val.trim().to_string()));
+                }
+            }
             break;
         }
         // Binary zero in a header line is a protocol violation — curl exits 8
