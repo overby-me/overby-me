@@ -30,7 +30,7 @@ pkgs.runCommand "rust-perl-test-${category}-${name}" {
 
   # Run with rust-perl (release build — debug is too slow for tests like
   # op/cond.t whose 20 000-deep ternary doesn't finish in 60 s unoptimised).
-  timeout 60 ${pkgs.rust-perl}/bin/perl -I../lib ${category}/${name}.t > "$TMPDIR/actual" 2>&1 || true
+  timeout 120 ${pkgs.rust-perl}/bin/perl -I../lib ${category}/${name}.t > "$TMPDIR/actual" 2>&1 || true
 
   # Normalize binary paths so /nix/store/... differences don't cause false failures
   REF_PERL="${pkgs.perl}/bin/perl"

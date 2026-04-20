@@ -2222,6 +2222,19 @@ impl Parser {
                 }
                 Token::Arrow => {
                     self.pos += 1;
+                    // Postfix deref forms: `->$*` (scalar), `->@*` (array
+                    // flat), `->%*` (hash flat). These are equivalent to
+                    // `${EXPR}` / `@{EXPR}` / `%{EXPR}`.
+                    if let Token::ScalarVar(n) = self.tok()
+                        && n == "*"
+                    {
+                        self.pos += 1;
+                        // Wrap as a scalar block deref so a Value::ScalarRef
+                        // is followed through to its inner value.
+                        let inner = expr;
+                        expr = Expr::Call("_scalar_block_deref".to_string(), vec![inner]);
+                        continue;
+                    }
                     match self.tok() {
                         Token::LBracket => {
                             self.pos += 1;
@@ -2989,6 +3002,7 @@ impl Parser {
                         | Token::ScalarVar(_)
                         | Token::ArrayVar(_)
                         | Token::HashVar(_)
+                        | Token::Plus
                         | Token::Minus
                         | Token::LogNot
                         | Token::Backslash
@@ -3291,16 +3305,74 @@ fn parse_interp_string(s: &str) -> Expr {
                     if is_simple_ident {
                         parts.push(InterpPart::ScalarVar(trimmed.to_string()));
                     } else {
-                        use crate::lexer::Lexer;
-                        let mut lex = Lexer::new(&inner);
-                        let toks = lex.tokenize();
-                        let tl = std::mem::take(&mut lex.token_lines);
-                        let mut p = Parser::new_with_lines(toks, tl);
-                        let inner_expr = p.parse_expr();
-                        parts.push(InterpPart::Expr(Box::new(Expr::Call(
-                            "_scalar_block_deref".to_string(),
-                            vec![inner_expr],
-                        ))));
+                        // Detect `${NAME[EXPR]}` / `${NAME{EXPR}}` —
+                        // these are equivalent to `$NAME[EXPR]` / `$NAME{EXPR}`
+                        // (array/hash element). Perl's brace-around-name
+                        // disambiguator, not a scalar deref.
+                        let bytes = trimmed.as_bytes();
+                        let mut name_end = 0usize;
+                        while name_end < bytes.len() {
+                            let c = bytes[name_end] as char;
+                            let ok = if name_end == 0 {
+                                c == '_' || c.is_ascii_alphabetic()
+                            } else {
+                                c == '_' || c.is_ascii_alphanumeric() || c == ':'
+                            };
+                            if !ok {
+                                break;
+                            }
+                            name_end += 1;
+                        }
+                        let after = &trimmed[name_end..];
+                        let name_part = &trimmed[..name_end];
+                        if !name_part.is_empty()
+                            && (after.starts_with('[') || after.starts_with('{'))
+                            && (after.ends_with(']') || after.ends_with('}'))
+                        {
+                            use crate::lexer::Lexer;
+                            // Re-lex/parse the inner subscript expression.
+                            let bracket = &after[..1];
+                            let close = &after[after.len() - 1..];
+                            let inside = &after[1..after.len() - 1];
+                            let mut lex = Lexer::new(inside);
+                            let toks = lex.tokenize();
+                            let tl = std::mem::take(&mut lex.token_lines);
+                            let mut p = Parser::new_with_lines(toks, tl);
+                            let idx_expr = p.parse_expr();
+                            if bracket == "[" && close == "]" {
+                                parts.push(InterpPart::ArrayElement(
+                                    name_part.to_string(),
+                                    Box::new(idx_expr),
+                                ));
+                            } else if bracket == "{" && close == "}" {
+                                parts.push(InterpPart::HashElement(
+                                    name_part.to_string(),
+                                    Box::new(idx_expr),
+                                ));
+                            } else {
+                                use crate::lexer::Lexer;
+                                let mut lex = Lexer::new(&inner);
+                                let toks = lex.tokenize();
+                                let tl = std::mem::take(&mut lex.token_lines);
+                                let mut p = Parser::new_with_lines(toks, tl);
+                                let inner_expr = p.parse_expr();
+                                parts.push(InterpPart::Expr(Box::new(Expr::Call(
+                                    "_scalar_block_deref".to_string(),
+                                    vec![inner_expr],
+                                ))));
+                            }
+                        } else {
+                            use crate::lexer::Lexer;
+                            let mut lex = Lexer::new(&inner);
+                            let toks = lex.tokenize();
+                            let tl = std::mem::take(&mut lex.token_lines);
+                            let mut p = Parser::new_with_lines(toks, tl);
+                            let inner_expr = p.parse_expr();
+                            parts.push(InterpPart::Expr(Box::new(Expr::Call(
+                                "_scalar_block_deref".to_string(),
+                                vec![inner_expr],
+                            ))));
+                        }
                     }
                 } else if chars[i] == '^' && i + 1 < chars.len() {
                     i += 1;

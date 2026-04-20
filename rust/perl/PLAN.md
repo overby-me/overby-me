@@ -592,6 +592,58 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
 
 ### Recent fixes
 
+- **`do FILE` runs in its own lexical scope**: previously a `do FILE`
+  call did `push_scope` on top of the caller's scope stack, so my-vars
+  declared in the calling file were visible inside the loaded file.
+  Reference perl runs `do FILE` with a fresh scope stack — globals
+  remain shared, but my-vars do not. Stash & restore `self.scopes`
+  around the load. Also reset `current_line` to 1 inside the load and
+  restore on exit so post-`do` `caller()` lines aren't polluted by the
+  loaded file's last LineMark.
+
+- **`eval STRING` resets `current_line` and restores it on exit**:
+  the eval body's `Stmt::LineMark`s would leave `current_line` pointing
+  inside the eval (typically 1) after returning. Subsequent `is(EVAL,
+  EXPECTED)` calls then pushed `(file, 1)` onto `call_stack`, so
+  `_where()` from test.pl reported `line 1` instead of the user's
+  source line. Save and restore `current_line` at every eval-string
+  return path. Fixes `[at op/eval.t line 33]` reporting and similar.
+
+- **`${IDENT[EXPR]}` / `${IDENT{EXPR}}` interpolation**: the
+  brace-around-name disambiguator inside double-quoted strings
+  (`"…${foo{$bar}}…"`) was being parsed as a scalar-ref deref of an
+  `EXPR`, returning empty when no ref was present. The interpolator
+  now detects `IDENT` followed by `[…]` / `{…}` inside the braces and
+  emits a regular `ArrayElement` / `HashElement` part. Fixes base/lex
+  test 23.
+
+- **Bareword sub call without parens accepts unary `+` first arg**:
+  for known subs (e.g. `is`, `ok` from test.pl) followed by `+`, our
+  parser dropped the call entirely because `Token::Plus` wasn't in the
+  argument-starter list. Adding it lets `is +()=eval '++', 0, 'desc'`
+  parse as `is(+()=eval '++', 0, 'desc')`. Cleared a block of tests in
+  op/eval.
+
+- **Postfix `->$*` scalar deref**: `$ref->$*` now parses (previously
+  the lexer mangled `$*` into `$_`). The lexer now emits
+  `ScalarVar("*")` for `$*` and the parser routes `->$*` into a
+  scalar-block-deref so chains like `$x[0]->$*` follow the ref to its
+  inner value.
+
+- **`Token::Tell` / `Token::Eof` are named-unary**: `tell *$fh`
+  without parens now parses as `tell(*$fh)` instead of
+  `tell() * $fh`. Required for the io/tell coercible-glob suite.
+
+- **`*$NAME` / `*{$NAME}` glob deref**: previously the lexer treated `*`
+  followed by `$` as multiplication (since `$` isn't a glob-name char),
+  so `tell *$fh` evaluated as `tell() * $fh` (returning -1). The lexer
+  now emits a `Token::Glob("$NAME")` (`$`-prefixed) for the `*$NAME` and
+  `*{NAME}` / `*{$NAME}` forms when in operand position; the interpreter
+  resolves the leading `$` at runtime to the scalar's value (a glob or a
+  symbol-table name string). Also added `Token::Tell` / `Token::Eof` to
+  `last_is_named_unary` so `tell *$fh` (no parens) parses as a single
+  named-unary call instead of `tell() * $fh`. Closes io/tell.
+
 - **`+(LIST) = RHS` keeps list-assignment shape**: unary `+` is parser
   noise, but our `Expr::Assign` arm only recognised the `(LHS) = RHS`
   list form when target was bare `Expr::ArrayLit`, so `+()=eval STRING`
@@ -1093,7 +1145,7 @@ This is the largest phase. Key clusters:
 
 **run (2):** exit, switches
 
-### Passing (61)
+### Passing (62)
 
 base/cond, base/if, base/num, base/pat, base/rs, base/term, base/translate,
 base/while, cmd/elsif, cmd/for, cmd/mod, cmd/subval, cmd/switch,
@@ -1102,12 +1154,12 @@ op/chop, op/closure, op/cond, op/context, op/defined, op/delete, op/die,
 op/do, op/each, op/grep, op/hash, op/inc, op/index, op/lc, op/list, op/my,
 op/not, op/oct, op/pack, op/push, op/quotemeta, op/range, op/ref, op/reverse,
 op/sort, op/splice, op/split, op/sprintf, op/sub, op/substr, op/unshift,
-op/vec, op/wantarray, io/argv, io/fs, io/open, io/print, io/read, re/pat,
-re/subst, run/exit, run/switches
+op/vec, op/wantarray, io/argv, io/fs, io/open, io/print, io/read, io/tell,
+re/pat, re/subst, run/exit, run/switches
 
-### Failing (18)
+### Failing (17)
 
-base/lex, io/tell, opbasic/cmp, opbasic/concat,
+base/lex, opbasic/cmp, opbasic/concat,
 op/array, op/chr, op/eval, op/heredoc, op/join, op/length, op/local,
 op/ord, op/pos, op/print, op/repeat, op/tr, op/undef, re/regexp
 

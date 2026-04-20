@@ -847,6 +847,12 @@ impl Lexer {
                         // var name; the [/{ is consumed by parse_postfix.
                         self.pos += 1;
                         tokens.push(Token::ScalarVar("#".to_string()));
+                    } else if self.ch() == '*' {
+                        // `$*` — only meaningful as the postfix-deref form
+                        // `EXPR->$*`. Emit a distinct ScalarVar so the parser
+                        // can match it after `->`.
+                        self.pos += 1;
+                        tokens.push(Token::ScalarVar("*".to_string()));
                     } else {
                         // Unknown special var, just treat as $_
                         tokens.push(Token::ScalarVar("_".to_string()));
@@ -1299,6 +1305,55 @@ impl Lexer {
                     } else if self.ch() == '=' {
                         self.pos += 1;
                         tokens.push(Token::StarAssign);
+                    } else if self.ch() == '$'
+                        && (self.peek(1).is_ascii_alphabetic() || self.peek(1) == '_')
+                        && (tokens.last().map(|t| t.expects_operand()).unwrap_or(true)
+                            || last_is_named_unary(tokens.last()))
+                    {
+                        // `*$NAME` — glob deref of a scalar holding a glob
+                        // or symbol-table name. Encoded as `Token::Glob`
+                        // with a leading `$` marker so the interpreter looks
+                        // the value up at runtime.
+                        self.pos += 1;
+                        let n = self.read_ident();
+                        tokens.push(Token::Glob(format!("${n}")));
+                    } else if self.ch() == '{'
+                        && (tokens.last().map(|t| t.expects_operand()).unwrap_or(true)
+                            || last_is_named_unary(tokens.last()))
+                    {
+                        // `*{ EXPR }` — block-form glob deref. Supports the
+                        // common forms `*{NAME}` and `*{$var}`; complex
+                        // EXPRs fall back to a plain Star token.
+                        let save = self.pos;
+                        self.pos += 1;
+                        if self.ch() == '$'
+                            && (self.peek(1).is_ascii_alphabetic() || self.peek(1) == '_')
+                        {
+                            self.pos += 1;
+                            let n = self.read_ident();
+                            if self.ch() == '}' {
+                                self.pos += 1;
+                                tokens.push(Token::Glob(format!("${n}")));
+                            } else {
+                                self.pos = save;
+                                tokens.push(Token::Star);
+                            }
+                        } else if self.ch() == '_'
+                            || self.ch().is_ascii_alphabetic()
+                            || (!self.ch().is_ascii() && self.ch().is_alphabetic())
+                        {
+                            let n = self.read_ident();
+                            if self.ch() == '}' {
+                                self.pos += 1;
+                                tokens.push(Token::Glob(n));
+                            } else {
+                                self.pos = save;
+                                tokens.push(Token::Star);
+                            }
+                        } else {
+                            self.pos = save;
+                            tokens.push(Token::Star);
+                        }
                     } else if (self.ch() == '_'
                         || self.ch().is_ascii_alphabetic()
                         || (!self.ch().is_ascii() && self.ch().is_alphabetic()))
@@ -2303,6 +2358,9 @@ impl Lexer {
 /// Idents that take an operand so `%` after them is a hash sigil,
 /// not modulus (e.g. `scalar %h` / `pos %h` without parens).
 fn last_is_named_unary(last: Option<&Token>) -> bool {
+    if matches!(last, Some(Token::Tell) | Some(Token::Eof)) {
+        return true;
+    }
     matches!(
         last,
         Some(Token::Ident(n)) if matches!(

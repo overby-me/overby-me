@@ -3258,6 +3258,26 @@ impl Interpreter {
                 // `*NAME` — produce a typeglob value pointing at the
                 // fully-qualified symbol in the current package. Strip a
                 // leading `::` (the `$::foo`-equivalent for globs).
+                // Leading `$` marker (from `*$VAR` / `*{$VAR}` glob deref)
+                // means: look up the scalar VAR; if it holds a `Value::Glob`
+                // re-emit it; otherwise treat its string value as a
+                // symbol-table name in the current package.
+                if let Some(varname) = name.strip_prefix('$') {
+                    let v = self.get_var(varname).resolve();
+                    return match v {
+                        Value::Glob(q) => Value::Glob(q),
+                        other => {
+                            let s = other.to_str();
+                            let s = s.trim_start_matches('*');
+                            let qualified = if s.contains("::") {
+                                s.trim_start_matches("::").to_string()
+                            } else {
+                                format!("{}::{s}", self.package)
+                            };
+                            Value::Glob(qualified)
+                        }
+                    };
+                }
                 let qualified = if name.contains("::") {
                     name.trim_start_matches("::").to_string()
                 } else {
@@ -3384,7 +3404,14 @@ impl Interpreter {
                     return Value::Undef;
                 }
                 let saved_file = std::mem::replace(&mut self.current_file, path.clone());
-                self.push_scope();
+                let saved_line = self.current_line;
+                self.current_line = 1;
+                // `do FILE` runs the file in its own lexical scope —
+                // caller's `my` variables must not be visible. Stash the
+                // current scope stack and replace with a fresh single
+                // scope; restore on exit. Globals (in `self.globals`) are
+                // still shared, matching reference perl.
+                let saved_scopes = std::mem::replace(&mut self.scopes, vec![Scope::new()]);
                 let mut ret = Value::Undef;
                 for stmt in &stmts {
                     match self.exec_stmt(stmt) {
@@ -3394,8 +3421,9 @@ impl Interpreter {
                         }
                         Flow::Die(msg) => {
                             self.set_global_var("@", Value::Str(msg));
-                            self.pop_scope();
+                            self.scopes = saved_scopes;
                             self.current_file = saved_file;
+                            self.current_line = saved_line;
                             return Value::Undef;
                         }
                         _ => {}
@@ -3404,8 +3432,9 @@ impl Interpreter {
                 if matches!(ret, Value::Undef) {
                     ret = self.last_expr_val.clone();
                 }
-                self.pop_scope();
+                self.scopes = saved_scopes;
                 self.current_file = saved_file;
+                self.current_line = saved_line;
                 ret
             }
 
@@ -9136,6 +9165,12 @@ impl Interpreter {
             &mut self.current_file,
             format!("(eval {})", self.eval_counter),
         );
+        // Save current_line too — eval-string body executes its own
+        // LineMark stmts (starting at line 1), so without restoring
+        // current_line on exit, code after the eval would inherit the
+        // eval's last line for caller()/die diagnostics.
+        let saved_line = self.current_line;
+        self.current_line = 1;
 
         // Lex-time errors (unterminated heredoc/regex/etc.) captured by
         // Lexer::error — surface as a Flow::Die captured in `$@` so the
@@ -9144,6 +9179,7 @@ impl Interpreter {
             let filled = err.replace("{FILE}", &self.current_file);
             self.set_global_var("@", Value::Str(filled));
             self.current_file = saved_file;
+            self.current_line = saved_line;
             return Value::Undef;
         }
 
@@ -9154,6 +9190,7 @@ impl Interpreter {
         if let Some(err) = compile_time_use_check(&stmts, &mut ct_line, self) {
             self.set_global_var("@", Value::Str(err));
             self.current_file = saved_file;
+            self.current_line = saved_line;
             return Value::Undef;
         }
 
@@ -9197,6 +9234,7 @@ impl Interpreter {
             }
             self.set_global_var("@", Value::Str(err));
             self.current_file = saved_file;
+            self.current_line = saved_line;
             return Value::Undef;
         }
 
@@ -9212,12 +9250,14 @@ impl Interpreter {
                     self.set_global_var("@", Value::Str(String::new()));
                     self.pop_scope();
                     self.current_file = saved_file;
+                    self.current_line = saved_line;
                     return v;
                 }
                 Flow::Die(msg) => {
                     self.set_global_var("@", Value::Str(msg));
                     self.pop_scope();
                     self.current_file = saved_file;
+                    self.current_line = saved_line;
                     return Value::Undef;
                 }
                 Flow::None => {}
@@ -9228,6 +9268,7 @@ impl Interpreter {
         let result = self.last_expr_val.clone();
         self.pop_scope();
         self.current_file = saved_file;
+        self.current_line = saved_line;
         result
     }
 
