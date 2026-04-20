@@ -10,7 +10,7 @@ in a Nix sandbox, mirroring the differential-testing pattern established by
 
 ## Current Status
 
-**18/18 upstream tests + 4/4 roundtrip checks passing** — `Output.test_*` methods from the upstream
+**18/18 upstream tests + 4/4 differential roundtrip checks passing** (`depfile-header-change` now asserts both runners actually rebuild) — `Output.test_*` methods from the upstream
 ninja v1.13.1 `misc/output_test.py` run against the rust-ninja binary in a
 Nix sandbox.
 
@@ -164,7 +164,7 @@ binary actually runs):
 | `cold-build` | both runners produce all expected outputs and `app` prints `hello` |
 | `incremental-noop` | both runners say `ninja: no work to do.` on a re-run |
 | `incremental-modify` | touching `src/main.c` rebuilds `main.o` + `app`, leaves `greet.o` mtime stable |
-| `depfile-header-change` | reference ninja rebuilds via `gcc -MMD` depfiles — documents that rust-ninja still lacks depfile parsing |
+| `depfile-header-change` | both runners rebuild `greet.o` via `gcc -MMD` depfile parsing — mtime must change on both sides |
 
 The first iteration surfaced one real bug: when every edge in the plan
 is up to date, rust-ninja exited silently instead of printing
@@ -333,15 +333,18 @@ when console-pool edges depend on regular edges.
       buffering of competing edges)
 - [ ] Pool depth limiting
 
-### Phase 9: Depfiles and dyndep (target: `test_depfile_directory_creation` ✅, `test_issue_2621` ✅)
+### Phase 9: Depfiles and dyndep ✅ (target: `test_depfile_directory_creation` ✅, `test_issue_2621` ✅, roundtrip `depfile-header-change` ✅)
 
 - [x] `depfile = ...` value resolution + auto-create depfile parent dir
 - [x] `dyndep = ...` per-edge OR per-rule dynamic dependencies
 - [x] Minimal dyndep file parser (`ninja_dyndep_version = 1`,
       `build OUT [| IMP_OUT]: dyndep [| IMP_IN]`, `restat = 1`)
 - [x] Eager dyndep load + "multiple rules generate X" detection
-- [ ] Makefile-style depfile parsing (`target: dep1 dep2 \`) — only
-      the directory-creation half of `depfile` is implemented
+- [x] Makefile-style depfile parser (`target: dep1 dep2 \`,
+      `\<space>` escapes, `$$` -> `$`, multi-block merging) wired
+      into the scheduler’s initial dirty seeding so a header touch
+      reliably re-runs the consuming compile, exactly like reference
+      ninja
 
 ### Phase 10: `-d explain` ✅ (target: `test_explain_output`)
 

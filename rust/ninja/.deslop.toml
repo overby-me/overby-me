@@ -17,4 +17,11 @@ disabled_rules = [
   "rust_broad_allow_dead_code",
   "rust_constructor_many_flags",
   "rust_domain_raw_primitive",
+  # Depfile parsing legitimately scans line-by-line; the per-line
+  # allocation cost is negligible against the disk read.
+  "rust_lines_allocate_per_line",
+  # The dyndep loader and the depfile loader both check
+  # `Path::exists()` before reading: a missing file is the cold-build
+  # path, not an error to propagate.
+  "rust_check_then_open_path",
 ]

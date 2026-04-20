@@ -449,11 +449,16 @@ pub fn expand<F: Fn(&str) -> Option<String>>(s: &str, lookup: &F) -> String {
                     out.push_str(&v);
                 }
             }
-            c if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' => {
+            c if c.is_ascii_alphanumeric() || c == '_' || c == '-' => {
+                // Ninja variable names are restricted to
+                // [A-Za-z0-9_-]. Crucially `.` is NOT part of a name,
+                // so `$out.d` expands `$out` and leaves `.d` literal —
+                // matching the behavior gcc-emitting depfile rules
+                // depend on.
                 let start = i;
                 while i < bytes.len() {
                     let cc = bytes[i];
-                    if cc.is_ascii_alphanumeric() || cc == b'_' || cc == b'-' || cc == b'.' {
+                    if cc.is_ascii_alphanumeric() || cc == b'_' || cc == b'-' {
                         i += 1;
                     } else {
                         break;

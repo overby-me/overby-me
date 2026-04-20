@@ -15,14 +15,10 @@
 #   incremental-modify     : touching one .c file rebuilds main.o + app
 #                            but does NOT touch the unrelated .o (mtime
 #                            stable across runners)
-#   depfile-header-change  : modifying the shared header rebuilds both
-#                            .o files via gcc -MMD depfile parsing —
-#                            same observable outcome on both runners
-#                            (this currently EXPECTS rust-ninja to
-#                            differ from reference, since depfile
-#                            parsing isn't implemented yet; the test
-#                            documents that gap rather than gating CI
-#                            on it)
+#   depfile-header-change  : modifying the shared header rebuilds
+#                            both .o files via gcc -MMD depfile
+#                            parsing — both runners must observe a
+#                            fresh greet.o mtime
 {
   pkgs,
   name,
@@ -150,7 +146,8 @@ pkgs.runCommand "rust-ninja-roundtrip-${name}" {
         ( cd "$RUST_DIR" && $RUST_NINJA )
         ( cd "$REF_DIR"  && $REF_NINJA  )
         sleep 1.1
-        stat_before_ref=$(stat -c '%Y' "$REF_DIR/obj/greet.o")
+        stat_before_rust=$(stat -c '%Y' "$RUST_DIR/obj/greet.o")
+        stat_before_ref=$( stat -c '%Y' "$REF_DIR/obj/greet.o")
         cat >> "$RUST_DIR/inc/greet.h" <<'EOF'
   /* trivial change */
   EOF
@@ -159,17 +156,18 @@ pkgs.runCommand "rust-ninja-roundtrip-${name}" {
   EOF
         ( cd "$RUST_DIR" && $RUST_NINJA )
         ( cd "$REF_DIR"  && $REF_NINJA  )
-        # Reference ninja parses depfiles — both .o files must rebuild.
-        stat_after_ref=$(stat -c '%Y' "$REF_DIR/obj/greet.o")
-        [ "$stat_before_ref" != "$stat_after_ref" ] || {
+        stat_after_rust=$(stat -c '%Y' "$RUST_DIR/obj/greet.o")
+        stat_after_ref=$( stat -c '%Y' "$REF_DIR/obj/greet.o")
+        echo "greet.o mtime rust: $stat_before_rust -> $stat_after_rust"
+        echo "greet.o mtime ref : $stat_before_ref  -> $stat_after_ref"
+        [ "$stat_before_rust" != "$stat_after_rust" ] || {
+          echo "FAIL: rust-ninja did not rebuild greet.o after header change";
+          exit 1; }
+        [ "$stat_before_ref"  != "$stat_after_ref"  ] || {
           echo "FAIL: reference ninja did not rebuild greet.o after header change";
           exit 1; }
         assert_app_works "$RUST_DIR"
         assert_app_works "$REF_DIR"
-        # NOTE: rust-ninja is intentionally NOT asserted to rebuild
-        # greet.o here — depfile parsing is a future phase. Once
-        # implemented, tighten this scenario to require a fresh greet.o
-        # mtime on both runners.
         ;;
 
       *)

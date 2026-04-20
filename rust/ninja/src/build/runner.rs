@@ -9,6 +9,7 @@
 //! Pools are not yet enforced; the `console` pool needs special handling
 //! and lands in a later phase.
 
+use super::depfile;
 use super::dyndep;
 use super::expand::{expand_in_edge, lookup_either};
 use super::plan::{build_plan, resolve_targets};
@@ -160,6 +161,60 @@ fn schedule(
         if edge.is_phony() && edge.inputs.is_empty() && edge.implicit_inputs.is_empty() {
             for o in edge.outputs.iter().chain(&edge.implicit_outputs) {
                 dirty.insert(o.clone(), true);
+            }
+        }
+    }
+
+    // Depfile-driven dirtiness. For each edge that declares
+    // `depfile = ...`, read the file gcc/clang dropped on the previous
+    // run and compare the output mtime against every listed
+    // prerequisite. If any prereq is newer (or has been deleted) the
+    // output is marked dirty so the dispatch-time `edge_needs_run`
+    // check fires the rebuild. Missing depfiles are silently ignored
+    // — that's the cold-build path where the edge is dirty anyway
+    // because its output doesn't exist yet.
+    for &edge_idx in plan.iter() {
+        let edge = &edges[edge_idx];
+        let Some(rule) = state.rules.get(&edge.rule) else {
+            continue;
+        };
+        let Some(depfile_raw) = lookup_either(edge, rule, "depfile") else {
+            continue;
+        };
+        let depfile_path = expand_in_edge(state, edge, &depfile_raw);
+        if depfile_path.is_empty() {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&depfile_path) else {
+            continue;
+        };
+        let parsed = depfile::parse(&text);
+        for out in edge.outputs.iter().chain(&edge.implicit_outputs) {
+            let Some(deps) = parsed.targets.get(out) else {
+                continue;
+            };
+            let out_mtime = mtime_of(out);
+            let mut out_is_dirty = false;
+            for dep in deps {
+                match mtime_of(dep) {
+                    None => {
+                        // A previously-tracked header was removed —
+                        // force a rebuild so the next compile fails
+                        // loudly (or picks up a moved header).
+                        out_is_dirty = true;
+                        break;
+                    }
+                    Some(dep_mtime) => match out_mtime {
+                        Some(out_m) if dep_mtime <= out_m => {}
+                        _ => {
+                            out_is_dirty = true;
+                            break;
+                        }
+                    },
+                }
+            }
+            if out_is_dirty {
+                dirty.insert(out.clone(), true);
             }
         }
     }
@@ -323,6 +378,12 @@ fn schedule(
         while let Ok(more) = rx.try_recv() {
             batch.push(more);
         }
+        // Sort batched completions by plan slot so output ordering is
+        // deterministic when several short edges finish nearly
+        // simultaneously. Edges that finish in a different batch
+        // i.e. distinct rx.recv() blocks still appear in completion
+        // order, preserving the interleaving asserted by test_issue_1418.
+        batch.sort_by_key(|o| o.slot);
         for outcome in batch {
             in_flight -= 1;
             let slot = outcome.slot;
