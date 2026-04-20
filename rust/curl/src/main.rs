@@ -293,7 +293,10 @@ fn main() {
                     );
                     exit_code = 28;
                 }
-                if resp.partial_file {
+                if resp.bad_content_encoding {
+                    eprintln!("curl: (61) Unrecognized or bad HTTP Content or Transfer-Encoding");
+                    exit_code = 61;
+                } else if resp.partial_file {
                     eprintln!("curl: (18) transfer closed with outstanding read data remaining");
                     exit_code = 18;
                 } else if resp.recv_error {

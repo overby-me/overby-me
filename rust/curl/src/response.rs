@@ -34,6 +34,7 @@ pub(crate) struct Response {
     /// True if a recv/protocol error occurred during body reading (exit 56).
     pub(crate) recv_error: bool,
     pub(crate) partial_file: bool,
+    pub(crate) bad_content_encoding: bool,
 }
 
 pub(crate) fn read_response(
@@ -74,6 +75,7 @@ pub(crate) fn read_response(
                     timed_out: false,
                     recv_error: false,
                     partial_file: false,
+                    bad_content_encoding: false,
                 });
             }
             return Err("empty reply from server".into());
@@ -100,6 +102,7 @@ pub(crate) fn read_response(
                 timed_out: false,
                 recv_error: false,
                 partial_file: false,
+                bad_content_encoding: false,
             });
         }
         header_bytes.extend_from_slice(line.as_bytes());
@@ -190,6 +193,7 @@ pub(crate) fn read_response(
                 timed_out: false,
                 recv_error: false,
                 partial_file: false,
+                bad_content_encoding: false,
             });
         }
         let this_ending: &'static [u8] = if line.ends_with("\r\n") {
@@ -264,6 +268,7 @@ pub(crate) fn read_response(
                 timed_out: false,
                 recv_error: false,
                 partial_file: false,
+                bad_content_encoding: false,
             });
         }
         pending_raw = Some(line.clone());
@@ -289,6 +294,7 @@ pub(crate) fn read_response(
             timed_out: false,
             recv_error: false,
             partial_file: false,
+            bad_content_encoding: false,
         });
     }
 
@@ -336,6 +342,7 @@ pub(crate) fn read_response(
             timed_out: false,
             recv_error: false,
             partial_file: false,
+            bad_content_encoding: false,
         });
     }
     let content_length: Option<usize> = cl_entry.and_then(|(_, v)| v.parse().ok());
@@ -344,11 +351,23 @@ pub(crate) fn read_response(
         let (b, err) = read_chunked_body(&mut reader)?;
         (b, false, err == ChunkErr::Recv, err == ChunkErr::Partial)
     } else if let Some(len) = content_length {
-        let mut buf = vec![0u8; len];
-        reader
-            .read_exact(&mut buf)
-            .map_err(|e| format!("failed to read body: {e}"))?;
-        (buf, false, false, false)
+        // Read up to `len` bytes; if the connection closes early, return the
+        // partial body and signal CURLE_PARTIAL_FILE so the caller can exit 18.
+        let mut buf = Vec::with_capacity(len);
+        let mut chunk = [0u8; 8192];
+        let mut partial = false;
+        while buf.len() < len {
+            let want = (len - buf.len()).min(chunk.len());
+            match reader.read(&mut chunk[..want]) {
+                Ok(0) => {
+                    partial = true;
+                    break;
+                }
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                Err(e) => return Err(format!("failed to read body: {e}")),
+            }
+        }
+        (buf, false, false, partial)
     } else {
         // Read until EOF.
         let mut buf = Vec::new();
@@ -367,36 +386,47 @@ pub(crate) fn read_response(
         None
     };
 
-    let body = match content_encoding.as_deref() {
-        Some(enc) if enc.contains("gzip") => {
-            let mut decoder = GzDecoder::new(&body[..]);
-            let mut decompressed = Vec::new();
-            decoder.read_to_end(&mut decompressed).unwrap_or_default();
-            // If decompression fails, fall back to raw body
-            if decompressed.is_empty() && !body.is_empty() {
-                body
+    // Apply each Content-Encoding layer in reverse (last-applied first).
+    let mut bad_encoding = false;
+    let body = if let Some(enc) = content_encoding.as_deref() {
+        let layers: Vec<&str> = enc.split(',').map(str::trim).collect();
+        let mut current = body;
+        for layer in layers.iter().rev() {
+            if layer.is_empty() || *layer == "identity" || *layer == "none" {
+                continue;
+            }
+            let mut decoded = Vec::new();
+            let ok = if layer.contains("gzip") || layer.contains("x-gzip") {
+                GzDecoder::new(&current[..])
+                    .read_to_end(&mut decoded)
+                    .is_ok()
+            } else if layer.contains("deflate") {
+                // Try zlib (RFC 1950) first; fall back to raw deflate (RFC 1951).
+                let zlib_ok = ZlibDecoder::new(&current[..])
+                    .read_to_end(&mut decoded)
+                    .is_ok();
+                if !zlib_ok || (decoded.is_empty() && !current.is_empty()) {
+                    decoded.clear();
+                    DeflateDecoder::new(&current[..])
+                        .read_to_end(&mut decoded)
+                        .is_ok()
+                } else {
+                    true
+                }
             } else {
-                decompressed
+                // Unknown encoding — leave as-is.
+                false
+            };
+            if !ok {
+                bad_encoding = true;
+                current.clear();
+                break;
             }
+            current = decoded;
         }
-        Some(enc) if enc.contains("deflate") => {
-            // Try zlib (RFC 1950) first — what most servers actually send.
-            // Fall back to raw deflate (RFC 1951) if that fails.
-            let mut decompressed = Vec::new();
-            let zlib_ok = ZlibDecoder::new(&body[..])
-                .read_to_end(&mut decompressed)
-                .is_ok();
-            if !zlib_ok || (decompressed.is_empty() && !body.is_empty()) {
-                decompressed.clear();
-                let _ = DeflateDecoder::new(&body[..]).read_to_end(&mut decompressed);
-            }
-            if decompressed.is_empty() && !body.is_empty() {
-                body
-            } else {
-                decompressed
-            }
-        }
-        _ => body,
+        current
+    } else {
+        body
     };
 
     // Remove content-encoding and content-length headers after decompression
@@ -420,6 +450,7 @@ pub(crate) fn read_response(
         timed_out,
         recv_error: recv_error_flag,
         partial_file: partial_flag,
+        bad_content_encoding: bad_encoding,
     })
 }
 
