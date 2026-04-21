@@ -4248,6 +4248,17 @@ impl Engine {
         // needs updating. Check ALL existing prereqs (recursively)
         // against the target's mtime, not just the intermediate's
         // immediate sources.
+        // Capture target mtime before recipe execution. Used later to
+        // determine if the recipe actually created/updated the target
+        // (for the peer-target warning).
+        let pre_recipe_target_mtime: Option<std::time::SystemTime> = if !is_phony {
+            std::fs::metadata(target)
+                .ok()
+                .and_then(|m| m.modified().ok())
+        } else {
+            None
+        };
+
         let skip_missing_intermediates = if !is_phony && Path::new(target).exists() {
             let target_m = std::fs::metadata(target)
                 .ok()
@@ -4902,21 +4913,33 @@ impl Engine {
         {
             for sibling_pat in &pat_rule.sibling_patterns {
                 let sibling = sibling_pat.replacen('%', &stem, 1);
-                // GNU make only warns when the recipe DID update this
-                // target (its file exists) but did not update a peer.
-                // GNU warns only when the recipe was non-trivial
-                // and updated the target but not the peer.
+                // GNU make only warns when the recipe actually created
+                // or updated the target file. If the target already
+                // existed before the recipe ran and wasn't modified,
+                // no warning is emitted (the recipe didn't "update" it).
                 let nontrivial_recipe = pat_rule.recipe.iter().any(|l| !l.trim().is_empty());
-                // GNU emits the warning only if the recipe actually
-                // ran for `target` (so the target was rebuilt) and a
-                // peer target's file is missing.
+                // Check if the target's mtime changed (recipe actually
+                // updated the file). Compare current mtime against the
+                // pre-recipe mtime we captured earlier.
+                let target_was_updated = if let (Some(before), Ok(after_meta)) =
+                    (pre_recipe_target_mtime, std::fs::metadata(target))
+                {
+                    // Target existed before — only "updated" if mtime changed.
+                    after_meta
+                        .modified()
+                        .map(|after| after > before)
+                        .unwrap_or(false)
+                } else {
+                    // Target didn't exist before — "updated" if it exists now.
+                    Path::new(target).exists()
+                };
                 if nontrivial_recipe
                     && !pat_rule.is_grouped
                     && !self.dry_run
                     && !self.touch
                     && !self.question
                     && self.rebuilt_targets.borrow().contains(target)
-                    && Path::new(target).exists()
+                    && target_was_updated
                     && !self.phony_targets.borrow().contains(&sibling)
                     && !Path::new(&sibling).exists()
                 {
