@@ -729,8 +729,22 @@ impl Lexer {
                         self.pos += 2;
                         let rest = self.read_ident();
                         tokens.push(Token::ScalarVar(format!("::{rest}")));
-                    } else if self.ch() == '{' {
+                    } else if self.ch() == '{'
+                        || (self.ch() == ' ' && {
+                            // Perl allows whitespace between $ and { in code:
+                            // `$ {name}` is the same as `${name}`.
+                            let mut look = self.pos;
+                            while look < self.input.len() && self.input[look] == ' ' {
+                                look += 1;
+                            }
+                            look < self.input.len() && self.input[look] == '{'
+                        })
+                    {
                         // ${expr} or ${^NAME} or ${$ref} or ${name}
+                        // Skip optional whitespace before the brace.
+                        while self.pos < self.input.len() && self.ch() == ' ' {
+                            self.pos += 1;
+                        }
                         self.pos += 1;
                         if self.ch() == '^' {
                             self.pos += 1;
@@ -1962,6 +1976,15 @@ impl Lexer {
                         s.push('\x1B');
                         self.pos += 1;
                     }
+                    'c' => {
+                        // \cX — control character: XOR next char with 0x40
+                        self.pos += 1;
+                        if self.pos < self.input.len() {
+                            let ctrl = (self.ch() as u8 ^ 0x40) as char;
+                            s.push(ctrl);
+                            self.pos += 1;
+                        }
+                    }
                     c if c == delim => {
                         s.push(c);
                         self.pos += 1;
@@ -2019,6 +2042,32 @@ impl Lexer {
         let mut depth = 1;
 
         while self.pos < self.input.len() {
+            if self.ch() == '\\' && self.pos + 1 < self.input.len() {
+                let next = self.input[self.pos + 1];
+                if is_paired {
+                    // In paired delimiters (q{}, q<>, etc.), \open and \close
+                    // should not affect nesting depth. Keep both chars in the
+                    // raw output so qq{}/qr{} still see the backslash for
+                    // later escape processing. read_q_string does its own
+                    // post-pass to strip the backslash for single-quote
+                    // semantics.
+                    if next == open || next == close {
+                        s.push(self.advance()); // the backslash
+                        s.push(self.advance()); // the delimiter char
+                        continue;
+                    }
+                } else {
+                    // Non-paired (q//, q!!, etc.): \delim produces the
+                    // literal delimiter, everything else keeps the backslash.
+                    self.pos += 1;
+                    if next == close {
+                        s.push(self.advance());
+                    } else {
+                        s.push('\\');
+                    }
+                    continue;
+                }
+            }
             if is_paired && self.ch() == open {
                 depth += 1;
                 s.push(self.advance());
@@ -2029,13 +2078,6 @@ impl Lexer {
                     break;
                 }
                 s.push(self.advance());
-            } else if self.ch() == '\\' && !is_paired {
-                self.pos += 1;
-                if self.ch() == close {
-                    s.push(self.advance());
-                } else {
-                    s.push('\\');
-                }
             } else {
                 s.push(self.advance());
             }
@@ -2044,9 +2086,30 @@ impl Lexer {
     }
 
     fn read_q_string(&mut self) -> String {
-        let (_, _, s) = self.read_delimited_string();
-        // q// is like single quotes — minimal escaping
-        s
+        let (open, close, s) = self.read_delimited_string();
+        // q// is like single quotes — minimal escaping.
+        // For paired delimiters (q{}, q<>, etc.), \open → open, \close → close,
+        // \\ → \, all other backslashes stay literal.
+        // For non-paired (q//), read_delimited_string already handled \delim.
+        if open == close {
+            return s;
+        }
+        let mut out = String::with_capacity(s.len());
+        let chars: Vec<char> = s.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            if chars[i] == '\\' && i + 1 < chars.len() {
+                let next = chars[i + 1];
+                if next == open || next == close || next == '\\' {
+                    out.push(next);
+                    i += 2;
+                    continue;
+                }
+            }
+            out.push(chars[i]);
+            i += 1;
+        }
+        out
     }
 
     fn read_qq_string(&mut self) -> String {
@@ -2441,6 +2504,14 @@ fn process_escapes(s: &str) -> String {
                 'b' => result.push('\x08'),
                 'f' => result.push('\x0C'),
                 'e' => result.push('\x1B'),
+                'c' => {
+                    // \cX — control character: XOR next char with 0x40
+                    i += 1;
+                    if i < chars.len() {
+                        let ctrl = (chars[i] as u8 ^ 0x40) as char;
+                        result.push(ctrl);
+                    }
+                }
                 'x' => {
                     i += 1;
                     let mut hex = String::new();

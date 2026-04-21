@@ -4183,8 +4183,15 @@ impl Interpreter {
                 let num = val.to_num();
                 // Perl's chr: negatives / non-integer out-of-range inputs
                 // yield U+FFFD (Unicode replacement character).
+                // Under `use bytes`, negatives wrap modulo 256.
                 if num < 0.0 || !num.is_finite() {
-                    Value::Str("\u{FFFD}".to_string())
+                    if self.bytes_mode && !num.is_nan() && num.is_finite() {
+                        // `use bytes`: chr(-1) == \xFF, chr(-2) == \xFE, etc.
+                        let byte = ((num as i64) & 0xFF) as u8;
+                        Value::Str((byte as char).to_string())
+                    } else {
+                        Value::Str("\u{FFFD}".to_string())
+                    }
                 } else {
                     let n = num as u32;
                     match char::from_u32(n) {
@@ -5183,7 +5190,10 @@ impl Interpreter {
                     Value::ScalarRef(r) => r.borrow().clone(),
                     // Symbolic ref: `${EXPR}` where EXPR is a string names
                     // the global scalar. Matches Perl under `no strict 'refs'`.
-                    Value::Str(s) if !s.is_empty() => self.get_var(&s),
+                    Value::Str(s) if !s.is_empty() => {
+                        let name = normalize_ctrl_var_name(&s);
+                        self.get_var(&name)
+                    }
                     other => other,
                 }
             }
@@ -7562,6 +7572,31 @@ impl Interpreter {
     fn assign_to(&mut self, target: &Expr, val: Value) {
         match target {
             Expr::ScalarVar(name) => self.set_var(name, val),
+            Expr::ScalarDerefVar(name) => {
+                // `$$name = val` / `${$name} = val` — deref the variable
+                // to get a ref or symbolic name, then assign through it.
+                let extras = name.chars().take_while(|c| *c == '$').count();
+                let base = &name[extras..];
+                let target_val = self.get_var(base);
+                // Walk extra deref levels for `$$$ref = val` etc.
+                let mut v = target_val;
+                for _ in 0..extras {
+                    v = match v {
+                        Value::ScalarRef(r) => r.borrow().clone(),
+                        _ => Value::Undef,
+                    };
+                }
+                match v {
+                    Value::ScalarRef(r) => {
+                        *r.borrow_mut() = val;
+                    }
+                    Value::Str(s) if !s.is_empty() => {
+                        let vname = normalize_ctrl_var_name(&s);
+                        self.set_var(&vname, val);
+                    }
+                    _ => {}
+                }
+            }
             Expr::GlobVar(name) => {
                 // `*FH = *SRC` — alias the FH filehandle slot (symbol-table
                 // entry) to SRC's target name. Also record it as a sub-name
@@ -7718,6 +7753,29 @@ impl Interpreter {
             Expr::OpAssign(_, inner_target, _) => {
                 // When an OpAssign result is used as an lvalue target
                 // (e.g., chained `.=`), the real lvalue is the inner target.
+                self.assign_to(inner_target, val);
+            }
+            Expr::Call(name, inner_args) if name == "_scalar_block_deref" => {
+                // `${EXPR} = val` — symbolic scalar deref assignment.
+                // Evaluate EXPR to get the variable name, then set it.
+                let v = inner_args
+                    .first()
+                    .map(|a| self.eval_expr(a))
+                    .unwrap_or(Value::Undef);
+                match v {
+                    Value::ScalarRef(r) => {
+                        *r.borrow_mut() = val;
+                    }
+                    Value::Str(s) if !s.is_empty() => {
+                        let vname = normalize_ctrl_var_name(&s);
+                        self.set_var(&vname, val);
+                    }
+                    _ => {}
+                }
+            }
+            Expr::Assign(inner_target, _) => {
+                // `($a = EXPR) .= RHS` — the assignment result is an lvalue
+                // referring to the LHS of the inner assignment.
                 self.assign_to(inner_target, val);
             }
             _ => {} // Can't assign to this
@@ -10208,6 +10266,22 @@ fn value_eq(a: &Value, b: &Value) -> bool {
 /// far more common case where a sub copies a scalar argument value.
 /// Matches Perl's spirit closely for the hash/array/arrow-chain cases
 /// (what `autov($href->{b})` needs).
+/// Convert control-character variable names (e.g. "\x18Y" from `\cXY`) to
+/// caret notation ("^XY") so they match the lexer's representation of
+/// `${^XY}` and `$^X`.
+fn normalize_ctrl_var_name(s: &str) -> String {
+    if let Some(first) = s.chars().next() {
+        let code = first as u32;
+        if code >= 1 && code <= 26 {
+            // Control char 0x01..0x1A → ^A..^Z
+            let letter = (code as u8 + 64) as char;
+            let rest: String = s.chars().skip(1).collect();
+            return format!("^{letter}{rest}");
+        }
+    }
+    s.to_string()
+}
+
 fn is_lvalue_shape(expr: &Expr) -> bool {
     matches!(
         expr,

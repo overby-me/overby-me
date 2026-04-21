@@ -592,6 +592,54 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
 
 ### Recent fixes
 
+- **`chr(N)` under `use bytes` for negative N**: previously returned
+  U+FFFD for any negative input. Reference perl wraps mod 256, so
+  `chr(-1) == "\xFF"`, `chr(-2) == "\xFE"`, `chr(-0.1) == "\x00"`.
+  Now masked with `& 0xFF` when `bytes_mode` is on. Fixes op/chr
+  tests 10–13 (~22 fewer diff lines).
+- **`\cX` control character escape**: `"\cX"` is chr(24) in Perl
+  (ASCII letter XOR 0x40), but the lexer dropped through to its
+  catch-all and produced literal `\c` + `X`. Added a `\c` arm to
+  both `process_escapes` (qq{}) and the inline escape handler in
+  `read_dq_str_interp` (double-quoted strings). Required for the
+  `${"\cXY"} == ${^XY}` symbolic-name equivalence test pattern in
+  base/lex.
+- **`${$name} = val` symbolic scalar assignment**: previously the
+  read path worked (`_scalar_block_deref` looks up via `get_var`),
+  but the parser emits `Expr::ScalarDerefVar` on the LHS of an
+  assignment, and `assign_to` had no arm for it — so writes
+  silently no-op'd. Added an `Expr::ScalarDerefVar` arm that
+  walks `$$$name`-style extra deref levels and finally either
+  mutates the inner ScalarRef or sets a global by symbolic name.
+- **Control-character variable name normalization**: `${^XY}`
+  stores under name `"^XY"` (lexer keeps the caret literal), but
+  `${$name}` where `$name == "\cXY" == "\x18Y"` does symbolic
+  lookup with name `"\x18Y"`. Added `normalize_ctrl_var_name` so
+  the symbolic-deref read/write paths convert leading 0x01..0x1A
+  bytes to caret notation, matching Perl's slot-aliasing semantics.
+- **Paired `q{}` strips backslash from escaped delimiters**: `q{...}`
+  with paired delimiters now treats `\{`/`\}`/`\\` as literal
+  delimiter / backslash (as reference perl does), not as a literal
+  backslash + char. The raw `read_delimited_string` keeps both
+  bytes (so `qq{}`/`qr{}` still see them for later escape
+  processing) and `read_q_string` post-passes to strip the
+  backslash. Also reworked the inner-loop ordering so the new
+  backslash handling fires before the depth-tracking sees the
+  delimiter. Fixes base/lex test 29 (`q{{\{\(}} . q{{\)\}}}`).
+- **`$ {NAME}` / `$ {EXPR}` whitespace tolerance**: Perl allows
+  whitespace between `$` and `{`, so `$ {foo}` is the same as
+  `${foo}`. The lexer required `$` immediately followed by `{`,
+  so `$ {$CX}` parsed as `$` + space + a block, dropping the
+  variable read entirely. Added a peek-past-spaces guard to the
+  scalar-`{` arm. Required for base/lex tests 31+ (`$ {$CX} = 17`
+  pattern in the caret-variable suite).
+- **Chained `($a = expr) .= rhs` lvalue**: the result of a
+  scalar assignment is an lvalue (the LHS of the inner assign),
+  but `assign_to` had no `Expr::Assign` arm, so chained `op=`
+  through the assignment fell into the `_ => {}` catch-all and
+  silently did nothing. Added an arm that recurses into the inner
+  target. Fixes opbasic/concat test 254 (`($a = 'A'.$b) .= 'c'`).
+
 - **`borrowed_file_scopes` for nested same-file sub calls**: when a sub
   from a required file (e.g. test.pl's `is`) calls another sub from the
   same file (e.g. `_ok`), the file scope was being popped and re-pushed
