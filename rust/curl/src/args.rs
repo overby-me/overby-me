@@ -579,6 +579,15 @@ pub(crate) fn parse_args() -> Options {
                 let val = next_arg(&args, i, "--stderr");
                 opts.stderr_redirect = Some(std::path::PathBuf::from(val));
             }
+            "--skip-existing" => {
+                opts.skip_existing = true;
+            }
+            "--no-clobber" => {
+                opts.no_clobber = true;
+            }
+            "--clobber" => {
+                opts.no_clobber = false;
+            }
             _ => {
                 if arg.starts_with('-') && arg.len() > 1 && !arg.starts_with("--") {
                     // Handle combined short flags like -sSL

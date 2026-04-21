@@ -73,8 +73,35 @@ fn main() {
             }
             None
         } else {
-            // Redirect stderr to file — not yet implemented, ignore.
-            None
+            // Redirect stderr to the given file by dup2'ing the file's fd onto fd 2.
+            #[cfg(unix)]
+            {
+                use std::os::unix::io::AsRawFd;
+                if let Ok(file) = fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(dest)
+                {
+                    let fd = file.as_raw_fd();
+                    unsafe extern "C" {
+                        fn dup2(oldfd: i32, newfd: i32) -> i32;
+                    }
+                    // SAFETY: dup2 is a standard POSIX function. We keep the
+                    // file alive in `_stderr_guard` so its fd remains valid
+                    // for the lifetime of the program.
+                    unsafe {
+                        dup2(fd, 2);
+                    }
+                    Some(Box::new(file) as Box<dyn std::any::Any>)
+                } else {
+                    None
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                None
+            }
         }
     } else {
         None
@@ -166,6 +193,62 @@ fn main() {
     }
 
     for (url_idx, url_str) in opts.urls.iter().enumerate() {
+        // --skip-existing: if the output target already exists, emit the
+        // notice and skip this URL's transfer entirely.
+        if opts.skip_existing {
+            // Resolve the prospective output path the same way the post-transfer
+            // path resolution does, but only for explicit -o targets (not -O/-J).
+            let raw_out = opts
+                .outputs
+                .get(url_idx)
+                .or_else(|| {
+                    if opts.outputs.len() == 1
+                        && opts.outputs[0].to_str().is_some_and(|s| s.contains('#'))
+                    {
+                        opts.outputs.first()
+                    } else {
+                        None
+                    }
+                })
+                .cloned()
+                .filter(|p| p.to_str() != Some("-"));
+            let out_path = raw_out.map(|p| {
+                if let Some(s) = p.to_str()
+                    && s.contains('#')
+                {
+                    let glob_vals = url_glob_values
+                        .get(url_idx)
+                        .map(|v| v.as_slice())
+                        .unwrap_or(&[]);
+                    let mut result = s.to_string();
+                    for digit in (1..=9u8).rev() {
+                        let pattern = format!("#{digit}");
+                        if let Some(val) = glob_vals.get(digit as usize - 1) {
+                            result = result.replace(&pattern, val);
+                        }
+                    }
+                    PathBuf::from(result)
+                } else {
+                    p
+                }
+            });
+            let out_path = out_path.map(|p| {
+                if let Some(ref dir) = opts.output_dir
+                    && p.is_relative()
+                {
+                    dir.join(&p)
+                } else {
+                    p
+                }
+            });
+            if let Some(ref p) = out_path
+                && p.exists()
+            {
+                eprintln!("Note: skips transfer, \"{}\" exists locally", p.display());
+                continue;
+            }
+        }
+
         // Collected bytes (header+body) of prior failed attempts in a retry
         // sequence — curl's `--retry` with `--include` emits every attempt's
         // response, so we accumulate and prepend these to the final output.
@@ -195,8 +278,8 @@ fn main() {
                 }
                 match perform(url_str, &opts) {
                     Ok(r) => {
-                        // Retry on 5xx.
-                        if r.status >= 500 && attempt < opts.retry {
+                        // Retry on 5xx and 429 (rate-limited).
+                        if (r.status >= 500 || r.status == 429) && attempt < opts.retry {
                             last_err = format!("HTTP {}", r.status);
                             if opts.include_headers {
                                 retry_prefix.extend_from_slice(&r.header_bytes);
@@ -545,6 +628,42 @@ fn main() {
                 // append to it (matches curl's resume semantics).
                 let append_mode = opts.resume_from.is_some();
 
+                // --no-clobber: if the chosen output file already exists, find the
+                // first available .N suffix (1..=100). If all 100 suffixes are taken,
+                // fail with exit 23.
+                let mut nc_failed = false;
+                let output_path = if opts.no_clobber {
+                    output_path.map(|p| {
+                        if !p.exists() {
+                            return p;
+                        }
+                        for n in 1..=100u32 {
+                            let candidate = {
+                                let mut s = p.as_os_str().to_owned();
+                                s.push(format!(".{n}"));
+                                PathBuf::from(s)
+                            };
+                            if !candidate.exists() {
+                                return candidate;
+                            }
+                        }
+                        nc_failed = true;
+                        p
+                    })
+                } else {
+                    output_path
+                };
+                if nc_failed {
+                    eprintln!(
+                        "curl: (23) Will not overwrite, all suffixes 1..=100 exist for {}",
+                        output_path
+                            .as_ref()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_default()
+                    );
+                    exit_code = 23;
+                }
+
                 let write_file = |path: &PathBuf, data: &[u8]| -> std::io::Result<()> {
                     use std::io::Write;
                     let mut f = fs::OpenOptions::new()
@@ -556,7 +675,9 @@ fn main() {
                     f.write_all(data)
                 };
 
-                if let Some(ref path) = output_path {
+                if nc_failed {
+                    // Skip writing the body — exit 23 already set.
+                } else if let Some(ref path) = output_path {
                     if opts.include_headers || opts.head {
                         let mut data = Vec::new();
                         data.extend_from_slice(&resp.redirect_headers);
@@ -614,15 +735,54 @@ fn main() {
                     } else {
                         "GET".to_string()
                     };
-                    let formatted = format_write_out(
-                        fmt,
-                        &resp,
-                        &url,
-                        resp.num_connects,
-                        resp.num_redirects,
-                        &method,
-                    );
-                    print!("{formatted}");
+                    // Split on %{stderr}/%{stdout}/%output{...} directives so each
+                    // chunk goes to its own destination, then run %{var} substitution
+                    // on each chunk separately.
+                    use format::{WriteOutDest, split_write_out};
+                    let mut chunks_by_dest: Vec<(WriteOutDest, String)> = Vec::new();
+                    for (dest, raw) in split_write_out(fmt) {
+                        if raw.is_empty() {
+                            chunks_by_dest.push((dest, raw));
+                            continue;
+                        }
+                        let formatted = format_write_out(
+                            &raw,
+                            &resp,
+                            &url,
+                            resp.num_connects,
+                            resp.num_redirects,
+                            &method,
+                            output_path.as_deref(),
+                        );
+                        chunks_by_dest.push((dest, formatted));
+                    }
+                    for (dest, text) in chunks_by_dest {
+                        if text.is_empty() {
+                            continue;
+                        }
+                        match dest {
+                            WriteOutDest::Stdout => print!("{text}"),
+                            WriteOutDest::Stderr => eprint!("{text}"),
+                            WriteOutDest::File { path, append } => {
+                                let res = fs::OpenOptions::new()
+                                    .write(true)
+                                    .create(true)
+                                    .append(append)
+                                    .truncate(!append)
+                                    .open(&path)
+                                    .and_then(|mut f| {
+                                        use std::io::Write;
+                                        f.write_all(text.as_bytes())
+                                    });
+                                if res.is_err() && !opts.silent {
+                                    eprintln!(
+                                        "curl: failed to write -w output to {}",
+                                        path.display()
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
             }
             Err(e) => {

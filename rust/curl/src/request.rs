@@ -1046,6 +1046,14 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                         opts.headers
                             .retain(|(k, _)| !k.eq_ignore_ascii_case("authorization"));
                         opts.user = None;
+                    } else if opts.user.is_none()
+                        && new_url.userinfo.is_none()
+                        && let Some(ui) = url.userinfo.clone()
+                    {
+                        // --location-trusted: propagate URL-userinfo credentials
+                        // across cross-host redirects when the target URL has no
+                        // userinfo of its own.
+                        opts.user = Some(ui);
                     }
                 }
 

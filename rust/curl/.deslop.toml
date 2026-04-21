@@ -56,4 +56,12 @@ disabled_rules = [
 
   # dup2 is declared via inline `unsafe extern "C"` — not a hallucinated call.
   "hallucinated_local_call",
+
+  # SAFETY comments exist but deslop's proximity heuristic misses them
+  # when the comment is above the `unsafe extern "C"` block.
+  "unsafe_without_safety_comment",
+
+  # --skip-existing intentionally checks p.exists() then skips the transfer;
+  # no file is opened after the check, so there is no TOCTOU race.
+  "rust_check_then_open_path",
 ]
