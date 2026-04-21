@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**121/135 tests passing** (90%) — upstream test harness from GNU make 4.4.1.
+**125/135 tests passing** (93%) — upstream test harness from GNU make 4.4.1.
 
 `rust/make` has a parser, expander, and build engine (~5k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -198,6 +198,19 @@ organised in six directories under `tests/scripts/`:
 ### Rules engine
 
 - Explicit, pattern, static-pattern, and grouped-target handling.
+- **Escaped-`%` in static pattern rules**: `find_unescaped_percent`,
+  `unescape_percent`, `replace_first_unescaped_percent` helpers handle
+  `\%` literally in target/prereq patterns.
+- **GPATH support**: when a vpath-resolved directory is listed in
+  `GPATH`, the target redirects to the resolved path and prereqs are
+  resolved there — files stay in place rather than being treated as
+  intermediate.
+- **Vpath same-file merging** (Savannah bug #62650): when `vpath`
+  resolves an explicit-rule target to another explicit-rule target's
+  path, the rules are merged and a "same file" warning is emitted.
+- **Library search order rewrite**: `resolve_vpath_with_index` provides
+  earliest-match semantics across `.LIBPATTERNS` candidates and vpath
+  entries, matching GNU make's library resolution order.
 - Double-colon rules execute each rule's recipe independently.
 - Pattern rule matching picks the first candidate whose prereqs exist
   or can be built; falls back to the last matching user-defined
@@ -341,9 +354,9 @@ in ways the test harness happens not to exercise in our passing set.
 
 - **`.SECONDEXPANSION:`** — partial implementation in place. Currently
   passing: `variables/automatic`, `features/rule_glob`. Subtest counts:
-  `features/se_explicit` 29/31, `features/se_implicit` 27/30, `features/se_statpat` 12/12,
-  `features/statipattrules` 66/68,
-  `features/patternrules` 62/72. Infrastructure: `RuleEntry` /
+  `features/se_explicit` 30/31, `features/se_implicit` 27/30, `features/se_statpat` 12/12,
+  `features/statipattrules` 68/68 ✅,
+  `features/patternrules` 63/72. Infrastructure: `RuleEntry` /
   `PatternRuleEntry` carry `second_expand` flag and `raw_prereq_text`;
   `build_target_for` runs `expand_with_auto` with `$@`/`$*`/`$<`/`$^`/`$+`/`$|`
   (and D/F variants) over the saved raw text under
@@ -366,16 +379,12 @@ in ways the test harness happens not to exercise in our passing set.
   `features/reinvoke` (1/12), `options/dash-B` (5/8),
   `variables/MAKE_RESTARTS` (0/3), many `options/dash-W` and
   `options/dash-n`.
-- **GPATH support** — files found via `vpath`/`VPATH` should stay
-  in the resolved location (treated as up-to-date in place) when
-  `GPATH` lists their dir. Without GPATH, vpath-found files are
-  treated as intermediate. Blocks `features/vpathgpath` (0/1) and
-  `features/vpathplus` Tests #2/#3 (intermediate via vpath).
-- **vpath conflict ("same file") warning** — when `vpath PATTERN
-  DIRS` resolves an explicit-rule target to another explicit-rule
-  target's path, GNU emits `Recipe was specified for file 'X' at
-  ..., but 'X' is now considered the same file as 'Y'`. Blocks
-  `features/mult_rules` Test #2 and `features/se_explicit` #27.
+- ~~**GPATH support**~~ ✅ Implemented. Files found via `vpath`/`VPATH`
+  stay in the resolved location when `GPATH` lists their dir.
+  `features/vpathgpath` now passes (1/1).
+- ~~**vpath conflict ("same file") warning**~~ ✅ Implemented. Vpath
+  same-file merging with warning (Savannah bug #62650). `features/mult_rules`
+  now passes (3/3), `features/se_explicit` #27 fixed.
 - **Built-in C compile pipeline through vpath** — pattern rules
   like `%: %.o` chained with `%.o: %.c` should resolve `%.c`
   through vpath so `notarget` finds `work/notarget.c`. Blocks
@@ -417,33 +426,28 @@ in ways the test harness happens not to exercise in our passing set.
 
 ---
 
-## Currently failing top-level tests (15 of 135)
+## Currently failing top-level tests (10 of 135)
 
 Latest baseline (`bash /tmp/run-make-baseline.sh`):
 
 | Test | Notes |
 | --- | --- |
 | `features/parallelism` | Requires `-j` / jobserver |
-| `features/patternrules` | `.SECONDEXPANSION` / chained pattern rules |
+| `features/patternrules` | 63/72 subtests pass; `.SECONDEXPANSION` / chained pattern rules |
 | `features/reinvoke` | Makefile auto-rebuild + re-exec |
-| `features/se_explicit` | 29/31 subtests pass; remaining: #10 (LIBPATTERNS conflict warning), #27 (vpath same-file merge) |
+| `features/se_explicit` | 30/31 subtests pass; remaining: #10 (LIBPATTERNS conflict warning) |
 | `features/se_implicit` | 27/30 subtests pass; failing subtests 3, 9, 27 (SE-during-pattern-search; implicit recursion guard for SE pattern rules) |
-| `features/statipattrules` | 66/68 subtests pass; remaining 2 are escaped-`%` tests (#66, #67) |
 | `features/temp_stdin` | `--debug=b` re-exec banner; stdin-as-makefile temp-file writeback failures; SIGTERM exit diagnostic |
-| `features/vpath` | 4/5 subtests pass; #3 needs `.LIBPATTERNS` interaction with wildcard `vpath %` |
-| `features/vpathgpath` | 0/1 — needs GPATH support |
-| `features/vpathplus` | 2/4 subtests pass; #1 (built-in cc pipeline via vpath), #2/#3 (GPATH) |
-| `features/mult_rules` | 2/3 subtests pass; #2 needs vpath same-file conflict warning |
+| `features/vpathplus` | 2/4 subtests pass; #1 (built-in cc pipeline via vpath), #2/#3 (GPATH intermediate handling) |
 | `options/dash-f` | First failing subtest: prereq makefile rebuild before consuming stdin (`bye.mk: bye.mk.src`) — needs makefile auto-rebuild |
 | `targets/WAIT` | `.WAIT` requires parallel scheduling |
 | `variables/MAKEFLAGS` | Full MAKEFLAGS round-trip parse in sub-makes |
 
 The biggest remaining unlock is finishing **`.SECONDEXPANSION`**
-edge cases — would directly clear several `se_*` subtests,
-`patternrules` and `statipattrules` remainders. After that, **GPATH +
-vpath conflict warning** (unlocks `vpathgpath`, parts of `vpathplus`,
-`mult_rules` #2, `se_explicit` #27) and **MAKEFLAGS round-trip** are
-the next two high-leverage items.
+edge cases — would directly clear several `se_*` subtests and
+`patternrules` remainders. After that, **makefile auto-rebuild/re-exec**
+(unlocks `reinvoke`, `dash-f`, `dash-B` subtests) and **MAKEFLAGS
+round-trip** are the next two high-leverage items.
 
 ---
 
@@ -506,15 +510,15 @@ Round 3 fix (121/135):
 
 ## Category breakdown (current)
 
-Based on the latest baseline run (approximate per-category pass ratios):
+Based on the latest baseline run (125/135 passing):
 
 | Category    | Status                                                            |
 | ----------- | ----------------------------------------------------------------- |
-| `features`  | Partial; SE infrastructure landed (`rule_glob` passes); blocked on SE edge cases + VPATH. |
+| `features`  | 35/42 passing. SE infrastructure landed; GPATH, vpath same-file merging, escaped-%, library search order all implemented. Blocked on remaining SE edge cases, parallelism, re-exec. |
 | `functions` | Most working. Remaining: fatal-error line numbers.                |
 | `misc`      | All passing (bs-nl 28/28, general4 10/10).                        |
 | `options`   | Most working; `dash-q` fully passing. Blocked on re-exec/MAKEFLAGS. |
-| `targets`   | `ONESHELL`+`NOTINTERMEDIATE`+`INTERMEDIATE`+`SECONDARY` fully passing. |
+| `targets`   | `ONESHELL`+`NOTINTERMEDIATE`+`INTERMEDIATE`+`SECONDARY` fully passing. `WAIT` needs parallel scheduling. |
 | `variables` | All done except MAKEFLAGS (`automatic` now passes via SE). |
 
 Round 4 (still 121/135 categories, but +6 vpath subtests):
@@ -542,7 +546,7 @@ Subtests now passing in failing categories:
 - features/vpathgpath: 0 → 0 of 1 (still requires vpath in pattern-rule prereqs)
 - features/vpathplus: 0 → 0 of 4 (same reason + intermediate-via-vpath)
 
-Round 5 (still 121/135 categories, but +5 vpath subtests):
+Round 5 (121/135 categories, +5 vpath subtests):
 
 - **VPATH lookup in pattern-rule prereqs**: `try_pattern_rule` now
   consults `file_exists_or_vpath` and `resolve_vpath_rule` so a
@@ -562,6 +566,46 @@ Remaining vpath/related blockers:
   explicit-rule target to another explicit-rule target's path
   (mult_rules #2). Requires vpath conflict warning.
 - Built-in C compile pipeline through vpath (vpathplus #1).
+
+Round 6 (125/135 categories — gained statipattrules, vpath, vpathgpath, mult_rules):
+
+1. **Escaped-`%` handling in static pattern rules**: added
+   `find_unescaped_percent`, `unescape_percent`, and
+   `replace_first_unescaped_percent` helpers. `\%` is now treated as a
+   literal `%` in target patterns, stem patterns, and prereq patterns.
+   Fixes `statipattrules` #66, #67 — file now fully passes (68/68).
+2. **Vpath duplicate pattern append**: multiple `vpath %` directives now
+   create separate entries in `vpath_patterns` instead of overwriting.
+   Each is tried in declaration order, matching GNU make semantics.
+   Fixes `vpath` #3 (`.LIBPATTERNS` interaction with wildcard `vpath %`).
+3. **Library search order rewrite**: `resolve_vpath_with_index` returns
+   both the resolved path and its vpath-entry index. `.LIBPATTERNS`
+   candidates are now resolved with earliest-match semantics across all
+   vpath entries, so `lib1.a` found via vpath entry 0 beats `lib1.so`
+   found via entry 1. Fixes remaining `vpath` #5 library ordering.
+4. **Vpath same-file merging with warning** (Savannah bug #62650): when
+   `vpath` resolves an explicit-rule target to another explicit-rule
+   target's path, the rules are merged (prereqs combined, recipe kept
+   from the original) and a `Recipe was specified for file 'X' ... but
+   'X' is now considered the same file as 'Y'` warning is emitted.
+   Fixes `mult_rules` #2 — file now fully passes (3/3).
+5. **SE side-effect firing for merged-away rules**: when vpath same-file
+   merging collapses two rules, the SE ordering for the surviving rule
+   respects the recipe-bearing rule's prereqs-first convention. Fixes
+   `se_explicit` #27 — file now 30/31.
+6. **GPATH support**: when a directory found via `vpath`/`VPATH` is
+   listed in `GPATH`, the target redirects to the resolved path and
+   prereqs resolve there. Files stay in the vpath directory rather than
+   being treated as intermediate needing rebuild. Fixes `vpathgpath`
+   #1 — file now fully passes (1/1).
+7. **Peer target warning fix**: the "file 'X' was not created by any
+   rule" grouped-target warning now only fires when the recipe actually
+   created or updated the main target. Avoids spurious warnings when
+   the recipe is a no-op. Fixes `patternrules` peer-target subtest —
+   file now 63/72.
+
+Subtest gains: statipattrules +2, vpath +1, mult_rules +1, vpathgpath +1,
+se_explicit +1, patternrules +1. Category total: 121 → 125.
 
 ---
 
