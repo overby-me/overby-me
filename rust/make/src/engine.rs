@@ -608,6 +608,11 @@ pub struct Engine {
     building_chain: RefCell<HashSet<String>>,
     /// `.SECONDEXPANSION:` has been seen — affects rules defined after.
     pub second_expansion_enabled: Cell<bool>,
+    /// Command-line-derived short flags for MAKEFLAGS (e.g. "erR").
+    /// Makefile assignments cannot remove these flags.
+    pub cmdline_mflags: RefCell<String>,
+    /// Command-line-derived long flags for MAKEFLAGS (e.g. ["--trace"]).
+    pub cmdline_mflags_long: RefCell<Vec<String>>,
 }
 
 /// GNU make's directory-transfer stem substitution for pattern rules.
@@ -716,6 +721,8 @@ impl Engine {
             precious_patterns: RefCell::new(Vec::new()),
             building_chain: RefCell::new(HashSet::new()),
             second_expansion_enabled: Cell::new(false),
+            cmdline_mflags: RefCell::new(String::new()),
+            cmdline_mflags_long: RefCell::new(Vec::new()),
         };
 
         // Set default variables
@@ -920,6 +927,147 @@ impl Engine {
                 Some(trimmed.to_string())
             };
         }
+        // MAKEFLAGS merge: when a makefile assigns MAKEFLAGS, command-line
+        // flags can never be removed. Merge the makefile-provided short
+        // flags with the saved command-line flags and re-add long flags.
+        if name == "MAKEFLAGS" && origin == VarOrigin::File {
+            let cmdline_short = self.cmdline_mflags.borrow();
+            let cmdline_long = self.cmdline_mflags_long.borrow();
+
+            // Split out the $(if $(MAKEOVERRIDES)...) suffix.
+            // Flags may appear both before AND after this suffix
+            // (e.g. after `+=` the raw value is
+            //   "$(if $(MAKEOVERRIDES), -- $(MAKEOVERRIDES)) -r").
+            let (before_suffix, after_suffix) =
+                if let Some(pos) = value.find("$(if $(MAKEOVERRIDES)") {
+                    // Find the matching closing paren for the $(if ...) call.
+                    let mut depth = 0;
+                    let mut end = pos;
+                    for (i, ch) in value[pos..].char_indices() {
+                        match ch {
+                            '(' if i > 0 && value.as_bytes().get(pos + i - 1) == Some(&b'$') => {
+                                depth += 1;
+                            }
+                            '(' => {
+                                depth += 1;
+                            }
+                            ')' => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    end = pos + i + 1;
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    (value[..pos].trim_end(), value[end..].trim_start())
+                } else {
+                    (value, "")
+                };
+            // Combine both parts for flag parsing.
+            let flags_part = if after_suffix.is_empty() {
+                before_suffix.to_string()
+            } else if before_suffix.is_empty() {
+                after_suffix.to_string()
+            } else {
+                format!("{before_suffix} {after_suffix}")
+            };
+
+            // Known single-char flags that GNU make supports.
+            let known_short: &str = "BdeiknqrRsStw";
+
+            // Parse all tokens from the file-assigned value. Extract:
+            // - bare cluster (no '-' prefix) → short flags
+            // - `-X` where X is a single known short flag → short flag
+            // - `-XY...` cluster of short flags → each char is a short flag
+            // - `--long-option` → file-added long flag
+            let mut file_short = String::new();
+            let mut file_long: Vec<String> = Vec::new();
+            let mut past_separator = false;
+            for tok in flags_part.as_str().split_whitespace() {
+                if tok == "--" {
+                    past_separator = true;
+                    continue;
+                }
+                // Skip variable assignments (after -- or containing =)
+                if past_separator || tok.contains('=') {
+                    continue;
+                }
+                if tok.starts_with("--") {
+                    // Long flag from file (e.g. --trace, --warn-undefined-variables)
+                    file_long.push(tok.to_string());
+                } else if tok.starts_with("-I") || tok.starts_with("-l") || tok.starts_with("-O") {
+                    // -Idir, -l2.5, -Otarget — flags with attached values, preserve as long flags
+                    file_long.push(tok.to_string());
+                } else if let Some(stripped) = tok.strip_prefix('-') {
+                    // Short flag cluster with dash: -r, -rR, -Idir, etc.
+                    // Extract known short-flag chars; stop at first
+                    // flag that takes an argument (I, j, l, o, W, f, C).
+                    let chars: Vec<char> = stripped.chars().collect();
+                    for &ch in &chars {
+                        if known_short.contains(ch) {
+                            file_short.push(ch);
+                        } else {
+                            // Unknown or arg-taking flag — stop parsing cluster
+                            break;
+                        }
+                    }
+                } else {
+                    // Bare cluster (no dash) — each char is a short flag
+                    for ch in tok.chars() {
+                        if known_short.contains(ch) {
+                            file_short.push(ch);
+                        }
+                    }
+                }
+            }
+
+            // Merge short flags: union of cmdline and file-assigned flags.
+            let mut merged_chars: Vec<char> = cmdline_short.chars().collect();
+            for ch in file_short.chars() {
+                if !merged_chars.contains(&ch) {
+                    merged_chars.push(ch);
+                }
+            }
+            merged_chars.sort();
+
+            let mut merged = String::from_iter(&merged_chars);
+
+            // Collect all long flags: cmdline first (always preserved), then file-added.
+            let mut all_long: Vec<String> = cmdline_long.clone();
+            for fl in &file_long {
+                if !all_long.contains(fl) {
+                    all_long.push(fl.clone());
+                }
+            }
+
+            // Append long flags.
+            if merged.is_empty() && !all_long.is_empty() {
+                merged.push(' ');
+            }
+            for (idx, long) in all_long.iter().enumerate() {
+                if idx > 0 || !merged_chars.is_empty() {
+                    merged.push(' ');
+                }
+                merged.push_str(long);
+            }
+
+            // Re-append the dynamic MAKEOVERRIDES suffix.
+            merged.push_str("$(if $(MAKEOVERRIDES), -- $(MAKEOVERRIDES))");
+
+            // Bypass origin check — always allow this merged write.
+            self.vars.borrow_mut().insert(
+                "MAKEFLAGS".to_string(),
+                Variable {
+                    value: merged,
+                    flavor: VarFlavor::Recursive,
+                    origin: VarOrigin::Default,
+                },
+            );
+            return;
+        }
+
         // Origin precedence: Override > CommandLine > Environment (with -e) > File >
         // Environment (default) > Default. Skip the assignment when an existing
         // variable has higher precedence.
@@ -6405,12 +6553,32 @@ impl Engine {
             match status_result {
                 Ok(status) => {
                     if !status.success() {
-                        let code = status.code().unwrap_or(2);
-                        if ignore_error || self.ignore_errors {
-                            eprintln!("make: [{loc}{target}] Error {code} (ignored)");
+                        use std::os::unix::process::ExitStatusExt;
+                        if let Some(sig) = status.signal() {
+                            let sig_name = match sig {
+                                1 => "Hangup",
+                                2 => "Interrupt",
+                                6 => "Aborted",
+                                9 => "Killed",
+                                11 => "Segmentation fault",
+                                13 => "Broken pipe",
+                                15 => "Terminated",
+                                _ => "Unknown signal",
+                            };
+                            if ignore_error || self.ignore_errors {
+                                eprintln!("make: [{loc}{target}] {sig_name} (ignored)");
+                            } else {
+                                *self.in_recipe.borrow_mut() = false;
+                                return Err(format!("[{loc}{target}] {sig_name}"));
+                            }
                         } else {
-                            *self.in_recipe.borrow_mut() = false;
-                            return Err(format!("[{loc}{target}] Error {code}"));
+                            let code = status.code().unwrap_or(2);
+                            if ignore_error || self.ignore_errors {
+                                eprintln!("make: [{loc}{target}] Error {code} (ignored)");
+                            } else {
+                                *self.in_recipe.borrow_mut() = false;
+                                return Err(format!("[{loc}{target}] Error {code}"));
+                            }
                         }
                     }
                 }

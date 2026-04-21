@@ -218,6 +218,35 @@ fn run() -> i32 {
             "-l" | "--load-average" | "--max-load" => {
                 // Accept -l with a float argument. TODO: implement load limiting.
                 i += 1;
+                if i < args.len() {
+                    mflags_long.push(format!("-l{}", args[i]));
+                }
+            }
+            "-O" | "--output-sync" => {
+                // Accept and ignore. May have an optional next argument
+                // (line, target, none, recurse). Peek at next arg.
+                if let Some(next) = args.get(i + 1) {
+                    match next.as_str() {
+                        "none" | "line" | "target" | "recurse" => {
+                            mflags_long.push(format!("-O{next}"));
+                            i += 1;
+                        }
+                        _ => {
+                            mflags_long.push("-O".to_string());
+                        }
+                    }
+                } else {
+                    mflags_long.push("-O".to_string());
+                }
+            }
+            arg if arg.starts_with("-O") && arg.len() > 2 => {
+                // -Oline, -Otarget, etc.
+                mflags_long.push(arg.to_string());
+            }
+            arg if arg.starts_with("--output-sync=") => {
+                // --output-sync=target etc.
+                let val = &arg["--output-sync=".len()..];
+                mflags_long.push(format!("-O{val}"));
             }
             "-n" | "--just-print" | "--dry-run" | "--recon" => {
                 engine.dry_run = true;
@@ -237,9 +266,10 @@ fn run() -> i32 {
                 engine.keep_going = true;
                 mflags_short.push('k');
             }
-            "--no-keep-going" | "--stop" => {
+            "-S" | "--no-keep-going" | "--stop" => {
                 engine.keep_going = false;
                 mflags_short.retain(|c| c != 'k');
+                mflags_short.push('S');
             }
             "-t" | "--touch" => {
                 engine.touch = true;
@@ -273,11 +303,11 @@ fn run() -> i32 {
             "-w" | "--print-directory" => {
                 engine.print_directory_opt = Some(true);
                 mflags_long.retain(|s| s != "--no-print-directory");
-                mflags_long.push("--print-directory".to_string());
+                mflags_short.push('w');
             }
             "--no-print-directory" => {
                 engine.print_directory_opt = Some(false);
-                mflags_long.retain(|s| s != "--print-directory");
+                mflags_short.retain(|c| c != 'w');
                 mflags_long.push("--no-print-directory".to_string());
             }
             "--trace" => {
@@ -288,10 +318,33 @@ fn run() -> i32 {
                 engine.warn_undefined_variables.set(true);
                 mflags_long.push("--warn-undefined-variables".to_string());
             }
-            "-d" | "--debug" | "--debug=a" | "--debug=b" | "--debug=basic" | "--debug=v"
-            | "--debug=verbose" | "--debug=i" | "--debug=implicit" | "--debug=j"
-            | "--debug=jobs" | "--debug=m" | "--debug=makefile" | "--debug=n" | "--debug=none" => {
+            "-d" | "--debug" | "--debug=a" => {
                 debug_mode = true;
+                mflags_short.push('d');
+            }
+            "--debug=b" | "--debug=basic" => {
+                debug_mode = true;
+                mflags_long.push("--debug=b".to_string());
+            }
+            "--debug=v" | "--debug=verbose" => {
+                debug_mode = true;
+                mflags_long.push("--debug=v".to_string());
+            }
+            "--debug=i" | "--debug=implicit" => {
+                debug_mode = true;
+                mflags_long.push("--debug=i".to_string());
+            }
+            "--debug=j" | "--debug=jobs" => {
+                debug_mode = true;
+                mflags_long.push("--debug=j".to_string());
+            }
+            "--debug=m" | "--debug=makefile" => {
+                debug_mode = true;
+                mflags_long.push("--debug=m".to_string());
+            }
+            "--debug=n" | "--debug=none" => {
+                debug_mode = true;
+                mflags_long.push("--debug=n".to_string());
             }
             arg if arg.starts_with("--debug=") => {
                 debug_mode = true;
@@ -344,10 +397,16 @@ fn run() -> i32 {
                 }
             },
             arg if arg.starts_with("-l") && arg.len() > 2 => {
-                // -l0.0001 form — accept and ignore.
+                // -l0.0001 form
+                mflags_long.push(arg.to_string());
             }
-            arg if arg.starts_with("--load-average=") || arg.starts_with("--max-load=") => {
-                // Accept and ignore.
+            arg if arg.starts_with("--load-average=") => {
+                let val = &arg["--load-average=".len()..];
+                mflags_long.push(format!("-l{val}"));
+            }
+            arg if arg.starts_with("--max-load=") => {
+                let val = &arg["--max-load=".len()..];
+                mflags_long.push(format!("-l{val}"));
             }
             arg if arg.starts_with("-f") => {
                 makefiles.push(arg[2..].to_string());
@@ -462,12 +521,21 @@ fn run() -> i32 {
                         'n' => engine.dry_run = true,
                         's' => engine.silent = true,
                         'k' => engine.keep_going = true,
+                        'S' => {
+                            engine.keep_going = false;
+                            mflags_short.retain(|c| c != 'k');
+                            mflags_short.push('S');
+                        }
                         't' => engine.touch = true,
                         'q' => engine.question = true,
                         'B' => engine.always_make.set(true),
                         'i' => engine.ignore_errors = true,
                         'e' => engine.env_overrides = true,
-                        'w' => {}
+                        'w' => {
+                            engine.print_directory_opt = Some(true);
+                            mflags_long.retain(|s| s != "--no-print-directory");
+                            mflags_short.push('w');
+                        }
                         'r' => engine.disable_builtin_rules(),
                         'R' => {
                             engine.disable_builtin_rules();
@@ -508,9 +576,24 @@ fn run() -> i32 {
                             let _ = take_arg(&flags, idx, &mut i);
                             break;
                         }
+                        'd' => {
+                            debug_mode = true;
+                            mflags_short.push('d');
+                        }
                         'l' => {
                             // -l takes a float argument (rest of cluster or next arg)
-                            let _ = take_arg(&flags, idx, &mut i);
+                            if let Some(v) = take_arg(&flags, idx, &mut i) {
+                                mflags_long.push(format!("-l{v}"));
+                            }
+                            break;
+                        }
+                        'O' => {
+                            // -O takes an optional argument (rest of cluster)
+                            if let Some(v) = take_arg(&flags, idx, &mut i) {
+                                mflags_long.push(format!("-O{v}"));
+                            } else {
+                                mflags_long.push("-O".to_string());
+                            }
                             break;
                         }
                         'o' => {
@@ -629,6 +712,10 @@ fn run() -> i32 {
         engine::VarFlavor::Recursive,
         engine::VarOrigin::Default,
     );
+    // Store command-line flags so MAKEFLAGS merge logic in set_var_with_origin
+    // can preserve them when a makefile assigns to MAKEFLAGS.
+    engine.cmdline_mflags.borrow_mut().clone_from(&mflags_short);
+    *engine.cmdline_mflags_long.borrow_mut() = mflags_long.clone();
 
     // Auto-include any makefiles listed in the MAKEFILES variable before
     // loading the primary makefile (GNU make behavior). MAKEFILES can be
