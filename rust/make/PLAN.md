@@ -341,8 +341,8 @@ in ways the test harness happens not to exercise in our passing set.
 
 - **`.SECONDEXPANSION:`** — partial implementation in place. Currently
   passing: `variables/automatic`, `features/rule_glob`. Subtest counts:
-  `features/se_explicit` 26/31, `features/se_implicit` 24/30,
-   `features/statipattrules` 64/68,
+  `features/se_explicit` 29/31, `features/se_implicit` 27/30, `features/se_statpat` 12/12,
+  `features/statipattrules` 66/68,
   `features/patternrules` 62/72. Infrastructure: `RuleEntry` /
   `PatternRuleEntry` carry `second_expand` flag and `raw_prereq_text`;
   `build_target_for` runs `expand_with_auto` with `$@`/`$*`/`$<`/`$^`/`$+`/`$|`
@@ -366,9 +366,20 @@ in ways the test harness happens not to exercise in our passing set.
   `features/reinvoke` (1/12), `options/dash-B` (5/8),
   `variables/MAKE_RESTARTS` (0/3), many `options/dash-W` and
   `options/dash-n`.
-- **VPATH / vpath** — search paths for prerequisites and targets.
-  Unlocks `features/vpath`, `features/vpathplus`,
-  `features/vpathgpath`, `features/mult_rules`, `misc/general1`.
+- **GPATH support** — files found via `vpath`/`VPATH` should stay
+  in the resolved location (treated as up-to-date in place) when
+  `GPATH` lists their dir. Without GPATH, vpath-found files are
+  treated as intermediate. Blocks `features/vpathgpath` (0/1) and
+  `features/vpathplus` Tests #2/#3 (intermediate via vpath).
+- **vpath conflict ("same file") warning** — when `vpath PATTERN
+  DIRS` resolves an explicit-rule target to another explicit-rule
+  target's path, GNU emits `Recipe was specified for file 'X' at
+  ..., but 'X' is now considered the same file as 'Y'`. Blocks
+  `features/mult_rules` Test #2 and `features/se_explicit` #27.
+- **Built-in C compile pipeline through vpath** — pattern rules
+  like `%: %.o` chained with `%.o: %.c` should resolve `%.c`
+  through vpath so `notarget` finds `work/notarget.c`. Blocks
+  `features/vpathplus` Test #1 (notarget) and `misc/general1`.
 - **Full MAKEFLAGS → child parse** — we propagate MAKEFLAGS but don't
   re-parse the full ` -- `-separated form in sub-makes. Blocks most
   of `variables/MAKEFLAGS` (12/218).
@@ -412,24 +423,27 @@ Latest baseline (`bash /tmp/run-make-baseline.sh`):
 
 | Test | Notes |
 | --- | --- |
-| `features/mult_rules` | VPATH-dependent |
 | `features/parallelism` | Requires `-j` / jobserver |
 | `features/patternrules` | `.SECONDEXPANSION` / chained pattern rules |
 | `features/reinvoke` | Makefile auto-rebuild + re-exec |
-| `features/se_explicit` | 29/31 subtests pass; remaining: #10 (LIBPATTERNS message), #27 (VPATH-related re-exec) |
-| `features/se_implicit` | 27/30 subtests pass; failing subtests 3, 9, 27 (implicit recursion guard for SE pattern rules; SE info ordering) |
+| `features/se_explicit` | 29/31 subtests pass; remaining: #10 (LIBPATTERNS conflict warning), #27 (vpath same-file merge) |
+| `features/se_implicit` | 27/30 subtests pass; failing subtests 3, 9, 27 (SE-during-pattern-search; implicit recursion guard for SE pattern rules) |
 | `features/statipattrules` | 66/68 subtests pass; remaining 2 are escaped-`%` tests (#66, #67) |
 | `features/temp_stdin` | `--debug=b` re-exec banner; stdin-as-makefile temp-file writeback failures; SIGTERM exit diagnostic |
-| `features/vpath` / `vpathgpath` / `vpathplus` | VPATH / `vpath` / `GPATH` |
+| `features/vpath` | 4/5 subtests pass; #3 needs `.LIBPATTERNS` interaction with wildcard `vpath %` |
+| `features/vpathgpath` | 0/1 — needs GPATH support |
+| `features/vpathplus` | 2/4 subtests pass; #1 (built-in cc pipeline via vpath), #2/#3 (GPATH) |
+| `features/mult_rules` | 2/3 subtests pass; #2 needs vpath same-file conflict warning |
 | `options/dash-f` | First failing subtest: prereq makefile rebuild before consuming stdin (`bye.mk: bye.mk.src`) — needs makefile auto-rebuild |
 | `targets/WAIT` | `.WAIT` requires parallel scheduling |
 | `variables/MAKEFLAGS` | Full MAKEFLAGS round-trip parse in sub-makes |
 
 The biggest remaining unlock is finishing **`.SECONDEXPANSION`**
 edge cases — would directly clear several `se_*` subtests,
-`patternrules` and `statipattrules` remainders. After that, **VPATH**
-(unlocks 4 tests) and **MAKEFLAGS round-trip** are the next two
-high-leverage items.
+`patternrules` and `statipattrules` remainders. After that, **GPATH +
+vpath conflict warning** (unlocks `vpathgpath`, parts of `vpathplus`,
+`mult_rules` #2, `se_explicit` #27) and **MAKEFLAGS round-trip** are
+the next two high-leverage items.
 
 ---
 
@@ -527,6 +541,27 @@ Subtests now passing in failing categories:
 - features/mult_rules: 1 → 2 of 3
 - features/vpathgpath: 0 → 0 of 1 (still requires vpath in pattern-rule prereqs)
 - features/vpathplus: 0 → 0 of 4 (same reason + intermediate-via-vpath)
+
+Round 5 (still 121/135 categories, but +5 vpath subtests):
+
+- **VPATH lookup in pattern-rule prereqs**: `try_pattern_rule` now
+  consults `file_exists_or_vpath` and `resolve_vpath_rule` so a
+  pattern rule with prereq `bar.d` matches when `work/bar.d` exists
+  via `VPATH=work/`. Both terminal and non-terminal rule branches.
+- **`resolve_vpath` skips local files**: GNU only redirects to a
+  vpath copy when the file is NOT in the current directory. Without
+  this, `bar.d` (local + `work/bar.d`) was being rewritten to
+  `work/bar.d` in `$^`, breaking `vpathplus` test 0.
+- Subtest gains: `vpathplus` 0 → 2 of 4.
+
+Remaining vpath/related blockers:
+
+- GPATH support (vpathgpath, vpathplus #2/#3) — files found via
+  vpath should stay there, treated as up-to-date.
+- "Same file" merging when `vpath PATTERN DIRS` resolves an
+  explicit-rule target to another explicit-rule target's path
+  (mult_rules #2). Requires vpath conflict warning.
+- Built-in C compile pipeline through vpath (vpathplus #1).
 
 ---
 
