@@ -4088,6 +4088,41 @@ impl Engine {
                 }
             } // end else (non-SE)
         }
+        // Multi-target pattern rules: merge explicit prereqs from
+        // sibling targets. When `%.t1 %.t2:` matches `x.t1` and
+        // `x.t2` has explicit prereqs (e.g. `x.t2: dep`), those
+        // prereqs must be built before the grouped recipe runs.
+        if let Some((pat_rule, pat_stem)) = &pattern_match
+            && !pat_rule.sibling_patterns.is_empty()
+        {
+            for sibling_pat in &pat_rule.sibling_patterns {
+                let sibling = sibling_pat.replacen('%', pat_stem, 1);
+                if sibling == target {
+                    continue;
+                }
+                // Look up explicit rules for the sibling target.
+                let sibling_rules = self
+                    .rules
+                    .borrow()
+                    .get(&sibling)
+                    .cloned()
+                    .unwrap_or_default();
+                for sr in &sibling_rules {
+                    for p in &sr.prerequisites {
+                        let resolved = self.resolve_library_prereq(p);
+                        if !all_prereqs.contains(&resolved) {
+                            all_prereqs.push(resolved);
+                        }
+                    }
+                    for o in &sr.order_only {
+                        if !all_order_only.contains(o) {
+                            all_order_only.push(o.clone());
+                        }
+                    }
+                }
+            }
+        }
+
         // For terminal pattern rules, prevent further implicit rule
         // chaining for the derived prereqs.
         if let Some((pat_rule, _)) = &pattern_match
