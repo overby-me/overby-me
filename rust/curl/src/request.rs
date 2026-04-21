@@ -854,6 +854,7 @@ fn execute_request(
         opts.max_filesize,
         max_filesize_overflow,
         accumulated_header_bytes,
+        opts.ignore_content_length,
     )?;
 
     if opts.verbose
@@ -936,6 +937,29 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                     opts.proxy_user = None;
                     break;
                 }
+            }
+        }
+    }
+
+    // Extract userinfo (user:pass) from proxy URL if present and --proxy-user not set.
+    if opts.proxy_user.is_none()
+        && let Some(proxy) = &opts.proxy
+    {
+        let stripped = proxy
+            .strip_prefix("http://")
+            .or_else(|| proxy.strip_prefix("https://"))
+            .unwrap_or(proxy);
+        if let Some(at_pos) = stripped.find('@') {
+            let userinfo = &stripped[..at_pos];
+            if !userinfo.is_empty() {
+                let decoded = crate::url::percent_decode(userinfo);
+                // curl treats "user" as "user:" (empty password)
+                let with_colon = if decoded.contains(':') {
+                    decoded
+                } else {
+                    format!("{decoded}:")
+                };
+                opts.proxy_user = Some(with_colon);
             }
         }
     }

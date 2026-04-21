@@ -248,6 +248,11 @@ pub fn parse_url(raw: &str) -> Result<ParsedUrl, String> {
         return Err("empty host".into());
     }
 
+    // curl limits hostnames to 65535 bytes (CURLE_URL_MALFORMAT / exit 3).
+    if host.len() > 65535 {
+        return Err(format!("hostname too long ({} bytes)", host.len()));
+    }
+
     // URL-decode userinfo so Basic auth credentials reflect their literal value
     // (e.g. "user%0aname:password" → "user\nname:password").
     let userinfo = userinfo.map(percent_decode);
@@ -261,7 +266,7 @@ pub fn parse_url(raw: &str) -> Result<ParsedUrl, String> {
     })
 }
 
-fn percent_decode(s: &str) -> String {
+pub(crate) fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;

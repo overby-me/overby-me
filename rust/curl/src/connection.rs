@@ -138,9 +138,20 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
     // --resolve overrides: "host:port:addr" (or multi-addr) replaces the
     // hostname lookup for the matching host:port.
     let resolved_addr = resolve_override(&connect_host, connect_port, &opts.resolves);
-    let addr = resolved_addr
-        .clone()
-        .unwrap_or_else(|| format!("{}:{}", connect_host, connect_port));
+
+    // RFC 6761: .localhost TLD always resolves to loopback (127.0.0.1).
+    // "localhost" itself and any subdomain (e.g. "foo.localhost") are handled.
+    let connect_host_norm = connect_host.trim_end_matches('.').to_ascii_lowercase();
+    let is_localhost =
+        connect_host_norm == "localhost" || connect_host_norm.ends_with(".localhost");
+
+    let addr = if let Some(ref resolved) = resolved_addr {
+        resolved.clone()
+    } else if is_localhost {
+        format!("127.0.0.1:{}", connect_port)
+    } else {
+        format!("{}:{}", connect_host, connect_port)
+    };
 
     // Resolve DNS first, so DNS failures can be distinguished from connection failures.
     let addrs: Vec<_> = std::net::ToSocketAddrs::to_socket_addrs(&addr)

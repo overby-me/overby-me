@@ -56,6 +56,7 @@ pub(crate) fn read_response(
     max_filesize: Option<u64>,
     max_filesize_overflow: bool,
     accumulated_header_bytes: usize,
+    ignore_content_length: bool,
 ) -> Result<Response, String> {
     let mut reader = BufReader::new(conn);
 
@@ -487,7 +488,11 @@ pub(crate) fn read_response(
             header_size_error: false,
         });
     }
-    let content_length: Option<usize> = cl_entry.and_then(|(_, v)| v.parse().ok());
+    let content_length: Option<usize> = if ignore_content_length {
+        None
+    } else {
+        cl_entry.and_then(|(_, v)| v.parse().ok())
+    };
 
     // --max-filesize: check Content-Length against the limit before reading the body.
     // If the raw max-filesize string didn't parse as u64 (overflow), treat as exceeded.

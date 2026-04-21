@@ -40,7 +40,13 @@ fn main() {
             if let Some(at_pos) = stripped.find('@') {
                 let userinfo = &stripped[..at_pos];
                 if !userinfo.is_empty() {
-                    opts.proxy_user = Some(userinfo.to_string());
+                    let decoded = url::percent_decode(userinfo);
+                    let with_colon = if decoded.contains(':') {
+                        decoded
+                    } else {
+                        format!("{decoded}:")
+                    };
+                    opts.proxy_user = Some(with_colon);
                 }
             }
         }
@@ -807,7 +813,12 @@ fn main() {
                     }
                 }
                 // Map error messages to curl exit codes.
-                if e.contains("unsupported proxy scheme") {
+                if e.contains("hostname too long")
+                    || e.contains("empty host")
+                    || e.contains("bad port")
+                {
+                    exit_code = 3; // URL malformed
+                } else if e.contains("unsupported proxy scheme") {
                     exit_code = 7; // Unsupported proxy protocol
                 } else if e.contains("unsupported scheme") || e.contains("unsupported protocol") {
                     exit_code = 1; // Unsupported protocol

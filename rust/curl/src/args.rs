@@ -414,6 +414,9 @@ pub(crate) fn parse_args() -> Options {
             "--raw" => {
                 opts.raw = true;
             }
+            "--ignore-content-length" => {
+                opts.ignore_content_length = true;
+            }
             "--etag-compare" => {
                 i += 1;
                 opts.etag_compare = Some(PathBuf::from(next_arg(&args, i, "--etag-compare")));

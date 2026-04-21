@@ -80,6 +80,7 @@ pub struct Options {
     pub(crate) skip_existing: bool, // --skip-existing — skip transfer when output file exists
     pub(crate) no_clobber: bool,    // --no-clobber — write to file.N suffix when output exists
     pub(crate) raw: bool,           // --raw — disable content decoding
+    pub(crate) ignore_content_length: bool, // --ignore-content-length — read until EOF
     pub(crate) max_filesize_str: Option<String>, // raw string for overflow detection
 }
 
@@ -164,6 +165,7 @@ impl Default for Options {
             skip_existing: false,
             no_clobber: false,
             raw: false,
+            ignore_content_length: false,
             max_filesize_str: None,
         }
     }
