@@ -27,7 +27,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use systemd_udevd::{
     CONTROL_SOCKET_PATH, DB_DIR, QUEUE_FILE, RULES_DIRS, RuleSet, TAGS_DIR, UEvent, glob_match,
-    open_uevent_socket, process_rules,
+    open_uevent_socket, process_rules, test_builtin_net_setup_link_lines,
 };
 
 // ---------------------------------------------------------------------------
@@ -2667,8 +2667,18 @@ fn cmd_test_builtin(action: &str, command: &str, devpath: &str) -> i32 {
             }
             0
         }
-        "input_id" | "keyboard" | "kmod" | "uaccess" | "blkid" | "hwdb" | "net_setup_link"
-        | "btrfs" | "factory_reset" => 0,
+        "net_setup_link" => {
+            // Print ID_NET_LINK_FILE, ID_NET_LINK_FILE_DROPINS, ID_NET_NAME,
+            // and the Property= / UnsetProperty= directives that would apply
+            // to the matched .link file.  Passing `action` so the test-builtin
+            // output honours upstream's "only on add/bind/move" gate.
+            for line in test_builtin_net_setup_link_lines(devpath, action) {
+                println!("{line}");
+            }
+            0
+        }
+        "input_id" | "keyboard" | "kmod" | "uaccess" | "blkid" | "hwdb" | "btrfs"
+        | "factory_reset" => 0,
         _ => 0,
     }
 }

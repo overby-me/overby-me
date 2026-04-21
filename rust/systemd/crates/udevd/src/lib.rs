@@ -3472,6 +3472,19 @@ fn builtin_net_setup_link(event: &mut UEvent) {
             .insert("ID_NET_LINK_FILE_ALTNAMES".to_string(), alt_names.join(" "));
     }
 
+    // .link file Property=/UnsetProperty=/ImportProperty= apply only on
+    // add/bind/move events.  Upstream `link_apply_config` early-returns
+    // for any other action (notably 'change') so re-processing a device
+    // (e.g. `udevadm trigger --action=change`) rebuilds the udev db
+    // without the link file's user-defined properties, leaving only
+    // rule-set values and metadata (ID_NET_LINK_FILE, ID_NET_LINK_FILE_DROPINS,
+    // ID_NET_NAME).  'move' must pass through because an interface rename
+    // ("dummy0 → test1") emits a 'move' uevent and the test still expects
+    // the link file's Property=HOGE=foo to land in the post-rename db.
+    if !matches!(event.action.as_str(), "add" | "bind" | "move") {
+        return;
+    }
+
     // [Link] Property=KEY=VALUE ... — set udev properties on the event env.
     // Each entry is a single "KEY=VALUE" token.
     for entry in &link.link_section.properties {
@@ -3509,6 +3522,88 @@ fn builtin_net_setup_link(event: &mut UEvent) {
             }
         }
     }
+}
+
+/// Test-mode emitter for `udevadm test-builtin net_setup_link <syspath>`.
+/// Unlike the runtime builtin, this does not mutate state; it just prints
+/// the properties each directive would set so the caller's assertions can
+/// check drop-in merging independently of the on-disk udev db.  Matches
+/// upstream's test-builtin format: each `Property=KEY=VALUE` emits
+/// `KEY=VALUE`, each `UnsetProperty=KEY` emits `KEY=` (empty
+/// assignment), and the `ID_NET_LINK_FILE` / `ID_NET_LINK_FILE_DROPINS`
+/// metadata are emitted up-front.
+pub fn test_builtin_net_setup_link_lines(devpath: &str, action: &str) -> Vec<String> {
+    let syspath = std::path::PathBuf::from(devpath);
+    let iface = syspath
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+    if iface.is_empty() {
+        return Vec::new();
+    }
+    let mac = std::fs::read_to_string(syspath.join("address"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let link_configs = link_config::load_link_configs();
+    let matched = link_config::find_matching_link_config(
+        &link_configs,
+        &iface,
+        mac.as_deref(),
+        None,
+        None,
+        None,
+    );
+    let Some(link) = matched else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    out.push(format!("ID_NET_LINK_FILE={}", link.path.display()));
+    if !link.dropin_paths.is_empty() {
+        let joined: Vec<String> = link
+            .dropin_paths
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect();
+        out.push(format!("ID_NET_LINK_FILE_DROPINS={}", joined.join(":")));
+    }
+    // Resolve ID_NET_NAME from NamePolicy / Name.  In test-builtin mode we
+    // have no pre-populated env, so only Name= / NamePolicy=keep / the
+    // current interface name can supply it.
+    if let Some(new_name) =
+        link_config::resolve_name_from_policy(link, |_key| Some(iface.clone()))
+        && !new_name.is_empty()
+    {
+        out.push(format!("ID_NET_NAME={new_name}"));
+    }
+    // Property= / UnsetProperty= / ImportProperty= only apply on
+    // add/bind/move — matching the runtime builtin's action gate.  The
+    // test script exercises both 'add' (expects the assignments) and
+    // 'change' (expects metadata only).
+    if matches!(action, "add" | "bind" | "move") {
+        // Emit Property= entries as KEY=VALUE (even when the same KEY is
+        // also listed in UnsetProperty= — upstream logs every directive).
+        for entry in &link.link_section.properties {
+            if let Some((k, v)) = entry.split_once('=') {
+                let k = k.trim();
+                if !k.is_empty() {
+                    out.push(format!("{k}={v}"));
+                }
+            }
+        }
+        // Emit UnsetProperty= entries as KEY= (empty assignment).  This
+        // is what the comment in upstream TEST-17-UDEV.link-property.sh
+        // calls "empty assignment is also logged".
+        for key in &link.link_section.unset_properties {
+            let key = key.trim();
+            if !key.is_empty() {
+                out.push(format!("{key}="));
+            }
+        }
+    }
+    out
 }
 
 /// Read the `E:KEY=VALUE` entries from the udev database file for this
