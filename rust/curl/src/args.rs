@@ -248,6 +248,12 @@ pub(crate) fn parse_args() -> Options {
                 opts.location = true;
                 opts.location_trusted = true;
             }
+            "--post301" => opts.post301 = true,
+            "--no-post301" => opts.post301 = false,
+            "--post302" => opts.post302 = true,
+            "--no-post302" => opts.post302 = false,
+            "--post303" => opts.post303 = true,
+            "--no-post303" => opts.post303 = false,
             "--tr-encoding" => {
                 opts.tr_encoding = true;
             }

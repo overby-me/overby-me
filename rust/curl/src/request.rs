@@ -1049,14 +1049,21 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                 current_url = normalize_url_path(&current_url);
 
                 // RFC 7231: on 301/302/303, a POST becomes a GET (and its body
-                // is dropped) unless the user explicitly opts in via --post301,
-                // --post302, --post303. We don't implement those flags yet, so
-                // convert unconditionally.
+                // is dropped) unless the user opts in via --post301, --post302,
+                // or --post303 to preserve the POST method and body.
                 if matches!(resp.status, 301..=303) {
-                    opts.data = None;
-                    opts.form_fields.clear();
-                    opts.upload_file = None;
-                    opts.method = Some("GET".to_string());
+                    let preserve = match resp.status {
+                        301 => opts.post301,
+                        302 => opts.post302,
+                        303 => opts.post303,
+                        _ => false,
+                    };
+                    if !preserve {
+                        opts.data = None;
+                        opts.form_fields.clear();
+                        opts.upload_file = None;
+                        opts.method = Some("GET".to_string());
+                    }
                 }
 
                 // If the redirect target is on a different host, drop any
