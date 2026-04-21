@@ -1068,7 +1068,7 @@ impl Engine {
         // not just the first match (GNU vpath search semantics).
         let vp = self.vpath_patterns.borrow();
         for (pat, dirs) in vp.iter() {
-            if expand::pattern_stem(name, pat).is_some() {
+            if self.vpath_pattern_matches(name, pat) {
                 for dir in dirs {
                     let candidate = Path::new(dir).join(name);
                     if candidate.exists() {
@@ -1108,7 +1108,7 @@ impl Engine {
         }
         let vp = self.vpath_patterns.borrow();
         for (vi, (pat, dirs)) in vp.iter().enumerate() {
-            if expand::pattern_stem(name, pat).is_some() {
+            if self.vpath_pattern_matches(name, pat) {
                 for (pi, dir) in dirs.iter().enumerate() {
                     let candidate = Path::new(dir).join(name);
                     if candidate.exists() {
@@ -1135,6 +1135,59 @@ impl Engine {
         None
     }
 
+    /// Check if a vpath pattern matches a name. Handles both
+    /// `%`-patterns (via `pattern_stem`) and literal patterns
+    /// (exact string comparison, for `vpath hello.c src`).
+    fn vpath_pattern_matches(&self, name: &str, pat: &str) -> bool {
+        if expand::find_unescaped_percent(pat).is_some() {
+            expand::pattern_stem(name, pat).is_some()
+        } else {
+            // Literal pattern: match exactly.
+            pat == name
+        }
+    }
+
+    /// Resolve a target name through vpath directives, looking for
+    /// another target that has registered rules (not file existence).
+    /// Used for "same file" merging (sv 62650) where `vpath hello.c
+    /// src` plus rules for both `hello.c` and `src/hello.c` should
+    /// redirect to `src/hello.c`.
+    fn resolve_vpath_to_rule_target(&self, name: &str) -> Option<String> {
+        // Don't redirect if the file exists locally (GNU behavior).
+        if Path::new(name).exists() {
+            return None;
+        }
+        let rules = self.rules.borrow();
+        let vp = self.vpath_patterns.borrow();
+        for (pat, dirs) in vp.iter() {
+            if self.vpath_pattern_matches(name, pat) {
+                for dir in dirs {
+                    let candidate = Path::new(dir).join(name).to_string_lossy().to_string();
+                    if rules.contains_key(&candidate) {
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+        drop(vp);
+        drop(rules);
+        let vpath = self.lookup_var("VPATH");
+        if !vpath.is_empty() {
+            let rules = self.rules.borrow();
+            for dir in vpath.split(&[':', ' '][..]) {
+                let dir = dir.trim();
+                if dir.is_empty() {
+                    continue;
+                }
+                let candidate = Path::new(dir).join(name).to_string_lossy().to_string();
+                if rules.contains_key(&candidate) {
+                    return Some(candidate);
+                }
+            }
+        }
+        None
+    }
+
     /// Look up a target's vpath-resolved name when there is no
     /// explicit rule for the original name. Searches both
     /// `vpath PATTERN DIRS` directives (matching `name` against
@@ -1148,7 +1201,7 @@ impl Engine {
         // Try ALL matching patterns in declaration order, not just
         // the first matching pattern.
         for (pat, dirs) in vp.iter() {
-            if expand::pattern_stem(name, pat).is_some() {
+            if self.vpath_pattern_matches(name, pat) {
                 for dir in dirs {
                     let candidate = Path::new(dir).join(name).to_string_lossy().to_string();
                     if rules.contains_key(&candidate) {
@@ -3199,6 +3252,50 @@ impl Engine {
         // updated on disk) when `foo.x` was requested under `VPATH=vpa`.
         let vpath_redirected: Option<String> = if rules.is_empty() && !is_phony {
             self.resolve_vpath_rule(target)
+        } else if !is_phony {
+            // "Same file" merging (sv 62650): when the target has rules
+            // but vpath also resolves to another target with rules, GNU
+            // make warns and redirects to the vpath-resolved target.
+            // We check vpath directories for a rule-registered name
+            // (not file existence) to handle targets that are only rules.
+            self.resolve_vpath_to_rule_target(target)
+                .and_then(|resolved| {
+                    let source = self
+                        .rules
+                        .borrow()
+                        .get(target)
+                        .and_then(|entries| entries.first())
+                        .map(|e| {
+                            format!(
+                                "{}:{}",
+                                e.source_name,
+                                e.recipe_lines.first().copied().unwrap_or(0)
+                            )
+                        })
+                        .unwrap_or_default();
+                    // Only warn if the local target actually has a recipe.
+                    let has_recipe = self
+                        .rules
+                        .borrow()
+                        .get(target)
+                        .map(|entries| entries.iter().any(|e| !e.recipe.is_empty()))
+                        .unwrap_or(false);
+                    if has_recipe {
+                        eprintln!(
+                            "{}: Recipe was specified for file '{}' at {},",
+                            source, target, source
+                        );
+                        eprintln!(
+                            "{}: but '{}' is now considered the same file as '{}'.",
+                            source, target, resolved
+                        );
+                        eprintln!(
+                            "{}: Recipe for '{}' will be ignored in favor of the one for '{}'.",
+                            source, target, resolved
+                        );
+                    }
+                    Some(resolved)
+                })
         } else {
             None
         };
@@ -4011,6 +4108,17 @@ impl Engine {
         // match injected new entries.
         let normal_set2: HashSet<String> = all_prereqs.iter().cloned().collect();
         all_order_only.retain(|o| !normal_set2.contains(o));
+
+        // Vpath "same file" resolution for prereqs: if a prereq name
+        // resolves via vpath to another target that has explicit rules,
+        // update the prereq name to the resolved path. This makes `$^`
+        // show vpath-resolved paths (e.g. `src/hello.c` instead of
+        // `hello.c` when `vpath hello.c src` is active).
+        for prereq in all_prereqs.iter_mut() {
+            if let Some(resolved) = self.resolve_vpath_to_rule_target(prereq) {
+                *prereq = resolved;
+            }
+        }
 
         // Fall back to `.DEFAULT`'s recipe if we still have nothing (and no
         // explicit rules exist for this target).
