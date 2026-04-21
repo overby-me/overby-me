@@ -1095,26 +1095,40 @@ impl Engine {
         None
     }
 
-    /// Strict-extension vpath resolution: only consults vpath patterns
-    /// whose pattern's suffix equals `name`'s suffix. Used for
-    /// `.LIBPATTERNS` library resolution where GNU make does not let
-    /// a `.so` library satisfy a `.a` candidate (or vice versa) via
-    /// generic `vpath %` wildcards.
-    fn resolve_vpath_strict_ext(&self, name: &str) -> Option<String> {
-        let dot = name.rfind('.')?;
-        let ext = &name[dot..];
+    /// Vpath search that returns the resolved path along with the
+    /// vpath-pattern index and directory index within that pattern.
+    /// This is used by `resolve_library_prereq` to pick the
+    /// "earliest" match across all `.LIBPATTERNS` candidates,
+    /// matching GNU make's linker-compatible library search order.
+    /// Also searches the general `VPATH` variable (those entries
+    /// come after all `vpath` directive entries).
+    fn resolve_vpath_with_index(&self, name: &str) -> Option<(String, usize, usize)> {
+        if Path::new(name).exists() {
+            return None;
+        }
         let vp = self.vpath_patterns.borrow();
-        for (pat, dirs) in vp.iter() {
-            // Pattern must end with the same extension.
-            if !pat.ends_with(ext) {
-                continue;
-            }
+        for (vi, (pat, dirs)) in vp.iter().enumerate() {
             if expand::pattern_stem(name, pat).is_some() {
-                for dir in dirs {
+                for (pi, dir) in dirs.iter().enumerate() {
                     let candidate = Path::new(dir).join(name);
                     if candidate.exists() {
-                        return Some(candidate.to_string_lossy().to_string());
+                        return Some((candidate.to_string_lossy().to_string(), vi, pi));
                     }
+                }
+            }
+        }
+        let vpath_base = vp.len();
+        drop(vp);
+        let vpath = self.lookup_var("VPATH");
+        if !vpath.is_empty() {
+            for (pi, dir) in vpath.split(&[':', ' '][..]).enumerate() {
+                let dir = dir.trim();
+                if dir.is_empty() {
+                    continue;
+                }
+                let candidate = Path::new(dir).join(name);
+                if candidate.exists() {
+                    return Some((candidate.to_string_lossy().to_string(), vpath_base, pi));
                 }
             }
         }
@@ -1914,12 +1928,12 @@ impl Engine {
                             // `vpath PATTERN` clears entries for that pattern.
                             vp.retain(|(p, _)| p != &pat);
                         } else {
-                            // Replace existing entry if present, else append.
-                            if let Some(entry) = vp.iter_mut().find(|(p, _)| p == &pat) {
-                                entry.1 = dirs;
-                            } else {
-                                vp.push((pat, dirs));
-                            }
+                            // GNU make appends a new entry for each `vpath`
+                            // directive, even when the pattern is identical
+                            // to an earlier one. This matters for search
+                            // order: `vpath % a b` then `vpath % c` means
+                            // search a, b, c in that order.
+                            vp.push((pat, dirs));
                         }
                     }
                 }
@@ -4807,16 +4821,18 @@ impl Engine {
         Ok(())
     }
 
-    /// Resolve `-l<name>` prereqs using .LIBPATTERNS. Each `%` pattern is
-    /// tried; the first that matches an existing file is used. If none
-    /// match, fall back to the first pattern expansion (GNU make uses
-    /// this for the `$<` / recipe view).
+    /// Resolve `-l<name>` prereqs using .LIBPATTERNS with GNU make's
+    /// linker-compatible search order: try all LIBPATTERNS candidates
+    /// locally first (return immediately if found), then try all
+    /// candidates through vpath and pick the one with the earliest
+    /// vpath position (lowest vpath_index, then lowest path_index).
     fn resolve_library_prereq(&self, name: &str) -> String {
         let Some(lib) = name.strip_prefix("-l") else {
             return name.to_string();
         };
         let patterns = self.lookup_var(".LIBPATTERNS");
         let mut first: Option<String> = None;
+        let mut candidates: Vec<String> = Vec::new();
         for pat in patterns.split_whitespace() {
             if !pat.contains('%') {
                 eprintln!("make: .LIBPATTERNS element '{pat}' is not a pattern");
@@ -4826,21 +4842,32 @@ impl Engine {
             if first.is_none() {
                 first = Some(candidate.clone());
             }
+            // Check locally or as an explicit rule target — return immediately.
             if std::path::Path::new(&candidate).exists()
                 || self.rules.borrow().contains_key(&candidate)
             {
                 return candidate;
             }
-            // GNU also tries the candidate through vpath / VPATH but
-            // only consults vpath patterns whose pattern matches the
-            // candidate's extension (e.g. `lib1.a` only consults
-            // `vpath %.a ...`, NOT `vpath %.so ...` or wildcard
-            // `vpath % ...`). This keeps `-l1` -> `a1/lib1.a` even
-            // when `b1/lib1.so` exists.
-            if let Some(resolved) = self.resolve_vpath_strict_ext(&candidate) {
-                return resolved;
+            candidates.push(candidate);
+        }
+
+        // Try all candidates through vpath and pick the earliest match.
+        let mut best: Option<(String, usize, usize)> = None;
+        for candidate in &candidates {
+            if let Some((resolved, vi, pi)) = self.resolve_vpath_with_index(candidate) {
+                let dominated = match &best {
+                    None => true,
+                    Some((_, bv, bp)) => vi < *bv || (vi == *bv && pi < *bp),
+                };
+                if dominated {
+                    best = Some((resolved, vi, pi));
+                }
             }
         }
+        if let Some((resolved, _, _)) = best {
+            return resolved;
+        }
+
         first.unwrap_or_else(|| name.to_string())
     }
 
