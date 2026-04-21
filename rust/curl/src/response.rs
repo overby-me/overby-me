@@ -3,6 +3,11 @@ use std::io::{BufRead, BufReader, Read};
 
 use crate::connection::Connection;
 
+/// Maximum size of response headers for a single response (~300KB).
+const MAX_HEADER_SIZE: usize = 307200;
+/// Maximum accumulated header size across all redirect hops (~6MB).
+const MAX_TOTAL_HEADER_SIZE: usize = 6 * 1024 * 1024;
+
 pub(crate) struct Response {
     pub(crate) status: u16,
     #[expect(
@@ -36,13 +41,20 @@ pub(crate) struct Response {
     pub(crate) partial_file: bool,
     pub(crate) bad_content_encoding: bool,
     pub(crate) bad_encoding_too_many: bool,
+    pub(crate) filesize_exceeded: bool,
+    pub(crate) header_size_error: bool,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn read_response(
     conn: &mut Connection,
     is_head: bool,
     http09: bool,
     decompress: bool,
+    raw: bool,
+    max_filesize: Option<u64>,
+    max_filesize_overflow: bool,
+    accumulated_header_bytes: usize,
 ) -> Result<Response, String> {
     let mut reader = BufReader::new(conn);
 
@@ -78,6 +90,8 @@ pub(crate) fn read_response(
                     partial_file: false,
                     bad_content_encoding: false,
                     bad_encoding_too_many: false,
+                    filesize_exceeded: false,
+                    header_size_error: false,
                 });
             }
             return Err("empty reply from server".into());
@@ -106,6 +120,8 @@ pub(crate) fn read_response(
                 partial_file: false,
                 bad_content_encoding: false,
                 bad_encoding_too_many: false,
+                filesize_exceeded: false,
+                header_size_error: false,
             });
         }
         header_bytes.extend_from_slice(line.as_bytes());
@@ -226,6 +242,8 @@ pub(crate) fn read_response(
                 partial_file: false,
                 bad_content_encoding: false,
                 bad_encoding_too_many: false,
+                filesize_exceeded: false,
+                header_size_error: false,
             });
         }
         let this_ending: &'static [u8] = if line.ends_with("\r\n") {
@@ -302,10 +320,60 @@ pub(crate) fn read_response(
                 partial_file: false,
                 bad_content_encoding: false,
                 bad_encoding_too_many: false,
+                filesize_exceeded: false,
+                header_size_error: false,
             });
         }
         pending_raw = Some(line.clone());
         pending_ending = this_ending;
+    }
+
+    // Check header size limits.
+    if header_bytes.len() > MAX_HEADER_SIZE {
+        return Ok(Response {
+            status,
+            status_text,
+            headers,
+            body: Vec::new(),
+            header_bytes,
+            redirect_headers: Vec::new(),
+            num_connects: 0,
+            num_redirects: 0,
+            max_redirects_reached: false,
+            weird_server_reply: false,
+            final_url: None,
+            redirect_url: None,
+            timed_out: false,
+            recv_error: false,
+            partial_file: false,
+            bad_content_encoding: false,
+            bad_encoding_too_many: false,
+            filesize_exceeded: false,
+            header_size_error: true,
+        });
+    }
+    if accumulated_header_bytes + header_bytes.len() > MAX_TOTAL_HEADER_SIZE {
+        return Ok(Response {
+            status,
+            status_text,
+            headers,
+            body: Vec::new(),
+            header_bytes,
+            redirect_headers: Vec::new(),
+            num_connects: 0,
+            num_redirects: 0,
+            max_redirects_reached: false,
+            weird_server_reply: false,
+            final_url: None,
+            redirect_url: None,
+            timed_out: false,
+            recv_error: false,
+            partial_file: false,
+            bad_content_encoding: false,
+            bad_encoding_too_many: false,
+            filesize_exceeded: false,
+            header_size_error: true,
+        });
     }
 
     // HEAD responses, and 204/304 responses, never have a body per HTTP spec —
@@ -329,13 +397,16 @@ pub(crate) fn read_response(
             partial_file: false,
             bad_content_encoding: false,
             bad_encoding_too_many: false,
+            filesize_exceeded: false,
+            header_size_error: false,
         });
     }
 
     // Read body based on Transfer-Encoding or Content-Length.
-    let is_chunked = headers
-        .iter()
-        .any(|(k, v)| k == "transfer-encoding" && v.contains("chunked"));
+    let is_chunked = !raw
+        && headers
+            .iter()
+            .any(|(k, v)| k == "transfer-encoding" && v.contains("chunked"));
 
     // Reject responses whose Transfer-Encoding stack has more than 5 layers,
     // matching curl's MAX_ENCODING_STACK guard (test 387).
@@ -365,6 +436,8 @@ pub(crate) fn read_response(
             partial_file: false,
             bad_content_encoding: true,
             bad_encoding_too_many: true,
+            filesize_exceeded: false,
+            header_size_error: false,
         });
     }
     // If Content-Length is present but fails to parse as a non-negative integer,
@@ -409,9 +482,64 @@ pub(crate) fn read_response(
             partial_file: false,
             bad_content_encoding: false,
             bad_encoding_too_many: false,
+            filesize_exceeded: false,
+            header_size_error: false,
         });
     }
     let content_length: Option<usize> = cl_entry.and_then(|(_, v)| v.parse().ok());
+
+    // --max-filesize: check Content-Length against the limit before reading the body.
+    // If the raw max-filesize string didn't parse as u64 (overflow), treat as exceeded.
+    // If Content-Length (as u64) exceeds the limit, also treat as exceeded.
+    // If cl_all_digits is true but it didn't parse as usize, it's a huge number — also exceeded.
+    if max_filesize.is_some() || max_filesize_overflow {
+        let cl_as_u64: Option<u64> = cl_entry.and_then(|(_, v)| v.parse().ok());
+        let exceeded = if max_filesize_overflow {
+            // The max-filesize value itself overflowed — but if there's a Content-Length
+            // that's also huge (didn't parse as u64), that's exceeded too.
+            // Actually, if max_filesize_overflow, the limit is astronomically large,
+            // so only exceed if CL also overflows (can't compare).
+            // For test 393: huge CL like 999999999999999999999999 with a parseable max-filesize
+            // Actually let's re-think: max_filesize_overflow means the --max-filesize VALUE
+            // didn't parse. If it didn't parse, max_filesize is None. We should treat
+            // unparsable max-filesize as 0 (curl behavior).
+            cl_entry.is_some()
+        } else if let Some(limit) = max_filesize {
+            if let Some(cl) = cl_as_u64 {
+                cl > limit
+            } else if cl_all_digits {
+                // Content-Length is all digits but too big for u64 — definitely exceeds
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if exceeded {
+            return Ok(Response {
+                status,
+                status_text,
+                headers,
+                body: Vec::new(),
+                header_bytes,
+                redirect_headers: Vec::new(),
+                num_connects: 0,
+                num_redirects: 0,
+                max_redirects_reached: false,
+                weird_server_reply: false,
+                final_url: None,
+                redirect_url: None,
+                timed_out: false,
+                recv_error: false,
+                partial_file: false,
+                bad_content_encoding: false,
+                bad_encoding_too_many: false,
+                filesize_exceeded: true,
+                header_size_error: false,
+            });
+        }
+    }
 
     let (body, timed_out, recv_error_flag, partial_flag) = if is_chunked {
         let (b, err) = read_chunked_body(&mut reader)?;
@@ -443,7 +571,7 @@ pub(crate) fn read_response(
     };
 
     // Decompress if Content-Encoding is present and --compressed was requested
-    let content_encoding = if decompress {
+    let content_encoding = if decompress && !raw {
         headers
             .iter()
             .find(|(k, _)| k == "content-encoding")
@@ -534,6 +662,8 @@ pub(crate) fn read_response(
         partial_file: partial_flag,
         bad_content_encoding: bad_encoding,
         bad_encoding_too_many,
+        filesize_exceeded: false,
+        header_size_error: false,
     })
 }
 

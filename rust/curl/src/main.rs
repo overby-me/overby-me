@@ -393,6 +393,14 @@ fn main() {
                 } else if resp.recv_error {
                     exit_code = 56;
                 }
+                if resp.filesize_exceeded {
+                    eprintln!("curl: (63) Maximum file size exceeded");
+                    exit_code = 63;
+                }
+                if resp.header_size_error {
+                    eprintln!("curl: (27) Response headers too large");
+                    exit_code = 56;
+                }
                 // status==0 means we consumed a 1xx interim response but the
                 // server closed the connection before sending a final response.
                 // Output the interim headers (handled below) but set exit 52.

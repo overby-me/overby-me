@@ -261,6 +261,7 @@ pub(crate) fn parse_args() -> Options {
                 i += 1;
                 let val = next_arg(&args, i, "--max-filesize");
                 opts.max_filesize = val.parse().ok();
+                opts.max_filesize_str = Some(val);
             }
             "-v" | "--verbose" => {
                 opts.verbose = true;
@@ -392,6 +393,9 @@ pub(crate) fn parse_args() -> Options {
             }
             "--remove-on-error" => {
                 opts.remove_on_error = true;
+            }
+            "--raw" => {
+                opts.raw = true;
             }
             "--etag-compare" => {
                 i += 1;
@@ -789,6 +793,20 @@ pub(crate) fn parse_args() -> Options {
         process::exit(2);
     }
 
+    // Mutual exclusion: --continue-at vs --no-clobber
+    if opts.no_clobber && opts.resume_from.is_some() {
+        eprintln!("curl: --continue-at is mutually exclusive with --no-clobber");
+        eprintln!("curl: option -C: is badly used here");
+        eprintln!("curl: try 'curl --help' or 'curl --manual' for more information");
+        process::exit(2);
+    }
+    // Mutual exclusion: --continue-at vs --remove-on-error
+    if opts.remove_on_error && opts.resume_from.is_some() {
+        eprintln!("curl: --continue-at is mutually exclusive with --remove-on-error");
+        eprintln!("curl: option -C: is badly used here");
+        eprintln!("curl: try 'curl --help' or 'curl --manual' for more information");
+        process::exit(2);
+    }
     opts
 }
 
@@ -853,9 +871,15 @@ fn append_data(opts: &mut Options, val: &str, raw: bool) {
             let mut buf = String::new();
             let _ = io::stdin().read_to_string(&mut buf);
             buf.into_bytes()
+                .into_iter()
+                .filter(|b| *b != b'\r' && *b != b'\n' && *b != b'\0')
+                .collect()
         } else {
             match fs::read(path) {
-                Ok(d) => d,
+                Ok(d) => d
+                    .into_iter()
+                    .filter(|b| *b != b'\r' && *b != b'\n' && *b != b'\0')
+                    .collect(),
                 Err(e) => {
                     eprintln!("curl: failed to read {path}: {e}");
                     process::exit(2);

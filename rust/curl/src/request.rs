@@ -799,7 +799,11 @@ fn multipart_boundary() -> String {
     format!("------------------------{rand_part}")
 }
 
-fn execute_request(url: &ParsedUrl, opts: &Options) -> Result<Response, String> {
+fn execute_request(
+    url: &ParsedUrl,
+    opts: &Options,
+    accumulated_header_bytes: usize,
+) -> Result<Response, String> {
     let (mut conn, connect_response) = connect(url, opts)?;
     let request = build_request(url, opts);
 
@@ -827,7 +831,20 @@ fn execute_request(url: &ParsedUrl, opts: &Options) -> Result<Response, String> 
             .as_deref()
             .map(|m| m.eq_ignore_ascii_case("HEAD"))
             .unwrap_or(false);
-    let mut resp = read_response(&mut conn, is_head, opts.http09, opts.compressed)?;
+    let max_filesize_overflow = opts
+        .max_filesize_str
+        .as_ref()
+        .is_some_and(|s| s.parse::<u64>().is_err());
+    let mut resp = read_response(
+        &mut conn,
+        is_head,
+        opts.http09,
+        opts.compressed,
+        opts.raw,
+        opts.max_filesize,
+        max_filesize_overflow,
+        accumulated_header_bytes,
+    )?;
 
     if opts.verbose
         && let Ok(hdr_str) = std::str::from_utf8(&resp.header_bytes)
@@ -938,7 +955,7 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
     loop {
         let url = parse_url(&current_url)?;
 
-        let resp = execute_request(&url, &opts)?;
+        let resp = execute_request(&url, &opts, redirect_headers.len())?;
         connects += 1;
 
         // Handle redirects.
