@@ -592,6 +592,67 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
 
 ### Recent fixes
 
+- **`$#name` in string interpolation**: `"max=$#that_array"` now
+  interpolates the last-index of `@that_array` (emitting an inner
+  `Expr::ArrayLen` for the part), matching Perl. Previously the
+  `$#name` sequence was left as a literal in the output. Required by
+  op/repeat test 47 (`is($#that_array, 28, 'list repetition propagates
+  lvalue cx to its lhs')`) and similar `$#…`-in-string tests across
+  the suite.
+- **Lexical-barrier scope reset for named subs (no-op stub)**: the
+  scaffolding (`enter_named_sub_scope` / `exit_named_sub_scope`,
+  `sub_scope_stack`) is in place but the body is currently a no-op.
+  An attempt to stash+clear `self.scopes` on every named-sub call
+  correctly fixed the `terminal()` lexical-leak case (op/eval test 40)
+  but regressed ~45 tests because test.pl helpers transitively call
+  each other and the file scope plumbing (`enter_file_scope`) loses
+  mutations when scopes are blanked between calls. A proper fix needs
+  a per-frame "lexical barrier" marker so name lookup stops at the
+  sub's own pad without disturbing the file-scope shuffle. Documented
+  here so the next attempt has the constraint up front.
+- **Anonymous-sub closure capture (read-mostly fallback)**: `sub { … }`
+  now snapshots the current lexical scope chain into a per-name
+  `closure_envs` map. When the resulting CodeRef is later called via
+  `&$cc` / `$cc->()`, the captured frames are spliced in *underneath*
+  the live scope stack so name lookups can fall back to the closure's
+  definition-time lexicals (after the original scope has gone). The
+  live frames continue to win for any name they define, which preserves
+  SIG-handler-style closures (`local $SIG{__DIE__} = sub { push @error,
+  @_ }` still mutates the actual `@error`). Mutations to a captured-only
+  slot persist within the env Rc but don't reach the original outer
+  slot — full per-slot sharing would need an `Rc<RefCell<Value>>`
+  refactor. Unblocks op/eval test 39 ("closures created within eval bind
+  correctly") and the basic returned-closure pattern: `sub bar { my $i =
+  shift; sub { $i } }`.
+- **Tail `sub { … }` parses as anon-sub expression**: a bare `sub { … }`
+  whose closing `}` is followed by another `}` (end of the enclosing
+  block) or `;` is now treated as the block's tail expression rather
+  than a nameless `sub NAME { … }` declaration. Without this, the
+  CodeRef returned from `sub bar { my $i = shift; sub { $i } }` was
+  being silently dropped because `parse_sub_decl` consumed a sub with
+  empty name, registered it in the global subs table under "", and
+  emitted nothing as the call's last expression.
+
+- **Chained subscripts after element access**: `$arr[0][1]`, `$h{a}{b}`,
+  `$ref->[0][0]`, `$_[0][0]` all parse as implicit arrow-deref now —
+  previously a second `[idx]` / `{k}` after an `ArrayElement` /
+  `HashElement` / `ArrowElement` fell through to the `_list_slice`
+  catch-all, returning the stringified ref instead of dereferencing.
+  Required by op/undef test 20's `$_[0][0]` pattern in DESTROY.
+- **Hash subscript with interpolated string key**: `$h{"k$i"}` now
+  recognises `Token::InterpString` as a valid first token in the
+  subscript heuristic. Previously the `{...}` was treated as a block,
+  so the assignment silently went elsewhere and the hash stayed empty.
+- **DESTROY semantics for `undef %hash` / wholesale hash replace**:
+  `set_hash_from_list` now removes each entry from the slot *first*,
+  then dispatches the value's `DESTROY` so the handler observes the
+  partially-cleared hash (matching Perl's per-entry teardown order).
+  Also keeps `blessed_refs` populated during the handler call so
+  `ref($_[0])` inside `DESTROY` returns the class name; only removes
+  the entry after the handler returns. Same fix applied to the scalar,
+  array, and per-iteration scope `DESTROY` paths. Unblocks op/undef
+  tests 19-43 (`k$N: keys` / `k$N: values` / `k$N: each` family).
+
 - **Regex `/s` `/x` `/m` flag prefixes + `\N` translator**: regex_match
   and regex_match_pos now propagate `/s`, `/x`, `/m` flags into the
   rust-regex `(?…)` flag prefix (case-insensitive `/i` was already

@@ -2097,6 +2097,24 @@ impl Parser {
                                 expr = Expr::Call("_list_slice".to_string(), args);
                             }
                         }
+                        // Chained subscript on an already-evaluated element
+                        // (e.g. `$arr[0][1]`, `$h{k}[0]`, `$ref->[0][0]`):
+                        // implicit arrow-deref the inner value as an array ref.
+                        Expr::ArrayElement(_, _)
+                        | Expr::HashElement(_, _)
+                        | Expr::ArrowElement(_, _, _) => {
+                            if single_index {
+                                expr = Expr::ArrowElement(
+                                    Box::new(expr),
+                                    Box::new(indices.into_iter().next().unwrap()),
+                                    ArrowKind::Array,
+                                );
+                            } else {
+                                let mut args = vec![expr];
+                                args.extend(indices);
+                                expr = Expr::Call("_list_slice".to_string(), args);
+                            }
+                        }
                         _ => {
                             // `(LIST)[idx1, idx2, ...]` — list slice. Use a
                             // helper Call so the interpreter evaluates LIST
@@ -2119,6 +2137,7 @@ impl Parser {
                     let first_is_value = matches!(
                         self.tok(),
                         Token::StringLit(_)
+                            | Token::InterpString(_)
                             | Token::ScalarVar(_)
                             | Token::Integer(_)
                             | Token::Float(_)
@@ -2207,6 +2226,19 @@ impl Parser {
                             Expr::ScalarDerefVar(name) => {
                                 expr = Expr::ArrowElement(
                                     Box::new(Expr::ScalarVar(name)),
+                                    Box::new(key),
+                                    ArrowKind::Hash,
+                                );
+                            }
+                            // Chained subscript on an already-evaluated
+                            // element (`$arr[0]{k}`, `$h{a}{b}`,
+                            // `$ref->[0]{k}`): implicit arrow-deref the
+                            // inner value as a hash ref.
+                            Expr::ArrayElement(_, _)
+                            | Expr::HashElement(_, _)
+                            | Expr::ArrowElement(_, _, _) => {
+                                expr = Expr::ArrowElement(
+                                    Box::new(expr),
                                     Box::new(key),
                                     ArrowKind::Hash,
                                 );
@@ -3165,6 +3197,13 @@ impl Parser {
                 | Some(Token::DefOr)
                 | Some(Token::Question)
                 | Some(Token::Comma)
+                // `sub { … }` at end of an enclosing block is the anon
+                // sub returned as the block's value (Perl's last-expr
+                // implicit return). Without this, a tail `sub { … }` was
+                // parsed as a nameless `sub NAME { … }` declaration,
+                // dropping the CodeRef. Same for trailing `;`.
+                | Some(Token::RBrace)
+                | Some(Token::Semi)
         )
     }
 }
@@ -3235,6 +3274,10 @@ fn parse_interp_string(s: &str) -> Expr {
             // `$$` followed by anything other than an ident (or end of
             // string) is the process-id special var.
             let is_pid = chars[i + 1] == '$' && !is_scalar_deref;
+            // `$#name` — last-index of @name, interpolated.
+            let is_array_len = chars[i + 1] == '#'
+                && i + 2 < chars.len()
+                && (chars[i + 2] == '_' || chars[i + 2].is_ascii_alphabetic());
             if chars[i + 1] == '_'
                 || chars[i + 1].is_ascii_alphabetic()
                 || chars[i + 1].is_ascii_digit()
@@ -3244,6 +3287,7 @@ fn parse_interp_string(s: &str) -> Expr {
                 || is_punct_special
                 || is_scalar_deref
                 || is_pid
+                || is_array_len
             {
                 // Flush literal
                 if !lit.is_empty() {
@@ -3252,7 +3296,16 @@ fn parse_interp_string(s: &str) -> Expr {
 
                 i += 1; // skip $
 
-                if chars[i] == '$' {
+                if chars[i] == '#' {
+                    // `$#name` — last index of @name.
+                    i += 1;
+                    let mut name = String::new();
+                    while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                        name.push(chars[i]);
+                        i += 1;
+                    }
+                    parts.push(InterpPart::Expr(Box::new(Expr::ArrayLen(name))));
+                } else if chars[i] == '$' {
                     // `$$name` — scalar deref of $name; `$$` alone is PID.
                     i += 1;
                     let mut name = String::new();

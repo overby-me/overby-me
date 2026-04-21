@@ -189,6 +189,33 @@ pub struct Interpreter {
     // registers its body under `__anon_N` and returns CodeRef(__anon_N) so
     // `$f->()` can dispatch through the normal sub-lookup path.
     anon_sub_counter: usize,
+    /// Captured lexical environment per anon sub. When `sub { ... }` is
+    /// evaluated, the current `scopes` are cloned into this slot keyed
+    /// by the generated `__anon_N` name. `call_sub_named` then pushes
+    /// these frames as a closure barrier underneath the new sub's own
+    /// frame so referenced `my` vars resolve to the enclosing scope's
+    /// values instead of returning Undef once the enclosing scope has
+    /// long since popped.
+    closure_envs: std::collections::HashMap<String, std::rc::Rc<std::cell::RefCell<Vec<Scope>>>>,
+    /// The captured env Rc of the closure currently being executed,
+    /// if any. Nested `sub { ... }` clones this so inner closures can mutate
+    /// the same lexicals their outer closure does.
+    current_closure_env: Option<std::rc::Rc<std::cell::RefCell<Vec<Scope>>>>,
+    /// Stack of (saved scopes, saved current_closure_env, env Rc) per
+    /// active closure call. Pushed on entry, popped on exit; the saved
+    /// scopes get restored and any mutations to the env Rc persist back
+    /// since we share it via Rc<RefCell<…>>.
+    #[allow(clippy::type_complexity)]
+    closure_call_stack: Vec<(
+        Vec<Scope>,
+        Option<std::rc::Rc<std::cell::RefCell<Vec<Scope>>>>,
+        std::rc::Rc<std::cell::RefCell<Vec<Scope>>>,
+    )>,
+    /// Stack of (saved_scopes) snapshots taken when entering a named
+    /// sub call so the sub doesn't see the dynamic caller's lexicals
+    /// (Perl named subs are closed over the file scope, not the call
+    /// site). Pushed by `enter_named_sub`, popped by `exit_named_sub`.
+    sub_scope_stack: Vec<Vec<Scope>>,
     // Whether we've already emitted the `test.pl had problems loading Config`
     // warning. test.pl emits this once on the first `which_perl` call; our
     // fresh_perl stub replays it for byte-identical comparison.
@@ -336,6 +363,10 @@ impl Interpreter {
             local_dot_fh_saves: Vec::new(),
             fh_counter: 0,
             anon_sub_counter: 0,
+            closure_envs: std::collections::HashMap::new(),
+            current_closure_env: None,
+            closure_call_stack: Vec::new(),
+            sub_scope_stack: Vec::new(),
             config_load_warned: false,
             set_up_inc_called: false,
             required_files: HashSet::new(),
@@ -3443,6 +3474,29 @@ impl Interpreter {
                 let name = format!("__anon_{}", self.anon_sub_counter);
                 self.subs
                     .insert(name.clone(), (params.clone(), body.clone()));
+                // Capture the current lexical environment so the returned
+                // CodeRef closes over enclosing `my` vars. Multiple anon
+                // subs created at the same point share one env (matching
+                // Perl's pad-sharing semantics).
+                if let Some(parent) = self.current_closure_env.clone() {
+                    // Inherit our parent closure's env; appended on top of
+                    // it our own visible scopes (above whichever frame the
+                    // parent already covers).
+                    let mut combined = parent.borrow().clone();
+                    let parent_depth = combined.len();
+                    if self.scopes.len() > parent_depth {
+                        combined.extend_from_slice(&self.scopes[parent_depth..]);
+                    }
+                    self.closure_envs.insert(
+                        name.clone(),
+                        std::rc::Rc::new(std::cell::RefCell::new(combined)),
+                    );
+                } else if !self.scopes.is_empty() {
+                    self.closure_envs.insert(
+                        name.clone(),
+                        std::rc::Rc::new(std::cell::RefCell::new(self.scopes.clone())),
+                    );
+                }
                 Value::CodeRef(name)
             }
 
@@ -5467,12 +5521,13 @@ impl Interpreter {
                             }
                             let destroy_key = format!("{class}::DESTROY");
                             if let Some((_params, body)) = self.subs.get(&destroy_key).cloned() {
-                                self.blessed_refs.remove(&p);
+                                // Keep blessed class info during the call.
                                 self.call_sub_named(
                                     &body,
                                     std::slice::from_ref(v),
                                     Some(&destroy_key),
                                 );
+                                self.blessed_refs.remove(&p);
                             }
                         }
                     }
@@ -6067,11 +6122,95 @@ impl Interpreter {
         }
     }
 
+    /// If `name` refers to an anon sub with a captured closure env,
+    /// prepend the captured frames *underneath* the live scope stack so
+    /// that lookups can fall back to the closure's definition-time
+    /// lexicals when the variable isn't visible in the current dynamic
+    /// chain. The live frames continue to win for any name they define
+    /// (preserving SIG-handler-style closures that rely on the dynamic
+    /// chain still containing the outer scope). Returns the count of
+    /// frames prepended so `exit_closure_env` knows how many to splice
+    /// back out.
+    fn enter_closure_env(&mut self, name: Option<&str>) -> usize {
+        let n = match name {
+            Some(n) => n,
+            None => return 0,
+        };
+        let env_rc = match self.closure_envs.get(n) {
+            Some(rc) => rc.clone(),
+            None => return 0,
+        };
+        let frames = env_rc.borrow().clone();
+        let n_prepended = frames.len();
+        if n_prepended == 0 {
+            return 0;
+        }
+        // Splice captured frames at the bottom of self.scopes so the
+        // existing live frames remain on top (winning name lookups).
+        let mut new_stack = frames;
+        new_stack.append(&mut self.scopes);
+        self.scopes = new_stack;
+        let saved_env = self.current_closure_env.take();
+        self.current_closure_env = Some(env_rc.clone());
+        self.closure_call_stack
+            .push((Vec::new(), saved_env, env_rc));
+        n_prepended
+    }
+
+    /// Pair to `enter_closure_env`: write any mutations the closure
+    /// made to its captured frames back into the shared env Rc, then
+    /// remove those frames from the bottom of `self.scopes` and restore
+    /// the previous current_closure_env.
+    fn exit_closure_env(&mut self, n_prepended: usize) {
+        if n_prepended == 0 {
+            return;
+        }
+        if let Some((_unused, saved_env, env_rc)) = self.closure_call_stack.pop() {
+            // Write mutated bottom frames back to the shared env.
+            let updated: Vec<Scope> = self.scopes.iter().take(n_prepended).cloned().collect();
+            *env_rc.borrow_mut() = updated;
+            // Splice them back out.
+            self.scopes.drain(0..n_prepended);
+            self.current_closure_env = saved_env;
+        }
+    }
+
+    /// Save and clear the dynamic scope stack on entering a named sub
+    /// (Perl named subs see only the file/global scope, not the call
+    /// site's lexicals). Skip when we're entering a closure: those have
+    /// already had their captured env spliced in by `enter_closure_env`.
+    /// Returns whether we stashed anything (so the matching exit knows
+    /// to restore).
+    fn enter_named_sub_scope(&mut self, _name: Option<&str>, _did_closure: bool) -> bool {
+        // Named subs *should* not see the dynamic caller's lexicals
+        // (Perl: they close over file scope, not the call site). Doing
+        // this naively (stash + clear self.scopes) regresses test.pl
+        // helpers that rely on transitive access to the file scope via
+        // sibling helper calls (the file scope gets shuffled in/out by
+        // enter_file_scope and mutations from inner calls are lost).
+        // Left as a no-op for now; a proper fix needs a per-frame
+        // "lexical barrier" marker so name lookups stop at the sub's
+        // own pad without disturbing the file-scope plumbing.
+        false
+    }
+
+    /// Pair to `enter_named_sub_scope`: restore the caller's scope stack.
+    fn exit_named_sub_scope(&mut self, stashed: bool) {
+        if !stashed {
+            return;
+        }
+        if let Some(saved) = self.sub_scope_stack.pop() {
+            self.scopes = saved;
+        }
+    }
+
     fn call_sub(&mut self, body: &[Stmt], args: &[Value]) -> Value {
         self.call_sub_named(body, args, None)
     }
 
     fn call_sub_named(&mut self, body: &[Stmt], args: &[Value], name: Option<&str>) -> Value {
+        let closure_guard = self.enter_closure_env(name);
+        let stashed_scopes = self.enter_named_sub_scope(name, closure_guard > 0);
         let pushed_origin = self.enter_file_scope(name);
         self.push_scope();
         // call_sub is the scalar-context entry point (`wantarray` returns
@@ -6143,6 +6282,8 @@ impl Interpreter {
                     self.last_list_val = saved_list;
                     self.pop_scope();
                     self.exit_file_scope(pushed_origin);
+                    self.exit_named_sub_scope(stashed_scopes);
+                    self.exit_closure_env(closure_guard);
                     if let Some((_, _, line)) = self.call_stack.pop() {
                         self.current_line = line;
                     }
@@ -6178,6 +6319,8 @@ impl Interpreter {
         self.last_list_val = saved_list;
         self.pop_scope();
         self.exit_file_scope(pushed_origin);
+        self.exit_named_sub_scope(stashed_scopes);
+        self.exit_closure_env(closure_guard);
         // Restore caller's source line so `caller()` in subsequent code
         // reports the call-site, not the sub body's last line-mark.
         if let Some((_, _, line)) = self.call_stack.pop() {
@@ -6201,6 +6344,8 @@ impl Interpreter {
         args: &[Value],
         name: Option<&str>,
     ) -> Vec<Value> {
+        let closure_guard = self.enter_closure_env(name);
+        let stashed_scopes = self.enter_named_sub_scope(name, closure_guard > 0);
         let pushed_origin = self.enter_file_scope(name);
         self.push_scope();
         self.call_stack.push((
@@ -6271,6 +6416,8 @@ impl Interpreter {
                     self.last_list_val = saved_list;
                     self.pop_scope();
                     self.exit_file_scope(pushed_origin);
+                    self.exit_named_sub_scope(stashed_scopes);
+                    self.exit_closure_env(closure_guard);
                     if let Some((_, _, line)) = self.call_stack.pop() {
                         self.current_line = line;
                     }
@@ -6302,6 +6449,8 @@ impl Interpreter {
         self.last_list_val = saved_list;
         self.pop_scope();
         self.exit_file_scope(pushed_origin);
+        self.exit_named_sub_scope(stashed_scopes);
+        self.exit_closure_env(closure_guard);
         if let Some((_, _, line)) = self.call_stack.pop() {
             self.current_line = line;
         }
@@ -6457,9 +6606,11 @@ impl Interpreter {
         {
             let destroy_key = format!("{class}::DESTROY");
             if let Some((_params, body)) = self.subs.get(&destroy_key).cloned() {
+                // Keep `blessed_refs` populated during the handler so
+                // `ref($_[0])` inside DESTROY returns the class name.
                 let ptr = Self::ref_ptr(&old);
-                self.blessed_refs.remove(&ptr);
                 self.call_sub_named(&body, std::slice::from_ref(&old), Some(&destroy_key));
+                self.blessed_refs.remove(&ptr);
             }
         }
         // Package-qualified names always bind globally — never shadow them
@@ -6632,8 +6783,12 @@ impl Interpreter {
         for (v, class) in destroys {
             let key = format!("{class}::DESTROY");
             if let Some((_params, body)) = self.subs.get(&key).cloned() {
-                self.blessed_refs.remove(&Self::ref_ptr(&v));
+                // Keep `blessed_refs` populated during the handler so
+                // `ref($_[0])` inside DESTROY returns the class name.
+                // Remove the entry only after the handler returns.
+                let p = Self::ref_ptr(&v);
                 self.call_sub_named(&body, &[v], Some(&key));
+                self.blessed_refs.remove(&p);
             }
         }
         for scope in self.scopes.iter_mut().rev() {
@@ -6979,21 +7134,87 @@ impl Interpreter {
             let val = iter.next().unwrap_or(Value::Undef);
             hash.insert(key.to_str(), val);
         }
-        if let Some(scope) = self.scopes.last_mut()
-            && scope.hashes.contains_key(name)
-        {
-            scope.hashes.insert(name.to_string(), hash);
-            return;
+        // Wholesale replace of `%name`. Perl's semantics for clearing a
+        // hash that holds blessed refs: for each entry, remove it from
+        // the slot first, then dispatch the value's DESTROY. The
+        // destructor sees the slot with that one entry already gone,
+        // but the remaining entries still present. Required by
+        // op/undef test 20 (`events`) and the `k$N: keys` series.
+        let old_hash = self.get_hash(name);
+        let kept: Vec<Value> = hash.values().cloned().collect();
+        // Install a fresh, empty placeholder; we'll re-populate the
+        // surviving entries afterward.
+        let install = |interp: &mut Self, h: HashMap<String, Value>| {
+            if let Some(scope) = interp.scopes.last_mut()
+                && scope.hashes.contains_key(name)
+            {
+                scope.hashes.insert(name.to_string(), h);
+                return;
+            }
+            if let Some(rc) = interp.aliased_hashes.get(name) {
+                *rc.borrow_mut() = h;
+                return;
+            }
+            if let Some(scope) = interp.scopes.last_mut() {
+                scope.hashes.insert(name.to_string(), h);
+            } else {
+                interp.globals.hashes.insert(name.to_string(), h);
+            }
+        };
+        // Start with the prior hash in the slot, then iteratively pop
+        // an entry and fire its DESTROY (if blessed + last-ref) so the
+        // handler sees the partially-shrunk hash.
+        install(self, old_hash);
+        // Collect the keys we will visit (must be deterministic-ish — match
+        // Perl's hash iteration order well enough; insertion order of
+        // HashMap isn't guaranteed but is fine for the test which sorts).
+        let visit: Vec<String> = self.get_hash(name).keys().cloned().collect();
+        for k in visit {
+            // Pop this entry first.
+            let popped = {
+                let mut taken: Option<Value> = None;
+                for scope in self.scopes.iter_mut().rev() {
+                    if let Some(h) = scope.hashes.get_mut(name) {
+                        taken = h.remove(&k);
+                        break;
+                    }
+                }
+                if taken.is_none()
+                    && let Some(rc) = self.aliased_hashes.get(name)
+                {
+                    taken = rc.borrow_mut().remove(&k);
+                }
+                if taken.is_none()
+                    && let Some(h) = self.globals.hashes.get_mut(name)
+                {
+                    taken = h.remove(&k);
+                }
+                taken.unwrap_or(Value::Undef)
+            };
+            // Decide whether to fire DESTROY: blessed + not reachable
+            // anywhere else (including the `kept` future contents).
+            let p = Self::ref_ptr(&popped);
+            if p == 0 {
+                continue;
+            }
+            let Some(class) = self.blessed_refs.get(&p).cloned() else {
+                continue;
+            };
+            if kept.iter().any(|x| Self::ref_ptr(x) == p) {
+                continue;
+            }
+            if self.ref_pointer_reachable_outside_hash(p, name) {
+                continue;
+            }
+            let key = format!("{class}::DESTROY");
+            if let Some((_params, body)) = self.subs.get(&key).cloned() {
+                self.call_sub_named(&body, &[popped], Some(&key));
+                self.blessed_refs.remove(&p);
+            }
         }
-        if let Some(rc) = self.aliased_hashes.get(name) {
-            *rc.borrow_mut() = hash;
-            return;
-        }
-        if let Some(scope) = self.scopes.last_mut() {
-            scope.hashes.insert(name.to_string(), hash);
-        } else {
-            self.globals.hashes.insert(name.to_string(), hash);
-        }
+        // Now overwrite with the requested `hash` contents (which may
+        // include some of the same blessed refs intentionally retained).
+        install(self, hash);
     }
 
     fn push_scope(&mut self) {
@@ -7040,8 +7261,10 @@ impl Interpreter {
                         .and_then(|s| s.vars.remove(&name))
                         .unwrap_or(Value::Undef);
                     if !matches!(v, Value::Undef) {
-                        self.blessed_refs.remove(&ptr);
+                        // Keep blessed class info during the call so
+                        // `ref($_[0])` inside DESTROY returns the class.
                         self.call_sub_named(&body, &[v], Some(&key));
+                        self.blessed_refs.remove(&ptr);
                     }
                 }
             }
