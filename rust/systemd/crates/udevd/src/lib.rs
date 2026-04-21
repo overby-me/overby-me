@@ -420,11 +420,11 @@ pub fn open_udev_monitor_send_socket() -> io::Result<i32> {
 /// the full message.
 #[repr(C)]
 struct UdevMonitorHeader {
-    prefix: [u8; 8],          // "libudev\0"
-    magic: u32,               // 0xfeedcafe
-    header_size: u32,         // sizeof(Self) = 40
-    properties_off: u32,      // offset to properties payload
-    properties_len: u32,      // length of properties payload
+    prefix: [u8; 8],     // "libudev\0"
+    magic: u32,          // 0xfeedcafe
+    header_size: u32,    // sizeof(Self) = 40
+    properties_off: u32, // offset to properties payload
+    properties_len: u32, // length of properties payload
     filter_subsystem_hash: u32,
     filter_devtype_hash: u32,
     filter_tag_bloom_hi: u32,
@@ -508,14 +508,11 @@ pub fn build_udev_monitor_message(event: &UEvent, result: &RuleResult) -> Vec<u8
     }
     // Tag list and symlinks so monitor consumers can see them.
     if !result.tags.is_empty() {
-        let joined = result
-            .tags
-            .iter()
-            .fold(String::from(":"), |mut a, t| {
-                a.push_str(t);
-                a.push(':');
-                a
-            });
+        let joined = result.tags.iter().fold(String::from(":"), |mut a, t| {
+            a.push_str(t);
+            a.push(':');
+            a
+        });
         push_kv(&mut props, "TAGS", &joined);
     }
     if !result.symlinks.is_empty() {
@@ -3384,6 +3381,19 @@ fn builtin_net_setup_link(event: &mut UEvent) {
         link.path.to_string_lossy().to_string(),
     );
 
+    // Set ID_NET_LINK_FILE_DROPINS to the list of applied drop-in paths,
+    // colon-separated, matching upstream udev's output format.
+    if !link.dropin_paths.is_empty() {
+        let joined: Vec<String> = link
+            .dropin_paths
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        event
+            .env
+            .insert("ID_NET_LINK_FILE_DROPINS".to_string(), joined.join(":"));
+    }
+
     // Resolve the interface name from NamePolicy / Name.
     // The closure looks up naming environment variables that were set by
     // earlier builtins (typically `net_id` and `path_id`).
@@ -3461,6 +3471,84 @@ fn builtin_net_setup_link(event: &mut UEvent) {
             .env
             .insert("ID_NET_LINK_FILE_ALTNAMES".to_string(), alt_names.join(" "));
     }
+
+    // [Link] Property=KEY=VALUE ... — set udev properties on the event env.
+    // Each entry is a single "KEY=VALUE" token.
+    for entry in &link.link_section.properties {
+        if let Some((k, v)) = entry.split_once('=') {
+            let k = k.trim();
+            if !k.is_empty() {
+                event.env.insert(k.to_string(), v.to_string());
+            }
+        }
+    }
+
+    // [Link] UnsetProperty=KEY ... — remove udev properties from the env.
+    for key in &link.link_section.unset_properties {
+        let key = key.trim();
+        if !key.is_empty() {
+            event.env.remove(key);
+        }
+    }
+
+    // [Link] ImportProperty=KEY ... — preserve a property from the udev
+    // database across event re-processing. When a drop-in clears the
+    // Property= list and explicitly opts in to keeping certain keys via
+    // ImportProperty=, we pull those from the on-disk db (populated by
+    // the previous event) and re-inject them into the current env.
+    if !link.link_section.import_properties.is_empty()
+        && let Some(db_entries) = read_existing_udev_db_env(event)
+    {
+        for key in &link.link_section.import_properties {
+            let key = key.trim();
+            if key.is_empty() || event.env.contains_key(key) {
+                continue;
+            }
+            if let Some(val) = db_entries.get(key) {
+                event.env.insert(key.to_string(), val.clone());
+            }
+        }
+    }
+}
+
+/// Read the `E:KEY=VALUE` entries from the udev database file for this
+/// event's device, returning a map of key → value. Used by
+/// `[Link] ImportProperty=` to preserve properties across event
+/// re-processing. Returns `None` if there is no db entry yet.
+fn read_existing_udev_db_env(event: &UEvent) -> Option<HashMap<String, String>> {
+    let db_path = udev_db_path_for_event(event)?;
+    let content = std::fs::read_to_string(&db_path).ok()?;
+    let mut env = HashMap::new();
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix("E:")
+            && let Some((k, v)) = rest.split_once('=')
+        {
+            env.insert(k.to_string(), v.to_string());
+        }
+    }
+    Some(env)
+}
+
+/// Compute the `/run/udev/data/<id>` path for an event, mirroring the
+/// naming convention used when writing the database (see
+/// `write_udev_db_entry`). Returns None if no id can be derived.
+fn udev_db_path_for_event(event: &UEvent) -> Option<std::path::PathBuf> {
+    let id_file_name = if event.subsystem == "net"
+        && let Some(ifindex) = event.env.get("IFINDEX")
+    {
+        format!("n{ifindex}")
+    } else if let (Some(maj), Some(min)) = (event.env.get("MAJOR"), event.env.get("MINOR")) {
+        if event.subsystem == "block" {
+            format!("b{maj}:{min}")
+        } else {
+            format!("c{maj}:{min}")
+        }
+    } else {
+        return None;
+    };
+    Some(std::path::PathBuf::from(format!(
+        "/run/udev/data/{id_file_name}"
+    )))
 }
 
 /// Encode udev-db-style whitespace/control chars as `\xNN` — matches
@@ -3543,7 +3631,11 @@ fn ethtool_driver(ifname: &str) -> Option<String> {
 
     let nul = drvinfo.driver.iter().position(|&b| b == 0).unwrap_or(32);
     let s = std::str::from_utf8(&drvinfo.driver[..nul]).ok()?;
-    if s.is_empty() { None } else { Some(s.to_owned()) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_owned())
+    }
 }
 
 /// Handle IMPORT{builtin} for common udev builtins.
@@ -3909,10 +4001,7 @@ fn write_device_db(event: &UEvent, result: &RuleResult) -> io::Result<()> {
         content.push_str(&format!("E:TAGS={}\n", format_joined(&merged_tags)));
     }
     if !result.tags.is_empty() {
-        content.push_str(&format!(
-            "E:CURRENT_TAGS={}\n",
-            format_joined(&result.tags)
-        ));
+        content.push_str(&format!("E:CURRENT_TAGS={}\n", format_joined(&result.tags)));
     }
 
     // Write atomically
@@ -4522,12 +4611,7 @@ fn linkprop_request(ifindex: i32, msg_type: u16, names: &[&str]) -> io::Result<(
     nl_put_i32(&mut msg, ifi + 4, ifindex);
 
     let attr_off = NLMSG_HDR_LEN + IFINFOMSG_LEN;
-    nl_put_rta_bytes(
-        &mut msg,
-        attr_off,
-        IFLA_PROP_LIST | NLA_F_NESTED,
-        &inner,
-    );
+    nl_put_rta_bytes(&mut msg, attr_off, IFLA_PROP_LIST | NLA_F_NESTED, &inner);
 
     netlink_route_request(&msg)
 }
@@ -4647,8 +4731,8 @@ fn rtm_getlink_altnames(ifindex: i32) -> io::Result<Vec<String>> {
             let mut inner_off = off + 4;
             let inner_end = off + rta_len;
             while inner_off + 4 <= inner_end {
-                let ilen = u16::from_ne_bytes(buf[inner_off..inner_off + 2].try_into().unwrap())
-                    as usize;
+                let ilen =
+                    u16::from_ne_bytes(buf[inner_off..inner_off + 2].try_into().unwrap()) as usize;
                 let itype =
                     u16::from_ne_bytes(buf[inner_off + 2..inner_off + 4].try_into().unwrap());
                 if ilen < 4 || inner_off + ilen > inner_end {
@@ -4762,11 +4846,7 @@ fn apply_net_link_settings(event: &mut UEvent, result: &RuleResult) {
                 ifindex
             );
             if let Err(e) = del_network_interface_altnames(ifindex, &[new_name.as_str()]) {
-                log::warn!(
-                    "Failed to drop altname '{}' before rename: {}",
-                    new_name,
-                    e
-                );
+                log::warn!("Failed to drop altname '{}' before rename: {}", new_name, e);
             }
         }
         log::info!(
@@ -4828,17 +4908,17 @@ fn apply_net_link_settings(event: &mut UEvent, result: &RuleResult) {
         .cloned()
         .unwrap_or_else(|| current_name.clone());
     let desired_altnames = compute_desired_altnames(
-        event.env.get("ID_NET_LINK_FILE_ALTNAMES").map(|s| s.as_str()),
+        event
+            .env
+            .get("ID_NET_LINK_FILE_ALTNAMES")
+            .map(|s| s.as_str()),
         &final_name,
     );
     let current_altnames = read_current_altnames(event);
     let (to_remove, to_add) = diff_altnames(&current_altnames, &desired_altnames);
 
     if !to_remove.is_empty() {
-        log::debug!(
-            "Removing altnames {:?} from ifindex={}",
-            to_remove, ifindex
-        );
+        log::debug!("Removing altnames {:?} from ifindex={}", to_remove, ifindex);
         for name in &to_remove {
             if let Err(e) = del_network_interface_altnames(ifindex, &[*name])
                 && e.raw_os_error() != Some(libc::ENODEV)
@@ -4850,7 +4930,9 @@ fn apply_net_link_settings(event: &mut UEvent, result: &RuleResult) {
     if !to_add.is_empty() {
         log::debug!(
             "Adding altnames {:?} to ifindex={} (current={:?})",
-            to_add, ifindex, current_altnames
+            to_add,
+            ifindex,
+            current_altnames
         );
         for name in &to_add {
             if let Err(e) = add_network_interface_altnames(ifindex, &[*name])
@@ -4880,10 +4962,7 @@ fn compute_desired_altnames(list: Option<&str>, primary_name: &str) -> Vec<Strin
 /// Compute the (remove, add) set-difference of `current` vs `desired`
 /// altname lists so the caller only issues netlink changes for the
 /// difference.  Order within each returned vec matches the source vec.
-fn diff_altnames<'a>(
-    current: &'a [String],
-    desired: &'a [String],
-) -> (Vec<&'a str>, Vec<&'a str>) {
+fn diff_altnames<'a>(current: &'a [String], desired: &'a [String]) -> (Vec<&'a str>, Vec<&'a str>) {
     let to_remove: Vec<&str> = current
         .iter()
         .filter(|n| !desired.iter().any(|d| d == *n))
@@ -4925,9 +5004,7 @@ fn process_event(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) {
         && !event.env.contains_key("IFINDEX")
         && let Some(idx) = read_net_ifindex(event)
     {
-        event
-            .env
-            .insert("IFINDEX".to_string(), idx.to_string());
+        event.env.insert("IFINDEX".to_string(), idx.to_string());
     }
 
     let result = process_rules(rules, event, hwdb);
@@ -4984,10 +5061,7 @@ fn process_event(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) {
             if has_run_programs {
                 event.env.remove("ID_PROCESSING");
                 if let Err(e) = write_device_db(event, &result) {
-                    log::debug!(
-                        "Failed to rewrite device db after RUN completion: {}",
-                        e
-                    );
+                    log::debug!("Failed to rewrite device db after RUN completion: {}", e);
                 }
             }
         }
@@ -5335,8 +5409,9 @@ const GLOBAL_ENV_FILE: &str = "/run/udev/control.conf";
 
 /// In-memory mirror of the persistent store, kept around to avoid a
 /// parse-on-every-event cost.
-static GLOBAL_ENV: std::sync::OnceLock<std::sync::Mutex<std::collections::BTreeMap<String, String>>> =
-    std::sync::OnceLock::new();
+static GLOBAL_ENV: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::BTreeMap<String, String>>,
+> = std::sync::OnceLock::new();
 
 fn global_env_cache() -> &'static std::sync::Mutex<std::collections::BTreeMap<String, String>> {
     GLOBAL_ENV.get_or_init(|| {
@@ -6851,10 +6926,9 @@ mod tests {
         event.devpath = "/devices/virtual/mem/null".to_string();
         event.subsystem = "mem".to_string();
         for i in 0..100 {
-            event.env.insert(
-                format!("XXX{:03}", i),
-                "0123456789".repeat(10),
-            );
+            event
+                .env
+                .insert(format!("XXX{:03}", i), "0123456789".repeat(10));
         }
         let result = super::RuleResult::default();
 

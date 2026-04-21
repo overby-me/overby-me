@@ -975,10 +975,39 @@ fn insert_bool(props: &mut PropertyMap, key: &str, value: bool) {
 fn insert_dep_list(props: &mut PropertyMap, key: &str, ids: &[crate::units::UnitId]) {
     let value: String = ids
         .iter()
-        .map(|id| id.name.as_str())
+        .map(|id| format_property_list_item(id.name.as_str()))
         .collect::<Vec<_>>()
         .join(" ");
     props.insert(key.to_string(), value);
+}
+
+/// Format a single item in a space-separated property list value.
+/// Upstream wraps items containing characters that need shell-escaping
+/// (backslash, whitespace, quotes) in double quotes and C-escapes the
+/// contents so the serialized form can round-trip through `systemctl
+/// show`. Items without such characters pass through unchanged.
+fn format_property_list_item(s: &str) -> String {
+    let needs_quote = s.chars().any(|c| {
+        c == '\\' || c == '"' || c == ' ' || c == '\t' || c == '\n' || c == '\'' || c.is_control()
+    });
+    if !needs_quote {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\x{:02x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn insert_string_list(props: &mut PropertyMap, key: &str, items: &[String]) {

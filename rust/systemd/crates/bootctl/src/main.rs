@@ -2480,8 +2480,13 @@ fn find_root_device(backing: bool) -> Option<String> {
         // mountinfo columns 4 (mount point) and 9 (fstype/source after `-`):
         //   36 35 98:0 /mnt1 /mnt/sda1 rw,noatime master:1 - ext4 /dev/sda1 rw
         let mut cols = line.split_whitespace();
-        let (_id, _parent, _dev_major_minor, _root, mount_point) =
-            (cols.next()?, cols.next()?, cols.next()?, cols.next()?, cols.next()?);
+        let (_id, _parent, _dev_major_minor, _root, mount_point) = (
+            cols.next()?,
+            cols.next()?,
+            cols.next()?,
+            cols.next()?,
+            cols.next()?,
+        );
         if mount_point != "/" {
             continue;
         }

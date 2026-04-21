@@ -33,6 +33,10 @@ pub struct LinkFileConfig {
     /// Original file path (for diagnostics).
     pub path: PathBuf,
 
+    /// Any `.link.d/*.conf` drop-in files merged on top of the base file,
+    /// in application order. Populated by `load_link_configs_from`.
+    pub dropin_paths: Vec<PathBuf>,
+
     /// `[Match]` section — determines which links this config applies to.
     pub match_section: LinkMatchSection,
 
@@ -327,6 +331,19 @@ pub struct LinkSettingsSection {
 
     /// `ActivationPolicy=` — when to bring the link up.
     pub activation_policy: Option<String>,
+
+    /// `Property=KEY=VALUE ...` — set udev properties on the matched link.
+    /// Each entry is the raw `KEY=VALUE` string, parsed later by the caller.
+    pub properties: Vec<String>,
+
+    /// `UnsetProperty=KEY ...` — remove udev properties previously set
+    /// by `Property=` or other rules.
+    pub unset_properties: Vec<String>,
+
+    /// `ImportProperty=KEY ...` — import a matching property from the
+    /// current udev event environment. For rust-systemd this is currently
+    /// treated the same as a no-op (the property is already in the env).
+    pub import_properties: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -390,10 +407,41 @@ pub fn load_link_configs_from(dirs: &[PathBuf]) -> Vec<LinkFileConfig> {
                 continue;
             }
             let path = entry.path();
-            seen.insert(name, path.clone());
+            seen.insert(name.clone(), path.clone());
 
             match parse_link_file(&path) {
-                Ok(cfg) => configs.push(cfg),
+                Ok(mut cfg) => {
+                    // Apply drop-ins from <name>.link.d/*.conf across all
+                    // search dirs (later dirs with the same drop-in name
+                    // win). Merges settings on top of the base config.
+                    let dropin_dir_name = format!("{name}.d");
+                    let mut dropin_files: Vec<PathBuf> = Vec::new();
+                    let mut dropin_seen: std::collections::HashSet<String> =
+                        std::collections::HashSet::new();
+                    for d in dirs {
+                        let dropin_dir = d.join(&dropin_dir_name);
+                        if let Ok(d_entries) = fs::read_dir(&dropin_dir) {
+                            for de in d_entries.flatten() {
+                                let dname = de.file_name().to_string_lossy().to_string();
+                                if !dname.ends_with(".conf") {
+                                    continue;
+                                }
+                                if dropin_seen.insert(dname.clone()) {
+                                    dropin_files.push(de.path());
+                                }
+                            }
+                        }
+                    }
+                    dropin_files
+                        .sort_by(|a, b| a.file_name().unwrap_or_default().cmp(b.file_name().unwrap_or_default()));
+                    for dp in &dropin_files {
+                        if let Ok(content) = fs::read_to_string(dp) {
+                            apply_dropin_to_link_config(&content, &mut cfg);
+                            cfg.dropin_paths.push(dp.clone());
+                        }
+                    }
+                    configs.push(cfg);
+                }
                 Err(e) => {
                     log::warn!("Failed to parse {}: {}", path.display(), e);
                 }
@@ -457,9 +505,34 @@ pub fn parse_link_file_content(content: &str, path: &Path) -> Result<LinkFileCon
 
     Ok(LinkFileConfig {
         path: path.to_path_buf(),
+        dropin_paths: Vec::new(),
         match_section,
         link_section,
     })
+}
+
+/// Apply a `.link.d/*.conf` drop-in's content to a base `LinkFileConfig`.
+/// Only [Link]-section settings are merged — [Match] is ignored since
+/// drop-ins do not alter which links a file applies to.
+pub fn apply_dropin_to_link_config(content: &str, cfg: &mut LinkFileConfig) {
+    let mut current_section = String::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            current_section = line[1..line.len() - 1].to_lowercase();
+            continue;
+        }
+        let (key, value) = match line.split_once('=') {
+            Some((k, v)) => (k.trim(), v.trim()),
+            None => continue,
+        };
+        if current_section == "link" {
+            parse_link_settings_entry(key, value, &mut cfg.link_section);
+        }
+    }
 }
 
 fn parse_link_match_entry(key: &str, value: &str, section: &mut LinkMatchSection) {
@@ -603,6 +676,36 @@ fn parse_link_settings_entry(key: &str, value: &str, section: &mut LinkSettingsS
         }
         "ActivationPolicy" => {
             section.activation_policy = Some(value.to_string());
+        }
+        "Property" => {
+            // Empty `Property=` resets the list — matches upstream's
+            // behavior where a later drop-in can clear earlier entries
+            // before appending its own.
+            if value.is_empty() {
+                section.properties.clear();
+            } else {
+                for entry in split_whitespace_values(value) {
+                    section.properties.push(entry);
+                }
+            }
+        }
+        "UnsetProperty" => {
+            if value.is_empty() {
+                section.unset_properties.clear();
+            } else {
+                for entry in split_whitespace_values(value) {
+                    section.unset_properties.push(entry);
+                }
+            }
+        }
+        "ImportProperty" => {
+            if value.is_empty() {
+                section.import_properties.clear();
+            } else {
+                for entry in split_whitespace_values(value) {
+                    section.import_properties.push(entry);
+                }
+            }
         }
         _ => {}
     }

@@ -801,17 +801,31 @@ fn prepare_exec_args(
 }
 
 /// Look up the login shell for the given UID from /etc/passwd.
-/// Falls back to "/bin/sh" if the lookup fails or the shell field is empty.
+/// Falls back to "/bin/sh" if the lookup fails, the shell field is empty,
+/// or the shell is a nologin/false stub that would refuse `-c` invocation.
 fn get_login_shell(uid: libc::uid_t) -> String {
     let pwd = unsafe { libc::getpwuid(uid) };
     if !pwd.is_null() {
         let shell = unsafe { std::ffi::CStr::from_ptr((*pwd).pw_shell) };
         let shell = shell.to_string_lossy().into_owned();
-        if !shell.is_empty() {
+        if !shell.is_empty() && !shell_is_stub(&shell) {
             return shell;
         }
     }
     "/bin/sh".to_owned()
+}
+
+/// System users commonly have `/usr/sbin/nologin` or `/bin/false` as their
+/// login shell to prevent interactive sessions. When a service uses the `|`
+/// prefix to request a login shell invocation, these stubs would reject the
+/// `-c` command and fail. Substitute `/bin/sh` instead, matching upstream
+/// systemd's behavior.
+fn shell_is_stub(shell: &str) -> bool {
+    let name = std::path::Path::new(shell)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    matches!(name, "nologin" | "false")
 }
 
 /// Open a terminal device, retrying on EIO.
@@ -2715,12 +2729,20 @@ pub fn run_exec_helper() {
         config.login_shell || config.use_first_arg_as_argv0,
     );
 
-    // Use execvp instead of execv so bare command names (e.g. "sh" from
-    // ExecStart=sh -c ...) are resolved via PATH, matching systemd behavior.
-    match nix::unistd::execvp(&cmd, &args) {
+    // Absolute paths go through execv so that unreadable shebangs / empty
+    // exec files fail with ENOEXEC instead of being auto-shelled by execvp
+    // (POSIX execvp's shell fallback would mask the error and make failing
+    // exec look like success). Bare command names still use execvp so they
+    // can be resolved via PATH, matching real systemd's behavior.
+    let exec_result = if cmd.to_bytes().first() == Some(&b'/') {
+        nix::unistd::execv(&cmd, &args)
+    } else {
+        nix::unistd::execvp(&cmd, &args)
+    };
+    match exec_result {
         Ok(_infallible) => unreachable!(),
         Err(e) => {
-            log::error!("execvp FAILED for {}: {}", cmd.to_string_lossy(), e,);
+            log::error!("exec FAILED for {}: {}", cmd.to_string_lossy(), e,);
             // Use EXIT_EXEC (203) so that the Type=exec check in
             // wait_for_service can distinguish exec failures from
             // normal program exits (which forward the program's own

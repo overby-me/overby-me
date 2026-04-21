@@ -9391,11 +9391,32 @@ pub fn execute_command(
                     .cloned();
                 if let Some(existing_id) = existing_id {
                     if let Some(existing_unit) = run_info.unit_table.get_mut(&existing_id) {
+                        // Transient units live only at runtime; their
+                        // authoritative [Unit] config (Description=, etc.)
+                        // came from the StartTransientUnit call, not from
+                        // disk.  When daemon-reload re-parses disk and
+                        // synthesizes an implicit-slice match by name, do
+                        // not clobber the transient [Unit] section or
+                        // dependencies — UNLESS a real fragment file has
+                        // since appeared on disk, in which case the disk
+                        // fragment wins and the unit stops being transient.
+                        let is_transient_existing =
+                            existing_unit.common.unit.fragment_path.as_ref().is_some_and(|p| {
+                                p.starts_with("/run/systemd/transient")
+                            });
+                        let has_disk_fragment =
+                            new_unit.common.unit.fragment_path.as_ref().is_some_and(|p| {
+                                !p.starts_with("/run/systemd/transient")
+                                    && std::fs::metadata(p).is_ok()
+                            });
+                        let preserve_transient = is_transient_existing && !has_disk_fragment;
                         // Update configuration but preserve runtime status
                         // (PIDs, restart counts, etc.) by only replacing conf.
                         existing_unit.specific.update_config_from(new_unit.specific);
-                        existing_unit.common.unit = new_unit.common.unit;
-                        existing_unit.common.dependencies = new_unit.common.dependencies;
+                        if !preserve_transient {
+                            existing_unit.common.unit = new_unit.common.unit;
+                            existing_unit.common.dependencies = new_unit.common.dependencies;
+                        }
                         updated_units_names.push(Value::String(existing_id.name.clone()));
                     }
                 } else {
@@ -9409,7 +9430,7 @@ pub fn execute_command(
             // dropins via `apply_dropins_to_transient` during their
             // creation path; slices use the implicit-slice path which we
             // re-invoke here.
-            let transient_slice_names: Vec<String> = run_info
+            let transient_slices: Vec<(String, crate::units::UnitConfig)> = run_info
                 .unit_table
                 .values()
                 .filter(|u| {
@@ -9421,13 +9442,18 @@ pub fn execute_command(
                             .map(|p| p.starts_with("/run/systemd/transient"))
                             .unwrap_or(false)
                 })
-                .map(|u| u.id.name.clone())
+                .map(|u| (u.id.name.clone(), u.common.unit.clone()))
                 .collect();
-            for name in transient_slice_names {
+            for (name, saved_unit_section) in transient_slices {
                 create_or_update_implicit_slice(&name, run_info);
-                // Re-pin the transient fragment_path (the implicit-slice
-                // helper resets it to /run/systemd/system/...).
+                // Restore transient [Unit] section fields (Description,
+                // Documentation, etc.) that were set via StartTransientUnit
+                // — the implicit-slice helper rebuilds from a synthetic
+                // default that would otherwise clobber them.  Also re-pin
+                // the fragment_path to /run/systemd/transient/ (the helper
+                // resets it to /run/systemd/system/...).
                 if let Some(unit) = run_info.unit_table.values_mut().find(|u| u.id.name == name) {
+                    unit.common.unit = saved_unit_section;
                     unit.common.unit.fragment_path = Some(std::path::PathBuf::from(format!(
                         "/run/systemd/transient/{name}"
                     )));

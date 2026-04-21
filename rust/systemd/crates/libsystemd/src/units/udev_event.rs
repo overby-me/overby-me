@@ -73,10 +73,7 @@ pub fn handle_udev_event(run_info: &ArcMutRuntimeInfo, params: &UdevEventParams)
         {
             let subsys_esc = crate::unit_name::unit_name_escape(&params.subsystem);
             let kernel_esc = crate::unit_name::unit_name_escape(old_kernel_name);
-            let alias = format!(
-                "sys-subsystem-{}-devices-{}.device",
-                subsys_esc, kernel_esc
-            );
+            let alias = format!("sys-subsystem-{}-devices-{}.device", subsys_esc, kernel_esc);
             if !old_names.contains(&alias) {
                 old_names.push(alias);
             }
@@ -132,12 +129,7 @@ pub fn handle_udev_event(run_info: &ArcMutRuntimeInfo, params: &UdevEventParams)
                 let ri = run_info.read_poisoned();
                 ri.unit_table
                     .get(&id)
-                    .map(|u| {
-                        matches!(
-                            &*u.common.status.read_poisoned(),
-                            UnitStatus::Started(_)
-                        )
-                    })
+                    .map(|u| matches!(&*u.common.status.read_poisoned(), UnitStatus::Started(_)))
                     .unwrap_or(false)
             } else {
                 false
@@ -526,10 +518,8 @@ fn udev_db_unescape(s: &str) -> String {
         if i + 3 < bytes.len()
             && bytes[i] == b'\\'
             && bytes[i + 1] == b'x'
-            && let (Some(hi), Some(lo)) = (
-                hex_digit_value(bytes[i + 2]),
-                hex_digit_value(bytes[i + 3]),
-            )
+            && let (Some(hi), Some(lo)) =
+                (hex_digit_value(bytes[i + 2]), hex_digit_value(bytes[i + 3]))
         {
             out.push((hi << 4) | lo);
             i += 4;
@@ -587,10 +577,7 @@ pub fn derive_unit_names(params: &UdevEventParams) -> Vec<String> {
     {
         let subsys_esc = crate::unit_name::unit_name_escape(&params.subsystem);
         let kernel_esc = crate::unit_name::unit_name_escape(kernel_name);
-        let alias = format!(
-            "sys-subsystem-{}-devices-{}.device",
-            subsys_esc, kernel_esc
-        );
+        let alias = format!("sys-subsystem-{}-devices-{}.device", subsys_esc, kernel_esc);
         if !names.contains(&alias) {
             names.push(alias);
         }
@@ -954,17 +941,9 @@ fn refresh_device_wants(
             continue;
         }
         if let Some(target) = ri.unit_table.get_mut(new_id)
-            && !target
-                .common
-                .dependencies
-                .wanted_by
-                .contains(device_id)
+            && !target.common.dependencies.wanted_by.contains(device_id)
         {
-            target
-                .common
-                .dependencies
-                .wanted_by
-                .push(device_id.clone());
+            target.common.dependencies.wanted_by.push(device_id.clone());
         }
     }
 
@@ -1060,13 +1039,7 @@ mod tests {
 
     #[test]
     fn test_derive_unit_names_with_alias_env() {
-        let mut p = make_params(
-            "add",
-            "/sys/devices/virtual/mem/null",
-            "mem",
-            &[],
-            &[],
-        );
+        let mut p = make_params("add", "/sys/devices/virtual/mem/null", "mem", &[], &[]);
         p.env.insert(
             "SYSTEMD_ALIAS".to_owned(),
             "/sys/test/alias-to-null-on-add".to_owned(),
@@ -1454,8 +1427,7 @@ E:TAGS=:systemd:\n\
 ";
         std::fs::write(&path, contents).unwrap();
         let content = std::fs::read_to_string(&path).unwrap();
-        let mut env: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
+        let mut env: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         let mut tags: Vec<String> = Vec::new();
         let mut symlinks: Vec<String> = Vec::new();
         for line in content.lines() {

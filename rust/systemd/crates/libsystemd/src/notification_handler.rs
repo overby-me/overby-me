@@ -856,15 +856,27 @@ pub fn handle_notification_message(msg: &str, srvc: &mut Service, name: &str) {
         "MAINPID" => {
             if split.len() > 1 {
                 match split[1].parse::<i32>() {
-                    Ok(pid) if pid > 0 => {
-                        let new_pid = nix::unistd::Pid::from_raw(pid);
-                        trace!(
-                            "Service {name}: MAINPID updated to {} (was {:?})",
-                            pid, srvc.main_pid
-                        );
-                        srvc.main_pid = Some(new_pid);
+                    Ok(pid) if pid > 1 => {
+                        // Validate that the PID refers to a live process
+                        // (non-existing PIDs are silently ignored, matching
+                        // upstream systemd's behavior on invalid MAINPID
+                        // values well above the kernel's pid_max).
+                        if !std::path::Path::new(&format!("/proc/{pid}")).exists() {
+                            trace!(
+                                "Service {name}: ignoring MAINPID={pid}, no such process"
+                            );
+                        } else {
+                            let new_pid = nix::unistd::Pid::from_raw(pid);
+                            trace!(
+                                "Service {name}: MAINPID updated to {} (was {:?})",
+                                pid, srvc.main_pid
+                            );
+                            srvc.main_pid = Some(new_pid);
+                        }
                     }
                     Ok(pid) => {
+                        // PID 0 is invalid; PID 1 is always the service
+                        // manager, never a legitimate service main PID.
                         trace!("Service {name}: ignoring invalid MAINPID={pid}");
                     }
                     Err(e) => {
@@ -1134,16 +1146,36 @@ mod tests {
     #[test]
     fn test_mainpid_valid() {
         let mut srvc = make_test_service();
-        handle_notification_message("MAINPID=12345", &mut srvc, "test.service");
-        assert_eq!(srvc.main_pid, Some(nix::unistd::Pid::from_raw(12345)));
+        // Use the current process PID since /proc existence is checked.
+        let me = std::process::id() as i32;
+        handle_notification_message(&format!("MAINPID={me}"), &mut srvc, "test.service");
+        assert_eq!(srvc.main_pid, Some(nix::unistd::Pid::from_raw(me)));
     }
 
     #[test]
     fn test_mainpid_updates_existing() {
         let mut srvc = make_test_service();
         srvc.main_pid = Some(nix::unistd::Pid::from_raw(100));
-        handle_notification_message("MAINPID=200", &mut srvc, "test.service");
-        assert_eq!(srvc.main_pid, Some(nix::unistd::Pid::from_raw(200)));
+        let me = std::process::id() as i32;
+        handle_notification_message(&format!("MAINPID={me}"), &mut srvc, "test.service");
+        assert_eq!(srvc.main_pid, Some(nix::unistd::Pid::from_raw(me)));
+    }
+
+    #[test]
+    fn test_mainpid_one_ignored() {
+        // PID 1 is always the service manager itself; a service must never
+        // be able to claim it as its MainPID via notify.
+        let mut srvc = make_test_service();
+        handle_notification_message("MAINPID=1", &mut srvc, "test.service");
+        assert_eq!(srvc.main_pid, None);
+    }
+
+    #[test]
+    fn test_mainpid_nonexistent_ignored() {
+        // Well above any plausible pid_max value.
+        let mut srvc = make_test_service();
+        handle_notification_message("MAINPID=1073741824", &mut srvc, "test.service");
+        assert_eq!(srvc.main_pid, None);
     }
 
     #[test]

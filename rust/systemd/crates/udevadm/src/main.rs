@@ -1703,8 +1703,7 @@ fn cmd_test_json(mode: &str, action: &str, devpath: &str) -> i32 {
     }
     let devpath_str = syspath_to_devpath(&syspath);
     let uevent = read_sysfs_uevent(&syspath);
-    let mut map: std::collections::BTreeMap<String, String> =
-        std::collections::BTreeMap::new();
+    let mut map: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
     map.insert("ACTION".to_string(), action.to_string());
     map.insert("DEVPATH".to_string(), devpath_str);
     for (k, v) in uevent {
@@ -2765,7 +2764,11 @@ fn ethtool_driver(ifname: &str) -> Option<String> {
 
     let nul = drvinfo.driver.iter().position(|&b| b == 0).unwrap_or(32);
     let s = std::str::from_utf8(&drvinfo.driver[..nul]).ok()?;
-    if s.is_empty() { None } else { Some(s.to_owned()) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_owned())
+    }
 }
 
 /// Walk `/sys` → target's parent chain, then print the target and its
@@ -3258,12 +3261,19 @@ fn main() -> ExitCode {
                     }
                 }
                 for sp in &syspaths {
-                    let devpath = syspath_to_devpath(sp);
-                    let db = read_device_db_by_syspath(sp, &devpath);
-                    let mut props = read_sysfs_uevent(sp);
+                    // Canonicalize the syspath so that /sys/class/... is
+                    // resolved to its real /sys/devices/... target. This
+                    // matches the DEVPATH form the kernel uses at uevent
+                    // time — DB entries keyed on the real path stay
+                    // consistent with rule-time substitutions like %p.
+                    let canonical = std::fs::canonicalize(sp).unwrap_or_else(|_| sp.clone());
+                    let devpath = syspath_to_devpath(&canonical);
+                    let db = read_device_db_by_syspath(&canonical, &devpath);
+                    let mut props = read_sysfs_uevent(&canonical);
                     for (k, v) in &db.env {
                         props.insert(k.clone(), v.clone());
                     }
+                    props.insert("DEVPATH".to_string(), devpath.clone());
                     if let Some(val) = props.get(prop_key) {
                         if value {
                             println!("{val}");

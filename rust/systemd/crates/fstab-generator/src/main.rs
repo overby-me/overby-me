@@ -30,9 +30,7 @@ use libsystemd::unit_name::unit_name_path_escape;
 
 /// Mount points that the generator must NEVER produce units for because
 /// they're managed by the kernel or the service manager core.
-const API_MOUNTS: &[&str] = &[
-    "/proc", "/sys", "/dev", "/run", "/tmp",
-];
+const API_MOUNTS: &[&str] = &["/proc", "/sys", "/dev", "/run", "/tmp"];
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
@@ -53,7 +51,9 @@ fn main() -> ExitCode {
     if args.len() < 4 {
         eprintln!(
             "Usage: {} <normal_dir> <early_dir> <late_dir>",
-            args.first().map(|s| s.as_str()).unwrap_or("systemd-fstab-generator"),
+            args.first()
+                .map(|s| s.as_str())
+                .unwrap_or("systemd-fstab-generator"),
         );
         return ExitCode::from(1);
     }
@@ -125,9 +125,7 @@ fn main() -> ExitCode {
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => {
-                eprintln!(
-                    "systemd-fstab-generator: cannot read {sr_path}: {e}"
-                );
+                eprintln!("systemd-fstab-generator: cannot read {sr_path}: {e}");
                 return ExitCode::from(1);
             }
         }
@@ -177,9 +175,7 @@ fn main() -> ExitCode {
     // generate a companion pair — `sysusr-usr.mount` mounts the device
     // at `/sysusr/usr`, and `sysroot-usr.mount` bind-mounts that into
     // `/sysroot/usr` so the switched-root system sees /usr.
-    if in_initrd
-        && let Some(usr_dev) = parse_cmdline_kv(&cmdline, "mount.usr=")
-    {
+    if in_initrd && let Some(usr_dev) = parse_cmdline_kv(&cmdline, "mount.usr=") {
         let usrfstype = parse_cmdline_kv(&cmdline, "mount.usrfstype=");
         let usrflags = parse_cmdline_kv(&cmdline, "mount.usrflags=");
         let resolved = resolve_disk_spec(&usr_dev);
@@ -249,10 +245,7 @@ fn main() -> ExitCode {
             let _ = fs::create_dir_all(&wants_dir);
             let link_path = wants_dir.join("systemd-fsck-root.service");
             let _ = fs::remove_file(&link_path);
-            let _ = unix_fs::symlink(
-                "/lib/systemd/system/systemd-fsck-root.service",
-                &link_path,
-            );
+            let _ = unix_fs::symlink("/lib/systemd/system/systemd-fsck-root.service", &link_path);
         }
     }
 
@@ -435,8 +428,8 @@ fn sysroot_fstab_check(args: &[String]) -> ExitCode {
         eprintln!("systemd-sysroot-fstab-check takes no arguments");
         return ExitCode::from(1);
     }
-    let fstab_path = env::var("SYSTEMD_SYSROOT_FSTAB")
-        .unwrap_or_else(|_| "/sysroot/etc/fstab".to_string());
+    let fstab_path =
+        env::var("SYSTEMD_SYSROOT_FSTAB").unwrap_or_else(|_| "/sysroot/etc/fstab".to_string());
     match load_fstab(&fstab_path) {
         Ok(_) => ExitCode::SUCCESS,
         Err(e) if e.kind() == io::ErrorKind::NotFound => ExitCode::SUCCESS,
@@ -499,9 +492,7 @@ fn parse_fstab(content: &str) -> Vec<FstabEntry> {
 fn should_skip(entry: &FstabEntry) -> bool {
     // API filesystems — handled by the service manager, never by fstab.
     for prefix in API_MOUNTS {
-        if entry.where_ == *prefix
-            || entry.where_.starts_with(&format!("{prefix}/"))
-        {
+        if entry.where_ == *prefix || entry.where_.starts_with(&format!("{prefix}/")) {
             // /proc/cmdline, /sys/fs/…, /run/host/…: ignored.
             // But we leave /tmp alone if it's a real tmpfs mount with
             // explicit fstype.
@@ -522,7 +513,8 @@ fn should_skip(entry: &FstabEntry) -> bool {
 fn is_network_fs(fstype: &str) -> bool {
     matches!(
         fstype,
-        "nfs" | "nfs4"
+        "nfs"
+            | "nfs4"
             | "cifs"
             | "smbfs"
             | "smb3"
@@ -621,8 +613,8 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
     // (path starts with `/sysroot`), the upstream generator pins the
     // mount into `initrd-fs.target` rather than `local-fs.target` —
     // the initrd target is what `initrd-switch-root` waits on.
-    let is_sysroot_prefixed = effective_where == "/sysroot"
-        || effective_where.starts_with("/sysroot/");
+    let is_sysroot_prefixed =
+        effective_where == "/sysroot" || effective_where.starts_with("/sysroot/");
     let target_fs = if in_initrd && is_sysroot_prefixed {
         "initrd-fs.target"
     } else if is_network_fs(&entry.fstype) || has_opt(&systemd_opts, "_netdev") {
@@ -680,7 +672,10 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
         if !opt_parts.iter().any(|p| p == "fg") {
             opt_parts.push("fg".to_owned());
         }
-        if !opt_parts.iter().any(|p| p.starts_with("x-systemd.mount-timeout=")) {
+        if !opt_parts
+            .iter()
+            .any(|p| p.starts_with("x-systemd.mount-timeout="))
+        {
             opt_parts.push("x-systemd.mount-timeout=infinity".to_owned());
         }
     }
@@ -703,7 +698,9 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
             "systemd-fsck@{}.service",
             unit_name_path_escape(&entry.what)
         );
-        unit.push_str(&format!("\n[Unit]\nRequires={fsck_unit}\nAfter={fsck_unit}\n"));
+        unit.push_str(&format!(
+            "\n[Unit]\nRequires={fsck_unit}\nAfter={fsck_unit}\n"
+        ));
     } else if entry.passno >= 1 && entry.where_ == "/usr" {
         let fsck_unit = format!(
             "systemd-fsck@{}.service",
@@ -723,10 +720,7 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
         fs::create_dir_all(&wants_dir)?;
         let link_path = wants_dir.join("systemd-fsck-root.service");
         let _ = fs::remove_file(&link_path);
-        unix_fs::symlink(
-            "/lib/systemd/system/systemd-fsck-root.service",
-            &link_path,
-        )?;
+        unix_fs::symlink("/lib/systemd/system/systemd-fsck-root.service", &link_path)?;
     }
 
     // Wire up the .target.{wants,requires} symlink so the mount is
@@ -734,7 +728,10 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
     // Upstream semantics (see TEST-81-GENERATORS.fstab-generator.sh:
     // remote-fs.target for network / _netdev, local-fs.target otherwise;
     // `.wants` when nofail OR (nfs && bg), else `.requires`):
-    if !is_rootfs && !has_opt(&systemd_opts, "noauto") && !has_opt(&systemd_opts, "x-systemd.automount") {
+    if !is_rootfs
+        && !has_opt(&systemd_opts, "noauto")
+        && !has_opt(&systemd_opts, "x-systemd.automount")
+    {
         let is_nfs_bg = matches!(entry.fstype.as_str(), "nfs" | "nfs4")
             && parse_csv(&entry.options).contains(&"bg");
         let link_dir = if has_opt(&systemd_opts, "nofail") || is_nfs_bg {
@@ -805,10 +802,7 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
     // `JobRunningTimeoutSec=<timespan>` so the device-unit activation
     // can wait longer before timing out.
     if let Some(timeout) = get_opt_arg(&systemd_opts, "x-systemd.device-timeout=") {
-        let device_unit = format!(
-            "{}.device",
-            unit_name_path_escape(&entry.what)
-        );
+        let device_unit = format!("{}.device", unit_name_path_escape(&entry.what));
         let dropin_dir = out_dir.join(format!("{device_unit}.d"));
         fs::create_dir_all(&dropin_dir)?;
         let dropin_path = dropin_dir.join("50-device-timeout.conf");
@@ -829,18 +823,12 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
         ("x-systemd.validatefs", "systemd-validatefs@"),
     ] {
         if has_opt(&systemd_opts, opt_name) {
-            let svc = format!(
-                "{tmpl}{}.service",
-                unit_name_path_escape(&entry.where_)
-            );
+            let svc = format!("{tmpl}{}.service", unit_name_path_escape(&entry.where_));
             let wants_dir = out_dir.join(format!("{}.wants", &unit_name));
             fs::create_dir_all(&wants_dir)?;
             let link_path = wants_dir.join(&svc);
             let _ = fs::remove_file(&link_path);
-            unix_fs::symlink(
-                format!("/lib/systemd/system/{tmpl}.service"),
-                &link_path,
-            )?;
+            unix_fs::symlink(format!("/lib/systemd/system/{tmpl}.service"), &link_path)?;
         }
     }
 
@@ -852,17 +840,13 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
     // the absence of `-.automount` even when `x-systemd.automount` is
     // requested.
     if has_opt(&systemd_opts, "x-systemd.automount") && !is_rootfs {
-        let automount_name = format!(
-            "{}.automount",
-            unit_name_path_escape(&entry.where_)
-        );
+        let automount_name = format!("{}.automount", unit_name_path_escape(&entry.where_));
         let automount_path = out_dir.join(&automount_name);
         let mut automount_unit = String::new();
         automount_unit.push_str("# Automatically generated by systemd-fstab-generator\n\n");
         automount_unit.push_str("[Unit]\n");
         automount_unit.push_str("SourcePath=/etc/fstab\n");
-        automount_unit
-            .push_str("Documentation=man:fstab(5) man:systemd-fstab-generator(8)\n");
+        automount_unit.push_str("Documentation=man:fstab(5) man:systemd-fstab-generator(8)\n");
         automount_unit.push_str("\n[Automount]\n");
         automount_unit.push_str(&format!("Where={}\n", entry.where_));
         if let Some(v) = get_opt_arg(&systemd_opts, "x-systemd.idle-timeout=") {
@@ -896,7 +880,9 @@ fn emit_swap_unit(out_dir: &Path, entry: &FstabEntry) -> io::Result<()> {
     let mut unit = String::new();
     unit.push_str("# Automatically generated by systemd-fstab-generator\n\n");
     unit.push_str("[Unit]\n");
-    unit.push_str("SourcePath=/etc/fstab\nDocumentation=man:fstab(5) man:systemd-fstab-generator(8)\n");
+    unit.push_str(
+        "SourcePath=/etc/fstab\nDocumentation=man:fstab(5) man:systemd-fstab-generator(8)\n",
+    );
     unit.push_str("Before=swap.target\n");
 
     unit.push_str("\n[Swap]\n");
@@ -1088,15 +1074,17 @@ mod tests {
         };
         emit_mount_unit(tmp.path(), &entry, false).unwrap();
         // nofail → wants/ not requires/
-        assert!(tmp
-            .path()
-            .join("local-fs.target.wants/home.mount")
-            .symlink_metadata()
-            .is_ok());
-        assert!(!tmp
-            .path()
-            .join("local-fs.target.requires/home.mount")
-            .exists());
+        assert!(
+            tmp.path()
+                .join("local-fs.target.wants/home.mount")
+                .symlink_metadata()
+                .is_ok()
+        );
+        assert!(
+            !tmp.path()
+                .join("local-fs.target.requires/home.mount")
+                .exists()
+        );
     }
 
     #[test]
@@ -1111,11 +1099,12 @@ mod tests {
             passno: 0,
         };
         emit_mount_unit(tmp.path(), &entry, false).unwrap();
-        assert!(tmp
-            .path()
-            .join("remote-fs.target.requires/mnt-nfs.mount")
-            .symlink_metadata()
-            .is_ok());
+        assert!(
+            tmp.path()
+                .join("remote-fs.target.requires/mnt-nfs.mount")
+                .symlink_metadata()
+                .is_ok()
+        );
     }
 
     #[test]
@@ -1131,7 +1120,11 @@ mod tests {
         };
         emit_mount_unit(tmp.path(), &entry, false).unwrap();
         assert!(tmp.path().join("home.mount").exists());
-        assert!(!tmp.path().join("local-fs.target.requires/home.mount").exists());
+        assert!(
+            !tmp.path()
+                .join("local-fs.target.requires/home.mount")
+                .exists()
+        );
         assert!(!tmp.path().join("local-fs.target.wants/home.mount").exists());
     }
 
@@ -1167,10 +1160,11 @@ mod tests {
         let unit = fs::read_to_string(tmp.path().join("dev-sdb1.swap")).unwrap();
         assert!(unit.contains("What=/dev/sdb1"));
         assert!(unit.contains("[Swap]"));
-        assert!(tmp
-            .path()
-            .join("swap.target.requires/dev-sdb1.swap")
-            .symlink_metadata()
-            .is_ok());
+        assert!(
+            tmp.path()
+                .join("swap.target.requires/dev-sdb1.swap")
+                .symlink_metadata()
+                .is_ok()
+        );
     }
 }
