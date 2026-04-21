@@ -503,6 +503,31 @@ Based on the latest baseline run (approximate per-category pass ratios):
 | `targets`   | `ONESHELL`+`NOTINTERMEDIATE`+`INTERMEDIATE`+`SECONDARY` fully passing. |
 | `variables` | All done except MAKEFLAGS (`automatic` now passes via SE). |
 
+Round 4 (still 121/135 categories, but +6 vpath subtests):
+
+- **`vpath PATTERN DIRS` directive** now stored in
+  `vpath_patterns: Vec<(String, Vec<String>)>` and consulted by
+  `resolve_vpath()`. Pattern matching uses `expand::pattern_stem`;
+  ALL matching patterns are tried in declaration order.
+- **VPATH-aware rule lookup**: when `target` has no explicit rule
+  but `resolve_vpath_rule(target)` finds a registered rule for a
+  vpath-resolved name, the build redirects to that name. So
+  `vpath %.te vpath-d/` + `vpath-d/fail.te:` makes `fail.te`
+  resolve to `vpath-d/fail.te`. Fixes `features/vpath` Test #1
+  (Savannah `default` test) and Test #4 (`vpa/foo.x` over `%.x`).
+- **Strict-extension vpath in `.LIBPATTERNS`**: extends
+  `resolve_library_prereq` to consult `vpath PATTERN DIRS` whose
+  pattern shares the candidate's extension (e.g. `lib1.a` only
+  consults `vpath %.a ...`). Fixes most of `vpath.3`'s lib lookup
+  modulo a wildcard-`vpath %` interaction.
+
+Subtests now passing in failing categories:
+
+- features/vpath: 1 → 4 of 5
+- features/mult_rules: 1 → 2 of 3
+- features/vpathgpath: 0 → 0 of 1 (still requires vpath in pattern-rule prereqs)
+- features/vpathplus: 0 → 0 of 4 (same reason + intermediate-via-vpath)
+
 ---
 
 ## Workflow

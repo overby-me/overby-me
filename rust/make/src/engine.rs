@@ -557,6 +557,9 @@ pub struct Engine {
     intermediate_targets: RefCell<HashSet<String>>,
     /// Explicit file names listed as prerequisites of `.NOTINTERMEDIATE`.
     notintermediate_files: RefCell<HashSet<String>>,
+    /// `vpath PATTERN DIRS` directives.
+    /// Each entry: (pattern with `%`, list of directories).
+    vpath_patterns: RefCell<Vec<(String, Vec<String>)>>,
     /// Patterns (containing `%`) listed as prerequisites of `.NOTINTERMEDIATE`.
     notintermediate_patterns: RefCell<Vec<String>>,
     /// Set by `.NOTINTERMEDIATE:` (no prereqs) — all targets are treated
@@ -665,6 +668,7 @@ impl Engine {
             secondary_all: Cell::new(false),
             intermediate_targets: RefCell::new(HashSet::new()),
             notintermediate_files: RefCell::new(HashSet::new()),
+            vpath_patterns: RefCell::new(Vec::new()),
             notintermediate_patterns: RefCell::new(Vec::new()),
             notintermediate_all: Cell::new(false),
             pending_intermediate_deletions: RefCell::new(Vec::new()),
@@ -1052,6 +1056,22 @@ impl Engine {
     /// If the file already exists in the current directory, returns None
     /// (the caller should check the current directory first).
     fn resolve_vpath(&self, name: &str) -> Option<String> {
+        // Try `vpath PATTERN DIRS` directives first — patterns whose
+        // `%` expansion matches `name` consult their attached dirs.
+        // ALL matching patterns are tried (in declaration order),
+        // not just the first match (GNU vpath search semantics).
+        let vp = self.vpath_patterns.borrow();
+        for (pat, dirs) in vp.iter() {
+            if expand::pattern_stem(name, pat).is_some() {
+                for dir in dirs {
+                    let candidate = Path::new(dir).join(name);
+                    if candidate.exists() {
+                        return Some(candidate.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+        drop(vp);
         let vpath = self.lookup_var("VPATH");
         if vpath.is_empty() {
             return None;
@@ -1064,6 +1084,71 @@ impl Engine {
             let candidate = Path::new(dir).join(name);
             if candidate.exists() {
                 return Some(candidate.to_string_lossy().to_string());
+            }
+        }
+        None
+    }
+
+    /// Strict-extension vpath resolution: only consults vpath patterns
+    /// whose pattern's suffix equals `name`'s suffix. Used for
+    /// `.LIBPATTERNS` library resolution where GNU make does not let
+    /// a `.so` library satisfy a `.a` candidate (or vice versa) via
+    /// generic `vpath %` wildcards.
+    fn resolve_vpath_strict_ext(&self, name: &str) -> Option<String> {
+        let dot = name.rfind('.')?;
+        let ext = &name[dot..];
+        let vp = self.vpath_patterns.borrow();
+        for (pat, dirs) in vp.iter() {
+            // Pattern must end with the same extension.
+            if !pat.ends_with(ext) {
+                continue;
+            }
+            if expand::pattern_stem(name, pat).is_some() {
+                for dir in dirs {
+                    let candidate = Path::new(dir).join(name);
+                    if candidate.exists() {
+                        return Some(candidate.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Look up a target's vpath-resolved name when there is no
+    /// explicit rule for the original name. Searches both
+    /// `vpath PATTERN DIRS` directives (matching `name` against
+    /// the pattern) and the general `VPATH` variable, returning
+    /// the first dir+name combination that has a registered rule.
+    /// Used so `fail.te` (with `vpath %.te vpath-d/`) finds the
+    /// rule defined as `vpath-d/fail.te`, matching GNU make.
+    fn resolve_vpath_rule(&self, name: &str) -> Option<String> {
+        let rules = self.rules.borrow();
+        let vp = self.vpath_patterns.borrow();
+        // Try ALL matching patterns in declaration order, not just
+        // the first matching pattern.
+        for (pat, dirs) in vp.iter() {
+            if expand::pattern_stem(name, pat).is_some() {
+                for dir in dirs {
+                    let candidate = Path::new(dir).join(name).to_string_lossy().to_string();
+                    if rules.contains_key(&candidate) {
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+        drop(vp);
+        let vpath = self.lookup_var("VPATH");
+        if !vpath.is_empty() {
+            for dir in vpath.split(&[':', ' '][..]) {
+                let dir = dir.trim();
+                if dir.is_empty() {
+                    continue;
+                }
+                let candidate = Path::new(dir).join(name).to_string_lossy().to_string();
+                if rules.contains_key(&candidate) {
+                    return Some(candidate);
+                }
             }
         }
         None
@@ -1803,8 +1888,35 @@ impl Engine {
                 self.private_vars.borrow_mut().insert(expanded_name.clone());
                 self.private_exports.borrow_mut().insert(expanded_name);
             }
-            Directive::Vpath(_) => {
-                // TODO: VPATH support
+            Directive::Vpath(spec) => {
+                match spec {
+                    None => {
+                        // `vpath` with no args clears all patterns.
+                        self.vpath_patterns.borrow_mut().clear();
+                    }
+                    Some((pat_raw, dirs_raw)) => {
+                        let pat = expand::expand(pat_raw, self);
+                        let dirs_str = expand::expand(dirs_raw, self);
+                        let dirs: Vec<String> = dirs_str
+                            .split(&[':', ' ', '\t'][..])
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.trim_end_matches('/').to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        let mut vp = self.vpath_patterns.borrow_mut();
+                        if dirs.is_empty() {
+                            // `vpath PATTERN` clears entries for that pattern.
+                            vp.retain(|(p, _)| p != &pat);
+                        } else {
+                            // Replace existing entry if present, else append.
+                            if let Some(entry) = vp.iter_mut().find(|(p, _)| p == &pat) {
+                                entry.1 = dirs;
+                            } else {
+                                vp.push((pat, dirs));
+                            }
+                        }
+                    }
+                }
             }
             Directive::Expand(expr, source, line_no) => {
                 // Evaluate a bare expression for side effects. The
@@ -3044,8 +3156,34 @@ impl Engine {
 
         let is_phony = self.phony_targets.borrow().contains(target);
 
-        // Find explicit rules
-        let rules = self.rules.borrow().get(target).cloned().unwrap_or_default();
+        // Find explicit rules. If none exist for `target` directly,
+        // try to resolve via `vpath` directives / `VPATH` so that
+        // `fail.te` (with `vpath %.te vpath-d/`) finds rules
+        // defined for `vpath-d/fail.te`. The original `target` name
+        // remains as `$@`/build key — only the rule lookup is
+        // redirected.
+        let mut rules = self.rules.borrow().get(target).cloned().unwrap_or_default();
+        // When the target itself has no rule but a VPATH-resolved name
+        // does, redirect the build to that resolved name. GNU make
+        // treats `vpa/foo.x` as the actual target (it's what will be
+        // updated on disk) when `foo.x` was requested under `VPATH=vpa`.
+        let vpath_redirected: Option<String> = if rules.is_empty() && !is_phony {
+            self.resolve_vpath_rule(target)
+        } else {
+            None
+        };
+        let target = match &vpath_redirected {
+            Some(vt) => {
+                rules = self
+                    .rules
+                    .borrow()
+                    .get(vt.as_str())
+                    .cloned()
+                    .unwrap_or_default();
+                vt.as_str()
+            }
+            None => target,
+        };
 
         // Push this target's own variable bindings onto the scope stack
         // so prereq builds inherit them (GNU make semantics). Popped
@@ -4676,6 +4814,15 @@ impl Engine {
                 || self.rules.borrow().contains_key(&candidate)
             {
                 return candidate;
+            }
+            // GNU also tries the candidate through vpath / VPATH but
+            // only consults vpath patterns whose pattern matches the
+            // candidate's extension (e.g. `lib1.a` only consults
+            // `vpath %.a ...`, NOT `vpath %.so ...` or wildcard
+            // `vpath % ...`). This keeps `-l1` -> `a1/lib1.a` even
+            // when `b1/lib1.so` exists.
+            if let Some(resolved) = self.resolve_vpath_strict_ext(&candidate) {
+                return resolved;
             }
         }
         first.unwrap_or_else(|| name.to_string())
