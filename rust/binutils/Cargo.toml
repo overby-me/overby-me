@@ -10,6 +10,12 @@ name = "rust-binutils"
 path = "src/main.rs"
 
 [dependencies]
+cpp_demangle = "0.4"
+iced-x86 = { version = "1.21", default-features = false, features = [
+  "std",
+  "decoder",
+  "gas",
+] }
 object = { version = "0.36", features = ["read", "write", "elf"] }
 
 [profile.release]

@@ -1,3 +1,5 @@
+use cpp_demangle::{DemangleOptions, Symbol as CppSymbol};
+use iced_x86::{Decoder, DecoderOptions, Formatter, GasFormatter};
 use object::Object as _;
 use object::ObjectSection as _;
 use object::ObjectSymbol as _;
@@ -911,7 +913,7 @@ fn tool_nm(args: &[String]) -> i32 {
                 continue;
             }
 
-            let type_char = nm_type_char(&sym);
+            let type_char = nm_type_char(&sym, &obj);
             let addr = sym.address();
             syms.push((addr, type_char, name.to_string()));
         }
@@ -967,7 +969,7 @@ fn nm_print_symbols(
         if undefined_only && !sym.is_undefined() {
             continue;
         }
-        syms.push((sym.address(), nm_type_char(&sym), name.to_string()));
+        syms.push((sym.address(), nm_type_char(&sym, obj), name.to_string()));
     }
     if !no_sort {
         syms.sort_by(|a, b| a.2.cmp(&b.2));
@@ -1047,7 +1049,12 @@ fn parse_archive_members(data: &[u8]) -> Vec<(String, Vec<u8>)> {
     members
 }
 
-fn nm_type_char(sym: &object::read::Symbol<'_, '_>) -> char {
+fn nm_type_char<'data>(
+    sym: &object::read::Symbol<'data, '_>,
+    file: &object::File<'data, &'data [u8]>,
+) -> char {
+    use object::ObjectSection as _;
+
     let is_global = sym.is_global();
 
     if sym.is_undefined() {
@@ -1060,13 +1067,50 @@ fn nm_type_char(sym: &object::read::Symbol<'_, '_>) -> char {
 
     let section_char = match sym.section() {
         object::SymbolSection::Section(idx) => {
-            // Try to determine type from section name via the symbol's section_index
-            // We can't access the section directly here easily, so use kind-based heuristic
-            let _ = idx;
-            match sym.kind() {
-                object::SymbolKind::Text => 't',
-                object::SymbolKind::Data => 'd',
-                _ => '?',
+            if let Ok(section) = file.section_by_index(idx) {
+                let name = section.name().unwrap_or("");
+                let flags = section.flags();
+                let (sh_type, sh_flags) = match flags {
+                    object::SectionFlags::Elf { sh_flags } => {
+                        let sh_type = match section.kind() {
+                            object::SectionKind::UninitializedData => 8, // SHT_NOBITS
+                            _ => 1,                                      // SHT_PROGBITS
+                        };
+                        (sh_type, sh_flags)
+                    }
+                    _ => (1, 0),
+                };
+
+                // Check section name and flags to determine type
+                if name == ".bss" || name.starts_with(".bss.") || sh_type == 8 {
+                    'b'
+                } else if name == ".text"
+                    || name.starts_with(".text.")
+                    || (sh_flags & 0x4 != 0 && sh_flags & 0x2 != 0)
+                {
+                    // SHF_EXECINSTR (0x4) + SHF_ALLOC (0x2) = text
+                    't'
+                } else if name == ".rodata"
+                    || name.starts_with(".rodata.")
+                    || (sh_flags & 0x2 != 0 && sh_flags & 0x1 == 0 && sh_flags & 0x4 == 0)
+                {
+                    // SHF_ALLOC but not SHF_WRITE and not SHF_EXECINSTR = read-only data
+                    'r'
+                } else if name == ".data"
+                    || name.starts_with(".data.")
+                    || (sh_flags & 0x2 != 0 && sh_flags & 0x1 != 0)
+                {
+                    // SHF_ALLOC + SHF_WRITE = data
+                    'd'
+                } else if sh_flags & 0x2 != 0 {
+                    // SHF_ALLOC but unclassified
+                    'd'
+                } else {
+                    // Non-allocated section (debug info, etc.)
+                    'n'
+                }
+            } else {
+                '?'
             }
         }
         object::SymbolSection::Absolute => 'a',
@@ -1265,44 +1309,90 @@ fn tool_size(args: &[String]) -> i32 {
 
         if sysv_format {
             println!("{file}  :");
-            println!("section             size      addr");
+            println!("{:<20}{:>5}{:>7}", "section", "size", "addr");
             let mut total: u64 = 0;
             for section in obj.sections() {
                 let name = section.name().unwrap_or("");
                 if name.is_empty() {
                     continue;
                 }
+                // Only show allocated sections (SHF_ALLOC)
+                let is_alloc = match section.flags() {
+                    object::SectionFlags::Elf { sh_flags } => sh_flags & 0x2 != 0,
+                    _ => matches!(
+                        section.kind(),
+                        object::SectionKind::Text
+                            | object::SectionKind::Data
+                            | object::SectionKind::ReadOnlyData
+                            | object::SectionKind::ReadOnlyString
+                            | object::SectionKind::UninitializedData
+                            | object::SectionKind::Tls
+                            | object::SectionKind::UninitializedTls
+                            | object::SectionKind::OtherString
+                    ),
+                };
+                if !is_alloc {
+                    continue;
+                }
                 let sz = section.size();
                 let addr = section.address();
-                println!("{name:<20}{sz:<10}{addr:<10}");
+                println!("{name:<20}{sz:>5}{addr:>7}");
                 total += sz;
             }
-            println!("Total               {total}");
+            println!("{:<20}{total:>5}", "Total");
+            println!();
             println!();
         } else {
             let mut text: u64 = 0;
             let mut data_size: u64 = 0;
             let mut bss: u64 = 0;
             for section in obj.sections() {
-                let name = section.name().unwrap_or("");
                 let sz = section.size();
-                if name == ".text"
-                    || name.starts_with(".text.")
-                    || name == ".init"
-                    || name == ".fini"
-                    || name == ".rodata"
-                    || name.starts_with(".rodata.")
-                {
-                    text += sz;
-                } else if name == ".bss" || name.starts_with(".bss.") || name == ".tbss" {
+                let flags = section.flags();
+                let (sh_type, sh_flags) = match flags {
+                    object::SectionFlags::Elf { sh_flags } => {
+                        let sh_type = match section.kind() {
+                            object::SectionKind::UninitializedData
+                            | object::SectionKind::UninitializedTls => 8_u32, // SHT_NOBITS
+                            _ => 1_u32, // SHT_PROGBITS
+                        };
+                        (sh_type, sh_flags)
+                    }
+                    _ => {
+                        // Non-ELF: fall back to section kind
+                        match section.kind() {
+                            object::SectionKind::Text
+                            | object::SectionKind::ReadOnlyData
+                            | object::SectionKind::ReadOnlyString
+                            | object::SectionKind::OtherString => {
+                                text += sz;
+                            }
+                            object::SectionKind::UninitializedData
+                            | object::SectionKind::UninitializedTls => {
+                                bss += sz;
+                            }
+                            object::SectionKind::Data | object::SectionKind::Tls => {
+                                data_size += sz;
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+                };
+                const SHF_ALLOC: u64 = 0x2;
+                const SHF_WRITE: u64 = 0x1;
+                if sh_flags & SHF_ALLOC == 0 {
+                    continue; // not allocated, skip
+                }
+                if sh_type == 8 {
+                    // SHT_NOBITS → bss
                     bss += sz;
-                } else if name == ".data"
-                    || name.starts_with(".data.")
-                    || name == ".tdata"
-                    || name == ".got"
-                    || name == ".got.plt"
-                {
+                } else if sh_flags & SHF_WRITE != 0 {
+                    // writable + allocated + PROGBITS → data
                     data_size += sz;
+                } else {
+                    // read-only + allocated → text
+                    text += sz;
                 }
             }
             let dec = text + data_size + bss;
@@ -1324,8 +1414,12 @@ fn tool_size(args: &[String]) -> i32 {
 // ─── READELF ──────────────────────────────────────────────────────────────────
 
 fn tool_readelf(args: &[String]) -> i32 {
-    if check_version_help("readelf", args) {
-        return 0;
+    // Don't use check_version_help here: -h means --file-header, not --help
+    for a in args {
+        if a == "--version" || a == "-V" || a == "--help" {
+            println!("{}", version_string("readelf"));
+            return 0;
+        }
     }
 
     let mut show_header = false;
@@ -1550,20 +1644,31 @@ fn readelf_display<'data, Elf: FileHeader>(
             "  Section header string table index: {}",
             header.e_shstrndx(endian)
         );
-        println!();
     }
 
     if show_sections && let Ok(sections) = elf.elf_header().sections(endian, data) {
-        println!("Section Headers:");
+        let num_sections = sections.len();
+        let sh_offset: u64 = elf.elf_header().e_shoff(endian).into();
         println!(
-            "  [Nr] Name              Type            Address          Off    Size   ES Flg Lk Inf Al"
+            "There are {} section headers, starting at offset 0x{:x}:",
+            num_sections, sh_offset
         );
+        println!();
+        println!("Section Headers:");
+        println!("  [Nr] Name              Type             Address           Offset");
+        println!("       Size              EntSize          Flags  Link  Info  Align");
         for (i, section) in sections.iter().enumerate() {
-            let name = sections
+            let name_raw = sections
                 .section_name(endian, section)
                 .ok()
                 .and_then(|n| std::str::from_utf8(n).ok())
                 .unwrap_or("");
+            // Truncate long names like GNU does (e.g. ".note.gnu.pr[...]")
+            let name = if name_raw.len() > 17 {
+                format!("{}[...]", &name_raw[..12])
+            } else {
+                name_raw.to_string()
+            };
             let sh_type = section.sh_type(endian);
             let addr: u64 = section.sh_addr(endian).into();
             let offset: u64 = section.sh_offset(endian).into();
@@ -1576,13 +1681,18 @@ fn readelf_display<'data, Elf: FileHeader>(
 
             let flag_str = elf_section_flags(flags);
             println!(
-                "  [{i:>2}] {name:<17} {:<15} {addr:016x} {offset:06x} {size:06x} {entsize:02x} {flag_str:<3} {link:>2} {info:>3} {addralign:>2}",
+                "  [{i:>2}] {name:<17} {:<16} {addr:016x}  {offset:08x}",
                 elf_section_type_name(sh_type)
+            );
+            println!(
+                "       {size:016x}  {entsize:016x} {flag_str:>3}       {link} {info:>5} {addralign:>5}",
             );
         }
         println!("Key to Flags:");
-        println!("  W (write), A (alloc), X (execute), M (merge), S (strings)");
-        println!();
+        println!("  W (write), A (alloc), X (execute), M (merge), S (strings), I (info),");
+        println!("  L (link order), O (extra OS processing required), G (group), T (TLS),");
+        println!("  C (compressed), x (unknown), o (OS specific), E (exclude),");
+        println!("  D (mbind), l (large), p (processor specific)");
     }
 
     if show_program_headers && let Ok(segments) = elf.elf_header().program_headers(endian, data) {
@@ -1838,8 +1948,19 @@ fn elf_segment_type_name(ty: u32) -> &'static str {
 // ─── OBJDUMP ──────────────────────────────────────────────────────────────────
 
 fn tool_objdump(args: &[String]) -> i32 {
-    if check_version_help("objdump", args) {
-        return 0;
+    // Don't use check_version_help here because -h means --section-headers, not --help
+    for arg in args {
+        match arg.as_str() {
+            "--version" | "-V" => {
+                println!("{}", version_string("objdump"));
+                return 0;
+            }
+            "--help" => {
+                println!("Usage: objdump [options] file...");
+                return 0;
+            }
+            _ => {}
+        }
     }
 
     let mut disassemble = false;
@@ -1922,22 +2043,132 @@ fn tool_objdump(args: &[String]) -> i32 {
         }
 
         if show_headers {
+            // Collect section names that have relocations targeting them
+            let reloc_sections: HashSet<String> = obj
+                .sections()
+                .filter_map(|s| {
+                    let sname = s.name().ok()?;
+                    if sname.starts_with(".rela.") || sname.starts_with(".rel.") {
+                        let target = if let Some(t) = sname.strip_prefix(".rela.") {
+                            format!(".{t}")
+                        } else {
+                            format!(".{}", sname.strip_prefix(".rel.").unwrap())
+                        };
+                        Some(target)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            // Build a map of section index → raw sh_offset from ELF headers
+            // This is needed because file_range() returns None for NOBITS sections
+            let raw_offsets: HashMap<object::SectionIndex, u64> = {
+                let mut map = HashMap::new();
+                // Try 64-bit ELF first, then 32-bit
+                if let Ok(elf) =
+                    ElfFile::<object::elf::FileHeader64<object::Endianness>>::parse(&*data)
+                {
+                    let endian = elf.endian();
+                    if let Ok(sections) = elf.elf_header().sections(endian, &*data) {
+                        for (i, section) in sections.iter().enumerate() {
+                            map.insert(object::SectionIndex(i), section.sh_offset(endian));
+                        }
+                    }
+                } else if let Ok(elf) =
+                    ElfFile::<object::elf::FileHeader32<object::Endianness>>::parse(&*data)
+                {
+                    let endian = elf.endian();
+                    if let Ok(sections) = elf.elf_header().sections(endian, &*data) {
+                        for (i, section) in sections.iter().enumerate() {
+                            map.insert(object::SectionIndex(i), section.sh_offset(endian).into());
+                        }
+                    }
+                }
+                map
+            };
+
+            // Filter to SHF_ALLOC sections only
+            let alloc_sections: Vec<_> = obj
+                .sections()
+                .filter(|section| {
+                    let name = section.name().unwrap_or("");
+                    if name.is_empty() {
+                        return false;
+                    }
+                    match section.flags() {
+                        object::SectionFlags::Elf { sh_flags } => sh_flags & 0x2 != 0,
+                        _ => matches!(
+                            section.kind(),
+                            object::SectionKind::Text
+                                | object::SectionKind::Data
+                                | object::SectionKind::ReadOnlyData
+                                | object::SectionKind::UninitializedData
+                        ),
+                    }
+                })
+                .collect();
+
             println!("\nSections:");
             println!(
                 "Idx Name          Size      VMA               LMA               File off  Algn"
             );
-            for (i, section) in obj.sections().enumerate() {
+            for (i, section) in alloc_sections.iter().enumerate() {
                 let name = section.name().unwrap_or("");
-                if name.is_empty() && i == 0 {
-                    continue;
-                }
                 let size = section.size();
                 let addr = section.address();
+                let file_off = raw_offsets
+                    .get(&section.index())
+                    .copied()
+                    .or_else(|| section.file_range().map(|(off, _)| off))
+                    .unwrap_or(0);
                 let align = section.align();
+                let align_pow = if align <= 1 {
+                    0
+                } else {
+                    (align as f64).log2() as u32
+                };
+
+                // Get ELF flags
+                let (sh_flags, sh_type) = match section.flags() {
+                    object::SectionFlags::Elf { sh_flags } => {
+                        let stype = match section.kind() {
+                            object::SectionKind::UninitializedData => 8u32, // SHT_NOBITS
+                            _ => 1u32, // SHT_PROGBITS (default for content sections)
+                        };
+                        (sh_flags, stype)
+                    }
+                    _ => (0u64, 1u32),
+                };
+
                 println!(
-                    "{i:>3} {name:<13} {size:08x}  {addr:016x}  {addr:016x}  {:08x}  2**{align}",
-                    0 // file offset not easily available from object crate
+                    "{i:>3} {name:<13} {size:08x}  {addr:016x}  {addr:016x}  {file_off:08x}  2**{align_pow}"
                 );
+
+                // Build flag description line
+                let mut flags_list: Vec<&str> = Vec::new();
+                let is_nobits = sh_type == 8;
+                if !is_nobits {
+                    flags_list.push("CONTENTS");
+                }
+                if sh_flags & 0x2 != 0 {
+                    flags_list.push("ALLOC");
+                    if !is_nobits {
+                        flags_list.push("LOAD");
+                    }
+                }
+                if reloc_sections.contains(name) {
+                    flags_list.push("RELOC");
+                }
+                if sh_flags & 0x1 == 0 && sh_flags & 0x2 != 0 {
+                    flags_list.push("READONLY");
+                }
+                if sh_flags & 0x4 != 0 {
+                    flags_list.push("CODE");
+                } else if sh_flags & 0x2 != 0 && !is_nobits {
+                    flags_list.push("DATA");
+                }
+                println!("                  {}", flags_list.join(", "));
             }
         }
 
@@ -1987,28 +2218,35 @@ fn tool_objdump(args: &[String]) -> i32 {
         }
 
         if disassemble {
-            println!("\nDisassembly:");
+            let bitness = if obj.is_64() { 64 } else { 32 };
+
             for section in obj.sections() {
-                let name = section.name().unwrap_or("");
+                let sec_name = section.name().unwrap_or("");
                 if section.kind() != object::SectionKind::Text {
                     continue;
                 }
-                println!("\nDisassembly of section {name}:");
+                let sec_idx = section.index();
+
+                // Build symbol table for labels in THIS section only
+                let mut sym_map: std::collections::BTreeMap<u64, String> =
+                    std::collections::BTreeMap::new();
+                for sym in obj.symbols() {
+                    let sname = sym.name().unwrap_or("");
+                    if sname.is_empty() || sym.is_undefined() {
+                        continue;
+                    }
+                    if let object::SymbolSection::Section(idx) = sym.section()
+                        && idx == sec_idx
+                        && sym.is_global()
+                    {
+                        sym_map.insert(sym.address(), sname.to_string());
+                    }
+                }
+
+                println!("\n\nDisassembly of section {sec_name}:");
                 if let Ok(data) = section.data() {
                     let base = section.address();
-                    // Print hex bytes (no actual disassembly)
-                    let mut offset = 0;
-                    while offset < data.len() {
-                        let addr = base + offset as u64;
-                        let end = (offset + 16).min(data.len());
-                        let bytes = &data[offset..end];
-                        print!("  {addr:8x}:\t");
-                        for b in bytes {
-                            print!("{b:02x} ");
-                        }
-                        println!();
-                        offset += 16;
-                    }
+                    objdump_disassemble_section(data, base, bitness, &sym_map);
                 }
             }
         }
@@ -2017,10 +2255,121 @@ fn tool_objdump(args: &[String]) -> i32 {
     if errors > 0 { 1 } else { 0 }
 }
 
+fn objdump_disassemble_section(
+    data: &[u8],
+    base: u64,
+    bitness: u32,
+    sym_map: &std::collections::BTreeMap<u64, String>,
+) {
+    // First pass: decode all instructions
+    let mut decoder = Decoder::with_ip(bitness, data, base, DecoderOptions::NONE);
+    let mut instructions: Vec<iced_x86::Instruction> = Vec::new();
+    while decoder.can_decode() {
+        instructions.push(decoder.decode());
+    }
+
+    let mut formatter = GasFormatter::new();
+    // GNU objdump pads mnemonic column
+    formatter.options_mut().set_first_operand_char_index(7);
+    formatter.options_mut().set_uppercase_hex(false);
+
+    let mut output = String::new();
+    let end_addr = base + data.len() as u64;
+
+    let mut i = 0;
+    while i < instructions.len() {
+        let instr = &instructions[i];
+        let ip = instr.ip();
+        let instr_len = instr.len();
+        let start_idx = (ip - base) as usize;
+        let instr_bytes = &data[start_idx..start_idx + instr_len];
+
+        // Print symbol label if one exists at this address
+        if let Some(sym_name) = sym_map.get(&ip) {
+            println!();
+            println!("{ip:016x} <{sym_name}>:");
+        }
+
+        // Always print the current instruction first
+        print!("{ip:>4x}:\t");
+        let show = instr_len.min(7);
+        for byte in instr_bytes.iter().take(show) {
+            print!("{byte:02x} ");
+        }
+        for _ in show..7 {
+            print!("   ");
+        }
+        print!("\t");
+
+        output.clear();
+        formatter.format(instr, &mut output);
+        println!("{output}");
+
+        // Continuation lines for long instructions
+        let mut extra_off = 7;
+        while extra_off < instr_len {
+            let end = (extra_off + 7).min(instr_len);
+            let cont_addr = ip + extra_off as u64;
+            print!("{cont_addr:>4x}:\t");
+            for byte in &instr_bytes[extra_off..end] {
+                print!("{byte:02x} ");
+            }
+            println!();
+            extra_off += 7;
+        }
+
+        // After printing, check if the NEXT instruction starts an all-zero
+        // run to the next symbol (or end of section). If so and there is at
+        // most one more zero instruction remaining, print "..." and skip.
+        // Otherwise let the next iteration print one more instruction first
+        // (matching GNU objdump behaviour of showing the repeated zero
+        // instruction at least once before collapsing).
+        let next_ip = ip + instr_len as u64;
+        let next_idx = (next_ip - base) as usize;
+        if next_idx < data.len() {
+            let next_sym_addr = sym_map
+                .range((std::ops::Bound::Excluded(ip), std::ops::Bound::Unbounded))
+                .next()
+                .map(|(&a, _)| a)
+                .unwrap_or(end_addr);
+
+            let remaining_end = ((next_sym_addr - base) as usize).min(data.len());
+            if next_idx < remaining_end {
+                let remaining = &data[next_idx..remaining_end];
+                if remaining.iter().all(|&b| b == 0) {
+                    // Count how many zero instructions the remaining bytes decode to
+                    let mut count = 0;
+                    let mut j = i + 1;
+                    while j < instructions.len() && instructions[j].ip() < next_sym_addr {
+                        count += 1;
+                        j += 1;
+                    }
+                    if count <= 1 {
+                        println!("\t...");
+                        i = j;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        i += 1;
+    }
+}
+
 fn objdump_format_name(obj: &object::File<'_>) -> &'static str {
-    match (obj.format(), obj.is_64()) {
-        (object::BinaryFormat::Elf, true) => "elf64",
-        (object::BinaryFormat::Elf, false) => "elf32",
+    match (obj.format(), obj.is_64(), obj.architecture()) {
+        (object::BinaryFormat::Elf, true, object::Architecture::X86_64) => "elf64-x86-64",
+        (object::BinaryFormat::Elf, false, object::Architecture::I386) => "elf32-i386",
+        (object::BinaryFormat::Elf, true, object::Architecture::Aarch64) => "elf64-littleaarch64",
+        (object::BinaryFormat::Elf, false, object::Architecture::Arm) => "elf32-littlearm",
+        (object::BinaryFormat::Elf, true, object::Architecture::PowerPc64) => "elf64-powerpc",
+        (object::BinaryFormat::Elf, false, object::Architecture::PowerPc) => "elf32-powerpc",
+        (object::BinaryFormat::Elf, true, object::Architecture::S390x) => "elf64-s390",
+        (object::BinaryFormat::Elf, true, object::Architecture::Riscv64) => "elf64-littleriscv",
+        (object::BinaryFormat::Elf, false, object::Architecture::Riscv32) => "elf32-littleriscv",
+        (object::BinaryFormat::Elf, true, _) => "elf64",
+        (object::BinaryFormat::Elf, false, _) => "elf32",
         _ => "unknown",
     }
 }
@@ -2575,6 +2924,7 @@ fn tool_addr2line(args: &[String]) -> i32 {
     }
     // Stub: read addresses from args or stdin, print ??:0
     let mut addrs: Vec<String> = Vec::new();
+    let mut show_functions = false;
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
@@ -2582,7 +2932,8 @@ fn tool_addr2line(args: &[String]) -> i32 {
             "-e" | "--exe" => {
                 i += 1; // skip filename
             }
-            "-f" | "--functions" | "-C" | "--demangle" | "-i" | "--inlines" => {}
+            "-f" | "--functions" => show_functions = true,
+            "-C" | "--demangle" | "-i" | "--inlines" => {}
             _ if !arg.starts_with('-') => addrs.push(arg.clone()),
             _ => {}
         }
@@ -2594,15 +2945,19 @@ fn tool_addr2line(args: &[String]) -> i32 {
         let stdin = io::stdin();
         for line in stdin.lock().lines().map_while(Result::ok) {
             for addr in line.split_whitespace() {
-                println!("??");
-                println!("??:0");
+                if show_functions {
+                    println!("??");
+                }
+                println!("??:?");
                 let _ = addr;
             }
         }
     } else {
         for _ in &addrs {
-            println!("??");
-            println!("??:0");
+            if show_functions {
+                println!("??");
+            }
+            println!("??:?");
         }
     }
     0
@@ -2668,62 +3023,13 @@ fn demangle_line(line: &str) -> String {
 }
 
 fn demangle_symbol(sym: &str) -> String {
-    // Basic Itanium C++ ABI demangling
-    if let Some(rest) = sym.strip_prefix("_Z")
-        && let Some(demangled) = try_demangle_itanium(rest)
+    let opts = DemangleOptions::default();
+    if let Ok(parsed) = CppSymbol::new(sym)
+        && let Ok(demangled) = parsed.demangle(&opts)
     {
         return demangled;
     }
     sym.to_string()
-}
-
-fn try_demangle_itanium(mangled: &str) -> Option<String> {
-    // Very basic: parse nested names like _ZN...E or simple names
-    let chars: Vec<char> = mangled.chars().collect();
-    let mut pos = 0;
-
-    if pos < chars.len() && chars[pos] == 'N' {
-        // Nested name
-        pos += 1;
-        let mut parts = Vec::new();
-        while pos < chars.len() && chars[pos] != 'E' {
-            if let Some((name, new_pos)) = parse_source_name(&chars, pos) {
-                parts.push(name);
-                pos = new_pos;
-            } else {
-                return None;
-            }
-        }
-        if parts.is_empty() {
-            return None;
-        }
-        Some(parts.join("::"))
-    } else {
-        // Simple name
-        if let Some((name, _)) = parse_source_name(&chars, pos) {
-            Some(name)
-        } else {
-            None
-        }
-    }
-}
-
-fn parse_source_name(chars: &[char], mut pos: usize) -> Option<(String, usize)> {
-    // Parse <length><name>
-    let mut len_str = String::new();
-    while pos < chars.len() && chars[pos].is_ascii_digit() {
-        len_str.push(chars[pos]);
-        pos += 1;
-    }
-    if len_str.is_empty() {
-        return None;
-    }
-    let len: usize = len_str.parse().ok()?;
-    if pos + len > chars.len() {
-        return None;
-    }
-    let name: String = chars[pos..pos + len].iter().collect();
-    Some((name, pos + len))
 }
 
 // ─── AS (stub) ────────────────────────────────────────────────────────────────

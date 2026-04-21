@@ -1,0 +1,37 @@
+# deslop configuration for rust-binutils
+#
+# A multicall binary reimplementing GNU binutils inherently needs:
+# - a single large module file (multicall dispatch + 14 tool implementations)
+# - UTF-8 validation when parsing archive headers (ar format is ASCII)
+# - narrowing casts for archive offsets and ELF field conversions
+# - HashMap for symbol table indexing during archive writes
+# - sequential stdout writes inside symbol/section listing loops
+# - string comparisons for archive operation flags ("r", "t", "x", etc.)
+# - struct field access inside iteration (ELF section/symbol processing)
+
+disabled_rules = [
+  # Single-file multicall binary is the intended architecture.
+  "rust_oversized_module_file",
+
+  # Archive headers are ASCII; from_utf8 on fixed-width fields is correct.
+  "rust_utf8_validate_hot_path",
+
+  # u64↔u32 conversions for ELF fields and archive offsets are intentional.
+  "rust_narrowing_numeric_cast",
+
+  # Archive symbol table construction needs a name→offset map.
+  "rust_hashmap_default_hasher",
+
+  # nm, readelf, objdump, size all print per-symbol/section inside loops.
+  "rust_unbuffered_file_writes",
+
+  # Archive operation flags ("r", "q", "t", etc.) are public CLI arguments.
+  "rust_secret_equality_compare",
+
+  # ELF processing iterates sections/symbols accessing multiple fields per item.
+  "rust_aos_hot_path",
+
+  # Release profile intentionally uses LTO+strip; overflow checks are not needed
+  # for a file-processing tool with no arithmetic on untrusted indices.
+  "rust_release_profile_missing_overflow_checks",
+]
