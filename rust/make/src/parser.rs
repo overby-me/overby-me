@@ -1006,7 +1006,10 @@ impl Parser {
                 target_pattern: pat,
                 prereq_patterns: prerequisites.clone(),
             })
-        } else if targets.iter().any(|t| t.contains('%')) {
+        } else if targets
+            .iter()
+            .any(|t| crate::expand::has_unescaped_percent(t))
+        {
             Some(PatternRule {
                 target_pattern: targets[0].clone(),
                 prereq_patterns: prerequisites.clone(),

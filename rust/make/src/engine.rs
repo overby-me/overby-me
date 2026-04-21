@@ -180,7 +180,7 @@ fn replace_first_percent_per_token(text: &str, stem: &str) -> String {
         let mut tok = String::new();
         let flush = |tok: &mut String, out: &mut String, stem: &str| {
             if !tok.is_empty() {
-                out.push_str(&tok.replacen('%', stem, 1));
+                out.push_str(&expand::replace_first_unescaped_percent(tok, stem));
                 tok.clear();
             }
         };
@@ -2510,7 +2510,7 @@ impl Engine {
         // by replacing `%` in the prereq patterns with the stem.
         // Register as explicit rules so normal lookup finds them.
         if let Some(pattern) = &rule.pattern
-            && !targets.iter().any(|t| t.contains('%'))
+            && !targets.iter().any(|t| expand::has_unescaped_percent(t))
         {
             let target_pattern = expand::expand(&pattern.target_pattern, self);
             let expanded_prereq_patterns: Vec<String> = pattern
@@ -2523,8 +2523,9 @@ impl Engine {
                         .collect::<Vec<_>>()
                 })
                 .collect();
-            for target in &targets {
-                let stem = match expand::pattern_stem(target, &target_pattern) {
+            for raw_target in &targets {
+                let target = expand::unescape_percent(raw_target);
+                let stem = match expand::pattern_stem(&target, &target_pattern) {
                     Some(s) => s,
                     None => {
                         eprintln!("make: target '{target}' doesn't match the target pattern");
@@ -2537,7 +2538,7 @@ impl Engine {
                 } else {
                     expanded_prereq_patterns
                         .iter()
-                        .map(|p| p.replacen('%', &stem, 1))
+                        .map(|p| expand::replace_first_unescaped_percent(p, &stem))
                         .filter(|s| !s.is_empty())
                         .collect()
                 };
@@ -2571,19 +2572,22 @@ impl Engine {
                         validate_balanced_refs(t, &rule.source_name, rule.line_no);
                     }
                 }
-                rules.entry(target.clone()).or_default().push(RuleEntry {
-                    prerequisites: resolved_prereqs,
-                    order_only: order_only.clone(),
-                    recipe: rule.recipe.clone(),
-                    recipe_lines: rule.recipe_lines.clone(),
-                    source_name: rule.source_name.clone(),
-                    is_double_colon: rule.is_double_colon,
-                    group: Vec::new(),
-                    stem: Some(stem.clone()),
-                    second_expand: se_active,
-                    raw_prereq_text: raw_pr_per_target,
-                    raw_order_only_text: raw_oo_per_target,
-                });
+                rules
+                    .entry(target.to_string())
+                    .or_default()
+                    .push(RuleEntry {
+                        prerequisites: resolved_prereqs,
+                        order_only: order_only.clone(),
+                        recipe: rule.recipe.clone(),
+                        recipe_lines: rule.recipe_lines.clone(),
+                        source_name: rule.source_name.clone(),
+                        is_double_colon: rule.is_double_colon,
+                        group: Vec::new(),
+                        stem: Some(stem.clone()),
+                        second_expand: se_active,
+                        raw_prereq_text: raw_pr_per_target,
+                        raw_order_only_text: raw_oo_per_target,
+                    });
             }
             if !*self.suppress_default_goal.borrow() {
                 let mut default = self.default_goal.borrow_mut();
@@ -2595,10 +2599,16 @@ impl Engine {
                     // their first-pass `$$`->`$` collapse applied by
                     // expand::expand, so a literal `$` in the target name
                     // (from `foo$$bar`) would otherwise be incorrectly expanded.
-                    *default = Some(t.replace('$', "$$").replace(' ', "\x01"));
+                    let unesc = expand::unescape_percent(t);
+                    *default = Some(unesc.replace('$', "$$").replace(' ', "\x01"));
                 }
             }
-            *self.last_rule_targets.borrow_mut() = Some(targets.clone());
+            *self.last_rule_targets.borrow_mut() = Some(
+                targets
+                    .iter()
+                    .map(|t| expand::unescape_percent(t))
+                    .collect(),
+            );
             return;
         }
 

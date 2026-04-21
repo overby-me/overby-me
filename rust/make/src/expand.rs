@@ -1422,12 +1422,71 @@ fn normalize_path(path: &str) -> String {
     }
 }
 
+/// Find the byte index of the first `%` that is not preceded by an odd
+/// number of backslashes.  `\%` is an escaped literal percent; `\\%` has
+/// two backslashes (the first escapes the second) so the `%` is unescaped.
+pub fn find_unescaped_percent(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            // skip escaped char
+            i += 2;
+            continue;
+        }
+        if bytes[i] == b'%' {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+pub fn has_unescaped_percent(s: &str) -> bool {
+    find_unescaped_percent(s).is_some()
+}
+
+/// Replace `\%` → `%` (and `\\` → `\` before a `%`).  Lone backslashes
+/// not followed by `%` are kept as-is, matching GNU make behaviour.
+pub fn unescape_percent(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'%' {
+            out.push('%');
+            i += 2;
+        } else {
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Replace only the first **unescaped** `%` with `replacement`, then
+/// unescape any remaining `\%` → `%` in the result.
+pub fn replace_first_unescaped_percent(s: &str, replacement: &str) -> String {
+    if let Some(pos) = find_unescaped_percent(s) {
+        let before = &s[..pos];
+        let after = &s[pos + 1..];
+        let mut out = unescape_percent(before);
+        out.push_str(replacement);
+        out.push_str(&unescape_percent(after));
+        out
+    } else {
+        unescape_percent(s)
+    }
+}
+
 pub fn pattern_stem(word: &str, pattern: &str) -> Option<String> {
-    if let Some(percent_pos) = pattern.find('%') {
-        let prefix = &pattern[..percent_pos];
-        let suffix = &pattern[percent_pos + 1..];
-        if word.starts_with(prefix)
-            && word.ends_with(suffix)
+    if let Some(percent_pos) = find_unescaped_percent(pattern) {
+        let raw_prefix = &pattern[..percent_pos];
+        let raw_suffix = &pattern[percent_pos + 1..];
+        let prefix = unescape_percent(raw_prefix);
+        let suffix = unescape_percent(raw_suffix);
+        if word.starts_with(&prefix)
+            && word.ends_with(&suffix)
             && word.len() >= prefix.len() + suffix.len()
         {
             let stem_end = word.len() - suffix.len();
