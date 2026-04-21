@@ -10,7 +10,7 @@ in a Nix sandbox, mirroring the differential-testing pattern established by
 
 ## Current Status
 
-**18/18 upstream tests + 7/7 differential roundtrip checks passing** (4 hand-rolled scenarios + 3 CMake-generated scenarios) — `Output.test_*` methods from the upstream
+**18/18 upstream `output_test.py` tests + 4/4 `jobserver_test.py` tests + 7/7 differential roundtrip checks passing** (4 hand-rolled scenarios + 3 CMake-generated scenarios) — `Output.test_*` methods from the upstream
 ninja v1.13.1 `misc/output_test.py` run against the rust-ninja binary in a
 Nix sandbox.
 
@@ -154,11 +154,30 @@ Port or adopt `misc/ninja_syntax.py` semantics in a Rust-side helper if
 useful, otherwise drop — the syntax helper only matters for callers
 generating manifests.
 
-### Phase 3: jobserver_test.py
+### Phase 3: jobserver_test.py ✅
 
-GNU make jobserver protocol (`--jobserver-auth=fifo:...` and the legacy
-pipe form). Required for proper `-j` cooperation when ninja is invoked
-from `make`.
+GNU make jobserver client implemented in `src/build/jobserver.rs`,
+covering the four upstream `JobserverTest.test_*` methods:
+
+- `test_no_jobserver_client` — local `-j N` cap behaves correctly when
+  `MAKEFLAGS` is unset.
+- `test_jobserver_client_with_posix_fifo` — full FIFO protocol: open
+  the named FIFO read+write nonblock, take the implicit slot first,
+  then `read(1)` per token; `write(1)` the same byte back on edge
+  completion. Combined with a raised local cap (jobs become unlimited
+  while the jobserver is active) parallelism is bounded entirely by
+  the upstream pool.
+- `test_jobserver_client_with_posix_pipe` — `--jobserver-fds=R,W` and
+  `--jobserver-auth=R,W` are detected and rejected with the canonical
+  `ninja: warning: Pipe-based protocol is not supported!` message,
+  matching reference ninja, then we fall back to the local `-j N` cap.
+- `test_client_passes_MAKEFLAGS` — `MAKEFLAGS` is forwarded to
+  child processes unchanged so downstream make invocations can
+  themselves pick up the same jobserver auth string.
+
+`GuessParallelism()` from reference ninja is also mirrored
+(`min` of cores+2 with a floor of 2) so the taskset-restricted leg of
+the FIFO test gets the expected fan-out.
 
 ### Phase 4: Differential roundtrip tests ✅ (initial)
 

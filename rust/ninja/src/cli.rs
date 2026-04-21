@@ -112,10 +112,20 @@ pub fn parse(argv: &[String]) -> Result<Options, String> {
 impl Options {
     #[allow(dead_code)]
     pub fn jobs_count(&self) -> usize {
+        // Match reference ninja's GuessParallelism(): cores + 2, with a
+        // minimum of 2 even on a single-CPU machine. Tests like
+        // test_jobserver_client_with_posix_fifo run under
+        // `taskset -c 0` and assert that ninja still spawns 2 jobs
+        // in parallel.
         self.jobs.unwrap_or_else(|| {
-            std::thread::available_parallelism()
+            let n = std::thread::available_parallelism()
                 .map(|n| n.get())
-                .unwrap_or(1)
+                .unwrap_or(1);
+            match n {
+                0 | 1 => 2,
+                2 => 3,
+                other => other + 2,
+            }
         })
     }
 

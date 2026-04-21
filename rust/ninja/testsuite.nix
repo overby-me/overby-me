@@ -10,6 +10,11 @@
 {
   pkgs,
   name,
+  # Which test file (without .py) and class to invoke. Defaults match
+  # the original output_test.Output convention so existing call sites
+  # keep working.
+  module ? "output_test",
+  className ? "Output",
 }: let
   # Some upstream tests pass a custom env= dict to subprocess that omits
   # PATH (e.g. test_issue_2586 with env={'NINJA_STATUS':''}). In a normal
@@ -68,8 +73,10 @@ in
     cp ${injectPathSitecustomize} ./pyhook/sitecustomize.py
     export PYTHONPATH="$PWD/pyhook:''${PYTHONPATH:-}"
 
-    # Run only the named TestCase method. unittest emits dots/F to stderr and
-    # the test framework exits non-zero on failure.
-    python3 misc/output_test.py "Output.${name}" -v
+    # Run only the named TestCase method. The {module}.{class}.{method}
+    # naming below selects which test file and class to invoke — the
+    # default targets misc/output_test.py's Output class, but jobserver
+    # tests live in misc/jobserver_test.py's JobserverTest class.
+    python3 misc/${module}.py "${className}.${name}" -v
     touch $out
   ''

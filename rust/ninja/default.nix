@@ -94,6 +94,17 @@
       "cmake-incremental-modify"
       "cmake-clean-rebuild"
     ];
+    # Phase 3 jobserver tests from misc/jobserver_test.py. The full
+    # GNU make jobserver client protocol is implemented for the FIFO
+    # variant; the FD-pair (`--jobserver-fds=R,W`) variant is rejected
+    # with the canonical "Pipe-based protocol is not supported!"
+    # warning, matching reference ninja.
+    jobserverTestNames = [
+      "test_no_jobserver_client"
+      "test_jobserver_client_with_posix_fifo"
+      "test_jobserver_client_with_posix_pipe"
+      "test_client_passes_MAKEFLAGS"
+    ];
   in
     builtins.listToAttrs (
       (map (name: {
@@ -106,5 +117,15 @@
           value = pkgs: import ./roundtrip.nix {inherit pkgs name;};
         })
         roundtripNames)
+      ++ (map (name: {
+          name = "rust-ninja-jobserver-${name}";
+          value = pkgs:
+            import ./testsuite.nix {
+              inherit pkgs name;
+              module = "jobserver_test";
+              className = "JobserverTest";
+            };
+        })
+        jobserverTestNames)
     );
 }

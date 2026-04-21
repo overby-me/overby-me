@@ -15,6 +15,7 @@
 use super::depfile;
 use super::dyndep;
 use super::expand::{expand_in_edge, lookup_either};
+use super::jobserver::{self, Slot};
 use super::log;
 use super::plan::{build_plan, resolve_targets};
 use crate::cli::Options;
@@ -81,6 +82,33 @@ fn schedule(
 ) -> Result<u8, String> {
     let jobs = opts.jobs_count().max(1);
     let explain = opts.explain();
+
+    // GNU make jobserver client. We only consult MAKEFLAGS when the
+    // user did *not* pass `-j N` explicitly — `-j N` always wins,
+    // matching reference ninja. A pipe-mode jobserver is rejected
+    // with a friendly stderr warning and we fall back to local `-j`.
+    let mut jobserver_client = if opts.jobs.is_none() {
+        match jobserver::detect_from_env() {
+            Ok(c) => c,
+            Err(msg) => {
+                eprintln!("ninja: warning: {msg}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    // When a jobserver is active, defer to the pool — the local `-j`
+    // cap is effectively unlimited so the only thing throttling us is
+    // token availability. Otherwise keep the GuessParallelism cap.
+    let jobs = if jobserver_client.is_some() {
+        usize::MAX
+    } else {
+        jobs
+    };
+    // Held tokens, indexed by plan slot. The implicit slot is taken
+    // first; explicit slots are written back to the FIFO on release.
+    let mut held_slots: Vec<Option<Slot>> = (0..plan.len()).map(|_| None).collect();
 
     // Map edge index → its dependencies (inputs that have a producer in
     // the plan). We use this to detect when an edge becomes ready.
@@ -373,7 +401,23 @@ fn schedule(
                         continue;
                     }
                 }
+                // Jobserver gate. Only real (non-phony) edges consume a
+                // token; phonies finish synchronously and never spawn a
+                // subprocess. If no token is currently available we leave
+                // the edge marked unstarted and revisit it after a
+                // completion frees one.
+                let acquired_slot = if !edges[edge_idx].is_phony()
+                    && let Some(c) = jobserver_client.as_mut()
+                {
+                    match c.try_acquire() {
+                        Some(s) => Some(s),
+                        None => continue,
+                    }
+                } else {
+                    None
+                };
                 started[slot] = true;
+                held_slots[slot] = acquired_slot;
                 let edge = edges[edge_idx].clone();
                 if edge.is_phony() {
                     // Phony "completes" instantly; mark done inline so we
@@ -492,6 +536,14 @@ fn schedule(
                 && let Some(c) = pool_in_flight.get_mut(&name)
             {
                 *c = c.saturating_sub(1);
+            }
+            // Return the jobserver token, if any, before reaping the
+            // next batch — other clients (or our own next dispatch
+            // pass) can then claim it.
+            if let (Some(c), Some(slot_token)) =
+                (jobserver_client.as_mut(), held_slots[slot].take())
+            {
+                c.release(slot_token);
             }
             for s2 in 0..plan.len() {
                 if deps[s2].contains(&slot) && !done[s2] {
