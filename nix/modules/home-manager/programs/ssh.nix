@@ -12,6 +12,12 @@ in {
     enable = true;
     enableDefaultConfig = false;
     matchBlocks = {
+      # Trigger agenix decryption on first SSH use rather than at login.
+      # If the decrypted key doesn't exist yet, start the agenix user service
+      # (which prompts for Nitrokey touch) and wait before connecting.
+      "agenix-trigger" = lib.mkIf hasSecrets {
+        match = ''exec "test -e %d/.ssh/id_ed25519 || systemctl --user start agenix"'';
+      };
       "*" = {
         addKeysToAgent = "yes";
         controlMaster = "auto";
