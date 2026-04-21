@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**125/135 tests passing** (93%) — upstream test harness from GNU make 4.4.1.
+**127/135 tests passing** (94%) — upstream test harness from GNU make 4.4.1.
 
 `rust/make` has a parser, expander, and build engine (~5k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -354,9 +354,10 @@ in ways the test harness happens not to exercise in our passing set.
 
 - **`.SECONDEXPANSION:`** — partial implementation in place. Currently
   passing: `variables/automatic`, `features/rule_glob`. Subtest counts:
-  `features/se_explicit` 30/31, `features/se_implicit` 27/30, `features/se_statpat` 12/12,
+  `features/se_explicit` 31/31 ✅, `features/se_implicit` 27/30,
+  `features/se_statpat` 12/12,
   `features/statipattrules` 68/68 ✅,
-  `features/patternrules` 63/72. Infrastructure: `RuleEntry` /
+  `features/patternrules` 72/72 ✅. Infrastructure: `RuleEntry` /
   `PatternRuleEntry` carry `second_expand` flag and `raw_prereq_text`;
   `build_target_for` runs `expand_with_auto` with `$@`/`$*`/`$<`/`$^`/`$+`/`$|`
   (and D/F variants) over the saved raw text under
@@ -426,28 +427,25 @@ in ways the test harness happens not to exercise in our passing set.
 
 ---
 
-## Currently failing top-level tests (10 of 135)
+## Currently failing top-level tests (8 of 135)
 
 Latest baseline (`bash /tmp/run-make-baseline.sh`):
 
 | Test | Notes |
 | --- | --- |
 | `features/parallelism` | Requires `-j` / jobserver |
-| `features/patternrules` | 63/72 subtests pass; `.SECONDEXPANSION` / chained pattern rules |
 | `features/reinvoke` | Makefile auto-rebuild + re-exec |
-| `features/se_explicit` | 30/31 subtests pass; remaining: #10 (LIBPATTERNS conflict warning) |
-| `features/se_implicit` | 27/30 subtests pass; failing subtests 3, 9, 27 (SE-during-pattern-search; implicit recursion guard for SE pattern rules) |
-| `features/temp_stdin` | `--debug=b` re-exec banner; stdin-as-makefile temp-file writeback failures; SIGTERM exit diagnostic |
-| `features/vpathplus` | 2/4 subtests pass; #1 (built-in cc pipeline via vpath), #2/#3 (GPATH intermediate handling) |
+| `features/se_implicit` | 27/30 subtests pass; failing subtests 3, 4, 9 (dir-transfer in SE implicit prereqs with order-only; implicit recursion guard; SE prereq verification rejection) |
+| `features/temp_stdin` | 6/8 subtests pass; `--debug=b` re-exec banner (#4); SIGTERM "Terminated" diagnostic (#5) |
+| `features/vpathplus` | 2/4 subtests pass; #1 (built-in cc pipeline via vpath + un-vpath on failed rebuild), #3 (VPATH intermediate chain timestamp comparison) |
 | `options/dash-f` | First failing subtest: prereq makefile rebuild before consuming stdin (`bye.mk: bye.mk.src`) — needs makefile auto-rebuild |
 | `targets/WAIT` | `.WAIT` requires parallel scheduling |
 | `variables/MAKEFLAGS` | Full MAKEFLAGS round-trip parse in sub-makes |
 
-The biggest remaining unlock is finishing **`.SECONDEXPANSION`**
-edge cases — would directly clear several `se_*` subtests and
-`patternrules` remainders. After that, **makefile auto-rebuild/re-exec**
+The biggest remaining unlocks are **makefile auto-rebuild/re-exec**
 (unlocks `reinvoke`, `dash-f`, `dash-B` subtests) and **MAKEFLAGS
-round-trip** are the next two high-leverage items.
+round-trip**. The `se_implicit` remainder requires implicit recursion
+guards with directory-aware stem decomposition and SE-during-pattern-search.
 
 ---
 
@@ -510,11 +508,11 @@ Round 3 fix (121/135):
 
 ## Category breakdown (current)
 
-Based on the latest baseline run (125/135 passing):
+Based on the latest baseline run (127/135 passing):
 
 | Category    | Status                                                            |
 | ----------- | ----------------------------------------------------------------- |
-| `features`  | 35/42 passing. SE infrastructure landed; GPATH, vpath same-file merging, escaped-%, library search order all implemented. Blocked on remaining SE edge cases, parallelism, re-exec. |
+| `features`  | 37/42 passing. `patternrules` 72/72 ✅, `se_explicit` 31/31 ✅, `statipattrules` 68/68 ✅. Blocked on remaining `se_implicit` edge cases, parallelism, re-exec, temp_stdin signal/debug, vpathplus chain. |
 | `functions` | Most working. Remaining: fatal-error line numbers.                |
 | `misc`      | All passing (bs-nl 28/28, general4 10/10).                        |
 | `options`   | Most working; `dash-q` fully passing. Blocked on re-exec/MAKEFLAGS. |
@@ -606,6 +604,26 @@ Round 6 (125/135 categories — gained statipattrules, vpath, vpathgpath, mult_r
 
 Subtest gains: statipattrules +2, vpath +1, mult_rules +1, vpathgpath +1,
 se_explicit +1, patternrules +1. Category total: 121 → 125.
+
+Round 7 (127/135 categories — gained patternrules, se_explicit):
+
+1. **Directory-transfer in SE pattern rule prereqs**: `replace_first_percent_per_token`
+   now applies GNU make directory-transfer semantics (prepend dir, substitute
+   only base into `%`) when `dir_transfer=true`. Previously the full stem
+   (including directory) was substituted for `%`, producing `3lib/bye4%5`
+   instead of `lib/3bye4%5`. Static pattern rules pass `dir_transfer=false`
+   (no directory transfer per GNU semantics). Fixes `patternrules` #45+#53
+   (multi-percent with directory stem) and #64+#65 (SE `$(wordlist)` with
+   directory stem) — file now fully passes (72/72).
+2. **`pattern_subst_with_dir` skip for no-`%` prereqs**: when a pattern
+   rule prerequisite contains no `%`, the directory portion of the stem is
+   no longer prepended. Previously `foo` with stem `lib/bye` became
+   `lib/foo`. Fixes implicit rule prereqs like order-only `bar.h` getting
+   spurious directory prefix.
+3. **Re-exec failure exit code**: changed from 2 to 127 (matching GNU
+   make's `execvp` failure convention). Fixes `temp_stdin` #7.
+
+Subtest gains: patternrules +9, temp_stdin +1. Category total: 126 → 127.
 
 ---
 

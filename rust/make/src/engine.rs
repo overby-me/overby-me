@@ -172,15 +172,36 @@ fn unescape_name(t: &str) -> String {
 /// matches GNU make's static-pattern stem substitution semantics:
 /// the literal `%` placeholder is per-word, and `$(wordlist ... %.1 %.2)`
 /// has both `%`s replaced because each is its own word inside the call.
-fn replace_first_percent_per_token(text: &str, stem: &str) -> String {
-    fn process(s: &str, stem: &str) -> String {
+fn replace_first_percent_per_token(text: &str, stem: &str, dir_transfer: bool) -> String {
+    fn process(s: &str, stem: &str, dir_transfer: bool) -> String {
         let bytes = s.as_bytes();
         let mut out = String::with_capacity(s.len());
         let mut i = 0;
         let mut tok = String::new();
-        let flush = |tok: &mut String, out: &mut String, stem: &str| {
+        let flush = |tok: &mut String, out: &mut String, stem: &str, dir_transfer: bool| {
             if !tok.is_empty() {
-                out.push_str(&expand::replace_first_unescaped_percent(tok, stem));
+                // Apply GNU make directory-transfer semantics for implicit
+                // pattern rules: when stem contains '/', substitute only
+                // the base part for '%' and prepend the directory. Tokens
+                // without '%' are left as-is. Static pattern rules do NOT
+                // use directory transfer — the full stem is substituted.
+                if dir_transfer {
+                    if let Some(slash_pos) = stem.rfind('/') {
+                        if expand::find_unescaped_percent(tok).is_some() {
+                            let dir = &stem[..=slash_pos];
+                            let base = &stem[slash_pos + 1..];
+                            let substituted = expand::replace_first_unescaped_percent(tok, base);
+                            out.push_str(dir);
+                            out.push_str(&substituted);
+                        } else {
+                            out.push_str(&expand::unescape_percent(tok));
+                        }
+                    } else {
+                        out.push_str(&expand::replace_first_unescaped_percent(tok, stem));
+                    }
+                } else {
+                    out.push_str(&expand::replace_first_unescaped_percent(tok, stem));
+                }
                 tok.clear();
             }
         };
@@ -215,11 +236,11 @@ fn replace_first_percent_per_token(text: &str, stem: &str) -> String {
                         }
                         j += 1;
                     }
-                    flush(&mut tok, &mut out, stem);
+                    flush(&mut tok, &mut out, stem, dir_transfer);
                     out.push(b'$' as char);
                     out.push(open as char);
                     let inner = &s[i + 2..j];
-                    out.push_str(&process(inner, stem));
+                    out.push_str(&process(inner, stem, dir_transfer));
                     out.push(close as char);
                     i = j + 1;
                     continue;
@@ -231,7 +252,7 @@ fn replace_first_percent_per_token(text: &str, stem: &str) -> String {
                 continue;
             }
             if c.is_ascii_whitespace() || c == b',' {
-                flush(&mut tok, &mut out, stem);
+                flush(&mut tok, &mut out, stem, dir_transfer);
                 out.push(c as char);
                 i += 1;
                 continue;
@@ -239,10 +260,10 @@ fn replace_first_percent_per_token(text: &str, stem: &str) -> String {
             tok.push(c as char);
             i += 1;
         }
-        flush(&mut tok, &mut out, stem);
+        flush(&mut tok, &mut out, stem, dir_transfer);
         out
     }
-    process(text, stem)
+    process(text, stem, dir_transfer)
 }
 
 /// Find the first `|` that's outside `$(...)`/`${...}` and not the
@@ -593,6 +614,9 @@ pub struct Engine {
 /// When the stem contains a `/`, the directory part is extracted and
 /// prepended to the result. E.g. stem="lib/bye", pattern="3%4" → "lib/3bye4".
 fn pattern_subst_with_dir(pattern: &str, stem: &str) -> String {
+    if !pattern.contains('%') {
+        return pattern.to_string();
+    }
     if let Some(slash_pos) = stem.rfind('/') {
         let dir = &stem[..=slash_pos]; // "lib/"
         let base = &stem[slash_pos + 1..]; // "bye"
@@ -2636,14 +2660,14 @@ impl Engine {
                         .map(|p| expand::expand(p, self))
                         .collect::<Vec<_>>()
                         .join(" ");
-                    Some(replace_first_percent_per_token(&joined, &stem_lit))
+                    Some(replace_first_percent_per_token(&joined, &stem_lit, false))
                 } else {
                     None
                 };
                 let mut rules = self.rules.borrow_mut();
                 let raw_oo_per_target = raw_orderonly_for_se
                     .as_ref()
-                    .map(|t| replace_first_percent_per_token(t, &stem_lit));
+                    .map(|t| replace_first_percent_per_token(t, &stem_lit, false));
                 if se_active {
                     if let Some(t) = &raw_pr_per_target {
                         validate_balanced_refs(t, &rule.source_name, rule.line_no);
@@ -3311,44 +3335,43 @@ impl Engine {
             // make warns and redirects to the vpath-resolved target.
             // We check vpath directories for a rule-registered name
             // (not file existence) to handle targets that are only rules.
-            self.resolve_vpath_to_rule_target(target)
-                .and_then(|resolved| {
-                    let source = self
-                        .rules
-                        .borrow()
-                        .get(target)
-                        .and_then(|entries| entries.first())
-                        .map(|e| {
-                            format!(
-                                "{}:{}",
-                                e.source_name,
-                                e.recipe_lines.first().copied().unwrap_or(0)
-                            )
-                        })
-                        .unwrap_or_default();
-                    // Only warn if the local target actually has a recipe.
-                    let has_recipe = self
-                        .rules
-                        .borrow()
-                        .get(target)
-                        .map(|entries| entries.iter().any(|e| !e.recipe.is_empty()))
-                        .unwrap_or(false);
-                    if has_recipe {
-                        eprintln!(
-                            "{}: Recipe was specified for file '{}' at {},",
-                            source, target, source
-                        );
-                        eprintln!(
-                            "{}: but '{}' is now considered the same file as '{}'.",
-                            source, target, resolved
-                        );
-                        eprintln!(
-                            "{}: Recipe for '{}' will be ignored in favor of the one for '{}'.",
-                            source, target, resolved
-                        );
-                    }
-                    Some(resolved)
-                })
+            self.resolve_vpath_to_rule_target(target).map(|resolved| {
+                let source = self
+                    .rules
+                    .borrow()
+                    .get(target)
+                    .and_then(|entries| entries.first())
+                    .map(|e| {
+                        format!(
+                            "{}:{}",
+                            e.source_name,
+                            e.recipe_lines.first().copied().unwrap_or(0)
+                        )
+                    })
+                    .unwrap_or_default();
+                // Only warn if the local target actually has a recipe.
+                let has_recipe = self
+                    .rules
+                    .borrow()
+                    .get(target)
+                    .map(|entries| entries.iter().any(|e| !e.recipe.is_empty()))
+                    .unwrap_or(false);
+                if has_recipe {
+                    eprintln!(
+                        "{}: Recipe was specified for file '{}' at {},",
+                        source, target, source
+                    );
+                    eprintln!(
+                        "{}: but '{}' is now considered the same file as '{}'.",
+                        source, target, resolved
+                    );
+                    eprintln!(
+                        "{}: Recipe for '{}' will be ignored in favor of the one for '{}'.",
+                        source, target, resolved
+                    );
+                }
+                resolved
+            })
         } else {
             None
         };
@@ -3991,7 +4014,7 @@ impl Engine {
                 *self.in_recipe.borrow_mut() = true;
                 let mut expanded_per_token: Vec<(String, bool)> = Vec::new();
                 for (rt, is_pat) in &raw_tokens {
-                    let with_stem = replace_first_percent_per_token(rt, &stem);
+                    let with_stem = replace_first_percent_per_token(rt, &stem, true);
                     let exp = self.with_target_vars_applied(target, || {
                         expand::expand_with_auto(&with_stem, self, &auto_vars)
                     });
@@ -4044,7 +4067,7 @@ impl Engine {
                 if let Some(orig_oo) = &pat_rule.raw_order_only_text
                     && !orig_oo.trim().is_empty()
                 {
-                    let with_stem_oo = replace_first_percent_per_token(orig_oo, &stem);
+                    let with_stem_oo = replace_first_percent_per_token(orig_oo, &stem, true);
                     let oo_exp = expand::expand_with_auto(&with_stem_oo, self, &auto_vars);
                     if !oo_combined.is_empty() {
                         oo_combined.push(' ');

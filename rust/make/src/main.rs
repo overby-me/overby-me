@@ -714,7 +714,7 @@ fn run() -> i32 {
             {
                 let tmpdir = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
                 let tmp_path = std::path::Path::new(&tmpdir).join("make-stdin-XXXXXX");
-                if let Err(_) = std::fs::write(&tmp_path, &content) {
+                if std::fs::write(&tmp_path, &content).is_err() {
                     eprintln!(
                         "make: *** cannot store makefile from stdin to a temporary file.  Stop."
                     );
@@ -817,7 +817,7 @@ fn run() -> i32 {
             _ => err.to_string(),
         };
         eprintln!("make: {}: {}", args[0], msg);
-        return 2;
+        return 127;
     }
 
     rc
