@@ -2292,13 +2292,20 @@ impl Lexer {
             let cmp_line = line.strip_suffix('\r').unwrap_or(&line).to_string();
             if ph.indent {
                 // For indented heredocs (<<~), the terminator can be indented.
-                // We trim leading whitespace for comparison and record the
-                // terminator's indentation to strip from body lines.
-                let trimmed_start = cmp_line.trim_start();
-                if trimmed_start == ph.tag {
-                    indent_prefix = cmp_line[..cmp_line.len() - trimmed_start.len()].to_string();
-                    terminated = true;
-                    break;
+                // Check if the line ends with the tag and everything before
+                // it is whitespace. This correctly handles tags that contain
+                // leading spaces (e.g. <<~' EOF' where tag is " EOF").
+                if cmp_line.len() >= ph.tag.len() {
+                    let prefix_len = cmp_line.len() - ph.tag.len();
+                    if cmp_line[prefix_len..] == *ph.tag
+                        && cmp_line[..prefix_len]
+                            .chars()
+                            .all(|c| c == ' ' || c == '\t')
+                    {
+                        indent_prefix = cmp_line[..prefix_len].to_string();
+                        terminated = true;
+                        break;
+                    }
                 }
             } else if cmp_line == ph.tag {
                 terminated = true;

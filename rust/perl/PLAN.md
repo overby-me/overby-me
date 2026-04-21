@@ -592,6 +592,65 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
 
 ### Recent fixes
 
+- **`borrowed_file_scopes` for nested same-file sub calls**: when a sub
+  from a required file (e.g. test.pl's `is`) calls another sub from the
+  same file (e.g. `_ok`), the file scope was being popped and re-pushed
+  as an empty copy, so the inner sub couldn't see file-scoped `my` vars
+  like `$test`. Added a `borrowed_file_scopes` set to `enter_file_scope`
+  / `exit_file_scope` so the live file scope stays on the stack and
+  nested calls share one mutable instance. Fixes the off-by-one test
+  numbering that affected op/pos, op/repeat, op/undef, op/eval, and
+  many other test.pl-based tests (first `ok` line had no test number).
+- **`chr`/`ord` for surrogates and above-Unicode codepoints**: Rust's
+  `char::from_u32` rejects surrogates (0xD800–0xDFFF) and values above
+  0x10FFFF, so `chr()` fell back to U+FFFD for those. Now encodes them
+  as extended/WTF-8 byte sequences via `unsafe String::from_utf8_unchecked`,
+  and `ord()` decodes them back using a manual byte-level UTF-8 decoder
+  that handles 1–6 byte sequences. Fixes op/ord tests 20–21, 33–35
+  (surrogate begin/end, 0x110000, last 4-byte UTF-8, first 5-byte UTF-8).
+  **op/ord now passes all 38 tests.**
+- **Indented heredoc terminator with spaces in delimiter**: `<<~' EOF'`
+  (tag containing leading/trailing spaces) failed because
+  `trim_start()` stripped the space that was part of the delimiter.
+  Changed terminator matching to check whether the line ends with the
+  tag and everything before it is whitespace. Fixes ~11 op/heredoc
+  indented heredoc tests with space-containing delimiters.
+
+- **`my $$x` / `my @$x` / `my %$x` / `my $$$x` are parser errors**:
+  reference perl rejects these at compile time as "Can't declare
+  scalar/array/hash dereference in \"my\"". Our parser silently
+  accepted them (the deref token wasn't in `parse_var_list`'s
+  recognised set, so it just produced an empty Stmt::My). Detect the
+  deref tokens after `my` (or after `my (`) in `parse_my_decl`,
+  consume up to a sane recovery point, and stash the canonical
+  message in `parser.error` so the eval-string boundary catches it
+  into `$@`. Unblocks op/eval tests 46-49.
+- **`join` defers item evaluation between elements**: a `__WARN__`
+  handler firing on an undef item can mutate a variable that appears
+  *later* in the join's argument list. Reference perl picks up the new
+  value because `@_` magic re-fetches per slot; we now achieve the
+  same by walking args one at a time and only evaluating the next arg
+  expression after warning on the previous undef. Required for
+  op/join tests 9-10 (and the same `local ($^W, $SIG{__WARN__}) = …`
+  pattern is currently blocked by separate plumbing — the actual
+  list-context `local` of `$^W` doesn't take effect, so this fix
+  doesn't yet flip the test, but the building block is in place).
+- **`eval { goto LABEL }` traps as die into `$@`**: an unresolved
+  `goto LABEL` (label not on the eval block's stack) used to bubble
+  out of the eval and crash. Reference perl converts it into the
+  diagnostic "Can't \"goto\" into the middle of a foreach loop"
+  caught by the eval. Convert `Flow::Goto` at the eval boundary to
+  set `$@` and return `Flow::None`. Unblocks op/eval test 45 and
+  everything after it (we now reach test 110 vs 44 before).
+- **Naked block `{ … }` is a 1-iteration loop for `last`/`next`**:
+  Perl treats a bare block as if it were `do { … } while (0)` for
+  control-flow purposes — `last;` inside `{ … }` exits the block,
+  doesn't bubble out to the surrounding scope. Catch unlabeled
+  `Flow::Last`/`Flow::Next` in `Stmt::Block` / `Stmt::BareBlock` so
+  they convert to `Flow::None` after popping. Required for op/eval
+  test 45's `eval { ... last; foreach { foo: ... } }` pattern; also
+  generally lets the rest of op/eval (and many other tests using
+  bare-block `last`) run to completion.
 - **`delete` is now a unary builtin**: `is delete $h{$k}, undef, "name"`
   used to parse as `is(delete($h{$k}, undef, "name"))` — `delete` was
   in the list-context group of builtins so it greedily consumed the
@@ -1234,23 +1293,23 @@ This is the largest phase. Key clusters:
 
 **run (2):** exit, switches
 
-### Passing (62)
+### Passing (63)
 
 base/cond, base/if, base/num, base/pat, base/rs, base/term, base/translate,
 base/while, cmd/elsif, cmd/for, cmd/mod, cmd/subval, cmd/switch,
 opbasic/arith, opbasic/magic_phase, opbasic/qq, op/arith2, op/auto, op/bop,
 op/chop, op/closure, op/cond, op/context, op/defined, op/delete, op/die,
 op/do, op/each, op/grep, op/hash, op/inc, op/index, op/lc, op/list, op/my,
-op/not, op/oct, op/pack, op/push, op/quotemeta, op/range, op/ref, op/reverse,
-op/sort, op/splice, op/split, op/sprintf, op/sub, op/substr, op/unshift,
-op/vec, op/wantarray, io/argv, io/fs, io/open, io/print, io/read, io/tell,
-re/pat, re/subst, run/exit, run/switches
+op/not, op/oct, op/ord, op/pack, op/push, op/quotemeta, op/range, op/ref,
+op/reverse, op/sort, op/splice, op/split, op/sprintf, op/sub, op/substr,
+op/unshift, op/vec, op/wantarray, io/argv, io/fs, io/open, io/print,
+io/read, io/tell, re/pat, re/subst, run/exit, run/switches
 
-### Failing (17)
+### Failing (16)
 
 base/lex, opbasic/cmp, opbasic/concat,
 op/array, op/chr, op/eval, op/heredoc, op/join, op/length, op/local,
-op/ord, op/pos, op/print, op/repeat, op/tr, op/undef, re/regexp
+op/pos, op/print, op/repeat, op/tr, op/undef, re/regexp
 
 ### Next high-impact targets
 

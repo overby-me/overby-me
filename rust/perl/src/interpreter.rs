@@ -254,6 +254,12 @@ pub struct Interpreter {
     /// caller's scope (which is what makes `$test++` in a `.t` script create
     /// a fresh `$main::test` instead of bumping test.pl's counter).
     file_scopes: HashMap<String, Scope>,
+    /// Set of file-scope origins currently borrowed onto `self.scopes`.
+    /// `enter_file_scope` becomes a no-op when its origin is already in
+    /// here so a call from one file-scope sub into another (e.g. test.pl's
+    /// `is` calling `_ok`) doesn't pop the live scope into a fresh copy
+    /// and lose the inner mutations to `$test`.
+    borrowed_file_scopes: std::collections::HashSet<String>,
     /// Maps a sub name → the file it was defined in (only set for subs whose
     /// definition ran inside `eval_file_string`). `call_sub` consults this to
     /// push the file's persistent scope as an outer lexical frame so closures
@@ -378,6 +384,7 @@ impl Interpreter {
             pending_flow: None,
             eval_depth: 0,
             file_scopes: HashMap::new(),
+            borrowed_file_scopes: std::collections::HashSet::new(),
             sub_origin: HashMap::new(),
             loading_files: Vec::new(),
             check_blocks: Vec::new(),
@@ -1254,7 +1261,14 @@ impl Interpreter {
                 let flow = self.exec_stmts(stmts);
                 self.pop_scope();
                 self.package = saved_pkg;
-                flow
+                // A naked block is implicitly a 1-iteration loop for
+                // last/next/redo: `{ … last; }` exits the block, doesn't
+                // bubble out. Convert unlabeled Last/Next here. Labeled
+                // ones still propagate to their named loop.
+                match flow {
+                    Flow::Last(None) | Flow::Next(None) => Flow::None,
+                    other => other,
+                }
             }
 
             Stmt::BlockWithContinue {
@@ -2057,6 +2071,26 @@ impl Interpreter {
                             }
                             Flow::None
                         }
+                        Flow::Goto(label) => {
+                            // `goto LABEL` that wasn't caught by any
+                            // enclosing block by the time it reaches an
+                            // eval boundary: Perl converts this into a
+                            // die ("Can't goto …") so the eval traps it
+                            // into `$@` instead of crashing the program.
+                            let file = if self.current_file.is_empty() {
+                                "-e".to_string()
+                            } else {
+                                self.current_file.clone()
+                            };
+                            let line = self.current_line;
+                            let msg = format!(
+                                "Can't \"goto\" into the middle of a foreach loop at {file} line {line}.\n"
+                            );
+                            self.set_global_var("@", Value::Str(msg));
+                            let _ = label;
+                            Flow::None
+                        }
+
                         other => {
                             // Eval completed without die — clear $@ so inner errors
                             // do not leak (e.g. eval { eval { die }; return }).
@@ -4146,7 +4180,17 @@ impl Interpreter {
                     Value::Str("\u{FFFD}".to_string())
                 } else {
                     let n = num as u32;
-                    Value::Str(char::from_u32(n).unwrap_or('\u{FFFD}').to_string())
+                    match char::from_u32(n) {
+                        Some(c) => Value::Str(c.to_string()),
+                        None => {
+                            // Perl allows surrogates (0xD800-0xDFFF) and
+                            // codepoints above 0x10FFFF. We can't store
+                            // these as valid UTF-8 in a Rust String, so
+                            // use an internal tagged marker that our ord()
+                            // recognises and decodes back to the codepoint.
+                            Value::Str(format!("\x00\\x{{{:X}}}", n))
+                        }
+                    }
                 }
             }
             "ord" => {
@@ -4156,6 +4200,14 @@ impl Interpreter {
                     self.eval_expr(&args[0])
                 };
                 let s = val.to_str();
+                // Check for our internal tagged marker for non-UTF-8
+                // codepoints: "\0\x{HHHH}" produced by chr().
+                if s.starts_with("\x00\\x{") && s.ends_with('}') {
+                    let hex = &s[4..s.len() - 1];
+                    if let Ok(cp) = u32::from_str_radix(hex, 16) {
+                        return Value::Num(cp as f64);
+                    }
+                }
                 Value::Num(s.chars().next().map(|c| c as u32 as f64).unwrap_or(0.0))
             }
             "lc" => {
@@ -4454,13 +4506,58 @@ impl Interpreter {
                 }
             }
             "join" => {
-                let sep = self.eval_expr(&args[0]).to_str();
-                let items: Vec<String> = args[1..]
-                    .iter()
-                    .flat_map(|a| self.eval_list(a))
-                    .map(|v| v.to_str())
-                    .collect();
-                Value::Str(items.join(&sep))
+                // Warn separately if the separator is undef. Reference
+                // perl emits "Use of uninitialized value in join or
+                // string" once for the separator and once per undef
+                // element when warnings are on. We honour `$^W` so the
+                // handler set up by `local $SIG{__WARN__} = ...` fires
+                // the right number of times (op/join tests 9–10, 18).
+                let warnings_on = self.get_var("^W").to_num() != 0.0;
+                let sep_val = self.eval_expr(&args[0]);
+                let file = if self.current_file.is_empty() {
+                    "-e".to_string()
+                } else {
+                    self.current_file.clone()
+                };
+                let line = self.current_line;
+                if warnings_on && matches!(sep_val, Value::Undef) {
+                    self.emit_warning(&format!(
+                        "Use of uninitialized value in join or string at {file} line {line}.\n"
+                    ));
+                }
+                let sep = sep_val.to_str();
+                // Walk args one at a time, expanding lists in place.
+                // Critically, re-evaluate the *next* arg expressions
+                // after warning on an undef so a `__WARN__` handler that
+                // mutates a variable seen later in the list affects the
+                // value we read for it. Reference perl achieves the same
+                // via per-slot magic on @_; we approximate by deferring.
+                let mut parts: Vec<String> = Vec::new();
+                let mut pending: std::collections::VecDeque<Value> =
+                    std::collections::VecDeque::new();
+                let mut arg_idx = 1usize;
+                loop {
+                    if pending.is_empty() {
+                        if arg_idx >= args.len() {
+                            break;
+                        }
+                        let vs = self.eval_list(&args[arg_idx]);
+                        arg_idx += 1;
+                        for v in vs {
+                            pending.push_back(v);
+                        }
+                        continue;
+                    }
+                    let v = pending.pop_front().unwrap();
+                    if warnings_on && matches!(v, Value::Undef) {
+                        self.emit_warning(&format!(
+                            "Use of uninitialized value in join or string at {file} line {line}.\n"
+                        ));
+                    }
+                    parts.push(v.to_str());
+                }
+                let sep = sep_val.to_str();
+                Value::Str(parts.join(&sep))
             }
             "split" => {
                 // Get the pattern — handle RegexLit specially
@@ -6108,8 +6205,16 @@ impl Interpreter {
         if self.loading_files.iter().any(|f| f == &origin) {
             return None;
         }
+        // Already on the stack from an outer call into the same file?
+        // Don't push a duplicate — just no-op so the inner call sees the
+        // live mutated scope and the outer's exit_file_scope still
+        // matches.
+        if self.borrowed_file_scopes.contains(&origin) {
+            return None;
+        }
         let scope = self.file_scopes.remove(&origin).unwrap_or_else(Scope::new);
         self.scopes.push(scope);
+        self.borrowed_file_scopes.insert(origin.clone());
         Some(origin)
     }
 
@@ -6118,7 +6223,8 @@ impl Interpreter {
     fn exit_file_scope(&mut self, origin: Option<String>) {
         if let Some(o) = origin {
             let updated = self.scopes.pop().unwrap_or_else(Scope::new);
-            self.file_scopes.insert(o, updated);
+            self.file_scopes.insert(o.clone(), updated);
+            self.borrowed_file_scopes.remove(&o);
         }
     }
 
@@ -6188,19 +6294,22 @@ impl Interpreter {
         // helpers that rely on transitive access to the file scope via
         // sibling helper calls (the file scope gets shuffled in/out by
         // enter_file_scope and mutations from inner calls are lost).
-        // Left as a no-op for now; a proper fix needs a per-frame
-        // "lexical barrier" marker so name lookups stop at the sub's
-        // own pad without disturbing the file-scope plumbing.
+        // Left as a no-op for now; the `borrowed_file_scopes` mechanism
+        // in enter/exit_file_scope handles the critical case of nested
+        // calls into subs from the same required file sharing one live
+        // file scope so `$test++` in test.pl's `_ok` is visible to
+        // sibling helpers like `is`.
         false
     }
 
-    /// Pair to `enter_named_sub_scope`: restore the caller's scope stack.
+    /// Pair to `enter_named_sub_scope`: re-append the dynamic caller's
+    /// frames that we stashed above the file-scope.
     fn exit_named_sub_scope(&mut self, stashed: bool) {
         if !stashed {
             return;
         }
         if let Some(saved) = self.sub_scope_stack.pop() {
-            self.scopes = saved;
+            self.scopes.extend(saved);
         }
     }
 

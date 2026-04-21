@@ -841,6 +841,40 @@ impl Parser {
     }
 
     fn parse_my_decl(&mut self) -> Stmt {
+        // Reject `my $$x`, `my @$x`, `my %$x`, `my $$$x`, etc.
+        // Reference perl errors: `Can't declare scalar dereference in
+        // "my" at FILE line N`. Detect a deref token (ScalarDeref /
+        // ArrayDeref / HashDeref) right after `my` (or `my (` ).
+        let probe_pos = if matches!(self.tok(), Token::LParen) {
+            self.pos + 1
+        } else {
+            self.pos
+        };
+        let bad = match self.tokens.get(probe_pos) {
+            Some(Token::ScalarDeref(_)) => Some("scalar"),
+            Some(Token::ArrayDeref(_)) => Some("array"),
+            Some(Token::HashDeref(_)) => Some("hash"),
+            _ => None,
+        };
+        if let Some(kind) = bad {
+            // Consume the offending tokens up to a sane point so the
+            // surrounding parser can keep going (the eval body using us
+            // catches the die into $@).
+            // Skip the deref token (and any following ident).
+            self.pos = probe_pos + 1;
+            // Eat balanced parens if we opened any.
+            if matches!(self.tok(), Token::RParen) {
+                self.pos += 1;
+            }
+            let line = self.token_lines.get(probe_pos).copied().unwrap_or(0);
+            let file = "{FILE}".to_string();
+            let msg =
+                format!("Can't declare {kind} dereference in \"my\" at {file} line {line}.\n");
+            // Surface as a parse error — the eval string boundary turns
+            // this into $@.
+            self.error.get_or_insert(msg);
+            return Stmt::Nop;
+        }
         let (vars, list_ctx) = self.parse_var_list();
         Stmt::My(vars, list_ctx)
     }
