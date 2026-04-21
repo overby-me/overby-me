@@ -674,13 +674,15 @@ fn apply_device_active(
                         warn!("udev-event: failed to build device unit {}: {}", name, e);
                     }
                 }
-            } else {
-                // Unit already exists — update its Wants= to match the
-                // new event.  We compute the new target UnitIds and
-                // swap out the old ones; reverse wanted_by edges are
-                // updated on any loaded targets too.
-                refresh_device_wants(&mut ri, &id, &new_wants);
             }
+            // Second: for a freshly-inserted device, refresh_device_wants
+            // would no-op because old_wants already == new_want_ids (we
+            // set them via build_device_unit).  So run a dedicated
+            // template-instantiation pass on the device's current Wants=
+            // first, then call refresh to handle the change case on
+            // subsequent events.
+            ensure_template_wants_instantiated(&mut ri, &id);
+            refresh_device_wants(&mut ri, &id, &new_wants);
         }
     }
 
@@ -878,6 +880,47 @@ fn parse_systemd_wants(params: &UdevEventParams) -> Vec<String> {
 /// update reverse `wanted_by` edges on any loaded target units.  Called
 /// on every add/change event to keep the derived dependency state in
 /// sync with the latest SYSTEMD_WANTS= value.
+/// Make sure every template-instance target in a device unit's current
+/// Wants= list is materialised in the unit table.  Without this, an
+/// activation request later errors with "unit not found" because
+/// `instantiate_template` is only invoked via systemctl/varlink code
+/// paths, not by udev's direct edge-wiring.  Used for freshly-inserted
+/// device units whose Wants= were populated by build_device_unit —
+/// refresh_device_wants can't see those as "new" additions.
+fn ensure_template_wants_instantiated(
+    ri: &mut crate::runtime_info::RuntimeInfo,
+    device_id: &UnitId,
+) {
+    let wants: Vec<UnitId> = match ri.unit_table.get(device_id) {
+        Some(u) => u.common.dependencies.wants.clone(),
+        None => return,
+    };
+    for want_id in wants {
+        if ri.unit_table.contains_key(&want_id) {
+            continue;
+        }
+        let Some((template_name, instance_name)) =
+            crate::units::loading::directory_deps::parse_template_instance(&want_id.name)
+        else {
+            continue;
+        };
+        let empty_dropins = std::collections::HashMap::new();
+        if let Some(unit) = crate::units::loading::directory_deps::instantiate_template(
+            &template_name,
+            &instance_name,
+            &want_id.name,
+            &ri.config.unit_dirs,
+            &empty_dropins,
+        ) {
+            trace!(
+                "udev-event: instantiated template {} -> {}",
+                template_name, want_id.name
+            );
+            crate::units::insert_new_unit_lenient(unit, ri);
+        }
+    }
+}
+
 fn refresh_device_wants(
     ri: &mut crate::runtime_info::RuntimeInfo,
     device_id: &UnitId,
@@ -935,10 +978,37 @@ fn refresh_device_wants(
     }
 
     // Add the NEW wanted_by edge to any target units that are newly
-    // wanted.
+    // wanted.  When the target is a template instance that isn't yet
+    // in the unit table (common for SYSTEMD_WANTS=test@%c.service
+    // where %c is the systemd-escape output), instantiate it from the
+    // template file before wiring the edge — otherwise
+    // activate_unit() later errors with "unit not found" and nothing
+    // starts.  TEST-17-UDEV.SYSTEMD_WANTS-escape exercises this with
+    // `test@sys-devices-virtual-net-test\x2dnetif\x2dfoo.service`.
     for new_id in &new_want_ids {
         if old_wants.contains(new_id) {
             continue;
+        }
+        if !ri.unit_table.contains_key(new_id)
+            && let Some((template_name, instance_name)) =
+                crate::units::loading::directory_deps::parse_template_instance(&new_id.name)
+        {
+            let empty_dropins = std::collections::HashMap::new();
+            if let Some(unit) =
+                crate::units::loading::directory_deps::instantiate_template(
+                    &template_name,
+                    &instance_name,
+                    &new_id.name,
+                    &ri.config.unit_dirs,
+                    &empty_dropins,
+                )
+            {
+                trace!(
+                    "udev-event: instantiated template {} -> {}",
+                    template_name, new_id.name
+                );
+                crate::units::insert_new_unit_lenient(unit, ri);
+            }
         }
         if let Some(target) = ri.unit_table.get_mut(new_id)
             && !target.common.dependencies.wanted_by.contains(device_id)
