@@ -4399,6 +4399,27 @@ impl Engine {
                         break;
                     }
                 }
+                // If any non-intermediate prereq doesn't exist as a
+                // file, it will be built, which means the target will
+                // need rebuilding — so don't skip intermediates.
+                // This handles cases like `%.tsk: %.z test.z` where
+                // `test.z` is explicitly mentioned (non-intermediate),
+                // doesn't exist, and will be built — forcing `hello.z`
+                // (intermediate) to also be built.
+                if !any_source_newer {
+                    for prereq in &all_prereqs {
+                        if !Path::new(prereq.as_str()).exists()
+                            && !self.check_intermediate(
+                                prereq,
+                                pattern_derived_prereqs.contains(prereq),
+                            )
+                            && !self.phony_targets.borrow().contains(prereq)
+                        {
+                            any_source_newer = true;
+                            break;
+                        }
+                    }
+                }
                 // Also check if any prereq would be rebuilt by its own
                 // chain — recursively check intermediate prereq sources.
                 if !any_source_newer {
@@ -4493,6 +4514,31 @@ impl Engine {
                     per_rule_seq.push((p_, true));
                 }
             }
+        }
+
+        // GNU make builds non-intermediate prereqs before intermediate
+        // ones. This matters when e.g. `%.tsk: %.z test.z` has both an
+        // intermediate `hello.z` and an explicitly-mentioned `test.z`:
+        // `test.z` must be built first so we know whether the target
+        // needs rebuilding (which forces the intermediate to be built).
+        // Stable-partition: non-intermediates keep their relative order,
+        // intermediates keep theirs, but all non-intermediates come first.
+        if pattern_match.is_some() {
+            let mut non_intermediate: Vec<(String, bool)> = Vec::new();
+            let mut intermediate: Vec<(String, bool)> = Vec::new();
+            for entry in per_rule_seq.drain(..) {
+                if !entry.1
+                    && !Path::new(entry.0.as_str()).exists()
+                    && self.check_intermediate(&entry.0, pattern_derived_prereqs.contains(&entry.0))
+                    && !self.phony_targets.borrow().contains(&entry.0)
+                {
+                    intermediate.push(entry);
+                } else {
+                    non_intermediate.push(entry);
+                }
+            }
+            per_rule_seq = non_intermediate;
+            per_rule_seq.extend(intermediate);
         }
 
         // Per-prereq build with full state tracking. Order-only prereqs
