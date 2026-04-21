@@ -178,7 +178,7 @@ binary actually runs):
 | `depfile-header-change` | both runners rebuild `greet.o` via `gcc -MMD` depfile parsing — mtime must change on both sides |
 | `cmake-cold-build` | a real CMake-generated `build.ninja` tree (with `include CMakeFiles/rules.ninja`, `$DEP_FILE` bindings, `restat`) cold-builds, no-ops on re-run, and rebuilds correctly after a header touch on both runners |
 | `cmake-incremental-modify` | touching one `.c` in a CMake tree rebuilds only the affected `.o` + `app`; the unrelated `greet.c.o` mtime stays stable on both runners |
-| `cmake-clean-rebuild` | `ninja -t clean` followed by a fresh invocation cold-rebuilds the full project on both runners |
+| `cmake-clean-rebuild` | each runner invokes its own `-t clean`, the deletion-count strings must match exactly, then a fresh invocation cold-rebuilds the full project on both runners |
 
 The first iteration surfaced one real bug: when every edge in the plan
 is up to date, rust-ninja exited silently instead of printing
@@ -330,6 +330,9 @@ when console-pool edges depend on regular edges.
 - [x] `-t compdb-targets` JSON, `ninja: error:` / `ninja: fatal:` paths
 - [x] `-t multi-inputs` with `-d <delim>` and `--print0`
 - [x] `-t recompact`, `-t restat` (log-version check only)
+- [x] `-t clean` (with `-r`, `-g`; respects `generator = 1` and
+      `deps = gcc`/`deps = msvc` exclusions to match reference
+      ninja’s `Cleaning... N files.` count exactly)
 
 ### Phase 7: Logs (target: `test_issue_2048` ✅, `test_explain_output` ✅ — partial)
 

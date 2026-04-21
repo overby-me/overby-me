@@ -2,6 +2,7 @@
 //!
 //! Each tool lives in its own submodule. Dispatch happens here.
 
+mod clean;
 mod compdb_targets;
 mod inputs;
 mod multi_inputs;
@@ -16,6 +17,7 @@ pub fn run(name: &str, state: &State, opts: &Options) -> Result<u8, String> {
         "inputs" => inputs::run(state, &opts.tool_args),
         "multi-inputs" => multi_inputs::run(state, &opts.tool_args),
         "compdb-targets" => compdb_targets::run(state, &opts.tool_args),
+        "clean" => clean::run(state, &opts.tool_args),
         other => Err(format!("unknown tool: {other}")),
     }
 }

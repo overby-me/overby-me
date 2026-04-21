@@ -298,11 +298,17 @@ pkgs.runCommand "rust-ninja-roundtrip-${name}" {
         ( cd "$SRC_DIR-rust" && $RUST_NINJA )
         ( cd "$SRC_DIR-ref"  && $REF_NINJA  )
 
-        # Use the reference ninja to do the clean step — rust-ninja
-        # `-t clean` isn't implemented yet, but the rebuild path
-        # underneath is what we care about.
-        ( cd "$SRC_DIR-rust" && $REF_NINJA -t clean >/dev/null )
-        ( cd "$SRC_DIR-ref"  && $REF_NINJA -t clean >/dev/null )
+        # Each runner cleans its own tree using its own `-t clean`
+        # implementation. Both must wipe the same set of artifacts:
+        # outputs of every non-phony, non-generator edge, plus any
+        # `depfile` / `rspfile` declared on those edges.
+        clean_rust=$( cd "$SRC_DIR-rust" && $RUST_NINJA -t clean )
+        clean_ref=$(  cd "$SRC_DIR-ref"  && $REF_NINJA  -t clean )
+        echo "rust: $clean_rust"
+        echo "ref : $clean_ref"
+        [ "$clean_rust" = "$clean_ref" ] || {
+          echo "FAIL: clean output differs between runners";
+          exit 1; }
         test ! -f "$SRC_DIR-rust/app"
         test ! -f "$SRC_DIR-ref/app"
 
