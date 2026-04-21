@@ -3250,6 +3250,46 @@ impl Engine {
         // does, redirect the build to that resolved name. GNU make
         // treats `vpa/foo.x` as the actual target (it's what will be
         // updated on disk) when `foo.x` was requested under `VPATH=vpa`.
+        // GPATH redirect: if the target has no local file but VPATH
+        // resolves it to a file in a GPATH directory, redirect the
+        // build to the VPATH location. The file "stays" in the VPATH
+        // dir and is considered up-to-date there.
+        let gpath_redirected: Option<String> =
+            if !is_phony && !Path::new(target).exists() && rules.is_empty() {
+                let gpath_raw = self.lookup_var("GPATH");
+                if !gpath_raw.is_empty() {
+                    let gpath_dirs: Vec<String> = gpath_raw
+                        .split(&[':', ' ', '\t'][..])
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.trim_end_matches('/').to_string())
+                        .collect();
+                    if let Some(resolved) = self.resolve_vpath(target) {
+                        let resolved_dir = std::path::Path::new(&resolved)
+                            .parent()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        let resolved_dir_trimmed = resolved_dir.trim_end_matches('/');
+                        if gpath_dirs.iter().any(|g| g == resolved_dir_trimmed) {
+                            Some(resolved)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+        if gpath_redirected.is_some() {
+            // The file exists at the GPATH location — treat it as
+            // up-to-date. Return immediately (nothing to build).
+            self.built_targets.borrow_mut().insert(target.to_string());
+            return Ok(());
+        }
+
         let vpath_redirected: Option<String> = if rules.is_empty() && !is_phony {
             self.resolve_vpath_rule(target)
         } else if !is_phony {
@@ -4141,6 +4181,38 @@ impl Engine {
         for prereq in all_prereqs.iter_mut() {
             if let Some(resolved) = self.resolve_vpath_to_rule_target(prereq) {
                 *prereq = resolved;
+            }
+        }
+
+        // GPATH support: when a prereq doesn't exist locally but is
+        // found via VPATH in a directory listed in GPATH, replace the
+        // prereq name with its VPATH-resolved path. This makes the
+        // file "stay" in the VPATH directory (treated as up-to-date
+        // there) instead of triggering a rebuild in the current dir.
+        let gpath_raw = self.lookup_var("GPATH");
+        if !gpath_raw.is_empty() {
+            let gpath_dirs: Vec<String> = gpath_raw
+                .split(&[':', ' ', '\t'][..])
+                .filter(|s| !s.is_empty())
+                .map(|s| s.trim_end_matches('/').to_string())
+                .collect();
+            if !gpath_dirs.is_empty() {
+                for prereq in all_prereqs.iter_mut() {
+                    if Path::new(prereq.as_str()).exists() {
+                        continue;
+                    }
+                    if let Some(resolved) = self.resolve_vpath(prereq) {
+                        // Check if the resolved path's directory is in GPATH.
+                        let resolved_dir = Path::new(&resolved)
+                            .parent()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        let resolved_dir_trimmed = resolved_dir.trim_end_matches('/');
+                        if gpath_dirs.iter().any(|g| g == resolved_dir_trimmed) {
+                            *prereq = resolved;
+                        }
+                    }
+                }
             }
         }
 
