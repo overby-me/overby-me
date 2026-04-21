@@ -530,15 +530,17 @@ fn main() {
                 let output_path = if let Some(name) = cd_filename {
                     Some(PathBuf::from(name))
                 } else if opts.remote_name || opts.remote_header_name {
-                    let name = url
-                        .path
-                        .split('?')
-                        .next()
-                        .unwrap_or(&url.path)
+                    // curl tool: derive filename from the URL path, ignoring
+                    // any query string. A trailing '/' is stripped before
+                    // taking the basename. Empty paths (or those reducing to
+                    // nothing) fall back to "curl_response".
+                    let path_no_query = url.path.split('?').next().unwrap_or(&url.path);
+                    let trimmed = path_no_query.trim_end_matches('/');
+                    let name = trimmed
                         .rsplit('/')
                         .next()
                         .filter(|s| !s.is_empty())
-                        .unwrap_or("index.html");
+                        .unwrap_or("curl_response");
                     Some(PathBuf::from(name))
                 } else {
                     // For glob-expanded URLs, a single -o pattern with #N applies
