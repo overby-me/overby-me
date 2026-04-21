@@ -1262,6 +1262,12 @@ fn expand_one_subst(
                 'D' => return (device_name.to_string(), 1),
                 'S' => return ("/sys".to_string(), 1),
                 'r' => return ("/dev".to_string(), 1),
+                'v' => {
+                    // Kernel release (`uname -r`).  Used by .link file
+                    // Property= values (TEST-17-UDEV.link-property asserts
+                    // LINK_VERSION=%v expands to the running kernel).
+                    return (kernel_release(), 1);
+                }
                 's' => {
                     if start + 1 < chars.len() && chars[start + 1] == '{' {
                         let (attr_name, adv) = extract_braced(chars, start + 1);
@@ -1409,6 +1415,35 @@ fn kernel_number(event: &UEvent) -> String {
 
 fn devpath_basename(event: &UEvent) -> String {
     event.devpath.rsplit('/').next().unwrap_or("").to_string()
+}
+
+fn kernel_release() -> String {
+    nix::sys::utsname::uname()
+        .ok()
+        .map(|u| u.release().to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// Kernel-provided / framework-reserved udev property keys that user
+/// rules and .link-file `Property=` directives must not overwrite or
+/// unset.  Matches upstream sd-device.c's is_valid_udev_property check:
+/// these come from the kernel (or the udev event header) and define the
+/// device's identity; letting a rule re-bind them would desynchronise
+/// the in-memory event from the kernel's view.
+fn is_read_only_property(key: &str) -> bool {
+    matches!(
+        key,
+        "ACTION"
+            | "DEVPATH"
+            | "SUBSYSTEM"
+            | "DEVTYPE"
+            | "DEVNAME"
+            | "IFINDEX"
+            | "MAJOR"
+            | "MINOR"
+            | "SEQNUM"
+            | "DRIVER"
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -3486,20 +3521,28 @@ fn builtin_net_setup_link(event: &mut UEvent) {
     }
 
     // [Link] Property=KEY=VALUE ... — set udev properties on the event env.
-    // Each entry is a single "KEY=VALUE" token.
+    // Each entry is a single "KEY=VALUE" token.  Values may contain
+    // specifiers like `%v` (kernel release) which get expanded via the
+    // shared substitution engine.  Kernel-provided read-only properties
+    // (ACTION, DEVPATH, IFINDEX, SUBSYSTEM, DEVTYPE, DEVNAME, MAJOR, MINOR)
+    // cannot be overwritten by a .link file — upstream sd-device.c enforces
+    // the same invariant.
     for entry in &link.link_section.properties {
         if let Some((k, v)) = entry.split_once('=') {
             let k = k.trim();
-            if !k.is_empty() {
-                event.env.insert(k.to_string(), v.to_string());
+            if k.is_empty() || is_read_only_property(k) {
+                continue;
             }
+            let expanded = expand_substitutions(v, event, "", "", &[]);
+            event.env.insert(k.to_string(), expanded);
         }
     }
 
     // [Link] UnsetProperty=KEY ... — remove udev properties from the env.
+    // Same read-only gate: the kernel-provided set cannot be unset either.
     for key in &link.link_section.unset_properties {
         let key = key.trim();
-        if !key.is_empty() {
+        if !key.is_empty() && !is_read_only_property(key) {
             event.env.remove(key);
         }
     }
@@ -3583,14 +3626,32 @@ pub fn test_builtin_net_setup_link_lines(devpath: &str, action: &str) -> Vec<Str
     // test script exercises both 'add' (expects the assignments) and
     // 'change' (expects metadata only).
     if matches!(action, "add" | "bind" | "move") {
+        // Synthesise a minimal UEvent so specifier expansion (%v etc.)
+        // works in Property= values.
+        let fake_event = UEvent {
+            action: action.to_string(),
+            devpath: devpath.to_string(),
+            subsystem: "net".to_string(),
+            devtype: String::new(),
+            devname: iface.clone(),
+            driver: String::new(),
+            major: String::new(),
+            minor: String::new(),
+            seqnum: 0,
+            env: std::collections::HashMap::new(),
+        };
         // Emit Property= entries as KEY=VALUE (even when the same KEY is
         // also listed in UnsetProperty= — upstream logs every directive).
+        // Kernel-provided keys (ACTION, DEVPATH, ...) are dropped to match
+        // sd-device.c's read-only property invariant.
         for entry in &link.link_section.properties {
             if let Some((k, v)) = entry.split_once('=') {
                 let k = k.trim();
-                if !k.is_empty() {
-                    out.push(format!("{k}={v}"));
+                if k.is_empty() || is_read_only_property(k) {
+                    continue;
                 }
+                let expanded = expand_substitutions(v, &fake_event, "", "", &[]);
+                out.push(format!("{k}={expanded}"));
             }
         }
         // Emit UnsetProperty= entries as KEY= (empty assignment).  This
@@ -3598,7 +3659,7 @@ pub fn test_builtin_net_setup_link_lines(devpath: &str, action: &str) -> Vec<Str
         // calls "empty assignment is also logged".
         for key in &link.link_section.unset_properties {
             let key = key.trim();
-            if !key.is_empty() {
+            if !key.is_empty() && !is_read_only_property(key) {
                 out.push(format!("{key}="));
             }
         }
