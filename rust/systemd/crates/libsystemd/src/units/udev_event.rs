@@ -746,10 +746,17 @@ fn apply_device_active(
                     "udev-event: activating dependency {} of device unit {}",
                     dep.name, first_name
                 );
+                // Use TriggerActivation so a SYSTEMD_WANTS= target that
+                // was manually `systemctl stop`-ped between events can
+                // restart on the next udev event — matching the way a
+                // socket/path/timer trigger revives a stopped service.
+                // TEST-17-UDEV.SYSTEMD_WANTS_vs_StopWhenUnneeded does a
+                // stop between the 'add' and 'change' events and then
+                // expects the 'change' event to bring the service back.
                 let errors = crate::units::activate_needed_units_with_source(
                     dep.clone(),
                     run_info.clone(),
-                    crate::units::ActivationSource::Regular,
+                    crate::units::ActivationSource::TriggerActivation,
                 );
                 for err in errors {
                     warn!(
@@ -842,21 +849,108 @@ fn deactivate_stale_aliases(
 /// them from the unit table — systemd keeps the entry around for
 /// reference, but transitions any `BindsTo=` dependents to stopped too.
 fn apply_device_inactive(run_info: &ArcMutRuntimeInfo, unit_names: &[String]) {
-    let ri = run_info.read_poisoned();
-    for name in unit_names {
-        let id = UnitId {
-            kind: UnitIdKind::Device,
-            name: name.clone(),
-        };
-        if let Some(unit) = ri.unit_table.get(&id) {
-            let mut status = unit.common.status.write_poisoned();
-            if !matches!(
-                &*status,
-                UnitStatus::Stopped(_, _) | UnitStatus::NeverStarted
-            ) {
-                trace!("udev-event: marking {} as stopped", name);
-                *status = UnitStatus::Stopped(StatusStopped::StoppedFinal, Vec::new());
+    // First: flip device status to Stopped and collect the former
+    // Wants= targets so we can clear reverse edges + check the
+    // StopWhenUnneeded invariant.
+    let mut former_wants: Vec<(UnitId, Vec<UnitId>)> = Vec::new();
+    {
+        let ri = run_info.read_poisoned();
+        for name in unit_names {
+            let id = UnitId {
+                kind: UnitIdKind::Device,
+                name: name.clone(),
+            };
+            if let Some(unit) = ri.unit_table.get(&id) {
+                let mut status = unit.common.status.write_poisoned();
+                if !matches!(
+                    &*status,
+                    UnitStatus::Stopped(_, _) | UnitStatus::NeverStarted
+                ) {
+                    trace!("udev-event: marking {} as stopped", name);
+                    *status = UnitStatus::Stopped(StatusStopped::StoppedFinal, Vec::new());
+                }
+                former_wants.push((id, unit.common.dependencies.wants.clone()));
             }
+        }
+    }
+
+    // Second: clear this device's wanted_by edge from each former
+    // target and gather the set of units that may now be unneeded.
+    // TEST-17-UDEV.SYSTEMD_WANTS_vs_StopWhenUnneeded requires
+    // StopWhenUnneeded=yes services to auto-stop when the device that
+    // pulled them in disappears.
+    let mut candidates: Vec<UnitId> = Vec::new();
+    {
+        let mut ri = run_info.write_poisoned();
+        for (device_id, wants) in &former_wants {
+            for want_id in wants {
+                if let Some(target) = ri.unit_table.get_mut(want_id) {
+                    target
+                        .common
+                        .dependencies
+                        .wanted_by
+                        .retain(|id| id != device_id);
+                }
+                if !candidates.contains(want_id) {
+                    candidates.push(want_id.clone());
+                }
+            }
+            if let Some(device) = ri.unit_table.get_mut(device_id) {
+                device.common.dependencies.wants.clear();
+                device.common.unit.refs_by_name.clear();
+            }
+        }
+    }
+
+    // Third: spawn a background thread to stop any StopWhenUnneeded=yes
+    // candidate that has no remaining needers.  Background because
+    // deactivation may block on ExecStop/WatchdogSec etc. and we don't
+    // want to hold the udev-event handler thread.
+    if !candidates.is_empty() {
+        let run_info = run_info.clone();
+        std::thread::spawn(move || {
+            for candidate_id in candidates {
+                stop_if_unneeded(&run_info, &candidate_id);
+            }
+        });
+    }
+}
+
+/// If the unit has `StopWhenUnneeded=true`, is currently active, and no
+/// longer has any unit that needs it (empty `wanted_by` / `required_by`
+/// / `bound_by` / `upheld_by`), deactivate it.  Matches upstream
+/// systemd's automatic-gc semantics for unneeded units.
+fn stop_if_unneeded(run_info: &ArcMutRuntimeInfo, target_id: &UnitId) {
+    let should_stop = {
+        let ri = run_info.read_poisoned();
+        let Some(target) = ri.unit_table.get(target_id) else {
+            return;
+        };
+        if !target.common.unit.stop_when_unneeded {
+            return;
+        }
+        let deps = &target.common.dependencies;
+        let has_needer = !deps.wanted_by.is_empty()
+            || !deps.required_by.is_empty()
+            || !deps.bound_by.is_empty()
+            || !deps.upheld_by.is_empty();
+        if has_needer {
+            return;
+        }
+        let status = target.common.status.read_poisoned();
+        matches!(&*status, UnitStatus::Started(_))
+    };
+    if should_stop {
+        trace!(
+            "udev-event: stopping {} (StopWhenUnneeded=yes, no needers)",
+            target_id.name
+        );
+        let ri = run_info.read_poisoned();
+        if let Err(e) = crate::units::deactivate_unit_recursive(target_id, &ri) {
+            warn!(
+                "udev-event: StopWhenUnneeded stop of {} failed: {}",
+                target_id.name, e.reason
+            );
         }
     }
 }

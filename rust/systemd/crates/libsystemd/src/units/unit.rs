@@ -2389,6 +2389,13 @@ pub struct UnitConfig {
     /// Parsed and stored; no runtime enforcement yet.
     pub allow_isolate: bool,
 
+    /// If true, this unit stops automatically when no other unit still
+    /// needs it (empty `wanted_by` / `required_by` / `bound_by` /
+    /// `upheld_by` set).  Matches systemd's `StopWhenUnneeded=` setting.
+    /// Enforced by udev-event device-remove handling and any future
+    /// dependency-release path.
+    pub stop_when_unneeded: bool,
+
     /// Timeout before a job for this unit is cancelled.
     /// Matches systemd's `JobTimeoutSec=` setting.
     /// Parsed and stored; no runtime enforcement yet.

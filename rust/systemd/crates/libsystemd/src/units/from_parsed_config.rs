@@ -878,6 +878,7 @@ fn make_common_from_parsed(
             job_timeout_action: unit.job_timeout_action,
             job_timeout_sec: unit.job_timeout_sec,
             allow_isolate: unit.allow_isolate,
+            stop_when_unneeded: unit.stop_when_unneeded,
             refuse_manual_start: unit.refuse_manual_start,
             refuse_manual_stop: unit.refuse_manual_stop,
             on_success: unit.on_success,
