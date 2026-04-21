@@ -1056,6 +1056,12 @@ impl Engine {
     /// If the file already exists in the current directory, returns None
     /// (the caller should check the current directory first).
     fn resolve_vpath(&self, name: &str) -> Option<String> {
+        // GNU make's vpath/VPATH search only fires when the named file
+        // is NOT in the current directory. If `name` exists locally,
+        // do not redirect to a vpath copy.
+        if Path::new(name).exists() {
+            return None;
+        }
         // Try `vpath PATTERN DIRS` directives first — patterns whose
         // `%` expansion matches `name` consult their attached dirs.
         // ALL matching patterns are tried (in declaration order),
@@ -5064,8 +5070,9 @@ impl Engine {
                     if chain.contains(&prereq) {
                         return true;
                     }
-                    Path::new(&prereq).exists()
+                    self.file_exists_or_vpath(&prereq)
                         || self.rules.borrow().contains_key(prereq.as_str())
+                        || self.resolve_vpath_rule(&prereq).is_some()
                         || (allow_chaining && self.is_mentioned_file(&prereq))
                 });
             return if prereqs_ok {
@@ -5115,9 +5122,10 @@ impl Engine {
                 {
                     return true;
                 }
-                Path::new(&prereq).exists()
+                self.file_exists_or_vpath(&prereq)
                     || self.phony_targets.borrow().contains(&prereq)
                     || self.rules.borrow().contains_key(prereq.as_str())
+                    || self.resolve_vpath_rule(&prereq).is_some()
                     || (allow_chaining
                         && (self.is_mentioned_file(&prereq)
                             || self
