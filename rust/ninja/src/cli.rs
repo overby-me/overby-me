@@ -8,7 +8,10 @@ pub struct Options {
     pub manifest_file: String,
     pub chdir: Option<String>,
     pub jobs: Option<usize>,
-    pub keep_going: bool,
+    /// Maximum number of failed jobs before stopping. `None` means
+    /// "stop on first failure" (default). `Some(0)` means unlimited
+    /// (`-k 0` in upstream ninja).
+    pub keep_going: Option<usize>,
     pub quiet: bool,
     pub verbose: bool,
     pub show_version: bool,
@@ -31,9 +34,11 @@ pub fn parse(argv: &[String]) -> Result<Options, String> {
             "--quiet" => o.quiet = true,
             "-v" | "--verbose" => o.verbose = true,
             "-k" => {
-                o.keep_going = true;
                 i += 1;
-                continue;
+                let n = argv
+                    .get(i)
+                    .ok_or_else(|| "-k needs an argument".to_string())?;
+                o.keep_going = Some(n.parse().map_err(|_| format!("bad -k value: {n}"))?);
             }
             "-C" => {
                 i += 1;
@@ -87,6 +92,10 @@ pub fn parse(argv: &[String]) -> Result<Options, String> {
                 let n = &s[2..];
                 o.jobs = Some(n.parse().map_err(|_| format!("bad -j value: {n}"))?);
             }
+            s if s.starts_with("-k") => {
+                let n = &s[2..];
+                o.keep_going = Some(n.parse().map_err(|_| format!("bad -k value: {n}"))?);
+            }
             s if s.starts_with("-f") => {
                 o.manifest_file = s[2..].to_string();
             }
@@ -108,6 +117,19 @@ impl Options {
                 .map(|n| n.get())
                 .unwrap_or(1)
         })
+    }
+
+    /// Maximum allowed failures before we stop launching new edges.
+    /// Matches reference ninja's `-k N` semantics:
+    ///   - flag absent          → 1 (stop on first failure)
+    ///   - `-k 0`               → `usize::MAX` (never stop)
+    ///   - `-k N` for N > 0     → N
+    pub fn failure_limit(&self) -> usize {
+        match self.keep_going {
+            None => 1,
+            Some(0) => usize::MAX,
+            Some(n) => n,
+        }
     }
 }
 

@@ -16,6 +16,9 @@ disabled_rules = [
   "rust_boolean_state_machine",
   "rust_broad_allow_dead_code",
   "rust_constructor_many_flags",
+  # The CLI options struct deliberately mirrors ninja’s flag
+  # surface; each Option<T> represents a real on/off CLI flag.
+  "rust_option_bag_config",
   "rust_domain_raw_primitive",
   # Depfile parsing legitimately scans line-by-line; the per-line
   # allocation cost is negligible against the disk read.

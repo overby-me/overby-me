@@ -69,11 +69,34 @@ fn parse_into(state: &mut State, src: &str, base_dir: &std::path::Path) -> Resul
                 state.defaults.extend(targets);
             }
             "pool" => {
-                // Skip pool body for now — depth limits not enforced.
-                let _ = p.word();
+                // Pool declaration: capture the `depth = N` body so the
+                // scheduler can cap concurrent edges by pool name.
+                let pool_name = p.word();
                 p.expect_newline()?;
+                let mut depth: Option<usize> = None;
                 while p.peek_indent() {
-                    p.skip_line();
+                    p.skip_spaces();
+                    let key = p.word();
+                    if key.is_empty() {
+                        p.skip_line();
+                        continue;
+                    }
+                    p.skip_spaces();
+                    if p.peek() != Some('=') {
+                        p.skip_line();
+                        continue;
+                    }
+                    p.bump();
+                    let raw = p.read_value();
+                    let value = expand_simple(raw.trim(), &state.bindings, None, None);
+                    if key == "depth" {
+                        depth = value.parse().ok();
+                    }
+                }
+                if !pool_name.is_empty()
+                    && let Some(d) = depth
+                {
+                    state.pools.insert(pool_name, d);
                 }
             }
             kw @ ("include" | "subninja") => {

@@ -11,6 +11,10 @@ pub struct State {
     pub producers: HashMap<String, usize>,
     /// Map target/alias → edge index for `default` resolution.
     pub defaults: Vec<String>,
+    /// Pool depth limits, keyed by pool name. The implicit `console`
+    /// pool (depth 1, special terminal-locking semantics) is always
+    /// present; user-declared pools are merged in by the parser.
+    pub pools: HashMap<String, usize>,
 }
 
 #[derive(Debug, Default, Clone)]

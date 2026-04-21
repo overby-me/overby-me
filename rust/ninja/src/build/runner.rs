@@ -6,8 +6,11 @@
 //! to the `Status` printer in completion order so logs interleave
 //! correctly.
 //!
-//! Pools are not yet enforced; the `console` pool needs special handling
-//! and lands in a later phase.
+//! Pool depth limits are honored: each edge whose rule (or per-edge
+//! binding) sets `pool = name` is dispatched only while the pool's
+//! in-flight count is below its declared `depth`. The implicit `console`
+//! pool defaults to depth 1; full terminal-locking semantics for it
+//! still land in a later phase.
 
 use super::depfile;
 use super::dyndep;
@@ -112,8 +115,19 @@ fn schedule(
     let mut started = vec![false; plan.len()];
     let mut in_flight = 0usize;
     let (tx, rx) = mpsc::channel::<EdgeOutcome>();
+    // We treat any non-zero exit as a "failure" and stop launching new
+    // edges once `failure_count` reaches the user's `-k N` threshold.
+    // The first failure code is preserved as the process exit status.
     let mut hard_failure: Option<u8> = None;
+    let mut failure_count: usize = 0;
+    let failure_limit = opts.failure_limit();
     let mut interrupted = false;
+    // Per-pool in-flight counts. Edges whose rule (or per-edge binding)
+    // sets `pool = name` may not start while `pool_in_flight[name] >=
+    // pools[name]`. The implicit `console` pool has depth 1.
+    let mut pool_in_flight: HashMap<String, usize> = HashMap::new();
+    let mut pool_depths: HashMap<String, usize> = state.pools.clone();
+    pool_depths.entry("console".to_string()).or_insert(1);
     // Tracks whether we actually dispatched any subprocess work. If
     // every edge in the plan was skipped (clean / phony) we still owe
     // the user the canonical "ninja: no work to do." message.
@@ -223,7 +237,9 @@ fn schedule(
         // Dispatch every ready edge up to the parallelism cap. We stop
         // launching new work once a hard failure or interruption fires
         // — let in-flight jobs drain so their output is preserved.
-        if hard_failure.is_none() && !interrupted && dyndep_failure.is_none() {
+        let stop_dispatching =
+            failure_count >= failure_limit || interrupted || dyndep_failure.is_some();
+        if !stop_dispatching {
             // Eagerly merge every loadable dyndep file before deciding
             // which edges to dispatch. Loading them up-front means a
             // "multiple rules generate X" collision is detected as
@@ -280,6 +296,18 @@ fn schedule(
                 if edges[edge_idx].dyndep.is_some() && !pending_dyndep_producers.is_empty() {
                     continue;
                 }
+                // Pool capacity check. Only real (non-phony) edges
+                // count against a pool — phonies don't spawn work.
+                let pool_name = pool_for_edge(state, &edges[edge_idx]);
+                if let Some(name) = pool_name.as_deref()
+                    && !edges[edge_idx].is_phony()
+                {
+                    let cap = pool_depths.get(name).copied().unwrap_or(usize::MAX);
+                    let cur = pool_in_flight.get(name).copied().unwrap_or(0);
+                    if cur >= cap {
+                        continue;
+                    }
+                }
                 started[slot] = true;
                 let edge = edges[edge_idx].clone();
                 if edge.is_phony() {
@@ -312,6 +340,9 @@ fn schedule(
                 }
                 in_flight += 1;
                 any_real_work = true;
+                if let Some(name) = pool_name.as_deref() {
+                    *pool_in_flight.entry(name.to_string()).or_insert(0) += 1;
+                }
                 let prepared = prepare(state, &edge, opts)?;
                 // Capture explain lines for dirty inputs of this edge.
                 let explain_lines: Vec<String> = if explain {
@@ -388,6 +419,13 @@ fn schedule(
             in_flight -= 1;
             let slot = outcome.slot;
             done[slot] = true;
+            // Release the pool slot this edge held, if any.
+            if let Some(name) = pool_for_edge(state, &edges[plan[slot]])
+                && !edges[plan[slot]].is_phony()
+                && let Some(c) = pool_in_flight.get_mut(&name)
+            {
+                *c = c.saturating_sub(1);
+            }
             for s2 in 0..plan.len() {
                 if deps[s2].contains(&slot) && !done[s2] {
                     remaining[s2] = remaining[s2].saturating_sub(1);
@@ -431,6 +469,7 @@ fn schedule(
                     if hard_failure.is_none() {
                         hard_failure = Some(code);
                     }
+                    failure_count += 1;
                 }
                 OutcomeKind::Interrupted => {
                     interrupted = true;
@@ -495,6 +534,24 @@ fn rule_has_restat(state: &State, edge: &Edge) -> bool {
         return matches!(v.as_str(), "1" | "true");
     }
     false
+}
+
+/// Resolve the pool name for an edge by walking the standard binding
+/// chain: per-edge bindings first, then the rule's bindings. Empty or
+/// missing means "no pool" (unbounded).
+fn pool_for_edge(state: &State, edge: &Edge) -> Option<String> {
+    if let Some(v) = edge.bindings.get("pool")
+        && !v.is_empty()
+    {
+        return Some(v.clone());
+    }
+    if let Some(rule) = state.rules.get(&edge.rule)
+        && let Some(v) = rule.bindings.get("pool")
+        && !v.is_empty()
+    {
+        return Some(v.clone());
+    }
+    None
 }
 
 fn mtime_of(path: &str) -> Option<SystemTime> {

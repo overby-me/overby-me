@@ -321,7 +321,9 @@ when console-pool edges depend on regular edges.
 - [x] `FAILED: [code=N] outputs\ncommand\n` block
 - [x] SIGINT (130) → suppressed status, "interrupted by user"
 - [x] Unknown CLI target → `ninja: error: unknown target 'X'`
-- [ ] `-k N` keep-going threshold (parsed but not yet enforced)
+- [x] `-k N` keep-going threshold — `-k 0` runs unlimited, `-k N`
+      stops launching new edges once `N` failures have been observed;
+      in-flight edges still drain so their output is preserved
 
 ### Phase 6: Tools ✅ (`test_tool_inputs`, `test_tool_compdb_targets`, `test_tool_multi_inputs`, `test_pr_1685`)
 
@@ -343,12 +345,14 @@ when console-pool edges depend on regular edges.
 
 ### Phase 8: Pools and console (target: `test_issue_2586` ✅)
 
-- [x] `pool` declaration is parsed (depth ignored)
+- [x] `pool` declaration is parsed including `depth = N`
 - [x] `pool = console` runs without hanging — sequential by default
       because we never block our own output stream
+- [x] Pool depth limiting — per-pool in-flight counters cap concurrent
+      edges by name (rule- or edge-bound `pool = name`); the implicit
+      `console` pool defaults to depth 1
 - [ ] True console-pool exclusive terminal locking (`SetConsoleLocked`
       buffering of competing edges)
-- [ ] Pool depth limiting
 
 ### Phase 9: Depfiles and dyndep ✅ (target: `test_depfile_directory_creation` ✅, `test_issue_2621` ✅, roundtrip `depfile-header-change` ✅)
 
