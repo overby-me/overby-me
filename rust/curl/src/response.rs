@@ -51,6 +51,7 @@ pub(crate) fn read_response(
     is_head: bool,
     http09: bool,
     decompress: bool,
+    tr_decompress: bool,
     raw: bool,
     max_filesize: Option<u64>,
     max_filesize_overflow: bool,
@@ -569,6 +570,50 @@ pub(crate) fn read_response(
         let timed_out = matches!(&read_err, Err(e) if e.kind() == std::io::ErrorKind::TimedOut || e.kind() == std::io::ErrorKind::WouldBlock);
         (buf, timed_out, false, false)
     };
+
+    // Decompress Transfer-Encoding (RFC 7230 §4) if --tr-encoding was set.
+    // Strip "chunked" (already de-chunked above) and apply remaining layers
+    // in reverse order. Unlike Content-Encoding, T-E layers are leftmost-applied-first.
+    let mut body = body;
+    if tr_decompress && !raw {
+        let te_value = headers
+            .iter()
+            .filter(|(k, _)| k == "transfer-encoding")
+            .map(|(_, v)| v.to_lowercase())
+            .collect::<Vec<_>>()
+            .join(",");
+        if !te_value.is_empty() {
+            let layers: Vec<&str> = te_value
+                .split(',')
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && *l != "chunked" && *l != "identity")
+                .collect();
+            for layer in layers.iter().rev() {
+                let mut decoded = Vec::new();
+                let ok = if layer.contains("gzip") || layer.contains("x-gzip") {
+                    GzDecoder::new(&body[..]).read_to_end(&mut decoded).is_ok()
+                } else if layer.contains("deflate") {
+                    let zlib_ok = ZlibDecoder::new(&body[..])
+                        .read_to_end(&mut decoded)
+                        .is_ok();
+                    if !zlib_ok || (decoded.is_empty() && !body.is_empty()) {
+                        decoded.clear();
+                        DeflateDecoder::new(&body[..])
+                            .read_to_end(&mut decoded)
+                            .is_ok()
+                    } else {
+                        true
+                    }
+                } else {
+                    false
+                };
+                if !ok {
+                    break;
+                }
+                body = decoded;
+            }
+        }
+    }
 
     // Decompress if Content-Encoding is present and --compressed was requested
     let content_encoding = if decompress && !raw {

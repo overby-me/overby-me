@@ -849,6 +849,7 @@ fn execute_request(
         is_head,
         opts.http09,
         opts.compressed,
+        opts.tr_encoding,
         opts.raw,
         opts.max_filesize,
         max_filesize_overflow,
