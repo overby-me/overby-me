@@ -604,9 +604,18 @@ fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options)
                                     {
                                         continue;
                                     }
+                                    // Likewise, if no Domain attribute was set, curl uses
+                                    // co->domain = NULL (length 0 in cookie_sort).
+                                    let had_domain_attr = cookie_str.split(";").skip(1).any(|a| {
+                                        let a = a.trim();
+                                        let key = a.split("=").next().unwrap_or("").trim();
+                                        key.eq_ignore_ascii_case("domain")
+                                    });
+                                    let sort_domain_len =
+                                        if had_domain_attr { domain.len() } else { 0 };
                                     file_pairs.push((
                                         effective_path.len(),
-                                        domain.len(),
+                                        sort_domain_len,
                                         name.len(),
                                         format!("{name}={value}"),
                                     ));

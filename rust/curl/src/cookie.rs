@@ -117,33 +117,37 @@ fn validate_set_cookie_domain(
         _ => return Some((request_host.to_string(), false)),
     };
 
-    let domain = attr.strip_prefix('.').unwrap_or(attr).to_lowercase();
-    let host = request_host.to_lowercase();
+    // Preserve the original case of the Domain attribute (curl writes the
+    // domain to the cookie jar verbatim) but use lowercased copies for
+    // case-insensitive comparisons.
+    let domain_orig = attr.strip_prefix('.').unwrap_or(attr).to_string();
+    let domain_lc = domain_orig.to_lowercase();
+    let host_lc = request_host.to_lowercase();
 
-    if is_ip_address(&host) {
+    if is_ip_address(&host_lc) {
         // For IP addresses, only exact match is allowed.
-        if domain == host {
-            return Some((domain, false));
+        if domain_lc == host_lc {
+            return Some((domain_orig, false));
         }
         return None;
     }
 
     // The host must match the domain or be a subdomain of it.
-    if host != domain && !host.ends_with(&format!(".{domain}")) {
+    if host_lc != domain_lc && !host_lc.ends_with(&format!(".{domain_lc}")) {
         return None;
     }
 
     // Reject TLD-only domains (no dot in the stripped domain).
-    if !domain.contains('.') {
+    if !domain_lc.contains('.') {
         return None;
     }
 
     // Reject malformed domains like "..com".
-    if domain.starts_with('.') {
+    if domain_lc.starts_with('.') {
         return None;
     }
 
-    Some((format!(".{domain}"), true))
+    Some((format!(".{domain_orig}"), true))
 }
 
 fn normalize_domain_lenient(domain_attr: Option<&str>, request_host: &str) -> (String, bool) {
