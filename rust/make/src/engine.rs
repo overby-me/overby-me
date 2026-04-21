@@ -589,6 +589,20 @@ pub struct Engine {
     pub second_expansion_enabled: Cell<bool>,
 }
 
+/// GNU make's directory-transfer stem substitution for pattern rules.
+/// When the stem contains a `/`, the directory part is extracted and
+/// prepended to the result. E.g. stem="lib/bye", pattern="3%4" → "lib/3bye4".
+fn pattern_subst_with_dir(pattern: &str, stem: &str) -> String {
+    if let Some(slash_pos) = stem.rfind('/') {
+        let dir = &stem[..=slash_pos]; // "lib/"
+        let base = &stem[slash_pos + 1..]; // "bye"
+        let substituted = pattern.replacen('%', base, 1);
+        format!("{}{}", dir, substituted)
+    } else {
+        pattern.replacen('%', stem, 1)
+    }
+}
+
 impl Engine {
     pub fn new() -> Self {
         let engine = Self {
@@ -4048,7 +4062,7 @@ impl Engine {
                 }
             } else {
                 for pp in &pat_rule.prereq_patterns {
-                    let prereq = pp.replacen('%', &stem, 1);
+                    let prereq = pattern_subst_with_dir(pp, &stem);
                     // Expand filesystem globs in pattern rule prereqs.
                     let expanded_list: Vec<String> = if prereq.contains(['*', '?', '[']) {
                         if let Ok(paths) = glob::glob(&prereq) {
@@ -4076,7 +4090,7 @@ impl Engine {
                     }
                 }
                 for op in &pat_rule.order_only_patterns {
-                    let oo = expand::expand(&op.replacen('%', &stem, 1), self);
+                    let oo = expand::expand(&pattern_subst_with_dir(op, &stem), self);
                     for tok in oo.split_whitespace() {
                         all_order_only.push(tok.to_string());
                     }
@@ -4434,7 +4448,7 @@ impl Engine {
                         }
                         if let Some((rule, stem)) = engine.find_pattern_rule(file) {
                             for pp in &rule.prereq_patterns {
-                                let src = pp.replacen('%', &stem, 1);
+                                let src = pattern_subst_with_dir(pp, &stem);
                                 if let Ok(sm) = std::fs::metadata(&src).and_then(|m| m.modified()) {
                                     if sm > target_m {
                                         return true;
@@ -5488,7 +5502,7 @@ impl Engine {
             // No implicit chaining allowed for terminal rules.
             let prereqs_ok = rule.prereq_patterns.is_empty()
                 || rule.prereq_patterns.iter().all(|pp| {
-                    let prereq = pp.replacen('%', &stem, 1);
+                    let prereq = pattern_subst_with_dir(pp, &stem);
                     // Circular prereq: treat as satisfied (dropped at build time)
                     if chain.contains(&prereq) {
                         return true;
@@ -5528,7 +5542,7 @@ impl Engine {
         } else {
             rule.prereq_patterns
                 .iter()
-                .map(|pp| pp.replacen('%', &stem, 1))
+                .map(|pp| pattern_subst_with_dir(pp, &stem))
                 .collect()
         };
         let prereqs_ok = prereq_iter.is_empty()
