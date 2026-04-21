@@ -1953,8 +1953,53 @@ impl Engine {
                 // If the parser-token contains a literal space (from a
                 // `\\<space>` escape) treat the whole token as a single
                 // target after expansion. Otherwise, expand and split on
-                // whitespace as usual.
-                if t.contains(' ') {
+                // whitespace as usual. Spaces *inside* a `$(...)` /
+                // `${...}` reference (e.g. `$(filter %.o,$(files))`) are
+                // not escape-spaces and must be ignored here.
+                fn has_unwrapped_space(s: &str) -> bool {
+                    let bytes = s.as_bytes();
+                    let mut paren = 0i32;
+                    let mut brace = 0i32;
+                    let mut i = 0;
+                    while i < bytes.len() {
+                        let c = bytes[i];
+                        if c == b'$' && i + 1 < bytes.len() {
+                            match bytes[i + 1] {
+                                b'(' => {
+                                    paren += 1;
+                                    i += 2;
+                                    continue;
+                                }
+                                b'{' => {
+                                    brace += 1;
+                                    i += 2;
+                                    continue;
+                                }
+                                b'$' => {
+                                    i += 2;
+                                    continue;
+                                }
+                                _ => {}
+                            }
+                        }
+                        if (c == b'(' || c == b'{') && (paren > 0 || brace > 0) {
+                            if c == b'(' {
+                                paren += 1;
+                            } else {
+                                brace += 1;
+                            }
+                        } else if c == b')' && paren > 0 {
+                            paren -= 1;
+                        } else if c == b'}' && brace > 0 {
+                            brace -= 1;
+                        } else if paren == 0 && brace == 0 && c == b' ' {
+                            return true;
+                        }
+                        i += 1;
+                    }
+                    false
+                }
+                if has_unwrapped_space(t) {
                     vec![expand::expand(t, self)]
                 } else {
                     expand::expand(t, self)
@@ -4209,6 +4254,153 @@ impl Engine {
             return Err(msg);
         }
 
+        // Grouped (`&:`) rules: before running the single recipe,
+        // fire SECONDEXPANSION side effects for each sibling target
+        // and build the prereqs they expand to. GNU make evaluates
+        // each sibling's per-target SE (and the prereqs contributed
+        // by each rule attached to that sibling) before the grouped
+        // recipe runs. Rules attached to a sibling are processed with
+        // the currently-executing grouped rule first, then the other
+        // rules in declaration order.
+        for rule in &rules {
+            if rule.group.is_empty() {
+                continue;
+            }
+            for sibling in &rule.group {
+                if sibling == target {
+                    continue;
+                }
+                let raw_sibling_rules = self
+                    .rules
+                    .borrow()
+                    .get(sibling.as_str())
+                    .cloned()
+                    .unwrap_or_default();
+                // Order: non-SE rules first (their prereqs are
+                // already resolved and contribute to auto-vars seen by
+                // the SE rules), then SE rules with the currently-
+                // executing grouped rule first, then the rest in
+                // declaration order.
+                let mut sibling_rules: Vec<RuleEntry> = Vec::with_capacity(raw_sibling_rules.len());
+                let needs_se_for = |sr: &RuleEntry| -> bool {
+                    sr.second_expand
+                        && (sr
+                            .raw_prereq_text
+                            .as_deref()
+                            .is_some_and(|s| s.contains('$'))
+                            || sr
+                                .raw_order_only_text
+                                .as_deref()
+                                .is_some_and(|s| s.contains('$')))
+                };
+                for sr in &raw_sibling_rules {
+                    if !needs_se_for(sr) {
+                        sibling_rules.push(sr.clone());
+                    }
+                }
+                for sr in &raw_sibling_rules {
+                    if needs_se_for(sr) && sr.group == rule.group {
+                        sibling_rules.push(sr.clone());
+                    }
+                }
+                for sr in &raw_sibling_rules {
+                    if needs_se_for(sr) && sr.group != rule.group {
+                        sibling_rules.push(sr.clone());
+                    }
+                }
+                // Accumulate prereqs from non-SE / already-resolved
+                // rules so SE auto-vars ($<, $^, etc.) reflect prior
+                // contributions, matching GNU make semantics.
+                let mut sib_prereqs: Vec<String> = Vec::new();
+                let mut sib_order_only: Vec<String> = Vec::new();
+                for sib_rule in &sibling_rules {
+                    let needs_se = sib_rule.second_expand
+                        && (sib_rule
+                            .raw_prereq_text
+                            .as_deref()
+                            .is_some_and(|s| s.contains('$'))
+                            || sib_rule
+                                .raw_order_only_text
+                                .as_deref()
+                                .is_some_and(|s| s.contains('$')));
+                    if needs_se {
+                        let stem_str = sib_rule.stem.clone().unwrap_or_default();
+                        let plus_str = sib_prereqs.join(" ");
+                        let mut seen: HashSet<String> = HashSet::new();
+                        let caret: Vec<String> = sib_prereqs
+                            .iter()
+                            .filter(|p| seen.insert((*p).clone()))
+                            .cloned()
+                            .collect();
+                        let caret_str = caret.join(" ");
+                        let mut pseen: HashSet<String> = HashSet::new();
+                        let pipe_str: String = sib_order_only
+                            .iter()
+                            .filter(|p| pseen.insert((*p).clone()))
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        let lt_str = sib_prereqs.first().cloned().unwrap_or_default();
+                        let mut auto_vars: HashMap<&str, String> = HashMap::new();
+                        auto_vars.insert("@", sibling.clone());
+                        auto_vars.insert("*", stem_str);
+                        auto_vars.insert("<", lt_str);
+                        auto_vars.insert("^", caret_str);
+                        auto_vars.insert("+", plus_str);
+                        auto_vars.insert("|", pipe_str);
+                        auto_vars.insert("?", String::new());
+                        auto_vars.insert("%", String::new());
+                        add_df_variants(&mut auto_vars);
+                        let raw = sib_rule.raw_prereq_text.as_deref().unwrap_or("");
+                        let exp = self.with_target_vars_applied(sibling, || {
+                            expand::expand_with_auto(raw, self, &auto_vars)
+                        });
+                        for tok in exp.split_whitespace() {
+                            sib_prereqs.push(tok.to_string());
+                        }
+                        if let Some(orig_oo) = &sib_rule.raw_order_only_text {
+                            let oo_exp = expand::expand_with_auto(orig_oo, self, &auto_vars);
+                            for tok in oo_exp.split_whitespace() {
+                                sib_order_only.push(tok.to_string());
+                            }
+                        }
+                    } else {
+                        sib_prereqs.extend(sib_rule.prerequisites.iter().cloned());
+                        sib_order_only.extend(sib_rule.order_only.iter().cloned());
+                    }
+                }
+                // Build sibling prereqs derived from SE expansion.
+                for prereq in &sib_prereqs {
+                    if prereq == target || prereq == sibling {
+                        continue;
+                    }
+                    if self.building_chain.borrow().contains(prereq.as_str()) {
+                        continue;
+                    }
+                    if let Err(e) = self.build_target_for(prereq, Some(sibling))
+                        && !self.keep_going
+                    {
+                        pop_scope(self);
+                        return Err(e);
+                    }
+                }
+                for prereq in &sib_order_only {
+                    if prereq == target || prereq == sibling {
+                        continue;
+                    }
+                    if self.building_chain.borrow().contains(prereq.as_str()) {
+                        continue;
+                    }
+                    if let Err(e) = self.build_target_for(prereq, Some(sibling))
+                        && !self.keep_going
+                    {
+                        pop_scope(self);
+                        return Err(e);
+                    }
+                }
+            }
+        }
+
         // Execute recipe
         if self.touch {
             if !is_phony {
@@ -4392,85 +4584,6 @@ impl Engine {
                                 .borrow_mut()
                                 .insert(sibling.clone());
                             self.rebuilt_targets.borrow_mut().insert(sibling.clone());
-                        }
-                    }
-                }
-                // Fire SECONDEXPANSION side effects for each sibling so
-                // GNU's per-target SE semantics are observed even when
-                // the recipe runs only once for the whole group. Iterate
-                // ALL rules attached to the sibling (not just this group
-                // rule) so rules contributing additional prereqs to the
-                // sibling also fire their SE side effects.
-                for sibling in &rule.group {
-                    if sibling == target {
-                        continue;
-                    }
-                    let sibling_rules = self
-                        .rules
-                        .borrow()
-                        .get(sibling.as_str())
-                        .cloned()
-                        .unwrap_or_default();
-                    // Accumulate prereqs from non-SE / already-resolved
-                    // rules so SE auto-vars ($<, $^, etc.) reflect prior
-                    // contributions, matching GNU make semantics.
-                    let mut sib_prereqs: Vec<String> = Vec::new();
-                    let mut sib_order_only: Vec<String> = Vec::new();
-                    for sib_rule in &sibling_rules {
-                        let needs_se = sib_rule.second_expand
-                            && (sib_rule
-                                .raw_prereq_text
-                                .as_deref()
-                                .is_some_and(|s| s.contains('$'))
-                                || sib_rule
-                                    .raw_order_only_text
-                                    .as_deref()
-                                    .is_some_and(|s| s.contains('$')));
-                        if needs_se {
-                            let stem_str = sib_rule.stem.clone().unwrap_or_default();
-                            let plus_str = sib_prereqs.join(" ");
-                            let mut seen: HashSet<String> = HashSet::new();
-                            let caret: Vec<String> = sib_prereqs
-                                .iter()
-                                .filter(|p| seen.insert((*p).clone()))
-                                .cloned()
-                                .collect();
-                            let caret_str = caret.join(" ");
-                            let mut pseen: HashSet<String> = HashSet::new();
-                            let pipe_str: String = sib_order_only
-                                .iter()
-                                .filter(|p| pseen.insert((*p).clone()))
-                                .cloned()
-                                .collect::<Vec<_>>()
-                                .join(" ");
-                            let lt_str = sib_prereqs.first().cloned().unwrap_or_default();
-                            let mut auto_vars: HashMap<&str, String> = HashMap::new();
-                            auto_vars.insert("@", sibling.clone());
-                            auto_vars.insert("*", stem_str);
-                            auto_vars.insert("<", lt_str);
-                            auto_vars.insert("^", caret_str);
-                            auto_vars.insert("+", plus_str);
-                            auto_vars.insert("|", pipe_str);
-                            auto_vars.insert("?", String::new());
-                            auto_vars.insert("%", String::new());
-                            add_df_variants(&mut auto_vars);
-                            let raw = sib_rule.raw_prereq_text.as_deref().unwrap_or("");
-                            let exp = self.with_target_vars_applied(sibling, || {
-                                expand::expand_with_auto(raw, self, &auto_vars)
-                            });
-                            // Add this rule's expanded prereqs to running totals.
-                            for tok in exp.split_whitespace() {
-                                sib_prereqs.push(tok.to_string());
-                            }
-                            if let Some(orig_oo) = &sib_rule.raw_order_only_text {
-                                let oo_exp = expand::expand_with_auto(orig_oo, self, &auto_vars);
-                                for tok in oo_exp.split_whitespace() {
-                                    sib_order_only.push(tok.to_string());
-                                }
-                            }
-                        } else {
-                            sib_prereqs.extend(sib_rule.prerequisites.iter().cloned());
-                            sib_order_only.extend(sib_rule.order_only.iter().cloned());
                         }
                     }
                 }

@@ -246,7 +246,14 @@ fn expand_expr(expr: &str, engine: &Engine, auto_vars: &HashMap<&str, String>) -
         }
     }
 
-    let expr_expanded = expand_with_auto(expr, engine, auto_vars);
+    let mut expr_expanded = expand_with_auto(expr, engine, auto_vars);
+    // Unescape backslash-colon: in SE-emitted prereq expressions like
+    // $$(@\:%=%.bar), the user escaped the colon to prevent it from being
+    // interpreted as a static-pattern separator. Inside $(...) it should be
+    // a literal colon (the substitution-ref separator).
+    if expr_expanded.contains("\\:") {
+        expr_expanded = expr_expanded.replace("\\:", ":");
+    }
 
     // Check for substitution reference: $(VAR:a=b)
     if let Some(colon_pos) = find_subst_colon(&expr_expanded) {

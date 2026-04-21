@@ -416,10 +416,10 @@ Latest baseline (`bash /tmp/run-make-baseline.sh`):
 | `features/parallelism` | Requires `-j` / jobserver |
 | `features/patternrules` | `.SECONDEXPANSION` / chained pattern rules |
 | `features/reinvoke` | Makefile auto-rebuild + re-exec |
-| `features/se_explicit` | 27/31 subtests pass; failing subtests 9, 10, 22, 27 (LIBPATTERNS library-pattern conflict warning #9, #10; SE prereq build ordering when recipe-bearing rule contributes SE prereqs #22, #27) |
+| `features/se_explicit` | 29/31 subtests pass; remaining: #10 (LIBPATTERNS message), #27 (VPATH-related re-exec) |
 | `features/se_implicit` | 27/30 subtests pass; failing subtests 3, 9, 27 (implicit recursion guard for SE pattern rules; SE info ordering) |
 | `features/se_statpat` | 11/12 subtests pass; only subtest 3 fails (stem with embedded `$`) |
-| `features/statipattrules` | 58/68 subtests pass; complex multi-`%` substitution |
+| `features/statipattrules` | 66/68 subtests pass; remaining 2 are escaped-`%` tests (#66, #67) |
 | `features/temp_stdin` | `--debug=b` re-exec banner; stdin-as-makefile temp-file writeback failures; SIGTERM exit diagnostic |
 | `features/vpath` / `vpathgpath` / `vpathplus` | VPATH / `vpath` / `GPATH` |
 | `options/dash-f` | First failing subtest: prereq makefile rebuild before consuming stdin (`bye.mk: bye.mk.src`) — needs makefile auto-rebuild |
@@ -436,43 +436,48 @@ high-leverage items.
 
 ## Investigation notes (latest)
 
-Round of SE-focused fixes (still 120/135 categories, but +5 subtests
-across SE tests):
+Round 2 of SE-focused fixes (still 120/135 categories, but +4 more
+subtests on top of the earlier +5):
 
-1. Parser: stop treating `$$(`/`$${` as opening a deferred ref when
-   scanning for inline-recipe `;` separator. GNU treats them as literal
-   text. Fixes `foo: $$(bar; @echo recipe` parsing.
-2. Parse-time validation of SE `raw_prereq_text` for unbalanced
-   `$(...)`/`${...}` references — emits `unterminated call to function`
-   at definition site (matches GNU). Applied at all three SE storage
-   sites: explicit/static rules, static-pattern rules, pure pattern
-   rules.
-3. Per-rule prereq build ordering: `build_target_for` now iterates
-   `rule_build_groups` (recipe-bearing rule first), each grouping its
-   normal + order-only prereqs together. Replaces the previous SE/non-SE
-   split that lost the head/tail reorder. When `--shuffle` is active,
-   all rule groups are flattened into one list before shuffling so
-   shuffle treats prereqs across rules as one sequence.
+1. **Static-pattern target token splitting**: tokens like
+   `$(filter %.o,$(files))` were treated as containing a literal space
+   (the space inside the function call) and thus passed through as a
+   single literal-space target name. New helper `has_unwrapped_space`
+   only flags spaces at depth 0 (outside `$(...)` / `${...}`). Fixes
+   `statipattrules` Test default (and Test #1 by side effect).
+2. **Grouped-target sibling SE timing**: per-sibling SE side-effects
+   were firing AFTER recipe execution and never built sibling SE-derived
+   prereqs. Moved sibling SE firing to BEFORE the recipe; the
+   currently-executing grouped rule fires first for each sibling, then
+   other rules in declaration order; SE-expanded prereqs are then built
+   via `build_target_for`. Fixes `se_explicit` #22 (sv 62706 grouped).
+3. **Backslash-colon in SE substitution refs**: `$(@\:%=%.bar)` (where
+   the user escaped `:` to prevent it being parsed as a static-pattern
+   separator in the prerequisite line) was confusing
+   `find_subst_colon`. Pre-process expressions in `expand_expr` to
+   replace `\:` with `:` before substitution-ref / function detection.
+   Fixes `se_explicit` #9.
 
-Subtest deltas:
+Subtest deltas (cumulative from baseline 108/135):
 
-- `features/se_explicit`: 26 → 27 (subtest 18: unterminated firstword)
-- `features/se_implicit`: 24 → 27 (subtests default/Test #3, #18, #26)
-- `features/se_statpat`: 10 → 11 (subtest 4: unterminated firstword in
-  static-pattern rule)
+- features/se_explicit 26 → 29 (+3 total this session: #18, #22, #9)
+- features/se_implicit 24 → 27 (+3: default, #18, #26)
+- features/se_statpat 10 → 11 (+1: #4)
+- features/statipattrules 64 → 66 (+2: default, #1)
 
-Remaining SE subtests are blocked by:
+Remaining notable blockers:
 
-- SE info side-effect ordering during pattern-rule recursion
-  (`se_explicit` #22, #27; `se_implicit` #27)
-- Library-pattern (`-l...`) handling and conflict warnings
-  (`se_explicit` #9, #10)
-- SE pattern rule with own recipe blocks chaining
-  (`se_explicit` #18)
-- SE-pattern matching when pattern has no recipe (`se_implicit` #9)
-- Implicit recursion guard for SE pattern rules with multiple expansions
-  (`se_implicit` #3)
-- Stem with embedded `$` (`se_statpat` #3)
+- SE side-effect firing during pattern_search (so SE info appears
+  during prereq verification, not just build): `se_explicit` #27 (VPATH
+  combined), `se_implicit` #9 (sim_base — pattern rule rejected only
+  after SE prereq verification fails)
+- LIBPATTERNS conflict warning for `-l<name>` resolved to lib<name>.a:
+  `se_explicit` #10
+- Implicit recursion guard for SE pattern rules with directory-aware
+  stem decomposition: `se_implicit` #3 (`%.o:` matched against
+  `../tests/tmp/bar.o` should pick stem `bar` not `../tests/tmp/bar`)
+- Stem with embedded `$` after `$$` collapse: `se_statpat` #3
+- Escaped-`%` in target names: `statipattrules` #66, #67
 
 ---
 
