@@ -1061,7 +1061,8 @@ in sandboxTests // vmTests;
 
 - [x] **124 sandbox-free Nix checks** — all passing (`testsuite.nix`)
 - [x] **VM test infrastructure** — `vmtest.nix`, `vmtests/libtest-nix.sh`
-- [x] **Category 1: Sandbox execution** — 10/13 VM tests implemented and passing
+- [x] **Category 1: Sandbox execution** — 13/13 VM tests implemented
+- [x] **Category 2: Override sandbox effects** — 11/11 VM tests implemented
 - [x] **Bug fixes discovered by VM tests:**
   - memfd CLOEXEC — fds passed to bwrap via `--ro-bind-data`/`--seccomp` were closed on exec
   - /etc ordering — timezone symlinks failed because /etc didn't exist yet in sandbox
@@ -1069,12 +1070,12 @@ in sandboxTests // vmTests;
   - Command path resolution — resolve command to `/app/bin/` or `/usr/bin/` since bwrap `execvp` uses parent PATH
 - [x] **`.deslop.toml`** — suppress pre-existing deslop findings on unsafe FFI code
 
-### Remaining (~55 VM tests across 14 categories)
+### Remaining (~41 VM tests across 12 categories)
 
 | Category | Tests | Status | Blockers |
 |---|---|---|---|
-| **Cat 1: Sandbox execution** | 3 remaining (`vm-run-namespace-net`, `vm-run-namespace-ipc`, `vm-run-devel`) | partial | None — builds on existing infra |
-| **Cat 2: Override sandbox effects** | 11 tests | not started | None — builds on Cat 1 |
+| **Cat 1: Sandbox execution** | 13 tests | ✅ done | — |
+| **Cat 2: Override sandbox effects** | 11 tests | ✅ done | — |
 | **Cat 3: Config set/get** | 3 tests | not started | Needs `config --set`/`--get`/`--unset` implementation in rust-flatpak |
 | **Cat 4: Bundle roundtrip** | 5 tests | not started | Needs OSTree in VM (already have `build-bundle` working) |
 | **Cat 5: Build-update-repo** | 3 tests | not started | Needs `--title`, `--redirect-url`, `--default-branch` flags |
@@ -1091,17 +1092,16 @@ in sandboxTests // vmTests;
 
 ### Recommended implementation order
 
-1. **Cat 2** (override sandbox effects) — direct extension of Cat 1, no new infra needed
-2. **Cat 13** (remote + network) — add Python HTTP server, enables many other categories
-3. **Cat 4** (bundle roundtrip) — validates end-to-end OSTree flow
-4. **Cat 7** (info deep) — mostly needs flags already in rust-flatpak
-5. **Cat 15** (misc/security) — CVE regression tests, high value
-6. **Cat 5** (build-update-repo) — needs new CLI flags
-7. **Cat 9** (seccomp) — needs helper binary
-8. **Cat 6** (repair) — needs OSTree object manipulation
-9. **Cat 3** (config set/get) — needs rust-flatpak feature work
-10. **Cat 14** (metadata validation) — needs OSTree + HTTP
-11. **Cat 10** (extensions) — needs extension setup
-12. **Cat 11** (D-Bus proxy) — needs D-Bus session
-13. **Cat 12** (documents/permissions) — needs xdg-document-portal
-14. **Cat 8** (history) — needs systemd journal integration
+1. **Cat 13** (remote + network) — add Python HTTP server, enables many other categories
+2. **Cat 4** (bundle roundtrip) — validates end-to-end OSTree flow
+3. **Cat 7** (info deep) — mostly needs flags already in rust-flatpak
+4. **Cat 15** (misc/security) — CVE regression tests, high value
+5. **Cat 5** (build-update-repo) — needs new CLI flags
+6. **Cat 9** (seccomp) — needs helper binary
+7. **Cat 6** (repair) — needs OSTree object manipulation
+8. **Cat 3** (config set/get) — needs rust-flatpak feature work
+9. **Cat 14** (metadata validation) — needs OSTree + HTTP
+10. **Cat 10** (extensions) — needs extension setup
+11. **Cat 11** (D-Bus proxy) — needs D-Bus session
+12. **Cat 12** (documents/permissions) — needs xdg-document-portal
+13. **Cat 8** (history) — needs systemd journal integration
