@@ -234,6 +234,16 @@ pub(crate) fn parse_args() -> Options {
             "-O" | "--remote-name" => {
                 opts.remote_name = true;
             }
+            "--remote-name-all" => {
+                // Apply -O semantics to every URL in the command line.
+                opts.remote_name = true;
+            }
+            "--no-remote-name" => {
+                opts.remote_name = false;
+            }
+            "--no-remote-name-all" => {
+                opts.remote_name = false;
+            }
             "-J" | "--remote-header-name" => {
                 opts.remote_header_name = true;
             }
