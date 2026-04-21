@@ -5074,6 +5074,11 @@ impl Engine {
     /// locally first (return immediately if found), then try all
     /// candidates through vpath and pick the one with the earliest
     /// vpath position (lowest vpath_index, then lowest path_index).
+    ///
+    /// Also emits a "same file" warning when `-l<name>` matches a
+    /// pattern rule (e.g. `-l%: lib%.a`) AND the resolved library
+    /// candidate has its own explicit rule — the pattern rule's
+    /// recipe is ignored in favor of the explicit rule (SV 54549).
     fn resolve_library_prereq(&self, name: &str) -> String {
         let Some(lib) = name.strip_prefix("-l") else {
             return name.to_string();
@@ -5094,6 +5099,9 @@ impl Engine {
             if std::path::Path::new(&candidate).exists()
                 || self.rules.borrow().contains_key(&candidate)
             {
+                // Emit LIBPATTERNS conflict warning if the original -l name
+                // matches a pattern rule whose recipe would be ignored.
+                self.warn_lib_pattern_conflict(name, &candidate);
                 return candidate;
             }
             candidates.push(candidate);
@@ -5117,6 +5125,55 @@ impl Engine {
         }
 
         first.unwrap_or_else(|| name.to_string())
+    }
+
+    /// Emit a "same file" warning when a `-l<name>` prereq matches a
+    /// pattern rule (like `-l%: lib%.a`) and the resolved LIBPATTERNS
+    /// candidate (like `libcat.a`) has its own explicit rule. GNU make
+    /// ignores the pattern rule's recipe in favor of the explicit one.
+    fn warn_lib_pattern_conflict(&self, lib_name: &str, resolved: &str) {
+        // Check if the resolved candidate has an explicit rule with a recipe.
+        let has_explicit_recipe = self
+            .rules
+            .borrow()
+            .get(resolved)
+            .map(|entries| entries.iter().any(|e| !e.recipe.is_empty()))
+            .unwrap_or(false);
+        if !has_explicit_recipe {
+            return;
+        }
+        // Check if the -l name matches any pattern rule that also has a recipe.
+        // Prefer user-defined rules over built-in ones (built-in rules have
+        // source_name "<built-in>").
+        let pat_rules = self.pattern_rules.borrow();
+        let mut best_match: Option<(&str, usize)> = None;
+        for pr in pat_rules.iter() {
+            if pr.recipe.is_empty() {
+                continue;
+            }
+            if expand::pattern_stem(lib_name, &pr.target_pattern).is_some() {
+                let line_no = pr.recipe_lines.first().copied().unwrap_or(0);
+                let is_builtin = pr.source_name == "<built-in>";
+                // Prefer user-defined over built-in; last user-defined wins.
+                if best_match.is_none() || !is_builtin {
+                    best_match = Some((&pr.source_name, line_no));
+                }
+            }
+        }
+        if let Some((source, line_no)) = best_match {
+            eprintln!(
+                "{}:{}: Recipe was specified for file '{}' at {}:{},",
+                source, line_no, lib_name, source, line_no
+            );
+            eprintln!(
+                "{}:{}: but '{}' is now considered the same file as '{}'.",
+                source, line_no, lib_name, resolved
+            );
+            eprintln!(
+                "{}:{}: Recipe for '{}' will be ignored in favor of the one for '{}'.",
+                source, line_no, lib_name, resolved
+            );
+        }
     }
 
     /// Check if a file is "mentioned" in the makefile — either as an
