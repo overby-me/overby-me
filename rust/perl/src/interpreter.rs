@@ -2102,7 +2102,14 @@ impl Interpreter {
                 EvalArg::Expr(expr) => {
                     let code = self.eval_expr(expr).to_str();
                     self.eval_depth += 1;
+                    // Push calling context so `wantarray` inside the
+                    // eval string sees void/scalar/list correctly.
+                    // Statement-level eval is void (0) unless an outer
+                    // caller already set next_call_ctx (tail-position).
+                    let ctx = self.next_call_ctx.take().unwrap_or(0);
+                    self.call_context.push(ctx);
                     self.eval_string(&code);
+                    self.call_context.pop();
                     self.eval_depth -= 1;
                     Flow::None
                 }
@@ -9602,7 +9609,41 @@ impl Interpreter {
         self.set_global_var("@", Value::Str(String::new()));
         self.push_scope();
 
-        for stmt in &stmts {
+        // Find the last runtime-meaningful statement index so we can
+        // propagate the eval's calling context to it (tail-context),
+        // letting `wantarray` inside the last expression see list/scalar
+        // correctly instead of always getting void.
+        let eval_caller_ctx = self.call_context.last().copied().unwrap_or(1);
+        let last_idx = {
+            let mut i = stmts.len();
+            while i > 0 {
+                match &stmts[i - 1] {
+                    Stmt::Begin(_, _)
+                    | Stmt::End(_)
+                    | Stmt::Nop
+                    | Stmt::LineMark(_)
+                    | Stmt::Sub { .. } => {
+                        i -= 1;
+                    }
+                    _ => break,
+                }
+            }
+            i.saturating_sub(1)
+        };
+
+        for (idx, stmt) in stmts.iter().enumerate() {
+            // Tail-position: propagate the eval's caller context so
+            // `wantarray` inside the last expression sees list/scalar.
+            if idx == last_idx {
+                if let Stmt::Expr(e) = stmt {
+                    if matches!(
+                        e,
+                        Expr::Call(_, _) | Expr::MethodCall(_, _, _) | Expr::CodeCall(_, _)
+                    ) {
+                        self.next_call_ctx = Some(eval_caller_ctx);
+                    }
+                }
+            }
             match self.exec_stmt(stmt) {
                 Flow::Return(v) => {
                     // Clear `$@` when the eval-string exits via `return`
