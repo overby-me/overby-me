@@ -2291,7 +2291,6 @@ impl Engine {
                 }
                 vec![s.to_string()]
             })
-            .map(|s| self.resolve_library_prereq(&s))
             .collect();
         let order_only: Vec<String> = format!("{post_pipe_order_only} {extra_order_only_text}")
             .split_whitespace()
@@ -3543,7 +3542,12 @@ impl Engine {
                     let _ = (&mut pr, &mut oo);
                     (pr, oo)
                 } else {
-                    (rule.prerequisites.clone(), rule.order_only.clone())
+                    let pr: Vec<String> = rule
+                        .prerequisites
+                        .iter()
+                        .map(|p| self.resolve_library_prereq(p))
+                        .collect();
+                    (pr, rule.order_only.clone())
                 };
                 for prereq in &prereqs {
                     if prereq == target || self.building_chain.borrow().contains(prereq.as_str()) {
@@ -3730,6 +3734,9 @@ impl Engine {
         }
 
         // Collect all prerequisites
+        // Resolve -l library prereqs now (build time) rather than parse
+        // time, so that rules registered later in the makefile (e.g.
+        // `libcat.a:`) are visible to the library search.
         let mut all_prereqs: Vec<String> = Vec::new();
         let mut all_order_only: Vec<String> = Vec::new();
         // SE-derived prereqs are collected separately and merged after non-SE
@@ -3762,6 +3769,15 @@ impl Engine {
                         .raw_order_only_text
                         .as_deref()
                         .is_some_and(|s| s.contains('$')));
+            // Resolve -l prereqs for non-SE rules at build time.
+            let prereqs_resolved: Vec<String> = if !needs_se {
+                rule.prerequisites
+                    .iter()
+                    .map(|p| self.resolve_library_prereq(p))
+                    .collect()
+            } else {
+                rule.prerequisites.clone()
+            };
             if needs_se {
                 // Build auto_vars from prereqs collected so far (from non-SE rules
                 // and prior SE rules — GNU make behavior).
@@ -3861,7 +3877,7 @@ impl Engine {
                         }
                     }
                 } else {
-                    all_prereqs.extend(rule.prerequisites.iter().cloned());
+                    all_prereqs.extend(prereqs_resolved.iter().cloned());
                     all_order_only.extend(rule.order_only.iter().cloned());
                 }
             }
@@ -4753,7 +4769,12 @@ impl Engine {
                             }
                         }
                     } else {
-                        sib_prereqs.extend(sib_rule.prerequisites.iter().cloned());
+                        sib_prereqs.extend(
+                            sib_rule
+                                .prerequisites
+                                .iter()
+                                .map(|p| self.resolve_library_prereq(p)),
+                        );
                         sib_order_only.extend(sib_rule.order_only.iter().cloned());
                     }
                 }
