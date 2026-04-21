@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**120/135 tests passing** (89%) — upstream test harness from GNU make 4.4.1.
+**121/135 tests passing** (90%) — upstream test harness from GNU make 4.4.1.
 
 `rust/make` has a parser, expander, and build engine (~5k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -342,7 +342,7 @@ in ways the test harness happens not to exercise in our passing set.
 - **`.SECONDEXPANSION:`** — partial implementation in place. Currently
   passing: `variables/automatic`, `features/rule_glob`. Subtest counts:
   `features/se_explicit` 26/31, `features/se_implicit` 24/30,
-  `features/se_statpat` 10/12, `features/statipattrules` 64/68,
+   `features/statipattrules` 64/68,
   `features/patternrules` 62/72. Infrastructure: `RuleEntry` /
   `PatternRuleEntry` carry `second_expand` flag and `raw_prereq_text`;
   `build_target_for` runs `expand_with_auto` with `$@`/`$*`/`$<`/`$^`/`$+`/`$|`
@@ -418,7 +418,6 @@ Latest baseline (`bash /tmp/run-make-baseline.sh`):
 | `features/reinvoke` | Makefile auto-rebuild + re-exec |
 | `features/se_explicit` | 29/31 subtests pass; remaining: #10 (LIBPATTERNS message), #27 (VPATH-related re-exec) |
 | `features/se_implicit` | 27/30 subtests pass; failing subtests 3, 9, 27 (implicit recursion guard for SE pattern rules; SE info ordering) |
-| `features/se_statpat` | 11/12 subtests pass; only subtest 3 fails (stem with embedded `$`) |
 | `features/statipattrules` | 66/68 subtests pass; remaining 2 are escaped-`%` tests (#66, #67) |
 | `features/temp_stdin` | `--debug=b` re-exec banner; stdin-as-makefile temp-file writeback failures; SIGTERM exit diagnostic |
 | `features/vpath` / `vpathgpath` / `vpathplus` | VPATH / `vpath` / `GPATH` |
@@ -476,8 +475,18 @@ Remaining notable blockers:
 - Implicit recursion guard for SE pattern rules with directory-aware
   stem decomposition: `se_implicit` #3 (`%.o:` matched against
   `../tests/tmp/bar.o` should pick stem `bar` not `../tests/tmp/bar`)
-- Stem with embedded `$` after `$$` collapse: `se_statpat` #3
 - Escaped-`%` in target names: `statipattrules` #66, #67
+
+Round 3 fix (121/135):
+
+- **`$` in static-pattern target names**: `foo$$bar: f%r: % ; ...`
+  registered `default_goal` as the post-first-expansion target name
+  `foo$bar`. At goal consumption time, `default_goal` is re-expanded
+  via `expand::expand`, which then mangled `foo$bar` -> `fooar`
+  (treating `$b` as an empty variable reference). Static-pattern's
+  `default_goal` insertion now `$`-escapes the target name (matching
+  the regular-rule branch that already did this). Fixes
+  `features/se_statpat` Test #4 (literal `$` in stem) — full file now 12/12.
 
 ---
 

@@ -2472,7 +2472,12 @@ impl Engine {
                 if default.is_none()
                     && let Some(t) = targets.iter().find(|t| !t.starts_with('.'))
                 {
-                    *default = Some(t.replace(' ', "\x01"));
+                    // Escape `$` to `$$` because default_goal is re-expanded
+                    // at consumption time. Targets here have already had
+                    // their first-pass `$$`->`$` collapse applied by
+                    // expand::expand, so a literal `$` in the target name
+                    // (from `foo$$bar`) would otherwise be incorrectly expanded.
+                    *default = Some(t.replace('$', "$$").replace(' ', "\x01"));
                 }
             }
             *self.last_rule_targets.borrow_mut() = Some(targets.clone());
