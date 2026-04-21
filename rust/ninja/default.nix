@@ -90,6 +90,7 @@
       "incremental-noop"
       "incremental-modify"
       "depfile-header-change"
+      "cmake-cold-build"
     ];
   in
     builtins.listToAttrs (

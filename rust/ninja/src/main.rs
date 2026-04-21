@@ -44,10 +44,8 @@ fn main() -> ExitCode {
 }
 
 fn run(opts: &cli::Options) -> Result<u8, String> {
-    let manifest_src = std::fs::read_to_string(&opts.manifest_file)
-        .map_err(|e| format!("loading '{}': {}", opts.manifest_file, e))?;
-    let state =
-        manifest::parse(&manifest_src).map_err(|e| format!("{}: {}", opts.manifest_file, e))?;
+    let state = manifest::parse_file(&opts.manifest_file)
+        .map_err(|e| format!("{}: {}", opts.manifest_file, e))?;
 
     if let Some(tool) = &opts.tool {
         return tools::run(tool, &state, opts);

@@ -24,4 +24,7 @@ disabled_rules = [
   # `Path::exists()` before reading: a missing file is the cold-build
   # path, not an error to propagate.
   "rust_check_then_open_path",
+  # parse_file is the natural disk-aware companion to parse(src);
+  # renaming to e.g. parse_manifest_file would be redundant.
+  "generic_name",
 ]

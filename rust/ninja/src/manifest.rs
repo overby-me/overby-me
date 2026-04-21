@@ -11,9 +11,32 @@
 use crate::graph::{Edge, Rule, State};
 use std::collections::HashMap;
 
+#[allow(dead_code)]
 pub fn parse(src: &str) -> Result<State, String> {
-    let mut p = Parser::new(src);
     let mut state = State::default();
+    parse_into(&mut state, src, std::path::Path::new("."))?;
+    Ok(state)
+}
+
+/// Read and parse a manifest from disk. Recursively follows
+/// `include` / `subninja` directives relative to the file’s parent
+/// directory — enough for CMake-generated trees that split rules
+/// across `CMakeFiles/rules.ninja`.
+pub fn parse_file(path: &str) -> Result<State, String> {
+    let mut state = State::default();
+    let p = std::path::Path::new(path);
+    let base = p.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let src = std::fs::read_to_string(path).map_err(|e| format!("loading '{path}': {e}"))?;
+    parse_into(&mut state, &src, base)?;
+    Ok(state)
+}
+
+/// Parse `src` (the contents of a manifest file located in `base_dir`)
+/// into the existing `state`. Splits out from `parse` so that
+/// `include` / `subninja` can recurse with the same accumulator and a
+/// new `base_dir`.
+fn parse_into(state: &mut State, src: &str, base_dir: &std::path::Path) -> Result<(), String> {
+    let mut p = Parser::new(src);
     while !p.eof() {
         p.skip_blank_and_comments();
         if p.eof() {
@@ -27,7 +50,7 @@ pub fn parse(src: &str) -> Result<State, String> {
                 state.rules.insert(r.name.clone(), r);
             }
             "build" => {
-                let edge = p.parse_build(&state).map_err(|e| with_line(line_no, &e))?;
+                let edge = p.parse_build(&*state).map_err(|e| with_line(line_no, &e))?;
                 let idx = state.edges.len();
                 for o in &edge.outputs {
                     state.producers.insert(o.clone(), idx);
@@ -53,9 +76,23 @@ pub fn parse(src: &str) -> Result<State, String> {
                     p.skip_line();
                 }
             }
-            "include" | "subninja" => {
-                // Not yet supported; consume to end of line.
-                p.skip_line();
+            kw @ ("include" | "subninja") => {
+                // Resolve the include target against the *current*
+                // file’s directory (gcc/CMake-generated trees rely on
+                // this — `include CMakeFiles/rules.ninja` from a
+                // `build.ninja` in `build/` must read
+                // `build/CMakeFiles/rules.ninja`).
+                let raw = p.read_value();
+                let path_str = expand_simple(raw.trim(), &state.bindings, None, None);
+                let nested_path = base_dir.join(&path_str);
+                let nested_base = nested_path
+                    .parent()
+                    .unwrap_or_else(|| std::path::Path::new("."))
+                    .to_path_buf();
+                let nested_src = std::fs::read_to_string(&nested_path).map_err(|e| {
+                    with_line(line_no, &format!("{kw} '{}' - {e}", nested_path.display()))
+                })?;
+                parse_into(state, &nested_src, &nested_base)?;
             }
             "" => {
                 // Stray blank line after skip_blank_and_comments shouldn't happen.
@@ -78,7 +115,7 @@ pub fn parse(src: &str) -> Result<State, String> {
             }
         }
     }
-    Ok(state)
+    Ok(())
 }
 
 fn with_line(line: usize, msg: &str) -> String {

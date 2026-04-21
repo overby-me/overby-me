@@ -55,6 +55,17 @@ The Nix wiring is in place:
   as `./ninja`, and runs a single `Output.test_*` method from
   `misc/output_test.py`.
 
+## Recent module additions
+
+- `manifest::parse_file(path)` — disk-aware entry point; recursively
+  follows `include` / `subninja` directives relative to each manifest’s
+  parent directory. Required to load CMake-generated trees that split
+  rules across `CMakeFiles/rules.ninja`.
+- Variable-name scanner tightened to ninja’s `[A-Za-z0-9_-]`
+  alphabet (was previously also accepting `.`). Without this, `$out.d`
+  resolved as `${out.d}` instead of `${out}` + literal `.d`, silently
+  breaking every depfile-driven incremental rebuild.
+
 ## Module Layout
 
 ```text

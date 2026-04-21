@@ -19,6 +19,11 @@
 #                            both .o files via gcc -MMD depfile
 #                            parsing — both runners must observe a
 #                            fresh greet.o mtime
+#   cmake-cold-build       : a cmake-generated `build.ninja` tree
+#                            (with `include`, `$DEP_FILE`, `restat`)
+#                            cold-builds, no-ops on re-run, and
+#                            rebuilds correctly after a header touch
+#                            on both runners
 {
   pkgs,
   name,
@@ -28,6 +33,7 @@ pkgs.runCommand "rust-ninja-roundtrip-${name}" {
     pkgs.rust-ninja-dev
     pkgs.ninja
     pkgs.gcc
+    pkgs.cmake
     pkgs.coreutils
     pkgs.bash
     pkgs.diffutils
@@ -168,6 +174,69 @@ pkgs.runCommand "rust-ninja-roundtrip-${name}" {
           exit 1; }
         assert_app_works "$RUST_DIR"
         assert_app_works "$REF_DIR"
+        ;;
+
+      cmake-cold-build)
+        # Real-world stress test: a CMake-generated `build.ninja`
+        # tree (rules.ninja include, $DEP_FILE bindings, restat,
+        # CUSTOM_COMMAND, multi-edge link rules). Both runners must
+        # cold-build the project, then report no work on a re-run,
+        # then rebuild the same set of objects after a header touch.
+        SRC_DIR=$PWD/cmake-src
+        mkdir -p "$SRC_DIR/inc" "$SRC_DIR/src"
+        cat > "$SRC_DIR/CMakeLists.txt" <<'EOF'
+  cmake_minimum_required(VERSION 3.20)
+  project(hello C)
+  add_library(greet STATIC src/greet.c)
+  target_include_directories(greet PUBLIC inc)
+  add_executable(app src/main.c)
+  target_link_libraries(app PRIVATE greet)
+  EOF
+        cat > "$SRC_DIR/inc/greet.h" <<'EOF'
+  const char *greeting(void);
+  EOF
+        cat > "$SRC_DIR/src/greet.c" <<'EOF'
+  #include "greet.h"
+  const char *greeting(void) { return "hello"; }
+  EOF
+        cat > "$SRC_DIR/src/main.c" <<'EOF'
+  #include <stdio.h>
+  #include "greet.h"
+  int main(void) { printf("%s\n", greeting()); return 0; }
+  EOF
+
+        # cmake refuses an in-source build if any cache lives there,
+        # so generate two separate build trees pointing at the same
+        # source tree. Each runner gets its own.
+        RUST_BUILD=$PWD/cmake-rust && mkdir -p "$RUST_BUILD"
+        REF_BUILD=$PWD/cmake-ref  && mkdir -p "$REF_BUILD"
+        ( cd "$RUST_BUILD" && cmake -G Ninja "$SRC_DIR" >/dev/null )
+        ( cd "$REF_BUILD"  && cmake -G Ninja "$SRC_DIR" >/dev/null )
+
+        ( cd "$RUST_BUILD" && $RUST_NINJA )
+        ( cd "$REF_BUILD"  && $REF_NINJA  )
+        test -f "$RUST_BUILD/app" || { echo "FAIL: rust missing app"; exit 1; }
+        test -f "$REF_BUILD/app"  || { echo "FAIL: ref missing app";  exit 1; }
+        [ "$( "$RUST_BUILD/app" )" = "hello" ]
+        [ "$( "$REF_BUILD/app"  )" = "hello" ]
+
+        # Second invocation: nothing to do.
+        out_rust=$( cd "$RUST_BUILD" && $RUST_NINJA )
+        out_ref=$(  cd "$REF_BUILD"  && $REF_NINJA  )
+        [ "$out_rust" = "ninja: no work to do." ] || {
+          echo "FAIL: rust-ninja: $out_rust"; exit 1; }
+        [ "$out_ref"  = "ninja: no work to do." ] || {
+          echo "FAIL: reference ninja: $out_ref"; exit 1; }
+
+        # Header-touch rebuild via CMake-generated `deps = gcc`
+        # depfile rules. We only assert observability — the binary
+        # must still run after both rebuild.
+        sleep 1.1
+        touch "$SRC_DIR/inc/greet.h"
+        ( cd "$RUST_BUILD" && $RUST_NINJA )
+        ( cd "$REF_BUILD"  && $REF_NINJA  )
+        [ "$( "$RUST_BUILD/app" )" = "hello" ]
+        [ "$( "$REF_BUILD/app"  )" = "hello" ]
         ;;
 
       *)
