@@ -709,6 +709,19 @@ fn run() -> i32 {
                 eprintln!("make: stdin: {e}");
                 return 2;
             }
+            // GNU make writes stdin to a temp file in $TMPDIR (or /tmp).
+            // Replicate the error when that directory is not writable.
+            {
+                let tmpdir = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
+                let tmp_path = std::path::Path::new(&tmpdir).join("make-stdin-XXXXXX");
+                if let Err(_) = std::fs::write(&tmp_path, &content) {
+                    eprintln!(
+                        "make: *** cannot store makefile from stdin to a temporary file.  Stop."
+                    );
+                    return 2;
+                }
+                let _ = std::fs::remove_file(&tmp_path);
+            }
             engine.load_string(&content);
         } else {
             engine.load_file(path, false);
