@@ -1,0 +1,9 @@
+#!/bin/bash
+set -euo pipefail
+
+rc=0
+output=$("$FLATPAK" --user install 2>&1) || rc=$?
+[ "$rc" -ne 0 ] || { echo "FAIL: expected non-zero exit"; exit 1; }
+echo "$output" | grep -qi "usage\|specified\|source" || { echo "FAIL: no usage hint"; exit 1; }
+
+echo "PASS: install-missing-args"

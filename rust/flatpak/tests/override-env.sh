@@ -1,0 +1,27 @@
+#!/bin/bash
+set -euo pipefail
+
+mkdir -p "$HOME/.local/share/flatpak"
+
+$FLATPAK --user override --env FOO=BAR org.test.Hello
+
+OVERRIDE_FILE="$HOME/.local/share/flatpak/overrides/org.test.Hello"
+
+if [ ! -f "$OVERRIDE_FILE" ]; then
+  echo "FAIL: override file not created at $OVERRIDE_FILE"
+  exit 1
+fi
+
+if ! grep -q '\[Environment\]' "$OVERRIDE_FILE"; then
+  echo "FAIL: override file missing [Environment] section"
+  cat "$OVERRIDE_FILE"
+  exit 1
+fi
+
+if ! grep -q 'FOO=BAR' "$OVERRIDE_FILE"; then
+  echo "FAIL: override file missing FOO=BAR"
+  cat "$OVERRIDE_FILE"
+  exit 1
+fi
+
+echo "PASS: override-env"

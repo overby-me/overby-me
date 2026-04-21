@@ -201,6 +201,11 @@ pub fn write_filter_to_memfd(opts: &SeccompOptions) -> Result<RawFd, String> {
 
     // Seek back to start.
     unsafe { libc::lseek(fd, 0, libc::SEEK_SET) };
+    // Clear close-on-exec so bwrap can read the fd after exec.
+    // SAFETY: fd is a valid open file descriptor returned by memfd_create above.
+    // F_SETFD with 0 clears FD_CLOEXEC, which is required because bwrap
+    // reads this fd after execvp (which would close CLOEXEC fds).
+    unsafe { libc::fcntl(fd, libc::F_SETFD, 0) };
 
     Ok(fd)
 }

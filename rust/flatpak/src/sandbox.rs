@@ -173,6 +173,15 @@ pub fn build_sandbox(
         }
     }
 
+    // --- Bind /nix/store for NixOS compatibility ---
+    // On NixOS, all executables reference /nix/store paths for their ELF
+    // interpreter and shared libraries. Without this, execvp fails with
+    // ENOENT inside the sandbox because the hardcoded interpreter path
+    // (e.g. /nix/store/xxx-glibc/lib/ld-linux-x86-64.so.2) is unreachable.
+    if Path::new("/nix/store").exists() {
+        bwrap.args(&["--ro-bind", "/nix/store", "/nix/store"]);
+    }
+
     // --- Mount app as /app ---
     let app_files = deployed.installation.files_path(&deployed.ref_);
     if app_files.exists() {
@@ -255,6 +264,15 @@ pub fn build_sandbox(
         }
     }
 
+    // --- Usr-merged symlinks ---
+    for name in &["bin", "sbin", "lib", "lib32", "lib64"] {
+        // Create usr-merged symlinks.
+        bwrap.args(&["--symlink", &format!("usr/{name}"), &format!("/{name}")]);
+    }
+
+    // --- /etc from runtime (must come before timezone so /etc exists for symlinks) ---
+    setup_etc(&mut bwrap, runtime_deployed);
+
     // --- Timezone ---
     setup_timezone(&mut bwrap);
 
@@ -278,15 +296,6 @@ pub fn build_sandbox(
             bwrap.args(&["--ro-bind", icon_dir, &dest]);
         }
     }
-
-    // --- Usr-merged symlinks ---
-    for name in &["bin", "sbin", "lib", "lib32", "lib64"] {
-        // Create usr-merged symlinks.
-        bwrap.args(&["--symlink", &format!("usr/{name}"), &format!("/{name}")]);
-    }
-
-    // --- /etc from runtime ---
-    setup_etc(&mut bwrap, runtime_deployed);
 
     // --- App data directories ---
     let app_data = Installation::ensure_app_data_dirs(app_id);
@@ -542,7 +551,26 @@ pub fn build_sandbox(
         .or_else(|| metadata.command())
         .ok_or_else(|| "no command specified in metadata".to_string())?;
 
-    let mut command = vec![cmd_name.to_string()];
+    // Resolve command to full path since bwrap's execvp uses the parent's
+    // PATH, not the child's --setenv PATH.
+    let resolved_cmd = if cmd_name.contains('/') {
+        cmd_name.to_string()
+    } else {
+        let app_files = deployed.installation.files_path(&deployed.ref_);
+        let rt_files = runtime_deployed.map(|rt| rt.installation.files_path(&rt.ref_));
+        let candidate_app = app_files.join("bin").join(cmd_name);
+        let candidate_usr = rt_files.as_ref().map(|p| p.join("bin").join(cmd_name));
+        if candidate_app.exists() {
+            format!("/app/bin/{cmd_name}")
+        } else if candidate_usr.as_ref().is_some_and(|p| p.exists()) {
+            format!("/usr/bin/{cmd_name}")
+        } else {
+            // Fall back to bare name and hope PATH works
+            cmd_name.to_string()
+        }
+    };
+
+    let mut command = vec![resolved_cmd];
     command.extend_from_slice(extra_args);
 
     // --- Info pipe for capturing child PID ---
@@ -608,6 +636,7 @@ fn setup_devices(bwrap: &mut BwrapBuilder, ctx: &ContextPermissions) {
 
 fn setup_etc(bwrap: &mut BwrapBuilder, runtime: Option<&DeployedRef>) {
     // Bind common /etc files from the host.
+    // Note: localtime and timezone are handled by setup_timezone() instead.
     let host_etc_files = [
         "resolv.conf",
         "hosts",
@@ -615,8 +644,6 @@ fn setup_etc(bwrap: &mut BwrapBuilder, runtime: Option<&DeployedRef>) {
         "gai.conf",
         "nsswitch.conf",
         "machine-id",
-        "localtime",
-        "timezone",
     ];
     for name in &host_etc_files {
         let host_path = format!("/etc/{name}");
@@ -828,6 +855,11 @@ fn write_memfd(name: &str, data: &[u8]) -> Result<i32, String> {
         return Err("write to memfd failed".into());
     }
     unsafe { libc::lseek(fd, 0, libc::SEEK_SET) };
+    // Clear close-on-exec so bwrap can read the fd after exec.
+    // SAFETY: fd is a valid open file descriptor returned by memfd_create above.
+    // F_SETFD with 0 clears FD_CLOEXEC, which is required because bwrap
+    // reads this fd after execvp (which would close CLOEXEC fds).
+    unsafe { libc::fcntl(fd, libc::F_SETFD, 0) };
     Ok(fd)
 }
 
