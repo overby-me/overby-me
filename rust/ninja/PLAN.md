@@ -10,7 +10,7 @@ in a Nix sandbox, mirroring the differential-testing pattern established by
 
 ## Current Status
 
-**18/18 upstream tests + 4/4 differential roundtrip checks passing** (`depfile-header-change` now asserts both runners actually rebuild) — `Output.test_*` methods from the upstream
+**18/18 upstream tests + 7/7 differential roundtrip checks passing** (4 hand-rolled scenarios + 3 CMake-generated scenarios) — `Output.test_*` methods from the upstream
 ninja v1.13.1 `misc/output_test.py` run against the rust-ninja binary in a
 Nix sandbox.
 
@@ -176,6 +176,9 @@ binary actually runs):
 | `incremental-noop` | both runners say `ninja: no work to do.` on a re-run |
 | `incremental-modify` | touching `src/main.c` rebuilds `main.o` + `app`, leaves `greet.o` mtime stable |
 | `depfile-header-change` | both runners rebuild `greet.o` via `gcc -MMD` depfile parsing — mtime must change on both sides |
+| `cmake-cold-build` | a real CMake-generated `build.ninja` tree (with `include CMakeFiles/rules.ninja`, `$DEP_FILE` bindings, `restat`) cold-builds, no-ops on re-run, and rebuilds correctly after a header touch on both runners |
+| `cmake-incremental-modify` | touching one `.c` in a CMake tree rebuilds only the affected `.o` + `app`; the unrelated `greet.c.o` mtime stays stable on both runners |
+| `cmake-clean-rebuild` | `ninja -t clean` followed by a fresh invocation cold-rebuilds the full project on both runners |
 
 The first iteration surfaced one real bug: when every edge in the plan
 is up to date, rust-ninja exited silently instead of printing

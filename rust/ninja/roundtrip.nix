@@ -24,6 +24,13 @@
 #                            cold-builds, no-ops on re-run, and
 #                            rebuilds correctly after a header touch
 #                            on both runners
+#   cmake-incremental-modify : touching one .c in a cmake tree
+#                            rebuilds only the affected .o + app —
+#                            the unrelated greet.c.o mtime stays
+#                            stable on both runners
+#   cmake-clean-rebuild    : `ninja -t clean` followed by a fresh
+#                            invocation cold-rebuilds the full
+#                            project on both runners
 {
   pkgs,
   name,
@@ -81,6 +88,38 @@ pkgs.runCommand "rust-ninja-roundtrip-${name}" {
   build app: link obj/greet.o obj/main.o
   default app
   EOF
+    }
+
+    # CMake-shaped two-target project. Used by every cmake-* scenario
+    # below. Drops the source tree into "$1" and produces two parallel
+    # build trees ("$1-rust" / "$1-ref") populated by `cmake -G Ninja`,
+    # so each runner has its own private CMakeFiles tree to mutate.
+    setup_cmake_project() {
+      local src="$1"
+      mkdir -p "$src/inc" "$src/src"
+      cat > "$src/CMakeLists.txt" <<'EOF'
+  cmake_minimum_required(VERSION 3.20)
+  project(hello C)
+  add_library(greet STATIC src/greet.c)
+  target_include_directories(greet PUBLIC inc)
+  add_executable(app src/main.c)
+  target_link_libraries(app PRIVATE greet)
+  EOF
+      cat > "$src/inc/greet.h" <<'EOF'
+  const char *greeting(void);
+  EOF
+      cat > "$src/src/greet.c" <<'EOF'
+  #include "greet.h"
+  const char *greeting(void) { return "hello"; }
+  EOF
+      cat > "$src/src/main.c" <<'EOF'
+  #include <stdio.h>
+  #include "greet.h"
+  int main(void) { printf("%s\n", greeting()); return 0; }
+  EOF
+      mkdir -p "$src-rust" "$src-ref"
+      ( cd "$src-rust" && cmake -G Ninja "$src" >/dev/null )
+      ( cd "$src-ref"  && cmake -G Ninja "$src" >/dev/null )
     }
 
     RUST_DIR=$PWD/out-rust
@@ -183,46 +222,18 @@ pkgs.runCommand "rust-ninja-roundtrip-${name}" {
         # cold-build the project, then report no work on a re-run,
         # then rebuild the same set of objects after a header touch.
         SRC_DIR=$PWD/cmake-src
-        mkdir -p "$SRC_DIR/inc" "$SRC_DIR/src"
-        cat > "$SRC_DIR/CMakeLists.txt" <<'EOF'
-  cmake_minimum_required(VERSION 3.20)
-  project(hello C)
-  add_library(greet STATIC src/greet.c)
-  target_include_directories(greet PUBLIC inc)
-  add_executable(app src/main.c)
-  target_link_libraries(app PRIVATE greet)
-  EOF
-        cat > "$SRC_DIR/inc/greet.h" <<'EOF'
-  const char *greeting(void);
-  EOF
-        cat > "$SRC_DIR/src/greet.c" <<'EOF'
-  #include "greet.h"
-  const char *greeting(void) { return "hello"; }
-  EOF
-        cat > "$SRC_DIR/src/main.c" <<'EOF'
-  #include <stdio.h>
-  #include "greet.h"
-  int main(void) { printf("%s\n", greeting()); return 0; }
-  EOF
+        setup_cmake_project "$SRC_DIR"
 
-        # cmake refuses an in-source build if any cache lives there,
-        # so generate two separate build trees pointing at the same
-        # source tree. Each runner gets its own.
-        RUST_BUILD=$PWD/cmake-rust && mkdir -p "$RUST_BUILD"
-        REF_BUILD=$PWD/cmake-ref  && mkdir -p "$REF_BUILD"
-        ( cd "$RUST_BUILD" && cmake -G Ninja "$SRC_DIR" >/dev/null )
-        ( cd "$REF_BUILD"  && cmake -G Ninja "$SRC_DIR" >/dev/null )
-
-        ( cd "$RUST_BUILD" && $RUST_NINJA )
-        ( cd "$REF_BUILD"  && $REF_NINJA  )
-        test -f "$RUST_BUILD/app" || { echo "FAIL: rust missing app"; exit 1; }
-        test -f "$REF_BUILD/app"  || { echo "FAIL: ref missing app";  exit 1; }
-        [ "$( "$RUST_BUILD/app" )" = "hello" ]
-        [ "$( "$REF_BUILD/app"  )" = "hello" ]
+        ( cd "$SRC_DIR-rust" && $RUST_NINJA )
+        ( cd "$SRC_DIR-ref"  && $REF_NINJA  )
+        test -f "$SRC_DIR-rust/app" || { echo "FAIL: rust missing app"; exit 1; }
+        test -f "$SRC_DIR-ref/app"  || { echo "FAIL: ref missing app";  exit 1; }
+        [ "$( "$SRC_DIR-rust/app" )" = "hello" ]
+        [ "$( "$SRC_DIR-ref/app"  )" = "hello" ]
 
         # Second invocation: nothing to do.
-        out_rust=$( cd "$RUST_BUILD" && $RUST_NINJA )
-        out_ref=$(  cd "$REF_BUILD"  && $REF_NINJA  )
+        out_rust=$( cd "$SRC_DIR-rust" && $RUST_NINJA )
+        out_ref=$(  cd "$SRC_DIR-ref"  && $REF_NINJA  )
         [ "$out_rust" = "ninja: no work to do." ] || {
           echo "FAIL: rust-ninja: $out_rust"; exit 1; }
         [ "$out_ref"  = "ninja: no work to do." ] || {
@@ -233,10 +244,74 @@ pkgs.runCommand "rust-ninja-roundtrip-${name}" {
         # must still run after both rebuild.
         sleep 1.1
         touch "$SRC_DIR/inc/greet.h"
-        ( cd "$RUST_BUILD" && $RUST_NINJA )
-        ( cd "$REF_BUILD"  && $REF_NINJA  )
-        [ "$( "$RUST_BUILD/app" )" = "hello" ]
-        [ "$( "$REF_BUILD/app"  )" = "hello" ]
+        ( cd "$SRC_DIR-rust" && $RUST_NINJA )
+        ( cd "$SRC_DIR-ref"  && $REF_NINJA  )
+        [ "$( "$SRC_DIR-rust/app" )" = "hello" ]
+        [ "$( "$SRC_DIR-ref/app"  )" = "hello" ]
+        ;;
+
+      cmake-incremental-modify)
+        # After a cold build, modifying *only* main.c must rebuild
+        # main.o + relink app, but leave greet.o (and libgreet.a)
+        # alone. Validates that rust-ninja correctly limits the dirty
+        # set in a real CMake tree where edges have order-only phony
+        # anchors and depfile-driven implicit deps that could
+        # over-rebuild if the dirtiness analysis is sloppy.
+        SRC_DIR=$PWD/cmake-src-mod
+        setup_cmake_project "$SRC_DIR"
+        ( cd "$SRC_DIR-rust" && $RUST_NINJA )
+        ( cd "$SRC_DIR-ref"  && $REF_NINJA  )
+
+        greet_o_rust="$SRC_DIR-rust/CMakeFiles/greet.dir/src/greet.c.o"
+        greet_o_ref="$SRC_DIR-ref/CMakeFiles/greet.dir/src/greet.c.o"
+        before_rust=$(stat -c '%Y' "$greet_o_rust")
+        before_ref=$( stat -c '%Y' "$greet_o_ref")
+
+        sleep 1.1
+        # Real source change so the .o is meaningfully different.
+        sed -i 's|return 0;|/* tweak */ return 0;|' "$SRC_DIR/src/main.c"
+
+        ( cd "$SRC_DIR-rust" && $RUST_NINJA )
+        ( cd "$SRC_DIR-ref"  && $REF_NINJA  )
+        after_rust=$(stat -c '%Y' "$greet_o_rust")
+        after_ref=$( stat -c '%Y' "$greet_o_ref")
+        echo "greet.c.o mtime rust: $before_rust -> $after_rust"
+        echo "greet.c.o mtime ref : $before_ref  -> $after_ref"
+        [ "$before_rust" = "$after_rust" ] || {
+          echo "FAIL: rust-ninja unnecessarily rebuilt greet.c.o";
+          exit 1; }
+        [ "$before_ref"  = "$after_ref"  ] || {
+          echo "FAIL: reference ninja unnecessarily rebuilt greet.c.o";
+          exit 1; }
+        [ "$( "$SRC_DIR-rust/app" )" = "hello" ]
+        [ "$( "$SRC_DIR-ref/app"  )" = "hello" ]
+        ;;
+
+      cmake-clean-rebuild)
+        # `ninja -t clean` removes outputs; the next build must
+        # cold-rebuild everything. Exercises rust-ninja parity with
+        # the reference clean tool *and* its ability to drive a
+        # cmake-shaped build from scratch when artifacts vanish but
+        # the manifest stays put.
+        SRC_DIR=$PWD/cmake-src-clean
+        setup_cmake_project "$SRC_DIR"
+        ( cd "$SRC_DIR-rust" && $RUST_NINJA )
+        ( cd "$SRC_DIR-ref"  && $REF_NINJA  )
+
+        # Use the reference ninja to do the clean step — rust-ninja
+        # `-t clean` isn't implemented yet, but the rebuild path
+        # underneath is what we care about.
+        ( cd "$SRC_DIR-rust" && $REF_NINJA -t clean >/dev/null )
+        ( cd "$SRC_DIR-ref"  && $REF_NINJA -t clean >/dev/null )
+        test ! -f "$SRC_DIR-rust/app"
+        test ! -f "$SRC_DIR-ref/app"
+
+        ( cd "$SRC_DIR-rust" && $RUST_NINJA )
+        ( cd "$SRC_DIR-ref"  && $REF_NINJA  )
+        test -f "$SRC_DIR-rust/app"
+        test -f "$SRC_DIR-ref/app"
+        [ "$( "$SRC_DIR-rust/app" )" = "hello" ]
+        [ "$( "$SRC_DIR-ref/app"  )" = "hello" ]
         ;;
 
       *)

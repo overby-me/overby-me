@@ -91,6 +91,8 @@
       "incremental-modify"
       "depfile-header-change"
       "cmake-cold-build"
+      "cmake-incremental-modify"
+      "cmake-clean-rebuild"
     ];
   in
     builtins.listToAttrs (
