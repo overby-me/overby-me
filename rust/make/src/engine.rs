@@ -3299,6 +3299,22 @@ impl Engine {
         } else {
             None
         };
+        // Save merged-away SE rules so we can fire their side effects
+        // after the resolved target's SE rules (GNU ordering).
+        let merged_away_se_rules: Vec<RuleEntry> = if vpath_redirected.is_some() {
+            rules
+                .iter()
+                .filter(|r| {
+                    r.second_expand
+                        && r.raw_prereq_text
+                            .as_deref()
+                            .is_some_and(|s| s.contains('$'))
+                })
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        };
         let target = match &vpath_redirected {
             Some(vt) => {
                 rules = self
@@ -3307,6 +3323,14 @@ impl Engine {
                     .get(vt.as_str())
                     .cloned()
                     .unwrap_or_default();
+                // Append merged-away SE rules (with recipe cleared) so
+                // their side effects fire after the resolved target's
+                // SE rules, matching GNU make's ordering.
+                for mut merged in merged_away_se_rules {
+                    merged.recipe.clear();
+                    merged.recipe_lines.clear();
+                    rules.push(merged);
+                }
                 vt.as_str()
             }
             None => target,
