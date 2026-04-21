@@ -34,4 +34,7 @@ disabled_rules = [
   # Release profile intentionally uses LTO+strip; overflow checks are not needed
   # for a file-processing tool with no arithmetic on untrusted indices.
   "rust_release_profile_missing_overflow_checks",
+
+  # parse_srec/parse_ihex iterate text input line-by-line; .lines() is the natural API.
+  "rust_lines_allocate_per_line",
 ]

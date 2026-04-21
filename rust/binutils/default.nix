@@ -179,43 +179,43 @@
       }
       {
         exp = "size.exp";
-        minPass = 2;
-        maxFail = 1;
+        minPass = 3;
+        maxFail = 0;
       }
       {
         exp = "strings.exp";
-        minPass = 0;
-        maxFail = 1;
+        minPass = 1;
+        maxFail = 0;
       }
       {
         exp = "nm.exp";
-        minPass = 3;
-        maxFail = 10;
+        minPass = 13;
+        maxFail = 0;
       }
       {
         exp = "ar.exp";
-        minPass = 1;
-        maxFail = 13;
+        minPass = 12;
+        maxFail = 2;
       }
       {
         exp = "addr2line.exp";
-        minPass = 0;
-        maxFail = 3;
+        minPass = 3;
+        maxFail = 0;
       }
       {
         exp = "readelf.exp";
-        minPass = 6;
-        maxFail = 33;
+        minPass = 25;
+        maxFail = 13;
       }
       {
         exp = "objdump.exp";
-        minPass = 3;
-        maxFail = 22;
+        minPass = 20;
+        maxFail = 12;
       }
       {
         exp = "objcopy.exp";
-        minPass = 12;
-        maxFail = 105;
+        minPass = 104;
+        maxFail = 11;
       }
     ];
 

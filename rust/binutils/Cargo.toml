@@ -16,7 +16,17 @@ iced-x86 = { version = "1.21", default-features = false, features = [
   "decoder",
   "gas",
 ] }
-object = { version = "0.36", features = ["read", "write", "elf"] }
+flate2 = "1"
+object = { version = "0.36", features = [
+  "read",
+  "write",
+  "elf",
+  "compression",
+] }
+gimli = { version = "0.31", default-features = false, features = [
+  "read",
+  "std",
+] }
 
 [profile.release]
 lto = true

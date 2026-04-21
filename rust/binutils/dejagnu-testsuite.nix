@@ -158,6 +158,7 @@ in
         # ── Save detailed results ────────────────────────────────────────────
         mkdir -p $out
         cp test-output.log $out/
+        cp -f binutils.log binutils.sum $out/ 2>/dev/null || true
         grep '^PASS:\|^FAIL:\|^XFAIL:\|^UNRESOLVED:\|^UNTESTED:' test-output.log \
           > $out/summary.log 2>/dev/null || true
 
