@@ -592,6 +592,26 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
 
 ### Recent fixes
 
+- **`delete` is now a unary builtin**: `is delete $h{$k}, undef, "name"`
+  used to parse as `is(delete($h{$k}, undef, "name"))` — `delete` was
+  in the list-context group of builtins so it greedily consumed the
+  rest of the comma list. Move it into its own arm of `parse_primary`
+  that takes a single term (`parse_unary()` for the bare form, one
+  `parse_expr()` for the parenthesised form). This was making the
+  DESTROY-time `is delete $hash{$key}, undef, "$key: delete"` calls in
+  op/undef look like single-arg `is()` calls — yielding the
+  `[at op/undef.t line 102]` fallback description instead of
+  `k$N: delete`. Hash-iteration order still differs (Rust HashMap is
+  randomised, Perl's is too but with a different seed) so the *line
+  ordering* of op/undef diff still doesn't byte-match reference perl,
+  but each `ok` line is now correct.
+- **DESTROY-during-`undef %hash` re-entry**: `set_hash_from_list`
+  pre-collected the visit list once and then iterated it. A DESTROY
+  handler that re-inserts into the same hash (op/undef test 19+'s
+  `$hash{"k$c"} = bless …` pattern) had its new entries left for the
+  enclosing `install(self, hash)` to clobber, so we observed only 5
+  destruction events instead of 10. Switch to a `loop { … get next key
+  from current hash … }` so newly-added entries are also torn down.
 - **`$#name` in string interpolation**: `"max=$#that_array"` now
   interpolates the last-index of `@that_array` (emitting an inner
   `Expr::ArrayLen` for the part), matching Perl. Previously the

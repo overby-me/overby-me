@@ -2792,7 +2792,6 @@ impl Parser {
             Token::Push
             | Token::Unshift
             | Token::Splice
-            | Token::Delete
             | Token::Reverse
             | Token::Join
             | Token::Split
@@ -2821,6 +2820,21 @@ impl Parser {
                     self.parse_list_expr()
                 };
                 Expr::Call(func, args)
+            }
+
+            Token::Delete => {
+                self.pos += 1;
+                let arg = if self.eat(&Token::LParen) {
+                    let e = self.parse_expr();
+                    self.expect(&Token::RParen);
+                    e
+                } else {
+                    // Bare `delete EXPR` takes one term, not a comma-list:
+                    // `is delete $h{$k}, undef, "name"` must parse as
+                    // `is( delete($h{$k}), undef, "name" )`.
+                    self.parse_unary()
+                };
+                Expr::Call("delete".to_string(), vec![arg])
             }
 
             Token::Eval => {

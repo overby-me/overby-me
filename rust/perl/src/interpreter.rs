@@ -7165,51 +7165,54 @@ impl Interpreter {
         // an entry and fire its DESTROY (if blessed + last-ref) so the
         // handler sees the partially-shrunk hash.
         install(self, old_hash);
-        // Collect the keys we will visit (must be deterministic-ish — match
-        // Perl's hash iteration order well enough; insertion order of
-        // HashMap isn't guaranteed but is fine for the test which sorts).
-        let visit: Vec<String> = self.get_hash(name).keys().cloned().collect();
-        for k in visit {
-            // Pop this entry first.
-            let popped = {
-                let mut taken: Option<Value> = None;
-                for scope in self.scopes.iter_mut().rev() {
-                    if let Some(h) = scope.hashes.get_mut(name) {
-                        taken = h.remove(&k);
-                        break;
+        // Iteratively take one key at a time: a DESTROY handler may
+        // re-insert into the same hash (op/undef test 19+ does exactly
+        // this — `$hash{"k$c"} = bless …` inside DESTROY), and those
+        // newly added entries also need to be torn down before we stop.
+        // Pre-collecting the key list misses those re-additions.
+        while let Some(k) = self.get_hash(name).keys().next().cloned() {
+            {
+                // Pop this entry first.
+                let popped = {
+                    let mut taken: Option<Value> = None;
+                    for scope in self.scopes.iter_mut().rev() {
+                        if let Some(h) = scope.hashes.get_mut(name) {
+                            taken = h.remove(&k);
+                            break;
+                        }
                     }
+                    if taken.is_none()
+                        && let Some(rc) = self.aliased_hashes.get(name)
+                    {
+                        taken = rc.borrow_mut().remove(&k);
+                    }
+                    if taken.is_none()
+                        && let Some(h) = self.globals.hashes.get_mut(name)
+                    {
+                        taken = h.remove(&k);
+                    }
+                    taken.unwrap_or(Value::Undef)
+                };
+                // Decide whether to fire DESTROY: blessed + not reachable
+                // anywhere else (including the `kept` future contents).
+                let p = Self::ref_ptr(&popped);
+                if p == 0 {
+                    continue;
                 }
-                if taken.is_none()
-                    && let Some(rc) = self.aliased_hashes.get(name)
-                {
-                    taken = rc.borrow_mut().remove(&k);
+                let Some(class) = self.blessed_refs.get(&p).cloned() else {
+                    continue;
+                };
+                if kept.iter().any(|x| Self::ref_ptr(x) == p) {
+                    continue;
                 }
-                if taken.is_none()
-                    && let Some(h) = self.globals.hashes.get_mut(name)
-                {
-                    taken = h.remove(&k);
+                if self.ref_pointer_reachable_outside_hash(p, name) {
+                    continue;
                 }
-                taken.unwrap_or(Value::Undef)
-            };
-            // Decide whether to fire DESTROY: blessed + not reachable
-            // anywhere else (including the `kept` future contents).
-            let p = Self::ref_ptr(&popped);
-            if p == 0 {
-                continue;
-            }
-            let Some(class) = self.blessed_refs.get(&p).cloned() else {
-                continue;
-            };
-            if kept.iter().any(|x| Self::ref_ptr(x) == p) {
-                continue;
-            }
-            if self.ref_pointer_reachable_outside_hash(p, name) {
-                continue;
-            }
-            let key = format!("{class}::DESTROY");
-            if let Some((_params, body)) = self.subs.get(&key).cloned() {
-                self.call_sub_named(&body, &[popped], Some(&key));
-                self.blessed_refs.remove(&p);
+                let key = format!("{class}::DESTROY");
+                if let Some((_params, body)) = self.subs.get(&key).cloned() {
+                    self.call_sub_named(&body, &[popped], Some(&key));
+                    self.blessed_refs.remove(&p);
+                }
             }
         }
         // Now overwrite with the requested `hash` contents (which may
