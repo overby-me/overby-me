@@ -168,8 +168,58 @@
         name = "nested";
       }
     ];
-  in
-    builtins.listToAttrs (map (t: {
+
+    # Upstream DejaGnu .exp files to run individually.
+    # Each gets a check like: rust-binutils-dejagnu-size
+    dejaGnuTests = [
+      {
+        exp = "cxxfilt.exp";
+        minPass = 3;
+        maxFail = 0;
+      }
+      {
+        exp = "size.exp";
+        minPass = 2;
+        maxFail = 1;
+      }
+      {
+        exp = "strings.exp";
+        minPass = 0;
+        maxFail = 1;
+      }
+      {
+        exp = "nm.exp";
+        minPass = 3;
+        maxFail = 10;
+      }
+      {
+        exp = "ar.exp";
+        minPass = 1;
+        maxFail = 13;
+      }
+      {
+        exp = "addr2line.exp";
+        minPass = 0;
+        maxFail = 3;
+      }
+      {
+        exp = "readelf.exp";
+        minPass = 6;
+        maxFail = 33;
+      }
+      {
+        exp = "objdump.exp";
+        minPass = 3;
+        maxFail = 22;
+      }
+      {
+        exp = "objcopy.exp";
+        minPass = 12;
+        maxFail = 105;
+      }
+    ];
+
+    customChecks = builtins.listToAttrs (map (t: {
         name = "rust-binutils-test-${t.tool}-${t.name}";
         value = pkgs:
           import ./testsuite.nix {
@@ -178,4 +228,27 @@
           };
       })
       testDefs);
+
+    dejaGnuChecks = builtins.listToAttrs (map (t: let
+        baseName = builtins.replaceStrings [".exp"] [""] t.exp;
+      in {
+        name = "rust-binutils-dejagnu-${baseName}";
+        value = pkgs:
+          import ./dejagnu-testsuite.nix {
+            inherit pkgs;
+            expFile = t.exp;
+            inherit (t) minPass maxFail;
+          };
+      })
+      dejaGnuTests);
+
+    # Single check that runs ALL upstream .exp files (informational, always passes)
+    dejaGnuAll = {
+      rust-binutils-dejagnu-all = pkgs:
+        import ./dejagnu-testsuite.nix {
+          inherit pkgs;
+        };
+    };
+  in
+    customChecks // dejaGnuChecks // dejaGnuAll;
 }
