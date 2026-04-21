@@ -201,7 +201,8 @@ pub(crate) fn parse_args() -> Options {
                 let val = next_arg(&args, i, "--json");
                 // Like -d: @filename reads from file, @- from stdin, otherwise
                 // the value is used as-is. (Not raw — @ is significant.)
-                append_data(&mut opts, &val, false);
+                // --json: like --data-binary, preserves newlines/nulls in @file reads.
+                append_data_binary(&mut opts, &val);
                 opts.json = true;
             }
             "--data-raw" => {
