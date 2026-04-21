@@ -336,12 +336,18 @@ when console-pool edges depend on regular edges.
       `deps = gcc`/`deps = msvc` exclusions to match reference
       ninja’s `Cleaning... N files.` count exactly)
 
-### Phase 7: Logs (target: `test_issue_2048` ✅, `test_explain_output` ✅ — partial)
+### Phase 7: Logs (target: `test_issue_2048` ✅, `test_explain_output` ✅)
 
 - [x] `.ninja_log` v6 version-mismatch warning (subset for `test_issue_2048`)
-- [ ] Full `.ninja_log` v6 reader/writer
+- [x] Full `.ninja_log` v6 reader/writer in `src/build/log.rs`,
+      tab-separated `start_ms\tend_ms\tmtime_ns\toutput\tcommand_hash`
+      with FNV-1a-64 over the executed command. Loaded at the start
+      of every build and appended to as edges complete; recompacted
+      by `-t recompact` (test_issue_2048 still gets its
+      "build log version is too old" warning when the existing log
+      is older than v6).
+- [x] `-d explain` interleaved with build progress
 - [ ] `.ninja_deps` binary format
-- [ ] `-d explain` interleaved with build progress
 
 ### Phase 8: Pools and console (target: `test_issue_2586` ✅)
 
@@ -373,8 +379,10 @@ when console-pool edges depend on regular edges.
       output mtime is unchanged across a re-run
 - [x] Per-node "is dirty" reasoning, printed inline with build progress
       (`ninja explain: X is dirty` before each dispatched edge)
-- [ ] Full `.ninja_log` integration so dirtiness survives across
-      independent ninja invocations even without `restat`
+- [x] Full `.ninja_log` integration so dirtiness survives across
+      independent ninja invocations: an output is treated as dirty
+      if its recorded command hash or recorded mtime no longer match
+      the freshly-expanded command and on-disk file
 
 ---
 

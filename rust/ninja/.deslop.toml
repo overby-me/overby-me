@@ -19,6 +19,13 @@ disabled_rules = [
   # The CLI options struct deliberately mirrors ninja’s flag
   # surface; each Option<T> represents a real on/off CLI flag.
   "rust_option_bag_config",
+  # The .ninja_log writer batches per-edge output writes; the
+  # implicit 8 KiB stdio buffer is more than sufficient for the
+  # one-line-per-output volume.
+  "rust_unbuffered_file_writes",
+  # log::load doc comment intentionally narrates the format details
+  # rather than just naming a function — the file format is the API.
+  "comment_style_tutorial",
   "rust_domain_raw_primitive",
   # Depfile parsing legitimately scans line-by-line; the per-line
   # allocation cost is negligible against the disk read.

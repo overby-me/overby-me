@@ -7,6 +7,7 @@
 mod depfile;
 mod dyndep;
 mod expand;
+pub mod log;
 mod plan;
 mod runner;
 

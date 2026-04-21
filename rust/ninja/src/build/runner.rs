@@ -15,6 +15,7 @@
 use super::depfile;
 use super::dyndep;
 use super::expand::{expand_in_edge, lookup_either};
+use super::log;
 use super::plan::{build_plan, resolve_targets};
 use crate::cli::Options;
 use crate::graph::{Edge, State};
@@ -147,6 +148,36 @@ fn schedule(
     // this we'd re-merge (and re-collide-against-self) every loop turn.
     let mut dyndep_loaded: HashSet<usize> = HashSet::new();
 
+    // Cross-invocation persistence via `.ninja_log`. We load whatever the
+    // last run wrote so a header touch (or command change) two builds ago
+    // still triggers a rebuild today, then keep a writer open to append
+    // fresh entries as edges complete.
+    let prev_log = log::load(".ninja_log");
+    let mut log_writer = log::Writer::new(".ninja_log");
+
+    // Per-edge expanded command (used for both hashing and dispatch). We
+    // compute it up front so we can both seed cross-invocation dirtiness
+    // and avoid re-expanding the same command at completion time.
+    let mut commands: Vec<String> = vec![String::new(); plan.len()];
+    let mut command_hashes: Vec<u64> = vec![0; plan.len()];
+    for (slot, &edge_idx) in plan.iter().enumerate() {
+        let edge = &edges[edge_idx];
+        if edge.is_phony() {
+            continue;
+        }
+        let Some(rule) = state.rules.get(&edge.rule) else {
+            continue;
+        };
+        let raw = rule
+            .bindings
+            .get("command")
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        let cmd = expand_in_edge(state, edge, raw);
+        command_hashes[slot] = log::hash_command(&cmd);
+        commands[slot] = cmd;
+    }
+
     // Initial node dirtiness — kept deliberately minimal:
     //   - source files (no in-edge) referenced as inputs: dirty iff the
     //     file is missing on disk;
@@ -229,6 +260,40 @@ fn schedule(
             }
             if out_is_dirty {
                 dirty.insert(out.clone(), true);
+            }
+        }
+    }
+
+    // Build-log-driven dirtiness. For every real edge:
+    //   - if no log entry exists for an output but the file does, treat
+    //     it as dirty (foreign artifact / first run after upgrade);
+    //   - if the recorded command hash differs from the freshly-computed
+    //     one the output is dirty (the rule changed);
+    //   - if the recorded mtime differs from what's on disk now the
+    //     output was modified outside ninja and must be regenerated.
+    // Missing files are already covered by the standard
+    // `edge_needs_run` check.
+    for (slot, &edge_idx) in plan.iter().enumerate() {
+        let edge = &edges[edge_idx];
+        if edge.is_phony() {
+            continue;
+        }
+        let new_hash = command_hashes[slot];
+        for out in edge.outputs.iter().chain(&edge.implicit_outputs) {
+            let on_disk = mtime_of(out);
+            if on_disk.is_none() {
+                continue; // missing -> handled by edge_needs_run
+            }
+            match prev_log.entries.get(out) {
+                None => {
+                    dirty.insert(out.clone(), true);
+                }
+                Some(entry) => {
+                    let current_ns = log::mtime_to_ns(on_disk);
+                    if entry.command_hash != new_hash || entry.mtime_ns != current_ns {
+                        dirty.insert(out.clone(), true);
+                    }
+                }
             }
         }
     }
@@ -380,12 +445,14 @@ fn schedule(
                 let prepared_mtimes = mtimes_before.clone();
                 let restat_flag = restat;
                 let explain_owned = explain_lines.clone();
+                let cmd_hash = command_hashes[slot];
                 thread::spawn(move || {
                     let mut outcome = execute(slot, prepared);
                     outcome.explain = explain_owned;
                     outcome.restat = restat_flag;
                     outcome.outputs_for_restat = prepared_outputs;
                     outcome.mtimes_before = prepared_mtimes;
+                    outcome.command_hash = cmd_hash;
                     let _ = tx.send(outcome);
                 });
             }
@@ -463,6 +530,22 @@ fn schedule(
             match outcome.kind {
                 OutcomeKind::Ok { combined } => {
                     status.build_finished(&outcome.shown, &combined);
+                    // Persist the latest command hash + observed output
+                    // mtimes so the next ninja invocation can detect
+                    // command changes and outside-of-ninja edits.
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0);
+                    for out in &outcome.outputs_for_restat {
+                        let entry = log::LogEntry {
+                            start_ms: now_ms,
+                            end_ms: now_ms,
+                            mtime_ns: log::mtime_to_ns(mtime_of(out)),
+                            command_hash: outcome.command_hash,
+                        };
+                        log_writer.record(std::slice::from_ref(out), &entry);
+                    }
                 }
                 OutcomeKind::Failed { code, combined } => {
                     status.build_finished(&outcome.shown, &combined);
@@ -677,6 +760,9 @@ struct EdgeOutcome {
     restat: bool,
     outputs_for_restat: Vec<String>,
     mtimes_before: Vec<Option<SystemTime>>,
+    /// Hash of the command we ran for this edge. Carried into the
+    /// completion handler so it can be appended to `.ninja_log`.
+    command_hash: u64,
 }
 
 enum OutcomeKind {
@@ -701,6 +787,7 @@ fn execute(slot: usize, p: Prepared) -> EdgeOutcome {
                 restat: false,
                 outputs_for_restat: Vec::new(),
                 mtimes_before: Vec::new(),
+                command_hash: 0,
             };
         }
     }
@@ -722,6 +809,7 @@ fn execute(slot: usize, p: Prepared) -> EdgeOutcome {
                 restat: false,
                 outputs_for_restat: Vec::new(),
                 mtimes_before: Vec::new(),
+                command_hash: 0,
             };
         }
     };
@@ -738,6 +826,7 @@ fn execute(slot: usize, p: Prepared) -> EdgeOutcome {
             restat: false,
             outputs_for_restat: Vec::new(),
             mtimes_before: Vec::new(),
+            command_hash: 0,
         };
     }
 
@@ -751,6 +840,7 @@ fn execute(slot: usize, p: Prepared) -> EdgeOutcome {
             restat: false,
             outputs_for_restat: Vec::new(),
             mtimes_before: Vec::new(),
+            command_hash: 0,
         };
     }
     let code: u8 = if !(0..=255).contains(&raw) {
@@ -771,6 +861,7 @@ fn execute(slot: usize, p: Prepared) -> EdgeOutcome {
             combined: buf,
         },
         explain: Vec::new(),
+        command_hash: 0,
         restat: false,
         outputs_for_restat: Vec::new(),
         mtimes_before: Vec::new(),
