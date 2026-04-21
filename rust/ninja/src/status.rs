@@ -49,6 +49,15 @@ pub struct Status {
     /// `\r…\x1b[K` redraw, meaning we owe a `\n` before any non-status
     /// output (or at the very end of the build).
     needs_newline: bool,
+    /// True while a `pool = console` edge owns the terminal. While set,
+    /// `build_started` is a no-op (no in-place status redraw racing
+    /// against the child process's own writes) and `build_finished` for
+    /// non-console edges queues into `pending` instead of writing.
+    console_locked: bool,
+    /// Buffered (description, captured-output) from non-console edges
+    /// that completed while the console was locked. Drained on
+    /// `unlock_console`.
+    pending: Vec<(String, Vec<u8>)>,
 }
 
 impl Status {
@@ -62,6 +71,37 @@ impl Status {
             total,
             finished: 0,
             needs_newline: false,
+            console_locked: false,
+            pending: Vec::new(),
+        }
+    }
+
+    /// Returns true while a console-pool edge is running and owns the
+    /// terminal. Other (non-console) edge completions are buffered
+    /// during this window and flushed when the console unlocks.
+    pub fn console_locked(&self) -> bool {
+        self.console_locked
+    }
+
+    /// Mark the console as locked: a console-pool edge is about to run
+    /// with stdin/stdout/stderr inherited, so we must not redraw any
+    /// in-place status line on top of its output. Any pending in-place
+    /// redraw is broken with a newline first so prior status doesn't
+    /// get clobbered by the child.
+    pub fn lock_console(&mut self) {
+        self.break_line();
+        self.console_locked = true;
+    }
+
+    /// Release the console lock and drain any non-console completions
+    /// that were buffered during the lock. Each is rendered the same
+    /// way `build_finished` would have rendered it had it not been
+    /// deferred.
+    pub fn unlock_console(&mut self) {
+        self.console_locked = false;
+        let pending = std::mem::take(&mut self.pending);
+        for (desc, output) in pending {
+            self.render_finished(&desc, &output);
         }
     }
 
@@ -101,6 +141,12 @@ impl Status {
         if self.quiet {
             return;
         }
+        // While a console-pool edge owns the terminal, suppress all
+        // status redraws — the child is writing directly to the same
+        // stdout we'd be drawing on.
+        if self.console_locked {
+            return;
+        }
         // Smart terminal draws an in-place "in-progress" line on start.
         // Piped (and verbose-on-smart) modes wait until completion to
         // emit a durable line.
@@ -109,14 +155,53 @@ impl Status {
         }
     }
 
-    /// Called after an edge finishes. Bumps `finished`, then:
-    ///   - In smart-terminal mode, redraws the status with the new count
-    ///     (still showing the just-finished edge's description), then
-    ///     dumps any captured output below it.
-    ///   - In piped mode, writes one fresh status line followed by the
-    ///     captured output (ANSI stripped unless `CLICOLOR_FORCE=1`).
+    /// Called after a *non-console* edge finishes. Bumps `finished`,
+    /// then either writes (status + captured output) immediately or, if
+    /// the console is currently locked by a console-pool edge, queues
+    /// the (description, output) pair to be flushed when the console
+    /// unlocks. This preserves the upstream semantics where a console
+    /// edge's terminal output is never interleaved with a competing
+    /// edge's captured stdout.
     pub fn build_finished(&mut self, description: &str, output: &[u8]) {
         self.finished += 1;
+        if self.console_locked {
+            self.pending
+                .push((description.to_string(), output.to_vec()));
+            return;
+        }
+        self.render_finished(description, output);
+    }
+
+    /// Called after the console-pool edge itself finishes. Bumps
+    /// `finished` and releases the console lock (which drains any
+    /// queued non-console completions). The corresponding status line
+    /// for this edge is emitted up-front by `build_started_console`
+    /// so the child's subsequent terminal output appears beneath it.
+    pub fn build_finished_console(&mut self, _description: &str) {
+        self.finished += 1;
+        self.unlock_console();
+    }
+
+    /// Print the status line for a console-pool edge that is about to
+    /// run. Always prints (even in piped mode), because the console
+    /// edge owns the terminal and its output will land directly on
+    /// stdout — we want the user to see what is running before its
+    /// output appears.
+    pub fn build_started_console(&mut self, description: &str) {
+        if self.quiet {
+            return;
+        }
+        // Force one durable line; smart-terminal's in-place redraw
+        // would just be clobbered by the child's own writes.
+        let prefix = self.render_prefix();
+        let mut stdout = std::io::stdout().lock();
+        let _ = writeln!(stdout, "{prefix}{description}");
+        let _ = stdout.flush();
+        self.needs_newline = false;
+    }
+
+    /// Inner helper shared by `build_finished` and `unlock_console`.
+    fn render_finished(&mut self, description: &str, output: &[u8]) {
         if self.quiet {
             self.write_output(output);
             return;
@@ -236,4 +321,56 @@ pub fn strip_ansi(s: &[u8]) -> Vec<u8> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lock_console_buffers_pending_completions_until_unlock() {
+        // Use Piped so we don't try to interact with a real TTY; that
+        // also means draw_status writes a full line, which is fine for
+        // the bookkeeping we're checking here.
+        let mut s = Status::new(
+            Mode::Piped,
+            /*quiet=*/ true,
+            /*verbose=*/ false,
+            3,
+        );
+        assert!(!s.console_locked());
+
+        s.lock_console();
+        assert!(s.console_locked());
+
+        // While locked, a non-console completion bumps `finished` but
+        // queues into `pending` rather than writing.
+        s.build_finished("non-console A", b"out-A");
+        s.build_finished("non-console B", b"");
+        assert_eq!(s.finished, 2);
+        assert_eq!(s.pending.len(), 2);
+        assert_eq!(s.pending[0].0, "non-console A");
+        assert_eq!(s.pending[0].1, b"out-A");
+
+        // build_started while locked must be a no-op.
+        s.build_started("would-be redraw");
+
+        // Unlocking via the console-edge completion path drains the
+        // queue and bumps `finished` for the console edge itself.
+        s.build_finished_console("the console edge");
+        assert!(!s.console_locked());
+        assert!(s.pending.is_empty());
+        assert_eq!(s.finished, 3);
+    }
+
+    #[test]
+    fn unlock_console_directly_drains_pending() {
+        let mut s = Status::new(Mode::Piped, true, false, 2);
+        s.lock_console();
+        s.build_finished("a", b"");
+        assert_eq!(s.pending.len(), 1);
+        s.unlock_console();
+        assert!(s.pending.is_empty());
+        assert!(!s.console_locked());
+    }
 }

@@ -427,6 +427,20 @@ fn schedule(
                         continue;
                     }
                 }
+                // Console-pool gate: a console edge must own the
+                // terminal exclusively. Wait until every in-flight
+                // async edge has drained before taking it. Conversely,
+                // a non-console edge must never start while the
+                // console is locked (defensive — synchronous console
+                // execution makes this unreachable in practice).
+                let is_console_now =
+                    !edges[edge_idx].is_phony() && is_console_edge(state, &edges[edge_idx]);
+                if is_console_now && in_flight > 0 {
+                    continue;
+                }
+                if !is_console_now && !edges[edge_idx].is_phony() && status.console_locked() {
+                    continue;
+                }
                 // Jobserver gate. Only real (non-phony) edges consume a
                 // token; phonies finish synchronously and never spawn a
                 // subprocess. If no token is currently available we leave
@@ -509,22 +523,46 @@ fn schedule(
                     .chain(&edge.implicit_outputs)
                     .cloned()
                     .collect();
-                status.build_started(&prepared.shown);
+                if is_console_now {
+                    status.build_started_console(&prepared.shown);
+                } else {
+                    status.build_started(&prepared.shown);
+                }
                 let tx = tx.clone();
                 let prepared_outputs = outputs_owned.clone();
                 let prepared_mtimes = mtimes_before.clone();
                 let restat_flag = restat;
                 let explain_owned = explain_lines.clone();
                 let cmd_hash = command_hashes[slot];
-                thread::spawn(move || {
-                    let mut outcome = execute(slot, prepared);
+                if is_console_now {
+                    // Console-pool edges run synchronously on the main
+                    // thread with inherited stdio so the child can
+                    // draw progress bars / read stdin. The status
+                    // printer is locked for the duration so any
+                    // non-console completion that arrives mid-run is
+                    // buffered and drained at unlock time. We still
+                    // inject the outcome through `tx` so the unified
+                    // reap path handles bookkeeping (dirtiness,
+                    // .ninja_log, deps_log, pool/jobserver release).
+                    status.lock_console();
+                    let mut outcome = execute_console(slot, prepared);
                     outcome.explain = explain_owned;
                     outcome.restat = restat_flag;
                     outcome.outputs_for_restat = prepared_outputs;
                     outcome.mtimes_before = prepared_mtimes;
                     outcome.command_hash = cmd_hash;
                     let _ = tx.send(outcome);
-                });
+                } else {
+                    thread::spawn(move || {
+                        let mut outcome = execute(slot, prepared);
+                        outcome.explain = explain_owned;
+                        outcome.restat = restat_flag;
+                        outcome.outputs_for_restat = prepared_outputs;
+                        outcome.mtimes_before = prepared_mtimes;
+                        outcome.command_hash = cmd_hash;
+                        let _ = tx.send(outcome);
+                    });
+                }
             }
         }
 
@@ -605,9 +643,15 @@ fn schedule(
             for line in &outcome.explain {
                 println!("{line}");
             }
+            let edge_was_console =
+                is_console_edge(state, &edges[plan[slot]]) && !edges[plan[slot]].is_phony();
             match outcome.kind {
                 OutcomeKind::Ok { combined } => {
-                    status.build_finished(&outcome.shown, &combined);
+                    if edge_was_console {
+                        status.build_finished_console(&outcome.shown);
+                    } else {
+                        status.build_finished(&outcome.shown, &combined);
+                    }
                     // Persist the latest command hash + observed output
                     // mtimes so the next ninja invocation can detect
                     // command changes and outside-of-ninja edits.
@@ -656,7 +700,20 @@ fn schedule(
                     }
                 }
                 OutcomeKind::Failed { code, combined } => {
-                    status.build_finished(&outcome.shown, &combined);
+                    if edge_was_console {
+                        // The child wrote any failure detail directly
+                        // to the terminal; we still emit the
+                        // FAILED:/header that execute_console
+                        // assembled so the user sees the exit code
+                        // and the failing command.
+                        status.build_finished_console(&outcome.shown);
+                        let mut stdout = std::io::stdout().lock();
+                        use std::io::Write as _;
+                        let _ = stdout.write_all(&combined);
+                        let _ = stdout.flush();
+                    } else {
+                        status.build_finished(&outcome.shown, &combined);
+                    }
                     if hard_failure.is_none() {
                         hard_failure = Some(code);
                     }
@@ -743,6 +800,13 @@ fn pool_for_edge(state: &State, edge: &Edge) -> Option<String> {
         return Some(v.clone());
     }
     None
+}
+
+/// True when this edge is bound to the implicit `console` pool, in
+/// which case it must run with stdin/stdout/stderr inherited from
+/// ninja and own the terminal exclusively for the duration.
+fn is_console_edge(state: &State, edge: &Edge) -> bool {
+    pool_for_edge(state, edge).as_deref() == Some("console")
 }
 
 fn mtime_of(path: &str) -> Option<SystemTime> {
@@ -967,6 +1031,100 @@ fn execute(slot: usize, p: Prepared) -> EdgeOutcome {
         kind: OutcomeKind::Failed {
             code,
             combined: buf,
+        },
+        explain: Vec::new(),
+        command_hash: 0,
+        restat: false,
+        outputs_for_restat: Vec::new(),
+        mtimes_before: Vec::new(),
+    }
+}
+
+/// Console-pool variant of `execute`: spawns the subprocess with
+/// stdin/stdout/stderr inherited from ninja so the child owns the
+/// terminal. Returns an `EdgeOutcome` with empty `combined` on success
+/// (the child's output went straight to the terminal); failures still
+/// carry a synthetic `FAILED: [code=N] outputs\ncommand\n` header so
+/// the eventual reap path can replay it after the console unlocks.
+fn execute_console(slot: usize, p: Prepared) -> EdgeOutcome {
+    if let Some((path, content)) = &p.rspfile {
+        ensure_parent_dir(path);
+        if let Err(e) = std::fs::write(path, content) {
+            return EdgeOutcome {
+                slot,
+                shown: p.shown,
+                kind: OutcomeKind::SpawnError(format!("rspfile '{path}': {e}")),
+                explain: Vec::new(),
+                restat: false,
+                outputs_for_restat: Vec::new(),
+                mtimes_before: Vec::new(),
+                command_hash: 0,
+            };
+        }
+    }
+
+    let result = Command::new("sh").arg("-c").arg(&p.command).status();
+
+    if let Some((path, _)) = &p.rspfile {
+        let _ = std::fs::remove_file(path);
+    }
+
+    let status = match result {
+        Ok(s) => s,
+        Err(e) => {
+            return EdgeOutcome {
+                slot,
+                shown: p.shown,
+                kind: OutcomeKind::SpawnError(format!("failed to spawn: {e}")),
+                explain: Vec::new(),
+                restat: false,
+                outputs_for_restat: Vec::new(),
+                mtimes_before: Vec::new(),
+                command_hash: 0,
+            };
+        }
+    };
+
+    if status.success() {
+        return EdgeOutcome {
+            slot,
+            shown: p.shown,
+            kind: OutcomeKind::Ok {
+                combined: Vec::new(),
+            },
+            explain: Vec::new(),
+            restat: false,
+            outputs_for_restat: Vec::new(),
+            mtimes_before: Vec::new(),
+            command_hash: 0,
+        };
+    }
+
+    let raw = status.code().unwrap_or(-1);
+    if raw == 130 {
+        return EdgeOutcome {
+            slot,
+            shown: p.shown,
+            kind: OutcomeKind::Interrupted,
+            explain: Vec::new(),
+            restat: false,
+            outputs_for_restat: Vec::new(),
+            mtimes_before: Vec::new(),
+            command_hash: 0,
+        };
+    }
+    let code: u8 = if !(0..=255).contains(&raw) {
+        1
+    } else {
+        raw as u8
+    };
+    let header = format!("FAILED: [code={raw}] {} \n{}\n", p.outputs, p.command);
+    EdgeOutcome {
+        slot,
+        shown: p.shown,
+        kind: OutcomeKind::Failed {
+            code,
+            combined: header.into_bytes(),
         },
         explain: Vec::new(),
         command_hash: 0,

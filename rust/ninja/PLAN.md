@@ -43,6 +43,12 @@ Passing:
 
 Recently added:
 
+- True console-pool exclusive terminal locking. Console edges now
+  run synchronously on the main thread with stdio inherited from
+  ninja, while the status printer's new `lock_console` /
+  `unlock_console` pair buffers any non-console completions that
+  arrive during the lock and drains them once the console edge
+  releases the terminal.
 - `test_explain_output` — `-d explain` lines emitted before each
   dispatched edge, plus rule-level `restat = true` semantics that prune
   downstream edges when an output's mtime is unchanged across a re-run.
@@ -398,8 +404,11 @@ when console-pool edges depend on regular edges.
 - [x] Pool depth limiting — per-pool in-flight counters cap concurrent
       edges by name (rule- or edge-bound `pool = name`); the implicit
       `console` pool defaults to depth 1
-- [ ] True console-pool exclusive terminal locking (`SetConsoleLocked`
-      buffering of competing edges)
+- [x] True console-pool exclusive terminal locking — console edges
+      run synchronously on the main thread with inherited stdio, and
+      the status printer buffers competing non-console completions
+      while the console is locked, draining them once the console
+      edge releases.
 
 ### Phase 9: Depfiles and dyndep ✅ (target: `test_depfile_directory_creation` ✅, `test_issue_2621` ✅, roundtrip `depfile-header-change` ✅)
 
