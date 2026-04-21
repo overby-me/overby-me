@@ -5,6 +5,7 @@
 //!     `$out`, etc.
 
 mod depfile;
+mod deps_log;
 mod dyndep;
 mod expand;
 mod jobserver;

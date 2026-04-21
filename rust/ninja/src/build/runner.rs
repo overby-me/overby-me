@@ -13,6 +13,7 @@
 //! still land in a later phase.
 
 use super::depfile;
+use super::deps_log::DepsLog;
 use super::dyndep;
 use super::expand::{expand_in_edge, lookup_either};
 use super::jobserver::{self, Slot};
@@ -182,6 +183,11 @@ fn schedule(
     // fresh entries as edges complete.
     let prev_log = log::load(".ninja_log");
     let mut log_writer = log::Writer::new(".ninja_log");
+    // Cross-invocation depfile cache. After a successful gcc/msvc edge
+    // we store its discovered headers here and unlink the depfile, so
+    // the next ninja invocation can answer "is this output stale?"
+    // even though the depfile itself is gone.
+    let mut deps_log = DepsLog::load(".ninja_deps");
 
     // Per-edge expanded command (used for both hashing and dispatch). We
     // compute it up front so we can both seed cross-invocation dirtiness
@@ -258,12 +264,32 @@ fn schedule(
         if depfile_path.is_empty() {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(&depfile_path) else {
-            continue;
-        };
-        let parsed = depfile::parse(&text);
+        // Two sources of recorded prerequisites:
+        //   1. the depfile that the previous run dropped on disk, if it
+        //      still exists (the cold path on freshly-checked-out trees);
+        //   2. `.ninja_deps`, which is what `deps = gcc|msvc` populates
+        //      after consuming and unlinking the depfile.
+        // We prefer the on-disk depfile when present (it's what the
+        // compiler just wrote), but fall back to the cached deps log
+        // when the depfile has been consumed — that's what makes
+        // incremental rebuilds work after a `deps = gcc` rule fires.
+        let depfile_text = std::fs::read_to_string(&depfile_path).ok();
+        let parsed = depfile_text.as_deref().map(depfile::parse);
+        let uses_deps_cache = matches!(
+            lookup_either(edge, rule, "deps").as_deref(),
+            Some("gcc") | Some("msvc")
+        );
         for out in edge.outputs.iter().chain(&edge.implicit_outputs) {
-            let Some(deps) = parsed.targets.get(out) else {
+            let deps_from_depfile = parsed
+                .as_ref()
+                .and_then(|p| p.targets.get(out))
+                .map(|v| v.as_slice());
+            let deps_from_log = if deps_from_depfile.is_none() && uses_deps_cache {
+                deps_log.records.get(out).map(|r| r.deps.as_slice())
+            } else {
+                None
+            };
+            let Some(deps) = deps_from_depfile.or(deps_from_log) else {
                 continue;
             };
             let out_mtime = mtime_of(out);
@@ -597,6 +623,36 @@ fn schedule(
                             command_hash: outcome.command_hash,
                         };
                         log_writer.record(std::slice::from_ref(out), &entry);
+                    }
+                    // For `deps = gcc|msvc` edges: parse the freshly
+                    // dropped depfile, persist the discovered headers
+                    // into `.ninja_deps`, then unlink the depfile.
+                    // Reference ninja consumes the depfile this way
+                    // so the next invocation can answer dirtiness
+                    // questions purely from `.ninja_deps`.
+                    let edge_idx = plan[slot];
+                    let edge_ref = &edges[edge_idx];
+                    if let Some(rule) = state.rules.get(&edge_ref.rule) {
+                        let deps_kind = lookup_either(edge_ref, rule, "deps");
+                        let depfile_raw = lookup_either(edge_ref, rule, "depfile");
+                        if matches!(deps_kind.as_deref(), Some("gcc") | Some("msvc"))
+                            && let Some(df_raw) = depfile_raw
+                        {
+                            let df_path = expand_in_edge(state, edge_ref, &df_raw);
+                            if !df_path.is_empty()
+                                && let Ok(text) = std::fs::read_to_string(&df_path)
+                            {
+                                let parsed = depfile::parse(&text);
+                                for out in edge_ref.outputs.iter().chain(&edge_ref.implicit_outputs)
+                                {
+                                    if let Some(deps_list) = parsed.targets.get(out) {
+                                        let mtime_ns = log::mtime_to_ns(mtime_of(out)) as u64;
+                                        let _ = deps_log.record(out, mtime_ns, deps_list);
+                                    }
+                                }
+                                let _ = std::fs::remove_file(&df_path);
+                            }
+                        }
                     }
                 }
                 OutcomeKind::Failed { code, combined } => {

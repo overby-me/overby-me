@@ -46,6 +46,9 @@ Recently added:
 - `test_explain_output` — `-d explain` lines emitted before each
   dispatched edge, plus rule-level `restat = true` semantics that prune
   downstream edges when an output's mtime is unchanged across a re-run.
+- `.ninja_deps` v4 binary log: discovered headers from `deps =
+  gcc|msvc` edges are now persisted (and the depfile unlinked) so
+  incremental rebuilds work the same way reference ninja's do.
 
 The Nix wiring is in place:
 
@@ -65,6 +68,12 @@ The Nix wiring is in place:
   alphabet (was previously also accepting `.`). Without this, `$out.d`
   resolved as `${out.d}` instead of `${out}` + literal `.d`, silently
   breaking every depfile-driven incremental rebuild.
+- `build::deps_log` — `.ninja_deps` v4 binary log. Persists discovered
+  header dependencies for every `deps = gcc|msvc` edge so incremental
+  rebuilds keep working after the depfile has been consumed and unlinked.
+  The runner now loads `.ninja_deps` at startup (next to `.ninja_log`),
+  consults it during depfile-driven dirtiness when the depfile is gone,
+  and records into it after each successful gcc/msvc edge.
 
 ## Module Layout
 
@@ -83,6 +92,10 @@ src/
                          merging + multi-producer detection
     expand.rs            Edge-context variable expansion ($in, $out, layered)
     dyndep.rs            Dyndep file parser (ninja_dyndep_version = 1)
+    depfile.rs           Makefile-style depfile parser (gcc -MMD output)
+    log.rs               .ninja_log v6 reader/writer (FNV-1a command hash)
+    deps_log.rs          .ninja_deps v4 binary reader/writer (path + deps records)
+    jobserver.rs         GNU make jobserver client (FIFO + posix-fd auth)
   tools/
     mod.rs               Dispatch on tool name
     recompact.rs         -t recompact / -t restat (log version warning only)
@@ -366,7 +379,16 @@ when console-pool edges depend on regular edges.
       "build log version is too old" warning when the existing log
       is older than v6).
 - [x] `-d explain` interleaved with build progress
-- [ ] `.ninja_deps` binary format
+- [x] `.ninja_deps` binary format — full v4 reader/writer in
+      `src/build/deps_log.rs`. Path records carry a `~node_id`
+      checksum and 4-byte NUL padding; deps records pack
+      `(out_id, mtime_lo, mtime_hi, in_id, ...)` as little-endian
+      i32s with the high bit of the size header set. Loaded at
+      the start of every build alongside `.ninja_log`; populated
+      by the runner after each successful `deps = gcc|msvc` edge
+      (parses + unlinks the depfile, then records the discovered
+      headers under the output's id) so subsequent invocations
+      can answer dirtiness questions without the depfile.
 
 ### Phase 8: Pools and console (target: `test_issue_2586` ✅)
 
