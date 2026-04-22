@@ -2,9 +2,9 @@
 
 ## Current Status
 
-**127/135 tests passing** (94%) — upstream test harness from GNU make 4.4.1.
+**128/135 tests passing** (95%) — upstream test harness from GNU make 4.4.1.
 
-MAKEFLAGS subtests: **187/218** (86%) — significant progress on flag
+MAKEFLAGS subtests: **198/218** (91%) — significant progress on flag
 merge, dedup, sort, origin tracking, and env-inherited override propagation.
 
 `rust/make` has a parser, expander, and build engine (~10k LoC) with
@@ -357,7 +357,7 @@ in ways the test harness happens not to exercise in our passing set.
 
 - **`.SECONDEXPANSION:`** — partial implementation in place. Currently
   passing: `variables/automatic`, `features/rule_glob`. Subtest counts:
-  `features/se_explicit` 31/31 ✅, `features/se_implicit` 27/30,
+  `features/se_explicit` 31/31 ✅, `features/se_implicit` 28/30,
   `features/se_statpat` 12/12,
   `features/statipattrules` 68/68 ✅,
   `features/patternrules` 72/72 ✅. Infrastructure: `RuleEntry` /
@@ -389,10 +389,10 @@ in ways the test harness happens not to exercise in our passing set.
 - ~~**vpath conflict ("same file") warning**~~ ✅ Implemented. Vpath
   same-file merging with warning (Savannah bug #62650). `features/mult_rules`
   now passes (3/3), `features/se_explicit` #27 fixed.
-- **Built-in C compile pipeline through vpath** — pattern rules
-  like `%: %.o` chained with `%.o: %.c` should resolve `%.c`
-  through vpath so `notarget` finds `work/notarget.c`. Blocks
-  `features/vpathplus` Test #1 (notarget) and `misc/general1`.
+- ~~**Built-in C compile pipeline through vpath**~~ ✅ Implemented.
+  Pattern rules like `%: %.o` chained with `%.o: %.c` resolve `%.c`
+  through vpath; phony targets skip implicit rules; VPATH revocation
+  after failed rebuild. `features/vpathplus` now fully passes (4/4).
 - **Full MAKEFLAGS → child parse** — we propagate MAKEFLAGS but don't
   re-parse the full ` -- `-separated form in sub-makes. Blocks most
   of `variables/MAKEFLAGS` (12/218).
@@ -430,7 +430,7 @@ in ways the test harness happens not to exercise in our passing set.
 
 ---
 
-## Currently failing top-level tests (8 of 135)
+## Currently failing top-level tests (7 of 135)
 
 Latest baseline (`bash /tmp/run-make-baseline.sh`):
 
@@ -438,17 +438,15 @@ Latest baseline (`bash /tmp/run-make-baseline.sh`):
 | --- | --- |
 | `features/parallelism` | Requires `-j` / jobserver (0/8) |
 | `features/reinvoke` | Makefile auto-rebuild + re-exec (5/12) |
-| `features/se_implicit` | 27/30 subtests pass; failing subtests 3 (implicit recursion with directory stems), 9 (SE prereq verification in pattern search), 27 (SE prereq expansion ordering) |
+| `features/se_implicit` | 28/30 subtests pass; failing subtests 9 (SE prereq verification in pattern search), 27 (SE prereq expansion ordering) |
 | `features/temp_stdin` | 6/8 subtests pass; `--debug=b` re-exec banner with `--temp-stdin=` (#4); SIGTERM "Terminated" diagnostic (#5, needs signal handler) |
-| `features/vpathplus` | 2/4 subtests pass; #1 (built-in cc pipeline via vpath + un-vpath on failed rebuild), #3 (VPATH intermediate chain timestamp comparison) |
 | `options/dash-f` | 23/32 subtests pass; all 9 failures need makefile auto-rebuild (`touch bye.mk.src` / `touch bye.mk` before consuming stdin) |
 | `targets/WAIT` | `.WAIT` requires parallel scheduling (3/4) |
-| `variables/MAKEFLAGS` | 187/218 subtests pass; remaining 31 need: sub-make MAKELEVEL (116-117, 124-127), makefile auto-rebuild (197-208), sub-make with debug (210-217), MAKEOVERRIDES `override` + `--` separator semantics (101, 104-107) |
+| `variables/MAKEFLAGS` | 198/218 subtests pass; remaining 20 need: makefile auto-rebuild (197-208), sub-make with debug (210-217) |
 
 The biggest remaining unlocks are **makefile auto-rebuild/re-exec**
 (unlocks `reinvoke`, `dash-f`, MAKEFLAGS 197-217) and **parallel jobs**
 (unlocks `parallelism`, `WAIT`). The `se_implicit` remainder requires
-implicit recursion guards with directory-aware stem decomposition and
 SE-during-pattern-search.
 
 ### MAKEFLAGS improvements (this session)
@@ -541,11 +539,11 @@ Round 3 fix (121/135):
 
 ## Category breakdown (current)
 
-Based on the latest baseline run (127/135 passing):
+Based on the latest baseline run (128/135 passing):
 
 | Category    | Status                                                            |
 | ----------- | ----------------------------------------------------------------- |
-| `features`  | 37/42 passing. `patternrules` 72/72 ✅, `se_explicit` 31/31 ✅, `statipattrules` 68/68 ✅. Blocked on remaining `se_implicit` edge cases, parallelism, re-exec, temp_stdin signal/debug, vpathplus chain. |
+| `features`  | 38/42 passing. `patternrules` 72/72 ✅, `se_explicit` 31/31 ✅, `statipattrules` 68/68 ✅, `vpathplus` 4/4 ✅. Blocked on remaining `se_implicit` edge cases, parallelism, re-exec, temp_stdin signal/debug. |
 | `functions` | Most working. Remaining: fatal-error line numbers.                |
 | `misc`      | All passing (bs-nl 28/28, general4 10/10).                        |
 | `options`   | Most working; `dash-q` fully passing. Blocked on re-exec/MAKEFLAGS. |
@@ -657,6 +655,44 @@ Round 7 (127/135 categories — gained patternrules, se_explicit):
    make's `execvp` failure convention). Fixes `temp_stdin` #7.
 
 Subtest gains: patternrules +9, temp_stdin +1. Category total: 126 → 127.
+
+Round 8 (128/135 categories — gained vpathplus):
+
+1. **Skip implicit rules for phony targets**: phony targets no longer
+   trigger implicit rule search, preventing spurious built-in CC pipeline
+   matches. Fixes `vpathplus` #1 (notarget).
+2. **VPATH-aware intermediate chain timestamp checks**: intermediate files
+   found via VPATH now compare timestamps correctly in the chain, so
+   `foo.o` older than `foo.c` triggers rebuild but `foo.o` newer than
+   `foo.c` does not. Fixes `vpathplus` #3.
+3. **Pre-existing file tracking for intermediate deletion**: files that
+   existed before the build started are not deleted as intermediates,
+   matching GNU make's behavior. Fixes `vpathplus` #3.
+4. **VPATH revocation ("un-vpath") after recipe doesn't create file**:
+   when a recipe runs but doesn't create the target at the vpath location,
+   the vpath resolution is revoked so subsequent rules look in the current
+   directory. Fixes `vpathplus` #1.
+5. **`-w` entering directory side-effect in MAKEFLAGS merge**: `-w` flag
+   now properly triggers "Entering directory" messages when set via
+   MAKEFLAGS in sub-makes. Fixes MAKEFLAGS subtests 124-127.
+6. **`-R` implies `-r` in post-load MAKEFLAGS**: when `-R` (no built-in
+   variables) is set via makefile MAKEFLAGS, `-r` (no built-in rules) is
+   also implied, matching GNU make. Fixes MAKEFLAGS subtests 104-107.
+7. **MAKEOVERRIDES empty→conditional separator post-load fix**: the `--`
+   separator between flags and MAKEOVERRIDES is only emitted when
+   MAKEOVERRIDES is non-empty, fixing edge case with empty overrides
+   after post-load merge. Fixes MAKEFLAGS subtest 101.
+8. **MAKEFLAGS/MAKELEVEL/MAKE export in `$(shell)` and `!=` operators**:
+   these variables are now exported to the environment for `$(shell ...)`
+   and `!= shell` assignment operators, matching GNU make's behavior.
+   Fixes MAKEFLAGS subtests 116-117.
+9. **SE pattern-rule directory-transfer: expand first, then prepend
+   directory**: SE prereqs in pattern rules now expand `$$*` etc. before
+   applying directory-transfer (prepending the directory portion of the
+   stem), matching GNU make's order of operations. Fixes `se_implicit` #3.
+
+Subtest gains: vpathplus +2, MAKEFLAGS +11 (187→198), se_implicit +1.
+Category total: 127 → 128.
 
 ---
 
