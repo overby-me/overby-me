@@ -153,17 +153,25 @@ Rust udevadm reimplementation is in progress.
 - 17-udev-netif-altname — altname application via RTM_NEWLINKPROP/DELLINKPROP with diff against current kernel altnames. `.link` Name=/MAC/MTU only applied on `add`, not `move` (matching upstream).
 - 17-udev-buffer-size — netlink recv buffers bumped to 2 MiB; udevd now broadcasts processed events via libudev monitor protocol (group 2, with 0xfeedcafe header, MurmurHash2 filter hashes, tag bloom filter).
 
+**LANDED** (since last plan revision):
+
+- 17-udev-link-property — `.link` file `Property=` / `UnsetProperty=` / `ImportProperty=` directives + drop-in support + %v specifier expansion + read-only property guards.  Added `udevadm test-builtin net_setup_link` emitter (was a silent no-op).  Action-gated so only add/bind/move apply the rules; `udevadm trigger --action=change` no longer re-applies link-file properties.
+- 17-udev-SYSTEMD_WANTS-escape — template-instance Wants= targets are now materialised on-the-fly in apply_device_active / refresh_device_wants so activate_unit can find them instead of erroring with "unit not found".
+- 17-udev-SYSTEMD_WANTS_vs_StopWhenUnneeded — UnitConfig grew a `stop_when_unneeded` field plumbed from the parser, and apply_device_inactive spawns a background stop_if_unneeded check for each former Wants= target.  Also switched udev-triggered activation to ActivationSource::TriggerActivation so a manually-stopped target restarts on the next udev event.
+- 17-udev-failed-event setup-phase blocker (`systemctl reload systemd-udevd.service`) — Command::Reload now falls back to SIGHUP for Type=notify-reload services with empty ExecReload (matches upstream).  Event-timeout + SIGABRT handling still unimplemented, so the test itself still fails, but gets further.
+- 15-DROPIN testcase_hierarchical_slice_dropins — transient slices survive daemon-reload without losing their [Unit] section or [Slice] config, and a subsequently-written disk fragment takes over cleanly from the transient.
+- 15-DROPIN testcase_template_alias — template instances instantiated on-demand via find_or_load_unit now survive daemon-reload when the backing template is still on disk.
+
 **FAIL (unimplemented):**
 
 - 17-udev-verify — comprehensive rules validator with ~100 syntax-error patterns (large feature).
-- 17-udev-link-property — `.link` file `Property=` / `UnsetProperty=` / `ImportProperty=` directives + drop-in support.
 - 17-udev-loop-own — systemd-dissect `--attach --loop-ref=...` integration.
 - 17-udev-failed-event — event-timeout + `timeout_signal=SIGABRT` handling.
 - 17-udev-watch — inotify watch fd passing via systemd fd-store.
-- 17-udev-credentials — needs `systemd-udev-load-credentials.service` (systemctl is-enabled "not-found" exit 4 already returned, so test should early-exit if service is missing).
 - 17-udev-queued-events-serialization — requires udevd to preserve rule→RUN marker across events.
 - 17-udev-diskseq — test-framework / device-specific.
 - 17-udev-owner-and-mode — After= ordering deps on systemd-tmpfiles-setup-dev services (NixOS unit-file question, not rust-systemd).
+- 15-DROPIN testcase_template_dropins — complex template + drop-in + alias interplay (bar@2 inheriting per-instance drop-ins including via template-level symlinks).
 
 ### 7. NixOS Framework Limitations
 
