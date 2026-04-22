@@ -250,11 +250,15 @@ fn run() -> i32 {
             }
             "-n" | "--just-print" | "--dry-run" | "--recon" => {
                 engine.dry_run = true;
-                mflags_short.push('n');
+                if !mflags_short.contains('n') {
+                    mflags_short.push('n');
+                }
             }
             "-s" | "--silent" | "--quiet" => {
                 engine.silent = true;
-                mflags_short.push('s');
+                if !mflags_short.contains('s') {
+                    mflags_short.push('s');
+                }
                 mflags_long.retain(|s| s != "--no-silent");
             }
             "--no-silent" => {
@@ -264,46 +268,67 @@ fn run() -> i32 {
             }
             "-k" | "--keep-going" => {
                 engine.keep_going = true;
-                mflags_short.push('k');
+                mflags_short.retain(|c| c != 'S');
+                if !mflags_short.contains('k') {
+                    mflags_short.push('k');
+                }
             }
             "-S" | "--no-keep-going" | "--stop" => {
                 engine.keep_going = false;
                 mflags_short.retain(|c| c != 'k');
-                mflags_short.push('S');
+                if !mflags_short.contains('S') {
+                    mflags_short.push('S');
+                }
             }
             "-t" | "--touch" => {
                 engine.touch = true;
-                mflags_short.push('t');
+                if !mflags_short.contains('t') {
+                    mflags_short.push('t');
+                }
             }
             "-q" | "--question" => {
                 engine.question = true;
-                mflags_short.push('q');
+                if !mflags_short.contains('q') {
+                    mflags_short.push('q');
+                }
             }
             "-B" | "--always-make" => {
                 engine.always_make.set(true);
-                mflags_short.push('B');
+                if !mflags_short.contains('B') {
+                    mflags_short.push('B');
+                }
             }
             "-i" | "--ignore-errors" => {
                 engine.ignore_errors = true;
-                mflags_short.push('i');
+                if !mflags_short.contains('i') {
+                    mflags_short.push('i');
+                }
             }
             "-e" | "--environment-overrides" => {
                 engine.env_overrides = true;
-                mflags_short.push('e');
+                if !mflags_short.contains('e') {
+                    mflags_short.push('e');
+                }
             }
             "-r" | "--no-builtin-rules" => {
                 engine.disable_builtin_rules();
-                mflags_short.push('r');
+                if !mflags_short.contains('r') {
+                    mflags_short.push('r');
+                }
             }
             "-R" | "--no-builtin-variables" => {
                 engine.disable_builtin_rules();
                 engine.disable_builtin_vars();
-                mflags_short.push('R');
+                if !mflags_short.contains('R') {
+                    mflags_short.push('R');
+                }
             }
             "-w" | "--print-directory" => {
                 engine.print_directory_opt = Some(true);
                 mflags_long.retain(|s| s != "--no-print-directory");
-                mflags_short.push('w');
+                if !mflags_short.contains('w') {
+                    mflags_short.push('w');
+                }
             }
             "--no-print-directory" => {
                 engine.print_directory_opt = Some(false);
@@ -320,7 +345,9 @@ fn run() -> i32 {
             }
             "-d" | "--debug" | "--debug=a" => {
                 debug_mode = true;
-                mflags_short.push('d');
+                if !mflags_short.contains('d') {
+                    mflags_short.push('d');
+                }
             }
             "--debug=b" | "--debug=basic" => {
                 debug_mode = true;
@@ -518,28 +545,88 @@ fn run() -> i32 {
                         }
                     };
                     match flag {
-                        'n' => engine.dry_run = true,
-                        's' => engine.silent = true,
-                        'k' => engine.keep_going = true,
+                        'n' => {
+                            engine.dry_run = true;
+                            if !mflags_short.contains('n') {
+                                mflags_short.push('n');
+                            }
+                        }
+                        's' => {
+                            engine.silent = true;
+                            if !mflags_short.contains('s') {
+                                mflags_short.push('s');
+                            }
+                            mflags_long.retain(|s| s != "--no-silent");
+                        }
+                        'k' => {
+                            engine.keep_going = true;
+                            mflags_short.retain(|c| c != 'S');
+                            if !mflags_short.contains('k') {
+                                mflags_short.push('k');
+                            }
+                        }
                         'S' => {
                             engine.keep_going = false;
                             mflags_short.retain(|c| c != 'k');
-                            mflags_short.push('S');
+                            if !mflags_short.contains('S') {
+                                mflags_short.push('S');
+                            }
                         }
-                        't' => engine.touch = true,
-                        'q' => engine.question = true,
-                        'B' => engine.always_make.set(true),
-                        'i' => engine.ignore_errors = true,
-                        'e' => engine.env_overrides = true,
+                        't' => {
+                            engine.touch = true;
+                            if !mflags_short.contains('t') {
+                                mflags_short.push('t');
+                            }
+                        }
+                        'q' => {
+                            engine.question = true;
+                            if !mflags_short.contains('q') {
+                                mflags_short.push('q');
+                            }
+                        }
+                        'B' => {
+                            engine.always_make.set(true);
+                            if !mflags_short.contains('B') {
+                                mflags_short.push('B');
+                            }
+                        }
+                        'i' => {
+                            engine.ignore_errors = true;
+                            if !mflags_short.contains('i') {
+                                mflags_short.push('i');
+                            }
+                        }
+                        'e' => {
+                            engine.env_overrides = true;
+                            if !mflags_short.contains('e') {
+                                mflags_short.push('e');
+                            }
+                        }
                         'w' => {
                             engine.print_directory_opt = Some(true);
                             mflags_long.retain(|s| s != "--no-print-directory");
-                            mflags_short.push('w');
+                            if !mflags_short.contains('w') {
+                                mflags_short.push('w');
+                            }
                         }
-                        'r' => engine.disable_builtin_rules(),
+                        'r' => {
+                            engine.disable_builtin_rules();
+                            if !mflags_short.contains('r') {
+                                mflags_short.push('r');
+                            }
+                        }
                         'R' => {
                             engine.disable_builtin_rules();
                             engine.disable_builtin_vars();
+                            if !mflags_short.contains('R') {
+                                mflags_short.push('R');
+                            }
+                        }
+                        'd' => {
+                            debug_mode = true;
+                            if !mflags_short.contains('d') {
+                                mflags_short.push('d');
+                            }
                         }
                         'f' => {
                             if let Some(v) = take_arg(&flags, idx, &mut i) {
@@ -576,10 +663,7 @@ fn run() -> i32 {
                             let _ = take_arg(&flags, idx, &mut i);
                             break;
                         }
-                        'd' => {
-                            debug_mode = true;
-                            mflags_short.push('d');
-                        }
+
                         'l' => {
                             // -l takes a float argument (rest of cluster or next arg)
                             if let Some(v) = take_arg(&flags, idx, &mut i) {
@@ -658,6 +742,9 @@ fn run() -> i32 {
 
     // Populate MAKEOVERRIDES from real command-line variable assignments.
     // GNU make stores these so sub-makes can inherit command-line overrides.
+    // GNU make orders `:=` / `::=` (simple) assignments before `=` (recursive)
+    // assignments in MAKEOVERRIDES, preserving relative order within each group.
+    makeoverrides.sort_by_key(|s| if s.contains(":=") { 0 } else { 1 });
     engine.set_var_with_origin(
         "MAKEOVERRIDES",
         &makeoverrides.join(" "),
@@ -671,7 +758,16 @@ fn run() -> i32 {
     // command-line variable assignments. MAKEFLAGS is recursive so
     // changes to MAKEOVERRIDES (even from inside a makefile) are
     // reflected when MAKEFLAGS is exported to child processes.
-    let mut mflags = mflags_short.clone();
+    // Sort short flags in GNU make's canonical order: case-insensitive,
+    // lowercase before uppercase for the same letter (e.g. r before R, s before S).
+    let mut mflags_chars: Vec<char> = mflags_short.chars().collect();
+    mflags_chars.sort_by(|a, b| {
+        let la = a.to_ascii_lowercase();
+        let lb = b.to_ascii_lowercase();
+        la.cmp(&lb).then(b.cmp(a))
+    });
+    let mflags_short_sorted: String = mflags_chars.into_iter().collect();
+    let mut mflags = mflags_short_sorted.clone();
     // Sort long flags in GNU make's switches-table order.
     // Add --eval strings to mflags_long for MAKEFLAGS propagation.
     // Encode: $ -> $$$$ (becomes $$ after one make expansion), space -> \\ (backslash-space).

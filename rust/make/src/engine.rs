@@ -1024,23 +1024,87 @@ impl Engine {
             }
 
             // Merge short flags: union of cmdline and file-assigned flags.
+            // Suppress mutually-exclusive pairs: cmdline "off" flag wins over file "on" flag.
             let mut merged_chars: Vec<char> = cmdline_short.chars().collect();
             for ch in file_short.chars() {
-                if !merged_chars.contains(&ch) {
-                    merged_chars.push(ch);
+                if merged_chars.contains(&ch) {
+                    continue;
                 }
+                // Cmdline --no-print-directory suppresses file w
+                if ch == 'w' && cmdline_long.contains(&"--no-print-directory".to_string()) {
+                    continue;
+                }
+                // Cmdline --no-silent suppresses file s
+                if ch == 's' && cmdline_long.contains(&"--no-silent".to_string()) {
+                    continue;
+                }
+                // Cmdline S suppresses file k; cmdline k suppresses file S
+                if ch == 'k' && cmdline_short.contains('S') {
+                    continue;
+                }
+                if ch == 'S' && cmdline_short.contains('k') {
+                    continue;
+                }
+                merged_chars.push(ch);
             }
-            merged_chars.sort();
+            merged_chars.sort_by(|a, b| {
+                let la = a.to_ascii_lowercase();
+                let lb = b.to_ascii_lowercase();
+                la.cmp(&lb).then(b.cmp(a))
+            });
 
             let mut merged = String::from_iter(&merged_chars);
 
+            // Suppress cmdline long flags that conflict with merged short flags.
+            // If file added 'w' and cmdline had --no-print-directory, 'w' was already
+            // suppressed above. But if file added 'w' and cmdline did NOT have
+            // --no-print-directory, suppress --no-print-directory that might be in cmdline.
+            // Conversely, if merged has 's', remove --no-silent from long flags.
+            // Actually: cmdline long flags always win, so we only filter file-added longs.
+
             // Collect all long flags: cmdline first (always preserved), then file-added.
-            let mut all_long: Vec<String> = cmdline_long.clone();
-            for fl in &file_long {
-                if !all_long.contains(fl) {
-                    all_long.push(fl.clone());
+            // Deduplicate by value (e.g. -Ilocaltmp appearing twice).
+            let mut all_long: Vec<String> = Vec::new();
+            for fl in cmdline_long.iter().chain(file_long.iter()) {
+                if all_long.contains(fl) {
+                    continue;
                 }
+                // File --no-print-directory suppressed if cmdline has w
+                if fl == "--no-print-directory" && cmdline_short.contains('w') {
+                    continue;
+                }
+                // File --no-silent suppressed if cmdline has s
+                if fl == "--no-silent" && cmdline_short.contains('s') {
+                    continue;
+                }
+                all_long.push(fl.clone());
             }
+            // Sort long flags in GNU make's canonical order:
+            // -I flags, -l flags, -O flags, --debug=X, --trace,
+            // --no-print-directory, --warn-undefined-variables, --no-silent, --eval
+            all_long.sort_by_key(|f| {
+                if f.starts_with("-I") {
+                    (0, f.clone())
+                } else if f.starts_with("-l") {
+                    (1, f.clone())
+                } else if f.starts_with("-O") {
+                    (2, f.clone())
+                } else if f.starts_with("--debug") {
+                    (3, f.clone())
+                } else if f == "--trace" {
+                    (4, f.clone())
+                } else if f == "--no-print-directory" {
+                    (5, f.clone())
+                } else if f == "--warn-undefined-variables" {
+                    (6, f.clone())
+                } else if f == "--no-silent" {
+                    (7, f.clone())
+                } else if f.starts_with("--eval") {
+                    (8, f.clone())
+                } else {
+                    (9, f.clone())
+                }
+            });
 
             // Append long flags.
             if merged.is_empty() && !all_long.is_empty() {
