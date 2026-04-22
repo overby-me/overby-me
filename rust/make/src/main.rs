@@ -100,6 +100,9 @@ fn run() -> i32 {
     // Track command-line variable overrides for MAKEOVERRIDES.
     // Only real command-line args (not inherited from MAKEFLAGS) go here.
     let mut makeoverrides: Vec<String> = Vec::new();
+    // Track env-inherited variable overrides (from MAKEFLAGS env).
+    // These appear after cmdline overrides in MAKEFLAGS output.
+    let mut env_overrides_list: Vec<String> = Vec::new();
 
     let mut targets = Vec::new();
     let mut makefiles: Vec<String> = Vec::new();
@@ -489,6 +492,9 @@ fn run() -> i32 {
                     if is_real_cmdline {
                         let escaped = combined.replace('$', "$$");
                         makeoverrides.push(format!("{name}={escaped}"));
+                    } else {
+                        let escaped = combined.replace('$', "$$");
+                        env_overrides_list.push(format!("{name}={escaped}"));
                     }
                     i += 1;
                     continue;
@@ -511,6 +517,9 @@ fn run() -> i32 {
                     // values like x=$(other.
                     let escaped = value.replace('$', "$$");
                     makeoverrides.push(format!("{name}{orig_sep}{escaped}"));
+                } else {
+                    let escaped = value.replace('$', "$$");
+                    env_overrides_list.push(format!("{name}{orig_sep}{escaped}"));
                 }
             }
             arg if arg.starts_with("--") => {
@@ -744,10 +753,33 @@ fn run() -> i32 {
     // GNU make stores these so sub-makes can inherit command-line overrides.
     // GNU make orders `:=` / `::=` (simple) assignments before `=` (recursive)
     // assignments in MAKEOVERRIDES, preserving relative order within each group.
+    // Combine: cmdline overrides first, then env-inherited overrides.
+    // Deduplicate: if a variable name appears in both cmdline and env,
+    // cmdline wins (don't include the env-inherited one).
     makeoverrides.sort_by_key(|s| if s.contains(":=") { 0 } else { 1 });
+    env_overrides_list.sort_by_key(|s| if s.contains(":=") { 0 } else { 1 });
+    let cmdline_var_names: std::collections::HashSet<String> = makeoverrides
+        .iter()
+        .filter_map(|s| {
+            s.find(":=")
+                .or_else(|| s.find('='))
+                .map(|idx| s[..idx].to_string())
+        })
+        .collect();
+    let mut all_overrides = makeoverrides.clone();
+    for ov in &env_overrides_list {
+        let var_name = ov.find(":=").or_else(|| ov.find('=')).map(|idx| &ov[..idx]);
+        if let Some(name) = var_name {
+            if !cmdline_var_names.contains(name) {
+                all_overrides.push(ov.clone());
+            }
+        } else {
+            all_overrides.push(ov.clone());
+        }
+    }
     engine.set_var_with_origin(
         "MAKEOVERRIDES",
-        &makeoverrides.join(" "),
+        &all_overrides.join(" "),
         engine::VarFlavor::Recursive,
         engine::VarOrigin::Default,
     );
