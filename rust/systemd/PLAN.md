@@ -9,8 +9,8 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 | Status | Count | Description |
 |--------|-------|-------------|
 | PASS | ~210 | Verified against `machine.succeed("test -f /testok")`.  Every upstream TEST-NN-NAME.*.sh subtest now has a nix wrapper; the 74-AUX-UTILS, 87-AUX-UTILS-VM, 13-NSPAWN, 29-PORTABLE, 50-DISSECT, 70-TPM2, 19-CGROUP, 07-PID1, and 81-GENERATORS series are all covered end-to-end.  Coverage parity with upstream systemd's subtest tree is complete. |
-| FAIL (architectural) | ~8 | Remaining: `udevadm verify` rules validator, exec-deserialization across daemon-reload, /etc/fstab RW (framework), `systemctl whoami` (framework), main-PID-change (framework), prefix-shell (framework). `systemd-fstab-generator` binary LANDED (MVP); udev → systemd device-unit wiring LANDED (iterating on VM-surfaced bugs). |
-| FAIL (unimplemented udev) | ~6 | Remaining: `.link` Property= / UnsetProperty= / ImportProperty= directives, inotify watch fd-store, credentials-unit, queued-events-serialization, owner-and-mode (After= deps), diskseq. Altname application, ID_PROCESSING, IMPORT value escaping, libudev monitor broadcast all LANDED. |
+| FAIL (architectural) | 0 | All previously-architectural failures now pass end-to-end: `udevadm verify`, exec-deserialization across daemon-reload, `/etc/fstab` RW, `systemctl whoami`, main-PID-change, prefix-shell.  `systemd-fstab-generator` LANDED. |
+| FAIL (unimplemented udev) | 0 | All 17-udev subtests pass: `.link` Property=/UnsetProperty=/ImportProperty= + specifier expansion + read-only property guards LANDED; event_timeout + SIGABRT LANDED; watch/diskseq/loop-own/owner-and-mode/verify LANDED. |
 | Boot hang (transient) | 0 | **FIXED** — was ~10 / ~30% rate; root cause was the bash `stage-2-init.sh` tee-pipe fd race.  `system.build.bootStage2` override in testsuite.nix strips the `if test -w /dev/kmsg; then exec > >(tee \| while read); fi` block.  See § 9. |
 
 ## Passing Tests
