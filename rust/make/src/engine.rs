@@ -5097,6 +5097,26 @@ impl Engine {
                 && self.check_intermediate(prereq, pattern_derived_prereqs.contains(prereq))
                 && !self.phony_targets.borrow().contains(prereq)
             {
+                // Skip building this missing intermediate, but still
+                // descend to build any phony order-only deps it has
+                // (GNU semantics: phony order-only prereqs of a missing
+                // intermediate are still evaluated).
+                let oo_deps: Vec<String> = self
+                    .rules
+                    .borrow()
+                    .get(prereq.as_str())
+                    .map(|entries| {
+                        entries
+                            .iter()
+                            .flat_map(|e| e.order_only.iter().cloned())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                for oo in oo_deps {
+                    if self.phony_targets.borrow().contains(&oo) {
+                        let _ = self.build_target_for(&oo, Some(prereq.as_str()));
+                    }
+                }
                 continue;
             }
             if let Err(e) = self.build_target_for(prereq, Some(target)) {

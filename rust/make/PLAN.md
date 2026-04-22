@@ -837,3 +837,21 @@ Subtest gains: WAIT 9→10. Categories unchanged at 133/135 — the
 remaining `targets/WAIT` and `features/parallelism` subtests require
 real concurrent recipe execution (job pool + jobserver), which is a
 larger structural change to the otherwise single-threaded engine.
+
+Round 14 (133/135 — small parallelism subtest gain):
+
+1. **Phony order-only deps of missing intermediates**: when
+   `build_target_for` decides to skip a missing intermediate prereq
+   (because the parent target is up-to-date and the intermediate
+   doesn't need to exist), it now still descends into the
+   intermediate's order-only deps that are phony, building each.
+   This matches GNU make's behavior where phony prereqs are always
+   evaluated regardless of intermediate-skipping. Fixes
+   `features/parallelism` subtest 8 (`.INTERMEDIATE` + `| phony`
+   order-only chain).
+
+Subtest gains: parallelism 1→2. Categories unchanged at 133/135 — the
+remaining 11 parallelism + 4 WAIT subtests genuinely require real
+concurrent recipe execution (the helper script `thelp.pl` uses
+cross-recipe file coordination via `wait FILE` that deadlocks under
+serial execution).
