@@ -1034,8 +1034,8 @@ fn main() {
         Some(Command::Calendar {
             ref expressions,
             iterations,
-            ..
-        }) => cmd_calendar(expressions, iterations),
+            ref base_time,
+        }) => cmd_calendar(expressions, iterations, base_time.as_deref()),
         Some(Command::Timespan { ref expressions }) => cmd_timespan(expressions),
         Some(Command::Timestamp { ref expressions }) => cmd_timestamp(expressions),
         Some(Command::Verify { ref files, .. }) => cmd_verify(files),
@@ -1212,11 +1212,25 @@ fn cmd_dot(
     println!("}}");
 }
 
-fn cmd_calendar(expressions: &[String], iterations: u32) {
+fn cmd_calendar(expressions: &[String], iterations: u32, base_time: Option<&str>) {
     if expressions.is_empty() {
         eprintln!("No calendar expression specified.");
         process::exit(1);
     }
+
+    // Resolve the base time — defaults to "now" if unspecified.  Any parse
+    // failure (e.g. `--base-time=never`) must exit non-zero to match
+    // upstream's TEST-65-ANALYZE expectation.
+    let base_now = match base_time {
+        Some(bt) => match parse_timestamp(bt) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("Failed to parse base time '{}': {}", bt, e);
+                process::exit(1);
+            }
+        },
+        None => SystemTime::now(),
+    };
 
     for expr in expressions {
         match CalendarSpec::parse(expr) {
@@ -1225,7 +1239,7 @@ fn cmd_calendar(expressions: &[String], iterations: u32) {
                 println!("Normalized form: {}", spec.normalized());
 
                 if iterations > 0 {
-                    let now = SystemTime::now();
+                    let now = base_now;
                     let mut ref_dt = CalendarSpec::system_time_to_datetime(now);
                     // Start from one second after now for "next" semantics
                     ref_dt = ref_dt.add_second();
