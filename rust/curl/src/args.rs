@@ -520,7 +520,8 @@ pub(crate) fn parse_args() -> Options {
             }
             "--proto-redir" => {
                 i += 1;
-                let _val = next_arg(&args, i, "--proto-redir");
+                let val = next_arg(&args, i, "--proto-redir");
+                opts.proto_redir = Some(val.to_string());
             }
             "-G" | "--get" => {
                 opts.get = true;

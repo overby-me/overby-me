@@ -425,6 +425,17 @@ fn main() {
                     );
                     exit_code = 47;
                 }
+                if resp.proto_redir_blocked {
+                    if let Some(ref redirect_url) = resp.redirect_url {
+                        let scheme = redirect_url.split("://").next().unwrap_or("");
+                        eprintln!(
+                            "curl: (1) Protocol \"{scheme}\" not supported or disabled in libcurl"
+                        );
+                    } else {
+                        eprintln!("curl: (1) Protocol not supported or disabled in libcurl");
+                    }
+                    exit_code = 1;
+                }
                 if resp.weird_server_reply {
                     eprintln!("curl: (8) weird server reply");
                     exit_code = 8;
@@ -712,6 +723,7 @@ fn main() {
 
                 let skip_body = (opts.resume_from.is_some() && resp.status == 416)
                     || resp.max_redirects_reached
+                    || resp.proto_redir_blocked
                     || resp.weird_server_reply
                     || (fail_http_error && !opts.fail_with_body)
                     || resume_range_refused

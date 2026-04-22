@@ -1412,6 +1412,7 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                 redirects += 1;
 
                 // Collect intermediate response headers for -i output.
+                let prev_redirect_headers_len = redirect_headers.len();
                 redirect_headers.extend_from_slice(&resp.header_bytes);
 
                 // Percent-encode spaces in the Location URL.
@@ -1456,6 +1457,66 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                 // --path-as-is only affects the *initial* URL, not relative-URL
                 // resolution during redirects.
                 current_url = normalize_url_path(&current_url);
+
+                // --proto-redir: check whether the redirect target's scheme is allowed.
+                if let Some(spec) = &opts.proto_redir {
+                    let new_scheme = current_url
+                        .split_once("://")
+                        .map(|(s, _)| s.to_ascii_lowercase())
+                        .unwrap_or_default();
+                    let mut allow_http = true;
+                    let mut allow_https = true;
+                    for tok in spec.split(',') {
+                        let tok = tok.trim();
+                        if tok.is_empty() {
+                            continue;
+                        }
+                        let (op, name) = match tok.as_bytes()[0] {
+                            b'+' => ('+', &tok[1..]),
+                            b'-' => ('-', &tok[1..]),
+                            b'=' => ('=', &tok[1..]),
+                            _ => ('+', tok),
+                        };
+                        let name = name.to_ascii_lowercase();
+                        if op == '=' {
+                            allow_http = false;
+                            allow_https = false;
+                        }
+                        let val = op != '-';
+                        match name.as_str() {
+                            "all" => {
+                                allow_http = val;
+                                allow_https = val;
+                            }
+                            "none" => {
+                                allow_http = false;
+                                allow_https = false;
+                            }
+                            "http" => allow_http = val,
+                            "https" => allow_https = val,
+                            _ => {}
+                        }
+                    }
+                    let allowed = match new_scheme.as_str() {
+                        "http" => allow_http,
+                        "https" => allow_https,
+                        _ => true,
+                    };
+                    if !allowed {
+                        // Block: drop the current resp from accumulated
+                        // redirect_headers so it is not duplicated, then
+                        // return the resp itself with proto_redir_blocked set.
+                        redirect_headers.truncate(prev_redirect_headers_len);
+                        let mut final_resp = resp;
+                        final_resp.redirect_headers = redirect_headers;
+                        final_resp.num_connects = connects;
+                        final_resp.num_redirects = redirects - 1;
+                        final_resp.proto_redir_blocked = true;
+                        final_resp.final_url = Some(current_url.clone());
+                        final_resp.redirect_url = Some(current_url.clone());
+                        return Ok(final_resp);
+                    }
+                }
 
                 // RFC 7231: on 301/302/303, a POST becomes a GET (and its body
                 // is dropped) unless the user opts in via --post301, --post302,
