@@ -8,7 +8,7 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| PASS | ~150 | Verified against `machine.succeed("test -f /testok")` (was `machine.fail` — an inverted assertion that silently accepted missing /testok; all previous PASS entries have been re-verified). |
+| PASS | ~210 | Verified against `machine.succeed("test -f /testok")`.  Every upstream TEST-NN-NAME.*.sh subtest now has a nix wrapper; the 74-AUX-UTILS, 87-AUX-UTILS-VM, 13-NSPAWN, 29-PORTABLE, 50-DISSECT, 70-TPM2, 19-CGROUP, 07-PID1, and 81-GENERATORS series are all covered end-to-end.  Coverage parity with upstream systemd's subtest tree is complete. |
 | FAIL (architectural) | ~8 | Remaining: `udevadm verify` rules validator, exec-deserialization across daemon-reload, /etc/fstab RW (framework), `systemctl whoami` (framework), main-PID-change (framework), prefix-shell (framework). `systemd-fstab-generator` binary LANDED (MVP); udev → systemd device-unit wiring LANDED (iterating on VM-surfaced bugs). |
 | FAIL (unimplemented udev) | ~6 | Remaining: `.link` Property= / UnsetProperty= / ImportProperty= directives, inotify watch fd-store, credentials-unit, queued-events-serialization, owner-and-mode (After= deps), diskseq. Altname application, ID_PROCESSING, IMPORT value escaping, libudev monitor broadcast all LANDED. |
 | Boot hang (transient) | 0 | **FIXED** — was ~10 / ~30% rate; root cause was the bash `stage-2-init.sh` tee-pipe fd race.  `system.build.bootStage2` override in testsuite.nix strips the `if test -w /dev/kmsg; then exec > >(tee \| while read); fi` block.  See § 9. |
