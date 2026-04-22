@@ -1064,6 +1064,65 @@ fn run() -> i32 {
         } else if has_w && engine.print_directory_opt.is_none() {
             engine.print_directory_opt = Some(true);
         }
+
+        // -R (no-builtin-variables) implies -r (no-builtin-rules) in GNU make.
+        // Check the raw MAKEFLAGS value for whether 'r' is already present;
+        // if not, insert it before 'R'. We check the raw value because the
+        // scanner above sets has_r=true whenever it sees 'R'.
+        if has_big_r {
+            let vars = engine.vars.borrow();
+            let raw = vars.get("MAKEFLAGS").map(|v| (v.value.clone(), v.origin));
+            drop(vars);
+            if let Some((raw_val, origin)) = raw {
+                // Check if 'r' is already in the short-flag cluster (before
+                // any space, '$', or '-'). Only look at leading flag chars.
+                let flags_end = raw_val.find([' ', '$', '-']).unwrap_or(raw_val.len());
+                let flag_cluster = &raw_val[..flags_end];
+                if !flag_cluster.contains('r')
+                    && let Some(pos) = raw_val.find('R')
+                {
+                    let mut new_val = raw_val[..pos].to_string();
+                    new_val.push('r');
+                    new_val.push_str(&raw_val[pos..]);
+                    engine.vars.borrow_mut().insert(
+                        "MAKEFLAGS".to_string(),
+                        engine::Variable {
+                            value: new_val,
+                            flavor: engine::VarFlavor::Recursive,
+                            origin,
+                        },
+                    );
+                }
+            }
+        }
+
+        // GNU make reconstructs MAKEFLAGS before running recipes.
+        // If MAKEOVERRIDES is now empty, switch from the unconditional
+        // " -- $(MAKEOVERRIDES)" suffix to the conditional form so the
+        // " -- " separator disappears when there are no overrides.
+        {
+            let mo = engine.lookup_var("MAKEOVERRIDES");
+            if mo.trim().is_empty() {
+                let vars = engine.vars.borrow();
+                let raw = vars.get("MAKEFLAGS").map(|v| (v.value.clone(), v.origin));
+                drop(vars);
+                if let Some((raw_val, origin)) = raw
+                    && let Some(pos) = raw_val.find(" -- $(MAKEOVERRIDES)")
+                {
+                    let mut new_val = raw_val[..pos].to_string();
+                    new_val.push_str("$(if $(MAKEOVERRIDES), -- $(MAKEOVERRIDES))");
+                    new_val.push_str(&raw_val[pos + " -- $(MAKEOVERRIDES)".len()..]);
+                    engine.vars.borrow_mut().insert(
+                        "MAKEFLAGS".to_string(),
+                        engine::Variable {
+                            value: new_val,
+                            flavor: engine::VarFlavor::Recursive,
+                            origin,
+                        },
+                    );
+                }
+            }
+        }
     }
 
     let rc = engine.build(&targets);

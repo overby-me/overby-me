@@ -812,6 +812,12 @@ fn call_function(
             for name in &export_names {
                 shell_cmd.env(name, resolve_for_env(name));
             }
+            // Always export MAKEFLAGS and MAKELEVEL for sub-make
+            // compatibility (GNU make exports these to all children).
+            shell_cmd.env("MAKEFLAGS", engine.lookup_var("MAKEFLAGS"));
+            let makelevel: i32 = engine.lookup_var_or("MAKELEVEL", "0").parse().unwrap_or(0);
+            shell_cmd.env("MAKELEVEL", (makelevel + 1).to_string());
+            shell_cmd.env("MAKE", engine.lookup_var("MAKE"));
             let result = shell_cmd.arg(&cmd).output();
             *engine.shell_depth.borrow_mut() -= 1;
             match result {

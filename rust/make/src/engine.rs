@@ -606,6 +606,12 @@ pub struct Engine {
     precious_patterns: RefCell<Vec<String>>,
     /// Targets currently being built — used for circular dependency detection.
     building_chain: RefCell<HashSet<String>>,
+    /// Files that existed (locally or via VPATH) before make tried to build them.
+    /// Used to suppress intermediate deletion for pre-existing files.
+    vpath_preexisting: RefCell<HashSet<String>>,
+    /// Files whose recipe ran but didn't create the file locally.
+    /// VPATH resolution is revoked for these files (GNU make "un-vpath").
+    vpath_revoked: RefCell<HashSet<String>>,
     /// `.SECONDEXPANSION:` has been seen — affects rules defined after.
     pub second_expansion_enabled: Cell<bool>,
     /// Command-line-derived short flags for MAKEFLAGS (e.g. "erR").
@@ -715,6 +721,8 @@ impl Engine {
             notintermediate_patterns: RefCell::new(Vec::new()),
             notintermediate_all: Cell::new(false),
             pending_intermediate_deletions: RefCell::new(Vec::new()),
+            vpath_preexisting: RefCell::new(HashSet::new()),
+            vpath_revoked: RefCell::new(HashSet::new()),
             pattern_vars: RefCell::new(Vec::new()),
             pattern_exports: RefCell::new(Vec::new()),
             precious_targets: RefCell::new(HashSet::new()),
@@ -1137,6 +1145,20 @@ impl Engine {
                     self.always_make.set(true);
                 }
             }
+            // When -w is set via MAKEFLAGS in a makefile, print
+            // "Entering directory" immediately if not yet printed.
+            if merged_chars.contains(&'w') && !self.printed_entering.get() {
+                let makelevel: i32 = self.lookup_var("MAKELEVEL").parse().unwrap_or(0);
+                let make_tag = if makelevel > 0 {
+                    format!("make[{makelevel}]")
+                } else {
+                    "make".to_string()
+                };
+                if let Ok(cwd) = std::env::current_dir() {
+                    println!("{make_tag}: Entering directory '{}'", cwd.display());
+                }
+                self.printed_entering.set(true);
+            }
             for fl in &all_long {
                 if fl == "--warn-undefined-variables" {
                     self.warn_undefined_variables.set(true);
@@ -1347,7 +1369,13 @@ impl Engine {
     /// if the file is found in a VPATH directory, or None if not found.
     /// If the file already exists in the current directory, returns None
     /// (the caller should check the current directory first).
+    /// Files in `vpath_revoked` are skipped (GNU make "un-vpath" behavior).
     fn resolve_vpath(&self, name: &str) -> Option<String> {
+        // GNU make "un-vpath": if a recipe ran for this file but didn't
+        // create it locally, don't resolve via VPATH anymore.
+        if self.vpath_revoked.borrow().contains(name) {
+            return None;
+        }
         // GNU make's vpath/VPATH search only fires when the named file
         // is NOT in the current directory. If `name` exists locally,
         // do not redirect to a vpath copy.
@@ -2379,6 +2407,12 @@ impl Engine {
                 for flag in shell_flags.split_whitespace() {
                     shell_cmd.arg(flag);
                 }
+                // Always export MAKEFLAGS, MAKELEVEL, and MAKE for sub-make
+                // compatibility (GNU make exports these to all children).
+                shell_cmd.env("MAKEFLAGS", self.lookup_var("MAKEFLAGS"));
+                let makelevel: i32 = self.lookup_var_or("MAKELEVEL", "0").parse().unwrap_or(0);
+                shell_cmd.env("MAKELEVEL", (makelevel + 1).to_string());
+                shell_cmd.env("MAKE", self.lookup_var("MAKE"));
                 let output = shell_cmd
                     .arg(&cmd)
                     .output()
@@ -3528,6 +3562,17 @@ impl Engine {
         }
         let _chain_guard = ChainGuard(&self.building_chain, target.to_string());
 
+        // Track whether the target already exists (locally or via VPATH)
+        // before we attempt to build it. Pre-existing files should not
+        // be deleted as intermediates (GNU make behavior).
+        if !self.vpath_preexisting.borrow().contains(target)
+            && (Path::new(target).exists() || self.resolve_vpath(target).is_some())
+        {
+            self.vpath_preexisting
+                .borrow_mut()
+                .insert(target.to_string());
+        }
+
         let is_phony = self.phony_targets.borrow().contains(target);
 
         // Find explicit rules. If none exist for `target` directly,
@@ -3976,11 +4021,12 @@ impl Engine {
 
         // Find matching pattern rule if no explicit recipe
         let has_recipe = rules.iter().any(|r| !r.recipe.is_empty());
-        let pattern_match = if !has_recipe && !self.skip_implicit.borrow().contains(target) {
-            self.find_pattern_rule(target)
-        } else {
-            None
-        };
+        let pattern_match =
+            if !has_recipe && !is_phony && !self.skip_implicit.borrow().contains(target) {
+                self.find_pattern_rule(target)
+            } else {
+                None
+            };
 
         // For non-double-colon grouped targets, if the group's recipe
         // was already executed by a sibling, fire any second-expansion
@@ -4247,9 +4293,6 @@ impl Engine {
                 auto_vars.insert("%", String::new());
                 add_df_variants(&mut auto_vars);
                 let raw = pat_rule.raw_prereq_text.clone().unwrap_or_default();
-                // Escape `$` in stem so it doesn't trigger variable expansion
-                // when the stem is substituted into the raw prereq text.
-                let stem = stem.replace('$', "$$");
                 // Track which raw tokens contained `%` (pattern-derived
                 // intermediates) before stem substitution. Tokens without
                 // `%` come from variables/SE expansions; they are NOT
@@ -4266,12 +4309,35 @@ impl Engine {
                         .collect();
                 let prev_in_recipe = *self.in_recipe.borrow();
                 *self.in_recipe.borrow_mut() = true;
+                // For directory-transfer: split stem into dir + base,
+                // substitute only base for %, expand, then prepend dir
+                // to each resulting token. This matches GNU make's SE
+                // pattern-rule semantics where directory transfer happens
+                // AFTER second expansion, not before.
+                let (stem_dir, stem_base) = if let Some(slash) = stem.rfind('/') {
+                    (Some(&stem[..=slash]), &stem[slash + 1..])
+                } else {
+                    (None, stem.as_str())
+                };
                 let mut expanded_per_token: Vec<(String, bool)> = Vec::new();
                 for (rt, is_pat) in &raw_tokens {
-                    let with_stem = replace_first_percent_per_token(rt, &stem, true);
+                    // Substitute % with base stem only (no dir prepend yet).
+                    let with_stem =
+                        replace_first_percent_per_token(rt, &stem_base.replace('$', "$$"), false);
                     let exp = self.with_target_vars_applied(target, || {
                         expand::expand_with_auto(&with_stem, self, &auto_vars)
                     });
+                    // Now prepend directory to each expanded token if the
+                    // original raw token contained % (pattern-derived) and
+                    // the stem has a directory component.
+                    let exp = if let (true, Some(dir)) = (*is_pat, stem_dir) {
+                        exp.split_whitespace()
+                            .map(|tok| format!("{dir}{tok}"))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    } else {
+                        exp
+                    };
                     expanded_per_token.push((exp, *is_pat));
                 }
                 *self.in_recipe.borrow_mut() = prev_in_recipe;
@@ -4321,7 +4387,11 @@ impl Engine {
                 if let Some(orig_oo) = &pat_rule.raw_order_only_text
                     && !orig_oo.trim().is_empty()
                 {
-                    let with_stem_oo = replace_first_percent_per_token(orig_oo, &stem, true);
+                    let with_stem_oo = replace_first_percent_per_token(
+                        orig_oo,
+                        &stem_base.replace('$', "$$"),
+                        false,
+                    );
                     let oo_exp = expand::expand_with_auto(&with_stem_oo, self, &auto_vars);
                     if !oo_combined.is_empty() {
                         oo_combined.push(' ');
@@ -4683,7 +4753,11 @@ impl Engine {
                 // newer than the target, we must rebuild (and thus must
                 // build any missing intermediates too).
                 for prereq in &all_prereqs {
-                    if let Ok(pm) = std::fs::metadata(prereq.as_str()).and_then(|m| m.modified())
+                    let prereq_path = self
+                        .resolve_vpath(prereq)
+                        .unwrap_or_else(|| prereq.to_string());
+                    if let Ok(pm) =
+                        std::fs::metadata(prereq_path.as_str()).and_then(|m| m.modified())
                         && pm > tm
                     {
                         any_source_newer = true;
@@ -4699,7 +4773,11 @@ impl Engine {
                 // (intermediate) to also be built.
                 if !any_source_newer {
                     for prereq in &all_prereqs {
+                        let prereq_resolved = self
+                            .resolve_vpath(prereq)
+                            .unwrap_or_else(|| prereq.to_string());
                         if !Path::new(prereq.as_str()).exists()
+                            && !Path::new(prereq_resolved.as_str()).exists()
                             && !self.check_intermediate(
                                 prereq,
                                 pattern_derived_prereqs.contains(prereq),
@@ -4723,9 +4801,16 @@ impl Engine {
                         if depth > 6 {
                             return false;
                         }
-                        if let Some((rule, stem)) = engine.find_pattern_rule(file) {
+                        let resolved_file = engine
+                            .resolve_vpath(file)
+                            .unwrap_or_else(|| file.to_string());
+                        if let Some((rule, stem)) = engine
+                            .find_pattern_rule(file)
+                            .or_else(|| engine.find_pattern_rule(&resolved_file))
+                        {
                             for pp in &rule.prereq_patterns {
                                 let src = pattern_subst_with_dir(pp, &stem);
+                                let src = engine.resolve_vpath(&src).unwrap_or(src);
                                 if let Ok(sm) = std::fs::metadata(&src).and_then(|m| m.modified()) {
                                     if sm > target_m {
                                         return true;
@@ -4743,7 +4828,11 @@ impl Engine {
                         false
                     }
                     for prereq in &all_prereqs {
+                        let pr = self
+                            .resolve_vpath(prereq)
+                            .unwrap_or_else(|| prereq.to_string());
                         if !Path::new(prereq.as_str()).exists()
+                            && !Path::new(pr.as_str()).exists()
                             && check_chain_sources(self, prereq, tm, 0)
                         {
                             any_source_newer = true;
@@ -5419,10 +5508,22 @@ impl Engine {
             }
         }
 
+        // GNU make "un-vpath": after running a target's recipe, if the
+        // file was not created locally, revoke VPATH resolution so that
+        // subsequent rules using this file as a prereq see the local
+        // (missing) name in $< / $^ instead of the VPATH-resolved path.
+        if self.rebuilt_targets.borrow().contains(target)
+            && !is_phony
+            && !Path::new(target).exists()
+        {
+            self.vpath_revoked.borrow_mut().insert(target.to_string());
+        }
+
         // Collect intermediate files for deferred deletion. They are
         // deleted after the top-level goal completes (in `build`).
         if !self.dry_run && !self.touch && !self.question {
             let rebuilt = self.rebuilt_targets.borrow();
+            let preexisting = self.vpath_preexisting.borrow();
             let mut pending = self.pending_intermediate_deletions.borrow_mut();
             for prereq in &all_prereqs {
                 let is_pat = pattern_derived_prereqs.contains(prereq);
@@ -5430,6 +5531,7 @@ impl Engine {
                     && self.check_intermediate(prereq, is_pat)
                     && !self.secondary_targets.borrow().contains(prereq.as_str())
                     && !self.secondary_all.get()
+                    && !preexisting.contains(prereq.as_str())
                     && !pending.iter().any(|(p, _)| p == prereq)
                 {
                     pending.push((prereq.clone(), is_pat));
