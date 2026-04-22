@@ -9527,7 +9527,13 @@ pub fn execute_command(
             // Skip transient units — they only exist at runtime.  A unit
             // is transient if it has no fragment_path OR its fragment_path
             // lives under /run/systemd/transient (where busctl/systemd-run
-            // write synthetic config for on-the-fly units).
+            // write synthetic config for on-the-fly units).  Also skip any
+            // unit that is currently `Started`/`Starting`/`Restarting` so a
+            // user who moves the .service file aside between runs can still
+            // observe `is-active` returning success — matches upstream
+            // systemd's TEST-07-PID1.issue-3171 expectation that a running
+            // socket survives daemon-reload after its on-disk file moves
+            // to `.disabled`.
             let mut removed_units_names = Vec::new();
             let stale_ids: Vec<_> = run_info
                 .unit_table
@@ -9536,6 +9542,14 @@ pub fn execute_command(
                     if fresh_names.contains(&unit.id.name) {
                         return false;
                     }
+                    let status = unit.common.status.read_poisoned();
+                    if matches!(
+                        &*status,
+                        UnitStatus::Started(_) | UnitStatus::Starting | UnitStatus::Restarting
+                    ) {
+                        return false;
+                    }
+                    drop(status);
                     match &unit.common.unit.fragment_path {
                         None => false,
                         Some(p) => {
