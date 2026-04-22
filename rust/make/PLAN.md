@@ -440,7 +440,7 @@ Latest baseline (`bash /tmp/run-make-baseline.sh`):
 | `features/vpathplus` | 2/4 subtests pass; #1 (built-in cc pipeline via vpath + un-vpath on failed rebuild), #3 (VPATH intermediate chain timestamp comparison) |
 | `options/dash-f` | First failing subtest: prereq makefile rebuild before consuming stdin (`bye.mk: bye.mk.src`) — needs makefile auto-rebuild |
 | `targets/WAIT` | `.WAIT` requires parallel scheduling |
-| `variables/MAKEFLAGS` | Full MAKEFLAGS round-trip parse in sub-makes |
+| `variables/MAKEFLAGS` | 181/218 subtests pass; remaining 37 need sub-make MAKELEVEL propagation (116-117, 124-127), makefile auto-rebuild (197-208), sub-make with debug (210-217), MAKEOVERRIDES override semantics (101-107), and `-e` env-override MAKEFLAGS interaction (112-115) |
 
 The biggest remaining unlocks are **makefile auto-rebuild/re-exec**
 (unlocks `reinvoke`, `dash-f`, `dash-B` subtests) and **MAKEFLAGS
