@@ -7710,7 +7710,7 @@ pub fn execute_command(
             }
 
             // Get ExecReload commands and the main PID for $MAINPID substitution
-            let (reload_cmds, main_pid, working_dir) =
+            let (reload_cmds, main_pid, working_dir, service_type) =
                 if let Specific::Service(svc) = &unit.specific {
                     let state = svc.state.read_poisoned();
                     let pid = state.srvc.main_pid.or(state.srvc.pid);
@@ -7718,12 +7718,37 @@ pub fn execute_command(
                         svc.conf.reload.clone(),
                         pid.map(i32::from),
                         svc.conf.exec_config.working_directory.clone(),
+                        svc.conf.srcv_type,
                     )
                 } else {
                     return Err(format!("Unit {unit_name} is not a service, cannot reload."));
                 };
 
-            if reload_cmds.is_empty() {
+            // Type=notify-reload: no ExecReload needed.  Send SIGHUP to
+            // the main PID — upstream systemd does the same (it writes
+            // RELOADING=1 / READY=1 around the reload).  TEST-17-UDEV
+            // exercises this via `systemctl reload systemd-udevd.service`.
+            let notify_reload_sighup = matches!(
+                service_type,
+                crate::units::ServiceType::NotifyReload
+            ) && reload_cmds.is_empty();
+            if notify_reload_sighup {
+                let Some(pid) = main_pid else {
+                    return Err(format!(
+                        "Unit {unit_name} has no main PID, cannot send SIGHUP."
+                    ));
+                };
+                if unsafe { libc::kill(pid, libc::SIGHUP) } != 0 {
+                    let err = std::io::Error::last_os_error();
+                    return Err(format!(
+                        "Failed to send SIGHUP to {unit_name} (pid {pid}): {err}"
+                    ));
+                }
+                result_vec
+                    .as_array_mut()
+                    .unwrap()
+                    .push(Value::String(format!("Reloaded {unit_name}")));
+            } else if reload_cmds.is_empty() {
                 return Err(format!(
                     "Job for {unit_name} failed because the unit does not support reload."
                 ));
