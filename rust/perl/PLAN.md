@@ -592,6 +592,83 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
 
 ### Recent fixes
 
+- **`local($a[i])` parens-form + array-element restore**: parser only
+  recognised `local $a[i]` (bare form), so `local($a[i]) = X` and
+  `local(@a[i,j]) = …` fell through to `parse_var_list` which dropped
+  the subscript. Added a `LParen + ScalarVar + LBracket/LBrace` peek
+  branch in `parse_local_decl` that emits the same `Stmt::LocalHashElem`
+  as the bare form (with `@`-prefix bucket name for array slots).
+  Interpreter side: `Stmt::LocalHashElem` now handles array slots —
+  saves prior value (or absent marker), writes new value, autovivifies
+  the slot if needed. `pop_scope` restores the slot, marks the index
+  as deleted if it was originally absent, then trims trailing deleted
+  runs so `scalar @a` shrinks to the original length. Also added
+  `local_array_len_saves` per-scope: any auto-viv padding slots between
+  the original `@a` length and the localised index get marked deleted
+  on scope exit (so `local($a[5])` against a 3-elem array doesn't leak
+  undef padding at indices 3,4 on exit). Net: op/local goes from ~24
+  passing in diff to ~142.
+
+- **Paired delimiter `\\` escape in q/qq/qr/qw/m/s**: the
+  `read_delimited_string` scanner only recognised `\open` / `\close`
+  as 2-char escapes inside paired delimiters (`q(...)`, `qq{...}`,
+  etc.); a literal `\\` was treated as a single backslash followed by
+  the next char as a normal character. That meant `qq(<<\`\\)`consumed`\\)` and ran past the closing paren, scanning the rest of the
+  source as one giant string. Adding `\\`as a 2-char escape (alongside`\open` / `\close`) prevents the runaway. Unblocks every`fresh_perl_*`case in op/heredoc that constructs program text via`qq(... \\)` — the
+  test count goes from ~80 actual lines to ~924 of 1802.
+
+- **Regex interpolation: `$name[...]` is only a subscript when the
+  brackets look like one**: in `interp_regex_pattern`, a `$name[...]`
+  sequence was unconditionally treated as an array-element access,
+  with the inside parsed (or fall-through to `0`). Reference perl
+  treats `[...]` as a regex character class when the bracketed
+  contents don't form a valid array index. Now we accept the
+  subscript form only when the inside parses as an integer, looks
+  like a simple `$var`, or `@name` actually has elements; otherwise
+  `$name` is interpolated as a scalar and `[...]` is emitted
+  literally for the regex engine to handle as a char class. Fixes
+  patterns like `/^$foo[$A-Z]$/` (base/lex test 26).
+
+- **`my $^X` / `my ${^XYZ}` parse-time error**: reference perl rejects
+  declaring magic-globals with `my` and emits `Can't use global $^X in
+  "my" at FILE line N.` at compile time. `parse_my_decl` already had a
+  similar pattern for `my $$ref` (scalar-deref); added a parallel
+  check for `Token::ScalarVar(name)` whose name starts with `^` (both
+  `$^X` and `${^XYZ}` lex to `ScalarVar("^…")`). The error is recorded
+  via `self.error.get_or_insert(msg)` so `eval STRING` captures it in
+  `$@`. Fixes base/lex tests 34–35.
+
+- **Interpolated `${NAME[idx]}` / `${NAME{key}}` accepts caret names**:
+  the brace-disambiguator subscript form (e.g. `"${^TEST[0]}"` =
+  `$ {^TEST}[0]`) only walked the inner-name end-pointer past `_` /
+  alpha chars, not `^`, so caret-prefixed names fell through to the
+  scalar-block-deref path (which can't index an array). Added `^` to
+  the first-char check. Fixes base/lex tests 39–41 (`${^TEST[0]}`,
+  `${^TEST[1]}`).
+
+- **Brace-subscript form tolerates whitespace around the bracket**:
+  `${ ^TEST [1] }` previously failed because `name_end` stopped at
+  the space and the `after = " [1]"` slice didn't satisfy the
+  `starts_with('[')` check. Trimming `after` (and the bracket
+  contents `inside`) lets whitespace-padded forms like `${ NAME [N] }`
+  reach the subscript path.
+
+- **`# line N "FILE"` directive**: Perl's lexical-line directive now
+  renames the apparent source file + line for diagnostics (caller(),
+  die, $0, etc.). Implemented end-to-end: the lexer detects
+  `\s*#\s*line\s+N(?:\s+"FILE")?` at start-of-line, adjusts the
+  internal `line_offset` so subsequent `recompute_line()` maps
+  physical lines to virtual line numbers, and records `(token_idx,
+  FILE)` pairs in a new `pub file_overrides` side channel. The
+  parser drains these in `parse_program` / `parse_block_body`,
+  emitting a new `Stmt::FileMark(file)` before the next
+  `Stmt::LineMark(line)`. The interpreter updates `current_file` on
+  `FileMark`. All `Lexer::new` / `Parser::new_with_lines` call sites
+  now plumb `file_overrides` through (a new
+  `Parser::new_with_lines_and_files` keeps `new_with_lines` as a
+  back-compat shim). Fixes base/lex tests 49–50 (the plink/plunk
+  file-rename round-trip).
+
 - **`chr(N)` under `use bytes` for negative N**: previously returned
   U+FFFD for any negative input. Reference perl wraps mod 256, so
   `chr(-1) == "\xFF"`, `chr(-2) == "\xFE"`, `chr(-0.1) == "\x00"`.

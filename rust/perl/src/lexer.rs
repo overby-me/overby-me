@@ -345,6 +345,14 @@ pub struct Lexer {
     /// Lex-time fatal error, e.g. an unterminated heredoc. main.rs checks
     /// this after tokenize() and exits with reference perl's diagnostic.
     pub error: Option<String>,
+    /// Records `# line N "FILE"` directives. Each entry is
+    /// (token_idx, file). Drained by parser to emit Stmt::FileMark.
+    pub file_overrides: Vec<(usize, String)>,
+    /// Updated by `tokenize()` before each `skip_whitespace_and_comments`
+    /// call so `try_handle_line_directive` knows the index of the next token.
+    cur_token_count: usize,
+    /// Added to `current_line` after recompute to honour `# line N` directives.
+    line_offset: isize,
 }
 
 struct PendingHeredoc {
@@ -468,6 +476,9 @@ impl Lexer {
             keywords,
             pending_heredocs: Vec::new(),
             error: None,
+            file_overrides: Vec::new(),
+            cur_token_count: 0,
+            line_offset: 0,
         }
     }
 
@@ -537,12 +548,109 @@ impl Lexer {
             }
             // Skip comments (to end-of-line, not including the newline)
             if self.ch() == '#' {
+                let comment_start = self.pos;
                 while self.pos < self.input.len() && self.ch() != '\n' {
                     self.pos += 1;
                 }
+                self.try_handle_line_directive(comment_start);
             } else {
                 break;
             }
+        }
+    }
+
+    /// If the comment between `[start, self.pos)` matches `# line N` or
+    /// `# line N "FILE"` AND the comment starts at start-of-line (only
+    /// whitespace between the previous newline and `#`), record the file
+    /// override (if any) and adjust `current_line` so the *next* line is N.
+    fn try_handle_line_directive(&mut self, start: usize) {
+        // Verify start-of-line: walk back from `start` over spaces/tabs
+        let mut k = start;
+        while k > 0 {
+            let c = self.input[k - 1];
+            if c == '\n' {
+                break;
+            }
+            if c == ' ' || c == '\t' {
+                k -= 1;
+                continue;
+            }
+            return;
+        }
+        // self.input[start] == '#'
+        let mut i = start + 1;
+        while i < self.pos && (self.input[i] == ' ' || self.input[i] == '\t') {
+            i += 1;
+        }
+        let word = ['l', 'i', 'n', 'e'];
+        if i + 4 > self.pos {
+            return;
+        }
+        for (j, w) in word.iter().enumerate() {
+            if self.input[i + j] != *w {
+                return;
+            }
+        }
+        i += 4;
+        if i >= self.pos || (self.input[i] != ' ' && self.input[i] != '\t') {
+            return;
+        }
+        while i < self.pos && (self.input[i] == ' ' || self.input[i] == '\t') {
+            i += 1;
+        }
+        let num_start = i;
+        while i < self.pos && self.input[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i == num_start {
+            return;
+        }
+        let num_str: String = self.input[num_start..i].iter().collect();
+        let n: usize = match num_str.parse() {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        let mut file: Option<String> = None;
+        let mut j = i;
+        while j < self.pos && (self.input[j] == ' ' || self.input[j] == '\t') {
+            j += 1;
+        }
+        if j < self.pos && self.input[j] == '"' {
+            j += 1;
+            let fs = j;
+            while j < self.pos && self.input[j] != '"' {
+                j += 1;
+            }
+            if j >= self.pos {
+                return;
+            }
+            file = Some(self.input[fs..j].iter().collect());
+            j += 1;
+        }
+        while j < self.pos && (self.input[j] == ' ' || self.input[j] == '\t') {
+            j += 1;
+        }
+        if j != self.pos {
+            return;
+        }
+
+        // Count raw newlines from start of input to `start` to get the
+        // 1-based physical line of the directive itself (before offset).
+        let mut raw_line: isize = 1;
+        for i in 0..start.min(self.input.len()) {
+            if self.input[i] == '\n' {
+                raw_line += 1;
+            }
+        }
+        // We want the *next* physical line (raw_line + 1) to render as `n`.
+        self.line_offset = (n as isize) - (raw_line + 1);
+        self.current_line = if (raw_line + self.line_offset) < 1 {
+            1
+        } else {
+            (raw_line + self.line_offset) as usize
+        };
+        if let Some(f) = file {
+            self.file_overrides.push((self.cur_token_count, f));
         }
     }
 
@@ -551,13 +659,14 @@ impl Lexer {
     /// per token. Keeps line tracking correct even when helpers consume
     /// newlines without updating `current_line`.
     fn recompute_line(&mut self) {
-        let mut line = 1;
+        let mut line: isize = 1;
         for i in 0..self.pos.min(self.input.len()) {
             if self.input[i] == '\n' {
                 line += 1;
             }
         }
-        self.current_line = line;
+        let adj = line + self.line_offset;
+        self.current_line = if adj < 1 { 1 } else { adj as usize };
     }
 
     fn skip_pod(&mut self) {
@@ -596,6 +705,7 @@ impl Lexer {
         let mut tokens = Vec::new();
 
         loop {
+            self.cur_token_count = tokens.len();
             self.skip_whitespace_and_comments();
             // Recompute line from absolute position to catch any newlines
             // consumed by internal helpers (heredocs, POD, multi-line strings)
@@ -1617,13 +1727,22 @@ impl Lexer {
 
         // Filter out newlines (they're not significant in our grammar).
         // We have to drop the parallel line entries too to keep them aligned.
+        // file_overrides indices refer to pre-filter positions — remap them.
+        let mut index_map: Vec<usize> = Vec::with_capacity(tokens.len() + 1);
         let mut kept_tokens = Vec::with_capacity(tokens.len());
         let mut kept_lines = Vec::with_capacity(tokens.len());
-        for (t, l) in tokens.iter().zip(self.token_lines.iter()) {
+        for (i, (t, l)) in tokens.iter().zip(self.token_lines.iter()).enumerate() {
+            index_map.push(kept_tokens.len());
+            let _ = i;
             if !matches!(t, Token::Newline) {
                 kept_tokens.push(t.clone());
                 kept_lines.push(*l);
             }
+        }
+        index_map.push(kept_tokens.len());
+        for f_over in self.file_overrides.iter_mut() {
+            let orig = f_over.0;
+            f_over.0 = index_map.get(orig).copied().unwrap_or(kept_tokens.len());
         }
         self.token_lines = kept_lines;
         self.tokens = kept_tokens.clone();
@@ -2051,7 +2170,7 @@ impl Lexer {
                     // later escape processing. read_q_string does its own
                     // post-pass to strip the backslash for single-quote
                     // semantics.
-                    if next == open || next == close {
+                    if next == '\\' || next == open || next == close {
                         s.push(self.advance()); // the backslash
                         s.push(self.advance()); // the delimiter char
                         continue;

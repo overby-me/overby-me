@@ -311,6 +311,10 @@ pub enum Stmt {
     /// Emitted by the parser to mark the source line of the following stmt.
     /// The interpreter uses it to keep `current_line` up to date for `caller()`.
     LineMark(usize),
+
+    /// Emitted by the parser to mark the source file of the following stmt.
+    /// Pushed before a LineMark when a `# line N "FILE"` directive sets a file.
+    FileMark(String),
 }
 
 #[derive(Clone, Debug)]

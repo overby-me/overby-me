@@ -91,6 +91,11 @@ pub struct Interpreter {
     // Local hash-element saves: each entry is (hash_name, key, prior_value
     // or None if the key was absent). Restored at sub / block scope exit.
     local_hash_elem_saves: Vec<Vec<(String, String, Option<Value>)>>,
+    /// For `local $arr[N]`: per-scope, name -> original array length
+    /// at the first localisation in this scope. On scope exit the
+    /// array is truncated back to that length so any auto-vivified
+    /// intermediate slots disappear too.
+    local_array_len_saves: Vec<std::collections::HashMap<String, usize>>,
     // Saved filehandle aliases (for `local(*F) = *G`). Each entry is
     // (local_name, previous_target). `None` previous means the slot was
     // absent before the local, so restore by removing the alias.
@@ -391,6 +396,7 @@ impl Interpreter {
             init_blocks: Vec::new(),
             in_die_handler: 0,
             local_hash_elem_saves: Vec::new(),
+            local_array_len_saves: Vec::new(),
             blessed_refs: HashMap::new(),
             pending_die_value: None,
         }
@@ -798,6 +804,11 @@ impl Interpreter {
 
             Stmt::LineMark(line) => {
                 self.current_line = *line;
+                Flow::None
+            }
+
+            Stmt::FileMark(file) => {
+                self.current_file = file.clone();
                 Flow::None
             }
 
@@ -1615,11 +1626,56 @@ impl Interpreter {
             }
 
             Stmt::LocalHashElem(name, key_expr, val_expr) => {
-                // `local $NAME{KEY} = VAL;` — snapshot the old element (or
-                // mark it absent), set the new one, record for restore at
-                // scope exit. `local $SIG{__DIE__} = sub {…}` is the common
-                // case; restoration lets an enclosing die-handler take over
-                // once the current block ends.
+                // `local $NAME{KEY} = VAL;` / `local $NAME[IDX] = VAL;` —
+                // snapshot the old element (or mark it absent), set the
+                // new one, record for restore at scope exit. The parser
+                // distinguishes array element by prefixing the bucket name
+                // with `@`. `local $SIG{__DIE__} = sub {…}` is the common
+                // case; restoration lets an enclosing die-handler take
+                // over once the current block ends.
+                if let Some(arr_name) = name.strip_prefix('@') {
+                    let idx_val = self.eval_expr(key_expr);
+                    let idx_i = idx_val.to_num() as i64;
+                    let arr = self.get_array(arr_name);
+                    let len = arr.len() as i64;
+                    let real_idx = if idx_i < 0 { idx_i + len } else { idx_i };
+                    let prior = if real_idx >= 0 && (real_idx as usize) < arr.len() {
+                        Some(arr[real_idx as usize].clone())
+                    } else {
+                        None
+                    };
+                    let was_present = prior.is_some()
+                        && !self
+                            .deleted_slots
+                            .get(arr_name)
+                            .is_some_and(|s| s.contains(&(real_idx as usize)));
+                    // Reuse the hash-elem save slot but tag with leading
+                    // `@` so pop_scope routes restore through the array.
+                    if let Some(saves) = self.local_hash_elem_saves.last_mut() {
+                        saves.push((
+                            name.clone(),
+                            idx_i.to_string(),
+                            if was_present { prior } else { None },
+                        ));
+                    }
+                    if let Some(lens) = self.local_array_len_saves.last_mut() {
+                        lens.entry(arr_name.to_string()).or_insert(arr.len());
+                    }
+                    let new_val = val_expr
+                        .as_ref()
+                        .map(|e| self.eval_expr(e))
+                        .unwrap_or(Value::Undef);
+                    let mut a = self.get_array(arr_name);
+                    if real_idx >= 0 {
+                        let ridx = real_idx as usize;
+                        if ridx >= a.len() {
+                            a.resize(ridx + 1, Value::Undef);
+                        }
+                        a[ridx] = new_val;
+                        self.set_array(arr_name, a);
+                    }
+                    return Flow::None;
+                }
                 let key = self.eval_expr(key_expr).to_str();
                 let hash = self.get_hash(name);
                 let prior = hash.get(&key).cloned();
@@ -3406,6 +3462,7 @@ impl Interpreter {
                             | Stmt::End(_)
                             | Stmt::Nop
                             | Stmt::LineMark(_)
+                            | Stmt::FileMark(_)
                             | Stmt::Sub { .. } => i -= 1,
                             _ => break,
                         }
@@ -3467,7 +3524,8 @@ impl Interpreter {
                 let toks = lex.tokenize();
                 let lex_err = lex.error.take();
                 let tl = std::mem::take(&mut lex.token_lines);
-                let mut parser = Parser::new_with_lines(toks, tl);
+                let f_overrides = std::mem::take(&mut lex.file_overrides);
+                let mut parser = Parser::new_with_lines_and_files(toks, tl, f_overrides);
                 let stmts = parser.parse_program();
                 let parse_err = parser.error.take();
                 if let Some(err) = lex_err.or(parse_err) {
@@ -6381,6 +6439,7 @@ impl Interpreter {
                     | Stmt::End(_)
                     | Stmt::Nop
                     | Stmt::LineMark(_)
+                    | Stmt::FileMark(_)
                     | Stmt::Sub { .. } => {
                         i -= 1;
                     }
@@ -6506,6 +6565,7 @@ impl Interpreter {
                     | Stmt::End(_)
                     | Stmt::Nop
                     | Stmt::LineMark(_)
+                    | Stmt::FileMark(_)
                     | Stmt::Sub { .. } => {
                         i -= 1;
                     }
@@ -6625,6 +6685,59 @@ impl Interpreter {
         }
         if let Some(saves) = self.local_hash_elem_saves.pop() {
             for (hash, key, prior) in saves.into_iter().rev() {
+                if let Some(arr_name) = hash.strip_prefix('@') {
+                    // Array-element restore. Index encoded as decimal in `key`.
+                    let idx_i: i64 = key.parse().unwrap_or(0);
+                    let mut a = self.get_array(arr_name);
+                    let len = a.len() as i64;
+                    let real_idx = if idx_i < 0 { idx_i + len } else { idx_i };
+                    if real_idx < 0 {
+                        continue;
+                    }
+                    let ridx = real_idx as usize;
+                    match prior {
+                        Some(v) => {
+                            if ridx >= a.len() {
+                                a.resize(ridx + 1, Value::Undef);
+                            }
+                            a[ridx] = v;
+                            // Slot was present before; clear any deleted-mark.
+                            if let Some(s) = self.deleted_slots.get_mut(arr_name) {
+                                s.remove(&ridx);
+                            }
+                            self.set_array(arr_name, a);
+                        }
+                        None => {
+                            // Slot was absent before `local`; mark it deleted
+                            // so `exists`/`scalar @arr` see the original
+                            // (shorter) shape. Trim trailing absent slots.
+                            if ridx < a.len() {
+                                a[ridx] = Value::Undef;
+                            }
+                            self.set_array(arr_name, a);
+                            self.deleted_slots
+                                .entry(arr_name.to_string())
+                                .or_default()
+                                .insert(ridx);
+                            // Trim trailing run of deleted/undef slots.
+                            let mut a2 = self.get_array(arr_name);
+                            let dset = self
+                                .deleted_slots
+                                .get(arr_name)
+                                .cloned()
+                                .unwrap_or_default();
+                            while let Some(last) = a2.len().checked_sub(1) {
+                                if dset.contains(&last) {
+                                    a2.pop();
+                                } else {
+                                    break;
+                                }
+                            }
+                            self.set_array(arr_name, a2);
+                        }
+                    }
+                    continue;
+                }
                 match prior {
                     Some(v) => self.set_hash_element(&hash, &key, v),
                     None => {
@@ -6634,6 +6747,43 @@ impl Interpreter {
                         self.globals.hashes.insert(hash, h);
                     }
                 }
+            }
+        }
+        if let Some(lens) = self.local_array_len_saves.pop() {
+            for (arr_name, orig_len) in lens {
+                // For each array that had a `local $arr[i]` with i > orig_len,
+                // any intermediate slots at orig_len..i that are still
+                // undef and not explicitly assigned are auto-viv padding —
+                // mark them deleted, then trim trailing deleted runs.
+                let a = self.get_array(&arr_name);
+                let dset_existing = self
+                    .deleted_slots
+                    .get(&arr_name)
+                    .cloned()
+                    .unwrap_or_default();
+                for i in orig_len..a.len() {
+                    if matches!(a[i], Value::Undef) && !dset_existing.contains(&i) {
+                        self.deleted_slots
+                            .entry(arr_name.clone())
+                            .or_default()
+                            .insert(i);
+                    }
+                }
+                // Trim trailing deleted slots.
+                let mut a2 = self.get_array(&arr_name);
+                let dset = self
+                    .deleted_slots
+                    .get(&arr_name)
+                    .cloned()
+                    .unwrap_or_default();
+                while let Some(last) = a2.len().checked_sub(1) {
+                    if dset.contains(&last) {
+                        a2.pop();
+                    } else {
+                        break;
+                    }
+                }
+                self.set_array(&arr_name, a2);
             }
         }
     }
@@ -7355,6 +7505,8 @@ impl Interpreter {
         self.local_array_saves.push(Vec::new());
         self.local_fh_alias_saves.push(Vec::new());
         self.local_hash_elem_saves.push(Vec::new());
+        self.local_array_len_saves
+            .push(std::collections::HashMap::new());
         self.local_dot_fh_saves.push(Vec::new());
         // Snapshot lexical pragma state (e.g. `use bytes`) so a `use` /
         // `no` inside the block doesn't leak out.
@@ -7870,21 +8022,38 @@ impl Interpreter {
                     if i < chars.len() {
                         i += 1;
                     }
-                    let idx: i64 = if let Ok(n) = inner.parse::<i64>() {
-                        n
-                    } else if let Some(v) = inner.strip_prefix('$') {
-                        self.get_var(v).to_num() as i64
+                    let parsed_int = inner.parse::<i64>().ok();
+                    let is_simple_var = inner
+                        .strip_prefix('$')
+                        .map(|v| {
+                            !v.is_empty() && v.chars().all(|c| c.is_alphanumeric() || c == '_')
+                        })
+                        .unwrap_or(false);
+                    let array_exists = !self.get_array(&name).is_empty();
+                    let valid_subscript = parsed_int.is_some() || is_simple_var || array_exists;
+                    if valid_subscript {
+                        let idx: i64 = if let Some(n) = parsed_int {
+                            n
+                        } else if let Some(v) = inner.strip_prefix('$') {
+                            self.get_var(v).to_num() as i64
+                        } else {
+                            0
+                        };
+                        let arr = self.get_array(&name);
+                        let real_idx = if idx < 0 {
+                            (arr.len() as i64 + idx) as usize
+                        } else {
+                            idx as usize
+                        };
+                        let v = arr.get(real_idx).cloned().unwrap_or(Value::Undef);
+                        out.push_str(&v.to_str());
                     } else {
-                        0
-                    };
-                    let arr = self.get_array(&name);
-                    let real_idx = if idx < 0 {
-                        (arr.len() as i64 + idx) as usize
-                    } else {
-                        idx as usize
-                    };
-                    let v = arr.get(real_idx).cloned().unwrap_or(Value::Undef);
-                    out.push_str(&v.to_str());
+                        let v = self.get_var(&name).to_str();
+                        out.push_str(&v);
+                        out.push('[');
+                        out.push_str(&inner);
+                        out.push(']');
+                    }
                     continue;
                 }
                 if sigil == '$' && i < chars.len() && chars[i] == '{' {
@@ -9486,7 +9655,8 @@ impl Interpreter {
         let mut lexer = Lexer::new(code);
         let tokens = lexer.tokenize();
         let token_lines = std::mem::take(&mut lexer.token_lines);
-        let mut parser = Parser::new_with_lines(tokens, token_lines);
+        let file_overrides = std::mem::take(&mut lexer.file_overrides);
+        let mut parser = Parser::new_with_lines_and_files(tokens, token_lines, file_overrides);
         let stmts = parser.parse_program();
 
         self.set_global_var("@", Value::Str(String::new()));
@@ -9579,7 +9749,8 @@ impl Interpreter {
         let tokens = lexer.tokenize();
         let lex_error = lexer.error.take();
         let token_lines = std::mem::take(&mut lexer.token_lines);
-        let mut parser = Parser::new_with_lines(tokens, token_lines);
+        let file_overrides = std::mem::take(&mut lexer.file_overrides);
+        let mut parser = Parser::new_with_lines_and_files(tokens, token_lines, file_overrides);
         let stmts = parser.parse_program();
         let parse_error = parser.error.take();
 
@@ -9680,6 +9851,7 @@ impl Interpreter {
                     | Stmt::End(_)
                     | Stmt::Nop
                     | Stmt::LineMark(_)
+                    | Stmt::FileMark(_)
                     | Stmt::Sub { .. } => {
                         i -= 1;
                     }
@@ -9928,6 +10100,7 @@ fn compile_time_use_check_in(
     for stmt in stmts {
         match stmt {
             Stmt::LineMark(n) => *line = *n,
+            Stmt::FileMark(_) => {}
             Stmt::Use(module, _args) => {
                 if PRAGMAS.contains(&module.as_str()) {
                     continue;
@@ -9956,7 +10129,12 @@ fn compile_time_use_check_in(
                             let mut lex = crate::lexer::Lexer::new(&src);
                             let toks = lex.tokenize();
                             let tl = std::mem::take(&mut lex.token_lines);
-                            let mut p = crate::parser::Parser::new_with_lines(toks, tl);
+                            let f_overrides = std::mem::take(&mut lex.file_overrides);
+                            let mut p = crate::parser::Parser::new_with_lines_and_files(
+                                toks,
+                                tl,
+                                f_overrides,
+                            );
                             let inner = p.parse_program();
                             let mut inner_line: usize = 1;
                             // Temporarily swap current_file so error blames
@@ -10538,6 +10716,7 @@ fn strict_vars_walk_stmt(
             *line = *n;
             None
         }
+        Stmt::FileMark(_) => None,
         Stmt::My(vars, _) | Stmt::Our(vars, _) | Stmt::Local(vars, _) => {
             for (name, init) in vars {
                 declared.insert(name.clone());
@@ -10733,6 +10912,7 @@ fn strict_vars_check(stmts: &[Stmt], file: &str) -> Option<String> {
                 *line = *n;
                 None
             }
+            Stmt::FileMark(_) => None,
             Stmt::My(vars, _) | Stmt::Our(vars, _) | Stmt::Local(vars, _) => {
                 for (name, init) in vars {
                     declared.insert(name.clone());

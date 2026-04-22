@@ -17,6 +17,9 @@ pub struct Parser {
     /// the filename. Main/eval_string reads this and surfaces it like the
     /// Lexer::error path (into `$@` inside eval, to stderr at top level).
     pub error: Option<String>,
+    /// Pending file overrides from `# line N "FILE"` directives.
+    /// Sorted by token_idx; drained as we emit LineMarks.
+    file_overrides: std::collections::VecDeque<(usize, String)>,
 }
 
 impl Parser {
@@ -28,10 +31,19 @@ impl Parser {
             pos: 0,
             known_subs,
             error: None,
+            file_overrides: std::collections::VecDeque::new(),
         }
     }
 
     pub fn new_with_lines(tokens: Vec<Token>, token_lines: Vec<usize>) -> Self {
+        Self::new_with_lines_and_files(tokens, token_lines, Vec::new())
+    }
+
+    pub fn new_with_lines_and_files(
+        tokens: Vec<Token>,
+        token_lines: Vec<usize>,
+        file_overrides: Vec<(usize, String)>,
+    ) -> Self {
         let known_subs = scan_sub_names(&tokens);
         Parser {
             tokens,
@@ -39,6 +51,7 @@ impl Parser {
             pos: 0,
             known_subs,
             error: None,
+            file_overrides: file_overrides.into_iter().collect(),
         }
     }
 
@@ -100,6 +113,14 @@ impl Parser {
             }
             let line = self.current_line();
             if line != 0 && line != last_line {
+                while let Some((idx, _)) = self.file_overrides.front() {
+                    if *idx <= self.pos {
+                        let (_, f) = self.file_overrides.pop_front().unwrap();
+                        stmts.push(Stmt::FileMark(f));
+                    } else {
+                        break;
+                    }
+                }
                 stmts.push(Stmt::LineMark(line));
                 last_line = line;
             }
@@ -756,6 +777,14 @@ impl Parser {
             }
             let line = self.current_line();
             if line != 0 && line != last_line {
+                while let Some((idx, _)) = self.file_overrides.front() {
+                    if *idx <= self.pos {
+                        let (_, f) = self.file_overrides.pop_front().unwrap();
+                        stmts.push(Stmt::FileMark(f));
+                    } else {
+                        break;
+                    }
+                }
                 stmts.push(Stmt::LineMark(line));
                 last_line = line;
             }
@@ -875,6 +904,23 @@ impl Parser {
             self.error.get_or_insert(msg);
             return Stmt::Nop;
         }
+        // Reject `my $^X`, `my ${^XYZ}`, etc. Reference perl errors:
+        // `Can't use global $^X in "my" at FILE line N`. Both $^X and
+        // ${^XYZ} lex to ScalarVar with a name starting with `^`.
+        if let Some(Token::ScalarVar(name)) = self.tokens.get(probe_pos)
+            && name.starts_with('^')
+        {
+            let line = self.token_lines.get(probe_pos).copied().unwrap_or(0);
+            let file = "{FILE}".to_string();
+            let msg = format!("Can't use global ${name} in \"my\" at {file} line {line}.\n");
+            // Skip past the var token; if we opened a paren, eat the close.
+            self.pos = probe_pos + 1;
+            if matches!(self.tok(), Token::RParen) {
+                self.pos += 1;
+            }
+            self.error.get_or_insert(msg);
+            return Stmt::Nop;
+        }
         let (vars, list_ctx) = self.parse_var_list();
         Stmt::My(vars, list_ctx)
     }
@@ -932,6 +978,37 @@ impl Parser {
             return Stmt::Die(vec![Expr::StringLit(
                 "Can't localize through a reference".to_string(),
             )]);
+        }
+        // `local($NAME{KEY})` / `local($NAME[IDX])` — paren-wrapped
+        // single-element form. Same shape as the bare form below, just
+        // with surrounding parens that we strip.
+        if matches!(self.tok(), Token::LParen)
+            && matches!(self.peek(1), Token::ScalarVar(_))
+            && matches!(self.peek(2), Token::LBrace | Token::LBracket)
+        {
+            let var_name = match self.peek(1) {
+                Token::ScalarVar(n) => n.clone(),
+                _ => unreachable!(),
+            };
+            let is_hash = matches!(self.peek(2), Token::LBrace);
+            self.pos += 3; // skip `(`, ScalarVar, `{`/`[`
+            let key = self.parse_expr();
+            let close = if is_hash {
+                &Token::RBrace
+            } else {
+                &Token::RBracket
+            };
+            self.expect(close);
+            self.expect(&Token::RParen);
+            let val = if self.eat(&Token::Assign) {
+                Some(self.parse_expr())
+            } else {
+                None
+            };
+            if is_hash {
+                return Stmt::LocalHashElem(var_name, key, val);
+            }
+            return Stmt::LocalHashElem(format!("@{var_name}"), key, val);
         }
         // `local $NAME{KEY}` / `local $NAME[IDX]` — hash/array element
         // localisation. Peek before falling through to parse_var_list,
@@ -3415,7 +3492,7 @@ fn parse_interp_string(s: &str) -> Expr {
                         while name_end < bytes.len() {
                             let c = bytes[name_end] as char;
                             let ok = if name_end == 0 {
-                                c == '_' || c.is_ascii_alphabetic()
+                                c == '_' || c == '^' || c.is_ascii_alphabetic()
                             } else {
                                 c == '_' || c.is_ascii_alphanumeric() || c == ':'
                             };
@@ -3424,7 +3501,7 @@ fn parse_interp_string(s: &str) -> Expr {
                             }
                             name_end += 1;
                         }
-                        let after = &trimmed[name_end..];
+                        let after = trimmed[name_end..].trim();
                         let name_part = &trimmed[..name_end];
                         if !name_part.is_empty()
                             && (after.starts_with('[') || after.starts_with('{'))
@@ -3434,11 +3511,12 @@ fn parse_interp_string(s: &str) -> Expr {
                             // Re-lex/parse the inner subscript expression.
                             let bracket = &after[..1];
                             let close = &after[after.len() - 1..];
-                            let inside = &after[1..after.len() - 1];
+                            let inside = after[1..after.len() - 1].trim();
                             let mut lex = Lexer::new(inside);
                             let toks = lex.tokenize();
                             let tl = std::mem::take(&mut lex.token_lines);
-                            let mut p = Parser::new_with_lines(toks, tl);
+                            let f_over = std::mem::take(&mut lex.file_overrides);
+                            let mut p = Parser::new_with_lines_and_files(toks, tl, f_over);
                             let idx_expr = p.parse_expr();
                             if bracket == "[" && close == "]" {
                                 parts.push(InterpPart::ArrayElement(
@@ -3455,7 +3533,8 @@ fn parse_interp_string(s: &str) -> Expr {
                                 let mut lex = Lexer::new(&inner);
                                 let toks = lex.tokenize();
                                 let tl = std::mem::take(&mut lex.token_lines);
-                                let mut p = Parser::new_with_lines(toks, tl);
+                                let f_over = std::mem::take(&mut lex.file_overrides);
+                                let mut p = Parser::new_with_lines_and_files(toks, tl, f_over);
                                 let inner_expr = p.parse_expr();
                                 parts.push(InterpPart::Expr(Box::new(Expr::Call(
                                     "_scalar_block_deref".to_string(),
@@ -3467,7 +3546,8 @@ fn parse_interp_string(s: &str) -> Expr {
                             let mut lex = Lexer::new(&inner);
                             let toks = lex.tokenize();
                             let tl = std::mem::take(&mut lex.token_lines);
-                            let mut p = Parser::new_with_lines(toks, tl);
+                            let f_over = std::mem::take(&mut lex.file_overrides);
+                            let mut p = Parser::new_with_lines_and_files(toks, tl, f_over);
                             let inner_expr = p.parse_expr();
                             parts.push(InterpPart::Expr(Box::new(Expr::Call(
                                 "_scalar_block_deref".to_string(),
@@ -3834,7 +3914,8 @@ fn parse_interp_string(s: &str) -> Expr {
                 let mut lex = Lexer::new(&inner);
                 let toks = lex.tokenize();
                 let tl = std::mem::take(&mut lex.token_lines);
-                let mut p = Parser::new_with_lines(toks, tl);
+                let f_over = std::mem::take(&mut lex.file_overrides);
+                let mut p = Parser::new_with_lines_and_files(toks, tl, f_over);
                 let inner_expr = p.parse_expr();
                 parts.push(InterpPart::Expr(Box::new(Expr::Call(
                     "_array_block_deref".to_string(),
