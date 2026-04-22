@@ -168,6 +168,8 @@ pub(crate) fn parse_args() -> Options {
         check_unicode_warning(arg);
     }
 
+    let mut has_url = false;
+
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
@@ -450,6 +452,7 @@ pub(crate) fn parse_args() -> Options {
             "--url" => {
                 i += 1;
                 opts.urls.push(next_arg(&args, i, "--url"));
+                has_url = true;
             }
             // Flags used by the curl test suite that we accept but ignore
             "-q" => {
@@ -606,6 +609,26 @@ pub(crate) fn parse_args() -> Options {
             "--skip-existing" => {
                 opts.skip_existing = true;
             }
+            "--next" | "-:" => {
+                if !has_url {
+                    eprintln!("curl: missing URL before --next");
+                    eprintln!("curl: option --next: is badly used here");
+                    eprintln!("curl: try 'curl --help' or 'curl --manual' for more information");
+                    process::exit(2);
+                }
+                // Reset per-URL options to defaults
+                opts.data = None;
+                opts.data_raw = false;
+                opts.headers.clear();
+                opts.method = None;
+                opts.json = false;
+                opts.form_fields.clear();
+                opts.upload_file = None;
+                opts.head = false;
+                opts.get = false;
+                i += 1;
+                continue;
+            }
             "--no-clobber" => {
                 opts.no_clobber = true;
             }
@@ -721,6 +744,25 @@ pub(crate) fn parse_args() -> Options {
                             'g' => opts.globoff = true,
                             'j' => opts.junk_session_cookies = true,
                             'G' => opts.get = true,
+                            ':' => {
+                                if !has_url {
+                                    eprintln!("curl: missing URL before --next");
+                                    eprintln!("curl: option --next: is badly used here");
+                                    eprintln!(
+                                        "curl: try 'curl --help' or 'curl --manual' for more information"
+                                    );
+                                    process::exit(2);
+                                }
+                                opts.data = None;
+                                opts.data_raw = false;
+                                opts.headers.clear();
+                                opts.method = None;
+                                opts.json = false;
+                                opts.form_fields.clear();
+                                opts.upload_file = None;
+                                opts.head = false;
+                                opts.get = false;
+                            }
                             'N' => {} // --no-buffer, ignored
                             'p' => opts.proxy_tunnel = true,
                             '0' => opts.http_version = Some("1.0".into()),
@@ -736,6 +778,7 @@ pub(crate) fn parse_args() -> Options {
                     process::exit(2);
                 } else {
                     opts.urls.push(arg.clone());
+                    has_url = true;
                 }
             }
         }

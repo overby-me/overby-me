@@ -71,12 +71,13 @@ pub struct Options {
     pub(crate) time_cond: Option<TimeCond>,
     /// --stderr: redirect stderr to file; "-" means stdout.
     pub(crate) stderr_redirect: Option<PathBuf>,
-    pub(crate) proxy: Option<String>,            // -x / --proxy
-    pub(crate) proxy_user: Option<String>,       // --proxy-user "user:pass"
-    pub(crate) proxy_tunnel: bool,               // -p / --proxytunnel — force CONNECT tunnel
-    pub(crate) proxy_1_0: bool,                  // --proxy1.0 — use HTTP/1.0 for CONNECT
-    pub(crate) cookie_engine: bool, // true when -b is used (enables cookie accumulation)
+    pub(crate) proxy: Option<String>,       // -x / --proxy
+    pub(crate) proxy_user: Option<String>,  // --proxy-user "user:pass"
+    pub(crate) proxy_tunnel: bool,          // -p / --proxytunnel — force CONNECT tunnel
+    pub(crate) proxy_1_0: bool,             // --proxy1.0 — use HTTP/1.0 for CONNECT
+    pub(crate) cookie_engine: bool,         // true when -b is used (enables cookie accumulation)
     pub(crate) memory_cookies: Vec<String>, // Netscape-format cookie lines accumulated from responses
+    pub(crate) deleted_cookies: Vec<(String, String, String)>, // (domain, path, name) tuples of cookies deleted via Max-Age=0
     pub(crate) skip_existing: bool, // --skip-existing — skip transfer when output file exists
     pub(crate) no_clobber: bool,    // --no-clobber — write to file.N suffix when output exists
     pub(crate) raw: bool,           // --raw — disable content decoding
@@ -162,6 +163,7 @@ impl Default for Options {
             proxy_1_0: false,
             cookie_engine: false,
             memory_cookies: Vec::new(),
+            deleted_cookies: Vec::new(),
             skip_existing: false,
             no_clobber: false,
             raw: false,

@@ -113,7 +113,7 @@
       dontStrip = true;
     };
   in
-    lib.warn "This derivation runs tests 1-200 in batch; use -L to see live output"
+    lib.warn "This derivation runs tests 1200-1500 in batch; use -L to see live output"
     (derivation {
       name = "rust-curl-test-discovery";
       inherit (stdenv) system;
@@ -301,7 +301,10 @@
       318
       319
       326
+      327
       328
+      329
+      330
       331
       333
       334
@@ -344,7 +347,9 @@
       415
       418
       419
+      420
       421
+      422
       425
       426
       434
@@ -443,6 +448,7 @@
       1150
       1155
       1157
+      1160
       1161
       1164
       1166

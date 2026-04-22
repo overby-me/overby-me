@@ -578,6 +578,25 @@ fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options)
                                     let name = fields[5];
                                     let value = fields[6];
 
+                                    // Skip cookies deleted via Max-Age=0.
+                                    {
+                                        let clean_domain = domain
+                                            .strip_prefix('.')
+                                            .unwrap_or(domain)
+                                            .to_lowercase();
+                                        let clean_path = cookie_path.trim_end_matches('/');
+                                        if opts.deleted_cookies.iter().any(|(dd, dp, dn)| {
+                                            let dd_clean =
+                                                dd.strip_prefix('.').unwrap_or(dd).to_lowercase();
+                                            let dp_clean = dp.trim_end_matches('/');
+                                            dd_clean == clean_domain
+                                                && dp_clean == clean_path
+                                                && dn == name
+                                        }) {
+                                            continue;
+                                        }
+                                    }
+
                                     if expiry == 0 && opts.junk_session_cookies {
                                         continue;
                                     }
@@ -649,10 +668,24 @@ fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options)
                     let name = fields[5];
                     let value = fields[6];
 
+                    // Skip cookies that were deleted via Max-Age=0 in a previous response.
+                    {
+                        let clean_domain =
+                            domain.strip_prefix('.').unwrap_or(domain).to_lowercase();
+                        let clean_path = cookie_path.trim_end_matches('/');
+                        if opts.deleted_cookies.iter().any(|(dd, dp, dn)| {
+                            let dd_clean = dd.strip_prefix('.').unwrap_or(dd).to_lowercase();
+                            let dp_clean = dp.trim_end_matches('/');
+                            dd_clean == clean_domain && dp_clean == clean_path && dn == name
+                        }) {
+                            continue;
+                        }
+                    }
+
                     if expiry == 0 && opts.junk_session_cookies {
                         continue;
                     }
-                    if expiry > 0 && expiry < now {
+                    if expiry > 0 && expiry <= now {
                         continue;
                     }
                     if secure && !secure_req {
@@ -701,7 +734,7 @@ fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options)
         if expiry == 0 && opts.junk_session_cookies {
             continue;
         }
-        if expiry > 0 && expiry < now {
+        if expiry > 0 && expiry <= now {
             continue;
         }
         if secure && !secure_req {
@@ -1100,6 +1133,10 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                 {
                     opts.headers
                         .retain(|(k, _)| !k.eq_ignore_ascii_case("host"));
+                    // Drop custom Cookie headers on cross-host redirects —
+                    // curl does not forward user-supplied cookies to other hosts.
+                    opts.headers
+                        .retain(|(k, _)| !k.eq_ignore_ascii_case("cookie"));
                     if !opts.location_trusted {
                         opts.headers
                             .retain(|(k, _)| !k.eq_ignore_ascii_case("authorization"));

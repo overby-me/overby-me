@@ -257,22 +257,28 @@ Current gaps:
 - [x] `.localhost` TLD resolution to 127.0.0.1 per RFC 6761 (unlocked test 389)
 - [x] Hostname length limit (65535 bytes) with exit code 3 (unlocked test 399)
 - [x] Sweep 2000-2100 (found test 2088)
+- [x] Cookie Max-Age=0 deletion — expired cookies removed from memory and file-based stores (unlocked tests 327, 329)
+- [x] Cookie deletion tracking across file-based cookie jars (deleted_cookies blocklist)
+- [x] Drop custom Cookie header on cross-host redirect (unlocked test 330)
+- [x] `--next` / `-:` option for resetting per-URL options (unlocked tests 420, 422)
+- [x] Session cookies excluded from cookie jar file output
+- [x] Sweep 1000-1200 (found test 1160)
 - [ ] Target 500+ passing by addressing remaining feature gaps
 
 ---
 
 ## Test Inventory
 
-### Passing tests (450)
+### Passing tests (456)
 
-1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 66, 71, 73, 74, 75, 77, 78, 80, 82, 83, 84, 85, 86, 87, 92, 93, 94, 95, 97, 98, 129, 151, 152, 156, 157, 158, 160, 163, 164, 166, 171, 172, 173, 174, 178, 179, 180, 181, 183, 184, 185, 186, 187, 188, 189, 192, 193, 194, 197, 198, 199, 207, 214, 218, 219, 220, 221, 222, 224, 230, 232, 233, 234, 249, 256, 260, 262, 264, 269, 274, 276, 278, 279, 281, 282, 292, 293, 300, 301, 302, 303, 304, 306, 309, 310, 317, 318, 319, 326, 328, 331, 333, 334, 339, 341, 342, 343, 344, 345, 347, 349, 360, 361, 364, 365, 366, 367, 368, 370, 371, 372, 373, 374, 376, 378, 379, 383, 384, 385, 387, 389, 391, 392, 393, 394, 395, 398, 399, 410, 415, 418, 419, 421, 425, 426, 434, 443, 449, 452, 453, 454, 456, 460, 461, 462, 463, 467, 468, 469, 470, 473, 477, 481, 482, 485, 497, 498, 499, 518, 537, 662, 663, 675, 678, 681, 686, 690, 691, 692, 697, 708, 722, 723, 724, 743, 752, 767, 768, 769, 773, 787, 899, 978, 979, 990, 991, 994, 995, 996, 998, 999, 1004, 1011, 1012, 1015, 1027, 1029, 1031, 1032, 1033, 1040, 1041, 1042, 1043, 1053, 1054, 1058, 1064, 1068, 1076, 1080, 1081, 1089, 1101, 1109, 1110, 1111, 1115, 1117, 1118, 1121, 1122, 1123, 1126, 1127, 1128, 1143, 1147, 1150, 1155, 1157, 1161, 1164, 1166, 1168, 1169, 1174, 1175, 1176, 1178, 1182, 1183, 1184, 1197, 1200, 1201, 1202, 1205, 1210, 1213, 1214, 1216, 1218, 1223, 1231, 1232, 1235, 1237, 1240, 1241, 1246, 1249, 1251, 1258, 1259, 1261, 1266, 1267, 1268, 1269, 1270, 1271, 1272, 1273, 1275, 1276, 1280, 1283, 1290, 1292, 1296, 1297, 1298, 1299, 1300, 1302, 1303, 1304, 1305, 1306, 1309, 1311, 1317, 1318, 1322, 1323, 1325, 1334, 1336, 1337, 1338, 1339, 1340, 1341, 1342, 1343, 1344, 1345, 1346, 1347, 1364, 1365, 1366, 1367, 1372, 1373, 1374, 1375, 1376, 1377, 1395, 1396, 1397, 1398, 1399, 1411, 1413, 1416, 1424, 1429, 1433, 1434, 1438, 1439, 1457, 1466, 1471, 1472, 1473, 1475, 1484, 1487, 1489, 1494, 1497, 1524, 1544, 1584, 1585, 1601, 1602, 1603, 1605, 1606, 1607, 1608, 1609, 1610, 1611, 1612, 1614, 1615, 1616, 1620, 1635, 1636, 1650, 1651, 1652, 1653, 1655, 1656, 1657, 1658, 1661, 1663, 1664, 1665, 1670, 1671, 1680, 1681, 1682, 1683, 1979, 1980, 2080, 2088
+1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 66, 71, 73, 74, 75, 77, 78, 80, 82, 83, 84, 85, 86, 87, 92, 93, 94, 95, 97, 98, 129, 151, 152, 156, 157, 158, 160, 163, 164, 166, 171, 172, 173, 174, 178, 179, 180, 181, 183, 184, 185, 186, 187, 188, 189, 192, 193, 194, 197, 198, 199, 207, 214, 218, 219, 220, 221, 222, 224, 230, 232, 233, 234, 249, 256, 260, 262, 264, 269, 274, 276, 278, 279, 281, 282, 292, 293, 300, 301, 302, 303, 304, 306, 309, 310, 317, 318, 319, 326, 327, 328, 329, 330, 331, 333, 334, 339, 341, 342, 343, 344, 345, 347, 349, 360, 361, 364, 365, 366, 367, 368, 370, 371, 372, 373, 374, 376, 378, 379, 383, 384, 385, 387, 389, 391, 392, 393, 394, 395, 398, 399, 410, 415, 418, 419, 420, 421, 422, 425, 426, 434, 443, 449, 452, 453, 454, 456, 460, 461, 462, 463, 467, 468, 469, 470, 473, 477, 481, 482, 485, 497, 498, 499, 518, 537, 662, 663, 675, 678, 681, 686, 690, 691, 692, 697, 708, 722, 723, 724, 743, 752, 767, 768, 769, 773, 787, 899, 978, 979, 990, 991, 994, 995, 996, 998, 999, 1004, 1011, 1012, 1015, 1027, 1029, 1031, 1032, 1033, 1040, 1041, 1042, 1043, 1053, 1054, 1058, 1064, 1068, 1076, 1080, 1081, 1089, 1101, 1109, 1110, 1111, 1115, 1117, 1118, 1121, 1122, 1123, 1126, 1127, 1128, 1143, 1147, 1150, 1155, 1157, 1160, 1161, 1164, 1166, 1168, 1169, 1174, 1175, 1176, 1178, 1182, 1183, 1184, 1197, 1200, 1201, 1202, 1205, 1210, 1213, 1214, 1216, 1218, 1223, 1231, 1232, 1235, 1237, 1240, 1241, 1246, 1249, 1251, 1258, 1259, 1261, 1266, 1267, 1268, 1269, 1270, 1271, 1272, 1273, 1275, 1276, 1280, 1283, 1290, 1292, 1296, 1297, 1298, 1299, 1300, 1302, 1303, 1304, 1305, 1306, 1309, 1311, 1317, 1318, 1322, 1323, 1325, 1334, 1336, 1337, 1338, 1339, 1340, 1341, 1342, 1343, 1344, 1345, 1346, 1347, 1364, 1365, 1366, 1367, 1372, 1373, 1374, 1375, 1376, 1377, 1395, 1396, 1397, 1398, 1399, 1411, 1413, 1416, 1424, 1429, 1433, 1434, 1438, 1439, 1457, 1466, 1471, 1472, 1473, 1475, 1484, 1487, 1489, 1494, 1497, 1524, 1544, 1584, 1585, 1601, 1602, 1603, 1605, 1606, 1607, 1608, 1609, 1610, 1611, 1612, 1614, 1615, 1616, 1620, 1635, 1636, 1650, 1651, 1652, 1653, 1655, 1656, 1657, 1658, 1661, 1663, 1664, 1665, 1670, 1671, 1680, 1681, 1682, 1683, 1979, 1980, 2080, 2088
 
 ### Major remaining failure categories
 
 Most remaining failures in the 1-200 range come from missing protocol/feature support:
 
 - **CONNECT tunnel** — implemented; remaining 1-200 failure is connection reuse (48)
-- **`--proxy-user` / proxy auth** — proxy URL userinfo extraction now implemented (264, 278, 279 fixed); `-U` flag works
+- **`--proxy-user` / proxy auth** — proxy URL userinfo extraction now implemented (264, 278, 279 fixed); `-U` flag works; blank-password proxy auth works
 - **FTP/FTPS** — not implemented (tests 100-series, 400-series)
 - **SMTP/IMAP/POP3** — not implemented
 - **HTTP/2, HTTP/3** — not implemented (tests 1800-series, 1900-series)
@@ -280,7 +286,7 @@ Most remaining failures in the 1-200 range come from missing protocol/feature su
 
 Protocol/output diff failures:
 
-- **Cookie jar edge cases** — in-memory cookie engine and cookie accumulation across URLs now work; remaining issues are control-character filtering in cookie values, IP address domain-match rules, and HTTP header file format parsing (test 8)
+- **Cookie jar edge cases** — in-memory cookie engine, cookie accumulation, Max-Age=0 deletion, and session-cookie jar exclusion now work; remaining issues are control-character filtering in cookie values, IP address domain-match rules, secure-cookie cross-scheme redirect handling (test 414), and HTTP header file format parsing (test 8)
 - **Connection reuse** — persistent connections / keep-alive semantics (test 48 dropped — requires connection reuse)
 
 ### Known timeouts
@@ -321,7 +327,7 @@ To expand the passing-test list incrementally, follow this loop:
 Priority targets (highest ROI first):
 
 1. **Connection reuse / keep-alive** — needed for test 48 and unlocks broader 1xxx range
-2. **`--next` support** — test 386, 422 and others need curl's `--next` option to reset options between URLs
-3. **Cookie Max-Age=0 deletion** — test 329 (cookies with Max-Age=0 should be deleted, not kept)
-4. **Expect: 100-continue retry on 417** — test 357 (when server returns 417, curl should retry without Expect header)
-5. **Sweep remaining ranges** — 700-900 mostly SOCKS/MQTT (not applicable); 1500-2000 already fully swept; 2000+ sparse
+2. **Expect: 100-continue retry on 417** — test 357 (when server returns 417, curl should retry without Expect header)
+3. **Chunked trailer support** — test 266 (chunked Transfer-Encoding with trailer headers)
+4. **`--next` with `--json` interaction** — test 386 (--json + --next: second URL should be plain GET)
+5. **Sweep 1200-1500 range** — previous sweep hung on a test; needs targeted sub-range sweeps skipping hangers

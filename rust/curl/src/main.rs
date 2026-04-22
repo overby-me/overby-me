@@ -502,7 +502,27 @@ fn main() {
                                     }
                                 });
                             }
-                            opts.memory_cookies.push(line);
+                            // Max-Age=0 or past Expires means "delete this cookie" —
+                            // remove the old entry (done above) but do NOT store the
+                            // expired cookie itself.
+                            if !cookie::is_jar_line_expired(&line) {
+                                opts.memory_cookies.push(line);
+                            } else {
+                                // Record the deleted cookie so file-based cookies
+                                // with the same (domain, path, name) are skipped.
+                                let df: Vec<&str> = line.split('\t').collect();
+                                if df.len() >= 7 {
+                                    let dd = df[0]
+                                        .strip_prefix("#HttpOnly_")
+                                        .unwrap_or(df[0])
+                                        .trim_start_matches('.');
+                                    opts.deleted_cookies.push((
+                                        dd.to_lowercase(),
+                                        df[2].to_string(),
+                                        df[5].to_string(),
+                                    ));
+                                }
+                            }
                         }
                     }
                 }
