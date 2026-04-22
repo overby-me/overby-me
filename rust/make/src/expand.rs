@@ -1176,6 +1176,9 @@ fn call_function(
         }
         "error" => {
             let msg = expand_with_auto(args_str, engine, auto_vars);
+            if engine.se_silence.get() {
+                return Some(String::new());
+            }
             let prefix = match engine.current_source.borrow().as_ref() {
                 Some((file, line)) => format!("{file}:{line}: "),
                 None => String::new(),
@@ -1185,6 +1188,9 @@ fn call_function(
         }
         "warning" => {
             let msg = expand_with_auto(args_str, engine, auto_vars);
+            if engine.se_silence.get() {
+                return Some(String::new());
+            }
             let prefix = match engine.current_source.borrow().as_ref() {
                 Some((file, line)) => format!("{file}:{line}: "),
                 None => String::new(),
@@ -1194,6 +1200,9 @@ fn call_function(
         }
         "info" => {
             let msg = expand_with_auto(args_str, engine, auto_vars);
+            if engine.se_silence.get() {
+                return Some(String::new());
+            }
             println!("{msg}");
             Some(String::new())
         }

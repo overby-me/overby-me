@@ -5,6 +5,56 @@ mod parser;
 
 use engine::Engine;
 
+// === Async-signal-safe child PID tracking ===
+//
+// When `make` itself receives a fatal signal (SIGTERM, SIGINT, SIGHUP,
+// SIGQUIT) we propagate it to the currently-running recipe child so the
+// child's wait() returns with the signal in its status. The recipe error
+// path then prints the standard `make: *** [...] Terminated` diagnostic
+// and exits. Without this, a SIGTERM to make would silently kill us
+// mid-recipe leaving the child (e.g. `sleep 10`) orphaned.
+pub static CURRENT_CHILD_PID: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+#[allow(non_camel_case_types)]
+type c_int = i32;
+
+unsafe extern "C" {
+    fn signal(signum: c_int, handler: usize) -> usize;
+    fn kill(pid: c_int, sig: c_int) -> c_int;
+}
+
+const SIGHUP: c_int = 1;
+const SIGINT: c_int = 2;
+const SIGQUIT: c_int = 3;
+const SIGTERM: c_int = 15;
+
+extern "C" fn fatal_signal_handler(sig: c_int) {
+    let pid = CURRENT_CHILD_PID.load(std::sync::atomic::Ordering::SeqCst);
+    if pid > 0 {
+        // Forward the signal to the child so its wait() returns with
+        // status indicating death-by-signal. Our regular recipe error
+        // path then prints the diagnostic.
+        unsafe {
+            kill(pid, sig);
+        }
+        // Don't exit here — let the recipe path handle the diagnostic.
+    } else {
+        // No child running: re-raise default handler by calling _exit.
+        // 128 + signal number is the conventional shell exit status.
+        std::process::exit(128 + sig);
+    }
+}
+
+fn install_signal_handlers() {
+    let h = fatal_signal_handler as usize;
+    unsafe {
+        signal(SIGTERM, h);
+        signal(SIGINT, h);
+        signal(SIGHUP, h);
+        signal(SIGQUIT, h);
+    }
+}
+
 fn main() {
     // Exit gracefully on stdout write errors (e.g. /dev/full, broken pipe)
     // instead of panicking with exit code 101.
@@ -30,6 +80,7 @@ fn main() {
 }
 
 fn run() -> i32 {
+    install_signal_handlers();
     // If a previous re-exec left a stdin temp file, record its path so
     // we can clean it up on exit. Detect by checking -f args for paths
     // matching the make-stdin-<pid> pattern in TMPDIR.
@@ -992,6 +1043,10 @@ fn run() -> i32 {
                     0,
                 ));
             }
+            engine
+                .include_mentioned
+                .borrow_mut()
+                .insert(path.to_string());
         }
         *engine.suppress_default_goal.borrow_mut() = false;
     }
@@ -1004,12 +1059,19 @@ fn run() -> i32 {
                 .pending_includes
                 .borrow_mut()
                 .push((name.to_string(), true, String::new(), 0));
+            engine
+                .include_mentioned
+                .borrow_mut()
+                .insert(name.to_string());
         }
     }
 
     let mut stdin_read = false;
     // Saved stdin content for re-exec (written to temp file only if needed).
     let mut stdin_content_for_reexec: Option<String> = None;
+    // Primary `-f` makefiles that failed to load (treated as goals on the
+    // main build; their failure also suppresses re-exec).
+    let mut failed_primary_makefiles: Vec<String> = Vec::new();
     for path in &makefile_paths {
         if path == "-" {
             if stdin_read {
@@ -1047,14 +1109,19 @@ fn run() -> i32 {
                 // too, not just included files).
                 engine.included_files.borrow_mut().push(path.clone());
             } else {
-                // Primary makefile couldn't be loaded. We still register
-                // it in included_files so finalize_includes attempts to
-                // rebuild it. If it still doesn't exist after that, we
-                // error out below (after finalize_includes).
+                // Primary makefile couldn't be loaded. Register it so
+                // finalize_includes attempts to rebuild it; if no rule
+                // ever produces it, treat its name as a goal so the
+                // main build phase emits "No rule to make target 'X'".
                 engine.included_files.borrow_mut().push(path.clone());
+                failed_primary_makefiles.push(path.clone());
             }
         }
     }
+    // Suppress re-exec when any primary makefile failed to load AND
+    // wasn't rebuilt — matches GNU make, which doesn't restart in that
+    // case (the missing makefile is reported as a goal-failure instead).
+    let had_failed_primary = !failed_primary_makefiles.is_empty();
 
     // After loading all makefiles, re-check MAKEFLAGS for flags
     // that were set inside the makefile (e.g. `MAKEFLAGS += -r`). GNU
@@ -1261,7 +1328,22 @@ fn run() -> i32 {
         }
     }
 
-    let rc = engine.build(&targets);
+    // GNU make adds unloadable primary `-f` makefiles to the goal list
+    // so the main build phase reports "No rule to make target 'X'".
+    let mut effective_targets = targets.clone();
+    for fp in &failed_primary_makefiles {
+        if !effective_targets.contains(fp) {
+            effective_targets.insert(0, fp.clone());
+        }
+    }
+    // Suppress re-exec when any primary `-f` makefile failed to load:
+    // GNU make does not restart in that case, even if other includes
+    // were rebuilt.
+    if had_failed_primary {
+        engine.suppress_reexec.set(true);
+    }
+
+    let rc = engine.build(&effective_targets);
 
     // Sentinel -1 means an included makefile was remade and we need to
     // re-exec the process (GNU make "restart" semantics).

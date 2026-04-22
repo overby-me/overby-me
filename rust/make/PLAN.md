@@ -2,16 +2,14 @@
 
 ## Current Status
 
-**130/135 tests passing** (96%) — upstream test harness from GNU make 4.4.1.
+**133/135 tests passing** (98.5%) — upstream test harness from GNU make 4.4.1.
 
-MAKEFLAGS subtests: **218/218** (100%) ✅ — full pass after wiring up
-`--debug=X` propagation from makefile-set MAKEFLAGS and emitting
-"Updating makefiles...." / "Putting child" debug output.
+MAKEFLAGS subtests: **218/218** (100%) ✅
+temp_stdin subtests: **8/8** (100%) ✅
+options/dash-f subtests: **32/32** (100%) ✅
 
-temp_stdin subtests: **7/8** (87%) — re-exec now writes stdin temp file
-and emits the `Re-executing[N]: ... --temp-stdin=PATH` banner under
-`--debug=b`; cleans up the temp file on exec failure too. Only #5
-(SIGTERM "Terminated" diagnostic) still fails — needs a signal handler.
+Two categories remain: `features/parallelism` and `targets/WAIT`.
+Both need real `-j`/jobserver implementation.
 
 `rust/make` has a parser, expander, and build engine (~10k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -437,22 +435,18 @@ in ways the test harness happens not to exercise in our passing set.
 
 ---
 
-## Currently failing top-level tests (5 of 135)
+## Currently failing top-level tests (2 of 135)
 
 Latest baseline (`bash /tmp/run-make-baseline.sh`):
 
 | Test | Notes |
 | --- | --- |
 | `features/parallelism` | Requires `-j` / jobserver (1/13) |
-| `features/se_implicit` | 28/30 subtests pass; failing subtests 9 (SE prereq verification in pattern search), 27 (SE prereq expansion ordering) |
-| `features/temp_stdin` | 7/8 subtests pass; only SIGTERM "Terminated" diagnostic (#5) remains — needs a signal handler that prints `make: *** [...] Terminated` for SIGTERM-killed recipes via the stdin temp file path |
-| `options/dash-f` | 31/32 subtests pass; remaining failure: extra `:0: R: ...` line on re-exec when one of the `-f` makefiles is missing |
-| `targets/WAIT` | `.WAIT` requires parallel scheduling (6/14 subtests, was 3/4) |
+| `targets/WAIT` | `.WAIT` requires parallel scheduling (6/14 subtests) |
 
 The biggest remaining unlocks are **parallel jobs**
 (unlocks `parallelism`, `WAIT`) and **stdin re-exec / `--temp-stdin`**
-(unlocks remaining `dash-f`, `temp_stdin`). The `se_implicit` remainder requires
-SE-during-pattern-search.
+(unlocks remaining `dash-f`, `temp_stdin`).
 
 ### MAKEFLAGS improvements (this session)
 
@@ -548,10 +542,10 @@ Based on the latest baseline run (129/135 passing):
 
 | Category    | Status                                                            |
 | ----------- | ----------------------------------------------------------------- |
-| `features`  | 39/42 passing. `patternrules` 72/72 ✅, `reinvoke` 12/12 ✅, `se_explicit` 31/31 ✅, `statipattrules` 68/68 ✅, `vpathplus` 4/4 ✅. Blocked on remaining `se_implicit` edge cases, parallelism, `temp_stdin` SIGTERM diagnostic. |
+| `features`  | 41/42 passing. `patternrules` 72/72 ✅, `reinvoke` 12/12 ✅, `se_explicit` 31/31 ✅, `se_implicit` 30/30 ✅, `statipattrules` 68/68 ✅, `vpathplus` 4/4 ✅, `temp_stdin` 8/8 ✅. Blocked only on parallelism. |
 | `functions` | Most working. Remaining: fatal-error line numbers.                |
 | `misc`      | All passing (bs-nl 28/28, general4 10/10).                        |
-| `options`   | Most working; `dash-q` fully passing. `dash-f` 31/32. Blocked on stdin re-exec/MAKEFLAGS. |
+| `options`   | All passing ✅ (`dash-q`, `dash-f` 32/32 after failed-primary-as-goal fix). |
 | `targets`   | `ONESHELL`+`NOTINTERMEDIATE`+`INTERMEDIATE`+`SECONDARY` fully passing. `WAIT` needs parallel scheduling. |
 | `variables` | All passing ✅ (MAKEFLAGS 218/218 after debug-flag wiring). |
 
@@ -751,6 +745,64 @@ Round 10 (130/135 categories — gained MAKEFLAGS):
 
 Subtest gains: MAKEFLAGS 198→218 (✅ category flip), temp_stdin 5→7.
 Category total: 129 → 130.
+
+Round 11 (132/135 categories — gained dash-f, temp_stdin):
+
+1. **Failed primary `-f` makefiles become goals + suppress re-exec**:
+   when a `-f` makefile fails to load, register its name in a new
+   `failed_primary_makefiles` list. Prepend those names to the goal
+   list so the main build phase emits `No rule to make target '<X>'`,
+   matching GNU. Also set a new `Engine.suppress_reexec` flag that
+   makes `build()` skip its `-1` sentinel return — GNU does not restart
+   when a primary makefile is missing, even if other includes were
+   rebuilt. Fixes `options/dash-f` #4 — file now fully passes (32/32).
+2. **Fatal-signal propagation to recipe child**: install a process-wide
+   handler for SIGTERM/SIGINT/SIGHUP/SIGQUIT that forwards the signal
+   to the currently-running recipe child via a `CURRENT_CHILD_PID`
+   atomic. New `Engine::run_with_signal_propagation` helper wraps each
+   `Command` with `spawn` + `wait` (loops on EINTR), recording/clearing
+   the child PID. The forwarded signal causes the child's wait status
+   to indicate death-by-signal, triggering the regular recipe error
+   path. Replaces the four `.status()` call sites in
+   `execute_recipe_inner`.
+3. **Signal-killed recipes during include remake print and re-raise**:
+   when `execute_recipe_inner` sees a fatal-signal (1/2/3/15) child
+   exit, print `make: *** [<src>:<ln>: <target>] <Sig>` and re-raise
+   the signal on ourselves with `signal(sig, SIG_DFL)` + `kill(getpid(),
+   sig)`. This bypasses include-remake error swallowing
+   (`finalize_includes` Phase 0 uses `let _ = build_target(...)`) and
+   makes the test harness see make as killed-by-signal rather than
+   exited-with-status. Fixes `features/temp_stdin` #5.
+
+Subtest gains: dash-f 31→32 (✅), temp_stdin 7→8 (✅).
+Category total: 130 → 132.
+
+Round 12 (133/135 categories — gained se_implicit):
+
+1. **SE side-effect ordering during pattern_search**: GNU make fires
+   second-expansion `$(info)` etc. messages in deepest-first order
+   relative to the recursive prerequisite verification. Previously we
+   either silenced SE entirely during pattern_search and re-fired in
+   `build_target_for` (wrong order — outer rule fired before nested
+   rules), or fired during pattern_search but at the wrong recursion
+   point (outer rule's SE fired before child rules were even tried).
+2. **Two-phase SE expansion in `try_pattern_rule`**: split into a
+   silenced verification expansion (just to compute prereq names) and
+   a real expansion fired AFTER successful verification. Because the
+   verification step recurses through `find_pattern_rule_inner` for
+   each prereq before returning, child pattern rules get to fire
+   their SE messages first; the outer rule fires its SE only after
+   all children have done so. Result is deepest-first ordering matching
+   GNU exactly.
+3. **`build_target_for` reuses cached SE expansion**: when handling a
+   matched SE pattern rule, check `pattern_se_cache` (populated by
+   `try_pattern_rule` after success) and replay the cached prereqs +
+   order-only without re-firing side effects. The cache key is
+   `(target, target_pattern)`. The original inline SE expansion path
+   remains as a fallback for rules that didn't go through pattern_search.
+
+Subtest gains: se_implicit 28→30 (✅).
+Category total: 132 → 133.
 
 ---
 

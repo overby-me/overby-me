@@ -81,6 +81,14 @@ struct RuleEntry {
     raw_order_only_text: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+struct CachedSeExpansion {
+    /// Expanded prereqs with is_pattern_derived flag (for `%`-tokens).
+    prereqs: Vec<(String, bool)>,
+    /// Expanded order-only prereqs.
+    order_only: Vec<String>,
+}
+
 /// A pattern rule entry.
 #[derive(Debug, Clone)]
 struct PatternRuleEntry {
@@ -550,6 +558,10 @@ pub struct Engine {
     /// Set to true by finalize_includes when an included makefile was
     /// remade and the process should re-exec itself.
     pub needs_reexec: Cell<bool>,
+    /// Block the re-exec sentinel return from `build()`. Set when a
+    /// primary `-f` makefile failed to load — GNU make does not restart
+    /// in that case; the missing makefile is reported as a goal instead.
+    pub suppress_reexec: Cell<bool>,
     /// Recursion depth counter for build_target_for. Prevents stack
     /// overflow when implicit rule search creates an infinite chain
     /// (e.g. %: %.c matching hello -> hello.c -> hello.c.c -> ...).
@@ -621,6 +633,25 @@ pub struct Engine {
     pub cmdline_mflags: RefCell<String>,
     /// Command-line-derived long flags for MAKEFLAGS (e.g. ["--trace"]).
     pub cmdline_mflags_long: RefCell<Vec<String>>,
+    /// Cache of second-expansion results keyed by (target, target_pattern).
+    /// Filled during `try_pattern_rule` so subsequent calls in the same
+    /// pattern_search (and `build_target_for`) can reuse the expansion
+    /// without re-firing `$(info)`/`$(error)` etc.
+    pattern_se_cache: RefCell<std::collections::HashMap<(String, String), CachedSeExpansion>>,
+    /// When true, $(info)/$(warning)/$(error) suppress their side
+    /// effects (no output, no process exit). Used to silently fire SE
+    /// during pattern_search so verification doesn't double-print
+    /// when build_target_for re-fires SE for real.
+    pub se_silence: std::cell::Cell<bool>,
+    /// Stack of pattern rule target_patterns currently being tried in
+    /// pattern_search recursion. Used for "implicit rule recursion
+    /// avoidance" — when verifying a chain prereq, the same rule
+    /// shouldn't be re-tried (matches GNU make's behavior).
+    trying_pattern_rules: RefCell<Vec<String>>,
+    /// Files mentioned via include/-include directives. Persisted
+    /// after `pending_includes` is drained so match-anything `%`
+    /// rules can still treat them as mentioned at build time.
+    pub include_mentioned: RefCell<HashSet<String>>,
 }
 
 /// GNU make's directory-transfer stem substitution for pattern rules.
@@ -709,6 +740,7 @@ impl Engine {
             buffered_kgo_errors: RefCell::new(None),
             posix_mode: RefCell::new(false),
             needs_reexec: Cell::new(false),
+            suppress_reexec: Cell::new(false),
             build_depth: Cell::new(0),
             printed_entering: Cell::new(false),
             skip_implicit: RefCell::new(HashSet::new()),
@@ -734,6 +766,10 @@ impl Engine {
             second_expansion_enabled: Cell::new(false),
             cmdline_mflags: RefCell::new(String::new()),
             cmdline_mflags_long: RefCell::new(Vec::new()),
+            pattern_se_cache: RefCell::new(std::collections::HashMap::new()),
+            se_silence: std::cell::Cell::new(false),
+            trying_pattern_rules: RefCell::new(Vec::new()),
+            include_mentioned: RefCell::new(HashSet::new()),
         };
 
         // Set default variables
@@ -2133,6 +2169,7 @@ impl Engine {
                                 if self.load_file_with_loc(&path, true, None) {
                                     loaded = true;
                                     self.included_files.borrow_mut().push(path.clone());
+                                    self.include_mentioned.borrow_mut().insert(path.clone());
                                 }
                                 matched = true;
                             }
@@ -2141,6 +2178,7 @@ impl Engine {
                             // Defer: a rule to build this file may appear
                             // later in the same makefile. `finalize_includes`
                             // retries after the full parse.
+                            self.include_mentioned.borrow_mut().insert(file.to_string());
                             self.pending_includes.borrow_mut().push((
                                 file.to_string(),
                                 *silent,
@@ -3336,9 +3374,12 @@ impl Engine {
         // re-exec the process (GNU make "restart" semantics).
         // Don't print Leaving — the re-exec'd process will print
         // Entering/Leaving from scratch.
-        if self.needs_reexec.get() {
+        if self.needs_reexec.get() && !self.suppress_reexec.get() {
             return -1; // sentinel: caller should re-exec
         }
+        // If re-exec is suppressed, clear the flag so the build proceeds
+        // normally with the (already-loaded) makefiles in their current state.
+        self.needs_reexec.set(false);
 
         let targets = if targets.is_empty() {
             match self.default_goal.borrow().as_ref() {
@@ -4346,149 +4387,179 @@ impl Engine {
                         .as_deref()
                         .is_some_and(|s| s.contains('$')));
             if pat_needs_se {
-                let target_str = target.to_string();
-                let stem_str = stem.clone();
-                let plus_str = all_prereqs.join(" ");
-                let mut seen_set: HashSet<String> = HashSet::new();
-                let caret: Vec<String> = all_prereqs
-                    .iter()
-                    .filter(|p| seen_set.insert((*p).clone()))
-                    .cloned()
-                    .collect();
-                let caret_str = caret.join(" ");
-                // $| dedups (matches GNU make execute_recipe behavior).
-                let mut pipe_seen: HashSet<String> = HashSet::new();
-                let pipe_str: String = all_order_only
-                    .iter()
-                    .filter(|p| pipe_seen.insert((*p).clone()))
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                let lt_str = all_prereqs.first().cloned().unwrap_or_default();
-                let mut auto_vars: HashMap<&str, String> = HashMap::new();
-                auto_vars.insert("@", target_str);
-                auto_vars.insert("*", stem_str.clone());
-                auto_vars.insert("<", lt_str);
-                auto_vars.insert("^", caret_str);
-                auto_vars.insert("+", plus_str);
-                auto_vars.insert("|", pipe_str);
-                auto_vars.insert("?", String::new());
-                auto_vars.insert("%", String::new());
-                add_df_variants(&mut auto_vars);
-                let raw = pat_rule.raw_prereq_text.clone().unwrap_or_default();
-                // Track which raw tokens contained `%` (pattern-derived
-                // intermediates) before stem substitution. Tokens without
-                // `%` come from variables/SE expansions; they are NOT
-                // intermediate (they must be mentioned to be built).
-                // Use nesting-aware split so `$$(...)` with internal
-                // whitespace stays as a single token.
-                let raw_tokens: Vec<(String, bool)> =
-                    crate::parser::split_whitespace_respecting_refs(&raw)
-                        .into_iter()
-                        .map(|t| {
-                            let p = t.contains('%');
-                            (t, p)
-                        })
+                // Reuse SE expansion result cached by pattern_search /
+                // try_pattern_rule. Pattern_search fires SE side effects
+                // ($(info) etc.) in deepest-first order during recursion;
+                // we must NOT re-fire them here. If a cached entry exists,
+                // just replay the resulting prereqs/order_only.
+                let pat_se_key = (target.to_string(), pat_rule.target_pattern.clone());
+                let cached_se = self.pattern_se_cache.borrow().get(&pat_se_key).cloned();
+                if let Some(c) = cached_se {
+                    for (ep, is_pat) in &c.prereqs {
+                        if *is_pat {
+                            pattern_derived_prereqs.insert(ep.clone());
+                            implied_prereqs.push(ep.clone());
+                        }
+                        se_prereqs.push(ep.clone());
+                        all_prereqs.push(ep.clone());
+                    }
+                    for tok in &c.order_only {
+                        se_order_only.push(tok.clone());
+                        all_order_only.push(tok.clone());
+                    }
+                    if recipe.is_empty() {
+                        recipe = pat_rule.recipe.clone();
+                        recipe_lines = pat_rule.recipe_lines.clone();
+                        recipe_source = pat_rule.source_name.clone();
+                    }
+                } else {
+                    let target_str = target.to_string();
+                    let stem_str = stem.clone();
+                    let plus_str = all_prereqs.join(" ");
+                    let mut seen_set: HashSet<String> = HashSet::new();
+                    let caret: Vec<String> = all_prereqs
+                        .iter()
+                        .filter(|p| seen_set.insert((*p).clone()))
+                        .cloned()
                         .collect();
-                let prev_in_recipe = *self.in_recipe.borrow();
-                *self.in_recipe.borrow_mut() = true;
-                // For directory-transfer: split stem into dir + base,
-                // substitute only base for %, expand, then prepend dir
-                // to each resulting token. This matches GNU make's SE
-                // pattern-rule semantics where directory transfer happens
-                // AFTER second expansion, not before.
-                let (stem_dir, stem_base) = if let Some(slash) = stem.rfind('/') {
-                    (Some(&stem[..=slash]), &stem[slash + 1..])
-                } else {
-                    (None, stem.as_str())
-                };
-                let mut expanded_per_token: Vec<(String, bool)> = Vec::new();
-                for (rt, is_pat) in &raw_tokens {
-                    // Substitute % with base stem only (no dir prepend yet).
-                    let with_stem =
-                        replace_first_percent_per_token(rt, &stem_base.replace('$', "$$"), false);
-                    let exp = self.with_target_vars_applied(target, || {
-                        expand::expand_with_auto(&with_stem, self, &auto_vars)
-                    });
-                    // Now prepend directory to each expanded token if the
-                    // original raw token contained % (pattern-derived) and
-                    // the stem has a directory component.
-                    let exp = if let (true, Some(dir)) = (*is_pat, stem_dir) {
-                        exp.split_whitespace()
-                            .map(|tok| format!("{dir}{tok}"))
-                            .collect::<Vec<_>>()
-                            .join(" ")
+                    let caret_str = caret.join(" ");
+                    // $| dedups (matches GNU make execute_recipe behavior).
+                    let mut pipe_seen: HashSet<String> = HashSet::new();
+                    let pipe_str: String = all_order_only
+                        .iter()
+                        .filter(|p| pipe_seen.insert((*p).clone()))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let lt_str = all_prereqs.first().cloned().unwrap_or_default();
+                    let mut auto_vars: HashMap<&str, String> = HashMap::new();
+                    auto_vars.insert("@", target_str);
+                    auto_vars.insert("*", stem_str.clone());
+                    auto_vars.insert("<", lt_str);
+                    auto_vars.insert("^", caret_str);
+                    auto_vars.insert("+", plus_str);
+                    auto_vars.insert("|", pipe_str);
+                    auto_vars.insert("?", String::new());
+                    auto_vars.insert("%", String::new());
+                    add_df_variants(&mut auto_vars);
+                    let raw = pat_rule.raw_prereq_text.clone().unwrap_or_default();
+                    // Track which raw tokens contained `%` (pattern-derived
+                    // intermediates) before stem substitution. Tokens without
+                    // `%` come from variables/SE expansions; they are NOT
+                    // intermediate (they must be mentioned to be built).
+                    // Use nesting-aware split so `$$(...)` with internal
+                    // whitespace stays as a single token.
+                    let raw_tokens: Vec<(String, bool)> =
+                        crate::parser::split_whitespace_respecting_refs(&raw)
+                            .into_iter()
+                            .map(|t| {
+                                let p = t.contains('%');
+                                (t, p)
+                            })
+                            .collect();
+                    let prev_in_recipe = *self.in_recipe.borrow();
+                    *self.in_recipe.borrow_mut() = true;
+                    // For directory-transfer: split stem into dir + base,
+                    // substitute only base for %, expand, then prepend dir
+                    // to each resulting token. This matches GNU make's SE
+                    // pattern-rule semantics where directory transfer happens
+                    // AFTER second expansion, not before.
+                    let (stem_dir, stem_base) = if let Some(slash) = stem.rfind('/') {
+                        (Some(&stem[..=slash]), &stem[slash + 1..])
                     } else {
-                        exp
+                        (None, stem.as_str())
                     };
-                    expanded_per_token.push((exp, *is_pat));
-                }
-                *self.in_recipe.borrow_mut() = prev_in_recipe;
-                // Re-join then re-parse for embedded `|` (order-only).
-                let joined: String = expanded_per_token
-                    .iter()
-                    .map(|(e, _)| e.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                let oo_part = if let Some(idx) = find_orderonly_pipe(&joined) {
-                    joined[idx + 1..].to_string()
-                } else {
-                    String::new()
-                };
-                for (exp, is_pat) in &expanded_per_token {
-                    let exp_norm = if let Some(idx) = find_orderonly_pipe(exp) {
-                        &exp[..idx]
+                    let mut expanded_per_token: Vec<(String, bool)> = Vec::new();
+                    for (rt, is_pat) in &raw_tokens {
+                        // Substitute % with base stem only (no dir prepend yet).
+                        let with_stem = replace_first_percent_per_token(
+                            rt,
+                            &stem_base.replace('$', "$$"),
+                            false,
+                        );
+                        let exp = self.with_target_vars_applied(target, || {
+                            expand::expand_with_auto(&with_stem, self, &auto_vars)
+                        });
+                        // Now prepend directory to each expanded token if the
+                        // original raw token contained % (pattern-derived) and
+                        // the stem has a directory component.
+                        let exp = if let (true, Some(dir)) = (*is_pat, stem_dir) {
+                            exp.split_whitespace()
+                                .map(|tok| format!("{dir}{tok}"))
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        } else {
+                            exp
+                        };
+                        expanded_per_token.push((exp, *is_pat));
+                    }
+                    *self.in_recipe.borrow_mut() = prev_in_recipe;
+                    // Re-join then re-parse for embedded `|` (order-only).
+                    let joined: String = expanded_per_token
+                        .iter()
+                        .map(|(e, _)| e.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let oo_part = if let Some(idx) = find_orderonly_pipe(&joined) {
+                        joined[idx + 1..].to_string()
                     } else {
-                        exp.as_str()
+                        String::new()
                     };
-                    for tok in exp_norm.split_whitespace() {
-                        let ep0 = unescape_name(tok);
-                        let expanded_list: Vec<String> = if ep0.contains(['*', '?', '[']) {
-                            if let Ok(paths) = glob::glob(&ep0) {
-                                let m: Vec<String> = paths
-                                    .flatten()
-                                    .map(|p| p.to_string_lossy().to_string())
-                                    .collect();
-                                if m.is_empty() { vec![ep0.clone()] } else { m }
+                    for (exp, is_pat) in &expanded_per_token {
+                        let exp_norm = if let Some(idx) = find_orderonly_pipe(exp) {
+                            &exp[..idx]
+                        } else {
+                            exp.as_str()
+                        };
+                        for tok in exp_norm.split_whitespace() {
+                            let ep0 = unescape_name(tok);
+                            let expanded_list: Vec<String> = if ep0.contains(['*', '?', '[']) {
+                                if let Ok(paths) = glob::glob(&ep0) {
+                                    let m: Vec<String> = paths
+                                        .flatten()
+                                        .map(|p| p.to_string_lossy().to_string())
+                                        .collect();
+                                    if m.is_empty() { vec![ep0.clone()] } else { m }
+                                } else {
+                                    vec![ep0.clone()]
+                                }
                             } else {
                                 vec![ep0.clone()]
+                            };
+                            for ep in expanded_list {
+                                if *is_pat {
+                                    pattern_derived_prereqs.insert(ep.clone());
+                                    implied_prereqs.push(ep.clone());
+                                }
+                                se_prereqs.push(ep.clone());
+                                all_prereqs.push(ep);
                             }
-                        } else {
-                            vec![ep0.clone()]
-                        };
-                        for ep in expanded_list {
-                            if *is_pat {
-                                pattern_derived_prereqs.insert(ep.clone());
-                                implied_prereqs.push(ep.clone());
-                            }
-                            se_prereqs.push(ep.clone());
-                            all_prereqs.push(ep);
                         }
                     }
-                }
-                let mut oo_combined = oo_part;
-                if let Some(orig_oo) = &pat_rule.raw_order_only_text
-                    && !orig_oo.trim().is_empty()
-                {
-                    let with_stem_oo = replace_first_percent_per_token(
-                        orig_oo,
-                        &stem_base.replace('$', "$$"),
-                        false,
-                    );
-                    let oo_exp = expand::expand_with_auto(&with_stem_oo, self, &auto_vars);
-                    if !oo_combined.is_empty() {
-                        oo_combined.push(' ');
+                    let mut oo_combined = oo_part;
+                    if let Some(orig_oo) = &pat_rule.raw_order_only_text
+                        && !orig_oo.trim().is_empty()
+                    {
+                        let with_stem_oo = replace_first_percent_per_token(
+                            orig_oo,
+                            &stem_base.replace('$', "$$"),
+                            false,
+                        );
+                        let oo_exp = expand::expand_with_auto(&with_stem_oo, self, &auto_vars);
+                        if !oo_combined.is_empty() {
+                            oo_combined.push(' ');
+                        }
+                        oo_combined.push_str(&oo_exp);
                     }
-                    oo_combined.push_str(&oo_exp);
-                }
-                for tok in oo_combined.split_whitespace() {
-                    se_order_only.push(tok.to_string());
-                    all_order_only.push(tok.to_string());
-                }
-                if recipe.is_empty() {
-                    recipe = pat_rule.recipe.clone();
-                    recipe_lines = pat_rule.recipe_lines.clone();
-                    recipe_source = pat_rule.source_name.clone();
+                    for tok in oo_combined.split_whitespace() {
+                        se_order_only.push(tok.to_string());
+                        all_order_only.push(tok.to_string());
+                    }
+                    if recipe.is_empty() {
+                        recipe = pat_rule.recipe.clone();
+                        recipe_lines = pat_rule.recipe_lines.clone();
+                        recipe_source = pat_rule.source_name.clone();
+                    }
                 }
             } else {
                 for pp in &pat_rule.prereq_patterns {
@@ -5751,6 +5822,38 @@ impl Engine {
     /// Check if a file is "mentioned" in the makefile — either as an
     /// explicit target or as a prerequisite of a non-pattern (explicit)
     /// rule. Such files "should exist" for terminal pattern rule matching.
+    /// Strict version that excludes MAKECMDGOALS (cmdline goals).
+    /// Used by match-anything restriction for non-terminal rules with prereqs.
+    fn is_mentioned_in_makefile(&self, file: &str) -> bool {
+        let rules = self.rules.borrow();
+        if rules.contains_key(file) {
+            return true;
+        }
+        for entries in rules.values() {
+            for entry in entries {
+                if entry.prerequisites.iter().any(|p| p == file) {
+                    return true;
+                }
+            }
+        }
+        drop(rules);
+        if self.included_files.borrow().iter().any(|f| f == file) {
+            return true;
+        }
+        if self
+            .pending_includes
+            .borrow()
+            .iter()
+            .any(|(f, _, _, _)| f == file)
+        {
+            return true;
+        }
+        if self.include_mentioned.borrow().contains(file) {
+            return true;
+        }
+        false
+    }
+
     fn is_mentioned_file(&self, file: &str) -> bool {
         let rules = self.rules.borrow();
         // Check if it is an explicit target.
@@ -5764,6 +5867,30 @@ impl Engine {
                     return true;
                 }
             }
+        }
+        // Include directives (loaded or pending) mark the file as
+        // mentioned — GNU make adds these as internal targets.
+        drop(rules);
+        if self.included_files.borrow().iter().any(|f| f == file) {
+            return true;
+        }
+        if self
+            .pending_includes
+            .borrow()
+            .iter()
+            .any(|(f, _, _, _)| f == file)
+        {
+            return true;
+        }
+        // Track includes once finalize_includes has drained them.
+        if self.include_mentioned.borrow().contains(file) {
+            return true;
+        }
+        // Top-level goals from the command line are mentioned (GNU make
+        // treats them as targets to make).
+        let goals = self.lookup_var("MAKECMDGOALS");
+        if goals.split_whitespace().any(|g| g == file) {
+            return true;
         }
         false
     }
@@ -5816,6 +5943,179 @@ impl Engine {
         }
         // 7. Default intermediacy: pattern-derived and not explicitly mentioned
         is_pattern_derived && !self.is_mentioned_file(file)
+    }
+
+    /// Second-expand a pattern rule's prereqs and order-only text.
+    /// Returns (prereqs_with_pattern_flag, order_only). Each prereq
+    /// element is `(name, is_pattern_derived)` where `is_pattern_derived`
+    /// is true when the originating raw token contained `%`.
+    ///
+    /// IMPORTANT: This fires SE side effects ($(info), $(error), etc.)
+    /// — exactly once per call. Callers should cache the result via
+    /// `pattern_se_cache` to avoid re-firing during build_target_for.
+    fn expand_se_pattern_rule_prereqs(
+        &self,
+        target: &str,
+        pat_rule: &PatternRuleEntry,
+        stem: &str,
+        prior_prereqs: &[String],
+        prior_order_only: &[String],
+    ) -> (Vec<(String, bool)>, Vec<String>) {
+        self._expand_se_pattern_rule_prereqs_inner(
+            target,
+            pat_rule,
+            stem,
+            prior_prereqs,
+            prior_order_only,
+        )
+    }
+
+    /// Same as expand_se_pattern_rule_prereqs but with SE side effects
+    /// (`$(info)`/`$(warning)`/`$(error)`) suppressed. Used during
+    /// pattern_search verification to compute prereq names without
+    /// firing side effects; the real fire happens after verification
+    /// succeeds (so child rules have already fired their SE).
+    fn expand_se_pattern_rule_prereqs_silenced(
+        &self,
+        target: &str,
+        pat_rule: &PatternRuleEntry,
+        stem: &str,
+        prior_prereqs: &[String],
+        prior_order_only: &[String],
+    ) -> (Vec<(String, bool)>, Vec<String>) {
+        let prev = self.se_silence.replace(true);
+        let r = self._expand_se_pattern_rule_prereqs_inner(
+            target,
+            pat_rule,
+            stem,
+            prior_prereqs,
+            prior_order_only,
+        );
+        self.se_silence.set(prev);
+        r
+    }
+
+    fn _expand_se_pattern_rule_prereqs_inner(
+        &self,
+        target: &str,
+        pat_rule: &PatternRuleEntry,
+        stem: &str,
+        prior_prereqs: &[String],
+        prior_order_only: &[String],
+    ) -> (Vec<(String, bool)>, Vec<String>) {
+        let plus_str = prior_prereqs.join(" ");
+        let mut seen_set: HashSet<String> = HashSet::new();
+        let caret: Vec<String> = prior_prereqs
+            .iter()
+            .filter(|p| seen_set.insert((*p).clone()))
+            .cloned()
+            .collect();
+        let caret_str = caret.join(" ");
+        let mut pipe_seen: HashSet<String> = HashSet::new();
+        let pipe_str: String = prior_order_only
+            .iter()
+            .filter(|p| pipe_seen.insert((*p).clone()))
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let lt_str = prior_prereqs.first().cloned().unwrap_or_default();
+        let mut auto_vars: HashMap<&str, String> = HashMap::new();
+        auto_vars.insert("@", target.to_string());
+        auto_vars.insert("*", stem.to_string());
+        auto_vars.insert("<", lt_str);
+        auto_vars.insert("^", caret_str);
+        auto_vars.insert("+", plus_str);
+        auto_vars.insert("|", pipe_str);
+        auto_vars.insert("?", String::new());
+        auto_vars.insert("%", String::new());
+        add_df_variants(&mut auto_vars);
+        let raw = pat_rule.raw_prereq_text.clone().unwrap_or_default();
+        let raw_tokens: Vec<(String, bool)> = crate::parser::split_whitespace_respecting_refs(&raw)
+            .into_iter()
+            .map(|t| {
+                let p = t.contains('%');
+                (t, p)
+            })
+            .collect();
+        let prev_in_recipe = *self.in_recipe.borrow();
+        *self.in_recipe.borrow_mut() = true;
+        let (stem_dir, stem_base) = if let Some(slash) = stem.rfind('/') {
+            (Some(&stem[..=slash]), &stem[slash + 1..])
+        } else {
+            (None, stem)
+        };
+        let mut expanded_per_token: Vec<(String, bool)> = Vec::new();
+        for (rt, is_pat) in &raw_tokens {
+            let with_stem =
+                replace_first_percent_per_token(rt, &stem_base.replace('$', "$$"), false);
+            let exp = self.with_target_vars_applied(target, || {
+                expand::expand_with_auto(&with_stem, self, &auto_vars)
+            });
+            let exp = if let (true, Some(dir)) = (*is_pat, stem_dir) {
+                exp.split_whitespace()
+                    .map(|tok| format!("{dir}{tok}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            } else {
+                exp
+            };
+            expanded_per_token.push((exp, *is_pat));
+        }
+        *self.in_recipe.borrow_mut() = prev_in_recipe;
+        let joined: String = expanded_per_token
+            .iter()
+            .map(|(e, _)| e.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let oo_part = if let Some(idx) = find_orderonly_pipe(&joined) {
+            joined[idx + 1..].to_string()
+        } else {
+            String::new()
+        };
+        let mut prereqs_out: Vec<(String, bool)> = Vec::new();
+        for (exp, is_pat) in &expanded_per_token {
+            let exp_norm = if let Some(idx) = find_orderonly_pipe(exp) {
+                &exp[..idx]
+            } else {
+                exp.as_str()
+            };
+            for tok in exp_norm.split_whitespace() {
+                let ep0 = unescape_name(tok);
+                let expanded_list: Vec<String> = if ep0.contains(['*', '?', '[']) {
+                    if let Ok(paths) = glob::glob(&ep0) {
+                        let m: Vec<String> = paths
+                            .flatten()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .collect();
+                        if m.is_empty() { vec![ep0.clone()] } else { m }
+                    } else {
+                        vec![ep0.clone()]
+                    }
+                } else {
+                    vec![ep0.clone()]
+                };
+                for ep in expanded_list {
+                    prereqs_out.push((ep, *is_pat));
+                }
+            }
+        }
+        let mut oo_combined = oo_part;
+        if let Some(orig_oo) = &pat_rule.raw_order_only_text
+            && !orig_oo.trim().is_empty()
+        {
+            let with_stem_oo =
+                replace_first_percent_per_token(orig_oo, &stem_base.replace('$', "$$"), false);
+            let oo_exp = expand::expand_with_auto(&with_stem_oo, self, &auto_vars);
+            if !oo_combined.is_empty() {
+                oo_combined.push(' ');
+            }
+            oo_combined.push_str(&oo_exp);
+        }
+        let oo_out: Vec<String> = oo_combined
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect();
+        (prereqs_out, oo_out)
     }
 
     fn find_pattern_rule(&self, target: &str) -> Option<(PatternRuleEntry, String)> {
@@ -5955,58 +6255,138 @@ impl Engine {
             return None;
         }
 
+        // Implicit rule recursion avoidance (GNU make):
+        // when verifying a chain prereq, do not retry the same rule
+        // that's currently being tried at an outer level.
+        if self
+            .trying_pattern_rules
+            .borrow()
+            .contains(&rule.target_pattern)
+        {
+            return None;
+        }
+
         // Non-terminal match-anything rules (target pattern is just `%`)
         // cannot build intermediates unless the target is an explicit
         // target in the makefile (has its own rule entry). Being merely
         // a prerequisite of some other rule doesn't count.
         // Terminal match-anything rules don't have this restriction.
-        if depth > 0
-            && rule.target_pattern == "%"
-            && !rule.is_terminal
-            && !self.rules.borrow().contains_key(target)
-        {
-            return None;
+        // Match-anything ("%") non-terminal rules are restricted:
+        //  - At any depth, if the rule has prereqs (would create
+        //    intermediates), require the target to be mentioned in
+        //    the makefile or via include directives. This matches
+        //    GNU make behavior — match-anything rules with prereqs
+        //    only apply to known/mentioned files.
+        //  - At depth > 0 (chain prereq), even prereq-less rules
+        //    require the target to be a known file (cycle/explosion
+        //    prevention).
+        if rule.target_pattern == "%" && !rule.is_terminal {
+            let has_prereqs = !rule.prereq_patterns.is_empty()
+                || rule
+                    .raw_prereq_text
+                    .as_deref()
+                    .is_some_and(|s| !s.trim().is_empty());
+            // For has-prereqs rules, MAKECMDGOALS doesn't count as
+            // mentioned (matches GNU make: cmdline goals don't enable
+            // %: %.o intermediate creation).
+            let mentioned_strict = self.is_mentioned_in_makefile(target);
+            if has_prereqs && !mentioned_strict {
+                return None;
+            }
+            if depth > 0 && !self.is_mentioned_file(target) {
+                return None;
+            }
         }
 
-        if rule.is_terminal {
-            // For SE terminal rules, defer prereq verification to build
-            // time so side-effect functions like $(info) don't fire twice.
-            if rule.second_expand && rule.raw_prereq_text.is_some() {
-                return Some((rule.clone(), stem));
+        // Compute prereqs to verify. For SE rules, expand the raw text
+        // (which fires `$(info)` etc. once); cache the result so
+        // `build_target_for` can reuse it without re-firing side effects.
+        let se_needs = rule.second_expand
+            && rule
+                .raw_prereq_text
+                .as_deref()
+                .is_some_and(|s| s.contains('$'));
+        let se_cache_key = (target.to_string(), rule.target_pattern.clone());
+        // Compute SE expansion (silenced) for verification only. The
+        // real (side-effect-firing) expansion happens after verification
+        // succeeds, so child pattern_search recursions get to fire their
+        // SE messages first (matching GNU's deepest-first ordering).
+        let prior_ctx: Option<(Vec<String>, Vec<String>)> = if se_needs {
+            let mut pre: Vec<String> = Vec::new();
+            let mut oo: Vec<String> = Vec::new();
+            if let Some(entries) = self.rules.borrow().get(target) {
+                for r in entries {
+                    for p in &r.prerequisites {
+                        pre.push(self.resolve_library_prereq(p));
+                    }
+                    for o in &r.order_only {
+                        oo.push(o.clone());
+                    }
+                }
             }
+            Some((pre, oo))
+        } else {
+            None
+        };
+        #[allow(clippy::type_complexity)]
+        let se_expanded: Option<(Vec<(String, bool)>, Vec<String>)> = if se_needs {
+            if let Some(cached) = self.pattern_se_cache.borrow().get(&se_cache_key).cloned() {
+                Some((cached.prereqs, cached.order_only))
+            } else {
+                let (prior_pre, prior_oo) = prior_ctx.as_ref().unwrap();
+                Some(self.expand_se_pattern_rule_prereqs_silenced(
+                    target, rule, &stem, prior_pre, prior_oo,
+                ))
+            }
+        } else {
+            None
+        };
+
+        if rule.is_terminal {
             // Terminal rules: prereqs must exist on disk, be explicit
             // targets, or (in pass 2) be mentioned in the makefile.
             // No implicit chaining allowed for terminal rules.
-            let prereqs_ok = rule.prereq_patterns.is_empty()
-                || rule.prereq_patterns.iter().all(|pp| {
-                    let prereq = pattern_subst_with_dir(pp, &stem);
-                    // Circular prereq: treat as satisfied (dropped at build time)
-                    if chain.contains(&prereq) {
+            let prereqs_ok = if let Some((sep, _)) = &se_expanded {
+                sep.iter().all(|(prereq, _)| {
+                    if chain.contains(prereq) {
                         return true;
                     }
-                    self.file_exists_or_vpath(&prereq)
+                    self.file_exists_or_vpath(prereq)
                         || self.rules.borrow().contains_key(prereq.as_str())
-                        || self.resolve_vpath_rule(&prereq).is_some()
-                        || (allow_chaining && self.is_mentioned_file(&prereq))
-                });
+                        || self.resolve_vpath_rule(prereq).is_some()
+                        || (allow_chaining && self.is_mentioned_file(prereq))
+                })
+            } else {
+                rule.prereq_patterns.is_empty()
+                    || rule.prereq_patterns.iter().all(|pp| {
+                        let prereq = pattern_subst_with_dir(pp, &stem);
+                        if chain.contains(&prereq) {
+                            return true;
+                        }
+                        self.file_exists_or_vpath(&prereq)
+                            || self.rules.borrow().contains_key(prereq.as_str())
+                            || self.resolve_vpath_rule(&prereq).is_some()
+                            || (allow_chaining && self.is_mentioned_file(&prereq))
+                    })
+            };
             return if prereqs_ok {
+                if se_needs && !self.pattern_se_cache.borrow().contains_key(&se_cache_key) {
+                    let (prior_pre, prior_oo) = prior_ctx.as_ref().unwrap();
+                    let real = self
+                        .expand_se_pattern_rule_prereqs(target, rule, &stem, prior_pre, prior_oo);
+                    self.pattern_se_cache.borrow_mut().insert(
+                        se_cache_key.clone(),
+                        CachedSeExpansion {
+                            prereqs: real.0,
+                            order_only: real.1,
+                        },
+                    );
+                }
                 Some((rule.clone(), stem))
             } else {
                 None
             };
         }
-
-        // For .SECONDEXPANSION pattern rules, the prereq text may
-        // contain side-effect-having functions like $(info). We can't
-        // expand here without those firing twice (once for matching
-        // verification, once for actual build). Accept the rule as
-        // matching and let build_target_for handle verification.
-        let se_expanded_prereqs: Option<Vec<String>> =
-            if rule.second_expand && rule.raw_prereq_text.is_some() {
-                Some(Vec::new())
-            } else {
-                None
-            };
 
         // Non-terminal rule: two-pass prereq check.
         // Pass 1 (allow_chaining=false): prereqs must exist on disk,
@@ -6014,14 +6394,17 @@ impl Engine {
         // Pass 2 (allow_chaining=true): additionally, prereqs can be
         //   satisfied by is_mentioned_file or by chaining through
         //   another implicit rule.
-        let prereq_iter: Vec<String> = if let Some(se) = &se_expanded_prereqs {
-            se.clone()
+        let prereq_iter: Vec<String> = if let Some((sep, _)) = &se_expanded {
+            sep.iter().map(|(p, _)| p.clone()).collect()
         } else {
             rule.prereq_patterns
                 .iter()
                 .map(|pp| pattern_subst_with_dir(pp, &stem))
                 .collect()
         };
+        self.trying_pattern_rules
+            .borrow_mut()
+            .push(rule.target_pattern.clone());
         let prereqs_ok = prereq_iter.is_empty()
             || prereq_iter.iter().all(|prereq| {
                 let prereq = prereq.clone();
@@ -6046,10 +6429,28 @@ impl Engine {
                                 .find_pattern_rule_inner(&prereq, depth + 1, chain)
                                 .is_some()))
             });
+        self.trying_pattern_rules.borrow_mut().pop();
 
         if prereqs_ok {
+            if se_needs && !self.pattern_se_cache.borrow().contains_key(&se_cache_key) {
+                let (prior_pre, prior_oo) = prior_ctx.as_ref().unwrap();
+                let real =
+                    self.expand_se_pattern_rule_prereqs(target, rule, &stem, prior_pre, prior_oo);
+                self.pattern_se_cache.borrow_mut().insert(
+                    se_cache_key.clone(),
+                    CachedSeExpansion {
+                        prereqs: real.0,
+                        order_only: real.1,
+                    },
+                );
+            }
             Some((rule.clone(), stem))
         } else {
+            // Drop silenced cache entry on failure so a subsequent retry
+            // (next allow_chaining pass) re-evaluates with fresh context.
+            // Note: we never cached anything silenced (only fire after
+            // success), so nothing to drop. Suppress unused warning.
+            let _ = &se_expanded;
             None
         }
     }
@@ -6390,6 +6791,30 @@ impl Engine {
             }
         }
         result
+    }
+
+    /// Run a `Command` to completion while making the child PID
+    /// available to the global SIGTERM/SIGINT/SIGHUP/SIGQUIT handler.
+    /// When `make` receives such a signal the handler forwards it to
+    /// this child, ensuring the child's status reflects death-by-signal
+    /// and the regular recipe error path prints `make: *** [...] Terminated`.
+    fn run_with_signal_propagation(
+        cmd: &mut std::process::Command,
+    ) -> std::io::Result<std::process::ExitStatus> {
+        use std::sync::atomic::Ordering;
+        let mut child = cmd.spawn()?;
+        crate::CURRENT_CHILD_PID.store(child.id() as i32, Ordering::SeqCst);
+        // Loop on EINTR — signal handler interrupts wait() but we want
+        // the child's real exit status.
+        let res = loop {
+            match child.wait() {
+                Ok(s) => break Ok(s),
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => break Err(e),
+            }
+        };
+        crate::CURRENT_CHILD_PID.store(0, Ordering::SeqCst);
+        res
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -6817,7 +7242,7 @@ impl Engine {
             let status_result = if use_shell {
                 let mut cmd = build_shell_cmd(&shell, &shell_flags, &expanded, ignore_error);
                 apply_env(&mut cmd);
-                cmd.status()
+                Self::run_with_signal_propagation(&mut cmd)
             } else {
                 // No shell metacharacters — try direct execution.
                 let parts: Vec<&str> = expanded.split_whitespace().collect();
@@ -6826,7 +7251,7 @@ impl Engine {
                     cmd.args(&parts[1..]);
                 }
                 apply_env(&mut cmd);
-                match cmd.status() {
+                match Self::run_with_signal_propagation(&mut cmd) {
                     Err(ref e) if e.raw_os_error() == Some(8) => {
                         // ENOEXEC — script has no shebang. Fall back to
                         // /bin/sh -c, matching GNU make / POSIX behavior.
@@ -6834,7 +7259,7 @@ impl Engine {
                         sh.arg("-c");
                         sh.arg(&expanded);
                         apply_env(&mut sh);
-                        sh.status()
+                        Self::run_with_signal_propagation(&mut sh)
                     }
                     Err(ref e) if e.raw_os_error() == Some(2) => {
                         // ENOENT — command not found.
@@ -6847,7 +7272,7 @@ impl Engine {
                             let mut cmd =
                                 build_shell_cmd(&shell, &shell_flags, &expanded, ignore_error);
                             apply_env(&mut cmd);
-                            cmd.status()
+                            Self::run_with_signal_propagation(&mut cmd)
                         } else {
                             // Default shell: report like GNU make.
                             let cmd_name = expanded.split_whitespace().next().unwrap_or(&expanded);
@@ -6899,6 +7324,32 @@ impl Engine {
                                 eprintln!("make: [{loc}{target}] {sig_name} (ignored)");
                             } else {
                                 *self.in_recipe.borrow_mut() = false;
+                                // For fatal signals (SIGTERM, SIGINT, SIGHUP,
+                                // SIGQUIT) propagated from `make` to its child,
+                                // print the diagnostic ourselves and exit
+                                // immediately. Otherwise the error would be
+                                // swallowed by include-remake error handling
+                                // (Phase 0 of finalize_includes uses `let _ =`).
+                                if matches!(sig, 1 | 2 | 3 | 15) {
+                                    eprintln!("make: *** [{loc}{target}] {sig_name}");
+                                    // Re-raise the signal on ourselves so the
+                                    // shell/test harness sees us as killed by
+                                    // signal, not as an exited-with-status
+                                    // process. Reset to default disposition
+                                    // first, then deliver.
+                                    use std::io::Write;
+                                    let _ = std::io::stderr().flush();
+                                    let _ = std::io::stdout().flush();
+                                    unsafe {
+                                        crate::signal(sig as crate::c_int, 0);
+                                        crate::kill(
+                                            std::process::id() as crate::c_int,
+                                            sig as crate::c_int,
+                                        );
+                                    }
+                                    // Fallback if re-raise didn't kill us.
+                                    std::process::exit(128 + sig);
+                                }
                                 return Err(format!("[{loc}{target}] {sig_name}"));
                             }
                         } else {
