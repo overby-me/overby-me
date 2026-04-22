@@ -30,6 +30,11 @@ fn main() {
 }
 
 fn run() -> i32 {
+    // If a previous re-exec left a stdin temp file, record its path so
+    // we can clean it up on exit. Detect by checking -f args for paths
+    // matching the make-stdin-<pid> pattern in TMPDIR.
+    let mut inherited_stdin_temp: Option<String> = None;
+
     // GNU make prepends GNUMAKEFLAGS and MAKEFLAGS env to argv so options
     // and cmdline vars from them are applied before explicit command-line
     // args. Unset GNUMAKEFLAGS afterward so recursive makes don't
@@ -76,6 +81,54 @@ fn run() -> i32 {
     }
     // Index where real command-line args start (after argv[0] and prepended MAKEFLAGS entries).
     let cmdline_start: usize = 1 + prepend_count;
+
+    // Detect inherited stdin temp files from a previous re-exec.
+    // These have the pattern make-stdin-<PID> in the filename.
+    // Check all -f / --file / --makefile arguments for this pattern.
+    {
+        let is_stdin_temp = |p: &str| -> bool {
+            std::path::Path::new(p)
+                .file_name()
+                .and_then(|f| f.to_str())
+                .is_some_and(|f| f.starts_with("make-stdin-"))
+        };
+        let mut i = 1;
+        while i < args.len() {
+            let arg = &args[i];
+            if let Some(path) = arg.strip_prefix("-f") {
+                if !path.is_empty() && is_stdin_temp(path) {
+                    inherited_stdin_temp = Some(path.to_string());
+                }
+            } else if (arg == "-f" || arg == "--makefile" || arg == "--file")
+                && i + 1 < args.len()
+                && is_stdin_temp(&args[i + 1])
+            {
+                inherited_stdin_temp = Some(args[i + 1].clone());
+            } else if let Some(path) = arg
+                .strip_prefix("--makefile=")
+                .or_else(|| arg.strip_prefix("--file="))
+            {
+                if is_stdin_temp(path) {
+                    inherited_stdin_temp = Some(path.to_string());
+                }
+            } else if arg.starts_with('-') && !arg.starts_with("--") && arg.len() > 2 {
+                // Handle combined flags like `-Rf<path>`.
+                if let Some(pos) = arg.find('f') {
+                    let after_f = &arg[pos + 1..];
+                    if !after_f.is_empty() && is_stdin_temp(after_f) {
+                        inherited_stdin_temp = Some(after_f.to_string());
+                    } else if after_f.is_empty()
+                        && i + 1 < args.len()
+                        && is_stdin_temp(&args[i + 1])
+                    {
+                        inherited_stdin_temp = Some(args[i + 1].clone());
+                    }
+                }
+            }
+            i += 1;
+        }
+    }
+
     let mut engine = Engine::new();
 
     // Set $(MAKE) to argv[0] so recursive make and tests can locate this
@@ -927,6 +980,8 @@ fn run() -> i32 {
     }
 
     let mut stdin_read = false;
+    // Saved stdin content for re-exec (written to temp file only if needed).
+    let mut stdin_content_for_reexec: Option<String> = None;
     for path in &makefile_paths {
         if path == "-" {
             if stdin_read {
@@ -941,7 +996,8 @@ fn run() -> i32 {
                 return 2;
             }
             // GNU make writes stdin to a temp file in $TMPDIR (or /tmp).
-            // Replicate the error when that directory is not writable.
+            // Verify we CAN write there (error if not), but don't persist
+            // the file yet — only write it on re-exec when actually needed.
             {
                 let tmpdir = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
                 let tmp_path = std::path::Path::new(&tmpdir).join("make-stdin-XXXXXX");
@@ -953,6 +1009,7 @@ fn run() -> i32 {
                 }
                 let _ = std::fs::remove_file(&tmp_path);
             }
+            stdin_content_for_reexec = Some(content.clone());
             engine.load_string(&content);
         } else {
             engine.load_file(path, false);
@@ -1156,9 +1213,61 @@ fn run() -> i32 {
         let _ = std::io::stdout().flush();
         let _ = std::io::stderr().flush();
 
-        // Re-exec the same binary with the same arguments.
+        // Re-exec the same binary with the same arguments. If stdin was
+        // read (-f-), write the content to a temp file and replace that
+        // arg with the temp file path so the re-exec'd process can read it.
+        let mut reexec_args: Vec<String> = args[1..].to_vec();
+        if let Some(ref content) = stdin_content_for_reexec {
+            let tmpdir = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
+            let temp_path =
+                std::path::Path::new(&tmpdir).join(format!("make-stdin-{}", std::process::id()));
+            if let Err(e) = std::fs::write(&temp_path, content) {
+                eprintln!("make: *** cannot write stdin temp file for re-exec: {e}.  Stop.");
+                return 2;
+            }
+            let temp_str = temp_path.to_string_lossy().to_string();
+            // Replace `-f-`, `-f -`, `--makefile -`, `--makefile=-` with
+            // the temp file path.
+            let mut i = 0;
+            while i < reexec_args.len() {
+                if reexec_args[i] == "-f-" {
+                    reexec_args[i] = format!("-f{temp_str}");
+                } else if reexec_args[i] == "--makefile=-" || reexec_args[i] == "--file=-" {
+                    reexec_args[i] = format!("--file={temp_str}");
+                } else if (reexec_args[i] == "-f"
+                    || reexec_args[i] == "--makefile"
+                    || reexec_args[i] == "--file")
+                    && i + 1 < reexec_args.len()
+                    && reexec_args[i + 1] == "-"
+                {
+                    reexec_args[i + 1] = temp_str.clone();
+                } else if reexec_args[i].starts_with('-')
+                    && !reexec_args[i].starts_with("--")
+                    && reexec_args[i].len() > 2
+                {
+                    // Handle combined short flags like `-Rf-`, `-Rf -`.
+                    // If the arg contains `f-` at the end, it's `-<flags>f-`.
+                    // If it ends with `f`, the next arg is the filename.
+                    let arg = &reexec_args[i];
+                    if arg.ends_with("f-") {
+                        // e.g. `-Rf-` → `-Rf<temp_path>`
+                        let prefix = &arg[..arg.len() - 1]; // strip trailing `-`
+                        reexec_args[i] = format!("{prefix}{temp_str}");
+                    } else if arg.ends_with('f')
+                        && i + 1 < reexec_args.len()
+                        && reexec_args[i + 1] == "-"
+                    {
+                        // e.g. `-Rf -` → `-Rf <temp_path>`
+                        reexec_args[i + 1] = temp_str.clone();
+                    }
+                }
+                i += 1;
+            }
+        }
         use std::os::unix::process::CommandExt;
-        let err = std::process::Command::new(&args[0]).args(&args[1..]).exec();
+        let err = std::process::Command::new(&args[0])
+            .args(&reexec_args)
+            .exec();
         // exec() only returns on error. Format the message like GNU make,
         // which prints `make: <path>: <reason>` on EACCES / ENOENT.
         let msg = match err.kind() {
@@ -1168,6 +1277,13 @@ fn run() -> i32 {
         };
         eprintln!("make: {}: {}", args[0], msg);
         return 127;
+    }
+
+    // Clean up stdin temp file from a previous re-exec (or from a
+    // re-exec we just triggered — exec() replaces the process so this
+    // line is only reached on normal exit, not re-exec).
+    if let Some(ref temp_path) = inherited_stdin_temp {
+        let _ = std::fs::remove_file(temp_path);
     }
 
     rc
