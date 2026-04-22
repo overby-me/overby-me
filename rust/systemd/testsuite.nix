@@ -587,7 +587,11 @@ in
       # scripts already set `set -eux` internally.
       # Tee output to /dev/kmsg so it appears on serial console (nix build -L).
       # Use a FIFO to capture the exit code without PIPESTATUS (avoiding Nix escaping).
-      test_cmd = f"cd {units_dir} && chmod +x *.sh && {env_prefix}./${testName}.sh 2>&1 | tee /dev/ttyS0"
+      # Wrap the test script so an exit code of 77 (upstream convention for
+      # "prerequisite missing, skip") creates /skipped even when the script
+      # didn't touch it itself (e.g. TEST-83-BTRFS exits 77 on non-btrfs root
+      # without writing /skipped).
+      test_cmd = f"cd {units_dir} && chmod +x *.sh && {env_prefix}bash -c './${testName}.sh; rc=$?; [ $rc -eq 77 ] && touch /skipped; exit $rc' 2>&1 | tee /dev/ttyS0"
 
       try:
           (rc, output) = machine.execute(test_cmd, timeout=${toString testTimeout})
@@ -603,20 +607,23 @@ in
           (rc, output) = machine.execute(test_cmd, timeout=${toString testTimeout})
           print(output)
 
-      # Check for /testok (standard systemd test success marker).  The
-      # upstream systemd tests create /testok as the last step of the
-      # test script after all assertions pass — its absence means the
-      # script crashed / a set-e-trapped `test` assertion failed.
+      # Check for /testok (standard systemd test success marker) or
+      # /skipped (upstream convention for tests that detected a missing
+      # prerequisite — e.g. TEST-08-INITRD when not running under a
+      # systemd initrd).  Either is a valid "this test ran to completion"
+      # marker; its absence means the script crashed / a set-e-trapped
+      # `test` assertion failed.
       (rc_ok, ok_out) = machine.execute("test -f /testok")
-      if rc_ok != 0:
-          print("=== /testok missing — dumping journal for diagnostics ===")
+      (rc_skip, skip_out) = machine.execute("test -f /skipped")
+      if rc_ok != 0 and rc_skip != 0:
+          print("=== /testok and /skipped both missing — dumping journal for diagnostics ===")
           (rc_j, j) = machine.execute("journalctl --no-pager -b 2>&1 | tail -400")
           print(j)
           print("=== systemctl list-units --failed ===")
           (rc_f, f) = machine.execute("systemctl list-units --failed 2>&1")
           print(f)
-      # Assert /testok exists — previous `machine.fail` was inverted and
-      # silently let missing-/testok cases pass the NixOS test.
-      machine.succeed("test -f /testok")
+      # Assert one of /testok or /skipped exists — previous `machine.fail`
+      # was inverted and silently let missing-marker cases pass.
+      machine.succeed("test -f /testok -o -f /skipped")
     '';
   }
