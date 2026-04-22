@@ -2515,6 +2515,31 @@ fn apply_dropins_to_transient(unit: &mut Unit, unit_dirs: &[std::path::PathBuf])
                                 unit.common.unit.description = value.to_string();
                             }
                         }
+                        // StandardInputText= / StandardInputData= accumulate
+                        // across directives; an empty value resets the list.
+                        // These configure systemd to stream the given bytes
+                        // (or base64 bytes) into the service's stdin.  See
+                        // systemd.exec(5).
+                        "StandardInputText" => {
+                            if value.is_empty() {
+                                svc.conf.exec_config.standard_input_text.clear();
+                            } else {
+                                svc.conf
+                                    .exec_config
+                                    .standard_input_text
+                                    .push(value.to_string());
+                            }
+                        }
+                        "StandardInputData" => {
+                            if value.is_empty() {
+                                svc.conf.exec_config.standard_input_data.clear();
+                            } else {
+                                svc.conf
+                                    .exec_config
+                                    .standard_input_data
+                                    .push(value.to_string());
+                            }
+                        }
                         _ => {
                             // Other properties are not applied to transient units for now
                         }
@@ -4084,6 +4109,26 @@ fn create_transient_unit(
                         "tty-fail" => crate::units::StandardInput::TtyFail,
                         _ => crate::units::StandardInput::Null,
                     };
+                }
+                "StandardInputText" => {
+                    if value.is_empty() {
+                        service_conf.exec_config.standard_input_text.clear();
+                    } else {
+                        service_conf
+                            .exec_config
+                            .standard_input_text
+                            .push(value.to_string());
+                    }
+                }
+                "StandardInputData" => {
+                    if value.is_empty() {
+                        service_conf.exec_config.standard_input_data.clear();
+                    } else {
+                        service_conf
+                            .exec_config
+                            .standard_input_data
+                            .push(value.to_string());
+                    }
                 }
                 "UtmpIdentifier" => {
                     service_conf.exec_config.utmp_identifier = if value.is_empty() {

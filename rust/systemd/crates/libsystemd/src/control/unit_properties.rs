@@ -1619,6 +1619,30 @@ fn insert_exec_config(props: &mut PropertyMap, conf: &ExecConfig) {
 
     // IP address allow/deny (from ServiceConfig but stored in ExecConfig vicinity)
     // These are on ServiceConfig, not ExecConfig, so handled in insert_service_config.
+
+    // StandardInputData= is reported as the base64 encoding of the
+    // concatenation of every StandardInputText= value (each suffixed with
+    // "\n") followed by every StandardInputData= value (pre-decoded from
+    // base64).  `systemctl show -P StandardInputData` expects this merged
+    // base64 form.  Matches upstream behaviour exercised by 15-DROPIN
+    // testcase_transient_service_dropins.
+    {
+        use base64::Engine;
+        let engine = base64::engine::general_purpose::STANDARD;
+        let mut bytes: Vec<u8> = Vec::new();
+        for s in &conf.standard_input_text {
+            bytes.extend_from_slice(s.as_bytes());
+            bytes.push(b'\n');
+        }
+        for s in &conf.standard_input_data {
+            if let Ok(decoded) = engine.decode(s) {
+                bytes.extend(decoded);
+            }
+        }
+        if !bytes.is_empty() {
+            insert(props, "StandardInputData", &engine.encode(&bytes));
+        }
+    }
 }
 
 fn insert_socket_config(props: &mut PropertyMap, conf: &SocketConfig) {
