@@ -411,12 +411,33 @@ pub fn resolve_symlink_aliases(
             }
 
             // Find all instances of the alias template in the unit table.
+            // Skip instances that have an *instance-level* symlink override
+            // pointing at a DIFFERENT target than the template-level alias —
+            // these redirect to a different unit (e.g. bar-alias@2.service
+            // -> yup@.service overrides bar-alias@.service -> bar@.service
+            // so bar-alias@2 is yup@2, not bar@2).  Handled separately in
+            // instantiate_template_units.
             let alias_instances: Vec<UnitId> = unit_table
                 .keys()
                 .filter(|id| {
-                    id.name.starts_with(alias_prefix)
+                    if !(id.name.starts_with(alias_prefix)
                         && id.name.ends_with(alias_suffix)
-                        && !is_template_unit(&id.name)
+                        && !is_template_unit(&id.name))
+                    {
+                        return false;
+                    }
+                    // Check for instance-level symlink override.  If the
+                    // instance's file is a symlink whose target differs from
+                    // alias_template (the template-level symlink target),
+                    // this instance is NOT part of the template alias chain.
+                    let has_different_target = unit_dirs.iter().any(|d| {
+                        let p = d.join(&id.name);
+                        std::fs::read_link(&p)
+                            .ok()
+                            .and_then(|t| t.file_name().map(|f| f.to_string_lossy().to_string()))
+                            .is_some_and(|tname| tname != *real_template)
+                    });
+                    !has_different_target
                 })
                 .cloned()
                 .collect();
