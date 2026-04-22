@@ -5089,19 +5089,21 @@ pub fn bind_mount_into_unit(
     let src_c = CString::new(source).map_err(|e| format!("bad source: {e}"))?;
     let dst_c = CString::new(destination).map_err(|e| format!("bad destination: {e}"))?;
 
-    // Block SIGCHLD so the signal-handler thread (which auto-reaps every
-    // child as PID 1's subreaper duty) doesn't beat us to the bind-helper's
-    // exit and leave waitpid(2) returning ECHILD.  Restore the previous
-    // mask once we've reaped the child explicitly.  Matches upstream
-    // systemd's pattern around its bind-mount helper.
-    let mut prev_mask = nix::sys::signal::SigSet::empty();
-    let mut block_mask = nix::sys::signal::SigSet::empty();
-    block_mask.add(nix::sys::signal::Signal::SIGCHLD);
-    let _ = nix::sys::signal::sigprocmask(
-        nix::sys::signal::SigmaskHow::SIG_BLOCK,
-        Some(&block_mask),
-        Some(&mut prev_mask),
-    );
+    // Use a pipe as a status channel.  PID 1's signal-hook thread reaps
+    // every SIGCHLD via signalfd, so a `waitpid(child_pid, ...)` here
+    // races and usually returns ECHILD before we can read the exit code.
+    // Instead the helper writes its result byte to the pipe before
+    // exiting; we read it from the parent.  EOF on the pipe means the
+    // helper died without writing (e.g. SIGKILL).
+    let mut pipe_fds: [libc::c_int; 2] = [-1, -1];
+    if unsafe { libc::pipe2(pipe_fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+        return Err(format!(
+            "pipe for bind-mount helper failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let read_fd = pipe_fds[0];
+    let write_fd = pipe_fds[1];
 
     let result = match unsafe { libc::fork() } {
         -1 => Err(format!(
@@ -5109,14 +5111,35 @@ pub fn bind_mount_into_unit(
             std::io::Error::last_os_error()
         )),
         0 => {
+            unsafe { libc::close(read_fd) };
+            // Clear CLOEXEC on write_fd so it survives any future exec
+            // (defensive — we don't exec, but the parent does dup'ing
+            // tricks elsewhere).
+            unsafe {
+                let flags = libc::fcntl(write_fd, libc::F_GETFD);
+                libc::fcntl(write_fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC);
+            }
+            let report = |code: u8| -> ! {
+                let buf = [code];
+                unsafe {
+                    libc::write(
+                        write_fd,
+                        buf.as_ptr() as *const libc::c_void,
+                        1,
+                    );
+                    libc::close(write_fd);
+                }
+                std::process::exit(code as i32);
+            };
+
             let ns_path = format!("/proc/{main_pid}/ns/mnt");
             let ns_file = match std::fs::File::open(&ns_path) {
                 Ok(f) => f,
-                Err(_) => std::process::exit(11),
+                Err(_) => report(11),
             };
             use std::os::unix::io::AsRawFd;
             if unsafe { libc::setns(ns_file.as_raw_fd(), libc::CLONE_NEWNS) } != 0 {
-                std::process::exit(12);
+                report(12);
             }
 
             if mkdir {
@@ -5141,7 +5164,7 @@ pub fn bind_mount_into_unit(
                 )
             } != 0
             {
-                std::process::exit(13);
+                report(13);
             }
             if read_only {
                 let remount = (libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY) as libc::c_ulong;
@@ -5155,21 +5178,24 @@ pub fn bind_mount_into_unit(
                     )
                 } != 0
                 {
-                    std::process::exit(14);
+                    report(14);
                 }
             }
-            std::process::exit(0);
+            report(0);
         }
-        child_pid => {
-            let mut status: libc::c_int = 0;
-            if unsafe { libc::waitpid(child_pid, &mut status, 0) } < 0 {
-                return Err(format!(
-                    "waitpid for bind helper failed: {}",
-                    std::io::Error::last_os_error()
-                ));
-            }
-            if libc::WIFEXITED(status) {
-                match libc::WEXITSTATUS(status) {
+        _child_pid => {
+            unsafe { libc::close(write_fd) };
+            // Read the exit code byte the helper wrote before exit.  If
+            // the pipe closes without a byte, the helper died abnormally.
+            let mut buf = [0u8; 1];
+            let n = unsafe {
+                libc::read(read_fd, buf.as_mut_ptr() as *mut libc::c_void, 1)
+            };
+            unsafe { libc::close(read_fd) };
+            if n != 1 {
+                Err("bind-mount helper terminated abnormally".to_string())
+            } else {
+                match buf[0] {
                     0 => Ok(()),
                     11 => Err(format!("failed to open /proc/{main_pid}/ns/mnt")),
                     12 => Err("setns(CLONE_NEWNS) failed".to_string()),
@@ -5181,19 +5207,9 @@ pub fn bind_mount_into_unit(
                     )),
                     code => Err(format!("bind-mount helper exited with code {code}")),
                 }
-            } else {
-                Err("bind-mount helper terminated abnormally".to_string())
             }
         }
     };
-
-    // Restore the original signal mask so SIGCHLD goes back through the
-    // signal-handler thread for normal child reaping.
-    let _ = nix::sys::signal::sigprocmask(
-        nix::sys::signal::SigmaskHow::SIG_SETMASK,
-        Some(&prev_mask),
-        None,
-    );
 
     result
 }
