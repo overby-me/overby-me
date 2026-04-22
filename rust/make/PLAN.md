@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**128/135 tests passing** (95%) — upstream test harness from GNU make 4.4.1.
+**129/135 tests passing** (96%) — upstream test harness from GNU make 4.4.1.
 
 MAKEFLAGS subtests: **198/218** (91%) — significant progress on flag
 merge, dedup, sort, origin tracking, and env-inherited override propagation.
@@ -378,9 +378,10 @@ in ways the test harness happens not to exercise in our passing set.
   where a function is *expanded*, not where it's *declared*. GNU
   make tags each function call with its source location in the
   makefile. Affects most `functions/*-e*` error tests.
-- **Makefile auto-rebuild / re-exec** — when an included or primary
-  makefile has a rule, re-run make on it, then re-exec. Needed for
-  `features/reinvoke` (1/12), `options/dash-B` (5/8),
+- **Makefile auto-rebuild / re-exec** — partially done: basic
+  auto-rebuild works for includes and primary makefiles (`-f`), but
+  stdin re-exec via `--temp-stdin` needs work. Needed for
+  `options/dash-B` (5/8),
   `variables/MAKE_RESTARTS` (0/3), many `options/dash-W` and
   `options/dash-n`.
 - ~~**GPATH support**~~ ✅ Implemented. Files found via `vpath`/`VPATH`
@@ -430,23 +431,22 @@ in ways the test harness happens not to exercise in our passing set.
 
 ---
 
-## Currently failing top-level tests (7 of 135)
+## Currently failing top-level tests (6 of 135)
 
 Latest baseline (`bash /tmp/run-make-baseline.sh`):
 
 | Test | Notes |
 | --- | --- |
 | `features/parallelism` | Requires `-j` / jobserver (0/8) |
-| `features/reinvoke` | Makefile auto-rebuild + re-exec (5/12) |
 | `features/se_implicit` | 28/30 subtests pass; failing subtests 9 (SE prereq verification in pattern search), 27 (SE prereq expansion ordering) |
 | `features/temp_stdin` | 6/8 subtests pass; `--debug=b` re-exec banner with `--temp-stdin=` (#4); SIGTERM "Terminated" diagnostic (#5, needs signal handler) |
-| `options/dash-f` | 23/32 subtests pass; all 9 failures need makefile auto-rebuild (`touch bye.mk.src` / `touch bye.mk` before consuming stdin) |
+| `options/dash-f` | 31/32 subtests pass; remaining failure needs stdin re-exec via `--temp-stdin` |
 | `targets/WAIT` | `.WAIT` requires parallel scheduling (3/4) |
 | `variables/MAKEFLAGS` | 198/218 subtests pass; remaining 20 need: makefile auto-rebuild (197-208), sub-make with debug (210-217) |
 
-The biggest remaining unlocks are **makefile auto-rebuild/re-exec**
-(unlocks `reinvoke`, `dash-f`, MAKEFLAGS 197-217) and **parallel jobs**
-(unlocks `parallelism`, `WAIT`). The `se_implicit` remainder requires
+The biggest remaining unlocks are **parallel jobs**
+(unlocks `parallelism`, `WAIT`) and **stdin re-exec / `--temp-stdin`**
+(unlocks remaining `dash-f`, `temp_stdin`). The `se_implicit` remainder requires
 SE-during-pattern-search.
 
 ### MAKEFLAGS improvements (this session)
@@ -539,14 +539,14 @@ Round 3 fix (121/135):
 
 ## Category breakdown (current)
 
-Based on the latest baseline run (128/135 passing):
+Based on the latest baseline run (129/135 passing):
 
 | Category    | Status                                                            |
 | ----------- | ----------------------------------------------------------------- |
-| `features`  | 38/42 passing. `patternrules` 72/72 ✅, `se_explicit` 31/31 ✅, `statipattrules` 68/68 ✅, `vpathplus` 4/4 ✅. Blocked on remaining `se_implicit` edge cases, parallelism, re-exec, temp_stdin signal/debug. |
+| `features`  | 39/42 passing. `patternrules` 72/72 ✅, `reinvoke` 12/12 ✅, `se_explicit` 31/31 ✅, `statipattrules` 68/68 ✅, `vpathplus` 4/4 ✅. Blocked on remaining `se_implicit` edge cases, parallelism, temp_stdin signal/debug. |
 | `functions` | Most working. Remaining: fatal-error line numbers.                |
 | `misc`      | All passing (bs-nl 28/28, general4 10/10).                        |
-| `options`   | Most working; `dash-q` fully passing. Blocked on re-exec/MAKEFLAGS. |
+| `options`   | Most working; `dash-q` fully passing. `dash-f` 31/32. Blocked on stdin re-exec/MAKEFLAGS. |
 | `targets`   | `ONESHELL`+`NOTINTERMEDIATE`+`INTERMEDIATE`+`SECONDARY` fully passing. `WAIT` needs parallel scheduling. |
 | `variables` | All done except MAKEFLAGS (`automatic` now passes via SE). |
 
@@ -693,6 +693,27 @@ Round 8 (128/135 categories — gained vpathplus):
 
 Subtest gains: vpathplus +2, MAKEFLAGS +11 (187→198), se_implicit +1.
 Category total: 127 → 128.
+
+Round 9 (129/135 categories — gained reinvoke):
+
+1. **Imagined targets for included makefiles** (sv 61226): when a rule
+   ran OK for an included makefile but didn't create the file, and the
+   file wasn't pre-marked by a sibling pattern rule, skip — don't error.
+   This matches GNU make's behavior where nonexistent included targets
+   with rules are "imagined" as updated.
+2. **Mtime-based rebuilt check**: only mark targets as "rebuilt"
+   (triggering dependents) when the file's mtime actually changed after
+   recipe execution. Prevents cascading rebuilds when recipes are no-ops.
+3. **Primary makefile auto-rebuild**: register `-f` makefiles in
+   `included_files` so `finalize_includes` checks them for rebuild rules.
+4. **Stdin temp file for re-exec**: when stdin is read via `-f-`, save
+   content and write to temp file on re-exec, replacing `-f-` with
+   `-f<temp>` in args. Handles combined flags (`-Rf-`, `--file=-`, etc.).
+5. **Inherited stdin temp cleanup**: detect and clean up stdin temp files
+   from previous re-exec on normal exit.
+
+Subtest gains: reinvoke 5→12 (✅ category flip!), dash-f 23→31,
+MAKEFLAGS 198 unchanged. Category total: 128 → 129.
 
 ---
 
