@@ -4,7 +4,7 @@ use std::time::Duration;
 use std::{env, fs, process};
 
 use crate::format::urlencode_field;
-use crate::options::{FormField, Options};
+use crate::options::{FormField, Options, PerUrlOptions};
 
 /// If an argument starts with a UTF-8 multibyte lead byte (0xC0-0xFF), emit
 /// curl's smart-quote warning. Used for both CLI args and config-file args.
@@ -28,7 +28,15 @@ fn read_config_file(path: &str) -> Vec<String> {
         io::stdin().read_to_string(&mut s).unwrap_or(0);
         s
     } else {
-        fs::read_to_string(path).unwrap_or_default()
+        match fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(_) => {
+                eprintln!("curl: cannot read config from '{path}'");
+                eprintln!("curl: option -K: error encountered when reading a file");
+                eprintln!("curl: try 'curl --help' or 'curl --manual' for more information");
+                process::exit(26);
+            }
+        }
     };
 
     let mut out = Vec::new();
@@ -152,6 +160,21 @@ fn warn_wrapped(msg: &str) {
     }
 }
 
+/// Snapshot the current per-URL fields from `opts` into a `PerUrlOptions`.
+fn snapshot_per_url(opts: &Options) -> PerUrlOptions {
+    PerUrlOptions {
+        data: opts.data.clone(),
+        data_raw: opts.data_raw,
+        headers: opts.headers.clone(),
+        method: opts.method.clone(),
+        json: opts.json,
+        form_fields: opts.form_fields.clone(),
+        upload_file: opts.upload_file.clone(),
+        head: opts.head,
+        get: opts.get,
+    }
+}
+
 pub(crate) fn parse_args() -> Options {
     let mut args: Vec<String> = env::args().skip(1).collect();
     let mut opts = Options::default();
@@ -169,6 +192,9 @@ pub(crate) fn parse_args() -> Options {
     }
 
     let mut has_url = false;
+    // Track the start index of the current --next group so we can snapshot
+    // per-URL options at group boundaries rather than at URL-add time.
+    let mut group_start_idx: usize = 0;
 
     let mut i = 0;
     while i < args.len() {
@@ -616,6 +642,12 @@ pub(crate) fn parse_args() -> Options {
                     eprintln!("curl: try 'curl --help' or 'curl --manual' for more information");
                     process::exit(2);
                 }
+                // Snapshot per-URL fields for all URLs in the current group.
+                let snap = snapshot_per_url(&opts);
+                for _ in group_start_idx..opts.urls.len() {
+                    opts.per_url_opts.push(snap.clone());
+                }
+                group_start_idx = opts.urls.len();
                 // Reset per-URL options to defaults
                 opts.data = None;
                 opts.data_raw = false;
@@ -753,6 +785,12 @@ pub(crate) fn parse_args() -> Options {
                                     );
                                     process::exit(2);
                                 }
+                                // Snapshot per-URL fields for all URLs in the current group.
+                                let snap = snapshot_per_url(&opts);
+                                for _ in group_start_idx..opts.urls.len() {
+                                    opts.per_url_opts.push(snap.clone());
+                                }
+                                group_start_idx = opts.urls.len();
                                 opts.data = None;
                                 opts.data_raw = false;
                                 opts.headers.clear();
@@ -785,6 +823,15 @@ pub(crate) fn parse_args() -> Options {
         i += 1;
     }
 
+    // Snapshot per-URL fields for the final --next group (or the only group
+    // when --next was never used).
+    {
+        let snap = snapshot_per_url(&opts);
+        for _ in group_start_idx..opts.urls.len() {
+            opts.per_url_opts.push(snap.clone());
+        }
+    }
+
     if opts.urls.is_empty() {
         eprintln!("curl: no URL specified");
         process::exit(2);
@@ -799,22 +846,28 @@ pub(crate) fn parse_args() -> Options {
     // --json: Content-Type / Accept defaults, applied once all -H args are
     // parsed so user-provided values are respected regardless of flag order.
     // curl emits these *after* any user-supplied headers.
-    if opts.json {
-        let has_ct = opts
-            .headers
+    // Apply to both the main opts (for the last URL group) and each per-URL
+    // snapshot so that earlier --json URLs also get the right headers.
+    fn apply_json_headers(headers: &mut Vec<(String, String)>) {
+        let has_ct = headers
             .iter()
             .any(|(k, _)| k.eq_ignore_ascii_case("content-type"));
-        let has_accept = opts
-            .headers
+        let has_accept = headers
             .iter()
             .any(|(k, _)| k.eq_ignore_ascii_case("accept"));
         if !has_ct {
-            opts.headers
-                .push(("Content-Type".to_string(), "application/json".to_string()));
+            headers.push(("Content-Type".to_string(), "application/json".to_string()));
         }
         if !has_accept {
-            opts.headers
-                .push(("Accept".to_string(), "application/json".to_string()));
+            headers.push(("Accept".to_string(), "application/json".to_string()));
+        }
+    }
+    if opts.json {
+        apply_json_headers(&mut opts.headers);
+    }
+    for puo in &mut opts.per_url_opts {
+        if puo.json {
+            apply_json_headers(&mut puo.headers);
         }
     }
 

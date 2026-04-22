@@ -118,8 +118,9 @@ fn main() {
     // Track glob values for each URL so #N in -o refers to the Nth glob value.
     let url_glob_values: Vec<Vec<String>>;
     if !opts.globoff {
+        let orig_urls = opts.urls.clone();
         let mut all_expanded = Vec::new();
-        for u in &opts.urls {
+        for u in &orig_urls {
             match expand_glob(u) {
                 Ok(expanded) => all_expanded.extend(expanded),
                 Err(e) => {
@@ -127,6 +128,23 @@ fn main() {
                     std::process::exit(3);
                 }
             }
+        }
+        // Expand per_url_opts in sync: each original URL's per-URL options
+        // apply to all URLs it expanded into.
+        if !opts.per_url_opts.is_empty() {
+            let mut new_per_url = Vec::new();
+
+            for (orig_idx, orig_url) in orig_urls.iter().enumerate() {
+                let count = match expand_glob(orig_url) {
+                    Ok(exp) => exp.len(),
+                    Err(_) => 1,
+                };
+                let puo = opts.per_url_opts.get(orig_idx).cloned().unwrap_or_default();
+                for _ in 0..count {
+                    new_per_url.push(puo.clone());
+                }
+            }
+            opts.per_url_opts = new_per_url;
         }
         opts.urls = all_expanded.iter().map(|(url, _)| url.clone()).collect();
         url_glob_values = all_expanded.into_iter().map(|(_, vals)| vals).collect();
@@ -183,7 +201,25 @@ fn main() {
 
     // -G / --get: append -d/--data-* content as a query string, and clear the
     // request body so these become GET (or HEAD with -I) requests.
-    if opts.get && opts.data.is_some() {
+    // When per-URL options are present, each URL uses its own snapshot's
+    // get/data fields; otherwise fall back to the global opts.
+    if !opts.per_url_opts.is_empty() {
+        for (idx, puo) in opts.per_url_opts.iter_mut().enumerate() {
+            if puo.get && puo.data.is_some() {
+                let data = puo.data.take().unwrap();
+                if let Ok(s) = std::str::from_utf8(&data)
+                    && let Some(url) = opts.urls.get_mut(idx)
+                {
+                    if url.contains('?') {
+                        url.push('&');
+                    } else {
+                        url.push('?');
+                    }
+                    url.push_str(s);
+                }
+            }
+        }
+    } else if opts.get && opts.data.is_some() {
         let data = opts.data.take().unwrap();
         if let Ok(s) = std::str::from_utf8(&data) {
             let extra = s.to_string();
@@ -259,7 +295,27 @@ fn main() {
         // sequence — curl's `--retry` with `--include` emits every attempt's
         // response, so we accumulate and prepend these to the final output.
         let mut retry_prefix: Vec<u8> = Vec::new();
-        let result = if opts.retry > 0 {
+
+        // Apply per-URL option overrides. Each URL was snapshotted at parse
+        // time so that `--next` resets don't retroactively affect earlier URLs.
+        // We always clone so that `opts` remains free for mutable cookie updates.
+        let effective_opts = if let Some(puo) = opts.per_url_opts.get(url_idx) {
+            let mut o = opts.clone();
+            o.data = puo.data.clone();
+            o.data_raw = puo.data_raw;
+            o.headers = puo.headers.clone();
+            o.method = puo.method.clone();
+            o.json = puo.json;
+            o.form_fields = puo.form_fields.clone();
+            o.upload_file = puo.upload_file.clone();
+            o.head = puo.head;
+            o.get = puo.get;
+            o
+        } else {
+            opts.clone()
+        };
+
+        let result = if effective_opts.retry > 0 {
             let mut last_err = String::new();
             let mut resp = None;
             let retry_start = std::time::Instant::now();
@@ -282,7 +338,7 @@ fn main() {
                     }
                     std::thread::sleep(Duration::from_secs(next_delay_secs));
                 }
-                match perform(url_str, &opts) {
+                match perform(url_str, &effective_opts) {
                     Ok(r) => {
                         // Retry on 5xx and 429 (rate-limited).
                         if (r.status >= 500 || r.status == 429) && attempt < opts.retry {
@@ -315,7 +371,7 @@ fn main() {
             }
             resp.ok_or(last_err)
         } else {
-            perform(url_str, &opts)
+            perform(url_str, &effective_opts)
         };
 
         match result {
@@ -355,7 +411,7 @@ fn main() {
                     && resp.status == 200
                     && !has_content_range
                     && !resume_fully_covered
-                    && opts.upload_file.is_none();
+                    && effective_opts.upload_file.is_none();
                 if resume_range_refused {
                     eprintln!(
                         "curl: (33) HTTP server doesn't seem to support byte ranges. Cannot resume."
@@ -659,7 +715,7 @@ fn main() {
                     || time_cond_not_met;
 
                 // Write output.
-                let write_body = !opts.head && !skip_body;
+                let write_body = !effective_opts.head && !skip_body;
                 // With -C <offset>, preserve existing output file content and
                 // append to it (matches curl's resume semantics).
                 let append_mode = opts.resume_from.is_some();
@@ -714,7 +770,7 @@ fn main() {
                 if nc_failed {
                     // Skip writing the body — exit 23 already set.
                 } else if let Some(ref path) = output_path {
-                    if opts.include_headers || opts.head {
+                    if opts.include_headers || effective_opts.head {
                         let mut data = Vec::new();
                         data.extend_from_slice(&resp.redirect_headers);
                         data.extend_from_slice(&resp.header_bytes);
@@ -734,7 +790,7 @@ fn main() {
                     let mut out = stdout.lock();
 
                     let _ = out.write_all(&retry_prefix);
-                    if opts.include_headers || opts.head {
+                    if opts.include_headers || effective_opts.head {
                         let _ = out.write_all(&resp.redirect_headers);
                         let _ = out.write_all(&resp.header_bytes);
                     }
@@ -758,15 +814,15 @@ fn main() {
                 if let Some(ref fmt) = opts.write_out {
                     // Determine the effective method (the one used on the final
                     // request — redirects can change POST → GET).
-                    let method = if opts.head {
+                    let method = if effective_opts.head {
                         "HEAD".to_string()
-                    } else if let Some(ref m) = opts.method {
+                    } else if let Some(ref m) = effective_opts.method {
                         m.clone()
                     } else if resp.num_redirects > 0 {
                         "GET".to_string()
-                    } else if opts.data.is_some() || !opts.form_fields.is_empty() {
+                    } else if opts.data.is_some() || !effective_opts.form_fields.is_empty() {
                         "POST".to_string()
-                    } else if opts.upload_file.is_some() {
+                    } else if effective_opts.upload_file.is_some() {
                         "PUT".to_string()
                     } else {
                         "GET".to_string()

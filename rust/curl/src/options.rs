@@ -7,6 +7,22 @@ pub enum TimeCond {
     IfUnmodifiedSince(i64), // unix timestamp
 }
 
+/// Per-URL option snapshot. These fields are reset by `--next` and must be
+/// captured at the time each URL is added so that earlier URLs keep their
+/// original values even after a `--next` reset.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct PerUrlOptions {
+    pub(crate) data: Option<Vec<u8>>,
+    pub(crate) data_raw: bool,
+    pub(crate) headers: Vec<(String, String)>,
+    pub(crate) method: Option<String>,
+    pub(crate) json: bool,
+    pub(crate) form_fields: Vec<FormField>,
+    pub(crate) upload_file: Option<PathBuf>,
+    pub(crate) head: bool,
+    pub(crate) get: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct Options {
     pub(crate) urls: Vec<String>,
@@ -83,6 +99,8 @@ pub struct Options {
     pub(crate) raw: bool,           // --raw — disable content decoding
     pub(crate) ignore_content_length: bool, // --ignore-content-length — read until EOF
     pub(crate) max_filesize_str: Option<String>, // raw string for overflow detection
+    /// Per-URL option snapshots. Index corresponds to `urls` index.
+    pub(crate) per_url_opts: Vec<PerUrlOptions>,
 }
 
 #[derive(Clone, Debug)]
@@ -169,6 +187,7 @@ impl Default for Options {
             raw: false,
             ignore_content_length: false,
             max_filesize_str: None,
+            per_url_opts: Vec::new(),
         }
     }
 }
