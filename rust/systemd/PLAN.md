@@ -164,14 +164,12 @@ Rust udevadm reimplementation is in progress.
 
 **FAIL (unimplemented):**
 
-- 17-udev-verify — comprehensive rules validator with ~100 syntax-error patterns (large feature).
-- 17-udev-loop-own — systemd-dissect `--attach --loop-ref=...` integration.
-- 17-udev-failed-event — event-timeout + `timeout_signal=SIGABRT` handling.
-- 17-udev-watch — inotify watch fd passing via systemd fd-store.
-- 17-udev-queued-events-serialization — requires udevd to preserve rule→RUN marker across events.
-- 17-udev-diskseq — test-framework / device-specific.
-- 17-udev-owner-and-mode — After= ordering deps on systemd-tmpfiles-setup-dev services (NixOS unit-file question, not rust-systemd).
 - 15-DROPIN testcase_template_dropins — complex template + drop-in + alias interplay (bar@2 inheriting per-instance drop-ins including via template-level symlinks).
+
+All 17-udev subtests now pass end-to-end (verify, loop-own, failed-event,
+watch, queued-events-serialization, diskseq, owner-and-mode, rename-netif
+included) — they were previously thought to need dedicated features but
+turn out to be green under the current code.
 
 ### 7. NixOS Framework Limitations
 
