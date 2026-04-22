@@ -1493,6 +1493,28 @@ pub fn instantiate_template_units(
             }
             instances_to_create.push((dep.child_unit.clone(), template_name, instance_name));
         }
+
+        // Also instantiate template-instance PARENTS of directory deps.
+        // TEST-15-DROPIN.testcase_template_dropins creates
+        // bar-alias@3.service.requires/ where bar-alias@.service → bar@.service
+        // (template-level symlink) and the parent template instance
+        // (bar-alias@3) needs to exist in the table for the .requires/
+        // dir to wire up correctly — even if no other code path loads it.
+        let parent_id: UnitId = match dep.parent_unit.as_str().try_into() {
+            Ok(id) => id,
+            Err(_) => continue,
+        };
+        if unit_table.contains_key(&parent_id) {
+            continue;
+        }
+        if let Some((template_name, instance_name)) = parse_template_instance(&dep.parent_unit)
+            && !instances_to_create
+                .iter()
+                .any(|(n, _, _)| n == &dep.parent_unit)
+            && !has_unresolved_specifiers(&instance_name)
+        {
+            instances_to_create.push((dep.parent_unit.clone(), template_name, instance_name));
+        }
     }
 
     // Also check for template instances referenced in Wants=/Requires= of existing units
