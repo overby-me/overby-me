@@ -458,6 +458,7 @@ enum Commands {
         timeout: u64,
 
         /// Command to execute while holding the lock.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
     },
 
