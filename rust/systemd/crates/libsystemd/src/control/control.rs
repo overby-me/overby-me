@@ -9399,7 +9399,35 @@ pub fn execute_command(
                     }
                     match &unit.common.unit.fragment_path {
                         None => false,
-                        Some(p) => !p.starts_with("/run/systemd/transient"),
+                        Some(p) => {
+                            if p.starts_with("/run/systemd/transient") {
+                                return false;
+                            }
+                            // Keep template instances alive whenever the
+                            // backing template is still on disk — daemon-
+                            // reload's disk scan doesn't re-enumerate
+                            // instances (it only parses the template), so
+                            // purging them would lose state for units that
+                            // were instantiated on-demand via
+                            // find_or_load_unit.  TEST-15-DROPIN
+                            // testcase_template_alias depends on this so
+                            // the forward-loaded test15-a@inst.service
+                            // survives the daemon-reload that precedes the
+                            // reverse check.
+                            if let Some((template_name, _)) =
+                                crate::units::loading::directory_deps::parse_template_instance(
+                                    &unit.id.name,
+                                )
+                                && run_info
+                                    .config
+                                    .unit_dirs
+                                    .iter()
+                                    .any(|d| d.join(&template_name).exists())
+                            {
+                                return false;
+                            }
+                            true
+                        }
                     }
                 })
                 .map(|(id, _)| id.clone())
