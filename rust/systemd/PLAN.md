@@ -165,12 +165,17 @@ Rust udevadm reimplementation is in progress.
 **FAIL (unimplemented):**
 
 - 15-DROPIN testcase_template_dropins — bar@0/bar@1/bar-alias@0/bar-alias@1
-  cases now pass (template-level alias dir-deps merged via
-  apply_directory_dependencies' alias-fallback lookup + template-parent
-  instantiation).  The remaining bar-alias@2/bar-alias@3 cases
-  (instance-level symlink to a DIFFERENT template/instance) partially
-  work but still cross-contaminate siblings' dir-deps — see the commit
-  trail for details.
+  cases pass via alias-fallback dir-dep application + template-parent
+  instantiation.  The bar-alias@2/bar-alias@3 cases (instance-level
+  symlink to a DIFFERENT template/instance) now have:
+  (a) instantiate_template_units producing yup@N primary unit with
+      bar-alias@N as alias instead of a separate bar-alias@N unit; and
+  (b) resolve_symlink_aliases skipping instances whose instance-level
+      symlink target differs from the template-level alias target.
+  Cross-contamination between yup@N and bar@N still leaks through in
+  some dir-dep passes, so the full test still fails on bar-alias@2.
+  Full fix requires single-path unit identity (no competing primary
+  units from different code paths claiming overlapping aliases).
 
 All 17-udev subtests now pass end-to-end (verify, loop-own, failed-event,
 watch, queued-events-serialization, diskseq, owner-and-mode, rename-netif
