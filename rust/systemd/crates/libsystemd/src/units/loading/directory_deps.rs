@@ -1559,33 +1559,68 @@ pub fn instantiate_template_units(
         // /etc/systemd/system/bar-alias@2.service is a symlink to
         // yup@.service (template) or yup@3.service (concrete instance),
         // bar-alias@2 is effectively an alias of yup@2 (instance mapped
-        // across) or yup@3 (whatever the symlink points at).
+        // across) or yup@3 (whatever the symlink points at).  We make
+        // the unit's primary id.name be the RESOLVED name (yup@2 /
+        // yup@3) and add the symlink name (bar-alias@2) as an alias, so
+        // dir-deps keyed on either name land on the same unit.  If the
+        // resolved unit already exists, skip and let the existing code
+        // path register the alias via find_symlink_aliases.
         // TEST-15-DROPIN.testcase_template_dropins exercises both forms.
-        let (effective_template, effective_instance_name) = unit_dirs
-            .iter()
-            .find_map(|d| {
+        let instance_override =
+            unit_dirs.iter().find_map(|d| {
                 let p = d.join(instance_unit_name);
                 std::fs::read_link(&p).ok().and_then(|t| {
                     let tname = t.file_name()?.to_string_lossy().to_string();
                     if tname.contains("@.") {
                         // Symlink to a template: derive yup@<instance>.service
                         // using the bar-alias@<N>.service's own instance.
-                        Some((tname, instance_name.clone()))
+                        let (prefix, suffix) = tname.split_once("@.")?;
+                        let resolved = format!("{prefix}@{instance_name}.{suffix}");
+                        Some((tname, instance_name.clone(), resolved))
                     } else if let Some((t_tmpl, t_inst)) = parse_template_instance(&tname) {
                         // Symlink to a concrete instance: use that instance.
-                        Some((t_tmpl, t_inst))
+                        Some((t_tmpl, t_inst, tname))
                     } else {
                         None
                     }
                 })
-            })
-            .unwrap_or_else(|| (template_name.clone(), instance_name.clone()));
-        let (template_name, instance_name) = (&effective_template, &effective_instance_name);
+            });
+        let (template_name, instance_name, effective_instance_unit_name, alias_name) =
+            if let Some((eff_tmpl, eff_inst, eff_name)) = instance_override {
+                (
+                    eff_tmpl,
+                    eff_inst,
+                    eff_name,
+                    Some(instance_unit_name.clone()),
+                )
+            } else {
+                (
+                    template_name.clone(),
+                    instance_name.clone(),
+                    instance_unit_name.clone(),
+                    None,
+                )
+            };
+        let instance_unit_name = &effective_instance_unit_name;
+        let template_name = &template_name;
+        let instance_name = &instance_name;
 
         trace!(
             "Instantiating template {} with instance {} -> {}",
             template_name, instance_name, instance_unit_name
         );
+
+        // If the resolved unit is already in the table, just add the
+        // alias name to it and skip re-instantiating.
+        if let Some(existing) = unit_table
+            .values_mut()
+            .find(|u| u.id.name == *instance_unit_name)
+            && let Some(alias) = &alias_name
+            && !existing.common.unit.aliases.contains(alias)
+        {
+            existing.common.unit.aliases.push(alias.clone());
+            continue;
+        }
 
         if let Some(mut unit) = instantiate_template(
             template_name,
@@ -1594,6 +1629,11 @@ pub fn instantiate_template_units(
             unit_dirs,
             dropins,
         ) {
+            if let Some(alias) = &alias_name
+                && !unit.common.unit.aliases.contains(alias)
+            {
+                unit.common.unit.aliases.push(alias.clone());
+            }
             // Discover template-level aliases (e.g. bar-alias@0.service
             // for bar@0.service when bar-alias@.service → bar@.service).
             let unit_path = unit_dirs
