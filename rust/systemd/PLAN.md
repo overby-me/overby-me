@@ -164,12 +164,26 @@ Rust udevadm reimplementation is in progress.
 
 **FAIL (unimplemented):**
 
-- 15-DROPIN testcase_template_dropins — complex template + drop-in + alias interplay (bar@2 inheriting per-instance drop-ins including via template-level symlinks).
+- 15-DROPIN testcase_template_dropins — bar@0/bar@1/bar-alias@0/bar-alias@1
+  cases now pass (template-level alias dir-deps merged via
+  apply_directory_dependencies' alias-fallback lookup + template-parent
+  instantiation).  The remaining bar-alias@2/bar-alias@3 cases
+  (instance-level symlink to a DIFFERENT template/instance) partially
+  work but still cross-contaminate siblings' dir-deps — see the commit
+  trail for details.
 
 All 17-udev subtests now pass end-to-end (verify, loop-own, failed-event,
 watch, queued-events-serialization, diskseq, owner-and-mode, rename-netif
 included) — they were previously thought to need dedicated features but
 turn out to be green under the current code.
+
+### 7b. NixOS framework limitations — now moot
+
+The PLAN.md once tracked 07-pid1-main-PID-change, 07-pid1-mount-invalid-chars,
+07-pid1-prefix-shell, 23-unit-file-whoami as framework failures.
+Re-running them all green end-to-end in this iteration, so the rust-systemd
+side is no longer blocked on framework issues there.  Keeping § 7 below
+as historical context.
 
 ### 7. NixOS Framework Limitations
 
