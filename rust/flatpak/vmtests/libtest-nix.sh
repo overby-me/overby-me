@@ -29,6 +29,12 @@ assert_not_file_has_content() {
 assert_file_empty() { [ ! -s "$1" ] || { echo "FAIL: expected empty: $1"; cat "$1"; exit 1; }; }
 assert_streq() { [ "$1" = "$2" ] || { echo "FAIL: expected '$1' == '$2'"; exit 1; }; }
 assert_not_streq() { [ "$1" != "$2" ] || { echo "FAIL: expected '$1' != '$2'"; exit 1; }; }
+assert_match() {
+  echo "$1" | grep -qE "$2" || { echo "FAIL: ${3:-output did not match}: expected pattern '$2' in:"; echo "$1"; exit 1; }
+}
+assert_not_match() {
+  if echo "$1" | grep -qE "$2"; then echo "FAIL: ${3:-output unexpectedly matched}: pattern '$2' in:"; echo "$1"; exit 1; fi
+}
 
 make_test_app() {
   local app_id="${1:-org.test.Hello}"
@@ -155,3 +161,86 @@ run_sh() {
   shift
   $FLATPAK --user run --command=sh "$app_id" -c "$*"
 }
+
+# ---------------------------------------------------------------------------
+# HTTP repo helpers (Cat 13: remote + network tests)
+# ---------------------------------------------------------------------------
+
+# Build a test app, export to an OSTree repo, update summary, and serve over HTTP.
+# Sets REPO_DIR, REPO_PORT, REPO_URL, and HTTP_PID.
+setup_http_repo() {
+  local branch="${1:-stable}"
+  local repo_dir="$TEST_DATA_DIR/http-repo"
+  rm -rf "$repo_dir"
+
+  # Build test app
+  local build_dir
+  build_dir=$(make_test_app org.test.Hello "$branch")
+
+  # Build test runtime
+  local rt_build_dir
+  rt_build_dir=$(make_test_runtime org.test.Platform "$branch")
+
+  # Export app to OSTree repo
+  $FLATPAK build-export "$repo_dir" "$build_dir" -b "$branch" 2>&1
+
+  # Export runtime to OSTree repo
+  $FLATPAK build-export "$repo_dir" "$rt_build_dir" -b "$branch" 2>&1
+
+  # Generate GVariant summary
+  $FLATPAK build-update-repo "$repo_dir" 2>&1
+
+  # Serve repo/  (the OSTree repo dir) over HTTP
+  local ostree_dir="$repo_dir/repo"
+  local port_file="$TEST_DATA_DIR/http-port"
+
+  python3 -c "
+import http.server, sys, os, threading
+os.chdir(sys.argv[1])
+httpd = http.server.HTTPServer(('127.0.0.1', 0), http.server.SimpleHTTPRequestHandler)
+port = httpd.server_address[1]
+with open(sys.argv[2], 'w') as f:
+    f.write(str(port))
+httpd.serve_forever()
+" "$ostree_dir" "$port_file" &
+  HTTP_PID=$!
+
+  # Wait for port file to appear
+  local retries=0
+  while [ ! -s "$port_file" ] && [ "$retries" -lt 50 ]; do
+    sleep 0.1
+    retries=$((retries + 1))
+  done
+
+  if [ ! -s "$port_file" ]; then
+    echo "FAIL: HTTP server did not start"
+    kill "$HTTP_PID" 2>/dev/null || true
+    exit 1
+  fi
+
+  REPO_DIR="$repo_dir"
+  REPO_PORT=$(cat "$port_file")
+  REPO_URL="http://127.0.0.1:${REPO_PORT}"
+
+  # Also install runtime locally so run commands work after remote install
+  setup_local_runtime "$branch"
+}
+
+# Install runtime directly (file copy) so apps installed from remote can run.
+setup_local_runtime() {
+  local branch="${1:-stable}"
+  local rt_src="$TEST_DATA_DIR/runtime-build-org.test.Platform"
+  local rt_dest="$FL_DIR/runtime/org.test.Platform/${ARCH}/${branch}/active"
+  mkdir -p "$rt_dest"
+  cp "$rt_src/metadata" "$rt_dest/metadata"
+  cp -r "$rt_src/files" "$rt_dest/files"
+}
+
+# Clean up HTTP server.
+cleanup_http() {
+  if [ -n "${HTTP_PID:-}" ]; then
+    kill "$HTTP_PID" 2>/dev/null || true
+    wait "$HTTP_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup_http EXIT

@@ -330,6 +330,9 @@ pub fn build_sandbox(
     bwrap.args(&["--dir", "/run/host"]);
     bwrap.args(&["--symlink", "../run", "/var/run"]);
 
+    // --- Persistent storage (--persist) ---
+    setup_persistent_dirs(&mut bwrap, &permissions, app_id, &home);
+
     // --- Filesystem exports ---
     setup_filesystem_exports(&mut bwrap, &permissions);
 
@@ -699,6 +702,46 @@ fn setup_etc(bwrap: &mut BwrapBuilder, runtime: Option<&DeployedRef>) {
             bwrap.args(&["--ro-bind", &path, "/etc/group"])
         }
     };
+}
+
+/// Set up --persist directories.
+///
+/// For each entry in `persistent`, create a real directory at
+/// `~/.var/app/<id>/<dir>` on the host and bind-mount it to
+/// `$HOME/<dir>` inside the sandbox. This gives the app persistent
+/// writable storage without exposing the real home directory.
+///
+/// Security: reject entries containing `..` or absolute paths to
+/// prevent symlink-based sandbox escapes (CVE-2024-42472).
+fn setup_persistent_dirs(
+    bwrap: &mut BwrapBuilder,
+    ctx: &ContextPermissions,
+    app_id: &str,
+    home: &str,
+) {
+    let app_data = format!("{home}/.var/app/{app_id}");
+
+    for dir in &ctx.persistent {
+        // Reject path traversal and absolute paths (CVE-2024-42472).
+        if dir.contains("..") || dir.starts_with('/') {
+            eprintln!("warning: ignoring dangerous --persist path: {dir}");
+            continue;
+        }
+
+        // Reject entries that are symlinks on the host side — an attacker
+        // could place a symlink at ~/.var/app/<id>/.foo → /etc and trick
+        // bwrap into bind-mounting over /etc inside the sandbox.
+        let host_dir = format!("{app_data}/{dir}");
+        let host_path = std::path::Path::new(&host_dir);
+        if host_path.is_symlink() {
+            eprintln!("warning: ignoring --persist path that is a symlink: {dir}");
+            continue;
+        }
+
+        let _ = std::fs::create_dir_all(&host_dir);
+        let sandbox_dir = format!("{home}/{dir}");
+        bwrap.args(&["--bind", &host_dir, &sandbox_dir]);
+    }
 }
 
 fn setup_filesystem_exports(bwrap: &mut BwrapBuilder, ctx: &ContextPermissions) {

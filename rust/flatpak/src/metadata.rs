@@ -16,12 +16,24 @@ pub struct Metadata {
 
 impl Metadata {
     pub fn from_file(path: &Path) -> Result<Self, String> {
-        let content = fs::read_to_string(path)
-            .map_err(|e| format!("read metadata {}: {e}", path.display()))?;
+        // Read raw bytes first to detect NUL bytes (CVE-2021-43860).
+        let raw = fs::read(path).map_err(|e| format!("read metadata {}: {e}", path.display()))?;
+        if raw.contains(&0u8) {
+            return Err(format!(
+                "metadata contains NUL bytes (CVE-2021-43860): {}",
+                path.display()
+            ));
+        }
+        let content = String::from_utf8(raw)
+            .map_err(|e| format!("metadata is not valid UTF-8 {}: {e}", path.display()))?;
         Self::parse(&content)
     }
 
     pub fn parse(content: &str) -> Result<Self, String> {
+        // Reject NUL bytes (CVE-2021-43860).
+        if content.contains('\0') {
+            return Err("metadata contains NUL bytes (CVE-2021-43860)".to_string());
+        }
         let mut groups: HashMap<String, HashMap<String, String>> = HashMap::new();
         let mut current_group: Option<String> = None;
 

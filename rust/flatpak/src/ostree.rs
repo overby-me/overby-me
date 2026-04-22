@@ -144,7 +144,7 @@ fn parse_summary_ref_entry(data: &[u8]) -> Result<SummaryRef, String> {
     let name = read_string(&data[..string_end]).to_string();
 
     // The inner tuple starts after the string, aligned to 8 (for `t`).
-    let inner_start = align_up(string_end + 1, 8); // +1 for NUL terminator
+    let inner_start = align_up(string_end, 8);
     if inner_start + 8 > data.len() {
         return Err("inner tuple too short".into());
     }
@@ -291,7 +291,7 @@ pub fn parse_dirtree(data: &[u8]) -> Result<Dirtree, String> {
     // Outer tuple has 2 variable-size elements. One framing offset for element 0.
     let files_end = read_offset(data, data.len() - osz, osz);
     let files_data = &data[..files_end];
-    let dirs_start = align_up(files_end, 8); // alignment of inner tuple
+    let dirs_start = files_end; // a(sayay) alignment = 1
     let dirs_data = &data[dirs_start..data.len() - osz];
 
     let files = parse_files_array(files_data);
@@ -312,8 +312,14 @@ fn parse_files_array(data: &[u8]) -> Vec<DirtreeFile> {
     // Variable-size array with offsets at the end.
     // Each entry is a tuple (s, ay). The `s` is variable, `ay` is variable but
     // always 32 bytes. The tuple has one framing offset for `s`.
+    if data.len() < osz {
+        return files;
+    }
     let last_offset_pos = data.len() - osz;
     let last_offset = read_offset(data, last_offset_pos, osz);
+    if last_offset > data.len() {
+        return files;
+    }
     let framing_region_size = data.len() - last_offset;
     let count = framing_region_size / osz;
 
@@ -340,7 +346,7 @@ fn parse_file_entry(data: &[u8]) -> Option<DirtreeFile> {
     let name_end = read_offset(data, data.len() - osz, osz);
     let name = read_string(&data[..name_end]).to_string();
 
-    let checksum_start = name_end + 1; // skip NUL
+    let checksum_start = name_end;
     if checksum_start + 32 > data.len() - osz {
         return None;
     }
@@ -358,8 +364,14 @@ fn parse_dirs_array(data: &[u8]) -> Vec<DirtreeDir> {
     let osz = offset_size(data.len());
     let mut dirs = Vec::new();
 
+    if data.len() < osz {
+        return dirs;
+    }
     let last_offset_pos = data.len() - osz;
     let last_offset = read_offset(data, last_offset_pos, osz);
+    if last_offset > data.len() {
+        return dirs;
+    }
     let framing_region_size = data.len() - last_offset;
     let count = framing_region_size / osz;
 
@@ -386,16 +398,16 @@ fn parse_dir_entry(data: &[u8]) -> Option<DirtreeDir> {
     let name_end = read_offset(data, data.len() - 2 * osz, osz);
     let name = read_string(&data[..name_end]).to_string();
 
-    let dirtree_start = name_end + 1; // skip NUL
+    let dirtree_start = name_end;
     let dirtree_end = read_offset(data, data.len() - osz, osz);
-    if dirtree_end - dirtree_start < 32 {
+    if dirtree_end < dirtree_start || dirtree_end - dirtree_start < 32 {
         return None;
     }
     let dirtree_checksum = checksum_to_hex(&data[dirtree_start..dirtree_start + 32]);
 
     let dirmeta_start = dirtree_end;
     let dirmeta_end = data.len() - 2 * osz;
-    if dirmeta_end - dirmeta_start < 32 {
+    if dirmeta_end < dirmeta_start || dirmeta_end - dirmeta_start < 32 {
         return None;
     }
     let dirmeta_checksum = checksum_to_hex(&data[dirmeta_start..dirmeta_start + 32]);
@@ -468,7 +480,7 @@ pub fn parse_filez_header(data: &[u8]) -> Result<(FileHeader, usize), String> {
 
     // Header GVariant: (tuuuusa(ayay))
     // All integer fields are big-endian.
-    if hdr.len() < 28 {
+    if hdr.len() < 24 {
         return Err("filez header too short".into());
     }
 
@@ -1242,42 +1254,40 @@ pub fn create_dirtree_from_dir(dir: &Path, repo_path: &Path) -> Result<(String, 
     Ok((dirtree_checksum, dirmeta_checksum))
 }
 
-/// Serialize a dirtree object.
+/// Serialize a dirtree object as proper GVariant: (a(say), a(sayay)).
 fn serialize_dirtree(files: &[(String, String)], dirs: &[(String, String, String)]) -> Vec<u8> {
-    // This is a simplified serialization. A full GVariant serializer would
-    // handle alignment and framing offsets properly. For now, produce a
-    // byte sequence that our parser can round-trip.
-    let mut data = Vec::new();
+    use crate::gvariant::{GVariant, byte_array, string};
 
-    // Files array placeholder — simplified binary format.
-    for (name, checksum) in files {
-        data.extend_from_slice(name.as_bytes());
-        data.push(0); // NUL
-        // 32-byte raw checksum.
-        for i in (0..64).step_by(2) {
-            let byte = u8::from_str_radix(&checksum[i..i + 2], 16).unwrap_or(0);
-            data.push(byte);
-        }
+    fn hex32(hex: &str) -> Vec<u8> {
+        (0..hex.len().min(64))
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0))
+            .collect()
     }
 
-    // Separator — in real GVariant this would be framing offsets.
-    // For our simplified format, the dirtree data is mainly used for
-    // checksumming and local storage.
+    // Files: a(say) — array of (name, checksum) tuples.
+    let files_array: Vec<GVariant> = files
+        .iter()
+        .map(|(name, cksum)| GVariant::Tuple(vec![string(name), byte_array(&hex32(cksum))]))
+        .collect();
 
-    for (name, dt_cksum, dm_cksum) in dirs {
-        data.extend_from_slice(name.as_bytes());
-        data.push(0);
-        for i in (0..64).step_by(2) {
-            let byte = u8::from_str_radix(&dt_cksum[i..i + 2], 16).unwrap_or(0);
-            data.push(byte);
-        }
-        for i in (0..64).step_by(2) {
-            let byte = u8::from_str_radix(&dm_cksum[i..i + 2], 16).unwrap_or(0);
-            data.push(byte);
-        }
-    }
+    // Dirs: a(sayay) — array of (name, dirtree_cksum, dirmeta_cksum) tuples.
+    let dirs_array: Vec<GVariant> = dirs
+        .iter()
+        .map(|(name, dt, dm)| {
+            GVariant::Tuple(vec![
+                string(name),
+                byte_array(&hex32(dt)),
+                byte_array(&hex32(dm)),
+            ])
+        })
+        .collect();
 
-    data
+    let dirtree = GVariant::Tuple(vec![
+        GVariant::Array(files_array),
+        GVariant::Array(dirs_array),
+    ]);
+    dirtree.serialize()
 }
 
 /// Create a commit object.
@@ -1294,36 +1304,27 @@ pub fn create_commit(
         .unwrap_or_default()
         .as_secs();
 
-    // Simplified commit serialization.
-    let mut data = Vec::new();
+    // Convert hex checksums to bytes.
+    fn hex_to_bytes_local(hex: &str) -> Vec<u8> {
+        (0..hex.len().min(64))
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0))
+            .collect()
+    }
+    let parent_bytes = parent.map(hex_to_bytes_local);
+    let dirtree_bytes = hex_to_bytes_local(root_dirtree);
+    let dirmeta_bytes = hex_to_bytes_local(root_dirmeta);
 
-    // Empty metadata a{sv}.
-    // Empty parent ay.
-    if let Some(p) = parent {
-        for i in (0..64).step_by(2) {
-            let byte = u8::from_str_radix(&p[i..i + 2], 16).unwrap_or(0);
-            data.push(byte);
-        }
-    }
-
-    // Empty related objects a(say).
-    // Subject string.
-    data.extend_from_slice(subject.as_bytes());
-    data.push(0);
-    // Empty body string.
-    data.push(0);
-    // Timestamp (BE u64).
-    data.extend_from_slice(&timestamp.to_be_bytes());
-    // Root dirtree checksum.
-    for i in (0..64).step_by(2) {
-        let byte = u8::from_str_radix(&root_dirtree[i..i + 2], 16).unwrap_or(0);
-        data.push(byte);
-    }
-    // Root dirmeta checksum.
-    for i in (0..64).step_by(2) {
-        let byte = u8::from_str_radix(&root_dirmeta[i..i + 2], 16).unwrap_or(0);
-        data.push(byte);
-    }
+    // Build proper GVariant commit object: (a{sv}, ay, a(say), s, s, t, ay, ay)
+    let commit = crate::gvariant::commit(
+        subject,
+        "",                // body
+        timestamp.to_be(), // BE-encoded timestamp
+        &dirtree_bytes,
+        &dirmeta_bytes,
+        parent_bytes.as_deref(),
+    );
+    let data = commit.serialize();
 
     let checksum = sha256_hex(&data);
     store_object(repo_path, &checksum, "commit", &data);

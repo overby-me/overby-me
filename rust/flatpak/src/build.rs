@@ -184,6 +184,8 @@ pub fn build_run(
 pub fn build_finish(
     dir: &Path,
     command: Option<&str>,
+    sdk: Option<&str>,
+    require_version: Option<&str>,
     permissions: &[(String, String)],
 ) -> Result<(), String> {
     let metadata_path = dir.join("metadata");
@@ -196,6 +198,26 @@ pub fn build_finish(
             .entry("Application".to_string())
             .or_default();
         app_group.insert("command".to_string(), cmd.to_string());
+    }
+
+    // Set the SDK if specified.
+    if let Some(sdk_val) = sdk {
+        let app_group = metadata
+            .groups
+            .entry("Application".to_string())
+            .or_default();
+        app_group.insert("sdk".to_string(), sdk_val.to_string());
+    }
+
+    // Record required-flatpak version if specified.
+    if let Some(ver) = require_version {
+        let group_name = if metadata.groups.contains_key("Runtime") {
+            "Runtime"
+        } else {
+            "Application"
+        };
+        let group = metadata.groups.entry(group_name.to_string()).or_default();
+        group.insert("required-flatpak".to_string(), ver.to_string());
     }
 
     // Apply permissions to [Context].
@@ -319,6 +341,11 @@ pub fn build_export(
     let ostree_repo = repo_path.join("repo");
     let _ = fs::create_dir_all(&ostree_repo);
     if src_files.exists() {
+        // Copy the metadata file into files/ so it ends up in the OSTree commit.
+        // Real Flatpak puts metadata both inside the tree (as files/metadata in
+        // the deployed checkout) and as xa.metadata in the commit metadata.
+        let metadata_in_files = src_files.join("metadata");
+        let _ = fs::copy(dir.join("metadata"), &metadata_in_files);
         match crate::ostree::create_dirtree_from_dir(&src_files, &ostree_repo) {
             Ok((dirtree_cksum, dirmeta_cksum)) => {
                 match crate::ostree::create_commit(
@@ -480,6 +507,27 @@ pub fn build_import_bundle(
         return Err("tar extraction failed".into());
     }
 
+    // Validate metadata consistency: if the bundle's tar payload also contains
+    // a metadata file, it must match the bundle header's metadata.
+    let extracted_meta_path = deploy_path.join("metadata");
+    if extracted_meta_path.exists() {
+        if let Ok(extracted) = fs::read_to_string(&extracted_meta_path) {
+            // Compare ignoring trailing whitespace (tar/file write may differ).
+            if extracted.trim() != metadata_str.trim()
+                && extracted.trim() != metadata_str.trim_end_matches('\n').trim()
+            {
+                let _ = fs::remove_dir_all(&deploy_path);
+                return Err(format!(
+                    "bundle metadata mismatch: header and payload metadata differ for {}",
+                    ref_.format_ref()
+                ));
+            }
+        }
+    } else {
+        // Re-write metadata from header (was overwritten or missing).
+        let _ = fs::write(&extracted_meta_path, &metadata_str);
+    }
+
     let _app_name = metadata.app_name().unwrap_or(&ref_.id).to_string();
 
     let ref_str = ref_.format_ref();
@@ -489,8 +537,16 @@ pub fn build_import_bundle(
 
 /// Update the summary file in a repository (stub).
 pub fn build_update_repo(repo_path: &Path) -> Result<(), String> {
-    // Walk the repo and create a summary of all refs.
-    let summary_path = repo_path.join("summary");
+    use crate::gvariant::{self, GVariant};
+
+    fn hex_to_bytes(hex: &str) -> Vec<u8> {
+        (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0))
+            .collect()
+    }
+
+    // Walk the repo and collect all refs.
     let mut refs = Vec::new();
 
     for kind in &["app", "runtime"] {
@@ -518,11 +574,49 @@ pub fn build_update_repo(repo_path: &Path) -> Result<(), String> {
         }
     }
 
+    // Write backward-compatible text summary at repo_path/summary.
+    let text_summary_path = repo_path.join("summary");
     let mut content = String::from("# Flatpak repo summary\n");
     for r in &refs {
         content.push_str(&format!("{r}\n"));
     }
-    fs::write(&summary_path, &content).map_err(|e| format!("write summary: {e}"))?;
+    fs::write(&text_summary_path, &content).map_err(|e| format!("write text summary: {e}"))?;
+
+    // Build GVariant binary summary at repo_path/repo/summary.
+    let ostree_repo = repo_path.join("repo");
+    let refs_heads = ostree_repo.join("refs").join("heads");
+
+    let mut ref_entries = Vec::new();
+    for ref_name in &refs {
+        // Read commit checksum from repo/refs/heads/{ref_name}.
+        let ref_file = refs_heads.join(ref_name);
+        let checksum_hex = fs::read_to_string(&ref_file)
+            .map_err(|e| format!("read ref {ref_name}: {e}"))?
+            .trim()
+            .to_string();
+        let checksum_bytes = hex_to_bytes(&checksum_hex);
+
+        // Each entry is (s, (t, ay, a{sv}))
+        let inner = GVariant::Tuple(vec![
+            GVariant::Uint64(0),
+            GVariant::ByteArray(checksum_bytes),
+            gvariant::empty_metadata(),
+        ]);
+        ref_entries.push(GVariant::Tuple(vec![
+            GVariant::Str(ref_name.clone()),
+            inner,
+        ]));
+    }
+
+    // Summary is (a(s(taya{sv})), a{sv})
+    let summary = GVariant::Tuple(vec![
+        GVariant::Array(ref_entries),
+        gvariant::empty_metadata(),
+    ]);
+
+    let binary_summary_path = ostree_repo.join("summary");
+    fs::write(&binary_summary_path, summary.serialize())
+        .map_err(|e| format!("write binary summary: {e}"))?;
 
     eprintln!("Updated summary: {} refs", refs.len());
     Ok(())

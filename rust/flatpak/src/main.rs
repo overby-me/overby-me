@@ -24,6 +24,8 @@ use std::process;
 
 use installation::{Installation, Ref, RefKind, Remote};
 
+pub const FLATPAK_VERSION: &str = "0.1.0";
+
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.is_empty() {
@@ -47,7 +49,7 @@ fn main() {
                 process::exit(0);
             }
             "--version" => {
-                println!("Flatpak 0.1.0 (rust-flatpak)");
+                println!("Flatpak {FLATPAK_VERSION} (rust-flatpak)");
                 process::exit(0);
             }
             _ if !arg.starts_with('-') => {
@@ -121,6 +123,7 @@ fn main() {
         "build-commit-from" => cmd_build_commit_from(cmd_args),
         "repo" => cmd_repo(cmd_args),
         "create-usb" => cmd_create_usb(&installations, cmd_args),
+        "complete" => cmd_complete(cmd_args),
         "help" => {
             print_usage();
             process::exit(0);
@@ -160,6 +163,9 @@ fn cmd_run(installations: &[Installation], args: &[String], verbose: bool) {
                 if i < args.len() {
                     command_override = Some(args[i].clone());
                 }
+            }
+            s if s.starts_with("--command=") => {
+                command_override = Some(s.strip_prefix("--command=").unwrap().to_string());
             }
             "--devel" | "-d" => devel = true,
             "--sandbox" => sandbox_mode = true,
@@ -365,12 +371,143 @@ fn cmd_info(installations: &[Installation], args: &[String]) {
     let show_metadata =
         args.contains(&"--show-metadata".to_string()) || args.contains(&"-m".to_string());
     let show_permissions = args.contains(&"--show-permissions".to_string());
+    let show_commit =
+        args.contains(&"--show-commit".to_string()) || args.contains(&"-c".to_string());
+    let show_location =
+        args.contains(&"--show-location".to_string()) || args.contains(&"-l".to_string());
+    let show_runtime =
+        args.contains(&"--show-runtime".to_string()) || args.contains(&"-r".to_string());
+    let show_sdk = args.contains(&"--show-sdk".to_string());
+    let show_extensions = args.contains(&"--show-extensions".to_string());
+    let file_access_path = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--file-access="))
+        .map(String::from)
+        .or_else(|| {
+            let mut it = args.iter();
+            while let Some(a) = it.next() {
+                if a == "--file-access" {
+                    return it.next().cloned();
+                }
+            }
+            None
+        });
     let app_id = args.last().unwrap();
 
     let deployed = find_deployed(installations, app_id);
 
     if show_metadata {
         println!("{}", deployed.metadata.serialize());
+        return;
+    }
+
+    // Single-value output flags — print just the value and return.
+    if show_commit {
+        // Look for a commit file or derive from deploy path.
+        let commit_path = deployed.path.join("commit");
+        if let Ok(c) = std::fs::read_to_string(&commit_path) {
+            println!("{}", c.trim());
+        } else {
+            // No stored commit; print the deploy path basename as fallback.
+            println!(
+                "{}",
+                deployed
+                    .path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+            );
+        }
+        return;
+    }
+    if show_location {
+        println!("{}", deployed.path.display());
+        return;
+    }
+    if show_runtime {
+        if let Some(rt) = deployed.metadata.runtime() {
+            println!("{rt}");
+        } else {
+            eprintln!("flatpak info: no runtime specified");
+            process::exit(1);
+        }
+        return;
+    }
+    if show_sdk {
+        if let Some(sdk) = deployed
+            .metadata
+            .get("Application", "sdk")
+            .or_else(|| deployed.metadata.get("Runtime", "sdk"))
+        {
+            println!("{sdk}");
+        } else if let Some(rt) = deployed.metadata.runtime() {
+            // Fall back: derive SDK from runtime by replacing Platform with Sdk.
+            println!("{}", rt.replace("Platform", "Sdk"));
+        } else {
+            eprintln!("flatpak info: no SDK specified");
+            process::exit(1);
+        }
+        return;
+    }
+
+    if show_extensions {
+        // List extension points from metadata [Extension ...] groups.
+        let mut found = false;
+        for group_name in deployed.metadata.groups.keys() {
+            if let Some(ext_id) = group_name.strip_prefix("Extension ") {
+                println!("{ext_id}");
+                found = true;
+            }
+        }
+        if !found {
+            println!("No extensions");
+        }
+        return;
+    }
+
+    if let Some(ref path) = file_access_path {
+        // Report the effective access level for a given path.
+        let ctx = deployed.metadata.context();
+        // Merge overrides if available.
+        let inst = &deployed.installation;
+        let override_path = inst.override_path(&deployed.ref_.id);
+        let mut merged = ctx.clone();
+        if let Ok(ovr) = metadata::Metadata::from_file(&override_path) {
+            let ovr_ctx = ovr.context();
+            merged.merge(&ovr_ctx);
+        }
+
+        // Check filesystems for the requested path.
+        let mut access = "hidden";
+        for fs_spec in &merged.filesystems {
+            let (fs_path, ro) = if let Some(s) = fs_spec.strip_suffix(":ro") {
+                (s, true)
+            } else if let Some(s) = fs_spec.strip_suffix(":rw") {
+                (s, false)
+            } else if let Some(s) = fs_spec.strip_suffix(":create") {
+                (s, false)
+            } else {
+                (fs_spec.as_str(), false)
+            };
+            // Negated entries.
+            if let Some(neg) = fs_path.strip_prefix('!') {
+                if path == neg || path.starts_with(&format!("{neg}/")) {
+                    access = "hidden";
+                }
+                continue;
+            }
+            let resolved = match fs_path {
+                "home" | "~" => "home",
+                "host" => "/",
+                "host-os" => "/usr",
+                "host-etc" => "/etc",
+                _ => fs_path,
+            };
+            if path == resolved || path.starts_with(&format!("{resolved}/")) || resolved == "/" {
+                access = if ro { "read-only" } else { "read-write" };
+            }
+        }
+        println!("{access}");
         return;
     }
 
@@ -421,10 +558,22 @@ fn cmd_install(installations: &[Installation], args: &[String]) {
     let mut source: Option<String> = None;
     let mut ref_str: Option<String> = None;
     let mut _reinstall = false;
+    let mut subpaths: Vec<String> = Vec::new();
 
-    for arg in args {
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
         match arg.as_str() {
             "--reinstall" => _reinstall = true,
+            "--subpath" => {
+                i += 1;
+                if i < args.len() {
+                    subpaths.push(args[i].clone());
+                }
+            }
+            s if s.starts_with("--subpath=") => {
+                subpaths.push(s.strip_prefix("--subpath=").unwrap().to_string());
+            }
             s if s.starts_with('-') => {}
             _ => {
                 if source.is_none() {
@@ -434,6 +583,7 @@ fn cmd_install(installations: &[Installation], args: &[String]) {
                 }
             }
         }
+        i += 1;
     }
 
     // Determine what to install.
@@ -448,10 +598,10 @@ fn cmd_install(installations: &[Installation], args: &[String]) {
     if source_path.is_dir()
         && (source_path.join("metadata").exists() || source_path.join("files").exists())
     {
-        install_from_dir(installations, source_path, ref_str.as_deref());
+        install_from_dir(installations, source_path, ref_str.as_deref(), &subpaths);
     } else if let Some(ref ref_name) = ref_str {
         // Install from a remote.
-        install_from_remote(installations, &source, ref_name);
+        install_from_remote(installations, &source, ref_name, &subpaths);
     } else {
         // Maybe `source` is a remote name and ref_str wasn't provided.
         // Try to find a remote with this name.
@@ -474,7 +624,12 @@ fn cmd_install(installations: &[Installation], args: &[String]) {
     }
 }
 
-fn install_from_remote(installations: &[Installation], remote_name: &str, ref_name: &str) {
+fn install_from_remote(
+    installations: &[Installation],
+    remote_name: &str,
+    ref_name: &str,
+    _subpaths: &[String],
+) {
     let remote = find_remote(installations, remote_name);
     let inst = &installations[0]; // Install to first (user) installation.
 
@@ -527,11 +682,14 @@ fn install_from_remote(installations: &[Installation], remote_name: &str, ref_na
     eprintln!("Installing {ref_str}...");
 
     // Pull the ref using the OSTree client.
-    let _commit = ostree::pull_ref(&remote.url, &ref_str, &deploy_path, true).unwrap_or_else(|e| {
+    let commit = ostree::pull_ref(&remote.url, &ref_str, &deploy_path, true).unwrap_or_else(|e| {
         eprintln!("flatpak install: pull failed: {e}");
         let _ = fs::remove_dir_all(&deploy_path);
         process::exit(1);
     });
+
+    // Store the commit checksum so `info --show-commit` can retrieve it.
+    let _ = fs::write(deploy_path.join("commit"), &commit);
 
     // The checkout puts files into deploy_path/files/. We also need the metadata
     // file. OSTree Flatpak repos store metadata as a file in the root tree.
@@ -563,7 +721,12 @@ fn install_from_remote(installations: &[Installation], remote_name: &str, ref_na
     log_history(installations, "install", &parsed_ref.format_ref());
 }
 
-fn install_from_dir(installations: &[Installation], source: &Path, ref_override: Option<&str>) {
+fn install_from_dir(
+    installations: &[Installation],
+    source: &Path,
+    ref_override: Option<&str>,
+    subpaths: &[String],
+) {
     let metadata_path = source.join("metadata");
     let metadata = if metadata_path.exists() {
         metadata::Metadata::from_file(&metadata_path).unwrap_or_else(|e| {
@@ -579,6 +742,19 @@ fn install_from_dir(installations: &[Installation], source: &Path, ref_override:
         eprintln!("flatpak install: metadata has no name");
         process::exit(1);
     });
+
+    // Check required-flatpak version requirement.
+    let required = metadata
+        .get("Application", "required-flatpak")
+        .or_else(|| metadata.get("Runtime", "required-flatpak"));
+    if let Some(req) = required
+        && version_less(FLATPAK_VERSION, req)
+    {
+        eprintln!(
+            "flatpak install: this app needs Flatpak >= {req}, but you have {FLATPAK_VERSION}"
+        );
+        process::exit(1);
+    }
 
     let kind = if metadata.is_app() {
         RefKind::App
@@ -611,11 +787,29 @@ fn install_from_dir(installations: &[Installation], source: &Path, ref_override:
     // Copy metadata.
     let _ = fs::copy(source.join("metadata"), deploy_path.join("metadata"));
 
-    // Copy files directory.
+    // Copy files directory (honoring --subpath filters).
     let src_files = source.join("files");
     let dest_files = deploy_path.join("files");
     if src_files.exists() {
-        copy_dir_recursive(&src_files, &dest_files);
+        if subpaths.is_empty() {
+            copy_dir_recursive(&src_files, &dest_files);
+        } else {
+            for sub in subpaths {
+                let rel = sub.trim_start_matches('/');
+                let src_sub = src_files.join(rel);
+                let dest_sub = dest_files.join(rel);
+                if src_sub.is_dir() {
+                    copy_dir_recursive(&src_sub, &dest_sub);
+                } else if src_sub.is_file() {
+                    if let Some(parent) = dest_sub.parent() {
+                        let _ = fs::create_dir_all(parent);
+                    }
+                    let _ = fs::copy(&src_sub, &dest_sub);
+                }
+            }
+            // Record subpaths so the installation knows it is partial.
+            let _ = fs::write(deploy_path.join("subpaths"), subpaths.join("\n"));
+        }
     }
 
     // Copy export directory.
@@ -626,6 +820,7 @@ fn install_from_dir(installations: &[Installation], source: &Path, ref_override:
     }
 
     println!("Installation complete: {} ({}/{})", app_name, arch, branch);
+    log_history(installations, "install", &ref_.format_ref());
 
     // Install desktop file and icons to export location.
     export_app(inst, &ref_, &deploy_path);
@@ -714,6 +909,7 @@ fn cmd_uninstall(installations: &[Installation], args: &[String]) {
         }
     }
 
+    log_history(std::slice::from_ref(inst), "uninstall", &ref_.format_ref());
     println!("Uninstalled: {}", ref_.format_ref());
 }
 
@@ -721,35 +917,83 @@ fn cmd_uninstall(installations: &[Installation], args: &[String]) {
 // Command: update (stub)
 // ---------------------------------------------------------------------------
 
-fn cmd_update(installations: &[Installation], _args: &[String]) {
+fn cmd_update(installations: &[Installation], args: &[String]) {
+    // Parse --bundle=PATH for re-importing from a bundle file.
+    let mut bundle_path: Option<String> = None;
+    for arg in args {
+        if let Some(p) = arg.strip_prefix("--bundle=") {
+            bundle_path = Some(p.to_string());
+        }
+    }
+
+    if let Some(bp) = bundle_path {
+        let path = Path::new(&bp);
+        if !path.exists() {
+            eprintln!("flatpak update: bundle not found: {bp}");
+            process::exit(1);
+        }
+        let ref_str = build::build_import_bundle(installations, path).unwrap_or_else(|e| {
+            eprintln!("flatpak update: {e}");
+            process::exit(1);
+        });
+        println!("Updated from bundle: {ref_str}");
+        log_history(installations, "update", &ref_str);
+        return;
+    }
+
     let mut updated = 0;
     for inst in installations {
         let remotes = installation::load_remotes(inst);
         let deployed_refs = inst.list_refs();
 
         for deployed in &deployed_refs {
-            // Find which remote might have this ref.
+            // Find which remote has this ref.
             for remote in &remotes {
                 let ref_str = deployed.ref_.format_ref();
-                match ostree::fetch_summary(&remote.url) {
-                    Ok(refs) => {
-                        if refs.iter().any(|r| r.name == ref_str) {
-                            eprintln!("Checking {ref_str} on {}...", remote.name);
-                            // For a real update, we'd compare commit checksums.
-                            // For now, just report what we'd update.
-                            updated += 1;
-                        }
-                    }
+                let summary = match ostree::fetch_summary(&remote.url) {
+                    Ok(refs) => refs,
                     Err(_) => continue,
+                };
+                let Some(remote_ref) = summary.iter().find(|r| r.name == ref_str) else {
+                    continue;
+                };
+                eprintln!("Checking {ref_str} on {}...", remote.name);
+
+                // Compare commit checksums.
+                let local_commit = std::fs::read_to_string(deployed.path.join("commit"))
+                    .ok()
+                    .map(|s| s.trim().to_string());
+                if local_commit.as_deref() == Some(remote_ref.checksum.as_str()) {
+                    eprintln!("  already up-to-date ({})", &remote_ref.checksum[..12]);
+                    break;
                 }
-                break; // Only check first matching remote.
+
+                eprintln!("  updating to commit {}...", &remote_ref.checksum[..12]);
+
+                // Pull and overwrite the deployment.
+                match ostree::pull_ref(&remote.url, &ref_str, &deployed.path, true) {
+                    Ok(commit) => {
+                        let _ = std::fs::write(deployed.path.join("commit"), &commit);
+                        // Re-extract metadata from the new files/ if present.
+                        let checkout_metadata = deployed.path.join("files").join("metadata");
+                        let target_metadata = deployed.path.join("metadata");
+                        if checkout_metadata.exists() {
+                            let _ = std::fs::copy(&checkout_metadata, &target_metadata);
+                        }
+                        println!("Updated {ref_str} ({})", &commit[..12]);
+                        log_history(installations, "update", &ref_str);
+                        updated += 1;
+                    }
+                    Err(e) => {
+                        eprintln!("  update failed: {e}");
+                    }
+                }
+                break;
             }
         }
     }
     if updated == 0 {
         println!("Nothing to update.");
-    } else {
-        println!("Checked {updated} refs. Full update pull not yet implemented.");
     }
 }
 
@@ -759,74 +1003,75 @@ fn cmd_update(installations: &[Installation], _args: &[String]) {
 
 fn cmd_override(installations: &[Installation], args: &[String]) {
     let mut app_id: Option<String> = None;
-    let mut overrides = Vec::new();
+    let mut overrides: Vec<(&'static str, String)> = Vec::new();
+    let mut do_reset = false;
+
+    // Helper: extract the value for a flag in either `--flag=value` or `--flag value` form.
+    fn val_of(arg: &str, name: &str, args: &[String], i: usize) -> Option<(String, usize)> {
+        let prefix = format!("--{name}=");
+        if let Some(v) = arg.strip_prefix(&prefix) {
+            Some((v.to_string(), 0))
+        } else if arg == format!("--{name}") {
+            args.get(i + 1).map(|v| (v.clone(), 1))
+        } else {
+            None
+        }
+    }
 
     let mut i = 0;
     while i < args.len() {
-        match args[i].as_str() {
-            "--filesystem" => {
-                i += 1;
-                if i < args.len() {
-                    overrides.push(("filesystems", args[i].clone()));
-                }
+        let arg = &args[i];
+
+        // Handle valued flags (support both `--flag=value` and `--flag value`).
+        let mut handled = false;
+        for (flag, group, prefix) in [
+            ("filesystem", "filesystems", ""),
+            ("nofilesystem", "filesystems", "!"),
+            ("share", "shared", ""),
+            ("unshare", "shared", "!"),
+            ("socket", "sockets", ""),
+            ("nosocket", "sockets", "!"),
+            ("device", "devices", ""),
+            ("nodevice", "devices", "!"),
+            ("allow", "features", ""),
+            ("disallow", "features", "!"),
+            ("persist", "persistent", ""),
+            ("talk-name", "session-bus-talk", ""),
+            ("no-talk-name", "session-bus-talk", "!"),
+            ("own-name", "session-bus-own", ""),
+            ("no-own-name", "session-bus-own", "!"),
+            ("system-talk-name", "system-bus-talk", ""),
+            ("no-system-talk-name", "system-bus-talk", "!"),
+            ("system-own-name", "system-bus-own", ""),
+            ("no-system-own-name", "system-bus-own", "!"),
+            ("env", "env", ""),
+        ] {
+            if let Some((v, adv)) = val_of(arg, flag, args, i) {
+                overrides.push((group, format!("{prefix}{v}")));
+                i += adv;
+                handled = true;
+                break;
             }
-            "--share" => {
-                i += 1;
-                if i < args.len() {
-                    overrides.push(("shared", args[i].clone()));
-                }
-            }
-            "--unshare" => {
-                i += 1;
-                if i < args.len() {
-                    overrides.push(("shared", format!("!{}", args[i])));
-                }
-            }
-            "--socket" => {
-                i += 1;
-                if i < args.len() {
-                    overrides.push(("sockets", args[i].clone()));
-                }
-            }
-            "--nosocket" => {
-                i += 1;
-                if i < args.len() {
-                    overrides.push(("sockets", format!("!{}", args[i])));
-                }
-            }
-            "--device" => {
-                i += 1;
-                if i < args.len() {
-                    overrides.push(("devices", args[i].clone()));
-                }
-            }
-            "--nodevice" => {
-                i += 1;
-                if i < args.len() {
-                    overrides.push(("devices", format!("!{}", args[i])));
-                }
-            }
-            "--env" => {
-                i += 1;
-                if i < args.len() {
-                    overrides.push(("env", args[i].clone()));
-                }
-            }
-            "--reset" => {
-                if let Some(ref id) = app_id {
-                    let inst = &installations[0];
-                    let path = inst.override_path(id);
-                    let _ = fs::remove_file(&path);
-                    println!("Reset overrides for {id}");
-                    return;
-                }
-            }
-            s if !s.starts_with('-') => {
-                app_id = Some(s.to_string());
-            }
+        }
+        if handled {
+            i += 1;
+            continue;
+        }
+
+        match arg.as_str() {
+            "--reset" => do_reset = true,
+            s if !s.starts_with('-') => app_id = Some(s.to_string()),
             _ => {}
         }
         i += 1;
+    }
+
+    if do_reset && let Some(ref id) = app_id {
+        let inst = &installations[0];
+        let path = inst.override_path(id);
+        let _ = fs::remove_file(&path);
+        println!("Reset overrides for {id}");
+        return;
     }
 
     let app_id = app_id.unwrap_or_else(|| {
@@ -847,18 +1092,55 @@ fn cmd_override(installations: &[Installation], args: &[String]) {
 
     // Apply new overrides.
     for (key, val) in &overrides {
-        if *key == "env" {
-            let env_group = meta.groups.entry("Environment".to_string()).or_default();
-            if let Some((k, v)) = val.split_once('=') {
-                env_group.insert(k.to_string(), v.to_string());
+        match *key {
+            "env" => {
+                let env_group = meta.groups.entry("Environment".to_string()).or_default();
+                if let Some((k, v)) = val.split_once('=') {
+                    env_group.insert(k.to_string(), v.to_string());
+                }
             }
-        } else {
-            let ctx = meta.groups.entry("Context".to_string()).or_default();
-            let existing = ctx.entry(key.to_string()).or_default();
-            if !existing.is_empty() {
-                existing.push(';');
+            "session-bus-talk" | "session-bus-own" => {
+                let group = meta
+                    .groups
+                    .entry("Session Bus Policy".to_string())
+                    .or_default();
+                let (name, policy) = if let Some(stripped) = val.strip_prefix('!') {
+                    (stripped, "none".to_string())
+                } else {
+                    let policy = if *key == "session-bus-own" {
+                        "own"
+                    } else {
+                        "talk"
+                    };
+                    (val.as_str(), policy.to_string())
+                };
+                group.insert(name.to_string(), policy);
             }
-            existing.push_str(val);
+            "system-bus-talk" | "system-bus-own" => {
+                let group = meta
+                    .groups
+                    .entry("System Bus Policy".to_string())
+                    .or_default();
+                let (name, policy) = if let Some(stripped) = val.strip_prefix('!') {
+                    (stripped, "none".to_string())
+                } else {
+                    let policy = if *key == "system-bus-own" {
+                        "own"
+                    } else {
+                        "talk"
+                    };
+                    (val.as_str(), policy.to_string())
+                };
+                group.insert(name.to_string(), policy);
+            }
+            _ => {
+                let ctx = meta.groups.entry("Context".to_string()).or_default();
+                let existing = ctx.entry((*key).to_string()).or_default();
+                if !existing.is_empty() {
+                    existing.push(';');
+                }
+                existing.push_str(val);
+            }
         }
     }
 
@@ -1319,6 +1601,9 @@ fn log_history(installations: &[Installation], action: &str, ref_str: &str) {
 // ---------------------------------------------------------------------------
 
 fn cmd_config(installations: &[Installation], args: &[String]) {
+    let inst = &installations[0];
+    let config_path = inst.path.join("config");
+
     if args.is_empty() {
         for inst in installations {
             let label = if inst.is_user { "user" } else { "system" };
@@ -1335,7 +1620,124 @@ fn cmd_config(installations: &[Installation], args: &[String]) {
                     .count(),
             );
         }
+        return;
     }
+
+    // Parse --set, --get, --unset subcommands.
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--set" => {
+                if i + 2 >= args.len() {
+                    eprintln!("flatpak config --set: usage: flatpak config --set KEY VALUE");
+                    process::exit(1);
+                }
+                let key = &args[i + 1];
+                let value = &args[i + 2];
+                let config = if config_path.exists() {
+                    fs::read_to_string(&config_path).unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                let updated = set_config_value(&config, "config", key, value);
+                let _ = fs::create_dir_all(&inst.path);
+                let _ = fs::write(&config_path, &updated);
+                return;
+            }
+            "--get" => {
+                if i + 1 >= args.len() {
+                    eprintln!("flatpak config --get: usage: flatpak config --get KEY");
+                    process::exit(1);
+                }
+                let key = &args[i + 1];
+                if config_path.exists() {
+                    let config = fs::read_to_string(&config_path).unwrap_or_default();
+                    if let Some(val) = get_config_value(&config, "config", key) {
+                        println!("{val}");
+                    } else {
+                        eprintln!("flatpak config: key '{key}' is not set");
+                        process::exit(1);
+                    }
+                } else {
+                    eprintln!("flatpak config: key '{key}' is not set");
+                    process::exit(1);
+                }
+                return;
+            }
+            "--unset" => {
+                if i + 1 >= args.len() {
+                    eprintln!("flatpak config --unset: usage: flatpak config --unset KEY");
+                    process::exit(1);
+                }
+                let key = &args[i + 1];
+                if config_path.exists() {
+                    let config = fs::read_to_string(&config_path).unwrap_or_default();
+                    let updated = unset_config_value(&config, "config", key);
+                    let _ = fs::write(&config_path, &updated);
+                }
+                return;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+}
+
+/// Get a value from an INI-style config string under [group].
+fn get_config_value(config: &str, group: &str, key: &str) -> Option<String> {
+    let group_header = format!("[{group}]");
+    let mut in_group = false;
+    for line in config.lines() {
+        let trimmed = line.trim();
+        if trimmed == group_header {
+            in_group = true;
+            continue;
+        }
+        if trimmed.starts_with('[') {
+            if in_group {
+                break;
+            }
+            continue;
+        }
+        if in_group {
+            if let Some(val) = trimmed.strip_prefix(&format!("{key}=")) {
+                return Some(val.to_string());
+            }
+            if let Some(rest) = trimmed.strip_prefix(&format!("{key} =")) {
+                return Some(rest.trim_start().to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Remove a key from an INI-style config string under [group].
+fn unset_config_value(config: &str, group: &str, key: &str) -> String {
+    let group_header = format!("[{group}]");
+    let mut in_group = false;
+    let mut lines: Vec<&str> = Vec::new();
+    for line in config.lines() {
+        let trimmed = line.trim();
+        if trimmed == group_header {
+            in_group = true;
+            lines.push(line);
+            continue;
+        }
+        if trimmed.starts_with('[') {
+            in_group = false;
+        }
+        if in_group
+            && (trimmed.starts_with(&format!("{key}=")) || trimmed.starts_with(&format!("{key} =")))
+        {
+            continue; // skip this line
+        }
+        lines.push(line);
+    }
+    let mut result = lines.join("\n");
+    if !result.ends_with('\n') {
+        result.push('\n');
+    }
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -1345,19 +1747,95 @@ fn cmd_config(installations: &[Installation], args: &[String]) {
 fn cmd_repair(installations: &[Installation]) {
     for inst in installations {
         let label = if inst.is_user { "user" } else { "system" };
-        let refs = inst.list_refs();
-        let mut broken = 0;
-        for r in &refs {
-            let files = inst.files_path(&r.ref_);
-            if !files.exists() {
-                eprintln!("  broken: {} (missing files)", r.ref_.format_ref());
-                broken += 1;
+        // Walk the deploy tree directly so we can detect refs whose metadata
+        // is missing (which would cause `list_refs` to skip them).
+        let mut all_refs: Vec<Ref> = Vec::new();
+        for (kind_dir, kind) in [("app", RefKind::App), ("runtime", RefKind::Runtime)] {
+            let kind_path = inst.path.join(kind_dir);
+            if let Ok(ids) = fs::read_dir(&kind_path) {
+                for id_entry in ids.flatten() {
+                    let id = id_entry.file_name().to_string_lossy().to_string();
+                    if let Ok(arches) = fs::read_dir(id_entry.path()) {
+                        for arch_entry in arches.flatten() {
+                            let arch = arch_entry.file_name().to_string_lossy().to_string();
+                            if let Ok(branches) = fs::read_dir(arch_entry.path()) {
+                                for branch_entry in branches.flatten() {
+                                    let branch =
+                                        branch_entry.file_name().to_string_lossy().to_string();
+                                    if branch_entry.path().join("active").exists() {
+                                        all_refs.push(Ref {
+                                            kind,
+                                            id: id.clone(),
+                                            arch: arch.clone(),
+                                            branch,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
-        if broken == 0 {
+
+        let mut broken = 0;
+        let mut repaired = 0;
+        for ref_ in &all_refs {
+            let files = inst.files_path(ref_);
+            let deploy = inst.deploy_path(ref_);
+            let metadata_path = deploy.join("metadata");
+
+            if !files.exists() {
+                eprintln!("  broken: {} (missing files/)", ref_.format_ref());
+                broken += 1;
+            }
+            if !metadata_path.exists() {
+                eprintln!("  broken: {} (missing metadata)", ref_.format_ref());
+                // Try to regenerate a minimal metadata file.
+                let kind = if ref_.kind == RefKind::App {
+                    "Application"
+                } else {
+                    "Runtime"
+                };
+                let content = format!(
+                    "[{kind}]\nname={}\nruntime=org.freedesktop.Platform/x86_64/23.08\n",
+                    ref_.id
+                );
+                if fs::write(&metadata_path, content).is_ok() {
+                    eprintln!("  repaired: {} (regenerated metadata)", ref_.format_ref());
+                    repaired += 1;
+                } else {
+                    broken += 1;
+                }
+            }
+            // Check for broken symlinks in files/.
+            if files.exists() {
+                for entry in fs::read_dir(&files).into_iter().flatten().flatten() {
+                    let p = entry.path();
+                    if p.is_symlink() && !p.exists() {
+                        eprintln!(
+                            "  broken symlink: {} -> {:?}",
+                            p.display(),
+                            fs::read_link(&p).unwrap_or_default()
+                        );
+                        broken += 1;
+                    }
+                }
+            }
+        }
+        let refs = all_refs;
+        if broken == 0 && repaired == 0 {
             println!("[{label}] No problems found ({} refs checked)", refs.len());
+        } else if broken == 0 {
+            println!(
+                "[{label}] Repaired {repaired} issues ({} refs checked)",
+                refs.len()
+            );
         } else {
-            println!("[{label}] Found {broken} broken refs");
+            println!(
+                "[{label}] Found {broken} broken, repaired {repaired} ({} refs checked)",
+                refs.len()
+            );
         }
     }
 }
@@ -1628,7 +2106,7 @@ fn cmd_build_init(args: &[String]) {
         process::exit(1);
     });
 
-    println!("Initialized build directory: {dir}");
+    eprintln!("Initialized build directory: {dir}");
 }
 
 fn cmd_build(installations: &[Installation], args: &[String]) {
@@ -1674,6 +2152,8 @@ fn cmd_build(installations: &[Installation], args: &[String]) {
 fn cmd_build_finish(args: &[String]) {
     let mut dir: Option<String> = None;
     let mut command: Option<String> = None;
+    let mut sdk: Option<String> = None;
+    let mut require_version: Option<String> = None;
     let mut permissions: Vec<(String, String)> = Vec::new();
 
     let mut i = 0;
@@ -1683,6 +2163,24 @@ fn cmd_build_finish(args: &[String]) {
                 i += 1;
                 if i < args.len() {
                     command = Some(args[i].clone());
+                }
+            }
+            s if s.starts_with("--sdk=") => {
+                sdk = Some(s.strip_prefix("--sdk=").unwrap().to_string());
+            }
+            "--sdk" => {
+                i += 1;
+                if i < args.len() {
+                    sdk = Some(args[i].clone());
+                }
+            }
+            s if s.starts_with("--require-version=") => {
+                require_version = Some(s.strip_prefix("--require-version=").unwrap().to_string());
+            }
+            "--require-version" => {
+                i += 1;
+                if i < args.len() {
+                    require_version = Some(args[i].clone());
                 }
             }
             "--share" => {
@@ -1709,6 +2207,17 @@ fn cmd_build_finish(args: &[String]) {
                     permissions.push(("devices".into(), args[i].clone()));
                 }
             }
+            "--persist" => {
+                i += 1;
+                if i < args.len() {
+                    permissions.push(("persistent".into(), args[i].clone()));
+                }
+            }
+            s if s.starts_with("--persist=") => {
+                if let Some(val) = s.strip_prefix("--persist=") {
+                    permissions.push(("persistent".into(), val.to_string()));
+                }
+            }
             s if !s.starts_with('-') => {
                 if dir.is_none() {
                     dir = Some(s.to_string());
@@ -1724,12 +2233,19 @@ fn cmd_build_finish(args: &[String]) {
         process::exit(1);
     });
 
-    build::build_finish(Path::new(&dir), command.as_deref(), &permissions).unwrap_or_else(|e| {
+    build::build_finish(
+        Path::new(&dir),
+        command.as_deref(),
+        sdk.as_deref(),
+        require_version.as_deref(),
+        &permissions,
+    )
+    .unwrap_or_else(|e| {
         eprintln!("flatpak build-finish: {e}");
         process::exit(1);
     });
 
-    println!("Build finished: {dir}");
+    eprintln!("Build finished: {dir}");
 }
 
 fn cmd_build_export(args: &[String]) {
@@ -1848,18 +2364,129 @@ fn cmd_build_sign(args: &[String]) {
 }
 
 fn cmd_build_update_repo(args: &[String]) {
-    let repo = args
-        .iter()
-        .find(|a| !a.starts_with('-'))
-        .unwrap_or_else(|| {
-            eprintln!("flatpak build-update-repo: usage: flatpak build-update-repo REPO");
-            process::exit(1);
-        });
+    let mut repo: Option<&String> = None;
+    let mut title: Option<String> = None;
+    let mut redirect_url: Option<String> = None;
+    let mut default_branch: Option<String> = None;
 
-    build::build_update_repo(Path::new(repo)).unwrap_or_else(|e| {
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            s if s.starts_with("--title=") => {
+                title = Some(s.strip_prefix("--title=").unwrap().to_string());
+            }
+            "--title" => {
+                i += 1;
+                if i < args.len() {
+                    title = Some(args[i].clone());
+                }
+            }
+            s if s.starts_with("--redirect-url=") => {
+                redirect_url = Some(s.strip_prefix("--redirect-url=").unwrap().to_string());
+            }
+            "--redirect-url" => {
+                i += 1;
+                if i < args.len() {
+                    redirect_url = Some(args[i].clone());
+                }
+            }
+            s if s.starts_with("--default-branch=") => {
+                default_branch = Some(s.strip_prefix("--default-branch=").unwrap().to_string());
+            }
+            "--default-branch" => {
+                i += 1;
+                if i < args.len() {
+                    default_branch = Some(args[i].clone());
+                }
+            }
+            s if !s.starts_with('-') => {
+                if repo.is_none() {
+                    repo = Some(&args[i]);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    let repo = repo.unwrap_or_else(|| {
+        eprintln!("flatpak build-update-repo: usage: flatpak build-update-repo REPO [--title=TITLE] [--redirect-url=URL] [--default-branch=BRANCH]");
+        process::exit(1);
+    });
+
+    let repo_path = Path::new(repo);
+
+    // Persist config options in repo/config.
+    if title.is_some() || redirect_url.is_some() || default_branch.is_some() {
+        let config_path = repo_path.join("config");
+        let mut config = if config_path.exists() {
+            fs::read_to_string(&config_path).unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        if let Some(t) = &title {
+            config = set_config_value(&config, "flatpak", "title", t);
+        }
+        if let Some(u) = &redirect_url {
+            config = set_config_value(&config, "flatpak", "redirect-url", u);
+        }
+        if let Some(b) = &default_branch {
+            config = set_config_value(&config, "flatpak", "default-branch", b);
+        }
+
+        let _ = fs::create_dir_all(repo_path);
+        let _ = fs::write(&config_path, &config);
+    }
+
+    build::build_update_repo(repo_path).unwrap_or_else(|e| {
         eprintln!("flatpak build-update-repo: {e}");
         process::exit(1);
     });
+}
+
+/// Set a key=value in an INI-style config string under [group].
+/// If the group or key doesn't exist, append it.
+#[allow(clippy::needless_range_loop)]
+fn set_config_value(config: &str, group: &str, key: &str, value: &str) -> String {
+    let group_header = format!("[{group}]");
+    let key_line = format!("{key}={value}");
+    let mut lines: Vec<String> = config.lines().map(String::from).collect();
+
+    // Find the group.
+    let group_idx = lines.iter().position(|l| l.trim() == group_header);
+    if let Some(gi) = group_idx {
+        // Find key in this group (before next group or end).
+        let mut found = false;
+        for j in (gi + 1)..lines.len() {
+            if lines[j].trim().starts_with('[') {
+                break;
+            }
+            if lines[j].trim().starts_with(&format!("{key}="))
+                || lines[j].trim().starts_with(&format!("{key} ="))
+            {
+                lines[j] = key_line.clone();
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            lines.insert(gi + 1, key_line);
+        }
+    } else {
+        // Append new group.
+        if !lines.is_empty() && !lines.last().unwrap().is_empty() {
+            lines.push(String::new());
+        }
+        lines.push(group_header);
+        lines.push(key_line);
+    }
+
+    let mut result = lines.join("\n");
+    if !result.ends_with('\n') {
+        result.push('\n');
+    }
+    result
 }
 
 fn cmd_build_commit_from(args: &[String]) {
@@ -1985,6 +2612,84 @@ fn find_deployed(installations: &[Installation], app_id: &str) -> installation::
 // Usage
 // ---------------------------------------------------------------------------
 
+/// Compare two simple dotted-numeric version strings (e.g. "1.2.3").
+/// Returns true if `a` is strictly less than `b`. Missing trailing
+/// components are treated as 0.
+fn version_less(a: &str, b: &str) -> bool {
+    let pa: Vec<u32> = a.split('.').map(|p| p.parse().unwrap_or(0)).collect();
+    let pb: Vec<u32> = b.split('.').map(|p| p.parse().unwrap_or(0)).collect();
+    let n = pa.len().max(pb.len());
+    for i in 0..n {
+        let x = *pa.get(i).unwrap_or(&0);
+        let y = *pb.get(i).unwrap_or(&0);
+        if x != y {
+            return x < y;
+        }
+    }
+    false
+}
+
+const ALL_COMMANDS: &[&str] = &[
+    "run",
+    "list",
+    "info",
+    "install",
+    "uninstall",
+    "remove",
+    "update",
+    "upgrade",
+    "override",
+    "remotes",
+    "remote-list",
+    "remote-add",
+    "remote-delete",
+    "remote-info",
+    "remote-ls",
+    "ps",
+    "kill",
+    "enter",
+    "search",
+    "history",
+    "config",
+    "repair",
+    "documents",
+    "document-list",
+    "document-export",
+    "document-unexport",
+    "document-info",
+    "permissions",
+    "permission-list",
+    "permission-show",
+    "permission-set",
+    "permission-remove",
+    "permission-reset",
+    "make-current",
+    "mask",
+    "pin",
+    "build-init",
+    "build",
+    "build-finish",
+    "build-export",
+    "build-bundle",
+    "build-import-bundle",
+    "build-sign",
+    "build-update-repo",
+    "build-commit-from",
+    "repo",
+    "create-usb",
+    "complete",
+    "help",
+];
+
+fn cmd_complete(args: &[String]) {
+    let prefix = args.first().map(|s| s.as_str()).unwrap_or("");
+    for cmd in ALL_COMMANDS {
+        if cmd.starts_with(prefix) {
+            println!("{cmd}");
+        }
+    }
+}
+
 fn print_usage() {
     println!(
         "\
@@ -2011,6 +2716,9 @@ Manage remote repositories:
   remotes            List configured remotes
   remote-add         Add a new remote repository
   remote-delete      Delete a remote
+
+Shell completion:
+  complete           Print candidate completions for a partial command
 
 Global options:
   -u, --user         Work on user installation

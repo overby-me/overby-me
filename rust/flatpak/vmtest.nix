@@ -30,6 +30,7 @@ pkgs.testers.nixosTest {
         pkgs.gnutar
         pkgs.gzip
         pkgs.util-linux # for unshare, mount, etc.
+        pkgs.python3 # for HTTP test server (Cat 13 network tests)
       ];
 
       # Copy test scripts into /etc/flatpak-vmtests so they're available in the VM
