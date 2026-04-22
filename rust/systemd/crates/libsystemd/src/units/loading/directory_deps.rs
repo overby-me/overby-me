@@ -1555,6 +1555,33 @@ pub fn instantiate_template_units(
 
     // Instantiate each template
     for (instance_unit_name, template_name, instance_name) in &instances_to_create {
+        // Resolve instance-level symlink override.  If
+        // /etc/systemd/system/bar-alias@2.service is a symlink to
+        // yup@.service (template) or yup@3.service (concrete instance),
+        // bar-alias@2 is effectively an alias of yup@2 (instance mapped
+        // across) or yup@3 (whatever the symlink points at).
+        // TEST-15-DROPIN.testcase_template_dropins exercises both forms.
+        let (effective_template, effective_instance_name) = unit_dirs
+            .iter()
+            .find_map(|d| {
+                let p = d.join(instance_unit_name);
+                std::fs::read_link(&p).ok().and_then(|t| {
+                    let tname = t.file_name()?.to_string_lossy().to_string();
+                    if tname.contains("@.") {
+                        // Symlink to a template: derive yup@<instance>.service
+                        // using the bar-alias@<N>.service's own instance.
+                        Some((tname, instance_name.clone()))
+                    } else if let Some((t_tmpl, t_inst)) = parse_template_instance(&tname) {
+                        // Symlink to a concrete instance: use that instance.
+                        Some((t_tmpl, t_inst))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .unwrap_or_else(|| (template_name.clone(), instance_name.clone()));
+        let (template_name, instance_name) = (&effective_template, &effective_instance_name);
+
         trace!(
             "Instantiating template {} with instance {} -> {}",
             template_name, instance_name, instance_unit_name
