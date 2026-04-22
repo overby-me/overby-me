@@ -2493,6 +2493,15 @@ pub fn run_exec_helper() {
             log::error!("Failed to set working directory to {:?}: {}", dir, e);
             std::process::exit(1);
         }
+        // Update the inherited PWD environment variable to match the new
+        // working directory.  Many shells (bash, dash) consult $PWD to
+        // initialise their internal $PWD instead of calling getcwd(3); a
+        // stale PWD inherited from PID 1 would otherwise persist into the
+        // child even though the chdir succeeded.  Mirrors upstream
+        // systemd's exec_invoke_setup_keyring → pwd handling.
+        unsafe {
+            std::env::set_var("PWD", &dir);
+        }
     }
 
     // setup environment vars
