@@ -1578,8 +1578,18 @@ pub fn instantiate_template_units(
 
     // Now re-apply directory dependencies for newly instantiated units
     for dep in dir_deps {
-        let parent_id = match unit_table.keys().find(|id| id.name == dep.parent_unit) {
-            Some(id) => id.clone(),
+        // Resolve parent by primary id.name OR by alias — same fallback
+        // as `apply_directory_dependencies` above; see that comment for
+        // why this matters for template-alias .requires/ dirs.
+        let parent_id = match unit_table
+            .values()
+            .find(|u| {
+                u.id.name == dep.parent_unit
+                    || u.common.unit.aliases.iter().any(|a| a == &dep.parent_unit)
+            })
+            .map(|u| u.id.clone())
+        {
+            Some(id) => id,
             None => continue,
         };
 
