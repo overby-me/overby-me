@@ -930,7 +930,7 @@ impl Engine {
         // MAKEFLAGS merge: when a makefile assigns MAKEFLAGS, command-line
         // flags can never be removed. Merge the makefile-provided short
         // flags with the saved command-line flags and re-add long flags.
-        if name == "MAKEFLAGS" && origin == VarOrigin::File {
+        if name == "MAKEFLAGS" && origin == VarOrigin::File && !self.env_overrides {
             let cmdline_short = self.cmdline_mflags.borrow();
             let cmdline_long = self.cmdline_mflags_long.borrow();
 
