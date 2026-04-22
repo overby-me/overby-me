@@ -489,12 +489,16 @@ fn main() {
                     match dump_path.to_str() {
                         Some("-") => {
                             let _ = io::stdout().write_all(&resp.header_bytes);
+                            let _ = io::stdout().write_all(&resp.trailer_bytes);
                         }
                         Some("%") => {
                             let _ = io::stderr().write_all(&resp.header_bytes);
+                            let _ = io::stderr().write_all(&resp.trailer_bytes);
                         }
                         _ => {
-                            if fs::write(dump_path, &resp.header_bytes).is_err() {
+                            let mut dump_data = resp.header_bytes.clone();
+                            dump_data.extend_from_slice(&resp.trailer_bytes);
+                            if fs::write(dump_path, &dump_data).is_err() {
                                 eprintln!(
                                     "curl: (23) Failure writing output to destination, passed {} bytes",
                                     resp.header_bytes.len()

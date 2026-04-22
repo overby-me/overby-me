@@ -1,6 +1,7 @@
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::options::Options;
 use crate::tls::{InsecureVerifier, make_tls_config};
@@ -47,6 +48,15 @@ impl Read for Connection {
         match self {
             Connection::Plain(s) => s.read(buf),
             Connection::Tls(s) => s.read(buf),
+        }
+    }
+}
+
+impl Connection {
+    pub(crate) fn set_read_timeout(&mut self, dur: Option<Duration>) -> io::Result<()> {
+        match self {
+            Connection::Plain(s) => s.set_read_timeout(dur),
+            Connection::Tls(s) => s.get_ref().set_read_timeout(dur),
         }
     }
 }

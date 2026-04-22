@@ -1,14 +1,13 @@
 use flate2::read::{DeflateDecoder, GzDecoder, ZlibDecoder};
 use std::io::{BufRead, BufReader, Read};
 
-use crate::connection::Connection;
-
 /// Maximum size of response headers for a single response (~300KB).
 const MAX_HEADER_SIZE: usize = 307200;
 /// Maximum accumulated header size across all redirect hops (~6MB).
 const MAX_TOTAL_HEADER_SIZE: usize = 6 * 1024 * 1024;
 
 pub(crate) struct Response {
+    pub(crate) trailer_bytes: Vec<u8>,
     pub(crate) status: u16,
     #[expect(
         dead_code,
@@ -47,7 +46,7 @@ pub(crate) struct Response {
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn read_response(
-    conn: &mut Connection,
+    conn: &mut impl Read,
     is_head: bool,
     http09: bool,
     decompress: bool,
@@ -75,6 +74,7 @@ pub(crate) fn read_response(
                 // output (curl --include shows them). Callers detect status==0
                 // as "empty reply" and set exit code 52.
                 return Ok(Response {
+                    trailer_bytes: Vec::new(),
                     status: 0,
                     status_text: String::new(),
                     headers: Vec::new(),
@@ -105,6 +105,7 @@ pub(crate) fn read_response(
             let mut body = line.into_bytes();
             let _ = reader.read_to_end(&mut body);
             return Ok(Response {
+                trailer_bytes: Vec::new(),
                 status: 200,
                 status_text: String::new(),
                 headers: Vec::new(),
@@ -227,6 +228,7 @@ pub(crate) fn read_response(
         // (weird server reply). We echo anything already buffered and stop.
         if line.contains('\0') {
             return Ok(Response {
+                trailer_bytes: Vec::new(),
                 status,
                 status_text,
                 headers,
@@ -305,6 +307,7 @@ pub(crate) fn read_response(
         // Reject malformed headers (missing ':') — curl exits 8.
         if !trimmed.contains(':') {
             return Ok(Response {
+                trailer_bytes: Vec::new(),
                 status,
                 status_text,
                 headers,
@@ -333,6 +336,7 @@ pub(crate) fn read_response(
     // Check header size limits.
     if header_bytes.len() > MAX_HEADER_SIZE {
         return Ok(Response {
+            trailer_bytes: Vec::new(),
             status,
             status_text,
             headers,
@@ -356,6 +360,7 @@ pub(crate) fn read_response(
     }
     if accumulated_header_bytes + header_bytes.len() > MAX_TOTAL_HEADER_SIZE {
         return Ok(Response {
+            trailer_bytes: Vec::new(),
             status,
             status_text,
             headers,
@@ -382,6 +387,7 @@ pub(crate) fn read_response(
     // even if they advertise Content-Length or Transfer-Encoding: chunked.
     if is_head || status == 204 || status == 304 {
         return Ok(Response {
+            trailer_bytes: Vec::new(),
             status,
             status_text,
             headers,
@@ -421,6 +427,7 @@ pub(crate) fn read_response(
         .count();
     if te_layer_count > 5 {
         return Ok(Response {
+            trailer_bytes: Vec::new(),
             status,
             status_text,
             headers,
@@ -467,6 +474,7 @@ pub(crate) fn read_response(
         }
         // Note: keep trailing '\n' — curl output includes LF after each header line.
         return Ok(Response {
+            trailer_bytes: Vec::new(),
             status,
             status_text,
             headers,
@@ -524,6 +532,7 @@ pub(crate) fn read_response(
         };
         if exceeded {
             return Ok(Response {
+                trailer_bytes: Vec::new(),
                 status,
                 status_text,
                 headers,
@@ -547,9 +556,15 @@ pub(crate) fn read_response(
         }
     }
 
-    let (body, timed_out, recv_error_flag, partial_flag) = if is_chunked {
-        let (b, err) = read_chunked_body(&mut reader)?;
-        (b, false, err == ChunkErr::Recv, err == ChunkErr::Partial)
+    let (body, timed_out, recv_error_flag, partial_flag, chunked_trailers) = if is_chunked {
+        let (b, err, trailers) = read_chunked_body(&mut reader)?;
+        (
+            b,
+            false,
+            err == ChunkErr::Recv,
+            err == ChunkErr::Partial,
+            trailers,
+        )
     } else if let Some(len) = content_length {
         // Read up to `len` bytes; if the connection closes early, return the
         // partial body and signal CURLE_PARTIAL_FILE so the caller can exit 18.
@@ -567,13 +582,13 @@ pub(crate) fn read_response(
                 Err(e) => return Err(format!("failed to read body: {e}")),
             }
         }
-        (buf, false, false, partial)
+        (buf, false, false, partial, Vec::new())
     } else {
         // Read until EOF.
         let mut buf = Vec::new();
         let read_err = reader.read_to_end(&mut buf);
         let timed_out = matches!(&read_err, Err(e) if e.kind() == std::io::ErrorKind::TimedOut || e.kind() == std::io::ErrorKind::WouldBlock);
-        (buf, timed_out, false, false)
+        (buf, timed_out, false, false, Vec::new())
     };
 
     // Decompress Transfer-Encoding (RFC 7230 §4) if --tr-encoding was set.
@@ -695,6 +710,7 @@ pub(crate) fn read_response(
     }
 
     Ok(Response {
+        trailer_bytes: chunked_trailers,
         status,
         status_text,
         headers,
@@ -726,42 +742,58 @@ pub(crate) enum ChunkErr {
     Recv,
 }
 
-fn read_chunked_body(reader: &mut impl BufRead) -> Result<(Vec<u8>, ChunkErr), String> {
+fn read_chunked_body(reader: &mut impl BufRead) -> Result<(Vec<u8>, ChunkErr, Vec<u8>), String> {
     let mut body = Vec::new();
     loop {
         let mut size_line = String::new();
         let n = match reader.read_line(&mut size_line) {
             Ok(n) => n,
-            Err(_) => return Ok((body, ChunkErr::Partial)),
+            Err(_) => return Ok((body, ChunkErr::Partial, Vec::new())),
         };
         if n == 0 {
             // EOF before terminator chunk.
-            return Ok((body, ChunkErr::Partial));
+            return Ok((body, ChunkErr::Partial, Vec::new()));
         }
         let size_str = size_line.trim();
         // Strip chunk extensions.
         let size_str = size_str.split(';').next().unwrap_or(size_str).trim();
         if size_str.is_empty() {
-            return Ok((body, ChunkErr::Recv));
+            return Ok((body, ChunkErr::Recv, Vec::new()));
         }
         let size = match usize::from_str_radix(size_str, 16) {
             Ok(s) => s,
-            Err(_) => return Ok((body, ChunkErr::Recv)),
+            Err(_) => return Ok((body, ChunkErr::Recv, Vec::new())),
         };
         if size == 0 {
-            // Read trailing CRLF.
-            let mut trailer = String::new();
-            let _ = reader.read_line(&mut trailer);
-            break;
+            // Read trailer headers until empty line (just CRLF).
+            // Per HTTP/1.1, after the final 0-length chunk, optional
+            // trailer headers may appear before the terminating CRLF.
+            let mut trailer_bytes: Vec<u8> = Vec::new();
+            loop {
+                let mut trailer_line = String::new();
+                match reader.read_line(&mut trailer_line) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        if trailer_line == "\r\n" || trailer_line == "\n" || trailer_line.is_empty()
+                        {
+                            break;
+                        }
+                        trailer_bytes.extend_from_slice(trailer_line.as_bytes());
+                    }
+                }
+            }
+            // Append trailers to body (curl includes them in data output).
+            body.extend_from_slice(&trailer_bytes);
+            // Return trailers separately so they can also go to header dump.
+            return Ok((body, ChunkErr::None, trailer_bytes));
         }
         let mut chunk = vec![0u8; size];
         if reader.read_exact(&mut chunk).is_err() {
-            return Ok((body, ChunkErr::Partial));
+            return Ok((body, ChunkErr::Partial, Vec::new()));
         }
         body.extend_from_slice(&chunk);
         // Read trailing CRLF after chunk data.
         let mut crlf = [0u8; 2];
         let _ = reader.read_exact(&mut crlf);
     }
-    Ok((body, ChunkErr::None))
 }

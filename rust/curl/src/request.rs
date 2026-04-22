@@ -1,5 +1,6 @@
 use std::fs;
 use std::io::{self, Read, Write};
+use std::time::Duration;
 
 use crate::connection::connect;
 use crate::format::base64_encode;
@@ -7,7 +8,7 @@ use crate::options::Options;
 use crate::response::{Response, read_response};
 use crate::url::{ParsedUrl, normalize_url_path, parse_url};
 
-fn build_request(url: &ParsedUrl, opts: &Options) -> Vec<u8> {
+fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) {
     let method = if let Some(ref m) = opts.method {
         m.clone()
     } else if opts.head {
@@ -76,7 +77,7 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> Vec<u8> {
             }
         }
         req.push_str("\r\n");
-        return req.into_bytes();
+        return (req.into_bytes(), None);
     }
 
     // When uploading with -T and the URL path ends with '/', append the basename of the
@@ -341,7 +342,8 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> Vec<u8> {
         // curl sends Expect: 100-continue for upload bodies >= 1 MiB or when
         // uploading from stdin (-T -). Skip for HTTP/1.0 or if user suppressed it.
         // See lib/http.h EXPECT_100_THRESHOLD in curl source.
-        if !has_expect && !http10 && (is_stdin_upload || body.len() >= 1024 * 1024) {
+        let auto_expect = !has_expect && !http10 && (is_stdin_upload || body.len() >= 1024 * 1024);
+        if auto_expect {
             req.push_str("Expect: 100-continue\r\n");
         }
 
@@ -355,6 +357,18 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> Vec<u8> {
                 req.push_str("Content-Type: application/x-www-form-urlencoded\r\n");
             }
         }
+        // When Expect: 100-continue was auto-added, return headers and body
+        // separately so the caller can implement the 100-continue handshake.
+        if auto_expect {
+            req.push_str("\r\n");
+            let header_bytes = req.into_bytes();
+            let body_bytes = if user_chunked {
+                encode_chunked(body)
+            } else {
+                body.clone()
+            };
+            return (header_bytes, Some(body_bytes));
+        }
     }
 
     req.push_str("\r\n");
@@ -367,7 +381,7 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> Vec<u8> {
             bytes.extend_from_slice(&body);
         }
     }
-    bytes
+    (bytes, None)
 }
 
 fn encode_chunked(body: &[u8]) -> Vec<u8> {
@@ -847,25 +861,7 @@ fn execute_request(
     accumulated_header_bytes: usize,
 ) -> Result<Response, String> {
     let (mut conn, connect_response) = connect(url, opts)?;
-    let request = build_request(url, opts);
-
-    if opts.verbose {
-        // Print request headers to stderr.
-        if let Ok(req_str) = std::str::from_utf8(&request) {
-            for line in req_str.split("\r\n") {
-                if line.is_empty() {
-                    break;
-                }
-                eprintln!("> {line}");
-            }
-            eprintln!(">");
-        }
-    }
-
-    conn.write_all(&request)
-        .map_err(|e| format!("failed to send request: {e}"))?;
-    conn.flush()
-        .map_err(|e| format!("failed to flush request: {e}"))?;
+    let (request_headers, expect_body) = build_request(url, opts);
 
     let is_head = opts.head
         || opts
@@ -877,6 +873,357 @@ fn execute_request(
         .max_filesize_str
         .as_ref()
         .is_some_and(|s| s.parse::<u64>().is_err());
+
+    if opts.verbose {
+        // Print request headers to stderr.
+        if let Ok(req_str) = std::str::from_utf8(&request_headers) {
+            for line in req_str.split("\r\n") {
+                if line.is_empty() {
+                    break;
+                }
+                eprintln!("> {line}");
+            }
+            eprintln!(">");
+        }
+    }
+
+    // When Expect: 100-continue was auto-added, implement the handshake:
+    // send headers, wait for server response, then decide whether to send body.
+    if let Some(body_bytes) = expect_body {
+        // Step 1: Send only the headers (including the trailing \r\n\r\n).
+        conn.write_all(&request_headers)
+            .map_err(|e| format!("failed to send request headers: {e}"))?;
+        conn.flush()
+            .map_err(|e| format!("failed to flush request headers: {e}"))?;
+
+        // Step 2: Wait for server response with a short timeout.
+        conn.set_read_timeout(Some(Duration::from_secs(1)))
+            .map_err(|e| format!("failed to set read timeout: {e}"))?;
+
+        let mut peek_buf = Vec::new();
+        let mut tmp = [0u8; 1];
+        let got_response = loop {
+            match conn.read(&mut tmp) {
+                Ok(0) => break true, // EOF — server closed, treat as response available
+                Ok(n) => {
+                    peek_buf.extend_from_slice(&tmp[..n]);
+                    // Check if we have enough to see the status code
+                    if peek_buf.len() >= 12 {
+                        // e.g. "HTTP/1.1 100" is 12 chars
+                        break true;
+                    }
+                }
+                Err(ref e)
+                    if e.kind() == io::ErrorKind::WouldBlock
+                        || e.kind() == io::ErrorKind::TimedOut =>
+                {
+                    // Timeout — no response within 1s
+                    break false;
+                }
+                Err(e) => return Err(format!("failed to read 100-continue response: {e}")),
+            }
+        };
+
+        // Restore no timeout for subsequent reads.
+        let _ = conn.set_read_timeout(None);
+
+        if !got_response {
+            // Timeout: server didn't respond within 1s. Send the body anyway
+            // (some servers don't send 100 but still expect the body).
+            conn.write_all(&body_bytes)
+                .map_err(|e| format!("failed to send request body: {e}"))?;
+            conn.flush()
+                .map_err(|e| format!("failed to flush request body: {e}"))?;
+
+            let mut resp = read_response(
+                &mut conn,
+                is_head,
+                opts.http09,
+                opts.compressed,
+                opts.tr_encoding,
+                opts.raw,
+                opts.max_filesize,
+                max_filesize_overflow,
+                accumulated_header_bytes,
+                opts.ignore_content_length,
+            )?;
+
+            if opts.verbose
+                && let Ok(hdr_str) = std::str::from_utf8(&resp.header_bytes)
+            {
+                for line in hdr_str.split("\r\n") {
+                    if !line.is_empty() {
+                        eprintln!("< {line}");
+                    }
+                }
+                eprintln!("<");
+            }
+
+            if !connect_response.is_empty() {
+                let mut combined = connect_response;
+                combined.extend_from_slice(&resp.header_bytes);
+                resp.header_bytes = combined;
+            }
+            return Ok(resp);
+        }
+
+        // We got some response bytes. Parse the status line from what we peeked.
+        let peeked_str = String::from_utf8_lossy(&peek_buf);
+
+        if peeked_str.len() >= 12 {
+            let status_str = &peeked_str[9..12];
+            if let Ok(status_code) = status_str.parse::<u16>() {
+                if status_code == 100 {
+                    // Got 100 Continue. Read and discard the rest of the 100
+                    // response headers, then send body.
+                    // We need to read until we see \r\n\r\n after the status line.
+                    // First, consume the rest of what we have plus more from the socket
+                    // until we find the blank line terminating the 100 headers.
+                    let mut interim_buf = peek_buf;
+                    let mut tmp2 = [0u8; 512];
+                    loop {
+                        // Check if we have the end-of-headers marker
+                        if let Some(pos) = find_subsequence(&interim_buf, b"\r\n\r\n") {
+                            // We may have read past the 100 headers into the next response.
+                            // Keep any leftover bytes after the \r\n\r\n.
+                            let leftover_start = pos + 4;
+                            let _leftover = interim_buf[leftover_start..].to_vec();
+                            // (leftover would need to be prepended to next read,
+                            // but read_response uses BufReader which handles this.
+                            // Since we consumed from the raw connection, any leftover
+                            // is lost. In practice, the 100 response is small and there
+                            // is no data following it until we send the body.)
+
+                            if opts.verbose
+                                && let Ok(s) = std::str::from_utf8(&interim_buf[..pos])
+                            {
+                                for line in s.split("\r\n") {
+                                    if !line.is_empty() {
+                                        eprintln!("< {line}");
+                                    }
+                                }
+                                eprintln!("<");
+                            }
+                            break;
+                        }
+                        match conn.read(&mut tmp2) {
+                            Ok(0) => break,
+                            Ok(n) => interim_buf.extend_from_slice(&tmp2[..n]),
+                            Err(_) => break,
+                        }
+                    }
+
+                    // Send the body.
+                    conn.write_all(&body_bytes)
+                        .map_err(|e| format!("failed to send request body: {e}"))?;
+                    conn.flush()
+                        .map_err(|e| format!("failed to flush request body: {e}"))?;
+
+                    // Read the real response.
+                    let mut resp = read_response(
+                        &mut conn,
+                        is_head,
+                        opts.http09,
+                        opts.compressed,
+                        opts.tr_encoding,
+                        opts.raw,
+                        opts.max_filesize,
+                        max_filesize_overflow,
+                        accumulated_header_bytes,
+                        opts.ignore_content_length,
+                    )?;
+
+                    if opts.verbose
+                        && let Ok(hdr_str) = std::str::from_utf8(&resp.header_bytes)
+                    {
+                        for line in hdr_str.split("\r\n") {
+                            if !line.is_empty() {
+                                eprintln!("< {line}");
+                            }
+                        }
+                        eprintln!("<");
+                    }
+
+                    if !connect_response.is_empty() {
+                        let mut combined = connect_response;
+                        combined.extend_from_slice(&resp.header_bytes);
+                        resp.header_bytes = combined;
+                    }
+                    return Ok(resp);
+                } else if status_code == 417 {
+                    // 417 Expectation Failed — read the full 417 response first,
+                    // then reconnect and retry without Expect.  The 417 headers
+                    // are prepended to the final output (like interim responses).
+
+                    // Read the rest of the 417 response.  We already have `peek_buf`
+                    // which contains the status line bytes.  Chain them with the
+                    // connection so read_response sees a complete HTTP response.
+                    let cursor = std::io::Cursor::new(peek_buf);
+                    let mut chained_417 = cursor.chain(&mut conn);
+                    let resp_417 = read_response(
+                        &mut chained_417,
+                        false, // not HEAD
+                        opts.http09,
+                        false, // no decompression for the 417
+                        false, // no tr_encoding
+                        true,  // raw
+                        None,  // no max_filesize
+                        false,
+                        0,
+                        false,
+                    )?;
+                    let headers_417 = resp_417.header_bytes;
+
+                    drop(chained_417);
+                    drop(conn);
+                    let mut retry_opts = opts.clone();
+                    retry_opts
+                        .headers
+                        .push(("Expect".to_string(), String::new()));
+                    let (mut conn2, connect_response2) = connect(url, &retry_opts)?;
+                    let (request2, _) = build_request(url, &retry_opts);
+
+                    if retry_opts.verbose
+                        && let Ok(req_str) = std::str::from_utf8(&request2)
+                    {
+                        for line in req_str.split("\r\n") {
+                            if line.is_empty() {
+                                break;
+                            }
+                            eprintln!("> {line}");
+                        }
+                        eprintln!(">");
+                    }
+
+                    conn2
+                        .write_all(&request2)
+                        .map_err(|e| format!("failed to send request: {e}"))?;
+                    conn2
+                        .flush()
+                        .map_err(|e| format!("failed to flush request: {e}"))?;
+
+                    let mut resp = read_response(
+                        &mut conn2,
+                        is_head,
+                        opts.http09,
+                        opts.compressed,
+                        opts.tr_encoding,
+                        opts.raw,
+                        opts.max_filesize,
+                        max_filesize_overflow,
+                        accumulated_header_bytes,
+                        opts.ignore_content_length,
+                    )?;
+
+                    if retry_opts.verbose
+                        && let Ok(hdr_str) = std::str::from_utf8(&resp.header_bytes)
+                    {
+                        for line in hdr_str.split("\r\n") {
+                            if !line.is_empty() {
+                                eprintln!("< {line}");
+                            }
+                        }
+                        eprintln!("<");
+                    }
+
+                    // Prepend 417 headers + CONNECT headers to the retry response.
+                    let mut combined = Vec::new();
+                    if !connect_response.is_empty() {
+                        combined.extend_from_slice(&connect_response);
+                    }
+                    combined.extend_from_slice(&headers_417);
+                    if !connect_response2.is_empty() {
+                        combined.extend_from_slice(&connect_response2);
+                    }
+                    combined.extend_from_slice(&resp.header_bytes);
+                    resp.header_bytes = combined;
+
+                    return Ok(resp);
+                } else {
+                    // Other status code — server sent a final response instead
+                    // of 100. Don't send body. Chain peeked bytes with the
+                    // connection so read_response sees the full response.
+                    let mut chain = io::Cursor::new(peek_buf).chain(&mut conn);
+                    let mut resp = read_response(
+                        &mut chain,
+                        is_head,
+                        opts.http09,
+                        opts.compressed,
+                        opts.tr_encoding,
+                        opts.raw,
+                        opts.max_filesize,
+                        max_filesize_overflow,
+                        accumulated_header_bytes,
+                        opts.ignore_content_length,
+                    )?;
+
+                    if opts.verbose
+                        && let Ok(hdr_str) = std::str::from_utf8(&resp.header_bytes)
+                    {
+                        for line in hdr_str.split("\r\n") {
+                            if !line.is_empty() {
+                                eprintln!("< {line}");
+                            }
+                        }
+                        eprintln!("<");
+                    }
+
+                    if !connect_response.is_empty() {
+                        let mut combined = connect_response;
+                        combined.extend_from_slice(&resp.header_bytes);
+                        resp.header_bytes = combined;
+                    }
+                    return Ok(resp);
+                }
+            }
+        }
+
+        // Could not parse status — just send body and read response normally.
+        conn.write_all(&body_bytes)
+            .map_err(|e| format!("failed to send request body: {e}"))?;
+        conn.flush()
+            .map_err(|e| format!("failed to flush request body: {e}"))?;
+
+        // Prepend peeked bytes via chained reader.
+        let mut chain = io::Cursor::new(peek_buf).chain(&mut conn);
+        let mut resp = read_response(
+            &mut chain,
+            is_head,
+            opts.http09,
+            opts.compressed,
+            opts.tr_encoding,
+            opts.raw,
+            opts.max_filesize,
+            max_filesize_overflow,
+            accumulated_header_bytes,
+            opts.ignore_content_length,
+        )?;
+
+        if opts.verbose
+            && let Ok(hdr_str) = std::str::from_utf8(&resp.header_bytes)
+        {
+            for line in hdr_str.split("\r\n") {
+                if !line.is_empty() {
+                    eprintln!("< {line}");
+                }
+            }
+            eprintln!("<");
+        }
+
+        if !connect_response.is_empty() {
+            let mut combined = connect_response;
+            combined.extend_from_slice(&resp.header_bytes);
+            resp.header_bytes = combined;
+        }
+        return Ok(resp);
+    }
+
+    // No Expect header — send the full request (headers + body) at once.
+    conn.write_all(&request_headers)
+        .map_err(|e| format!("failed to send request: {e}"))?;
+    conn.flush()
+        .map_err(|e| format!("failed to flush request: {e}"))?;
+
     let mut resp = read_response(
         &mut conn,
         is_head,
@@ -909,6 +1256,11 @@ fn execute_request(
     }
 
     Ok(resp)
+}
+
+/// Search for a subsequence in a byte slice.
+fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String> {
