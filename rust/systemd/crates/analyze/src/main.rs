@@ -114,6 +114,16 @@ enum Command {
         expressions: Vec<String>,
     },
 
+    /// Compare two version strings.  With an operator
+    /// (`lt`, `le`, `eq`, `ne`, `ge`, `gt`) exit 0 if the comparison
+    /// holds, otherwise non-zero.  Without an operator print one of
+    /// `<` / `==` / `>` depending on the relative ordering.
+    #[command(name = "compare-versions")]
+    CompareVersions {
+        /// Versions and optional operator: `VER1 OP VER2` or `VER1 VER2`
+        args: Vec<String>,
+    },
+
     /// Verify unit file(s) for correctness
     Verify {
         /// Unit file(s) to verify
@@ -1230,6 +1240,7 @@ fn main() {
         }) => cmd_calendar(expressions, iterations, base_time.as_deref()),
         Some(Command::Timespan { ref expressions }) => cmd_timespan(expressions),
         Some(Command::Timestamp { ref expressions }) => cmd_timestamp(expressions),
+        Some(Command::CompareVersions { ref args }) => cmd_compare_versions(args),
         Some(Command::Verify { ref files, .. }) => cmd_verify(files),
         Some(Command::Condition {
             ref expressions,
@@ -1543,6 +1554,59 @@ fn cmd_timespan(expressions: &[String]) {
                 eprintln!("Failed to parse time span '{}': {}", expr, e);
                 process::exit(1);
             }
+        }
+    }
+}
+
+/// Compare two version strings using `compare_kernel_versions` (the same
+/// numeric-component compare used for `ConditionKernelVersion=`).  With an
+/// operator (`lt`, `le`, `eq`, `ne`, `ge`, `gt`) exit 0 when the comparison
+/// holds, otherwise exit non-zero.  Without an operator print one of
+/// `<` / `==` / `>` and exit 0.
+///
+/// Empty version strings sort below all non-empty strings (matching upstream
+/// `systemd-analyze compare-versions` semantics).
+fn cmd_compare_versions(args: &[String]) {
+    fn compare_versions(a: &str, b: &str) -> i32 {
+        match (a.is_empty(), b.is_empty()) {
+            (true, true) => 0,
+            (true, false) => -1,
+            (false, true) => 1,
+            (false, false) => compare_kernel_versions(a, b),
+        }
+    }
+
+    match args.len() {
+        2 => {
+            let cmp = compare_versions(&args[0], &args[1]);
+            let sym = match cmp.signum() {
+                -1 => "<",
+                0 => "==",
+                _ => ">",
+            };
+            println!("{} {} {}", args[0], sym, args[1]);
+        }
+        3 => {
+            let cmp = compare_versions(&args[0], &args[2]);
+            let result = match args[1].as_str() {
+                "lt" | "<" => cmp < 0,
+                "le" | "<=" => cmp <= 0,
+                "eq" | "==" | "=" => cmp == 0,
+                "ne" | "!=" | "<>" => cmp != 0,
+                "ge" | ">=" => cmp >= 0,
+                "gt" | ">" => cmp > 0,
+                other => {
+                    eprintln!("Unknown operator: {other}");
+                    process::exit(1);
+                }
+            };
+            if !result {
+                process::exit(1);
+            }
+        }
+        _ => {
+            eprintln!("compare-versions: expects 2 or 3 arguments");
+            process::exit(1);
         }
     }
 }
