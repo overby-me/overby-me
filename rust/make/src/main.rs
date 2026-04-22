@@ -802,11 +802,21 @@ fn run() -> i32 {
     // Only include the " -- " separator when MAKEOVERRIDES is non-empty,
     // otherwise MAKEFLAGS would always end with " --".
     mflags.push_str("$(if $(MAKEOVERRIDES), -- $(MAKEOVERRIDES))");
+    // Use CommandLine origin when cmdline flags or overrides are present
+    // so that file-level `MAKEFLAGS +=` is blocked (matching GNU make).
+    // The MAKEFLAGS merge in set_var_with_origin still intercepts plain
+    // `MAKEFLAGS=X` assignments from makefiles.
+    let mflags_origin =
+        if !mflags_short.is_empty() || !mflags_long.is_empty() || !makeoverrides.is_empty() {
+            engine::VarOrigin::CommandLine
+        } else {
+            engine::VarOrigin::Default
+        };
     engine.set_var_with_origin(
         "MAKEFLAGS",
         &mflags,
         engine::VarFlavor::Recursive,
-        engine::VarOrigin::Default,
+        mflags_origin,
     );
     // Store command-line flags so MAKEFLAGS merge logic in set_var_with_origin
     // can preserve them when a makefile assigns to MAKEFLAGS.

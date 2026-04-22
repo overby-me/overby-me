@@ -1144,12 +1144,20 @@ impl Engine {
             }
 
             // Bypass origin check — always allow this merged write.
+            // Preserve the existing origin (e.g. CommandLine) so that
+            // subsequent file-level `+=` is blocked when `-e` is active.
+            let existing_origin = self
+                .vars
+                .borrow()
+                .get("MAKEFLAGS")
+                .map(|v| v.origin)
+                .unwrap_or(VarOrigin::Default);
             self.vars.borrow_mut().insert(
                 "MAKEFLAGS".to_string(),
                 Variable {
                     value: merged,
                     flavor: VarFlavor::Recursive,
-                    origin: VarOrigin::Default,
+                    origin: existing_origin,
                 },
             );
             return;
