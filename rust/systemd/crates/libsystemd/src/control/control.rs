@@ -2936,19 +2936,42 @@ fn create_transient_unit(
         Some(other) => return Err(format!("Unknown service type: {other}")),
     };
 
-    // Build the main command from the command line.  This is appended to
-    // the ExecStart list AFTER any `-p ExecStart=` properties, so that
-    // for multi-ExecStart oneshot services the property-based commands run
-    // first and the trailing command is the main process.
-    let main_cmd: Option<Commandline> = params
+    // Build the main commands from the command line.  Matching upstream
+    // systemd-run, a literal `;` argument splits the command list into
+    // multiple ExecStart= entries (shell-escaped as `\;` on the invoking
+    // command line).  Used by tests like TEST-78-SIGQUEUE:
+    //   `systemd-run -p Type=notify -- env … systemd-notify --exec --ready \; sleep infinity`
+    let main_cmds: Vec<Commandline> = params
         .command
         .as_ref()
         .filter(|cmd_parts| !cmd_parts.is_empty())
-        .map(|cmd_parts| Commandline {
-            cmd: cmd_parts[0].clone(),
-            args: cmd_parts[1..].to_vec(),
-            prefixes: vec![],
-        });
+        .map(|cmd_parts| {
+            let mut cmds = Vec::new();
+            let mut current: Vec<String> = Vec::new();
+            for part in cmd_parts.iter() {
+                if part == ";" {
+                    if !current.is_empty() {
+                        cmds.push(Commandline {
+                            cmd: current[0].clone(),
+                            args: current[1..].to_vec(),
+                            prefixes: vec![],
+                        });
+                        current = Vec::new();
+                    }
+                } else {
+                    current.push(part.clone());
+                }
+            }
+            if !current.is_empty() {
+                cmds.push(Commandline {
+                    cmd: current[0].clone(),
+                    args: current[1..].to_vec(),
+                    prefixes: vec![],
+                });
+            }
+            cmds
+        })
+        .unwrap_or_default();
     let exec: Vec<Commandline> = Vec::new();
 
     // Ensure the transient directory exists for --pipe temp files.
@@ -4306,9 +4329,10 @@ fn create_transient_unit(
         service_conf.limit_nofile = read_default_limit_nofile();
     }
 
-    // Append the main command (from the trailing command line) after any
-    // `-p ExecStart=` property entries, so it runs last.
-    if let Some(cmd) = main_cmd {
+    // Append the main commands (from the trailing command line, possibly
+    // split on `;`) after any `-p ExecStart=` property entries, so they
+    // run last.
+    for cmd in main_cmds {
         service_conf.exec.push(cmd);
     }
 
