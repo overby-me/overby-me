@@ -92,40 +92,52 @@ fn run() -> i32 {
                 .and_then(|f| f.to_str())
                 .is_some_and(|f| f.starts_with("make-stdin-"))
         };
-        let mut i = 1;
-        while i < args.len() {
+        // Scan all args (including those prepended from MAKEFLAGS).
+        for i in 1..args.len() {
             let arg = &args[i];
-            if let Some(path) = arg.strip_prefix("-f") {
-                if !path.is_empty() && is_stdin_temp(path) {
-                    inherited_stdin_temp = Some(path.to_string());
-                }
-            } else if (arg == "-f" || arg == "--makefile" || arg == "--file")
+            if let Some(path) = arg.strip_prefix("-f")
+                && !path.is_empty()
+                && is_stdin_temp(path)
+            {
+                inherited_stdin_temp = Some(path.to_string());
+                break;
+            }
+            if (arg == "-f" || arg == "--makefile" || arg == "--file")
                 && i + 1 < args.len()
                 && is_stdin_temp(&args[i + 1])
             {
                 inherited_stdin_temp = Some(args[i + 1].clone());
-            } else if let Some(path) = arg
+                break;
+            }
+            if let Some(path) = arg
                 .strip_prefix("--makefile=")
                 .or_else(|| arg.strip_prefix("--file="))
+                && is_stdin_temp(path)
             {
-                if is_stdin_temp(path) {
-                    inherited_stdin_temp = Some(path.to_string());
-                }
-            } else if arg.starts_with('-') && !arg.starts_with("--") && arg.len() > 2 {
-                // Handle combined flags like `-Rf<path>`.
-                if let Some(pos) = arg.find('f') {
-                    let after_f = &arg[pos + 1..];
-                    if !after_f.is_empty() && is_stdin_temp(after_f) {
-                        inherited_stdin_temp = Some(after_f.to_string());
-                    } else if after_f.is_empty()
-                        && i + 1 < args.len()
-                        && is_stdin_temp(&args[i + 1])
-                    {
-                        inherited_stdin_temp = Some(args[i + 1].clone());
-                    }
+                inherited_stdin_temp = Some(path.to_string());
+                break;
+            }
+            // Handle combined flags like `-Rf<path>` or `-Rf <path>`.
+            if arg.starts_with('-')
+                && !arg.starts_with("--")
+                && arg.len() > 2
+                && let Some(pos) = arg.find('f')
+            {
+                let after_f = &arg[pos + 1..];
+                if !after_f.is_empty() && is_stdin_temp(after_f) {
+                    inherited_stdin_temp = Some(after_f.to_string());
+                    break;
+                } else if after_f.is_empty() && i + 1 < args.len() && is_stdin_temp(&args[i + 1]) {
+                    inherited_stdin_temp = Some(args[i + 1].clone());
+                    break;
                 }
             }
-            i += 1;
+            // Also check if the arg itself is a stdin temp path (could be
+            // after a `-f` that was already consumed by option parsing).
+            if is_stdin_temp(arg) {
+                inherited_stdin_temp = Some(arg.clone());
+                break;
+            }
         }
     }
 
@@ -1012,11 +1024,19 @@ fn run() -> i32 {
             stdin_content_for_reexec = Some(content.clone());
             engine.load_string(&content);
         } else {
-            engine.load_file(path, false);
-            // Register primary makefile for auto-rebuild checking in
-            // finalize_includes (GNU make rebuilds the primary makefile
-            // too, not just included files).
-            engine.included_files.borrow_mut().push(path.clone());
+            let loaded = engine.load_file_with_loc(path, false, None);
+            if loaded {
+                // Register primary makefile for auto-rebuild checking in
+                // finalize_includes (GNU make rebuilds the primary makefile
+                // too, not just included files).
+                engine.included_files.borrow_mut().push(path.clone());
+            } else {
+                // Primary makefile couldn't be loaded. We still register
+                // it in included_files so finalize_includes attempts to
+                // rebuild it. If it still doesn't exist after that, we
+                // error out below (after finalize_includes).
+                engine.included_files.borrow_mut().push(path.clone());
+            }
         }
     }
 

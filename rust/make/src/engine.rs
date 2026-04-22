@@ -3181,10 +3181,6 @@ impl Engine {
         }
     }
 
-    pub fn load_file(&self, path: &str, silent: bool) {
-        self.load_file_with_loc(path, silent, None);
-    }
-
     /// Load a file with optional source location for error messages.
     pub fn load_file_with_loc(
         &self,
