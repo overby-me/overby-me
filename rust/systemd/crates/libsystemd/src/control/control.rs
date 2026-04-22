@@ -6570,14 +6570,38 @@ pub fn execute_command(
                     write_cgroup_freeze(&slice_cgroup, freeze);
                 }
 
-                // Recursively freeze/thaw child units in this slice
+                // Recursively freeze/thaw child units in this slice.
+                //
+                // We match children by two criteria so the recursive walk
+                // isn't defeated by an out-of-sync `conf.slice` field:
+                //  (a) `svc.conf.slice == slice_name` (primary path), or
+                //  (b) the service's own cgroup_path lives under the slice's
+                //      cgroup path (cgroup-hierarchy fallback).  Needed for
+                //      services whose conf.slice hasn't been updated yet
+                //      after a transient-unit create/recreate cycle.
                 let slice_name = unit_name.clone();
+                let slice_cgroup_root = crate::platform::cgroups::get_cgroup_root(
+                    &std::path::PathBuf::from("/sys/fs/cgroup"),
+                )
+                .ok()
+                .map(|root| {
+                    crate::units::from_parsed_config::slice_cgroup_path(&root, &slice_name)
+                });
                 for child_unit in ri.unit_table.values() {
                     let child_slice = match &child_unit.specific {
                         Specific::Service(svc) => svc.conf.slice.as_deref(),
                         _ => None,
                     };
-                    if child_slice != Some(&slice_name) {
+                    let matches_by_name = child_slice == Some(&slice_name);
+                    let matches_by_cgroup = !matches_by_name
+                        && slice_cgroup_root.is_some()
+                        && matches!(
+                            &child_unit.specific,
+                            Specific::Service(svc)
+                            if svc.conf.platform_specific.cgroup_path.starts_with(
+                                slice_cgroup_root.as_ref().unwrap())
+                        );
+                    if !matches_by_name && !matches_by_cgroup {
                         continue;
                     }
                     let child_status = child_unit.common.status.read_poisoned().clone();
