@@ -734,6 +734,12 @@ impl Service {
         common
             .main_exit_status
             .store(-1, std::sync::atomic::Ordering::Release);
+        common
+            .runtime_max_timeout_fired
+            .store(false, std::sync::atomic::Ordering::Release);
+        common
+            .watchdog_timeout_fired
+            .store(false, std::sync::atomic::Ordering::Release);
 
         super::prepare_service::prepare_service(
             self,

@@ -66,6 +66,16 @@ pub struct Common {
     /// Lock-free ExecMainStatus readable without the per-service state lock.
     /// Set by the exit handler when the main process exits.  -1 means unset.
     pub main_exit_status: std::sync::atomic::AtomicI32,
+    /// Lock-free mirror of `Service::runtime_max_timeout_fired` so that
+    /// `systemctl show -P Result` can detect a `RuntimeMaxSec=` kill even
+    /// when the per-service state lock is briefly contended (e.g. during
+    /// the immediately-following `prepare_service` of a restart).  Set by
+    /// the watchdog thread before sending SIGTERM; cleared by
+    /// `prepare_service` on the next start.
+    pub runtime_max_timeout_fired: std::sync::atomic::AtomicBool,
+    /// Lock-free mirror of `Service::watchdog_timeout_fired` (same rationale
+    /// as `runtime_max_timeout_fired`).
+    pub watchdog_timeout_fired: std::sync::atomic::AtomicBool,
 }
 
 /// Lifecycle timestamps for a unit, tracking when it transitions between

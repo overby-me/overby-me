@@ -447,10 +447,26 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                     );
                 }
                 {
+                    // Use the Common atomics so a contended state lock
+                    // doesn't drop the timeout/watchdog signal here.
+                    let runtime_max_fired = unit
+                        .common
+                        .runtime_max_timeout_fired
+                        .load(std::sync::atomic::Ordering::Acquire);
+                    let watchdog_fired = unit
+                        .common
+                        .watchdog_timeout_fired
+                        .load(std::sync::atomic::Ordering::Acquire);
                     let status = unit.common.status.read_poisoned();
-                    let result = match &*status {
-                        UnitStatus::Stopped(_, errors) if !errors.is_empty() => "exit-code",
-                        _ => "success",
+                    let result = if runtime_max_fired {
+                        "timeout"
+                    } else if watchdog_fired {
+                        "watchdog"
+                    } else {
+                        match &*status {
+                            UnitStatus::Stopped(_, errors) if !errors.is_empty() => "exit-code",
+                            _ => "success",
+                        }
                     };
                     insert(&mut props, "Result", result);
                 }

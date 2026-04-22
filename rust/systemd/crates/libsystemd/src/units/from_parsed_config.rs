@@ -920,6 +920,8 @@ fn make_common_from_parsed(
         main_pid: std::sync::atomic::AtomicI32::new(0),
         main_exit_pid: std::sync::atomic::AtomicI32::new(0),
         main_exit_status: std::sync::atomic::AtomicI32::new(-1),
+        runtime_max_timeout_fired: std::sync::atomic::AtomicBool::new(false),
+        watchdog_timeout_fired: std::sync::atomic::AtomicBool::new(false),
     })
 }
 

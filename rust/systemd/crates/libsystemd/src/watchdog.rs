@@ -197,12 +197,18 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
         );
 
         // Set the runtime_max_timeout_fired flag so the exit handler knows
-        // this was a RuntimeMaxSec kill (result="timeout").
+        // this was a RuntimeMaxSec kill (result="timeout").  Also mirror
+        // it onto the lock-free Common atomic so `systemctl show -P Result`
+        // returns "timeout" even when the per-service state lock is briefly
+        // contended.
         {
             let ri = run_info.read_poisoned();
             if let Some(unit) = ri.unit_table.values().find(|u| u.id.name == rt.unit_name)
                 && let Specific::Service(srvc_specific) = &unit.specific
             {
+                unit.common
+                    .runtime_max_timeout_fired
+                    .store(true, std::sync::atomic::Ordering::Release);
                 let mut state = srvc_specific.state.write_poisoned();
                 state.srvc.runtime_max_timeout_fired = true;
             }
@@ -229,12 +235,16 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
         );
 
         // Set the watchdog_timeout_fired flag so that the exit handler
-        // knows this was a watchdog kill (for Restart=on-watchdog).
+        // knows this was a watchdog kill (for Restart=on-watchdog).  Also
+        // mirror it onto the Common atomic for lock-free Result reads.
         {
             let ri = run_info.read_poisoned();
             if let Some(unit) = ri.unit_table.values().find(|u| u.id.name == wt.unit_name)
                 && let Specific::Service(srvc_specific) = &unit.specific
             {
+                unit.common
+                    .watchdog_timeout_fired
+                    .store(true, std::sync::atomic::Ordering::Release);
                 let mut state = srvc_specific.state.write_poisoned();
                 state.srvc.watchdog_timeout_fired = true;
             }

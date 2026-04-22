@@ -4415,6 +4415,8 @@ fn create_transient_unit(
             main_pid: std::sync::atomic::AtomicI32::new(0),
             main_exit_pid: std::sync::atomic::AtomicI32::new(0),
             main_exit_status: std::sync::atomic::AtomicI32::new(-1),
+            runtime_max_timeout_fired: std::sync::atomic::AtomicBool::new(false),
+            watchdog_timeout_fired: std::sync::atomic::AtomicBool::new(false),
         },
         specific: Specific::Service(ServiceSpecific {
             conf: service_conf,
@@ -4673,6 +4675,8 @@ fn create_transient_unit(
                 main_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_status: std::sync::atomic::AtomicI32::new(-1),
+            runtime_max_timeout_fired: std::sync::atomic::AtomicBool::new(false),
+            watchdog_timeout_fired: std::sync::atomic::AtomicBool::new(false),
             },
             specific: Specific::Timer(crate::units::TimerSpecific {
                 conf: timer_config,
@@ -4829,6 +4833,8 @@ fn create_transient_unit(
                 main_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_status: std::sync::atomic::AtomicI32::new(-1),
+            runtime_max_timeout_fired: std::sync::atomic::AtomicBool::new(false),
+            watchdog_timeout_fired: std::sync::atomic::AtomicBool::new(false),
             },
             specific: Specific::Path(crate::units::PathSpecific {
                 conf: path_config,
@@ -10031,6 +10037,8 @@ mod tests {
                 main_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_status: std::sync::atomic::AtomicI32::new(-1),
+            runtime_max_timeout_fired: std::sync::atomic::AtomicBool::new(false),
+            watchdog_timeout_fired: std::sync::atomic::AtomicBool::new(false),
             },
             specific: Specific::Target(TargetSpecific {
                 state: RwLock::new(TargetState {

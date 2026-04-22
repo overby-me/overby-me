@@ -2016,6 +2016,8 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                     main_pid: std::sync::atomic::AtomicI32::new(0),
                     main_exit_pid: std::sync::atomic::AtomicI32::new(0),
                     main_exit_status: std::sync::atomic::AtomicI32::new(-1),
+                    runtime_max_timeout_fired: std::sync::atomic::AtomicBool::new(false),
+                    watchdog_timeout_fired: std::sync::atomic::AtomicBool::new(false),
                 },
                 specific: Specific::Swap(SwapSpecific {
                     conf: SwapConfig {
@@ -2191,6 +2193,8 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                 main_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_status: std::sync::atomic::AtomicI32::new(-1),
+                    runtime_max_timeout_fired: std::sync::atomic::AtomicBool::new(false),
+                    watchdog_timeout_fired: std::sync::atomic::AtomicBool::new(false),
             },
             specific: Specific::Mount(MountSpecific {
                 conf: MountConfig {
@@ -2881,6 +2885,8 @@ mod tests {
                 main_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_status: std::sync::atomic::AtomicI32::new(-1),
+                    runtime_max_timeout_fired: std::sync::atomic::AtomicBool::new(false),
+                    watchdog_timeout_fired: std::sync::atomic::AtomicBool::new(false),
             },
             specific: Specific::Target(crate::units::TargetSpecific {
                 state: RwLock::new(crate::units::TargetState {
