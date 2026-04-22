@@ -855,3 +855,17 @@ remaining 11 parallelism + 4 WAIT subtests genuinely require real
 concurrent recipe execution (the helper script `thelp.pl` uses
 cross-recipe file coordination via `wait FILE` that deadlocks under
 serial execution).
+
+Round 15 (133/135 — small parallelism subtest gain):
+
+1. **`check_chain_sources` now handles explicit rules**: when deciding
+   whether to skip a missing intermediate prereq, recursively walk
+   explicit-rule prereq chains (in addition to pattern-rule chains)
+   to see if any source file is newer than the target. Previously
+   only pattern rules were traversed; an explicit chain like
+   `file4: file3; ...` / `file3: file2; ...` / `file2: file1; ...`
+   would incorrectly conclude file3 (intermediate) doesn't need
+   rebuilding because pattern lookup found nothing. Fixes
+   `features/parallelism` subtest 10 (Savannah bug 30653 regression).
+
+Subtest gains: parallelism 2→3.

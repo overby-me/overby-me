@@ -4959,6 +4959,35 @@ impl Engine {
                         let resolved_file = engine
                             .resolve_vpath(file)
                             .unwrap_or_else(|| file.to_string());
+                        // Collect prereqs from explicit rules first.
+                        let mut prereqs: Vec<String> = Vec::new();
+                        if let Some(entries) = engine.rules.borrow().get(file) {
+                            for e in entries {
+                                prereqs.extend(e.prerequisites.iter().cloned());
+                            }
+                        }
+                        if prereqs.is_empty()
+                            && let Some(entries) = engine.rules.borrow().get(resolved_file.as_str())
+                        {
+                            for e in entries {
+                                prereqs.extend(e.prerequisites.iter().cloned());
+                            }
+                        }
+                        if !prereqs.is_empty() {
+                            for src in &prereqs {
+                                let src = engine.resolve_vpath(src).unwrap_or(src.clone());
+                                if let Ok(sm) = std::fs::metadata(&src).and_then(|m| m.modified()) {
+                                    if sm > target_m {
+                                        return true;
+                                    }
+                                    if check_chain_sources(engine, &src, target_m, depth + 1) {
+                                        return true;
+                                    }
+                                } else if check_chain_sources(engine, &src, target_m, depth + 1) {
+                                    return true;
+                                }
+                            }
+                        }
                         if let Some((rule, stem)) = engine
                             .find_pattern_rule(file)
                             .or_else(|| engine.find_pattern_rule(&resolved_file))
