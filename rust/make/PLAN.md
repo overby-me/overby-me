@@ -4,7 +4,10 @@
 
 **127/135 tests passing** (94%) — upstream test harness from GNU make 4.4.1.
 
-`rust/make` has a parser, expander, and build engine (~5k LoC) with
+MAKEFLAGS subtests: **187/218** (86%) — significant progress on flag
+merge, dedup, sort, origin tracking, and env-inherited override propagation.
+
+`rust/make` has a parser, expander, and build engine (~10k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
 `rust-make`. Ongoing work on the `make-test` bookmark.
 
@@ -433,19 +436,49 @@ Latest baseline (`bash /tmp/run-make-baseline.sh`):
 
 | Test | Notes |
 | --- | --- |
-| `features/parallelism` | Requires `-j` / jobserver |
-| `features/reinvoke` | Makefile auto-rebuild + re-exec |
-| `features/se_implicit` | 27/30 subtests pass; failing subtests 3, 4, 9 (dir-transfer in SE implicit prereqs with order-only; implicit recursion guard; SE prereq verification rejection) |
-| `features/temp_stdin` | 6/8 subtests pass; `--debug=b` re-exec banner (#4); SIGTERM "Terminated" diagnostic (#5) |
+| `features/parallelism` | Requires `-j` / jobserver (0/8) |
+| `features/reinvoke` | Makefile auto-rebuild + re-exec (5/12) |
+| `features/se_implicit` | 27/30 subtests pass; failing subtests 3 (implicit recursion with directory stems), 9 (SE prereq verification in pattern search), 27 (SE prereq expansion ordering) |
+| `features/temp_stdin` | 6/8 subtests pass; `--debug=b` re-exec banner with `--temp-stdin=` (#4); SIGTERM "Terminated" diagnostic (#5, needs signal handler) |
 | `features/vpathplus` | 2/4 subtests pass; #1 (built-in cc pipeline via vpath + un-vpath on failed rebuild), #3 (VPATH intermediate chain timestamp comparison) |
-| `options/dash-f` | First failing subtest: prereq makefile rebuild before consuming stdin (`bye.mk: bye.mk.src`) — needs makefile auto-rebuild |
-| `targets/WAIT` | `.WAIT` requires parallel scheduling |
-| `variables/MAKEFLAGS` | 181/218 subtests pass; remaining 37 need sub-make MAKELEVEL propagation (116-117, 124-127), makefile auto-rebuild (197-208), sub-make with debug (210-217), MAKEOVERRIDES override semantics (101-107), and `-e` env-override MAKEFLAGS interaction (112-115) |
+| `options/dash-f` | 23/32 subtests pass; all 9 failures need makefile auto-rebuild (`touch bye.mk.src` / `touch bye.mk` before consuming stdin) |
+| `targets/WAIT` | `.WAIT` requires parallel scheduling (3/4) |
+| `variables/MAKEFLAGS` | 187/218 subtests pass; remaining 31 need: sub-make MAKELEVEL (116-117, 124-127), makefile auto-rebuild (197-208), sub-make with debug (210-217), MAKEOVERRIDES `override` + `--` separator semantics (101, 104-107) |
 
 The biggest remaining unlocks are **makefile auto-rebuild/re-exec**
-(unlocks `reinvoke`, `dash-f`, `dash-B` subtests) and **MAKEFLAGS
-round-trip**. The `se_implicit` remainder requires implicit recursion
-guards with directory-aware stem decomposition and SE-during-pattern-search.
+(unlocks `reinvoke`, `dash-f`, MAKEFLAGS 197-217) and **parallel jobs**
+(unlocks `parallelism`, `WAIT`). The `se_implicit` remainder requires
+implicit recursion guards with directory-aware stem decomposition and
+SE-during-pattern-search.
+
+### MAKEFLAGS improvements (this session)
+
+Went from 15/218 → 187/218 subtests:
+
+- **MAKEFLAGS merge logic**: When a makefile assigns `MAKEFLAGS`, command-line
+  flags are preserved (merged union). File-added flags are additive.
+- **Flag deduplication**: Short flags from env MAKEFLAGS, cmdline, and
+  makefile are deduplicated.
+- **Flag sorting**: Short flags sorted case-insensitively (lowercase before
+  uppercase for same letter, e.g. `rR` not `Rr`). Long flags sorted by
+  GNU make's canonical category order (`-I`, `-l`, `-O`, `--debug`, `--trace`,
+  `--no-print-directory`, `--warn-undefined-variables`, `--no-silent`, `--eval`).
+- **New flags**: `-S`/`--stop`, `-O`/`--output-sync`, `-d`/`--debug=X`,
+  `-l`/`--load-average` now tracked in MAKEFLAGS.
+- **`-w` as short flag**: `-w` stored as `w` in short flags (not `--print-directory`
+  in long flags), matching GNU make.
+- **Mutual exclusion**: `-w`/`--no-print-directory`, `-s`/`--no-silent`,
+  `-k`/`-S` properly suppress each other.
+- **Origin tracking**: MAKEFLAGS uses `CommandLine` origin when cmdline
+  flags/overrides are present, blocking file-level `+=` when `-e` is active.
+- **Variable ordering**: `:=` overrides before `=` in MAKEOVERRIDES.
+- **Env-inherited overrides**: `hello=world` from MAKEFLAGS env propagated
+  through MAKEOVERRIDES with dedup against cmdline overrides.
+- **Post-load flag application**: `-s`, `-k`, `-i`, `-n`, `-e`, `-w`,
+  `--no-print-directory`, `--trace` set from makefile `MAKEFLAGS +=` are
+  applied to engine state after all makefiles are loaded.
+- **Signal handling**: Recipe processes killed by signals now report the
+  signal name (e.g. "Terminated") instead of a numeric error code.
 
 ---
 
