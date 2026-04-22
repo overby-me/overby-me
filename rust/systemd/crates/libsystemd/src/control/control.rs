@@ -5083,7 +5083,21 @@ pub fn bind_mount_into_unit(
     let src_c = CString::new(source).map_err(|e| format!("bad source: {e}"))?;
     let dst_c = CString::new(destination).map_err(|e| format!("bad destination: {e}"))?;
 
-    match unsafe { libc::fork() } {
+    // Block SIGCHLD so the signal-handler thread (which auto-reaps every
+    // child as PID 1's subreaper duty) doesn't beat us to the bind-helper's
+    // exit and leave waitpid(2) returning ECHILD.  Restore the previous
+    // mask once we've reaped the child explicitly.  Matches upstream
+    // systemd's pattern around its bind-mount helper.
+    let mut prev_mask = nix::sys::signal::SigSet::empty();
+    let mut block_mask = nix::sys::signal::SigSet::empty();
+    block_mask.add(nix::sys::signal::Signal::SIGCHLD);
+    let _ = nix::sys::signal::sigprocmask(
+        nix::sys::signal::SigmaskHow::SIG_BLOCK,
+        Some(&block_mask),
+        Some(&mut prev_mask),
+    );
+
+    let result = match unsafe { libc::fork() } {
         -1 => Err(format!(
             "fork for bind-mount helper failed: {}",
             std::io::Error::last_os_error()
@@ -5165,7 +5179,17 @@ pub fn bind_mount_into_unit(
                 Err("bind-mount helper terminated abnormally".to_string())
             }
         }
-    }
+    };
+
+    // Restore the original signal mask so SIGCHLD goes back through the
+    // signal-handler thread for normal child reaping.
+    let _ = nix::sys::signal::sigprocmask(
+        nix::sys::signal::SigmaskHow::SIG_SETMASK,
+        Some(&prev_mask),
+        None,
+    );
+
+    result
 }
 
 pub fn execute_command(
