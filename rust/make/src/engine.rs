@@ -1079,32 +1079,32 @@ impl Engine {
                 }
                 all_long.push(fl.clone());
             }
-            // Sort long flags in GNU make's canonical order:
-            // -I flags, -l flags, -O flags, --debug=X, --trace,
-            // --no-print-directory, --warn-undefined-variables, --no-silent, --eval
-            all_long.sort_by_key(|f| {
+            // Sort long flags in GNU make's canonical order, preserving
+            // insertion order within each category (stable sort).
+            let long_category = |f: &str| -> u8 {
                 if f.starts_with("-I") {
-                    (0, f.clone())
+                    0
                 } else if f.starts_with("-l") {
-                    (1, f.clone())
+                    1
                 } else if f.starts_with("-O") {
-                    (2, f.clone())
+                    2
                 } else if f.starts_with("--debug") {
-                    (3, f.clone())
+                    3
                 } else if f == "--trace" {
-                    (4, f.clone())
+                    4
                 } else if f == "--no-print-directory" {
-                    (5, f.clone())
+                    5
                 } else if f == "--warn-undefined-variables" {
-                    (6, f.clone())
+                    6
                 } else if f == "--no-silent" {
-                    (7, f.clone())
+                    7
                 } else if f.starts_with("--eval") {
-                    (8, f.clone())
+                    8
                 } else {
-                    (9, f.clone())
+                    9
                 }
-            });
+            };
+            all_long.sort_by_key(|f| long_category(f));
 
             // Append long flags.
             if merged.is_empty() && !all_long.is_empty() {
@@ -1119,6 +1119,29 @@ impl Engine {
 
             // Re-append the dynamic MAKEOVERRIDES suffix.
             merged.push_str("$(if $(MAKEOVERRIDES), -- $(MAKEOVERRIDES))");
+
+            // Apply side effects for Cell-based fields (safe through &self).
+            for ch in &merged_chars {
+                if ch == &'B' {
+                    self.always_make.set(true);
+                }
+            }
+            for fl in &all_long {
+                if fl == "--warn-undefined-variables" {
+                    self.warn_undefined_variables.set(true);
+                }
+            }
+
+            // Update .INCLUDE_DIRS when -I flags change via MAKEFLAGS.
+            for fl in &all_long {
+                if let Some(dir) = fl.strip_prefix("-I") {
+                    if dir == "-" {
+                        self.include_dirs.borrow_mut().clear();
+                    } else if !self.include_dirs.borrow().contains(&dir.to_string()) {
+                        self.include_dirs.borrow_mut().push(dir.to_string());
+                    }
+                }
+            }
 
             // Bypass origin check — always allow this merged write.
             self.vars.borrow_mut().insert(

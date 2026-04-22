@@ -911,22 +911,29 @@ fn run() -> i32 {
         }
     }
 
-    // After loading all makefiles, re-check MAKEFLAGS for -r / -R flags
+    // After loading all makefiles, re-check MAKEFLAGS for flags
     // that were set inside the makefile (e.g. `MAKEFLAGS += -r`). GNU
     // make honours these the same way as command-line flags.
     {
         let mflags_post = engine.lookup_var("MAKEFLAGS");
-        // Split on whitespace; stop at "--" (separator before var
-        // assignments). Each token that starts with "-" is a flag
-        // cluster or long option; bare tokens (no leading dash) are
-        // also short-flag clusters in MAKEFLAGS format.
         let mut has_r = false;
         let mut has_big_r = false;
+        let mut has_s = false;
+        let mut has_k = false;
+        let mut has_i = false;
+        let mut has_n = false;
+        let mut has_e = false;
+        let mut has_w = false;
+        let mut has_no_print_dir = false;
+        let mut has_no_silent = false;
+        let mut has_trace = false;
+        let mut past_separator = false;
         for tok in mflags_post.split_whitespace() {
-            // Don't break at "--" — flags appended via
-            // `MAKEFLAGS += -r` may appear after the separator.
-            // Skip variable assignments (contain '=') — they are not flags.
-            if tok.contains('=') {
+            if tok == "--" {
+                past_separator = true;
+                continue;
+            }
+            if past_separator || tok.contains('=') {
                 continue;
             }
             if tok == "--no-builtin-rules" {
@@ -937,7 +944,23 @@ fn run() -> i32 {
                 has_big_r = true;
                 continue;
             }
-            // Short-flag cluster: may or may not start with '-'
+            if tok == "--no-print-directory" {
+                has_no_print_dir = true;
+                continue;
+            }
+            if tok == "--no-silent" {
+                has_no_silent = true;
+                continue;
+            }
+            if tok == "--trace" {
+                has_trace = true;
+                continue;
+            }
+            // Short-flag cluster: may or may not start with '-'.
+            // Skip long options (--foo) — only single-dash or bare tokens.
+            if tok.starts_with("--") {
+                continue;
+            }
             let chars: &str = if let Some(rest) = tok.strip_prefix('-') {
                 rest
             } else {
@@ -950,6 +973,12 @@ fn run() -> i32 {
                         has_r = true;
                         has_big_r = true;
                     }
+                    's' => has_s = true,
+                    'k' => has_k = true,
+                    'i' => has_i = true,
+                    'n' => has_n = true,
+                    'e' => has_e = true,
+                    'w' => has_w = true,
                     _ => {}
                 }
             }
@@ -959,6 +988,33 @@ fn run() -> i32 {
         }
         if has_big_r {
             engine.disable_builtin_vars();
+        }
+        if has_s && !has_no_silent {
+            engine.silent = true;
+        }
+        if has_no_silent {
+            engine.silent = false;
+        }
+        if has_k {
+            engine.keep_going = true;
+        }
+        if has_i {
+            engine.ignore_errors = true;
+        }
+        if has_n {
+            engine.dry_run = true;
+        }
+        if has_e {
+            engine.env_overrides = true;
+        }
+        if has_trace {
+            engine.trace = true;
+        }
+        // -w / --no-print-directory: only override if not already set by cmdline
+        if has_no_print_dir {
+            engine.print_directory_opt = Some(false);
+        } else if has_w && engine.print_directory_opt.is_none() {
+            engine.print_directory_opt = Some(true);
         }
     }
 
