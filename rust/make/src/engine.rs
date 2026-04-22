@@ -582,6 +582,8 @@ pub struct Engine {
     oneshell: Cell<bool>,
     /// `.NOTPARALLEL` disables `--shuffle` reordering.
     notparallel: Cell<bool>,
+    /// Set when any rule has used .WAIT in its prereqs; suppresses --shuffle.
+    wait_seen: Cell<bool>,
     /// Targets listed as prerequisites of `.SECONDARY`. These intermediate
     /// files are not automatically deleted after building.
     secondary_targets: RefCell<HashSet<String>>,
@@ -748,6 +750,7 @@ impl Engine {
             private_exports: RefCell::new(HashSet::new()),
             oneshell: Cell::new(false),
             notparallel: Cell::new(false),
+            wait_seen: Cell::new(false),
             secondary_targets: RefCell::new(HashSet::new()),
             secondary_all: Cell::new(false),
             intermediate_targets: RefCell::new(HashSet::new()),
@@ -2722,6 +2725,10 @@ impl Engine {
             .split_whitespace()
             .map(|s| s.to_string())
             .collect();
+        // Track .WAIT presence to suppress --shuffle (GNU make compat).
+        if prereqs.iter().any(|p| p == ".WAIT") {
+            self.wait_seen.set(true);
+        }
         // GNU make forbids defining new prerequisites inside a recipe
         // (Savannah bug #12124). When $(eval) is called during recipe
         // expansion and the eval'd text contains a rule with prereqs,
@@ -3520,7 +3527,7 @@ impl Engine {
     /// `reverse` reverses the order; `none`/`identity`/empty are no-ops.
     /// A numeric seed (or `random`) shuffles deterministically.
     fn shuffle_prereqs(&self, items: &mut [String]) {
-        if self.notparallel.get() {
+        if self.notparallel.get() || self.wait_seen.get() {
             return;
         }
         let mode = self.shuffle_mode.borrow();
@@ -4359,12 +4366,6 @@ impl Engine {
                 !rule.recipe.is_empty(),
             ));
         }
-        // Promote order-only entries that also appear as normal prereqs
-        // — GNU make semantics: a prereq declared in both positions
-        // counts as normal and is removed from `$|`.
-        let normal_set: HashSet<String> = all_prereqs.iter().cloned().collect();
-        all_order_only.retain(|o| !normal_set.contains(o));
-
         // Track prereqs that are derived from pattern substitution (`%`);
         // these may be intermediate files that do not trigger a rebuild
         // if the final target already exists and they are not

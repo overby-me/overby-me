@@ -817,3 +817,23 @@ Category total: 132 → 133.
 
 Deslop pre-commit hook complains about pre-existing struct patterns;
 commit with `SKIP=deslop`.
+
+Round 13 (133/135 — partial WAIT improvement, parallelism not yet done):
+
+1. **Defer order-only dedup** in `build_target_for` until after
+   `rule_build_groups` slice extraction. Previously, deduping
+   `all_order_only` against `all_prereqs` immediately after the
+   rule-iteration loop shrank `all_order_only.len()` while
+   `rule_prereq_slices` still held the pre-dedup `oo_end` indices,
+   causing the slice extraction to silently fall through to empty
+   `oo` vectors when an entry like `.WAIT` appeared in both lists.
+   Symptom: `pre = .WAIT pre1 .WAIT pre2 | .WAIT pre3` (after SE)
+   dropped `pre3` from the build entirely. Fix: remove the early
+   `all_order_only.retain(...)` step; the existing later dedup at
+   line 5201 (after slice extraction) is sufficient and keeps slice
+   indices consistent. Fixes `targets/WAIT` subtest 9.
+
+Subtest gains: WAIT 9→10. Categories unchanged at 133/135 — the
+remaining `targets/WAIT` and `features/parallelism` subtests require
+real concurrent recipe execution (job pool + jobserver), which is a
+larger structural change to the otherwise single-threaded engine.
