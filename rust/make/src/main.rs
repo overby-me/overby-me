@@ -138,6 +138,10 @@ fn run() -> i32 {
                 inherited_stdin_temp = Some(arg.clone());
                 break;
             }
+            if let Some(path) = arg.strip_prefix("--temp-stdin=") {
+                inherited_stdin_temp = Some(path.to_string());
+                break;
+            }
         }
     }
 
@@ -413,28 +417,34 @@ fn run() -> i32 {
             }
             "-d" | "--debug" | "--debug=a" => {
                 debug_mode = true;
+                engine.set_debug_flag(b'a');
                 if !mflags_short.contains('d') {
                     mflags_short.push('d');
                 }
             }
             "--debug=b" | "--debug=basic" => {
                 debug_mode = true;
+                engine.set_debug_flag(b'b');
                 mflags_long.push("--debug=b".to_string());
             }
             "--debug=v" | "--debug=verbose" => {
                 debug_mode = true;
+                engine.set_debug_flag(b'v');
                 mflags_long.push("--debug=v".to_string());
             }
             "--debug=i" | "--debug=implicit" => {
                 debug_mode = true;
+                engine.set_debug_flag(b'i');
                 mflags_long.push("--debug=i".to_string());
             }
             "--debug=j" | "--debug=jobs" => {
                 debug_mode = true;
+                engine.set_debug_flag(b'j');
                 mflags_long.push("--debug=j".to_string());
             }
             "--debug=m" | "--debug=makefile" => {
                 debug_mode = true;
+                engine.set_debug_flag(b'm');
                 mflags_long.push("--debug=m".to_string());
             }
             "--debug=n" | "--debug=none" => {
@@ -587,6 +597,11 @@ fn run() -> i32 {
                     env_overrides_list.push(format!("{name}{orig_sep}{escaped}"));
                 }
             }
+            arg if arg.starts_with("--temp-stdin=") => {
+                // Recognized but no-op: stdin contents are passed via -f<path>;
+                // this flag exists for the re-exec banner under --debug=b and
+                // for cleanup of the temp file on exit.
+            }
             arg if arg.starts_with("--") => {
                 // Unknown long option: GNU make prints an error and
                 // a usage banner that includes the "built for" line.
@@ -698,6 +713,7 @@ fn run() -> i32 {
                         }
                         'd' => {
                             debug_mode = true;
+                            engine.set_debug_flag(b'a');
                             if !mflags_short.contains('d') {
                                 mflags_short.push('d');
                             }
@@ -1062,7 +1078,12 @@ fn run() -> i32 {
                 past_separator = true;
                 continue;
             }
-            if past_separator || tok.contains('=') {
+            if past_separator {
+                continue;
+            }
+            // Variable assignments contain '=', but options like --debug=b also do.
+            // Skip plain assignments (NAME=val) but keep --opt=val.
+            if tok.contains('=') && !tok.starts_with("--") {
                 continue;
             }
             if tok == "--no-builtin-rules" {
@@ -1083,6 +1104,40 @@ fn run() -> i32 {
             }
             if tok == "--trace" {
                 has_trace = true;
+                continue;
+            }
+            if let Some(arg) = tok.strip_prefix("--debug=") {
+                for c in arg.chars() {
+                    match c {
+                        'a' => engine.set_debug_flag(b'a'),
+                        'b' => engine.set_debug_flag(b'b'),
+                        'v' => engine.set_debug_flag(b'v'),
+                        'i' => engine.set_debug_flag(b'i'),
+                        'j' => engine.set_debug_flag(b'j'),
+                        'm' => engine.set_debug_flag(b'm'),
+                        'n' => engine.set_debug_flag(b'n'),
+                        _ => {}
+                    }
+                }
+                if matches!(
+                    arg,
+                    "basic" | "verbose" | "implicit" | "jobs" | "makefile" | "all" | "none"
+                ) {
+                    let f = match arg {
+                        "basic" => b'b',
+                        "verbose" => b'v',
+                        "implicit" => b'i',
+                        "jobs" => b'j',
+                        "makefile" => b'm',
+                        "all" => b'a',
+                        _ => b'n',
+                    };
+                    engine.set_debug_flag(f);
+                }
+                continue;
+            }
+            if tok == "--debug" {
+                engine.set_debug_flag(b'a');
                 continue;
             }
             // Short-flag cluster: may or may not start with '-'.
@@ -1237,6 +1292,7 @@ fn run() -> i32 {
         // read (-f-), write the content to a temp file and replace that
         // arg with the temp file path so the re-exec'd process can read it.
         let mut reexec_args: Vec<String> = args[1..].to_vec();
+        let mut just_created_stdin_temp: Option<String> = None;
         if let Some(ref content) = stdin_content_for_reexec {
             let tmpdir = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
             let temp_path =
@@ -1246,6 +1302,11 @@ fn run() -> i32 {
                 return 2;
             }
             let temp_str = temp_path.to_string_lossy().to_string();
+            just_created_stdin_temp = Some(temp_str.clone());
+            // Also append --temp-stdin=<path> to mirror GNU make 4.4+ semantics.
+            // (The -f<path> arg is what actually loads the makefile; --temp-stdin
+            // exists primarily for the re-exec banner under --debug=b.)
+            reexec_args.push(format!("--temp-stdin={temp_str}"));
             // Replace `-f-`, `-f -`, `--makefile -`, `--makefile=-` with
             // the temp file path.
             let mut i = 0;
@@ -1284,12 +1345,24 @@ fn run() -> i32 {
                 i += 1;
             }
         }
+        if engine.debug_basic() {
+            let mut buf = String::from(&args[0][..]);
+            for a in &reexec_args {
+                buf.push(' ');
+                buf.push_str(a);
+            }
+            eprintln!("Re-executing[{}]: {}", restarts + 1, buf);
+        }
         use std::os::unix::process::CommandExt;
         let err = std::process::Command::new(&args[0])
             .args(&reexec_args)
             .exec();
         // exec() only returns on error. Format the message like GNU make,
         // which prints `make: <path>: <reason>` on EACCES / ENOENT.
+        // exec failed — clean up the stdin temp file we just created.
+        if let Some(ref tmp) = just_created_stdin_temp {
+            let _ = std::fs::remove_file(tmp);
+        }
         let msg = match err.kind() {
             std::io::ErrorKind::PermissionDenied => "Permission denied".to_string(),
             std::io::ErrorKind::NotFound => "No such file or directory".to_string(),

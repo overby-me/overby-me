@@ -2,10 +2,16 @@
 
 ## Current Status
 
-**129/135 tests passing** (96%) — upstream test harness from GNU make 4.4.1.
+**130/135 tests passing** (96%) — upstream test harness from GNU make 4.4.1.
 
-MAKEFLAGS subtests: **198/218** (91%) — significant progress on flag
-merge, dedup, sort, origin tracking, and env-inherited override propagation.
+MAKEFLAGS subtests: **218/218** (100%) ✅ — full pass after wiring up
+`--debug=X` propagation from makefile-set MAKEFLAGS and emitting
+"Updating makefiles...." / "Putting child" debug output.
+
+temp_stdin subtests: **7/8** (87%) — re-exec now writes stdin temp file
+and emits the `Re-executing[N]: ... --temp-stdin=PATH` banner under
+`--debug=b`; cleans up the temp file on exec failure too. Only #5
+(SIGTERM "Terminated" diagnostic) still fails — needs a signal handler.
 
 `rust/make` has a parser, expander, and build engine (~10k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -431,18 +437,17 @@ in ways the test harness happens not to exercise in our passing set.
 
 ---
 
-## Currently failing top-level tests (6 of 135)
+## Currently failing top-level tests (5 of 135)
 
 Latest baseline (`bash /tmp/run-make-baseline.sh`):
 
 | Test | Notes |
 | --- | --- |
-| `features/parallelism` | Requires `-j` / jobserver (0/8) |
+| `features/parallelism` | Requires `-j` / jobserver (1/13) |
 | `features/se_implicit` | 28/30 subtests pass; failing subtests 9 (SE prereq verification in pattern search), 27 (SE prereq expansion ordering) |
-| `features/temp_stdin` | 6/8 subtests pass; `--debug=b` re-exec banner with `--temp-stdin=` (#4); SIGTERM "Terminated" diagnostic (#5, needs signal handler) |
-| `options/dash-f` | 31/32 subtests pass; remaining failure needs stdin re-exec via `--temp-stdin` |
-| `targets/WAIT` | `.WAIT` requires parallel scheduling (3/4) |
-| `variables/MAKEFLAGS` | 198/218 subtests pass; remaining 20 need: makefile auto-rebuild (197-208), sub-make with debug (210-217) |
+| `features/temp_stdin` | 7/8 subtests pass; only SIGTERM "Terminated" diagnostic (#5) remains — needs a signal handler that prints `make: *** [...] Terminated` for SIGTERM-killed recipes via the stdin temp file path |
+| `options/dash-f` | 31/32 subtests pass; remaining failure: extra `:0: R: ...` line on re-exec when one of the `-f` makefiles is missing |
+| `targets/WAIT` | `.WAIT` requires parallel scheduling (6/14 subtests, was 3/4) |
 
 The biggest remaining unlocks are **parallel jobs**
 (unlocks `parallelism`, `WAIT`) and **stdin re-exec / `--temp-stdin`**
@@ -543,12 +548,12 @@ Based on the latest baseline run (129/135 passing):
 
 | Category    | Status                                                            |
 | ----------- | ----------------------------------------------------------------- |
-| `features`  | 39/42 passing. `patternrules` 72/72 ✅, `reinvoke` 12/12 ✅, `se_explicit` 31/31 ✅, `statipattrules` 68/68 ✅, `vpathplus` 4/4 ✅. Blocked on remaining `se_implicit` edge cases, parallelism, temp_stdin signal/debug. |
+| `features`  | 39/42 passing. `patternrules` 72/72 ✅, `reinvoke` 12/12 ✅, `se_explicit` 31/31 ✅, `statipattrules` 68/68 ✅, `vpathplus` 4/4 ✅. Blocked on remaining `se_implicit` edge cases, parallelism, `temp_stdin` SIGTERM diagnostic. |
 | `functions` | Most working. Remaining: fatal-error line numbers.                |
 | `misc`      | All passing (bs-nl 28/28, general4 10/10).                        |
 | `options`   | Most working; `dash-q` fully passing. `dash-f` 31/32. Blocked on stdin re-exec/MAKEFLAGS. |
 | `targets`   | `ONESHELL`+`NOTINTERMEDIATE`+`INTERMEDIATE`+`SECONDARY` fully passing. `WAIT` needs parallel scheduling. |
-| `variables` | All done except MAKEFLAGS (`automatic` now passes via SE). |
+| `variables` | All passing ✅ (MAKEFLAGS 218/218 after debug-flag wiring). |
 
 Round 4 (still 121/135 categories, but +6 vpath subtests):
 
@@ -714,6 +719,38 @@ Round 9 (129/135 categories — gained reinvoke):
 
 Subtest gains: reinvoke 5→12 (✅ category flip!), dash-f 23→31,
 MAKEFLAGS 198 unchanged. Category total: 128 → 129.
+
+Round 10 (130/135 categories — gained MAKEFLAGS):
+
+1. **Engine-side debug flag tracking**: added `debug_flags: Cell<u8>` to
+   `Engine` plus `set_debug_flag(b'a'/b'b'/...)`, `debug_basic()`,
+   `debug_jobs()` helpers. CLI `--debug=X` handlers now wire each flag
+   into the engine. Mapping mirrors GNU semantics: `a`=all, `b`=basic,
+   `v`⇒basic+verbose, `i`⇒basic+implicit, `j`=jobs, `m`⇒basic, `n`=clear.
+2. **Post-load MAKEFLAGS scan recognizes long-options**: previous
+   `tok.contains('=')` check skipped `--debug=b` as if it were a variable
+   assignment. Now `tok.contains('=') && !tok.starts_with("--")` only
+   skips genuine `NAME=VAL` tokens. Same fix in `set_var_with_origin`'s
+   MAKEFLAGS merge path. Lets `MAKEFLAGS=--debug=b` in a makefile turn
+   on debug output for the rest of the run.
+3. **"Updating makefiles...." emitted at finalize_includes start** when
+   `debug_basic()` is true. Fixes MAKEFLAGS subtests 197–208.
+4. **"Putting child / Reaping winning child / Removing child" emitted
+   around `execute_recipe_inner`** when `debug_jobs()` is true. Synthetic
+   chain pointer (target's slice ptr) — sufficient for the regex match
+   tests use; real parallel scheduling not implemented. Fixes MAKEFLAGS
+   subtests 210–217.
+5. **`--temp-stdin=PATH` flag and re-exec banner**: the re-exec arg list
+   now appends `--temp-stdin=<temp>` (in addition to `-f<temp>`).
+   `--temp-stdin=PATH` is recognized at startup as an inherited stdin
+   temp (for cleanup) and as a no-op CLI flag. Under `--debug=b`, prints
+   `Re-executing[N]: <argv>` before `exec()`. Fixes `temp_stdin` #4.
+6. **Stdin temp file cleanup on `exec()` failure**: track the just-
+   created temp file across the re-exec branch; remove it before
+   printing the error and returning 127. Fixes `temp_stdin` #6.
+
+Subtest gains: MAKEFLAGS 198→218 (✅ category flip), temp_stdin 5→7.
+Category total: 129 → 130.
 
 ---
 
