@@ -1211,9 +1211,23 @@ pub fn apply_directory_dependencies(
     let effective_deps = resolve_masked_dir_deps(dir_deps);
 
     for dep in &effective_deps {
-        // Find the parent unit
-        let parent_id = match unit_table.keys().find(|id| id.name == dep.parent_unit) {
-            Some(id) => id.clone(),
+        // Find the parent unit — by primary id.name OR by alias.
+        // TEST-15-DROPIN.testcase_template_dropins uses a template-level
+        // symlink alias (bar-alias@.service -> bar@.service) plus an
+        // alias-instance .requires/ directory (bar-alias@0.service.requires/),
+        // and expects the Requires= drop-in to land on the resolved
+        // unit (bar@0.service).  Without the alias fallback we'd silently
+        // drop these deps because no unit is literally named
+        // "bar-alias@0.service" in the table.
+        let parent_id = match unit_table
+            .values()
+            .find(|u| {
+                u.id.name == dep.parent_unit
+                    || u.common.unit.aliases.iter().any(|a| a == &dep.parent_unit)
+            })
+            .map(|u| u.id.clone())
+        {
+            Some(id) => id,
             None => {
                 trace!(
                     "Directory dependency: parent unit {} not found, skipping",
