@@ -934,10 +934,12 @@ impl Engine {
             let cmdline_short = self.cmdline_mflags.borrow();
             let cmdline_long = self.cmdline_mflags_long.borrow();
 
-            // Split out the $(if $(MAKEOVERRIDES)...) suffix.
+            // Split out the MAKEOVERRIDES suffix. Two formats:
+            //   "$(if $(MAKEOVERRIDES), -- $(MAKEOVERRIDES))" (no initial overrides)
+            //   " -- $(MAKEOVERRIDES)" (when overrides existed at startup)
             // Flags may appear both before AND after this suffix
             // (e.g. after `+=` the raw value is
-            //   "$(if $(MAKEOVERRIDES), -- $(MAKEOVERRIDES)) -r").
+            //   "<suffix> -r").
             let (before_suffix, after_suffix) =
                 if let Some(pos) = value.find("$(if $(MAKEOVERRIDES)") {
                     // Find the matching closing paren for the $(if ...) call.
@@ -961,6 +963,9 @@ impl Engine {
                             _ => {}
                         }
                     }
+                    (value[..pos].trim_end(), value[end..].trim_start())
+                } else if let Some(pos) = value.find(" -- $(MAKEOVERRIDES)") {
+                    let end = pos + " -- $(MAKEOVERRIDES)".len();
                     (value[..pos].trim_end(), value[end..].trim_start())
                 } else {
                     (value, "")
@@ -1118,7 +1123,13 @@ impl Engine {
             }
 
             // Re-append the dynamic MAKEOVERRIDES suffix.
-            merged.push_str("$(if $(MAKEOVERRIDES), -- $(MAKEOVERRIDES))");
+            // Preserve the original format: if the value had " -- $(MAKEOVERRIDES)"
+            // (unconditional separator), keep that; otherwise use $(if ...).
+            if value.contains(" -- $(MAKEOVERRIDES)") && !value.contains("$(if $(MAKEOVERRIDES)") {
+                merged.push_str(" -- $(MAKEOVERRIDES)");
+            } else {
+                merged.push_str("$(if $(MAKEOVERRIDES), -- $(MAKEOVERRIDES))");
+            }
 
             // Apply side effects for Cell-based fields (safe through &self).
             for ch in &merged_chars {

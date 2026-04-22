@@ -831,9 +831,15 @@ fn run() -> i32 {
     }
     // Use $(MAKEOVERRIDES) so the value is resolved dynamically -- if
     // the makefile appends to MAKEOVERRIDES, MAKEFLAGS picks it up.
-    // Only include the " -- " separator when MAKEOVERRIDES is non-empty,
-    // otherwise MAKEFLAGS would always end with " --".
-    mflags.push_str("$(if $(MAKEOVERRIDES), -- $(MAKEOVERRIDES))");
+    // When there were originally overrides (cmdline or env), always
+    // include the " -- " separator even if MAKEOVERRIDES becomes empty
+    // later (e.g. via `MAKEOVERRIDES=` in the makefile). GNU make
+    // keeps the separator once overrides existed.
+    if !all_overrides.is_empty() {
+        mflags.push_str(" -- $(MAKEOVERRIDES)");
+    } else {
+        mflags.push_str("$(if $(MAKEOVERRIDES), -- $(MAKEOVERRIDES))");
+    }
     // Use CommandLine origin when cmdline flags or overrides are present
     // so that file-level `MAKEFLAGS +=` is blocked (matching GNU make).
     // The MAKEFLAGS merge in set_var_with_origin still intercepts plain
