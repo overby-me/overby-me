@@ -1631,6 +1631,20 @@ pub fn instantiate_template_units(
             template_name, instance_name, instance_unit_name
         );
 
+        // Remove any orphan unit created by parse_all_units from the
+        // original symlink name (bar-alias@2.service parsed directly via
+        // fs::read_to_string follow-symlink).  The canonical unit under
+        // the resolved identity (yup@2.service) takes its place.
+        if let Some(alias) = &alias_name {
+            let orphan_id = unit_table
+                .values()
+                .find(|u| u.id.name == *alias)
+                .map(|u| u.id.clone());
+            if let Some(orphan_id) = orphan_id {
+                unit_table.remove(&orphan_id);
+            }
+        }
+
         // If the resolved unit is already in the table, just add the
         // alias name to it and skip re-instantiating.
         if let Some(existing) = unit_table
