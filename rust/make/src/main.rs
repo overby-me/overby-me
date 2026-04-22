@@ -956,6 +956,10 @@ fn run() -> i32 {
             engine.load_string(&content);
         } else {
             engine.load_file(path, false);
+            // Register primary makefile for auto-rebuild checking in
+            // finalize_includes (GNU make rebuilds the primary makefile
+            // too, not just included files).
+            engine.included_files.borrow_mut().push(path.clone());
         }
     }
 

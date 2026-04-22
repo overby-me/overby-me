@@ -427,7 +427,7 @@ pub struct Engine {
     /// All files included via `include`/`-include` — tracked for
     /// include-file remaking. Even files that loaded successfully need
     /// their build rules checked (GNU make restarts after remaking).
-    included_files: RefCell<Vec<String>>,
+    pub included_files: RefCell<Vec<String>>,
     /// Names of variables originally inherited from the environment.
     /// We track these separately from `VarOrigin` so we can re-export
     /// them to child processes even after a makefile assignment has
@@ -1742,9 +1742,15 @@ impl Engine {
             #[allow(dead_code)]
             printed_nsfd: bool,
             kgo_errors: Vec<String>,
+            /// Whether the file was already in `built_targets` before
+            /// Phase 2 tried to build it (e.g. marked by a sibling
+            /// pattern rule). Used to avoid the "imagined" skip for
+            /// files that were never actually built by their own recipe.
+            was_already_built: bool,
         }
         let mut results: Vec<BuildResult> = Vec::new();
         for entry in &to_build {
+            let was_already_built = self.built_targets.borrow().contains(entry.file.as_str());
             let has_explicit = self.rules.borrow().contains_key(entry.file.as_str());
             let has_pattern = self.find_pattern_rule(&entry.file).is_some();
             let has_rule = has_explicit || has_pattern;
@@ -1817,6 +1823,7 @@ impl Engine {
                 skip_reason,
                 printed_nsfd,
                 kgo_errors,
+                was_already_built,
             });
         }
 
@@ -1836,6 +1843,22 @@ impl Engine {
                 continue;
             }
             if self.load_file_with_loc(&res.file, true, None) {
+                continue;
+            }
+
+            // GNU make "imagined" targets (sv 61226): when a rule ran
+            // successfully for an included makefile but didn't create
+            // the file, just skip — don't error, don't re-exec. The
+            // makefile is treated as if it doesn't need updating.
+            // Only apply this when the file's own recipe actually ran
+            // (was_already_built=false). If it was pre-marked as built
+            // by a sibling pattern rule, the recipe never ran for this
+            // file so the "imagined" logic doesn't apply.
+            if res.had_rule
+                && res.build_err.is_none()
+                && !res.was_already_built
+                && !std::path::Path::new(&res.file).exists()
+            {
                 continue;
             }
 
@@ -3983,6 +4006,13 @@ impl Engine {
                             rule.source_name, trace_line_no, target, reason
                         );
                     }
+                    let dc_mtime_before: Option<std::time::SystemTime> = if !is_phony {
+                        std::fs::metadata(target)
+                            .ok()
+                            .and_then(|m| m.modified().ok())
+                    } else {
+                        None
+                    };
                     match self.execute_recipe(
                         target,
                         &rule.recipe,
@@ -3999,7 +4029,25 @@ impl Engine {
                         }
                         Ok(ran) => {
                             if ran {
-                                self.rebuilt_targets.borrow_mut().insert(target.to_string());
+                                // Only mark as rebuilt if the file's mtime
+                                // actually changed. This prevents cascading
+                                // rebuilds when a recipe is a no-op (e.g.
+                                // `test -f $@ || echo >> $@` when file exists).
+                                let mtime_changed = if !is_phony {
+                                    let after = std::fs::metadata(target)
+                                        .ok()
+                                        .and_then(|m| m.modified().ok());
+                                    match (dc_mtime_before, after) {
+                                        (Some(before), Some(after)) => after > before,
+                                        (None, Some(_)) => true, // file was created
+                                        _ => true,               // conservative
+                                    }
+                                } else {
+                                    true
+                                };
+                                if mtime_changed {
+                                    self.rebuilt_targets.borrow_mut().insert(target.to_string());
+                                }
                             }
                         }
                     }
@@ -5426,10 +5474,25 @@ impl Engine {
                 }
                 Ok(ran) => {
                     if ran {
-                        // Mark this target as rebuilt so dependents see it
-                        // as updated (needed in dry-run where file mtime
-                        // doesn't actually change).
-                        self.rebuilt_targets.borrow_mut().insert(target.to_string());
+                        // Only mark as rebuilt if the file's mtime
+                        // actually changed (or in dry-run where mtime
+                        // doesn't change). This prevents cascading
+                        // rebuilds when a recipe is a no-op.
+                        let mtime_changed = if !is_phony && !self.dry_run {
+                            let after = std::fs::metadata(target)
+                                .ok()
+                                .and_then(|m| m.modified().ok());
+                            match (pre_recipe_target_mtime, after) {
+                                (Some(before), Some(after)) => after > before,
+                                (None, Some(_)) => true,
+                                _ => true,
+                            }
+                        } else {
+                            true
+                        };
+                        if mtime_changed {
+                            self.rebuilt_targets.borrow_mut().insert(target.to_string());
+                        }
                     }
                 }
             }
