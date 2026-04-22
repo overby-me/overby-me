@@ -51,7 +51,13 @@ use crate::units::{Specific, StatusStarted, Timeout, UnitStatus};
 /// `WatchdogSec=` value so that timeouts are detected promptly.
 /// Real systemd uses per-service timers, but a 2-second poll is a
 /// reasonable trade-off for our architecture.
-const WATCHDOG_CHECK_INTERVAL: Duration = Duration::from_secs(2);
+// Polling interval for the watchdog enforcement loop.
+//
+// Tighter than upstream systemd's event-loop wake-ups (which fire exactly at
+// the deadline via timerfd) but sufficient to catch a `RuntimeMaxSec=5s`
+// timeout within the typical test allowance of `runtime_max + 2s`.  Was
+// 2 seconds; bumped down so 5s deadlines don't slip past a 7s test budget.
+const WATCHDOG_CHECK_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Start the background watchdog enforcement thread.
 ///
