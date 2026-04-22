@@ -254,8 +254,15 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<SysusersE
     // Parse type field
     let type_str = &fields[0];
     let (entry_type, plus) = match type_str.as_str() {
+        // `u`: create system user, `u+`: ensure system user (don't error if
+        // already exists with different fields), `u!`: create system user
+        // and lock the password (no login).  `u!+` combines both modifiers.
+        // We don't currently implement password locking, so `u!` and `u!+`
+        // create the user identically to `u` / `u+`.
         "u" => (EntryType::CreateUser, false),
         "u+" => (EntryType::CreateUser, true),
+        "u!" => (EntryType::CreateUser, false),
+        "u!+" | "u+!" => (EntryType::CreateUser, true),
         "g" => (EntryType::CreateGroup, false),
         "g+" => (EntryType::CreateGroup, true),
         "m" => (EntryType::AddToGroup, false),
