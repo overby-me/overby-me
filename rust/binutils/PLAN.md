@@ -66,7 +66,7 @@ Key design decisions:
 | `objdump-relocs` | objdump | ✅ PASS |
 | `addr2line-basic` | addr2line | ✅ PASS |
 
-### Upstream DejaGnu tests (193/220 passing)
+### Upstream DejaGnu tests (195/220 passing)
 
 | Test file | Pass | Fail | Total | Threshold |
 |-----------|------|------|-------|-----------|
@@ -74,12 +74,12 @@ Key design decisions:
 | size.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
 | nm.exp | **13** | 0 | 13 | minPass=13, maxFail=0 |
 | ar.exp | **13** | 1 | 14 | minPass=13, maxFail=1 |
-| readelf.exp | **26** | 12 | 39 | minPass=26, maxFail=12 |
-| objdump.exp | **22** | 10 | 33 | minPass=19, maxFail=3 (standalone; `-all` sees 22) |
+| readelf.exp | **28** | 11 | 39 | minPass=28, maxFail=11 |
+| objdump.exp | **22** | 10 | 33 | minPass=22, maxFail=10 |
 | objcopy.exp | **109** | 6 | 116 | minPass=109, maxFail=6 |
 | strings.exp | **1** | 0 | 1 | minPass=1, maxFail=0 |
 | addr2line.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
-| **Total** | **193** | **27** | **220** | |
+| **Total** | **195** | **25** | **220** | |
 
 ## Fixes applied
 
@@ -221,6 +221,8 @@ Two layers of testing:
 - [x] Fix objcopy SHT_GROUP preservation (106→109 objcopy.exp passes): in-place ELF rewriter for `--remove-section` on files with COMDAT groups; preserves GROUP section type, drops orphan `.rela.X`/`.rel.X` when target removed, rebuilds `SHT_GROUP` contents with renumbered surviving indices, renumbers `sh_link`/`sh_info` everywhere. Fixes `copy removing group member`, `copy removing reloc group member`, `copy removing non-reloc group member` (and `group-7c` for free).
 
 - [x] Fix ar.exp `replacing non-deterministic member` (12→13/14): unset SOURCE_DATE_EPOCH at dejagnu test entry (Nix build env sets it; the test explicitly requires it absent to distinguish deterministic vs non-deterministic archives). Only the ar foreign-object Tektronix-format test remains.
+
+- [x] Add basic `readelf -wi` / `--debug-dump=info` / `--dwarf=info` DWARF `.debug_info` dumper (26→28 readelf.exp passes; unlocks 3 objdump -Wi tests to run): custom DWARF reader handles CU headers, DIE traversal with depth, abbrev tables, and the core DW_FORM_* value formatting. Custom tolerant sLEB128 decoder detects over-long encodings and emits GNU-readelf-compatible warnings (required by pr26548 test). Fixes `binutils-all/pr26548` and `readelf -Wwi pr26548e`. Complex attribute enum mappings (DW_OP_* decoding, language codes, section contributions) still required for pr26160, dw5-op, dwarf-attributes.
 
 ## Next steps
 

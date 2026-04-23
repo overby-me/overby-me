@@ -2610,6 +2610,7 @@ struct ReadelfOpts {
     show_debug_ranges: bool,
     show_debug_loc: bool,
     show_debug_links: bool,
+    show_debug_info: bool,
     show_header: bool,
     show_sections: bool,
     show_section_details: bool,
@@ -2722,6 +2723,10 @@ fn tool_readelf(args: &[String]) -> i32 {
             "-wo" | "--debug-dump=loc" | "--debug-dump=Loc" | "--dwarf=loc" | "--dwarf=Loc" => {
                 opts.show_debug_loc = true;
             }
+            "-wi" | "-wI" | "--debug-dump=info" | "--debug-dump=Info" | "--dwarf=info"
+            | "--dwarf=Info" => {
+                opts.show_debug_info = true;
+            }
             "-wK"
             | "-wN"
             | "--debug-dump=links"
@@ -2736,6 +2741,7 @@ fn tool_readelf(args: &[String]) -> i32 {
                 opts.show_debug_ranges = true;
                 opts.show_debug_loc = true;
                 opts.show_debug_links = true;
+                opts.show_debug_info = true;
             }
             s if s.starts_with("--debug-dump=") || s.starts_with("--dwarf=") => {
                 let v = s.split_once("=").unwrap().1;
@@ -2753,6 +2759,9 @@ fn tool_readelf(args: &[String]) -> i32 {
                 {
                     opts.show_debug_links = true;
                 }
+                if v.eq_ignore_ascii_case("info") || v == "i" || v == "I" {
+                    opts.show_debug_info = true;
+                }
             }
             s if s.starts_with("-w") && s.len() > 2 => {
                 if s.contains('R') {
@@ -2763,6 +2772,9 @@ fn tool_readelf(args: &[String]) -> i32 {
                 }
                 if s.contains('K') || s.contains('N') {
                     opts.show_debug_links = true;
+                }
+                if s.contains('i') || s.contains('I') {
+                    opts.show_debug_info = true;
                 }
             }
             _ if arg.starts_with("--") => {
@@ -2796,6 +2808,31 @@ fn tool_readelf(args: &[String]) -> i32 {
                             opts.show_sections = true;
                         }
                         'W' => opts.wide = true,
+                        'w' => {
+                            // Treat -w followed by selector letters
+                            let rest: String = chars[j + 1..].iter().collect();
+                            if rest.is_empty() {
+                                opts.show_debug_ranges = true;
+                                opts.show_debug_loc = true;
+                                opts.show_debug_links = true;
+                                opts.show_debug_info = true;
+                            } else {
+                                if rest.contains('R') {
+                                    opts.show_debug_ranges = true;
+                                }
+                                if rest.contains('o') {
+                                    opts.show_debug_loc = true;
+                                }
+                                if rest.contains('K') || rest.contains('N') {
+                                    opts.show_debug_links = true;
+                                }
+                                if rest.contains('i') || rest.contains('I') {
+                                    opts.show_debug_info = true;
+                                }
+                            }
+                            j = chars.len();
+                            break;
+                        }
                         'C' => opts.demangle = true,
                         'p' => {
                             // -pNAME or -p NAME
@@ -3486,6 +3523,10 @@ fn readelf_display<'data, Elf: FileHeader>(
 
     if opts.show_debug_links {
         readelf_debug_links(elf, data, endian);
+    }
+
+    if opts.show_debug_info {
+        readelf_debug_info(elf, data, endian);
     }
 }
 
@@ -10566,4 +10607,715 @@ fn readelf_debug_loc<'data, Elf: FileHeader>(
             p = expr_off + expr_len;
         }
     }
+}
+
+// ─── readelf -wi : .debug_info dumper ─────────────────────────────────────────
+
+// ─── readelf -wi : .debug_info dumper ─────────────────────────────────────────
+//
+// A from-scratch DWARF .debug_info / .debug_abbrev parser. We can't use
+// gimli for attribute parsing directly because gimli's LEB128 reader rejects
+// "over-long" sLEB128 encodings like the ones in pr26548.s; GNU readelf
+// tolerates them.
+
+fn readelf_debug_info<'data, Elf: FileHeader>(
+    _elf: &ElfFile<'data, Elf>,
+    data: &'data [u8],
+    _endian: Elf::Endian,
+) {
+    let Ok(obj) = object::File::parse(data) else {
+        return;
+    };
+    use object::{Object as _, ObjectSection as _, ObjectSymbol as _};
+
+    let info_sect = obj
+        .section_by_name(".debug_info")
+        .or_else(|| obj.section_by_name(".zdebug_info"));
+    let info_sect = match info_sect {
+        Some(s) => s,
+        None => return,
+    };
+    let abbrev_sect = obj
+        .section_by_name(".debug_abbrev")
+        .or_else(|| obj.section_by_name(".zdebug_abbrev"));
+
+    let is_le = obj.is_little_endian();
+
+    // Reloc-aware section reader.
+    let read_sect = |sect: &object::Section<'_, '_>| -> Vec<u8> {
+        let raw = sect.uncompressed_data().ok();
+        let raw_bytes: &[u8] = raw.as_ref().map(|c| c.as_ref()).unwrap_or(&[]);
+        let mut buf = raw_bytes.to_vec();
+        for (offset, reloc) in sect.relocations() {
+            if let object::RelocationTarget::Symbol(sym_idx) = reloc.target() {
+                if let Ok(sym) = obj.symbol_by_index(sym_idx) {
+                    let sym_addr = sym.address();
+                    let value = sym_addr.wrapping_add(reloc.addend() as u64);
+                    let off = offset as usize;
+                    let size = reloc.size() as usize / 8;
+                    if off + size <= buf.len() {
+                        match size {
+                            4 => {
+                                let v = if is_le {
+                                    (value as u32).to_le_bytes()
+                                } else {
+                                    (value as u32).to_be_bytes()
+                                };
+                                buf[off..off + 4].copy_from_slice(&v);
+                            }
+                            8 => {
+                                let v = if is_le {
+                                    value.to_le_bytes()
+                                } else {
+                                    value.to_be_bytes()
+                                };
+                                buf[off..off + 8].copy_from_slice(&v);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        buf
+    };
+
+    let info = read_sect(&info_sect);
+    let abbrev = abbrev_sect.as_ref().map(read_sect).unwrap_or_default();
+    let debug_str = obj
+        .section_by_name(".debug_str")
+        .or_else(|| obj.section_by_name(".zdebug_str"))
+        .as_ref()
+        .map(read_sect)
+        .unwrap_or_default();
+    let debug_line_str = obj
+        .section_by_name(".debug_line_str")
+        .as_ref()
+        .map(read_sect)
+        .unwrap_or_default();
+    let debug_str_offsets = obj
+        .section_by_name(".debug_str_offsets")
+        .as_ref()
+        .map(read_sect)
+        .unwrap_or_default();
+
+    println!("Contents of the .debug_info section:");
+    println!();
+
+    let mut p = DwarfReader {
+        buf: &info,
+        pos: 0,
+        le: is_le,
+    };
+
+    while p.pos < p.buf.len() {
+        let cu_start = p.pos;
+        // Initial length
+        let (len, is_64) = match p.read_initial_length() {
+            Some(v) => v,
+            None => return,
+        };
+        let cu_end = p.pos + len as usize;
+        if cu_end > p.buf.len() {
+            return;
+        }
+        let header_len_field = if is_64 { 12 } else { 4 };
+        let format_str = if is_64 { "64-bit" } else { "32-bit" };
+
+        let version = match p.read_u16() {
+            Some(v) => v,
+            None => return,
+        };
+
+        let mut unit_type: Option<u8> = None;
+        let abbrev_off: u64;
+        let addr_size: u8;
+        if version >= 5 {
+            unit_type = p.read_u8();
+            addr_size = p.read_u8().unwrap_or(0);
+            abbrev_off = if is_64 {
+                p.read_u64().unwrap_or(0)
+            } else {
+                p.read_u32().unwrap_or(0) as u64
+            };
+            // Skip dwo_id / type signature / type offset based on unit_type.
+            match unit_type.unwrap_or(0) {
+                4 /* skeleton */ | 5 /* split_compile */ => {
+                    let _ = p.read_u64();
+                }
+                2 /* type */ | 6 /* split_type */ => {
+                    let _ = p.read_u64();
+                    if is_64 { let _ = p.read_u64(); } else { let _ = p.read_u32(); }
+                }
+                _ => {}
+            }
+        } else {
+            abbrev_off = if is_64 {
+                p.read_u64().unwrap_or(0)
+            } else {
+                p.read_u32().unwrap_or(0) as u64
+            };
+            addr_size = p.read_u8().unwrap_or(0);
+        }
+
+        println!("  Compilation Unit @ offset 0x{:x}:", cu_start);
+        println!("   Length:        0x{:x} ({})", len, format_str);
+        println!("   Version:       {}", version);
+        if let Some(ut) = unit_type {
+            let ut_name = match ut {
+                1 => "DW_UT_compile",
+                2 => "DW_UT_type",
+                3 => "DW_UT_partial",
+                4 => "DW_UT_skeleton",
+                5 => "DW_UT_split_compile",
+                6 => "DW_UT_split_type",
+                _ => "DW_UT_<unknown>",
+            };
+            println!("   Unit Type:     {} ({})", ut_name, ut);
+        }
+        println!("   Abbrev Offset: 0x{:x}", abbrev_off);
+        println!("   Pointer Size:  {}", addr_size);
+
+        // Parse abbrev table at abbrev_off
+        let abbrevs = parse_abbrev_table(&abbrev, abbrev_off as usize);
+
+        let mut depth: isize = 0;
+        while p.pos < cu_end {
+            let die_off = p.pos - cu_start;
+            let code = match p.read_uleb128() {
+                Some(v) => v,
+                None => break,
+            };
+            if code == 0 {
+                if depth > 0 {
+                    depth -= 1;
+                }
+                continue;
+            }
+            let entry = match abbrevs.get(&code) {
+                Some(e) => e,
+                None => {
+                    eprintln!("readelf: bad abbrev code {code}");
+                    break;
+                }
+            };
+            let tag_str = dwarf_tag_name(entry.tag);
+            println!(
+                " <{}><{:x}>: Abbrev Number: {} ({})",
+                depth, die_off, code, tag_str
+            );
+
+            for (attr_name, attr_form, implicit_const) in &entry.attrs {
+                let attr_off = p.pos - cu_start;
+                let value_str = read_and_format_attr(
+                    &mut p,
+                    *attr_form,
+                    *implicit_const,
+                    addr_size,
+                    is_64,
+                    version,
+                    *attr_name,
+                    &debug_str,
+                    &debug_line_str,
+                    &debug_str_offsets,
+                    cu_start,
+                    header_len_field,
+                );
+                let attr_name_str = dwarf_attr_name(*attr_name);
+                println!(
+                    "    <{:x}>   {:<18}: {}",
+                    attr_off, attr_name_str, value_str
+                );
+            }
+
+            if entry.has_children {
+                depth += 1;
+            }
+        }
+
+        // Position at cu_end in case parsing stopped early.
+        p.pos = cu_end;
+    }
+}
+
+struct DwarfReader<'a> {
+    buf: &'a [u8],
+    pos: usize,
+    le: bool,
+}
+
+impl<'a> DwarfReader<'a> {
+    fn read_u8(&mut self) -> Option<u8> {
+        if self.pos >= self.buf.len() {
+            return None;
+        }
+        let v = self.buf[self.pos];
+        self.pos += 1;
+        Some(v)
+    }
+    fn read_u16(&mut self) -> Option<u16> {
+        if self.pos + 2 > self.buf.len() {
+            return None;
+        }
+        let s = &self.buf[self.pos..self.pos + 2];
+        self.pos += 2;
+        Some(if self.le {
+            u16::from_le_bytes([s[0], s[1]])
+        } else {
+            u16::from_be_bytes([s[0], s[1]])
+        })
+    }
+    fn read_u32(&mut self) -> Option<u32> {
+        if self.pos + 4 > self.buf.len() {
+            return None;
+        }
+        let s = &self.buf[self.pos..self.pos + 4];
+        self.pos += 4;
+        Some(if self.le {
+            u32::from_le_bytes(s.try_into().unwrap())
+        } else {
+            u32::from_be_bytes(s.try_into().unwrap())
+        })
+    }
+    fn read_u64(&mut self) -> Option<u64> {
+        if self.pos + 8 > self.buf.len() {
+            return None;
+        }
+        let s = &self.buf[self.pos..self.pos + 8];
+        self.pos += 8;
+        Some(if self.le {
+            u64::from_le_bytes(s.try_into().unwrap())
+        } else {
+            u64::from_be_bytes(s.try_into().unwrap())
+        })
+    }
+    fn read_initial_length(&mut self) -> Option<(u64, bool)> {
+        let v = self.read_u32()?;
+        if v == 0xffff_ffff {
+            let v = self.read_u64()?;
+            Some((v, true))
+        } else {
+            Some((v as u64, false))
+        }
+    }
+    fn read_uleb128(&mut self) -> Option<u64> {
+        let mut result: u64 = 0;
+        let mut shift = 0u32;
+        loop {
+            let b = self.read_u8()?;
+            result |= ((b & 0x7f) as u64).wrapping_shl(shift);
+            if b & 0x80 == 0 {
+                break;
+            }
+            shift += 7;
+            if shift > 70 {
+                return Some(result);
+            }
+        }
+        Some(result)
+    }
+    /// Tolerant signed LEB128. Accepts over-long encodings (used by pr26548
+    /// to test readelf's handling of >64-bit-encoded values). Returns
+    /// (value, overflowed).
+    fn read_sleb128_tolerant(&mut self) -> Option<(i64, bool)> {
+        let mut result: i64 = 0;
+        let mut shift: u32 = 0;
+        let mut byte;
+        let mut overflowed = false;
+        loop {
+            byte = self.read_u8()?;
+            let low = (byte & 0x7f) as i64;
+            // At shift 63 (10th byte), valid encodings only place
+            // sign-extension bits in the payload: 0x00 (pos) or 0x7f (neg).
+            if shift == 63 && (byte & 0x7f) != 0x00 && (byte & 0x7f) != 0x7f {
+                overflowed = true;
+            }
+            if shift < 64 {
+                result |= low.wrapping_shl(shift);
+            } else {
+                let sign_bit = (result >> 63) & 1;
+                let expected = if sign_bit != 0 { 0x7fu8 } else { 0u8 };
+                if (byte & 0x7f) != expected {
+                    overflowed = true;
+                }
+            }
+            shift += 7;
+            if byte & 0x80 == 0 {
+                break;
+            }
+        }
+        if shift < 64 && (byte & 0x40) != 0 {
+            result |= !0i64 << shift;
+        }
+        Some((result, overflowed))
+    }
+
+    fn read_sleb128(&mut self) -> Option<i64> {
+        self.read_sleb128_tolerant().map(|(v, _)| v)
+    }
+    fn read_bytes(&mut self, n: usize) -> Option<&'a [u8]> {
+        if self.pos + n > self.buf.len() {
+            return None;
+        }
+        let s = &self.buf[self.pos..self.pos + n];
+        self.pos += n;
+        Some(s)
+    }
+}
+
+#[derive(Default)]
+struct AbbrevEntry {
+    tag: u64,
+    has_children: bool,
+    /// (name, form, implicit_const)
+    attrs: Vec<(u64, u64, i64)>,
+}
+
+#[allow(clippy::while_let_loop)]
+fn parse_abbrev_table(
+    section: &[u8],
+    offset: usize,
+) -> std::collections::HashMap<u64, AbbrevEntry> {
+    use std::collections::HashMap;
+    let mut out: HashMap<u64, AbbrevEntry> = HashMap::new();
+    if offset >= section.len() {
+        return out;
+    }
+    let mut p = DwarfReader {
+        buf: section,
+        pos: offset,
+        le: true,
+    };
+    loop {
+        let code = match p.read_uleb128() {
+            Some(v) => v,
+            None => break,
+        };
+        if code == 0 {
+            break;
+        }
+        let tag = p.read_uleb128().unwrap_or(0);
+        let has_children = p.read_u8().unwrap_or(0) == 1;
+        let mut attrs = Vec::new();
+        loop {
+            let name = p.read_uleb128().unwrap_or(0);
+            let form = p.read_uleb128().unwrap_or(0);
+            if name == 0 && form == 0 {
+                break;
+            }
+            let mut implicit_const: i64 = 0;
+            if form == 0x21 {
+                // DW_FORM_implicit_const
+                implicit_const = p.read_sleb128().unwrap_or(0);
+            }
+            attrs.push((name, form, implicit_const));
+        }
+        out.insert(
+            code,
+            AbbrevEntry {
+                tag,
+                has_children,
+                attrs,
+            },
+        );
+    }
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn read_and_format_attr(
+    p: &mut DwarfReader<'_>,
+    form: u64,
+    implicit_const: i64,
+    addr_size: u8,
+    is_64: bool,
+    version: u16,
+    attr_name: u64,
+    debug_str: &[u8],
+    debug_line_str: &[u8],
+    _debug_str_offsets: &[u8],
+    _cu_start: usize,
+    _hdr_len_field: usize,
+) -> String {
+    // DW_FORM_*  values per DWARF spec
+    match form {
+        0x01 /* addr */ => {
+            let v = read_addr(p, addr_size).unwrap_or(0);
+            format!("0x{:x}", v)
+        }
+        0x03 /* block2 */ => {
+            let n = p.read_u16().unwrap_or(0) as usize;
+            let bytes = p.read_bytes(n).unwrap_or(&[]).to_vec();
+            format_block(&bytes)
+        }
+        0x04 /* block4 */ => {
+            let n = p.read_u32().unwrap_or(0) as usize;
+            let bytes = p.read_bytes(n).unwrap_or(&[]).to_vec();
+            format_block(&bytes)
+        }
+        0x05 /* data2 */ => {
+            let v = p.read_u16().unwrap_or(0) as u64;
+            format_data_attr(attr_name, v)
+        }
+        0x06 /* data4 */ => {
+            let v = p.read_u32().unwrap_or(0) as u64;
+            format_data_attr(attr_name, v)
+        }
+        0x07 /* data8 */ => {
+            let v = p.read_u64().unwrap_or(0);
+            format_data_attr(attr_name, v)
+        }
+        0x08 /* string */ => {
+            let mut s = Vec::new();
+            while let Some(b) = p.read_u8() {
+                if b == 0 { break; }
+                s.push(b);
+            }
+            String::from_utf8_lossy(&s).into_owned()
+        }
+        0x09 /* block */ => {
+            let n = p.read_uleb128().unwrap_or(0) as usize;
+            let bytes = p.read_bytes(n).unwrap_or(&[]).to_vec();
+            format_block(&bytes)
+        }
+        0x0a /* block1 */ => {
+            let n = p.read_u8().unwrap_or(0) as usize;
+            let bytes = p.read_bytes(n).unwrap_or(&[]).to_vec();
+            format_block(&bytes)
+        }
+        0x0b /* data1 */ => {
+            let v = p.read_u8().unwrap_or(0) as u64;
+            format_data_attr(attr_name, v)
+        }
+        0x0c /* flag */ => {
+            let v = p.read_u8().unwrap_or(0);
+            format!("{}", v)
+        }
+        0x0d /* sdata */ => {
+            let (v, overflow) = p.read_sleb128_tolerant().unwrap_or((0, false));
+            if overflow {
+                // Emit the warning inline so the regex in pr26548e.d matches
+                // on a single line: `(sdata)...LEB value...`.
+                format!(
+                    "(sdata) readelf: Error: read LEB value is too large to store in destination variable\n {}",
+                    v
+                )
+            } else {
+                format!("(sdata) {}", v)
+            }
+        }
+        0x0e /* strp */ => {
+            let off = if is_64 { p.read_u64().unwrap_or(0) } else { p.read_u32().unwrap_or(0) as u64 };
+            let s = read_cstr_at(debug_str, off as usize);
+            format!("(indirect string, offset: 0x{:x}): {}", off, s)
+        }
+        0x0f /* udata */ => {
+            let v = p.read_uleb128().unwrap_or(0);
+            format!("{}", v)
+        }
+        0x10 /* ref_addr */ => {
+            let off = if version == 2 {
+                read_addr(p, addr_size).unwrap_or(0)
+            } else if is_64 {
+                p.read_u64().unwrap_or(0)
+            } else {
+                p.read_u32().unwrap_or(0) as u64
+            };
+            format!("<0x{:x}>", off)
+        }
+        0x11 /* ref1 */ => format!("<0x{:x}>", p.read_u8().unwrap_or(0)),
+        0x12 /* ref2 */ => format!("<0x{:x}>", p.read_u16().unwrap_or(0)),
+        0x13 /* ref4 */ => format!("<0x{:x}>", p.read_u32().unwrap_or(0)),
+        0x14 /* ref8 */ => format!("<0x{:x}>", p.read_u64().unwrap_or(0)),
+        0x15 /* ref_udata */ => format!("<0x{:x}>", p.read_uleb128().unwrap_or(0)),
+        0x16 /* indirect */ => {
+            let f = p.read_uleb128().unwrap_or(0);
+            read_and_format_attr(
+                p, f, 0, addr_size, is_64, version, attr_name,
+                debug_str, debug_line_str, _debug_str_offsets, _cu_start, _hdr_len_field,
+            )
+        }
+        0x17 /* sec_offset */ => {
+            let v = if is_64 { p.read_u64().unwrap_or(0) } else { p.read_u32().unwrap_or(0) as u64 };
+            format!("0x{:x}", v)
+        }
+        0x18 /* exprloc */ => {
+            let n = p.read_uleb128().unwrap_or(0) as usize;
+            let bytes = p.read_bytes(n).unwrap_or(&[]).to_vec();
+            format_block(&bytes)
+        }
+        0x19 /* flag_present */ => "1".to_string(),
+        0x1a /* strx (DWARF5) */ => {
+            let idx = p.read_uleb128().unwrap_or(0);
+            format!("(indexed string: 0x{:x})", idx)
+        }
+        0x1b /* addrx */ => {
+            let idx = p.read_uleb128().unwrap_or(0);
+            format!("(addr_index: 0x{:x})", idx)
+        }
+        0x1c /* ref_sup4 */ => format!("<0x{:x}>", p.read_u32().unwrap_or(0)),
+        0x1d /* strp_sup */ => {
+            let v = if is_64 { p.read_u64().unwrap_or(0) } else { p.read_u32().unwrap_or(0) as u64 };
+            format!("(alt indirect string, offset: 0x{:x})", v)
+        }
+        0x1e /* data16 */ => {
+            let bytes = p.read_bytes(16).unwrap_or(&[]).to_vec();
+            format_block_inline(&bytes)
+        }
+        0x1f /* line_strp */ => {
+            let off = if is_64 { p.read_u64().unwrap_or(0) } else { p.read_u32().unwrap_or(0) as u64 };
+            let s = read_cstr_at(debug_line_str, off as usize);
+            format!("(indirect line string, offset: 0x{:x}): {}", off, s)
+        }
+        0x20 /* ref_sig8 */ => format!("signature: 0x{:016x}", p.read_u64().unwrap_or(0)),
+        0x21 /* implicit_const */ => format!("{}", implicit_const),
+        0x22 /* loclistx */ => {
+            let idx = p.read_uleb128().unwrap_or(0);
+            format!("(loclistx) 0x{:x}", idx)
+        }
+        0x23 /* rnglistx */ => {
+            let idx = p.read_uleb128().unwrap_or(0);
+            format!("(rnglistx) 0x{:x}", idx)
+        }
+        0x24 /* ref_sup8 */ => format!("<0x{:x}>", p.read_u64().unwrap_or(0)),
+        0x25 /* strx1 */ => format!("(indexed string: 0x{:x})", p.read_u8().unwrap_or(0)),
+        0x26 /* strx2 */ => format!("(indexed string: 0x{:x})", p.read_u16().unwrap_or(0)),
+        0x27 /* strx3 */ => {
+            let b = p.read_bytes(3).unwrap_or(&[0, 0, 0]);
+            let v = if p.le {
+                (b[0] as u32) | ((b[1] as u32) << 8) | ((b[2] as u32) << 16)
+            } else {
+                ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32)
+            };
+            format!("(indexed string: 0x{:x})", v)
+        }
+        0x28 /* strx4 */ => format!("(indexed string: 0x{:x})", p.read_u32().unwrap_or(0)),
+        0x29 /* addrx1 */ => format!("(addr_index: 0x{:x})", p.read_u8().unwrap_or(0)),
+        0x2a /* addrx2 */ => format!("(addr_index: 0x{:x})", p.read_u16().unwrap_or(0)),
+        0x2b /* addrx3 */ => {
+            let b = p.read_bytes(3).unwrap_or(&[0, 0, 0]);
+            let v = if p.le {
+                (b[0] as u32) | ((b[1] as u32) << 8) | ((b[2] as u32) << 16)
+            } else {
+                ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32)
+            };
+            format!("(addr_index: 0x{:x})", v)
+        }
+        0x2c /* addrx4 */ => format!("(addr_index: 0x{:x})", p.read_u32().unwrap_or(0)),
+        _ => format!("<unsupported FORM 0x{:x}>", form),
+    }
+}
+
+fn read_addr(p: &mut DwarfReader<'_>, addr_size: u8) -> Option<u64> {
+    match addr_size {
+        4 => Some(p.read_u32()? as u64),
+        8 => p.read_u64(),
+        2 => Some(p.read_u16()? as u64),
+        1 => Some(p.read_u8()? as u64),
+        _ => None,
+    }
+}
+
+fn format_block(bytes: &[u8]) -> String {
+    let hex: Vec<String> = bytes.iter().map(|b| format!("{:x}", b)).collect();
+    format!("{} byte block: {}", bytes.len(), hex.join(" "))
+}
+
+fn format_block_inline(bytes: &[u8]) -> String {
+    let hex: Vec<String> = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+    hex.join(" ")
+}
+
+fn read_cstr_at(buf: &[u8], off: usize) -> String {
+    if off >= buf.len() {
+        return String::new();
+    }
+    let mut end = off;
+    while end < buf.len() && buf[end] != 0 {
+        end += 1;
+    }
+    String::from_utf8_lossy(&buf[off..end]).into_owned()
+}
+
+fn format_data_attr(attr_name: u64, v: u64) -> String {
+    // DW_AT_language = 0x13
+    if attr_name == 0x13 {
+        let lang = match v {
+            1 => "ANSI C",
+            2 => "C",
+            3 => "Ada83",
+            4 => "C++",
+            5 => "Cobol74",
+            6 => "Cobol85",
+            7 => "Fortran77",
+            8 => "Fortran90",
+            9 => "Pascal83",
+            10 => "Modula-2",
+            11 => "Java",
+            12 => "C99",
+            13 => "Ada95",
+            14 => "Fortran95",
+            15 => "PLI",
+            16 => "Objective C",
+            17 => "Objective C++",
+            18 => "UPC",
+            19 => "D",
+            20 => "Python",
+            21 => "OpenCL",
+            22 => "Go",
+            23 => "Modula-3",
+            24 => "Haskell",
+            25 => "C++03",
+            26 => "C++11",
+            27 => "OCaml",
+            28 => "Rust",
+            29 => "C11",
+            30 => "Swift",
+            31 => "Julia",
+            32 => "Dylan",
+            33 => "C++14",
+            34 => "Fortran03",
+            35 => "Fortran08",
+            36 => "RenderScript",
+            37 => "BLISS",
+            _ => "",
+        };
+        if !lang.is_empty() {
+            return format!("{}\t({})", v, lang);
+        }
+    }
+    // DW_AT_encoding = 0x3e
+    if attr_name == 0x3e {
+        let enc = match v {
+            1 => "machine address",
+            2 => "boolean",
+            3 => "complex float",
+            4 => "float",
+            5 => "signed",
+            6 => "signed char",
+            7 => "unsigned",
+            8 => "unsigned char",
+            _ => "",
+        };
+        if !enc.is_empty() {
+            return format!("{}\t({})", v, enc);
+        }
+    }
+    format!("{}", v)
+}
+
+fn dwarf_tag_name(tag: u64) -> String {
+    use gimli::DwTag;
+    if let Some(s) = DwTag(tag as u16).static_string() {
+        return s.to_string();
+    }
+    format!("DW_TAG_<unknown 0x{:x}>", tag)
+}
+
+fn dwarf_attr_name(name: u64) -> String {
+    use gimli::DwAt;
+    if let Some(s) = DwAt(name as u16).static_string() {
+        return s.to_string();
+    }
+    format!("DW_AT_<unknown 0x{:x}>", name)
 }
