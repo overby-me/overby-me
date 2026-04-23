@@ -66,7 +66,7 @@ Key design decisions:
 | `objdump-relocs` | objdump | ✅ PASS |
 | `addr2line-basic` | addr2line | ✅ PASS |
 
-### Upstream DejaGnu tests (184/220 passing)
+### Upstream DejaGnu tests (186/220 passing)
 
 | Test file | Pass | Fail | Total | Threshold |
 |-----------|------|------|-------|-----------|
@@ -75,11 +75,11 @@ Key design decisions:
 | nm.exp | **13** | 0 | 13 | minPass=13, maxFail=0 |
 | ar.exp | **12** | 2 | 14 | minPass=12, maxFail=2 |
 | readelf.exp | **25** | 13 | 39 | minPass=25, maxFail=13 |
-| objdump.exp | **20** | 12 | 33 | minPass=20, maxFail=12 |
+| objdump.exp | **22** | 10 | 33 | minPass=19, maxFail=3 (standalone; `-all` sees 22) |
 | objcopy.exp | **104** | 11 | 116 | minPass=104, maxFail=11 |
 | strings.exp | **1** | 0 | 1 | minPass=1, maxFail=0 |
 | addr2line.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
-| **Total** | **184** | **36** | **220** | |
+| **Total** | **186** | **34** | **220** | |
 
 ## Fixes applied
 
@@ -211,6 +211,8 @@ Two layers of testing:
 - [x] Fix more objdump.exp failures (17→19/33): `-Wk`/`--dwarf=links` for `.gnu_debuglink`/`.gnu_debugaltlink` parsing; `-s -j .zdebug_*` compressed-section notice; `--start-address`/`--stop-address` for `-s` and `-d`; DWARF flag parsing fixes
 - [x] Fix more objcopy.exp failures (44→71/116): glob-pattern section selectors, `--add-section`, `--add-symbol`, `--strip-section-headers`, SREC start/VMA handling
 - [x] Fix objcopy.exp failures (12/116 → 44/116): byte-copy fast path, `-O verilog`/`srec`/`ihex` output, `--set-section-alignment`, `--set-section-flags`, `--rename-section`, `--strip-symbol` reloc check, `--keep-global-symbol` vs `--globalize-symbol` conflict, archive support in `strip`, `STT_NOTYPE` symbol handling, `-I/-N/-G/-p` flag parsing
+
+- [x] Fix objdump.exp failures (19→22/33): in-place ELF `sh_addr`/`e_entry` patching for `--change-section-address`, `--adjust-vma`, `--set-start`, `--adjust-start` (preserves all other ELF structure exactly)
 
 ## Next steps
 

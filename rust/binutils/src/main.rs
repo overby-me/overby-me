@@ -5787,6 +5787,128 @@ impl AdjustAddrs {
     }
 }
 
+fn objcopy_apply_addr_adjustments(
+    input: &str,
+    output: &str,
+    adj: &AdjustAddrs,
+    preserve_dates: bool,
+) -> i32 {
+    let data = match fs::read(input) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("objcopy: '{input}': {e}");
+            return 1;
+        }
+    };
+    let mut out = data.clone();
+    if !patch_elf_addresses(&data, &mut out, adj) {
+        if input != output
+            && let Err(e) = fs::write(output, &data)
+        {
+            eprintln!("objcopy: '{output}': {e}");
+            return 1;
+        }
+    } else if let Err(e) = fs::write(output, &out) {
+        eprintln!("objcopy: '{output}': {e}");
+        return 1;
+    }
+    if preserve_dates
+        && let Ok(meta) = fs::metadata(input)
+        && let Ok(mtime) = meta.modified()
+    {
+        let _ = set_file_times(Path::new(output), mtime);
+    }
+    0
+}
+
+fn patch_elf_addresses(data: &[u8], out: &mut [u8], adj: &AdjustAddrs) -> bool {
+    use object::Endianness;
+    use object::read::elf::FileHeader as _;
+    use object::read::elf::SectionHeader as _;
+
+    if let Ok(elf) =
+        object::read::elf::ElfFile::<object::elf::FileHeader64<Endianness>>::parse(data)
+    {
+        let endian = elf.endian();
+        let header = elf.elf_header();
+        let is_le = matches!(endian, Endianness::Little);
+        let entry: u64 = header.e_entry(endian);
+        let new_entry = adj.entry(entry);
+        if new_entry != entry && out.len() >= 0x20 {
+            write_u64(&mut out[0x18..0x20], new_entry, is_le);
+        }
+        let e_shoff = header.e_shoff(endian) as usize;
+        let e_shentsize = header.e_shentsize(endian) as usize;
+        let sections = match header.sections(endian, data) {
+            Ok(s) => s,
+            Err(_) => return true,
+        };
+        for (i, section) in sections.iter().enumerate() {
+            let name_bytes = sections.section_name(endian, section).unwrap_or(b"");
+            let name = std::str::from_utf8(name_bytes).unwrap_or("");
+            let cur = section.sh_addr(endian);
+            let new_addr = adj.section_addr(name, cur);
+            if new_addr != cur {
+                let off = e_shoff + i * e_shentsize + 0x10;
+                if off + 8 <= out.len() {
+                    write_u64(&mut out[off..off + 8], new_addr, is_le);
+                }
+            }
+        }
+        return true;
+    }
+    if let Ok(elf) =
+        object::read::elf::ElfFile::<object::elf::FileHeader32<Endianness>>::parse(data)
+    {
+        let endian = elf.endian();
+        let header = elf.elf_header();
+        let is_le = matches!(endian, Endianness::Little);
+        let entry: u64 = header.e_entry(endian) as u64;
+        let new_entry = adj.entry(entry) as u32;
+        if new_entry as u64 != entry && out.len() >= 0x1c {
+            write_u32(&mut out[0x18..0x1c], new_entry, is_le);
+        }
+        let e_shoff = header.e_shoff(endian) as usize;
+        let e_shentsize = header.e_shentsize(endian) as usize;
+        let sections = match header.sections(endian, data) {
+            Ok(s) => s,
+            Err(_) => return true,
+        };
+        for (i, section) in sections.iter().enumerate() {
+            let name_bytes = sections.section_name(endian, section).unwrap_or(b"");
+            let name = std::str::from_utf8(name_bytes).unwrap_or("");
+            let cur: u64 = section.sh_addr(endian) as u64;
+            let new_addr = adj.section_addr(name, cur) as u32;
+            if new_addr as u64 != cur {
+                let off = e_shoff + i * e_shentsize + 0x0c;
+                if off + 4 <= out.len() {
+                    write_u32(&mut out[off..off + 4], new_addr, is_le);
+                }
+            }
+        }
+        return true;
+    }
+    false
+}
+
+fn write_u64(buf: &mut [u8], v: u64, is_le: bool) {
+    let bytes = if is_le {
+        v.to_le_bytes()
+    } else {
+        v.to_be_bytes()
+    };
+    buf.copy_from_slice(&bytes);
+}
+
+fn write_u32(buf: &mut [u8], v: u32, is_le: bool) {
+    let bytes = if is_le {
+        v.to_le_bytes()
+    } else {
+        v.to_be_bytes()
+    };
+    buf.copy_from_slice(&bytes);
+}
+
 fn tool_objcopy(args: &[String]) -> i32 {
     if check_version_help("objcopy", args) {
         return 0;
@@ -6257,6 +6379,37 @@ fn tool_objcopy(args: &[String]) -> i32 {
         _ => {}
     }
 
+    let only_addr_adjustments = !strip_debug
+        && !strip_all
+        && !strip_unneeded
+        && remove_sections.is_empty()
+        && keep_sections.is_empty()
+        && strip_symbols.is_empty()
+        && globalize_syms.is_empty()
+        && keep_global_syms.is_empty()
+        && set_section_alignment.is_empty()
+        && set_section_flags.is_empty()
+        && rename_sections.is_empty()
+        && localize_syms.is_empty()
+        && weaken_syms.is_empty()
+        && !weaken_all
+        && !localize_hidden
+        && add_sections.is_empty()
+        && add_symbols.is_empty()
+        && remove_relocations.is_empty()
+        && keep_symbols.is_empty()
+        && elf_stt_common.is_none()
+        && reverse_bytes.is_none()
+        && !other_modifications
+        && (set_start.is_some()
+            || adjust_start != 0
+            || adjust_vma != 0
+            || !adjust_section_vma.is_empty());
+
+    if only_addr_adjustments {
+        return objcopy_apply_addr_adjustments(input, output, &adj_addrs, preserve_dates);
+    }
+
     let no_transformations = !strip_debug
         && !strip_all
         && !strip_unneeded
@@ -6278,7 +6431,11 @@ fn tool_objcopy(args: &[String]) -> i32 {
         && keep_symbols.is_empty()
         && elf_stt_common.is_none()
         && reverse_bytes.is_none()
-        && !other_modifications;
+        && !other_modifications
+        && set_start.is_none()
+        && adjust_start == 0
+        && adjust_vma == 0
+        && adjust_section_vma.is_empty();
 
     // Fast path: no transformations -> byte copy
     if no_transformations {
