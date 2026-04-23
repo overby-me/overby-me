@@ -1191,16 +1191,24 @@ passing test in the upstream suite, so they're prioritized below
 anything that affects the test count. Listed roughly by user-visible
 impact:
 
-1. **`-p` / `--print-data-base` dump.** Implement the database dump
-   so `make -p` prints variables, rules, file timestamps, pattern
-   rules, and `.SUFFIXES`. Useful for debugging real-world makefiles.
-   Touchpoint: `rust/make/src/main.rs` `"-p" | "--print-data-base"`
-   match arm (currently `// TODO: print database`).
-2. **Variable-definition-site line tracking.** Tag each variable
-   value with `(file, line)` at parse time and emit those locations
-   in `$(error)`/`$(warning)` instead of the expansion site. Already
-   partially supported via `var_source_locs`, but function-call sites
-   inside expanded values aren't tracked.
+1. ~~**`-p` / `--print-data-base` dump.**~~ ✅ Implemented. Walks
+   `vars`, `pattern_vars`, `pattern_rules`, `rules`, special-target
+   sets, `suffixes`, and `vpath_patterns` and emits a GNU-make-`-p`-
+   compatible report (header, Variables with origin labels, Pattern-
+   specific Variable Values, Implicit Rules with recipes, Files with
+   prereqs/recipes/annotations, `.SUFFIXES`, vpath, footer).
+2. **Variable-definition-site line tracking.** *Partial.*
+   `var_source_locs` is now populated for `Assignment`, `ExportAssign`,
+   `UnexportAssign`, `Override`, `PrivateAssign`, `PrivateExportAssign`,
+   `Define`, and `OverrideDefine` directives via the new
+   `record_var_source` helper. The `lookup_var_with_auto` recursive-
+   expansion path already propagates the location via
+   `expand_chain_source` so `$(error)`/`$(warning)` inside a recursive
+   variable surface the variable's *definition* line. Still missing:
+   per-function-call site tracking (each `$(...)` call in a value
+   stores its own `(file, line)`), so an `$(error)` inside a `define`
+   body still reports the variable's line, not the line of the `$(error)`
+   inside it.
 3. **Real jobserver protocol.** Implement the `--jobserver-auth=R,W`
    pipe protocol so `$(MAKE)` sub-makes share the parent's job pool
    instead of each running their own. Requires:
@@ -1208,12 +1216,19 @@ impact:
    - Take a token before spawning each child recipe; release on reap.
    - Pass `--jobserver-auth=R,W` in MAKEFLAGS to children.
    - Handle `+` recipe prefix to bypass the token check.
-4. **Output-sync (`-O`).** Buffer per-recipe stdout/stderr to a
-   temp file, then flush atomically at reap time. Modes:
-   `none` (default), `line`, `target`, `recurse`, `job`.
-5. **`-l N` load average sampling.** Read `/proc/loadavg` (Linux)
-   or `getloadavg(3)`; gate `try_parallel_batch` spawning on it.
-   Currently we just bail out of the parallel fast-path entirely.
+4. ~~**Output-sync (`-O`).**~~ ✅ Implemented for `target` mode (and
+   accepted as a synonym for `recurse`/`job`/bare `-O`). When enabled,
+   each forked child's combined stdout/stderr is captured via a pipe
+   and drained by a `std::thread`; the buffered output is flushed
+   atomically under a process-wide `Mutex` after `waitpid` reaps the
+   child, so different parallel recipes don't interleave. Modes
+   `none` and `target` covered; `line` not implemented (treated as
+   target).
+5. ~~**`-l N` load average sampling.**~~ ✅ Implemented for Linux via
+   `/proc/loadavg`. `try_parallel_batch` and `parallel_remake_files`
+   now sample the 1-minute load average before each spawn batch and
+   bail out when load >= `-l N`. Best-effort: if `/proc/loadavg` can't
+   be read (non-Linux, sandbox), spawning proceeds unconditionally.
 6. **Deeper chained pattern rules.** The two-pass implicit-rule
    search bounded at depth 6 covers the upstream tests, but more
    aggressive chaining could match GNU's behavior more precisely
