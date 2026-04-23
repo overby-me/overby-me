@@ -799,6 +799,15 @@ type ParallelChildOO = (
 );
 type PendingChild = (String, bool, Option<std::thread::JoinHandle<Vec<u8>>>);
 
+/// Kind of old-style suffix rule parsed from a target name.
+///
+/// - `Double`: `.src.dst` → pattern `%.dst: %.src`.
+/// - `Single`: `.src` → pattern `%: %.src`.
+enum SuffixRuleKind {
+    Double(String, String),
+    Single(String),
+}
+
 impl Engine {
     pub fn new() -> Self {
         let engine = Self {
@@ -1075,18 +1084,25 @@ impl Engine {
         );
     }
 
-    /// Check if a target name is an old-style suffix rule (e.g., ".c.o").
-    /// Returns (source_suffix, target_suffix) if it is.
-    fn parse_suffix_rule(&self, target: &str) -> Option<(String, String)> {
+    /// Check if a target name is an old-style suffix rule.
+    ///
+    /// A suffix-rule target is either a double-suffix (`.src.dst` → pattern
+    /// `%.dst: %.src`) or a single-suffix (`.src` → pattern `%: %.src`).
+    fn parse_suffix_rule(&self, target: &str) -> Option<SuffixRuleKind> {
         let suffixes = self.suffixes.borrow();
-        // Try all possible splits: .src.dst
+        // First try double-suffix: .src.dst (outer-suffix-first, consistent
+        // with existing behavior).
         for dst in suffixes.iter() {
             if target.ends_with(dst.as_str()) && target.len() > dst.len() {
                 let src = &target[..target.len() - dst.len()];
                 if suffixes.iter().any(|s| s == src) {
-                    return Some((src.to_string(), dst.to_string()));
+                    return Some(SuffixRuleKind::Double(src.to_string(), dst.to_string()));
                 }
             }
+        }
+        // Single-suffix: the whole target must equal one of the suffixes.
+        if suffixes.iter().any(|s| s == target) {
+            return Some(SuffixRuleKind::Single(target.to_string()));
         }
         None
     }
@@ -3175,7 +3191,13 @@ impl Engine {
         // warn and fall through to register the explicit rule.
         if targets.len() == 1 && targets[0].starts_with('.') {
             let target = &targets[0];
-            if let Some((src_suffix, dst_suffix)) = self.parse_suffix_rule(target) {
+            if let Some(kind) = self.parse_suffix_rule(target) {
+                let (target_pattern, prereq_patterns) = match kind {
+                    SuffixRuleKind::Double(src, dst) => {
+                        (format!("%{dst}"), vec![format!("%{src}")])
+                    }
+                    SuffixRuleKind::Single(src) => ("%".to_string(), vec![format!("%{src}")]),
+                };
                 if !prereqs.is_empty() && *self.posix_mode.borrow() {
                     // POSIX mode: suffix rule with prereqs is just a
                     // normal rule — no pattern rule, no warning.
@@ -3191,8 +3213,8 @@ impl Engine {
                         );
                     }
                     self.pattern_rules.borrow_mut().push(PatternRuleEntry {
-                        target_pattern: format!("%{dst_suffix}"),
-                        prereq_patterns: vec![format!("%{src_suffix}")],
+                        target_pattern,
+                        prereq_patterns,
                         order_only_patterns: Vec::new(),
                         recipe: rule.recipe.clone(),
                         recipe_lines: rule.recipe_lines.clone(),
