@@ -1209,13 +1209,18 @@ impact:
    stores its own `(file, line)`), so an `$(error)` inside a `define`
    body still reports the variable's line, not the line of the `$(error)`
    inside it.
-3. **Real jobserver protocol.** Implement the `--jobserver-auth=R,W`
-   pipe protocol so `$(MAKE)` sub-makes share the parent's job pool
-   instead of each running their own. Requires:
-   - Allocate a pipe and pre-fill with `jobs - 1` tokens.
-   - Take a token before spawning each child recipe; release on reap.
-   - Pass `--jobserver-auth=R,W` in MAKEFLAGS to children.
-   - Handle `+` recipe prefix to bypass the token check.
+3. ~~**Real jobserver protocol.**~~ ✅ Implemented. `setup_jobserver` in
+   `main.rs` either inherits an existing pipe via
+   `--jobserver-auth=R,W` (or legacy `--jobserver-fds=`) from the parent
+   make's MAKEFLAGS, or creates a fresh one and pre-fills `jobs - 1`
+   tokens (one byte each) when `-jN > 1`. The
+   `--jobserver-auth=R,W` token is injected into the engine's MAKEFLAGS
+   so sub-makes inherit via env. `try_parallel_batch` and
+   `parallel_remake_files` gate spawns beyond the first on
+   `jobserver_try_acquire()` (non-blocking via temp `O_NONBLOCK`),
+   stopping the batch early when no token is available. Tokens are
+   released after waitpid reaps each child. `+`-prefixed recipes
+   bypass token gating (they use the regular serial recipe path).
 4. ~~**Output-sync (`-O`).**~~ ✅ Implemented for `target` mode (and
    accepted as a synonym for `recurse`/`job`/bare `-O`). When enabled,
    each forked child's combined stdout/stderr is captured via a pipe
