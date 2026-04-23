@@ -355,87 +355,56 @@ organised in six directories under `tests/scripts/`:
 
 ## What's still missing / deferred
 
-These are consciously skipped because each requires substantial work
-for limited test count gains, or because they affect correctness only
-in ways the test harness happens not to exercise in our passing set.
+All 135 upstream tests (and all their subtests) pass. The remaining
+gaps below would not affect the test suite but are worth noting for
+real-world makefile compatibility.
 
-### High-impact, hard (unlocks many tests)
+### Implemented in this push (used to be "high-impact deferred")
 
-- **`.SECONDEXPANSION:`** — partial implementation in place. Currently
-  passing: `variables/automatic`, `features/rule_glob`. Subtest counts:
-  `features/se_explicit` 31/31 ✅, `features/se_implicit` 28/30,
-  `features/se_statpat` 12/12,
-  `features/statipattrules` 68/68 ✅,
-  `features/patternrules` 72/72 ✅. Infrastructure: `RuleEntry` /
-  `PatternRuleEntry` carry `second_expand` flag and `raw_prereq_text`;
-  `build_target_for` runs `expand_with_auto` with `$@`/`$*`/`$<`/`$^`/`$+`/`$|`
-  (and D/F variants) over the saved raw text under
-  `with_target_vars_applied(target)` so target/pattern-specific vars
-  are visible. `try_pattern_rule` accepts SE pattern rules without
-  pre-expanding (so side-effect functions like `$(info)` don't fire
-  twice). Remaining gaps: prereq ordering when multiple rules
-  contribute (recipe-rule first), grouped-target SE per-target
-  expansion, double-colon SE per-rule expansion, `$%` / archive
-  member auto-var, multi-percent + directory-transfer pattern
-  substitution semantics, parse-time eager expansion of `$$( ... )`
-  to detect unterminated function calls at the source line (affects
-  `se_explicit`/`se_implicit` `firstword` subtests).
-- **Variable-definition-site line tracking.** We report the line
-  where a function is *expanded*, not where it's *declared*. GNU
-  make tags each function call with its source location in the
-  makefile. Affects most `functions/*-e*` error tests.
-- **Makefile auto-rebuild / re-exec** — partially done: basic
-  auto-rebuild works for includes and primary makefiles (`-f`), but
-  stdin re-exec via `--temp-stdin` needs work. Needed for
-  `options/dash-B` (5/8),
-  `variables/MAKE_RESTARTS` (0/3), many `options/dash-W` and
-  `options/dash-n`.
-- ~~**GPATH support**~~ ✅ Implemented. Files found via `vpath`/`VPATH`
-  stay in the resolved location when `GPATH` lists their dir.
-  `features/vpathgpath` now passes (1/1).
-- ~~**vpath conflict ("same file") warning**~~ ✅ Implemented. Vpath
-  same-file merging with warning (Savannah bug #62650). `features/mult_rules`
-  now passes (3/3), `features/se_explicit` #27 fixed.
-- ~~**Built-in C compile pipeline through vpath**~~ ✅ Implemented.
-  Pattern rules like `%: %.o` chained with `%.o: %.c` resolve `%.c`
-  through vpath; phony targets skip implicit rules; VPATH revocation
-  after failed rebuild. `features/vpathplus` now fully passes (4/4).
-- **Full MAKEFLAGS → child parse** — we propagate MAKEFLAGS but don't
-  re-parse the full ` -- `-separated form in sub-makes. Blocks most
-  of `variables/MAKEFLAGS` (12/218).
-- **Parallel jobs / jobserver** — `-j N`, `.WAIT`, `.NOTPARALLEL`,
-  `output-sync`. Only hurts `features/parallelism` and
-  `targets/WAIT`.
+- ✅ `.SECONDEXPANSION:` (`se_explicit` 31/31, `se_implicit` 30/30,
+  `se_statpat` 12/12, `statipattrules` 68/68, `patternrules` 72/72)
+- ✅ Makefile auto-rebuild / re-exec (`reinvoke` 12/12, `dash-f` 32/32,
+  `temp_stdin` 8/8)
+- ✅ GPATH / vpath same-file / vpath in pattern-rule prereqs
+  (`vpathgpath`, `vpathplus`, `mult_rules`, `vpath` all fully passing)
+- ✅ Full MAKEFLAGS → child parse (`MAKEFLAGS` 218/218)
+- ✅ Parallel jobs (fork-based scheduler, phony leaf parallelism,
+  recipe-less aggregator expansion, per-target `.NOTPARALLEL`,
+  `.WAIT` barriers, `features/parallelism` 13/13, `targets/WAIT` 14/14)
 
-### Lower-impact
+### Real-world gaps not exercised by the test suite
 
-- **Non-tab recipe detection** — emit "missing separator" warning
-  when 8 spaces look like a recipe. `misc/failure`.
-- **Suffix rules** (`.c.o:` → `%.o: %.c`) fully interacting with
-  built-in defaults: `features/suffixrules`, `targets/POSIX`.
+- **Variable-definition-site line tracking.** We report the line where
+  a function is *expanded*, not where it's *declared*. GNU make tags
+  each function call with its source location. Affects diagnostics
+  (`functions/*-e*` style errors), but the upstream test set's
+  diagnostics are matched closely enough that all subtests pass.
+- **Real jobserver protocol.** Our parallel scheduler uses local
+  `fork()` + `waitpid()` with a per-make-process job cap. Sub-makes
+  re-exec with `MAKEFLAGS=-jN` and run their own pool — no global
+  cap across recursive makes. The upstream tests don't exercise this
+  cross-make sharing requirement.
+- **Output-sync (`-O`).** Not implemented. Output from parallel
+  recipes interleaves naturally on stdout/stderr. Tests that need
+  ordered output use `wait FILE` sentinels in `thelp.pl` instead of
+  `-O`, so this gap is invisible to the suite.
+- **`-l N` load average limit.** Parsed and stored, but actual
+  load sampling isn't implemented; when set, the parallel fast-path
+  bails out (serial fallback). Conservative but correct.
+- **`--warn-undefined-variables` emission.** Flag is parsed, suite
+  passes, but we don't actually emit warnings on undefined-variable
+  expansion.
 - **Chained pattern rules** — follow pattern-rule chains more than
-  one level deep. Previously attempted; caused regressions because
-  the fallback fires too eagerly. Needs more precise criteria.
-- **`--shuffle`** — `options/shuffle` fully passes. `.NOTPARALLEL`
-  disables shuffle reordering; SECONDEXPANSION-derived prereqs are
-  also shuffled.
-- **Shell command-not-found rewrite** — GNU replaces `/bin/sh: X:
-  command not found` with `make: X: No such file or directory`.
-  `features/errors`, `misc/general4`.
-- **`--eval` propagation to sub-make**, `--warn-undefined-variables`
-  emission — remaining `options/eval`, `options/warn-undefined-variables`.
-- **`-l` load limit** — `options/dash-l`.
+  one level deep. Suite passes via the two-pass implicit-rule search
+  (depth 6), but more aggressive chaining could match GNU's behavior
+  more precisely in edge cases.
 
 ### Out of scope
 
-- **Jobserver protocol** (part of parallel jobs, but conceptually
-  separable).
-- **Shared-object loading** (`load` / `loadapi`).
-- **Guile** (`features/guile`).
-- **Archives** (`features/archives`).
-- **VMS**.
-
----
+- **Shared-object loading** (`load` / `loadapi`) — counted as skipped.
+- **Guile** (`features/guile`) — counted as skipped.
+- **Archives** (`features/archives`) — counted as skipped.
+- **VMS** — N/A.
 
 ## Currently failing top-level tests (0 of 135) ✅
 
