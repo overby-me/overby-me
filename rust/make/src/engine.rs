@@ -460,7 +460,10 @@ pub struct Engine {
     /// caller's serial post-loop checks this and propagates Err
     /// (or sets first_err under -k).
     parallel_batch_failed: Cell<bool>,
-    /// -l<N> load limit. When >0, our parallel fast-path bails out.
+    /// -l<N> load limit. When >0, new parallel spawns are gated on
+    /// the 1-minute load average from /proc/loadavg being below this
+    /// value. If sampling fails (non-Linux, file unavailable), spawning
+    /// proceeds unconditionally (best-effort).
     pub load_limit: f64,
     pub keep_going: bool,
     pub dry_run: bool,
@@ -687,6 +690,13 @@ fn pattern_subst_with_dir(pattern: &str, stem: &str) -> String {
     } else {
         pattern.replacen('%', stem, 1)
     }
+}
+
+/// Read the current 1-minute load average from `/proc/loadavg`.
+/// Returns None if the file can't be read or parsed (e.g. non-Linux).
+fn current_load_average() -> Option<f64> {
+    let s = std::fs::read_to_string("/proc/loadavg").ok()?;
+    s.split_whitespace().next()?.parse().ok()
 }
 
 impl Engine {
@@ -3896,7 +3906,13 @@ impl Engine {
     /// include rebuild) and Phase 2 (pending include build).
     fn parallel_remake_files(&self, files: &[String]) -> std::collections::HashSet<String> {
         let mut spawned: std::collections::HashSet<String> = std::collections::HashSet::new();
-        if self.jobs <= 1 || self.load_limit > 0.0 {
+        if self.jobs <= 1 {
+            return spawned;
+        }
+        if self.load_limit > 0.0
+            && let Some(loadavg) = current_load_average()
+            && loadavg >= self.load_limit
+        {
             return spawned;
         }
         if self.dry_run || self.question || self.touch || self.notparallel.get() {
@@ -4046,7 +4062,10 @@ impl Engine {
         if self.jobs <= 1 {
             return 0;
         }
-        if self.load_limit > 0.0 {
+        if self.load_limit > 0.0
+            && let Some(loadavg) = current_load_average()
+            && loadavg >= self.load_limit
+        {
             return 0;
         }
         if self.dry_run || self.question || self.touch {
