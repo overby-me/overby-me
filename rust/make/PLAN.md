@@ -2,15 +2,16 @@
 
 ## Current Status
 
-**134/135 tests passing** (99.3%) — upstream test harness from GNU make 4.4.1.
+**135/135 tests passing** (100%) ✅ — upstream test harness from GNU make 4.4.1.
 
 MAKEFLAGS subtests: **218/218** (100%) ✅
 temp_stdin subtests: **8/8** (100%) ✅
 options/dash-f subtests: **32/32** (100%) ✅
 
-One category remains: `targets/WAIT` (12/14 subtests). The remaining 2
-subtests require cross-sibling concurrent scheduling (`all: one two`
-where both have overlapping non-leaf prereqs).
+All categories pass. Parallel execution: phony-leaf forking,
+completion-order reaping, per-target `.NOTPARALLEL`, and
+recipe-less-aggregator expansion (deduping shared leaves across
+sibling non-leaf prereqs).
 
 `rust/make` has a parser, expander, and build engine (~10k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -436,48 +437,9 @@ in ways the test harness happens not to exercise in our passing set.
 
 ---
 
-## Currently failing top-level tests (1 of 135)
+## Currently failing top-level tests (0 of 135) ✅
 
-Latest baseline (`bash /tmp/run-make-baseline.sh`):
-
-| Test | Notes |
-| --- | --- |
-| `targets/WAIT` | `.WAIT` requires parallel scheduling (12/14 subtests) |
-
-The biggest remaining unlocks are **parallel jobs**
-(unlocks `parallelism`, `WAIT`) and **stdin re-exec / `--temp-stdin`**
-(unlocks remaining `dash-f`, `temp_stdin`).
-
-### MAKEFLAGS improvements (this session)
-
-Went from 15/218 → 187/218 subtests:
-
-- **MAKEFLAGS merge logic**: When a makefile assigns `MAKEFLAGS`, command-line
-  flags are preserved (merged union). File-added flags are additive.
-- **Flag deduplication**: Short flags from env MAKEFLAGS, cmdline, and
-  makefile are deduplicated.
-- **Flag sorting**: Short flags sorted case-insensitively (lowercase before
-  uppercase for same letter, e.g. `rR` not `Rr`). Long flags sorted by
-  GNU make's canonical category order (`-I`, `-l`, `-O`, `--debug`, `--trace`,
-  `--no-print-directory`, `--warn-undefined-variables`, `--no-silent`, `--eval`).
-- **New flags**: `-S`/`--stop`, `-O`/`--output-sync`, `-d`/`--debug=X`,
-  `-l`/`--load-average` now tracked in MAKEFLAGS.
-- **`-w` as short flag**: `-w` stored as `w` in short flags (not `--print-directory`
-  in long flags), matching GNU make.
-- **Mutual exclusion**: `-w`/`--no-print-directory`, `-s`/`--no-silent`,
-  `-k`/`-S` properly suppress each other.
-- **Origin tracking**: MAKEFLAGS uses `CommandLine` origin when cmdline
-  flags/overrides are present, blocking file-level `+=` when `-e` is active.
-- **Variable ordering**: `:=` overrides before `=` in MAKEOVERRIDES.
-- **Env-inherited overrides**: `hello=world` from MAKEFLAGS env propagated
-  through MAKEOVERRIDES with dedup against cmdline overrides.
-- **Post-load flag application**: `-s`, `-k`, `-i`, `-n`, `-e`, `-w`,
-  `--no-print-directory`, `--trace` set from makefile `MAKEFLAGS +=` are
-  applied to engine state after all makefiles are loaded.
-- **Signal handling**: Recipe processes killed by signals now report the
-  signal name (e.g. "Terminated") instead of a numeric error code.
-
----
+All 135 upstream tests pass. See Round 20 below.
 
 ## Investigation notes (latest)
 
@@ -1199,3 +1161,52 @@ Fixing this requires one of:
   this. Bigger change; gated behind the same RefCell-per-job refactor.
 
 Hold at 134/135 (99.3%) pending one of those paths.
+
+Round 20 (135/135 ✅ — gained targets/WAIT, +2 subtests):
+
+1. **Per-target `.NOTPARALLEL`**: previously `.NOTPARALLEL: t1 t2`
+   set the global `notparallel` flag, killing all parallelism. Split
+   into:
+   - Bare `.NOTPARALLEL:` (no prereqs) → keeps the global
+     `notparallel: Cell<bool>` flag.
+   - `.NOTPARALLEL: t1 t2 ...` → populates a new
+     `notparallel_targets: RefCell<HashSet<String>>` field.
+   `try_parallel_batch` consults both. Fixes WAIT #11 (mk.10):
+
+   `np1`'s prereqs build serially while `p1`'s leaves still race.
+
+2. **Aggregator-expansion in `try_parallel_batch`**: when a sibling
+   prereq is a "no-recipe aggregator" (every rule entry has empty
+   recipe and non-empty prereqs), and its prereqs are all
+   `is_simple_leaf` (or already-built), inline the leaves into the
+   parallel batch (deduped across siblings) and mark the aggregator
+   as built post-batch. Skip aggregators marked `.NOTPARALLEL`.
+   Fixes WAIT #7 (mk.6):
+
+   ```text
+   all : one two
+   one: pre1 .WAIT pre2
+   two: pre2 pre1
+   pre1, pre2: <recipes that wait FILE on each other>
+   ```
+
+   Now schedules `[pre1, pre2]` (deduped) as one parallel batch from
+   `all`'s perspective; the leaves race correctly via their `wait FILE`
+   sentinels and `one`/`two` get marked built once their leaves complete.
+3. **`fn aggregator_prereqs`** helper: returns `Some(prereqs)` if
+   `target` qualifies as a no-recipe aggregator, `None` otherwise.
+   Excludes targets with grouped rules, SE, target-specific vars
+   or exports, or any rule entry having a recipe.
+
+**Subtest gains.**
+
+- `targets/WAIT`: 12 → 14 of 14 (✅ category flip).
+
+**Final total**: 135/135 (100%). MAKEFLAGS 218/218, temp_stdin 8/8,
+options/dash-f 32/32, features/parallelism 13/13, targets/WAIT 14/14.
+
+The aggregator-expansion technique is conservative: it requires every
+inlined leaf to be a `is_simple_leaf` and skips `.WAIT` markers within
+the inlined sequence. The shared-state risk is bounded because each
+forked child runs only one leaf recipe and exits — the parent never
+needs to migrate any RefCell mutations from a child.

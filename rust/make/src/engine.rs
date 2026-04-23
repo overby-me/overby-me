@@ -593,6 +593,11 @@ pub struct Engine {
     oneshell: Cell<bool>,
     /// `.NOTPARALLEL` disables `--shuffle` reordering.
     notparallel: Cell<bool>,
+    /// Targets whose prereqs must be built serially (set by
+    /// `.NOTPARALLEL: target1 target2`). Distinguished from the
+    /// bare `.NOTPARALLEL:` form which sets the global `notparallel`
+    /// flag.
+    notparallel_targets: RefCell<HashSet<String>>,
     /// Set when any rule has used .WAIT in its prereqs; suppresses --shuffle.
     wait_seen: Cell<bool>,
     /// Targets listed as prerequisites of `.SECONDARY`. These intermediate
@@ -764,6 +769,7 @@ impl Engine {
             private_exports: RefCell::new(HashSet::new()),
             oneshell: Cell::new(false),
             notparallel: Cell::new(false),
+            notparallel_targets: RefCell::new(HashSet::new()),
             wait_seen: Cell::new(false),
             secondary_targets: RefCell::new(HashSet::new()),
             secondary_all: Cell::new(false),
@@ -2991,7 +2997,14 @@ impl Engine {
                         *self.export_all.borrow_mut() = true;
                     }
                     if target == ".NOTPARALLEL" {
-                        self.notparallel.set(true);
+                        if prereqs.is_empty() {
+                            self.notparallel.set(true);
+                        } else {
+                            let mut npt = self.notparallel_targets.borrow_mut();
+                            for p in &prereqs {
+                                npt.insert(p.clone());
+                            }
+                        }
                     }
                     if target == ".ONESHELL" {
                         self.oneshell.set(true);
@@ -3776,6 +3789,52 @@ impl Engine {
     ///
     /// Returns 0 if no parallel work was done (caller falls back to
     /// serial path for `seq[start]`).
+    /// If `target` is a no-recipe aggregator (each rule entry has a
+    /// non-empty prereq list and an empty recipe), return its
+    /// concatenated prereq list (preserving order, may include
+    /// `.WAIT` markers and duplicates). Otherwise None.
+    ///
+    /// Used by `try_parallel_batch` to "lift" leaf prereqs of
+    /// recipe-less aggregator siblings into the parallel batch.
+    fn aggregator_prereqs(&self, target: &str) -> Option<Vec<String>> {
+        if target.is_empty() || target.starts_with('.') {
+            return None;
+        }
+        if self.target_vars.borrow().contains_key(target) {
+            return None;
+        }
+        if self.target_exports.borrow().contains_key(target) {
+            return None;
+        }
+        let rules = self.rules.borrow();
+        let entries = rules.get(target)?;
+        if entries.is_empty() {
+            return None;
+        }
+        if !entries
+            .iter()
+            .all(|r| r.recipe.is_empty() && !r.prerequisites.is_empty())
+        {
+            return None;
+        }
+        if entries
+            .iter()
+            .any(|r| !r.group.is_empty() || r.second_expand)
+        {
+            return None;
+        }
+        let mut out: Vec<String> = Vec::new();
+        for r in entries {
+            for p in &r.prerequisites {
+                out.push(p.clone());
+            }
+            for p in &r.order_only {
+                out.push(p.clone());
+            }
+        }
+        Some(out)
+    }
+
     fn try_parallel_batch(
         &self,
         target: &str,
@@ -3793,6 +3852,9 @@ impl Engine {
             return 0;
         }
         if self.notparallel.get() {
+            return 0;
+        }
+        if self.notparallel_targets.borrow().contains(target) {
             return 0;
         }
         // Don't fork during include-remake phase (finalize_includes).
@@ -3828,17 +3890,16 @@ impl Engine {
         // Identify spawnable batch.
         let max_n = self.jobs;
         let mut batch: Vec<(String, bool)> = Vec::new();
+        let mut batch_set: HashSet<String> = HashSet::new();
+        let mut aggregators_consumed: Vec<String> = Vec::new();
         let mut idx = start;
-        while idx < seq.len() && batch.len() < max_n {
+        'outer: while idx < seq.len() && batch.len() < max_n {
             let (prereq, is_oo) = &seq[idx];
             if prereq == ".WAIT" {
                 break;
             }
-            if !self.is_simple_leaf(prereq) {
-                break;
-            }
+            // Already-built / failed-skip / cycle / dedupe handling.
             if self.built_targets.borrow().contains(prereq.as_str()) {
-                // Already built — counts toward consumption but no work.
                 idx += 1;
                 continue;
             }
@@ -3849,16 +3910,68 @@ impl Engine {
             if self.building_chain.borrow().contains(prereq.as_str()) {
                 break;
             }
-            // Don't double-add to seen.
             if built_seen.contains(prereq.as_str()) {
                 idx += 1;
                 continue;
             }
-            batch.push((prereq.clone(), *is_oo));
-            idx += 1;
+
+            // Direct simple-leaf: add to batch.
+            if self.is_simple_leaf(prereq) {
+                if batch_set.insert(prereq.clone()) {
+                    batch.push((prereq.clone(), *is_oo));
+                }
+                idx += 1;
+                continue;
+            }
+
+            // Don't inline leaves of an aggregator that's marked .NOTPARALLEL.
+            if self.notparallel_targets.borrow().contains(prereq) {
+                break;
+            }
+            // Aggregator expansion: if this prereq is a recipe-less
+            // aggregator whose leaves are all simple-leaf (or .WAIT),
+            // inline the leaves and mark the aggregator for post-batch
+            // "built" status.
+            if let Some(agg_prereqs) = self.aggregator_prereqs(prereq) {
+                let mut to_add: Vec<String> = Vec::new();
+                let mut ok = true;
+                for ap in &agg_prereqs {
+                    if ap == ".WAIT" {
+                        continue;
+                    }
+                    if self.built_targets.borrow().contains(ap.as_str()) {
+                        continue;
+                    }
+                    if batch_set.contains(ap) {
+                        continue;
+                    }
+                    if self.is_simple_leaf(ap) {
+                        to_add.push(ap.clone());
+                    } else {
+                        ok = false;
+                        break;
+                    }
+                }
+                if !ok {
+                    break 'outer;
+                }
+                for ap in to_add {
+                    if batch.len() >= max_n {
+                        break;
+                    }
+                    if batch_set.insert(ap.clone()) {
+                        batch.push((ap, false));
+                    }
+                }
+                aggregators_consumed.push(prereq.clone());
+                idx += 1;
+                continue;
+            }
+
+            // Non-leaf, non-aggregator: stop.
+            break;
         }
         if batch.len() < 2 {
-            // No real benefit to forking a single entry.
             return 0;
         }
 
@@ -3945,6 +4058,12 @@ impl Engine {
         // post-loop) so the parent stops building dependent targets.
         if any_failed {
             self.parallel_batch_failed.set(true);
+        }
+        if !any_failed {
+            for agg in &aggregators_consumed {
+                self.built_targets.borrow_mut().insert(agg.clone());
+                built_seen.insert(agg.clone());
+            }
         }
         idx - start
     }
