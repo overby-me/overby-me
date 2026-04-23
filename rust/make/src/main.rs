@@ -220,6 +220,7 @@ fn run() -> i32 {
     // and flags-with-args accumulate as separate tokens prefixed with `-`
     // (e.g. `--trace`).
     let mut mflags_short = String::new();
+    let mut print_database_flag = false;
     let mut mflags_long: Vec<String> = Vec::new();
     // `--eval=TEXT` strings, evaluated before the primary makefile.
     let mut eval_strings: Vec<String> = Vec::new();
@@ -528,7 +529,10 @@ fn run() -> i32 {
                 }
             }
             "-p" | "--print-data-base" => {
-                // TODO: print database
+                print_database_flag = true;
+                if !mflags_short.contains('p') {
+                    mflags_short.push('p');
+                }
             }
             "-v" | "--version" => {
                 // Mimic GNU make's version format so the upstream test
@@ -743,6 +747,12 @@ fn run() -> i32 {
                             engine.question = true;
                             if !mflags_short.contains('q') {
                                 mflags_short.push('q');
+                            }
+                        }
+                        'p' => {
+                            print_database_flag = true;
+                            if !mflags_short.contains('p') {
+                                mflags_short.push('p');
                             }
                         }
                         'B' => {
@@ -1401,6 +1411,10 @@ fn run() -> i32 {
     }
 
     let rc = engine.build(&effective_targets);
+
+    if print_database_flag {
+        engine.print_database();
+    }
 
     // Sentinel -1 means an included makefile was remade and we need to
     // re-exec the process (GNU make "restart" semantics).

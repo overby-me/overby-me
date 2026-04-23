@@ -3414,6 +3414,207 @@ impl Engine {
         }
     }
 
+    /// Print the make data base (variables, rules, pattern rules,
+    /// files, special targets) in GNU make `-p`-compatible format.
+    /// Output goes to stdout.
+    pub fn print_database(&self) {
+        use std::io::Write;
+        let stdout = std::io::stdout();
+        let mut out = stdout.lock();
+
+        // Header
+        let _ = writeln!(out, "# GNU Make 4.4.1");
+        let _ = writeln!(out, "# Built for x86_64-pc-linux-gnu");
+        let _ = writeln!(
+            out,
+            "# Copyright (C) 1988-2023 Free Software Foundation, Inc."
+        );
+        let _ = writeln!(
+            out,
+            "# License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>"
+        );
+        let _ = writeln!(
+            out,
+            "# This is free software: you are free to change and redistribute it."
+        );
+        let _ = writeln!(
+            out,
+            "# There is NO WARRANTY, to the extent permitted by law."
+        );
+        let _ = writeln!(out);
+        let _ = writeln!(out, "# Make data base, printed on (date omitted)");
+        let _ = writeln!(out);
+
+        // Variables
+        let _ = writeln!(out, "# Variables");
+        let _ = writeln!(out);
+        {
+            let vars = self.vars.borrow();
+            let mut names: Vec<&String> = vars.keys().collect();
+            names.sort();
+            for name in names {
+                let var = &vars[name];
+                let _ = writeln!(out, "# {}", var.origin);
+                let op = match var.flavor {
+                    VarFlavor::Simple => ":=",
+                    VarFlavor::Recursive => "=",
+                    VarFlavor::Undefined => continue,
+                };
+                let _ = writeln!(out, "{} {} {}", name, op, var.value);
+            }
+        }
+        let _ = writeln!(out);
+
+        // Pattern-specific variables
+        let _ = writeln!(out, "# Pattern-specific Variable Values");
+        let _ = writeln!(out);
+        {
+            let pvars = self.pattern_vars.borrow();
+            if pvars.is_empty() {
+                let _ = writeln!(out, "# No pattern-specific variable values.");
+            } else {
+                for (pat, name, op, value, _is_override, _is_private) in pvars.iter() {
+                    let op_str = match op {
+                        AssignOp::Recursive => "=",
+                        AssignOp::Simple => ":=",
+                        AssignOp::ImmediateRecursive => ":::=",
+                        AssignOp::Append => "+=",
+                        AssignOp::Conditional => "?=",
+                        AssignOp::Shell => "!=",
+                    };
+                    let _ = writeln!(out, "{}: {} {} {}", pat, name, op_str, value);
+                }
+            }
+        }
+        let _ = writeln!(out);
+
+        // Directories — skip (no tracking)
+        let _ = writeln!(out, "# Directories");
+        let _ = writeln!(out);
+        let _ = writeln!(out, "# (directory statistics not tracked)");
+        let _ = writeln!(out);
+
+        // Implicit / pattern rules
+        let _ = writeln!(out, "# Implicit Rules");
+        let _ = writeln!(out);
+        {
+            let prules = self.pattern_rules.borrow();
+            for r in prules.iter() {
+                let prereqs = r.prereq_patterns.join(" ");
+                let oo = r.order_only_patterns.join(" ");
+                let sep = if r.is_terminal { "::" } else { ":" };
+                if !oo.is_empty() {
+                    let _ = writeln!(out, "{}{} {} | {}", r.target_pattern, sep, prereqs, oo);
+                } else {
+                    let _ = writeln!(out, "{}{} {}", r.target_pattern, sep, prereqs);
+                }
+                if !r.recipe.is_empty() {
+                    let _ = writeln!(out, "#  recipe to execute (from '{}'):", r.source_name);
+                    for line in &r.recipe {
+                        let _ = writeln!(out, "\t{line}");
+                    }
+                }
+                let _ = writeln!(out);
+            }
+            let _ = writeln!(out, "# {} implicit rules.", prules.len());
+        }
+        let _ = writeln!(out);
+
+        // Files (explicit rules)
+        let _ = writeln!(out, "# Files");
+        let _ = writeln!(out);
+        {
+            let rules = self.rules.borrow();
+            let phony = self.phony_targets.borrow();
+            let precious = self.precious_targets.borrow();
+            let secondary = self.secondary_targets.borrow();
+            let intermediate = self.intermediate_targets.borrow();
+
+            let mut names: Vec<&String> = rules.keys().collect();
+            names.sort();
+            for name in names {
+                let entries = &rules[name];
+                for r in entries {
+                    let sep = if r.is_double_colon { "::" } else { ":" };
+                    let prereqs = r.prerequisites.join(" ");
+                    let oo = r.order_only.join(" ");
+                    if !oo.is_empty() {
+                        let _ = writeln!(out, "{}{} {} | {}", name, sep, prereqs, oo);
+                    } else {
+                        let _ = writeln!(out, "{}{} {}", name, sep, prereqs);
+                    }
+                    // Annotations
+                    if phony.contains(name) {
+                        let _ = writeln!(out, "#  Phony target.");
+                    }
+                    if precious.contains(name) {
+                        let _ = writeln!(out, "#  Precious file.");
+                    }
+                    if secondary.contains(name) || self.secondary_all.get() {
+                        let _ = writeln!(out, "#  Secondary file.");
+                    }
+                    if intermediate.contains(name) {
+                        let _ = writeln!(out, "#  Intermediate file.");
+                    }
+                    if !r.group.is_empty() {
+                        let _ = writeln!(out, "#  Grouped with: {}", r.group.join(" "));
+                    }
+                    if r.second_expand {
+                        let _ = writeln!(out, "#  .SECONDEXPANSION applies.");
+                    }
+                    // File status (best-effort).
+                    match std::fs::metadata(name) {
+                        Ok(_) => {
+                            let _ = writeln!(out, "#  File exists.");
+                        }
+                        Err(_) => {
+                            if !phony.contains(name) {
+                                let _ = writeln!(out, "#  File does not exist.");
+                            }
+                        }
+                    }
+                    // Recipe
+                    if !r.recipe.is_empty() {
+                        let line_no = r.recipe_lines.first().copied().unwrap_or(0);
+                        let _ = writeln!(
+                            out,
+                            "#  recipe to execute (from '{}', line {}):",
+                            r.source_name, line_no
+                        );
+                        for line in &r.recipe {
+                            let _ = writeln!(out, "\t{line}");
+                        }
+                    }
+                    let _ = writeln!(out);
+                }
+            }
+            let _ = writeln!(out, "# {} files.", rules.len());
+        }
+        let _ = writeln!(out);
+
+        // Special targets summary
+        let _ = writeln!(out, "# .SUFFIXES:");
+        {
+            let s = self.suffixes.borrow();
+            let _ = writeln!(out, ".SUFFIXES: {}", s.join(" "));
+        }
+        let _ = writeln!(out);
+
+        // VPATH / vpath
+        {
+            let vpaths = self.vpath_patterns.borrow();
+            if !vpaths.is_empty() {
+                let _ = writeln!(out, "# VPATH search paths");
+                for (pat, dirs) in vpaths.iter() {
+                    let _ = writeln!(out, "vpath {} {}", pat, dirs.join(":"));
+                }
+                let _ = writeln!(out);
+            }
+        }
+
+        let _ = writeln!(out, "# Finished Make data base.");
+    }
+
     /// Build the specified targets.
     pub fn build(&self, targets: &[String]) -> i32 {
         let level: i32 = self.lookup_var_or("MAKELEVEL", "0").parse().unwrap_or(0);
