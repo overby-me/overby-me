@@ -66,7 +66,7 @@ Key design decisions:
 | `objdump-relocs` | objdump | ✅ PASS |
 | `addr2line-basic` | addr2line | ✅ PASS |
 
-### Upstream DejaGnu tests (189/220 passing)
+### Upstream DejaGnu tests (192/220 passing)
 
 | Test file | Pass | Fail | Total | Threshold |
 |-----------|------|------|-------|-----------|
@@ -76,10 +76,10 @@ Key design decisions:
 | ar.exp | **12** | 2 | 14 | minPass=12, maxFail=2 |
 | readelf.exp | **26** | 12 | 39 | minPass=26, maxFail=12 |
 | objdump.exp | **22** | 10 | 33 | minPass=19, maxFail=3 (standalone; `-all` sees 22) |
-| objcopy.exp | **106** | 9 | 116 | minPass=106, maxFail=9 |
+| objcopy.exp | **109** | 6 | 116 | minPass=109, maxFail=6 |
 | strings.exp | **1** | 0 | 1 | minPass=1, maxFail=0 |
 | addr2line.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
-| **Total** | **189** | **31** | **220** | |
+| **Total** | **192** | **28** | **220** | |
 
 ## Fixes applied
 
@@ -217,6 +217,8 @@ Two layers of testing:
 - [x] Fix readelf.exp failure (25→26/39): `-j`/`--display-section` on REL/RELA sections now emits a relocation table instead of a hex dump (GNU-compatible format; refactored `readelf_relocs` to share per-section printing via new `readelf_dump_reloc_section`)
 
 - [x] Fix strip on executables (104→106 objcopy.exp passes): in-place ELF section-table edit for ET_EXEC/ET_DYN preserves `sh_addr`, program-header layout, and PROGBITS/NOBITS distinction (slow `object::write::Object` path was producing unrunnable binaries by zeroing addresses); `-K` rewrites `.symtab`/`.strtab` instead of dropping them. Fixes `run stripped executable` and `run stripped executable with saving a symbol`.
+
+- [x] Fix objcopy SHT_GROUP preservation (106→109 objcopy.exp passes): in-place ELF rewriter for `--remove-section` on files with COMDAT groups; preserves GROUP section type, drops orphan `.rela.X`/`.rel.X` when target removed, rebuilds `SHT_GROUP` contents with renumbered surviving indices, renumbers `sh_link`/`sh_info` everywhere. Fixes `copy removing group member`, `copy removing reloc group member`, `copy removing non-reloc group member` (and `group-7c` for free).
 
 ## Next steps
 

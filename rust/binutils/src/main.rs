@@ -6449,6 +6449,63 @@ fn tool_objcopy(args: &[String]) -> i32 {
         return objcopy_apply_addr_adjustments(input, output, &adj_addrs, preserve_dates);
     }
 
+    // Fast path for ELF files with SHT_GROUP sections when only --remove-section
+    // is requested. The slow path via object::write::Object loses group structure
+    // and doesn't drop orphan .rela.X / .rel.X sections.
+    if !strip_debug
+        && !strip_all
+        && !strip_unneeded
+        && keep_sections.is_empty()
+        && strip_symbols.is_empty()
+        && globalize_syms.is_empty()
+        && keep_global_syms.is_empty()
+        && set_section_alignment.is_empty()
+        && set_section_flags.is_empty()
+        && rename_sections.is_empty()
+        && localize_syms.is_empty()
+        && weaken_syms.is_empty()
+        && !weaken_all
+        && !localize_hidden
+        && add_sections.is_empty()
+        && add_symbols.is_empty()
+        && remove_relocations.is_empty()
+        && keep_symbols.is_empty()
+        && elf_stt_common.is_none()
+        && reverse_bytes.is_none()
+        && set_start.is_none()
+        && adjust_start == 0
+        && adjust_vma == 0
+        && adjust_section_vma.is_empty()
+        && !other_modifications
+        && !remove_sections.is_empty()
+    {
+        if let Ok(input_data) = fs::read(input)
+            && let Some(out_bytes) = objcopy_inplace_remove_sections(
+                &input_data,
+                &ObjcopyInplaceOpts {
+                    remove_sections: &remove_sections,
+                    keep_section_patterns: &keep_section_patterns,
+                },
+            )
+        {
+            match fs::write(output, &out_bytes) {
+                Ok(_) => {
+                    if preserve_dates
+                        && let Ok(meta) = fs::metadata(input)
+                        && let Ok(mtime) = meta.modified()
+                    {
+                        let _ = set_file_times(Path::new(output), mtime);
+                    }
+                    return 0;
+                }
+                Err(e) => {
+                    eprintln!("objcopy: '{output}': {e}");
+                    return 1;
+                }
+            }
+        }
+    }
+
     let no_transformations = !strip_debug
         && !strip_all
         && !strip_unneeded
@@ -9200,6 +9257,450 @@ struct StripInplaceOpts<'a> {
 ///
 /// Returns `None` for files that aren't ELF executables/shared libs (e.g.
 /// ET_REL objects), letting the caller fall back to the slow path.
+struct ObjcopyInplaceOpts<'a> {
+    remove_sections: &'a [String],
+    keep_section_patterns: &'a [String],
+}
+
+/// In-place ELF objcopy fast path that ONLY handles `--remove-section`.
+///
+/// Returns `None` if the file isn't a supported ELF, has no SHT_GROUP
+/// sections, or isn't safe to handle here. The caller falls back to the
+/// slow path via `object::write::Object` in that case.
+///
+/// Why this exists: the slow path doesn't preserve SHT_GROUP sections
+/// (it converts them to PROGBITS, breaking COMDAT groups) and doesn't
+/// drop orphan `.rela.X`/`.rel.X` sections when the target X is removed.
+fn objcopy_inplace_remove_sections(data: &[u8], opts: &ObjcopyInplaceOpts<'_>) -> Option<Vec<u8>> {
+    if data.len() < 0x40 || &data[..4] != b"\x7fELF" {
+        return None;
+    }
+    let class = data[4];
+    let endian = data[5];
+    if class != 1 && class != 2 {
+        return None;
+    }
+    let le = endian == 1;
+
+    let r16 = |o: usize| -> u16 {
+        let mut b = [0u8; 2];
+        b.copy_from_slice(&data[o..o + 2]);
+        if le {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        }
+    };
+    let r32 = |o: usize| -> u32 {
+        let mut b = [0u8; 4];
+        b.copy_from_slice(&data[o..o + 4]);
+        if le {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        }
+    };
+    let r64 = |o: usize| -> u64 {
+        let mut b = [0u8; 8];
+        b.copy_from_slice(&data[o..o + 8]);
+        if le {
+            u64::from_le_bytes(b)
+        } else {
+            u64::from_be_bytes(b)
+        }
+    };
+
+    let (shoff, shentsize, shnum, shstrndx) = if class == 2 {
+        (
+            r64(0x28) as usize,
+            r16(0x3a) as usize,
+            r16(0x3c) as usize,
+            r16(0x3e) as usize,
+        )
+    } else {
+        (
+            r32(0x20) as usize,
+            r16(0x2e) as usize,
+            r16(0x30) as usize,
+            r16(0x32) as usize,
+        )
+    };
+    if shoff == 0 || shnum == 0 || shstrndx >= shnum {
+        return None;
+    }
+    let expected_entsize = if class == 2 { 64 } else { 40 };
+    if shentsize != expected_entsize {
+        return None;
+    }
+    let total = shnum.checked_mul(shentsize)?;
+    if shoff.checked_add(total)? > data.len() {
+        return None;
+    }
+
+    #[derive(Clone)]
+    struct Shdr {
+        name: u32,
+        sh_type: u32,
+        sh_flags: u64,
+        sh_addr: u64,
+        sh_offset: u64,
+        sh_size: u64,
+        sh_link: u32,
+        sh_info: u32,
+        sh_addralign: u64,
+        sh_entsize: u64,
+    }
+
+    let mut headers: Vec<Shdr> = Vec::with_capacity(shnum);
+    for i in 0..shnum {
+        let h = shoff + i * shentsize;
+        let sh = if class == 2 {
+            Shdr {
+                name: r32(h),
+                sh_type: r32(h + 4),
+                sh_flags: r64(h + 8),
+                sh_addr: r64(h + 16),
+                sh_offset: r64(h + 24),
+                sh_size: r64(h + 32),
+                sh_link: r32(h + 40),
+                sh_info: r32(h + 44),
+                sh_addralign: r64(h + 48),
+                sh_entsize: r64(h + 56),
+            }
+        } else {
+            Shdr {
+                name: r32(h),
+                sh_type: r32(h + 4),
+                sh_flags: r32(h + 8) as u64,
+                sh_addr: r32(h + 12) as u64,
+                sh_offset: r32(h + 16) as u64,
+                sh_size: r32(h + 20) as u64,
+                sh_link: r32(h + 24),
+                sh_info: r32(h + 28),
+                sh_addralign: r32(h + 32) as u64,
+                sh_entsize: r32(h + 36) as u64,
+            }
+        };
+        headers.push(sh);
+    }
+
+    // Only take this fast path when SHT_GROUP sections exist; otherwise the
+    // slow path / no_transformations byte copy already produces correct output.
+    if !headers.iter().any(|h| h.sh_type == 17) {
+        return None;
+    }
+
+    let shstr_off = headers[shstrndx].sh_offset as usize;
+    let shstr_size = headers[shstrndx].sh_size as usize;
+    let shstr_end = shstr_off.checked_add(shstr_size)?;
+    if shstr_end > data.len() {
+        return None;
+    }
+    let strtab = &data[shstr_off..shstr_end];
+    let name_of = |off: u32| -> &str {
+        let o = off as usize;
+        if o >= strtab.len() {
+            return "";
+        }
+        let mut e = o;
+        while e < strtab.len() && strtab[e] != 0 {
+            e += 1;
+        }
+        std::str::from_utf8(&strtab[o..e]).unwrap_or("")
+    };
+
+    let kept_by_keep = |name: &str| -> bool {
+        !opts.keep_section_patterns.is_empty()
+            && matches_selector_list(name, opts.keep_section_patterns)
+    };
+
+    // Initial removal pass based on --remove-section selectors.
+    let mut keep: Vec<bool> = vec![true; shnum];
+    let names: Vec<String> = (0..shnum)
+        .map(|i| name_of(headers[i].name).to_string())
+        .collect();
+    for i in 1..shnum {
+        let name = &names[i];
+        if !opts.remove_sections.is_empty()
+            && matches_selector_list(name, opts.remove_sections)
+            && !kept_by_keep(name)
+        {
+            keep[i] = false;
+        }
+    }
+
+    // Drop orphan .rela.X / .rel.X whose target X is being removed.
+    for i in 1..shnum {
+        if !keep[i] {
+            continue;
+        }
+        let t = headers[i].sh_type;
+        if t != 4 && t != 9 {
+            continue;
+        }
+        let info = headers[i].sh_info as usize;
+        if info > 0 && info < shnum && !keep[info] && !kept_by_keep(&names[i]) {
+            keep[i] = false;
+        }
+    }
+
+    // Drop SHT_GROUP sections whose members are all removed.
+    for i in 1..shnum {
+        if !keep[i] || headers[i].sh_type != 17 {
+            continue;
+        }
+        let off = headers[i].sh_offset as usize;
+        let size = headers[i].sh_size as usize;
+        if size < 4 || off + size > data.len() || size % 4 != 0 {
+            continue;
+        }
+        let nmembers = (size - 4) / 4;
+        let mut any_kept = false;
+        for k in 0..nmembers {
+            let mo = off + 4 + k * 4;
+            let mut b = [0u8; 4];
+            b.copy_from_slice(&data[mo..mo + 4]);
+            let m = if le {
+                u32::from_le_bytes(b)
+            } else {
+                u32::from_be_bytes(b)
+            } as usize;
+            if m < shnum && keep[m] {
+                any_kept = true;
+                break;
+            }
+        }
+        if !any_kept && !kept_by_keep(&names[i]) {
+            keep[i] = false;
+        }
+    }
+
+    // Don't drop the section name string table.
+    keep[shstrndx] = true;
+    // Always keep section 0 (null).
+    keep[0] = true;
+
+    // Compute new index mapping (indices for kept sections only).
+    let mut newidx = vec![0u32; shnum];
+    let mut new_count = 0u32;
+    for i in 0..shnum {
+        if keep[i] {
+            newidx[i] = new_count;
+            new_count += 1;
+        }
+    }
+    if (new_count as usize) == shnum {
+        // Nothing to remove — let the byte-copy path handle it.
+        return None;
+    }
+
+    // Determine extent of original data we still need (for kept sections).
+    let ehdr_size: usize = if class == 2 { 64 } else { 52 };
+    let mut data_end: usize = ehdr_size;
+    for i in 0..shnum {
+        if !keep[i] {
+            continue;
+        }
+        if headers[i].sh_type == 8 {
+            // SHT_NOBITS occupies no file bytes
+            continue;
+        }
+        let end = (headers[i].sh_offset as usize).saturating_add(headers[i].sh_size as usize);
+        if end > data_end {
+            data_end = end;
+        }
+    }
+    if data_end > data.len() {
+        data_end = data.len();
+    }
+    // Preserve program headers if present (objcopy fast path also handles
+    // ET_EXEC/DYN files that may have no group sections, but for safety).
+    let phoff = if class == 2 {
+        r64(0x20) as usize
+    } else {
+        r32(0x1c) as usize
+    };
+    let phentsize = if class == 2 {
+        r16(0x36) as usize
+    } else {
+        r16(0x2a) as usize
+    };
+    let phnum = if class == 2 {
+        r16(0x38) as usize
+    } else {
+        r16(0x2c) as usize
+    };
+    let ph_end = phoff.saturating_add(phentsize.saturating_mul(phnum));
+    if ph_end <= data.len() && ph_end > data_end {
+        data_end = ph_end;
+    }
+
+    // Build rewritten SHT_GROUP contents (one per group section).
+    // Layout: 4-byte flags, then N×4-byte member section indices.
+    // We rewrite each in place into a per-section buffer kept in `group_overrides`,
+    // then place them after data_end like the symtab override pattern in strip.
+    let mut group_overrides: Vec<(usize, Vec<u8>)> = Vec::new();
+    for i in 0..shnum {
+        if !keep[i] || headers[i].sh_type != 17 {
+            continue;
+        }
+        let off = headers[i].sh_offset as usize;
+        let size = headers[i].sh_size as usize;
+        if size < 4 || off + size > data.len() || size % 4 != 0 {
+            return None;
+        }
+        let nmembers = (size - 4) / 4;
+        let mut new_buf: Vec<u8> = Vec::with_capacity(size);
+        new_buf.extend_from_slice(&data[off..off + 4]); // flags unchanged
+        for k in 0..nmembers {
+            let mo = off + 4 + k * 4;
+            let mut b = [0u8; 4];
+            b.copy_from_slice(&data[mo..mo + 4]);
+            let member = if le {
+                u32::from_le_bytes(b)
+            } else {
+                u32::from_be_bytes(b)
+            };
+            let m = member as usize;
+            if m >= shnum {
+                return None;
+            }
+            if !keep[m] {
+                continue;
+            }
+            let renumbered = newidx[m];
+            let nb = if le {
+                renumbered.to_le_bytes()
+            } else {
+                renumbered.to_be_bytes()
+            };
+            new_buf.extend_from_slice(&nb);
+        }
+        group_overrides.push((i, new_buf));
+    }
+
+    let mut out = data[..data_end].to_vec();
+    while out.len() % 8 != 0 {
+        out.push(0);
+    }
+
+    let new_shstrndx = newidx[shstrndx];
+
+    // Append new group section contents.
+    let mut group_offsets: Vec<(usize, u64, u64)> = Vec::new();
+    for (idx, buf) in &group_overrides {
+        while out.len() % 4 != 0 {
+            out.push(0);
+        }
+        let off = out.len() as u64;
+        out.extend_from_slice(buf);
+        group_offsets.push((*idx, off, buf.len() as u64));
+    }
+
+    while out.len() % 8 != 0 {
+        out.push(0);
+    }
+    let new_shoff = out.len();
+
+    let w16m = |out: &mut [u8], o: usize, v: u16| {
+        let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        out[o..o + 2].copy_from_slice(&b);
+    };
+    let w32m = |out: &mut [u8], o: usize, v: u32| {
+        let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        out[o..o + 4].copy_from_slice(&b);
+    };
+    let w64m = |out: &mut [u8], o: usize, v: u64| {
+        let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        out[o..o + 8].copy_from_slice(&b);
+    };
+
+    let w32_buf = |buf: &mut [u8], o: usize, v: u32| {
+        let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        buf[o..o + 4].copy_from_slice(&b);
+    };
+    let w64_buf = |buf: &mut [u8], o: usize, v: u64| {
+        let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        buf[o..o + 8].copy_from_slice(&b);
+    };
+
+    for i in 0..shnum {
+        if !keep[i] {
+            continue;
+        }
+        let sh = &headers[i];
+
+        // Renumber sh_link / sh_info per section type semantics.
+        let new_link = if (sh.sh_link as usize) < shnum && keep[sh.sh_link as usize] {
+            newidx[sh.sh_link as usize]
+        } else {
+            0
+        };
+        // sh_info is a section index for SHT_REL/RELA (4/9). For SHT_GROUP (17)
+        // it's a symbol-table index (within the kept symbol table) — leave alone.
+        // For other section types, leave unchanged.
+        let new_info = if (sh.sh_type == 9 || sh.sh_type == 4) && (sh.sh_info as usize) < shnum {
+            if keep[sh.sh_info as usize] {
+                newidx[sh.sh_info as usize]
+            } else {
+                0
+            }
+        } else {
+            sh.sh_info
+        };
+
+        // Apply overridden offset/size for SHT_GROUP sections we rewrote.
+        let mut sh_offset = sh.sh_offset;
+        let mut sh_size = sh.sh_size;
+        for &(idx, off, sz) in &group_offsets {
+            if idx == i {
+                sh_offset = off;
+                sh_size = sz;
+            }
+        }
+
+        if class == 2 {
+            let mut buf = [0u8; 64];
+            w32_buf(&mut buf, 0, sh.name);
+            w32_buf(&mut buf, 4, sh.sh_type);
+            w64_buf(&mut buf, 8, sh.sh_flags);
+            w64_buf(&mut buf, 16, sh.sh_addr);
+            w64_buf(&mut buf, 24, sh_offset);
+            w64_buf(&mut buf, 32, sh_size);
+            w32_buf(&mut buf, 40, new_link);
+            w32_buf(&mut buf, 44, new_info);
+            w64_buf(&mut buf, 48, sh.sh_addralign);
+            w64_buf(&mut buf, 56, sh.sh_entsize);
+            out.extend_from_slice(&buf);
+        } else {
+            let mut buf = [0u8; 40];
+            w32_buf(&mut buf, 0, sh.name);
+            w32_buf(&mut buf, 4, sh.sh_type);
+            w32_buf(&mut buf, 8, sh.sh_flags as u32);
+            w32_buf(&mut buf, 12, sh.sh_addr as u32);
+            w32_buf(&mut buf, 16, sh_offset as u32);
+            w32_buf(&mut buf, 20, sh_size as u32);
+            w32_buf(&mut buf, 24, new_link);
+            w32_buf(&mut buf, 28, new_info);
+            w32_buf(&mut buf, 32, sh.sh_addralign as u32);
+            w32_buf(&mut buf, 36, sh.sh_entsize as u32);
+            out.extend_from_slice(&buf);
+        }
+    }
+
+    if class == 2 {
+        w64m(&mut out, 0x28, new_shoff as u64);
+        w16m(&mut out, 0x3c, new_count as u16);
+        w16m(&mut out, 0x3e, new_shstrndx as u16);
+    } else {
+        w32m(&mut out, 0x20, new_shoff as u32);
+        w16m(&mut out, 0x30, new_count as u16);
+        w16m(&mut out, 0x32, new_shstrndx as u16);
+    }
+
+    Some(out)
+}
+
 fn strip_inplace_elf(data: &[u8], opts: &StripInplaceOpts<'_>) -> Option<Vec<u8>> {
     if data.len() < 0x40 || &data[..4] != b"\x7fELF" {
         return None;
