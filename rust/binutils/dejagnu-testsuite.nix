@@ -51,6 +51,11 @@ in
         # ── Set up working directory ─────────────────────────────────────────
         # DejaGnu expects to be run from a directory that contains site.exp
         # and a tmpdir/ for assembler output.
+        # The ar.exp test "replacing non-deterministic member" explicitly expects
+        # SOURCE_DATE_EPOCH to NOT be set (Nix's build env sets it). Unset it so the
+        # tests for both deterministic and non-deterministic ar archives can distinguish.
+        unset SOURCE_DATE_EPOCH
+
         WORKDIR=$(mktemp -d)
         cd "$WORKDIR"
         mkdir -p tmpdir

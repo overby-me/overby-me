@@ -194,8 +194,8 @@
       }
       {
         exp = "ar.exp";
-        minPass = 12;
-        maxFail = 2;
+        minPass = 13;
+        maxFail = 1;
       }
       {
         exp = "addr2line.exp";

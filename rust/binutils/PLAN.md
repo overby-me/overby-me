@@ -66,20 +66,20 @@ Key design decisions:
 | `objdump-relocs` | objdump | ✅ PASS |
 | `addr2line-basic` | addr2line | ✅ PASS |
 
-### Upstream DejaGnu tests (192/220 passing)
+### Upstream DejaGnu tests (193/220 passing)
 
 | Test file | Pass | Fail | Total | Threshold |
 |-----------|------|------|-------|-----------|
 | cxxfilt.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
 | size.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
 | nm.exp | **13** | 0 | 13 | minPass=13, maxFail=0 |
-| ar.exp | **12** | 2 | 14 | minPass=12, maxFail=2 |
+| ar.exp | **13** | 1 | 14 | minPass=13, maxFail=1 |
 | readelf.exp | **26** | 12 | 39 | minPass=26, maxFail=12 |
 | objdump.exp | **22** | 10 | 33 | minPass=19, maxFail=3 (standalone; `-all` sees 22) |
 | objcopy.exp | **109** | 6 | 116 | minPass=109, maxFail=6 |
 | strings.exp | **1** | 0 | 1 | minPass=1, maxFail=0 |
 | addr2line.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
-| **Total** | **192** | **28** | **220** | |
+| **Total** | **193** | **27** | **220** | |
 
 ## Fixes applied
 
@@ -219,6 +219,8 @@ Two layers of testing:
 - [x] Fix strip on executables (104→106 objcopy.exp passes): in-place ELF section-table edit for ET_EXEC/ET_DYN preserves `sh_addr`, program-header layout, and PROGBITS/NOBITS distinction (slow `object::write::Object` path was producing unrunnable binaries by zeroing addresses); `-K` rewrites `.symtab`/`.strtab` instead of dropping them. Fixes `run stripped executable` and `run stripped executable with saving a symbol`.
 
 - [x] Fix objcopy SHT_GROUP preservation (106→109 objcopy.exp passes): in-place ELF rewriter for `--remove-section` on files with COMDAT groups; preserves GROUP section type, drops orphan `.rela.X`/`.rel.X` when target removed, rebuilds `SHT_GROUP` contents with renumbered surviving indices, renumbers `sh_link`/`sh_info` everywhere. Fixes `copy removing group member`, `copy removing reloc group member`, `copy removing non-reloc group member` (and `group-7c` for free).
+
+- [x] Fix ar.exp `replacing non-deterministic member` (12→13/14): unset SOURCE_DATE_EPOCH at dejagnu test entry (Nix build env sets it; the test explicitly requires it absent to distinguish deterministic vs non-deterministic archives). Only the ar foreign-object Tektronix-format test remains.
 
 ## Next steps
 
