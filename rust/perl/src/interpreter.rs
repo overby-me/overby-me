@@ -1987,6 +1987,7 @@ impl Interpreter {
                             | Value::HashRef(_)
                             | Value::ScalarRef(_)
                             | Value::CodeRef(_)
+                            | Value::Regex(_, _)
                     ) {
                         Some(v)
                     } else {
@@ -2092,9 +2093,19 @@ impl Interpreter {
                         None
                     }
                 } else if ref_arg.is_some() {
-                    ref_arg
+                    ref_arg.clone()
                 } else {
                     None
+                };
+                let msg = if msg.ends_with('\n') || ref_arg.is_some() || args.is_empty() {
+                    msg
+                } else {
+                    let file = if self.current_file.is_empty() {
+                        "-e".to_string()
+                    } else {
+                        self.current_file.clone()
+                    };
+                    format!("{msg} at {file} line {}.\n", self.current_line)
                 };
                 Flow::Die(msg)
             }

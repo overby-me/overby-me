@@ -6,7 +6,7 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**61/79 Nix tests passing** (77%) — selected tests from the upstream Perl test suite.
+**63/79 Nix tests passing** (80%) — selected tests from the upstream Perl test suite.
 
 Passing: base/if, base/cond, base/while, base/pat, base/num, base/translate,
 base/term, base/rs, cmd/elsif, cmd/for, cmd/mod, cmd/subval, cmd/switch,
@@ -591,6 +591,15 @@ Run a test: `nix build .#checks.x86_64-linux.rust-perl-test-{category}-{name}`
 View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{name}`
 
 ### Recent fixes
+
+- **`die "msg"` appends `at FILE line N.\n` location suffix**: when
+  the die argument is a plain string (not a reference) and lacks a
+  trailing newline, perl appends the source location to the message —
+  e.g. `die "hi"` produces `hi at FILE line N.\n`. Previously we
+  emitted just `"hi"`. Refs (Regex / ArrayRef / HashRef / ScalarRef /
+  CodeRef) and bare `die;` re-raises remain untouched (matching
+  reference perl). Fixes the eval-string error format used throughout
+  test.pl (`x at (eval N) line 1.`).
 
 - **`delete local` for hash/array element + slice**: parser detects
   `Token::Delete` followed by `Token::Local` and routes through a new
