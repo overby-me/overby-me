@@ -288,6 +288,14 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         req.push_str("Transfer-Encoding: chunked\r\n");
     }
 
+    // Generate multipart boundary up-front so we can append it to a user-supplied
+    // Content-Type header (matches curl's RFC 1867 behavior).
+    let boundary = if !opts.form_fields.is_empty() {
+        Some(multipart_boundary())
+    } else {
+        None
+    };
+
     // Custom headers (may override defaults).
     // - Empty value (e.g. -H "X-Header:") removes/suppresses the header entirely.
     // - "\x00" marker (from -H "X-Header;") sends header with no value.
@@ -300,6 +308,13 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         if val.is_empty() {
             continue;
         }
+        if key.eq_ignore_ascii_case("content-type")
+            && let Some(b) = boundary.as_ref()
+            && !val.to_ascii_lowercase().contains("boundary=")
+        {
+            req.push_str(&format!("{key}: {val}; boundary={b}\r\n"));
+            continue;
+        }
         if val == "\x00" {
             req.push_str(&format!("{key}:\r\n"));
         } else {
@@ -307,12 +322,6 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         }
     }
 
-    // Body handling — generate boundary once and reuse for header + body.
-    let boundary = if !opts.form_fields.is_empty() {
-        Some(multipart_boundary())
-    } else {
-        None
-    };
     let body = build_body(opts, boundary.as_deref());
 
     if let Some(ref body) = body {

@@ -7,14 +7,20 @@ pub(crate) fn make_tls_config(opts: &Options) -> Result<Arc<rustls::ClientConfig
     let mut root_store = rustls::RootCertStore::empty();
 
     if let Some(ref ca_path) = opts.cacert {
-        let pem = fs::read(ca_path).map_err(|e| format!("failed to read cacert: {e}"))?;
+        let pem = fs::read(ca_path).map_err(|e| format!("cacert: failed to read cacert: {e}"))?;
         let certs = rustls_pemfile::certs(&mut &pem[..])
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("failed to parse cacert PEM: {e}"))?;
+            .map_err(|e| format!("cacert: failed to parse cacert PEM: {e}"))?;
+        if certs.is_empty() {
+            return Err(format!(
+                "cacert: no certificates found in {}",
+                ca_path.display()
+            ));
+        }
         for cert in certs {
             root_store
                 .add(cert)
-                .map_err(|e| format!("failed to add CA cert: {e}"))?;
+                .map_err(|e| format!("cacert: failed to add CA cert: {e}"))?;
         }
     } else {
         root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());

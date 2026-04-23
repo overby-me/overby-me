@@ -561,6 +561,9 @@ pub(crate) fn parse_args() -> Options {
             "--no-include" => {
                 opts.include_headers = false;
             }
+            "--ca-native" | "--no-ca-native" => {
+                // Ignored — rustls does not use OS native CA store
+            }
             "-N" | "--no-buffer" => {
                 // Disable output buffering — ignored
             }

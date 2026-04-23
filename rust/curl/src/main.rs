@@ -914,7 +914,9 @@ fn main() {
                     }
                 }
                 // Map error messages to curl exit codes.
-                if e.contains("hostname too long")
+                if e.starts_with("cacert: ") {
+                    exit_code = 77; // Problem with reading the SSL CA cert
+                } else if e.contains("hostname too long")
                     || e.contains("empty host")
                     || e.contains("bad port")
                 {
