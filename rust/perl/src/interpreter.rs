@@ -164,6 +164,12 @@ pub struct Interpreter {
     /// scope-pop semantics (saved+restored per push/pop_scope).
     strict_vars_saves: Vec<bool>,
     strict_vars: bool,
+    /// Lexical `use warnings` depth. Incremented by `use warnings [cat...]`,
+    /// decremented by `no warnings` or scope exit. When > 0, builtins
+    /// like `join` / `substr` emit "Use of uninitialized value…"
+    /// warnings through `$SIG{__WARN__}` even if $^W isn't set.
+    warnings_on_saves: Vec<bool>,
+    warnings_on: bool,
     /// Per-hash iteration cursor for `each %h` — index into the snapshot
     /// of keys taken on first call. Reset on `keys`/`values`/end-of-iter.
     each_cursors: HashMap<String, (Vec<String>, usize)>,
@@ -365,6 +371,8 @@ impl Interpreter {
             bytes_mode: false,
             strict_vars_saves: Vec::new(),
             strict_vars: false,
+            warnings_on_saves: Vec::new(),
+            warnings_on: false,
             each_cursors: HashMap::new(),
             call_context: Vec::new(),
             next_call_ctx: None,
@@ -1826,6 +1834,12 @@ impl Interpreter {
                         // We only enforce vars; treat any `use strict`
                         // as enabling vars-checking inside this scope.
                         self.strict_vars = true;
+                    } else if module == "warnings" {
+                        // `use warnings` (with or without category args)
+                        // enables warnings lexically. Builtins like join
+                        // / substr then emit "Use of uninitialized value"
+                        // through the warning handler.
+                        self.warnings_on = true;
                     }
                     return Flow::None;
                 }
@@ -3107,9 +3121,16 @@ impl Interpreter {
                         } else {
                             (text, 0)
                         };
-                        // Assign modified text back to the target variable
-                        self.assign_to(target, Value::Str(new_text));
-                        Value::Num(count as f64)
+                        // /r flag: non-destructive. Return the modified
+                        // string and leave the target unchanged. Otherwise
+                        // assign the modified text back to the target.
+                        if flags.contains('r') || inner_flags.contains('r') {
+                            let _ = count;
+                            Value::Str(new_text)
+                        } else {
+                            self.assign_to(target, Value::Str(new_text));
+                            Value::Num(count as f64)
+                        }
                     }
                     Err(_) => Value::Num(0.0),
                 }
@@ -3995,6 +4016,19 @@ impl Interpreter {
         // Accept a few fully-qualified builtins from special namespaces
         // that appear in the upstream test suite. We only stub enough for
         // the tests to progress.
+        // Handle `no MODULE` — the parser sees `no` as a bareword
+        // call to `no("MODULE", ...)`. We intercept here to reverse
+        // pragmas like `use bytes` / `use warnings` / `use strict`.
+        if name == "no" && !args.is_empty() {
+            let module = self.eval_expr(&args[0]).to_str();
+            match module.as_str() {
+                "bytes" => self.bytes_mode = false,
+                "warnings" => self.warnings_on = false,
+                "strict" => self.strict_vars = false,
+                _ => {}
+            }
+            return Value::Num(1.0);
+        }
         match name {
             "Internals::stack_refcounted" => return Value::Num(1.0),
             "__FILE__" => return Value::Str(self.current_file.clone()),
@@ -4334,6 +4368,9 @@ impl Interpreter {
                         return Value::Num(cp as f64);
                     }
                 }
+                if self.bytes_mode {
+                    return Value::Num(s.bytes().next().map(|b| b as f64).unwrap_or(0.0));
+                }
                 Value::Num(s.chars().next().map(|c| c as u32 as f64).unwrap_or(0.0))
             }
             "lc" => {
@@ -4390,7 +4427,14 @@ impl Interpreter {
             "substr" => {
                 let s_val = self.eval_expr(&args[0]);
                 let s = s_val.to_str();
-                let chars: Vec<char> = s.chars().collect();
+                let chars: Vec<char> = if self.bytes_mode {
+                    // Treat each UTF-8 byte as an independent "char" so
+                    // offset/length arithmetic counts bytes, matching
+                    // Perl's `use bytes` semantics.
+                    s.bytes().map(|b| b as char).collect()
+                } else {
+                    s.chars().collect()
+                };
                 let slen = chars.len() as i64;
                 let offset_val = self.eval_expr(&args[1]);
                 if matches!(offset_val, Value::Undef) {
@@ -4449,7 +4493,14 @@ impl Interpreter {
                 };
                 let start = eff_start;
 
-                let result: String = chars[start..end].iter().collect();
+                let result: String = if self.bytes_mode {
+                    // Bytes mode: slice raw UTF-8 bytes directly to avoid
+                    // double-encoding the per-byte pseudo-chars.
+                    let bytes = &s.as_bytes()[start..end];
+                    unsafe { String::from_utf8_unchecked(bytes.to_vec()) }
+                } else {
+                    chars[start..end].iter().collect()
+                };
                 // 4-arg form: `substr($s, OFFSET, LEN, REPL)` modifies $s
                 // in-place to splice in REPL, and returns the old substring.
                 if args.len() >= 4 {
@@ -4468,10 +4519,19 @@ impl Interpreter {
                         );
                     }
                     let repl = self.eval_expr(&args[3]).to_str();
-                    let mut new_chars: Vec<char> = chars[..start].to_vec();
-                    new_chars.extend(repl.chars());
-                    new_chars.extend(chars[end..].iter().copied());
-                    let new_s: String = new_chars.into_iter().collect();
+                    let new_s: String = if self.bytes_mode {
+                        let sb = s.as_bytes();
+                        let mut buf: Vec<u8> = Vec::with_capacity(sb.len() + repl.len());
+                        buf.extend_from_slice(&sb[..start]);
+                        buf.extend_from_slice(repl.as_bytes());
+                        buf.extend_from_slice(&sb[end..]);
+                        unsafe { String::from_utf8_unchecked(buf) }
+                    } else {
+                        let mut new_chars: Vec<char> = chars[..start].to_vec();
+                        new_chars.extend(repl.chars());
+                        new_chars.extend(chars[end..].iter().copied());
+                        new_chars.into_iter().collect()
+                    };
                     self.assign_to(&args[0], Value::Str(new_s));
                 }
                 Value::Str(result)
@@ -4638,7 +4698,7 @@ impl Interpreter {
                 // element when warnings are on. We honour `$^W` so the
                 // handler set up by `local $SIG{__WARN__} = ...` fires
                 // the right number of times (op/join tests 9–10, 18).
-                let warnings_on = self.get_var("^W").to_num() != 0.0;
+                let warnings_on = self.warnings_on || self.get_var("^W").to_num() != 0.0;
                 let sep_val = self.eval_expr(&args[0]);
                 let file = if self.current_file.is_empty() {
                     "-e".to_string()
@@ -5759,6 +5819,26 @@ impl Interpreter {
                         Value::Str(c.to_string())
                     } else {
                         Value::Str(String::new())
+                    }
+                } else if (fmt == "a*" || fmt == "A*" || fmt == "a" || fmt == "A") && args.len() > 1
+                {
+                    // Binary string: take the underlying UTF-8 bytes verbatim.
+                    // 'a' takes only the first byte; 'a*' takes everything.
+                    let s = self.eval_expr(&args[1]).to_str();
+                    if fmt == "a" || fmt == "A" {
+                        // SAFETY: UTF-8 bytes interpreted as latin-1 chars are
+                        // valid char values (0..=255 maps to a single byte each).
+                        let first = s.bytes().next();
+                        match first {
+                            Some(b) => Value::Str((b as char).to_string()),
+                            None => Value::Str(String::new()),
+                        }
+                    } else {
+                        // 'a*': preserve all bytes verbatim. Our strings are
+                        // already stored as UTF-8 in a Rust String, so the
+                        // underlying byte sequence is the same as Perl's
+                        // SvPV. `use bytes` callers compare on byte content.
+                        Value::Str(s)
                     }
                 } else {
                     Value::Str(String::new())
@@ -7798,6 +7878,7 @@ impl Interpreter {
         // `no` inside the block doesn't leak out.
         self.bytes_mode_saves.push(self.bytes_mode);
         self.strict_vars_saves.push(self.strict_vars);
+        self.warnings_on_saves.push(self.warnings_on);
     }
 
     fn pop_scope(&mut self) {
@@ -7851,6 +7932,9 @@ impl Interpreter {
         }
         if let Some(prev) = self.strict_vars_saves.pop() {
             self.strict_vars = prev;
+        }
+        if let Some(prev) = self.warnings_on_saves.pop() {
+            self.warnings_on = prev;
         }
     }
 

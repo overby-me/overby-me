@@ -592,6 +592,48 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
 
 ### Recent fixes
 
+- **`no MODULE` pragma support**: `no bytes`, `no warnings`,
+  `no strict` now reverse their `use` counterparts. Previously `no`
+  was parsed as a bareword call to `no()` and silently did nothing —
+  so `{ use bytes; ... no bytes; ... }` stayed in byte-mode for the
+  rest of the block. Now intercepted in `eval_call`.
+
+- **Lexical `use warnings`** tracks a `warnings_on` flag alongside
+  `bytes_mode` / `strict_vars`, saved/restored per-scope. When on,
+  builtins like `join` emit "Use of uninitialized value" through
+  `$SIG{__WARN__}` even without $^W. Unlocks op/join test 18
+  (`should warn if separator is undef`).
+
+- **`s///r` non-destructive substitution flag**: previously the `/r` flag
+  was ignored, so `my $r = $s =~ s/x/y/gr;` mutated $s and returned the
+  count (0 or 1) instead of the modified copy. Now `/r` leaves the
+  target unchanged and returns the new string. The test.pl idiom
+  `$safe = $s =~ s/'/\'/gr` (escape quotes for eval string)
+  was the proximate failure cause of op/heredoc tests 48-66 (the
+  "Eval'd Indented here-doc" and "Indented here-doc" variants that
+  construct their prog via a $safe_start_delim).
+
+- **`pack "a*"` / `pack "a"` (binary string)**: previously
+  unsupported (returned empty string), so `pack "a*", "\x{100}"`
+  yielded "" and `use bytes`-aware concat tests in opbasic/concat
+  failed. Now passes the source string through verbatim (preserving
+  the underlying UTF-8 bytes — Perl's binary-string semantics on a
+  Rust `String`). `a` (no count) takes only the first byte. Unlocks
+  opbasic/concat tests 21/22 (`perl #26905, left/right eq bytes`).
+
+- **`ord` / `substr` honor `use bytes`**: under the bytes pragma,
+  `ord($s)` now returns the first UTF-8 byte's value (0..255) instead
+  of the first character's codepoint, and `substr($s, OFFSET, LEN)`
+  counts bytes (not characters) for both the read path and the 4-arg
+  replace form. Output is constructed via direct byte-slicing of
+  `s.as_bytes()` and `String::from_utf8_unchecked` so individual UTF-8
+  bytes round-trip unchanged. Previously `pack("U", 0xFF) + use bytes`
+  saw `length == 2` but `ord(substr(... ,1,1))` returned `0` because
+  `substr` indexed by char and re-encoded its single-char result back
+  to UTF-8 (a 2-byte sequence whose first byte was returned as `255`).
+  Matches reference perl byte-for-byte for the `pack("U", N) eq
+  "\xC3\xBF"` family of tests.
+
 - **`die "msg"` appends `at FILE line N.\n` location suffix**: when
   the die argument is a plain string (not a reference) and lacks a
   trailing newline, perl appends the source location to the message —

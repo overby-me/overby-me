@@ -28,4 +28,8 @@ disabled_rules = [
   # `.lines()` in `find_which_perl_require_line` scans a small
   # test-support file once at startup; not a hot path.
   "rust_lines_allocate_per_line",
+  # `use bytes` byte-slicing intentionally reinterprets UTF-8 byte
+  # sub-sequences; the resulting string is consumed by Perl-level code
+  # that compares raw byte content, not Rust string operations.
+  "rust_from_utf8_unchecked_boundary",
 ]
