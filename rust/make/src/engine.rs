@@ -18,6 +18,48 @@ pub enum VarOrigin {
     Automatic,
 }
 
+/// `-O` output sync mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputSyncMode {
+    /// No buffering — output streams interleave as they're produced.
+    None,
+    /// Buffer per-recipe; flush atomically at reap time.
+    Target,
+}
+
+/// Drain a pipe read fd to EOF into a Vec<u8>. Takes ownership; closes the fd on drop.
+fn drain_fd(fd: crate::c_int) -> Vec<u8> {
+    use std::io::Read;
+    use std::os::unix::io::FromRawFd;
+    let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
+    let mut buf = Vec::new();
+    let _ = file.read_to_end(&mut buf);
+    buf
+}
+
+/// Atomically write a buffered child output blob to real stdout, taking
+/// the process-wide output mutex so concurrent reaps don't interleave.
+fn flush_buffered_output(buf: &[u8]) {
+    use std::io::Write;
+    static OUTPUT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = OUTPUT_LOCK.lock().unwrap();
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    let _ = out.write_all(buf);
+    let _ = out.flush();
+}
+
+/// Set up a pipe pair for buffered child output. Returns (read_fd, write_fd) on success.
+fn make_output_pipe() -> Option<(crate::c_int, crate::c_int)> {
+    let mut fds: [crate::c_int; 2] = [0, 0];
+    let rc = unsafe { crate::pipe(fds.as_mut_ptr()) };
+    if rc == 0 {
+        Some((fds[0], fds[1]))
+    } else {
+        None
+    }
+}
+
 impl std::fmt::Display for VarOrigin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -456,6 +498,9 @@ pub struct Engine {
     last_rule_targets: RefCell<Option<Vec<String>>>,
     // Options
     pub jobs: usize,
+    /// `-O[mode]` output sync setting. `Target` buffers each forked
+    /// child's combined stdout/stderr and flushes atomically at reap.
+    pub output_sync: Cell<OutputSyncMode>,
     /// Set by `try_parallel_batch` when a forked prereq failed; the
     /// caller's serial post-loop checks this and propagates Err
     /// (or sets first_err under -k).
@@ -699,6 +744,19 @@ fn current_load_average() -> Option<f64> {
     s.split_whitespace().next()?.parse().ok()
 }
 
+type ParallelChild = (
+    crate::c_int,
+    String,
+    Option<std::thread::JoinHandle<Vec<u8>>>,
+);
+type ParallelChildOO = (
+    crate::c_int,
+    String,
+    bool,
+    Option<std::thread::JoinHandle<Vec<u8>>>,
+);
+type PendingChild = (String, bool, Option<std::thread::JoinHandle<Vec<u8>>>);
+
 impl Engine {
     pub fn new() -> Self {
         let engine = Self {
@@ -731,6 +789,7 @@ impl Engine {
             shell_depth: RefCell::new(0),
             last_rule_targets: RefCell::new(None),
             jobs: 1,
+            output_sync: Cell::new(OutputSyncMode::None),
             parallel_batch_failed: Cell::new(false),
             load_limit: 0.0,
             keep_going: false,
@@ -3940,13 +3999,25 @@ impl Engine {
         use std::io::Write;
         let _ = std::io::stdout().flush();
         let _ = std::io::stderr().flush();
+        let osync = self.output_sync.get();
         for batch in batches {
-            let mut pids: Vec<(crate::c_int, String)> = Vec::new();
+            let mut pids: Vec<ParallelChild> = Vec::new();
             for file in &batch {
+                let pipe_fds = if osync != OutputSyncMode::None {
+                    make_output_pipe()
+                } else {
+                    None
+                };
                 let pid = unsafe { crate::fork() };
                 if pid < 0 {
+                    if let Some((rf, wf)) = pipe_fds {
+                        unsafe {
+                            crate::close(rf);
+                            crate::close(wf);
+                        }
+                    }
                     // fork failed — wait for already-spawned and bail.
-                    for (cpid, _) in &pids {
+                    for (cpid, _, _) in &pids {
                         let mut status: crate::c_int = 0;
                         unsafe {
                             let _ = crate::waitpid(*cpid, &mut status as *mut _, 0);
@@ -3955,6 +4026,14 @@ impl Engine {
                     return spawned;
                 }
                 if pid == 0 {
+                    if let Some((rf, wf)) = pipe_fds {
+                        unsafe {
+                            crate::dup2(wf, 1);
+                            crate::dup2(wf, 2);
+                            crate::close(rf);
+                            crate::close(wf);
+                        }
+                    }
                     let rc = match self.build_target(file) {
                         Ok(()) => 0,
                         Err(_) => 1,
@@ -3963,11 +4042,25 @@ impl Engine {
                     let _ = std::io::stderr().flush();
                     unsafe { crate::_exit(rc) };
                 }
-                pids.push((pid, file.clone()));
+                let drain_handle = if let Some((rf, wf)) = pipe_fds {
+                    unsafe {
+                        crate::close(wf);
+                    }
+                    Some(std::thread::spawn(move || drain_fd(rf)))
+                } else {
+                    None
+                };
+                pids.push((pid, file.clone(), drain_handle));
             }
-            for (cpid, file) in &pids {
+            for (cpid, file, drain) in pids {
                 let mut status: crate::c_int = 0;
-                let rc = unsafe { crate::waitpid(*cpid, &mut status as *mut _, 0) };
+                let rc = unsafe { crate::waitpid(cpid, &mut status as *mut _, 0) };
+                if let Some(handle) = drain
+                    && let Ok(buf) = handle.join()
+                    && !buf.is_empty()
+                {
+                    flush_buffered_output(&buf);
+                }
                 if rc < 0 {
                     self.failed_targets.borrow_mut().insert(file.clone());
                     spawned.insert(file.clone());
@@ -4196,17 +4289,29 @@ impl Engine {
         }
 
         // Fork each batch entry. Parent collects via waitpid.
-        let mut pids: Vec<(crate::c_int, String, bool)> = Vec::new();
+        let osync = self.output_sync.get();
+        let mut pids: Vec<ParallelChildOO> = Vec::new();
         // Flush stdio before forking so children don't double-print.
         use std::io::Write;
         let _ = std::io::stdout().flush();
         let _ = std::io::stderr().flush();
         for (prereq, is_oo) in &batch {
+            let pipe_fds = if osync != OutputSyncMode::None {
+                make_output_pipe()
+            } else {
+                None
+            };
             let pid = unsafe { crate::fork() };
             if pid < 0 {
+                if let Some((rf, wf)) = pipe_fds {
+                    unsafe {
+                        crate::close(rf);
+                        crate::close(wf);
+                    }
+                }
                 // fork failed — fall back to serial for the rest.
                 // Wait for any already-spawned children.
-                for (cpid, _, _) in &pids {
+                for (cpid, _, _, _) in &pids {
                     let mut status: crate::c_int = 0;
                     unsafe {
                         let _ = crate::waitpid(*cpid, &mut status as *mut _, 0);
@@ -4215,7 +4320,15 @@ impl Engine {
                 return 0;
             }
             if pid == 0 {
-                // Child: build this prereq, exit with 0/1.
+                // Child: redirect stdio to pipe (if buffering), then build.
+                if let Some((rf, wf)) = pipe_fds {
+                    unsafe {
+                        crate::dup2(wf, 1);
+                        crate::dup2(wf, 2);
+                        crate::close(rf);
+                        crate::close(wf);
+                    }
+                }
                 let suppress_err = self.in_include_remake.get();
                 let rc = match self.build_target_for(prereq, Some(target)) {
                     Ok(()) => 0,
@@ -4234,13 +4347,23 @@ impl Engine {
                 let _ = std::io::stderr().flush();
                 unsafe { crate::_exit(rc) };
             }
-            pids.push((pid, prereq.clone(), *is_oo));
+            let drain_handle = if let Some((rf, wf)) = pipe_fds {
+                unsafe {
+                    crate::close(wf);
+                }
+                Some(std::thread::spawn(move || drain_fd(rf)))
+            } else {
+                None
+            };
+            pids.push((pid, prereq.clone(), *is_oo, drain_handle));
         }
 
         // Parent: wait for all children. Reap in completion order via waitpid(-1),
         // so failures from earlier recipes print before later-completing ones.
-        let mut pending: std::collections::HashMap<crate::c_int, (String, bool)> =
-            pids.into_iter().map(|(p, t, oo)| (p, (t, oo))).collect();
+        let mut pending: std::collections::HashMap<crate::c_int, PendingChild> = pids
+            .into_iter()
+            .map(|(p, t, oo, h)| (p, (t, oo, h)))
+            .collect();
         let mut any_failed = false;
         let mut printed_waiting = false;
         while !pending.is_empty() {
@@ -4251,10 +4374,16 @@ impl Engine {
                 any_failed = true;
                 break;
             }
-            let (prereq, _is_oo) = match pending.remove(&rc) {
+            let (prereq, _is_oo, drain) = match pending.remove(&rc) {
                 Some(v) => v,
                 None => continue, // Not our child.
             };
+            if let Some(handle) = drain
+                && let Ok(buf) = handle.join()
+                && !buf.is_empty()
+            {
+                flush_buffered_output(&buf);
+            }
             let exit_code = (status >> 8) & 0xff;
             let signaled = (status & 0x7f) != 0 && (status & 0x7f) != 0x7f;
             built_seen.insert(prereq.clone());

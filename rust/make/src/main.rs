@@ -25,6 +25,9 @@ unsafe extern "C" {
     pub fn waitpid(pid: c_int, status: *mut c_int, options: c_int) -> c_int;
     pub fn _exit(status: c_int) -> !;
     pub fn getpid() -> c_int;
+    pub fn pipe(fds: *mut c_int) -> c_int;
+    pub fn dup2(oldfd: c_int, newfd: c_int) -> c_int;
+    pub fn close(fd: c_int) -> c_int;
 }
 
 const SIGHUP: c_int = 1;
@@ -81,6 +84,13 @@ fn main() {
         std::process::exit(1);
     }
     std::process::exit(code);
+}
+
+fn parse_output_sync(mode: &str) -> crate::engine::OutputSyncMode {
+    match mode {
+        "none" => crate::engine::OutputSyncMode::None,
+        _ => crate::engine::OutputSyncMode::Target,
+    }
 }
 
 fn run() -> i32 {
@@ -360,12 +370,13 @@ fn run() -> i32 {
                 }
             }
             "-O" | "--output-sync" => {
-                // Accept and ignore. May have an optional next argument
-                // (line, target, none, recurse). Peek at next arg.
+                // Optional next arg: line/target/none/recurse/job.
+                let mut mode_str: String = String::new();
                 if let Some(next) = args.get(i + 1) {
                     match next.as_str() {
-                        "none" | "line" | "target" | "recurse" => {
+                        "none" | "line" | "target" | "recurse" | "job" => {
                             mflags_long.push(format!("-O{next}"));
+                            mode_str = next.clone();
                             i += 1;
                         }
                         _ => {
@@ -375,15 +386,18 @@ fn run() -> i32 {
                 } else {
                     mflags_long.push("-O".to_string());
                 }
+                engine.output_sync.set(parse_output_sync(&mode_str));
             }
             arg if arg.starts_with("-O") && arg.len() > 2 => {
                 // -Oline, -Otarget, etc.
                 mflags_long.push(arg.to_string());
+                engine.output_sync.set(parse_output_sync(&arg[2..]));
             }
             arg if arg.starts_with("--output-sync=") => {
                 // --output-sync=target etc.
                 let val = &arg["--output-sync=".len()..];
                 mflags_long.push(format!("-O{val}"));
+                engine.output_sync.set(parse_output_sync(val));
             }
             "-n" | "--just-print" | "--dry-run" | "--recon" => {
                 engine.dry_run = true;
