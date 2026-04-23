@@ -869,3 +869,107 @@ Round 15 (133/135 — small parallelism subtest gain):
    `features/parallelism` subtest 10 (Savannah bug 30653 regression).
 
 Subtest gains: parallelism 2→3.
+
+Round 16 (133/135 — parallel scheduler analysis, no code change):
+
+Investigated what would be required to pass the remaining two
+categories: `features/parallelism` (3/13 subtests) and
+`targets/WAIT` (10/14 subtests). Every failing subtest in both
+categories uses the helper `tests/thelp.pl` to call
+`wait FILE` — i.e. one recipe blocks until **another concurrently
+running recipe** creates a sentinel file. Under serial execution
+these are guaranteed to deadlock and time out (10s in `thelp.pl`,
+7s in the test harness for parallelism). There is no semantics-
+preserving reordering or detection trick that can avoid this:
+real concurrent process execution is required.
+
+**Why this is a multi-day refactor, not a quick patch.**
+
+The engine is built around a single-threaded, recursive,
+`RefCell`-mutating control flow:
+
+- `Engine` carries ~25 `RefCell`/`Cell` fields (not `Sync`):
+  `vars`, `rules`, `pattern_rules`, `exports`, `unexports`,
+  `built_targets`, `rebuilt_targets`, `failed_targets`,
+  `group_recipe_done`, `building_chain`, `target_vars`,
+  `private_vars`, `in_recipe`, `recipe_executed`, `current_source`,
+  `expand_chain_source`, `pending_includes`, `included_files`,
+  `env_inherited`, `immediate_recursive`, `shell_depth`,
+  `last_rule_targets`, `vpath_preexisting`, `vpath_patterns`,
+  `pattern_se_cache`, `buffered_kgo_errors`, `skip_implicit`, …
+- `build_target_for` is recursive (~2000 lines) and mutates many
+  of those fields on every call — push/pop scope guards
+  (`DepthGuard`, `ChainGuard`), target-specific var save/restore,
+  export set add/remove, etc.
+- `execute_recipe` saves a Vec of prior var values, calls
+  `execute_recipe_inner` synchronously (which spawns and waits
+  for one shell process at a time), then restores state in a
+  fixed order. The serial spawn+wait is on lines ~6855 and
+  ~7272/7299/7308/7331/7342, all via
+  `Self::run_with_signal_propagation`.
+- `CURRENT_CHILD_PID` is a single global atomic — only one
+  in-flight child can be tracked for SIGTERM forwarding.
+
+**Design sketch for a correct implementation.**
+
+1. Split `execute_recipe` into:
+   - `prepare_recipe(target, …) -> RecipeJob` — pre-expands all
+     recipe lines, captures the env_set/env_remove vectors,
+     captures the saved target-var state, captures
+     added/removed exports.
+   - `start_recipe_line(job, line_idx) -> Option<Child>` —
+     spawns the next shell process, returns the Child handle.
+   - `finalize_recipe(job, status)` — runs the existing var
+     restore + exports cleanup + rebuilt-targets update logic.
+2. New `JobPool { max: usize, running: Vec<(Child, RecipeJob,
+   line_idx)> }` with `submit(job)`, `try_spawn_next()`,
+   `wait_one() -> (RecipeJob, Status)`. Signal forwarding tracks
+   all running PIDs (small Vec under a Mutex), not just one.
+3. In `build_target_for`'s sibling-prereq loop:
+   - Partition `per_rule_seq` into `.WAIT`-separated batches.
+   - For each batch: recursively descend each prereq (still
+     serial recursion to satisfy *its* sub-graph), but instead
+     of running each prereq's own recipe synchronously, hand
+     the prepared `RecipeJob` to the pool. Block on
+     `wait_one()` whenever the pool is full or the batch is
+     drained before crossing a `.WAIT` barrier.
+   - Then run the parent target's recipe (also via the pool,
+     so its siblings under a grandparent can run alongside it).
+4. `.NOTPARALLEL: targets` (used by parallelism mk.10): track a
+   set of "no-parallel" targets; when entering one of them set
+   pool capacity to 1 for the duration of its sub-build.
+5. Skip the cross-process jobserver pipe protocol — sub-makes
+   re-exec with `MAKEFLAGS=-jN` and run their own pool. This
+   loses the global parallelism cap across recursive makes but
+   is acceptable for these tests.
+6. Decide what to do about `--debug=j`: the existing synthetic
+   "Putting child / Reaping winning child" emitted around the
+   serial path stays, but should now use real PIDs from the
+   pool.
+
+**Risks.**
+
+- `built_targets`, `rebuilt_targets`, `failed_targets` updates
+  must happen in `finalize_recipe`, *not* at submit time, or
+  parent rebuild decisions race with sibling completions.
+- Target-specific var save/restore is currently per-recipe; with
+  N recipes in flight the saved-state stacks must be per-job.
+- Output interleaving: GNU make uses `-O` (output-sync) modes;
+  none of the failing tests require output-sync (their expected
+  outputs are intentionally serialized via the `wait FILE`
+  pattern), but a future implementation must keep stderr/stdout
+  per-job until reap time.
+- `in_recipe` and `current_source` `RefCell`s are read by
+  `expand::expand` to format error messages — these must become
+  per-job (e.g. passed in via the job context) before parallel
+  pre-expansion is safe.
+- The 133 passing tests cover many subtle interactions between
+  these RefCells; landing the pool in stages (pool created but
+  unused, then enabled only when `jobs > 1` and goal-tree is
+  pure leaves, then full) is the safest path.
+
+**Decision.** Hold at 133/135 (98.5%) for now. The remaining 2
+tests are deferred under a single, well-understood blocker
+(real parallel scheduler), not 15 disparate bugs. A future
+session that takes on the refactor above can land it behind a
+feature flag and gradually widen its applicability.
