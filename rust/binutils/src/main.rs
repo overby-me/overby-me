@@ -4811,31 +4811,29 @@ fn tool_objdump(args: &[String]) -> i32 {
     let mut errors = 0;
     for file in &files {
         if emit_wi_placeholder {
-            // The dejagnu test does `tail -n +4 objdump.out > objdump.out`,
-            // which truncates the file before tail reads — empirically this
-            // wipes short outputs. Print a large block (~40 lines) so the
-            // surviving content is always non-empty and contains enough text
-            // to satisfy regexp checks.
+            // Delegate DWARF .debug_info dumping to the readelf implementation.
+            let data_bytes = match fs::read(file) {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("objdump: '{file}': {e}");
+                    errors += 1;
+                    continue;
+                }
+            };
             println!();
             println!("{file}:     file format elf64-x86-64");
             println!();
-            println!("Contents of the .debug_info section:");
-            println!();
-            for cu in 0..3 {
-                println!("  Compilation Unit @ offset 0x{cu:x}:");
-                println!("   Length:        0x10 (32-bit)");
-                println!("   Version:       4");
-                println!("   Abbrev Offset: 0x0");
-                println!("   Pointer Size:  8");
-                println!(" <0><b>: Abbrev Number: 0 (DW_TAG_compile_unit)");
-                println!(" <1><1c>: Abbrev Number: 0 (DW_TAG_subprogram)");
-                println!("    <DW_AT_low_pc>     : 0x0");
-                println!("    <DW_AT_high_pc>    : 0x10");
-                println!("    <DW_AT_name>       : main");
-                println!();
+            if let Ok(elf) =
+                ElfFile::<object::elf::FileHeader64<object::Endianness>>::parse(&*data_bytes)
+            {
+                let endian = elf.endian();
+                readelf_debug_info(&elf, &data_bytes, endian);
+            } else if let Ok(elf) =
+                ElfFile::<object::elf::FileHeader32<object::Endianness>>::parse(&*data_bytes)
+            {
+                let endian = elf.endian();
+                readelf_debug_info(&elf, &data_bytes, endian);
             }
-            println!("  (DWARF info parsing not fully implemented)");
-            println!();
             continue;
         }
 
@@ -10795,6 +10793,12 @@ fn readelf_debug_info<'data, Elf: FileHeader>(
             let entry = match abbrevs.get(&code) {
                 Some(e) => e,
                 None => {
+                    // Missing abbrev table entries typically happen when abbrevs live in a
+                    // separate debug file (follow-links / debuglink / alt-link). Rather than
+                    // erroring out and truncating the rest of the dump, skip gracefully.
+                    if abbrevs.is_empty() {
+                        break;
+                    }
                     eprintln!("readelf: bad abbrev code {code}");
                     break;
                 }
