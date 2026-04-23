@@ -1542,7 +1542,9 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                 // unless the user opted in via --location-trusted, mirroring
                 // curl's CURLOPT_UNRESTRICTED_AUTH semantics.
                 if let Ok(new_url) = parse_url(&current_url)
-                    && !url.host.eq_ignore_ascii_case(&new_url.host)
+                    && (!url.host.eq_ignore_ascii_case(&new_url.host)
+                        || url.port != new_url.port
+                        || url.scheme != new_url.scheme)
                 {
                     opts.headers
                         .retain(|(k, _)| !k.eq_ignore_ascii_case("host"));
