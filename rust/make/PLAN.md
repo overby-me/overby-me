@@ -973,3 +973,95 @@ tests are deferred under a single, well-understood blocker
 (real parallel scheduler), not 15 disparate bugs. A future
 session that takes on the refactor above can land it behind a
 feature flag and gradually widen its applicability.
+
+Round 17 (133/135 — first-pass parallel implementation, +8 subtests):
+
+Implemented a fork()-based parallel-spawn fast-path for sibling
+prereqs that are "simple leaves". Activated when `-jN > 1`,
+gated off when `-l<N>` (load limit), `--dry-run`, `--question`,
+`--touch`, `.NOTPARALLEL`, or recipe-phase. Each batch terminates
+at `.WAIT` markers (which act as serialization barriers); after
+a batch completes, the next segment can start its own batch.
+
+**What's implemented (this round).**
+
+1. **`fn try_parallel_batch`** in `engine.rs`: collects up to N
+   "simple leaf" prereqs, forks each via `libc::fork()`, parent
+   `waitpid`s on all children. POSIX exit-status decoded into
+   success / signaled / nonzero-exit. Successful builds re-stat
+   the file in the parent and update `built_targets` /
+   `rebuilt_targets` / set `recipe_executed = true` so the
+   parent's "Nothing to be done" / "is up to date" diagnostics
+   reflect that work was performed. Failures land in
+   `failed_targets` and set `parallel_batch_failed`.
+2. **`fn is_simple_leaf`**: a conservative spawnability gate.
+   Spawnable means: non-dot name, not phony, no target-specific
+   vars/exports, exactly one rule entry with a non-empty recipe,
+   no further prereqs/order-only deps, no `&:` group, no
+   `.SECONDEXPANSION`, no `$(MAKE)`/`${MAKE}` in recipe lines.
+3. **Segment-aware pre-pass** in `build_target_for`: walks
+   `per_rule_seq` partitioning at `.WAIT`, attempts a parallel
+   batch from each segment start. When a batch fails to form
+   (single entry, non-spawnable head, etc.) the entries up to
+   the next `.WAIT` flush serially before the next batch starts
+   — preserving `.WAIT` semantics. Failures from the parallel
+   batch are surfaced via a new `parallel_batch_failed: Cell<bool>`
+   and propagate as either `first_err` (under `-k`) or an
+   immediate `Err(String::new())` return (without `-k`).
+4. **Failure FFI plumbing** in `main.rs`: added `fork`,
+   `waitpid`, `_exit`, `getpid` to the existing `extern "C"`
+   block.
+5. **`-l<N>` load-limit tracking**: `engine.load_limit: f64`
+   stores the value parsed from `-l`/`--load-average`/`--max-load`.
+   When `>0.0`, `try_parallel_batch` bails out (we don't
+   implement real load sampling, so safest is to serialize).
+   Cmdline-set `cmdline_set_load: bool` keeps a makefile
+   `MAKEFLAGS += -lN` from overriding a cmdline `-lM`.
+6. **`-jN` post-load propagation**: makefile-level
+   `MAKEFLAGS += -jN` now updates `engine.jobs` after parse,
+   matching how other flags (`-r`, `-R`, `-s`, `-k`, `-i`,
+   `-n`, `-e`, `-w`, `--trace`) are applied post-load. Cmdline
+   `-jM` still wins via `cmdline_set_jobs: bool`. Also added
+   `-j` to the MAKEFLAGS prefix-flag whitelist (alongside
+   `-I`, `-l`, `-O`) so `MAKEFLAGS += -j4` is now actually
+   stored in the variable rather than being dropped, plus
+   added a `-j` category to the long-flag canonical sort
+   order (between `-I` and `-l`).
+
+**Subtest gains.**
+
+- `features/parallelism`: 3 → 9 of 13 (passes 0,1,2,5,8,9,10
+  plus the original 3).
+- `targets/WAIT`: 10 → 12 of 14 (passes the basic
+  `.WAIT`-as-barrier subtests in addition to the originals).
+
+Categories unchanged at 133/135 — the remaining 4 parallelism
+subtests and 2 WAIT subtests need:
+
+- **Parallel during include-remake** (parallelism #3, #4): the
+  `finalize_includes` phase has its own loop and doesn't go
+  through the per-prereq pre-pass. Would need a second
+  `try_parallel_batch`-style call there.
+- **Parallel non-leaf execution** (parallelism #6, WAIT #7,
+  WAIT #11): `all: one two` where `one` and `two` are
+  themselves rules with prereqs. `is_simple_leaf` rejects
+  them, so they fall back to serial. Forking non-leaves is
+  riskier — the forked child runs a full `build_target_for`
+  subtree that touches many `RefCell`s and may write files
+  the parent later expects. Tractable but wants careful
+  testing of the 133 baseline.
+- **Sub-make jobserver inheritance** (parallelism #12):
+  recipes invoking `$(MAKE)` need the child make to participate
+  in the same job pool. We currently re-exec without a
+  jobserver, so the child runs serially and the test
+  deadlocks on a `wait FILE` waiting for a parallel sibling
+  on the parent's side.
+
+**Risk and rollback.**
+
+Zero category regressions across the full 135-test suite. The
+parallel path is gated behind multiple checks; setting `-j1`
+(the default) goes straight back to the serial code path. The
+post-load `-jN` and `-lN` handlers are also gated on cmdline
+not having set the same flag, so existing MAKEFLAGS-merge
+tests are unaffected.

@@ -456,6 +456,12 @@ pub struct Engine {
     last_rule_targets: RefCell<Option<Vec<String>>>,
     // Options
     pub jobs: usize,
+    /// Set by `try_parallel_batch` when a forked prereq failed; the
+    /// caller's serial post-loop checks this and propagates Err
+    /// (or sets first_err under -k).
+    parallel_batch_failed: Cell<bool>,
+    /// -l<N> load limit. When >0, our parallel fast-path bails out.
+    pub load_limit: f64,
     pub keep_going: bool,
     pub dry_run: bool,
     pub silent: bool,
@@ -705,6 +711,8 @@ impl Engine {
             shell_depth: RefCell::new(0),
             last_rule_targets: RefCell::new(None),
             jobs: 1,
+            parallel_batch_failed: Cell::new(false),
+            load_limit: 0.0,
             keep_going: false,
             dry_run: false,
             silent: false,
@@ -1085,7 +1093,12 @@ impl Engine {
                 if tok.starts_with("--") {
                     // Long flag from file (e.g. --trace, --warn-undefined-variables)
                     file_long.push(tok.to_string());
-                } else if tok.starts_with("-I") || tok.starts_with("-l") || tok.starts_with("-O") {
+                } else if tok.starts_with("-I")
+                    || tok.starts_with("-l")
+                    || tok.starts_with("-O")
+                    || tok.starts_with("-j")
+                    || tok == "-j"
+                {
                     // -Idir, -l2.5, -Otarget — flags with attached values, preserve as long flags
                     file_long.push(tok.to_string());
                 } else if let Some(stripped) = tok.strip_prefix('-') {
@@ -1172,24 +1185,26 @@ impl Engine {
             let long_category = |f: &str| -> u8 {
                 if f.starts_with("-I") {
                     0
-                } else if f.starts_with("-l") {
+                } else if f.starts_with("-j") {
                     1
-                } else if f.starts_with("-O") {
+                } else if f.starts_with("-l") {
                     2
-                } else if f.starts_with("--debug") {
+                } else if f.starts_with("-O") {
                     3
-                } else if f == "--trace" {
+                } else if f.starts_with("--debug") {
                     4
-                } else if f == "--no-print-directory" {
+                } else if f == "--trace" {
                     5
-                } else if f == "--warn-undefined-variables" {
+                } else if f == "--no-print-directory" {
                     6
-                } else if f == "--no-silent" {
+                } else if f == "--warn-undefined-variables" {
                     7
-                } else if f.starts_with("--eval") {
+                } else if f == "--no-silent" {
                     8
-                } else {
+                } else if f.starts_with("--eval") {
                     9
+                } else {
+                    10
                 }
             };
             all_long.sort_by_key(|f| long_category(f));
@@ -3613,6 +3628,203 @@ impl Engine {
             .collect()
     }
 
+    /// Try to build a leading batch of prereqs in parallel via fork().
+    ///
+    /// Returns the number of entries from `seq[start..]` that were
+    /// consumed (built in parallel, or skipped because they were
+    /// already built). Caller continues serial processing from
+    /// `start + consumed`.
+    ///
+    /// Conservative spawnability check: only build via fork() when each
+    /// candidate is a "simple leaf" — has explicit rule(s), each rule
+    /// has a non-empty recipe and no further prereqs/order-only deps,
+    /// is not phony, not grouped, not double-colon-with-multi-rule, has
+    /// no target-specific vars/exports, and isn't already built/failed.
+    /// Anything else, plus any `.WAIT` marker, terminates the batch.
+    ///
+    /// Returns 0 if no parallel work was done (caller falls back to
+    /// serial path for `seq[start]`).
+    fn try_parallel_batch(
+        &self,
+        target: &str,
+        seq: &[(String, bool)],
+        start: usize,
+        built_seen: &mut HashSet<String>,
+    ) -> usize {
+        if self.jobs <= 1 {
+            return 0;
+        }
+        if self.load_limit > 0.0 {
+            return 0;
+        }
+        if self.dry_run || self.question || self.touch {
+            return 0;
+        }
+        if self.notparallel.get() {
+            return 0;
+        }
+        // Don't fork during include-remake phase (finalize_includes).
+        if *self.in_recipe.borrow() {
+            return 0;
+        }
+
+        // Identify spawnable batch.
+        let max_n = self.jobs;
+        let mut batch: Vec<(String, bool)> = Vec::new();
+        let mut idx = start;
+        while idx < seq.len() && batch.len() < max_n {
+            let (prereq, is_oo) = &seq[idx];
+            if prereq == ".WAIT" {
+                break;
+            }
+            if !self.is_simple_leaf(prereq) {
+                break;
+            }
+            if self.built_targets.borrow().contains(prereq.as_str()) {
+                // Already built — counts toward consumption but no work.
+                idx += 1;
+                continue;
+            }
+            if self.keep_going && self.failed_targets.borrow().contains(prereq.as_str()) {
+                idx += 1;
+                continue;
+            }
+            if self.building_chain.borrow().contains(prereq.as_str()) {
+                break;
+            }
+            // Don't double-add to seen.
+            if built_seen.contains(prereq.as_str()) {
+                idx += 1;
+                continue;
+            }
+            batch.push((prereq.clone(), *is_oo));
+            idx += 1;
+        }
+        if batch.len() < 2 {
+            // No real benefit to forking a single entry.
+            return 0;
+        }
+
+        // Fork each batch entry. Parent collects via waitpid.
+        let mut pids: Vec<(crate::c_int, String, bool)> = Vec::new();
+        // Flush stdio before forking so children don't double-print.
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+        let _ = std::io::stderr().flush();
+        for (prereq, is_oo) in &batch {
+            let pid = unsafe { crate::fork() };
+            if pid < 0 {
+                // fork failed — fall back to serial for the rest.
+                // Wait for any already-spawned children.
+                for (cpid, _, _) in &pids {
+                    let mut status: crate::c_int = 0;
+                    unsafe {
+                        let _ = crate::waitpid(*cpid, &mut status as *mut _, 0);
+                    }
+                }
+                return 0;
+            }
+            if pid == 0 {
+                // Child: build this prereq, exit with 0/1.
+                // Re-flush after potential output.
+                let rc = match self.build_target_for(prereq, Some(target)) {
+                    Ok(()) => 0,
+                    Err(_) => 1,
+                };
+                let _ = std::io::stdout().flush();
+                let _ = std::io::stderr().flush();
+                unsafe { crate::_exit(rc) };
+            }
+            pids.push((pid, prereq.clone(), *is_oo));
+        }
+
+        // Parent: wait for all children. Track failures for -k semantics.
+        let mut any_failed = false;
+        for (cpid, prereq, _is_oo) in &pids {
+            let mut status: crate::c_int = 0;
+            let rc = unsafe { crate::waitpid(*cpid, &mut status as *mut _, 0) };
+            if rc < 0 {
+                any_failed = true;
+                continue;
+            }
+            // POSIX exit-status decoding: low 7 bits = signal, bit 7 =
+            // core dump, next 8 bits = exit status.
+            let exit_code = (status >> 8) & 0xff;
+            let signaled = (status & 0x7f) != 0 && (status & 0x7f) != 0x7f;
+            built_seen.insert(prereq.clone());
+            if exit_code != 0 || signaled {
+                any_failed = true;
+                self.failed_targets.borrow_mut().insert(prereq.clone());
+            } else {
+                // Success: mark built; if file now exists/changed mtime, mark rebuilt.
+                self.built_targets.borrow_mut().insert(prereq.clone());
+                if std::fs::metadata(prereq.as_str()).is_ok() {
+                    self.rebuilt_targets.borrow_mut().insert(prereq.clone());
+                }
+                // The forked child ran the prereq's recipe — make sure
+                // the parent's "Nothing to be done" / "is up to date"
+                // diagnostic logic sees that work was performed.
+                *self.recipe_executed.borrow_mut() = true;
+            }
+        }
+        // Surface failures via the failure flag (consumed by the serial
+        // post-loop) so the parent stops building dependent targets.
+        if any_failed {
+            self.parallel_batch_failed.set(true);
+        }
+        idx - start
+    }
+
+    /// Returns true if `target` can be built safely in a forked child:
+    /// has explicit rules with recipes, no further prereqs/order-only
+    /// deps, no target-specific vars/exports, not phony/grouped/double-
+    /// colon-with-multi-rule, no SE, no pattern rules required.
+    fn is_simple_leaf(&self, target: &str) -> bool {
+        if target.is_empty() || target.starts_with('.') {
+            return false;
+        }
+        if self.phony_targets.borrow().contains(target) {
+            return false;
+        }
+        if self.target_vars.borrow().contains_key(target) {
+            return false;
+        }
+        if self.target_exports.borrow().contains_key(target) {
+            return false;
+        }
+        let rules = self.rules.borrow();
+        let entries = match rules.get(target) {
+            Some(e) if !e.is_empty() => e,
+            _ => return false,
+        };
+        // Single rule entry; must have recipe; no prereqs/order-only;
+        // not grouped; not SE.
+        if entries.len() != 1 {
+            return false;
+        }
+        let r = &entries[0];
+        if r.recipe.is_empty() {
+            return false;
+        }
+        if !r.prerequisites.is_empty() || !r.order_only.is_empty() {
+            return false;
+        }
+        if !r.group.is_empty() {
+            return false;
+        }
+        if r.second_expand {
+            return false;
+        }
+        // Recipe must not contain $(MAKE) — sub-makes need their own jobserver
+        // setup that we don't yet support.
+        for line in &r.recipe {
+            if line.contains("$(MAKE)") || line.contains("${MAKE}") {
+                return false;
+            }
+        }
+        true
+    }
+
     fn build_target_for(&self, target: &str, needed_by: Option<&str>) -> Result<(), String> {
         // Normalize path: strip leading ./ for consistency with rule lookup
         let target = target.strip_prefix("./").unwrap_or(target);
@@ -5108,8 +5320,250 @@ impl Engine {
         // Per-prereq build with full state tracking. Order-only prereqs
         // skip the mtime/has_phony tracking (they don't influence the
         // target's rebuild decision).
-        for (prereq, is_oo) in &per_rule_seq {
+        //
+        // Parallel fast-path: when -jN > 1, attempt to spawn a leading
+        // batch of "simple leaf" prereqs in parallel via fork() before
+        // falling back to serial recursion. The batch terminates at the
+        // first non-spawnable entry or `.WAIT` marker. Failures land in
+        // `failed_targets`; the serial loop below picks up the rest.
+        // Parallel pre-pass partitions per_rule_seq into segments
+        // separated by `.WAIT` markers. Within each segment, attempt to
+        // fork all spawnable simple-leaf prereqs in one batch. The serial
+        // tail (after the first non-spawnable, mid-segment) falls back to
+        // the serial loop. With this design, the segment after a `.WAIT`
+        // can still be batched even if the segment before it had only
+        // serial entries.
+        let mut idx = 0usize;
+        let seg_start = |start: usize| -> usize {
+            let mut e = start;
+            while e < per_rule_seq.len() && per_rule_seq[e].0 != ".WAIT" {
+                e += 1;
+            }
+            e
+        };
+        let mut serial_carry: Vec<(String, bool)> = Vec::new();
+        while idx < per_rule_seq.len() {
+            // Skip leading .WAIT markers.
+            while idx < per_rule_seq.len() && per_rule_seq[idx].0 == ".WAIT" {
+                idx += 1;
+            }
+            if idx >= per_rule_seq.len() {
+                break;
+            }
+            let seg_end = seg_start(idx);
+            let consumed = self.try_parallel_batch(target, &per_rule_seq, idx, &mut built_seen);
+            if self.parallel_batch_failed.replace(false) {
+                // A forked prereq failed. Mark this target as failed.
+                if self.keep_going {
+                    if first_err.is_none() {
+                        first_err = Some(String::new());
+                    }
+                } else {
+                    self.failed_targets.borrow_mut().insert(target.to_string());
+                    clean_skip(self);
+                    pop_scope(self);
+                    return Err(String::new());
+                }
+            }
+            if consumed == 0 {
+                // No parallel batch from this position. Push entries up
+                // to the next .WAIT into the serial carry, then advance.
+                for entry in &per_rule_seq[idx..seg_end] {
+                    serial_carry.push(entry.clone());
+                }
+                idx = seg_end;
+                // If there are more segments, we need to ensure the
+                // serial carry is processed BEFORE crossing the .WAIT.
+                // Run the serial loop on `serial_carry` now, then
+                // continue. But to keep code simple we only do the
+                // build inline here; the serial loop below will
+                // naturally process anything in carry.
+                if idx < per_rule_seq.len() {
+                    // Process the carry serially right here so that
+                    // .WAIT semantics hold (carry must complete before
+                    // we look at the next batch's parallel work).
+                    let carry: Vec<(String, bool)> = std::mem::take(&mut serial_carry);
+                    for (prereq, is_oo) in &carry {
+                        if !built_seen.insert(prereq.clone()) {
+                            continue;
+                        }
+                        if let Err(e) = self.build_target_for(prereq, Some(target)) {
+                            if self.keep_going {
+                                if !e.is_empty() {
+                                    let msg = if e.starts_with('[') {
+                                        format!("make: *** {e}")
+                                    } else {
+                                        format!("make: *** {e}.")
+                                    };
+                                    if let Some(ref mut buf) =
+                                        *self.buffered_kgo_errors.borrow_mut()
+                                    {
+                                        buf.push(msg);
+                                    } else {
+                                        eprintln!("{msg}");
+                                    }
+                                }
+                                if first_err.is_none() {
+                                    first_err = Some(String::new());
+                                }
+                                continue;
+                            }
+                            clean_skip(self);
+                            pop_scope(self);
+                            return Err(e);
+                        }
+                        if !*is_oo {
+                            if self.rebuilt_targets.borrow().contains(prereq.as_str())
+                                && !self.check_intermediate(
+                                    prereq,
+                                    pattern_derived_prereqs.contains(prereq),
+                                )
+                            {
+                                has_rebuilt_prereq = true;
+                            }
+                            if let Some(meta) = self.metadata_or_vpath(prereq)
+                                && let Ok(mtime) = meta.modified()
+                            {
+                                newest_prereq = Some(match newest_prereq {
+                                    Some(t) if mtime > t => mtime,
+                                    Some(t) => t,
+                                    None => mtime,
+                                });
+                            } else if self.phony_targets.borrow().contains(prereq)
+                                || self.rules.borrow().contains_key(prereq)
+                            {
+                                has_phony_prereq = true;
+                            } else {
+                                let is_intermediate = self.check_intermediate(
+                                    prereq,
+                                    pattern_derived_prereqs.contains(prereq),
+                                );
+                                if !is_intermediate {
+                                    has_phony_prereq = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+            // Successfully forked a batch. Advance past it; if there are
+            // mid-segment leftover entries (between batch end and seg_end),
+            // hand them to serial.
+            idx += consumed;
+            if idx < seg_end {
+                for entry in &per_rule_seq[idx..seg_end] {
+                    serial_carry.push(entry.clone());
+                }
+                idx = seg_end;
+                // Process the carry now (before the next .WAIT batch).
+                if idx < per_rule_seq.len() {
+                    let carry: Vec<(String, bool)> = std::mem::take(&mut serial_carry);
+                    for (prereq, is_oo) in &carry {
+                        if !built_seen.insert(prereq.clone()) {
+                            continue;
+                        }
+                        if let Err(e) = self.build_target_for(prereq, Some(target)) {
+                            if self.keep_going {
+                                if !e.is_empty() {
+                                    let msg = if e.starts_with('[') {
+                                        format!("make: *** {e}")
+                                    } else {
+                                        format!("make: *** {e}.")
+                                    };
+                                    if let Some(ref mut buf) =
+                                        *self.buffered_kgo_errors.borrow_mut()
+                                    {
+                                        buf.push(msg);
+                                    } else {
+                                        eprintln!("{msg}");
+                                    }
+                                }
+                                if first_err.is_none() {
+                                    first_err = Some(String::new());
+                                }
+                                continue;
+                            }
+                            clean_skip(self);
+                            pop_scope(self);
+                            return Err(e);
+                        }
+                        if !*is_oo {
+                            if self.rebuilt_targets.borrow().contains(prereq.as_str())
+                                && !self.check_intermediate(
+                                    prereq,
+                                    pattern_derived_prereqs.contains(prereq),
+                                )
+                            {
+                                has_rebuilt_prereq = true;
+                            }
+                            if let Some(meta) = self.metadata_or_vpath(prereq)
+                                && let Ok(mtime) = meta.modified()
+                            {
+                                newest_prereq = Some(match newest_prereq {
+                                    Some(t) if mtime > t => mtime,
+                                    Some(t) => t,
+                                    None => mtime,
+                                });
+                            } else if self.phony_targets.borrow().contains(prereq)
+                                || self.rules.borrow().contains_key(prereq)
+                            {
+                                has_phony_prereq = true;
+                            } else {
+                                let is_intermediate = self.check_intermediate(
+                                    prereq,
+                                    pattern_derived_prereqs.contains(prereq),
+                                );
+                                if !is_intermediate {
+                                    has_phony_prereq = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Anything left in serial_carry, plus anything past the last
+        // batched segment, falls through to the serial loop below.
+        let mut per_rule_seq_serial: Vec<(String, bool)> = serial_carry;
+        if idx < per_rule_seq.len() {
+            per_rule_seq_serial.extend(per_rule_seq[idx..].iter().cloned());
+        }
+
+        for (prereq, is_oo) in &per_rule_seq_serial {
             if !built_seen.insert(prereq.clone()) {
+                // Already handled by parallel batch — but we still need to
+                // propagate failed-prereq state into the parent's loop
+                // accumulators (has_phony_prereq, has_rebuilt_prereq).
+                if !*is_oo {
+                    if self.failed_targets.borrow().contains(prereq.as_str()) {
+                        if self.keep_going {
+                            if first_err.is_none() {
+                                first_err = Some(String::new());
+                            }
+                            continue;
+                        } else {
+                            clean_skip(self);
+                            pop_scope(self);
+                            return Err(String::new());
+                        }
+                    }
+                    if self.rebuilt_targets.borrow().contains(prereq.as_str())
+                        && !self
+                            .check_intermediate(prereq, pattern_derived_prereqs.contains(prereq))
+                    {
+                        has_rebuilt_prereq = true;
+                    }
+                    if let Some(meta) = self.metadata_or_vpath(prereq)
+                        && let Ok(mtime) = meta.modified()
+                    {
+                        newest_prereq = Some(match newest_prereq {
+                            Some(t) if mtime > t => mtime,
+                            Some(t) => t,
+                            None => mtime,
+                        });
+                    }
+                }
                 continue;
             }
             // Circular dependency: drop with a warning.

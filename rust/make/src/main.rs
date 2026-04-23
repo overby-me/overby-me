@@ -21,6 +21,10 @@ type c_int = i32;
 unsafe extern "C" {
     fn signal(signum: c_int, handler: usize) -> usize;
     fn kill(pid: c_int, sig: c_int) -> c_int;
+    pub fn fork() -> c_int;
+    pub fn waitpid(pid: c_int, status: *mut c_int, options: c_int) -> c_int;
+    pub fn _exit(status: c_int) -> !;
+    pub fn getpid() -> c_int;
 }
 
 const SIGHUP: c_int = 1;
@@ -85,6 +89,8 @@ fn run() -> i32 {
     // we can clean it up on exit. Detect by checking -f args for paths
     // matching the make-stdin-<pid> pattern in TMPDIR.
     let mut inherited_stdin_temp: Option<String> = None;
+    let mut cmdline_set_jobs: bool = false;
+    let mut cmdline_set_load: bool = false;
 
     // GNU make prepends GNUMAKEFLAGS and MAKEFLAGS env to argv so options
     // and cmdline vars from them are applied before explicit command-line
@@ -337,12 +343,17 @@ fn run() -> i32 {
                 } else {
                     engine.jobs = 0; // unlimited
                 }
+                cmdline_set_jobs = true;
             }
             "-l" | "--load-average" | "--max-load" => {
                 // Accept -l with a float argument. TODO: implement load limiting.
                 i += 1;
                 if i < args.len() {
+                    if let Ok(v) = args[i].parse::<f64>() {
+                        engine.load_limit = v;
+                    }
                     mflags_long.push(format!("-l{}", args[i]));
+                    cmdline_set_load = true;
                 }
             }
             "-O" | "--output-sync" => {
@@ -546,7 +557,10 @@ fn run() -> i32 {
                 return 0;
             }
             arg if arg.starts_with("-j") => match arg[2..].parse::<usize>() {
-                Ok(n) => engine.jobs = n,
+                Ok(n) => {
+                    engine.jobs = n;
+                    cmdline_set_jobs = true;
+                }
                 Err(_) => {
                     eprintln!("make: invalid integer argument '{}' for '-j'", &arg[2..]);
                     return 2;
@@ -554,6 +568,10 @@ fn run() -> i32 {
             },
             arg if arg.starts_with("-l") && arg.len() > 2 => {
                 // -l0.0001 form
+                if let Ok(v) = arg[2..].parse::<f64>() {
+                    engine.load_limit = v;
+                    cmdline_set_load = true;
+                }
                 mflags_long.push(arg.to_string());
             }
             arg if arg.starts_with("--load-average=") => {
@@ -1205,6 +1223,42 @@ fn run() -> i32 {
             }
             if tok == "--debug" {
                 engine.set_debug_flag(b'a');
+                continue;
+            }
+            // Post-load -jN / --jobs=N: update engine.jobs unless cmdline set it.
+            if let Some(n_str) = tok.strip_prefix("-j") {
+                if !cmdline_set_jobs {
+                    if n_str.is_empty() {
+                        engine.jobs = 0; // unlimited
+                    } else if let Ok(n) = n_str.parse::<usize>() {
+                        engine.jobs = n;
+                    }
+                }
+                continue;
+            }
+            if let Some(n_str) = tok.strip_prefix("--jobs=") {
+                if !cmdline_set_jobs && let Ok(n) = n_str.parse::<usize>() {
+                    engine.jobs = n;
+                }
+                continue;
+            }
+            // Post-load -lN / --load-average=N / --max-load=N: update engine.load_limit unless cmdline set it.
+            if let Some(n_str) = tok.strip_prefix("-l") {
+                if !cmdline_set_load
+                    && !n_str.is_empty()
+                    && let Ok(v) = n_str.parse::<f64>()
+                {
+                    engine.load_limit = v;
+                }
+                continue;
+            }
+            if let Some(n_str) = tok
+                .strip_prefix("--load-average=")
+                .or_else(|| tok.strip_prefix("--max-load="))
+            {
+                if !cmdline_set_load && let Ok(v) = n_str.parse::<f64>() {
+                    engine.load_limit = v;
+                }
                 continue;
             }
             // Short-flag cluster: may or may not start with '-'.
