@@ -30,7 +30,6 @@ All 15 stdenv tools have Rust replacements available:
 | Build driver | gnumake | [rust-make](../make) | repo | 4 |
 | Patch application | gnupatch | [rust-patch](../patch) | repo | 4 |
 | ELF patching | patchelf | [rust-patchelf](../patchelf) | repo | 5 |
-| Symbol stripping | binutils strip | [rust-strip](../strip) | repo | 5 |
 
 ## How It Works
 
@@ -125,8 +124,7 @@ rust/nixpkgs/
 │   ├── xz.nix           # xz → rust-xz
 │   ├── make.nix         # gnumake → rust-make
 │   ├── patch.nix        # gnupatch → rust-patch
-│   ├── patchelf.nix     # patchelf → rust-patchelf
-│   └── strip.nix        # binutils strip → rust-strip
+│   └── patchelf.nix     # patchelf → rust-patchelf
 ├── PLAN.md              # Phased replacement roadmap
 ├── README.md            # This file
 └── justfile             # Build, test, and status commands

@@ -255,7 +255,6 @@
         ./rust/perl
         ./rust/pkg-config
         ./rust/sed
-        ./rust/strip
         ./rust/systemd
         ./rust/tar
         ./rust/texinfo

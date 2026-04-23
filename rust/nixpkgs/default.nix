@@ -89,7 +89,6 @@
       rust-make,
       rust-patch,
       rust-patchelf,
-      rust-strip,
     }:
       stdenv.mkDerivation {
         pname = "rust-nixpkgs-test";
@@ -113,7 +112,6 @@
           rust-make
           rust-patch
           rust-patchelf
-          rust-strip
         ];
 
         buildPhase = ''
@@ -124,7 +122,7 @@
           echo "  Phase 2: sed (uutils-sed), grep, awk, findutils (uutils), diffutils (uutils)"
           echo "  Phase 3: tar, gzip, bzip2, xz"
           echo "  Phase 4: make, patch"
-          echo "  Phase 5: patchelf, strip"
+          echo "  Phase 5: patchelf"
           echo ""
           echo "Verifying binaries..."
           bash --version | head -1
@@ -141,7 +139,6 @@
           make --version | head -1
           patch --version | head -1
           patchelf --version | head -1
-          strip --version | head -1
           echo ""
           echo "All components verified."
         '';

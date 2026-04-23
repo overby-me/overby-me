@@ -53,7 +53,6 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 | Build driver | gnumake | rust/make | repo | 4 | ✅ Available |
 | Patch | gnupatch | rust/patch | repo | 4 | ✅ Available |
 | ELF patcher | patchelf | rust/patchelf | repo | 5 | ✅ Available |
-| Symbol strip | binutils (strip) | rust/strip | repo | 5 | ✅ Available |
 | Build phases | setup.sh | rust-mkderivation (future) | repo | 6 | ⏳ Planned |
 
 ---
@@ -223,7 +222,6 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 | Tool | Replacement | Rust Foundation |
 |------|-------------|-----------------|
 | patchelf | rust/patchelf | `goblin` crate for ELF parsing/writing |
-| strip (binutils) | rust/strip | `object` crate for ELF section manipulation |
 
 ### Testing Strategy
 

@@ -104,7 +104,6 @@
 | [Patchelf-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/patchelf) | patchelf-compatible ELF binary patching tool |
 | [Pkg-config-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/pkg-config) | pkg-config reimplementation |
 | [Sed-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/sed) | GNU sed-compatible stream editor |
-| [Strip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/strip) | binutils strip-compatible symbol stripping tool |
 | [Systemd-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/systemd) | Systemd replacement |
 | [Tar-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/tar) | GNU tar-compatible tape archive tool |
 | [Texinfo-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/texinfo) | GNU makeinfo-compatible Texinfo processor |
@@ -570,7 +569,7 @@
 |:-:|-|-|-|-|-|
 | ✅ | Language | [Rust 🦀](https://github.com/rust-lang/rust) | | [cxx 🦀](https://github.com/dtolnay/cxx), [bindgen 🦀](https://github.com/rust-lang/rust-bindgen), [GCC-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/gcc) | [C 💣](https://en.wikipedia.org/wiki/C_(programming_language)), [C++ 💣](https://en.wikipedia.org/wiki/C%2B%2B) |
 | 🚧 | Compiler Framework | [Mlir 💣](https://github.com/llvm/llvm-project/tree/main/mlir), [LLVM 💣](https://github.com/llvm/llvm-project) | [Cranelift 🦀](https://github.com/bytecodealliance/wasmtime/tree/main/cranelift) | ⬅️ | |
-| 🚧 | Linker | [Mold 💣](https://github.com/rui314/mold) | [Wild 🦀](https://github.com/davidlattimore/wild) | [Binutils-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/binutils), [Strip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/strip) | [GNU ld 💣](https://sourceware.org/binutils) |
+| 🚧 | Linker | [Mold 💣](https://github.com/rui314/mold) | [Wild 🦀](https://github.com/davidlattimore/wild) | [Binutils-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/binutils) | [GNU ld 💣](https://sourceware.org/binutils) |
 | ✅ | Formatter | [Rustfmt 🦀](https://github.com/rust-lang/rustfmt) | | 🆗 | |
 | ✅ | Linter | [Clippy 🦀](https://github.com/rust-lang/rust-clippy) | | 🆗 | |
 | ✅ | Language Server | [Rust-analyzer 🦀](https://github.com/rust-lang/rust-analyzer) | | [LSP 📖](https://github.com/microsoft/language-server-protocol) | |
