@@ -391,13 +391,14 @@ real-world makefile compatibility.
 - **`-l N` load average limit.** Parsed and stored, but actual
   load sampling isn't implemented; when set, the parallel fast-path
   bails out (serial fallback). Conservative but correct.
-- **`--warn-undefined-variables` emission.** Flag is parsed, suite
-  passes, but we don't actually emit warnings on undefined-variable
-  expansion.
 - **Chained pattern rules** — follow pattern-rule chains more than
   one level deep. Suite passes via the two-pass implicit-rule search
   (depth 6), but more aggressive chaining could match GNU's behavior
   more precisely in edge cases.
+- **`-p` / `--print-data-base` not implemented.** The flag is
+  accepted but the database dump is a no-op. GNU make prints all
+  variables, rules, files, and `.SUFFIXES` to stdout. `main.rs`
+  marks the call site with `// TODO: print database`.
 
 ### Out of scope
 
@@ -1162,6 +1163,7 @@ Round 20 (135/135 ✅ — gained targets/WAIT, +2 subtests):
    Now schedules `[pre1, pre2]` (deduped) as one parallel batch from
    `all`'s perspective; the leaves race correctly via their `wait FILE`
    sentinels and `one`/`two` get marked built once their leaves complete.
+
 3. **`fn aggregator_prereqs`** helper: returns `Some(prereqs)` if
    `target` qualifies as a no-recipe aggregator, `None` otherwise.
    Excludes targets with grouped rules, SE, target-specific vars
@@ -1179,3 +1181,51 @@ inlined leaf to be a `is_simple_leaf` and skips `.WAIT` markers within
 the inlined sequence. The shared-state risk is bounded because each
 forked child runs only one leaf recipe and exits — the parent never
 needs to migrate any RefCell mutations from a child.
+
+---
+
+## TODO: future work
+
+These items are tracked as future work. None are required for any
+passing test in the upstream suite, so they're prioritized below
+anything that affects the test count. Listed roughly by user-visible
+impact:
+
+1. **`-p` / `--print-data-base` dump.** Implement the database dump
+   so `make -p` prints variables, rules, file timestamps, pattern
+   rules, and `.SUFFIXES`. Useful for debugging real-world makefiles.
+   Touchpoint: `rust/make/src/main.rs` `"-p" | "--print-data-base"`
+   match arm (currently `// TODO: print database`).
+2. **Variable-definition-site line tracking.** Tag each variable
+   value with `(file, line)` at parse time and emit those locations
+   in `$(error)`/`$(warning)` instead of the expansion site. Already
+   partially supported via `var_source_locs`, but function-call sites
+   inside expanded values aren't tracked.
+3. **Real jobserver protocol.** Implement the `--jobserver-auth=R,W`
+   pipe protocol so `$(MAKE)` sub-makes share the parent's job pool
+   instead of each running their own. Requires:
+   - Allocate a pipe and pre-fill with `jobs - 1` tokens.
+   - Take a token before spawning each child recipe; release on reap.
+   - Pass `--jobserver-auth=R,W` in MAKEFLAGS to children.
+   - Handle `+` recipe prefix to bypass the token check.
+4. **Output-sync (`-O`).** Buffer per-recipe stdout/stderr to a
+   temp file, then flush atomically at reap time. Modes:
+   `none` (default), `line`, `target`, `recurse`, `job`.
+5. **`-l N` load average sampling.** Read `/proc/loadavg` (Linux)
+   or `getloadavg(3)`; gate `try_parallel_batch` spawning on it.
+   Currently we just bail out of the parallel fast-path entirely.
+6. **Deeper chained pattern rules.** The two-pass implicit-rule
+   search bounded at depth 6 covers the upstream tests, but more
+   aggressive chaining could match GNU's behavior more precisely
+   in edge cases. Needs careful regression testing.
+7. **Fork-based parallel non-leaf scheduling beyond aggregator
+   expansion.** Currently a sibling that's a non-leaf, non-aggregator
+   target falls back to serial. A real async scheduler (per-job
+   `RecipeJob` context, Vec of in-flight children, completion-driven
+   `build_target_for` continuations) would cover arbitrary parallel
+   DAGs. Sketched in Round 16; the deferred Round 17/18/20 work
+   covers what's needed for the current 135/135.
+8. **Suffix-rule full parity** (`.c.o:` → `%.o: %.c`) interacting
+   with built-in defaults. Suite passes but conversion edge cases
+   (single-suffix rules `.c:` → `%: %.c`, suffix order in
+   `.SUFFIXES`) could be tightened.
