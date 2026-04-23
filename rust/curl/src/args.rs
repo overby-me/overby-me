@@ -885,13 +885,8 @@ pub(crate) fn parse_args() -> Options {
     // --etag-compare and --etag-save only make sense for a single URL; with
     // multiple URLs curl exits 2 with an explanatory 3-line warning block.
     if (opts.etag_compare.is_some() || opts.etag_save.is_some()) && opts.urls.len() > 1 {
-        let opt = if opts.etag_save.is_some() {
-            "--etag-save"
-        } else {
-            "--etag-compare"
-        };
         eprintln!("curl: The etag options only work on a single URL");
-        eprintln!("curl: option {opt}: is badly used here");
+        eprintln!("curl: option --url: is badly used here");
         eprintln!("curl: try 'curl --help' or 'curl --manual' for more information");
         process::exit(2);
     }

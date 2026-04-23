@@ -91,14 +91,14 @@ pub(crate) fn parse_proxy(proxy: &str) -> Result<(String, u16), String> {
     } else {
         proxy
     };
-    // Strip trailing slash
-    let stripped = stripped.trim_end_matches('/');
     // Strip userinfo (user:pass@) if present
     let stripped = if let Some(at_pos) = stripped.find('@') {
         &stripped[at_pos + 1..]
     } else {
         stripped
     };
+    // Strip path component (anything from the first '/' onward).
+    let stripped = stripped.split('/').next().unwrap_or(stripped);
     // Handle [ipv6]:port
     if stripped.starts_with('[')
         && let Some(bracket_end) = stripped.find(']')
