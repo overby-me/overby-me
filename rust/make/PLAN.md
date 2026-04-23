@@ -1205,10 +1205,13 @@ impact:
    expansion path already propagates the location via
    `expand_chain_source` so `$(error)`/`$(warning)` inside a recursive
    variable surface the variable's *definition* line. Still missing:
-   per-function-call site tracking (each `$(...)` call in a value
-   stores its own `(file, line)`), so an `$(error)` inside a `define`
-   body still reports the variable's line, not the line of the `$(error)`
-   inside it.
+   per-function-call site tracking. Completing this requires the
+   parser (`parse.rs`) to attach `(file, line)` metadata to every
+   `$(...)` function-call AST node, and `expand.rs` to thread that
+   location through the expansion call-chain when emitting diagnostics.
+   GNU make does this via `floc` structures on each `chartok`.
+   Substantial parser/expander refactor; defer until a user reports
+   that a missing line number caused real debugging friction.
 3. ~~**Real jobserver protocol.**~~ ✅ Implemented. `setup_jobserver` in
    `main.rs` either inherits an existing pipe via
    `--jobserver-auth=R,W` (or legacy `--jobserver-fds=`) from the parent
@@ -1250,7 +1253,10 @@ impact:
    `build_target_for` continuations) would cover arbitrary parallel
    DAGs. Sketched in Round 16; the deferred Round 17/18/20 work
    covers what's needed for the current 135/135.
-8. **Suffix-rule full parity** (`.c.o:` → `%.o: %.c`) interacting
-   with built-in defaults. Suite passes but conversion edge cases
-   (single-suffix rules `.c:` → `%: %.c`, suffix order in
-   `.SUFFIXES`) could be tightened.
+8. ~~**Suffix-rule single-suffix form**~~ ✅ Implemented.
+   `.c:` now converts to `%: %.c`, and `.c.o:` still converts to
+   `%.o: %.c`. `parse_suffix_rule` returns a `SuffixRuleKind` enum
+   distinguishing `Double(src, dst)` from `Single(src)`. Suffix
+   ordering in `.SUFFIXES` still uses insertion order (non-canonical
+   for edge cases, but matches the current behavior the suite
+   expects).
