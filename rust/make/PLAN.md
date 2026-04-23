@@ -2,14 +2,15 @@
 
 ## Current Status
 
-**133/135 tests passing** (98.5%) — upstream test harness from GNU make 4.4.1.
+**134/135 tests passing** (99.3%) — upstream test harness from GNU make 4.4.1.
 
 MAKEFLAGS subtests: **218/218** (100%) ✅
 temp_stdin subtests: **8/8** (100%) ✅
 options/dash-f subtests: **32/32** (100%) ✅
 
-Two categories remain: `features/parallelism` and `targets/WAIT`.
-Both need real `-j`/jobserver implementation.
+One category remains: `targets/WAIT` (12/14 subtests). The remaining 2
+subtests require cross-sibling concurrent scheduling (`all: one two`
+where both have overlapping non-leaf prereqs).
 
 `rust/make` has a parser, expander, and build engine (~10k LoC) with
 Nix-checks wiring that wraps `run_make_tests.pl` and points it at
@@ -435,14 +436,13 @@ in ways the test harness happens not to exercise in our passing set.
 
 ---
 
-## Currently failing top-level tests (2 of 135)
+## Currently failing top-level tests (1 of 135)
 
 Latest baseline (`bash /tmp/run-make-baseline.sh`):
 
 | Test | Notes |
 | --- | --- |
-| `features/parallelism` | Requires `-j` / jobserver (1/13) |
-| `targets/WAIT` | `.WAIT` requires parallel scheduling (6/14 subtests) |
+| `targets/WAIT` | `.WAIT` requires parallel scheduling (12/14 subtests) |
 
 The biggest remaining unlocks are **parallel jobs**
 (unlocks `parallelism`, `WAIT`) and **stdin re-exec / `--temp-stdin`**
@@ -1066,7 +1066,6 @@ post-load `-jN` and `-lN` handlers are also gated on cmdline
 not having set the same flag, so existing MAKEFLAGS-merge
 tests are unaffected.
 
-
 ```text
 Round 18 (133/135 — parallel during include-remake + cmdline -j export, +3 subtests):
 
@@ -1125,3 +1124,78 @@ Total subtest improvement across both rounds: 13 → 24 of 27
 (13 originally → +6 in Round 17 → +5 in Round 18). Categories
 remain at 133/135.
 ```
+
+Round 19 (134/135 — gained features/parallelism, +1 subtest on WAIT carry-over):
+
+1. **Phony targets allowed in `is_simple_leaf`**: removed the early
+   `return false` for phony names. Test #6 (cascading `-k` / non-`-k`
+   failure with phony siblings `fail.1`/`fail.2`/`fail.3`/`ok`) needed
+   phony siblings to be forkable.
+2. **Completion-order reaping in `try_parallel_batch`**: replaced the
+   spawn-order `waitpid(pid, ...)` loop with `waitpid(-1, ...)` against
+   a `HashMap<pid, (target, is_oo)>` of pending children. Failures from
+   an earlier-finishing recipe now print before later-completing
+   recipes, matching GNU make's real-time output ordering.
+3. **"Waiting for unfinished jobs...." on first failure**: when a
+   forked child fails and `keep_going` is false and pending children
+   remain, print `make: *** Waiting for unfinished jobs....` to stderr
+   (once) and continue reaping the rest. Suppressed during
+   include-remake (see below).
+4. **Child prints error before exit**: forked child now emits
+   `make: *** <err>` (or `make: *** <err>.` for non-bracket errors)
+   before `_exit(1)`. Required so the parent's combined stderr shows
+   recipe error diagnostics in completion order.
+5. **Bail-out when exported recursive var contains `$(shell`**:
+   test #5 (`export HI = $(shell $($@.CMD))`) must run serial in GNU
+   make because token-losing races in the jobserver can occur. We
+   detect this condition and return 0 from `try_parallel_batch`,
+   falling back to serial.
+6. **`in_include_remake: Cell<bool>` flag with Drop-guard**:
+   `finalize_includes` sets this flag for its duration. The child
+   error-printing in `try_parallel_batch` checks it and suppresses
+   `make: *** ...` output — matching the serial `let _ = self.build_target(...)`
+   discard behavior. Also suppresses the "Waiting for unfinished
+   jobs...." banner during include remake. Fixes test #7 (Savannah bug
+
+   #15641: `-include foo.d` where `foo.d`'s prereqs `mod_a.o mod_b.o`
+   both fail under `-j2`).
+
+**Subtest gains.**
+
+- `features/parallelism`: 12 → 13 of 13 (✅ category flip).
+- `targets/WAIT`: 12 of 14 (unchanged; #7 and #11 need cross-sibling
+  parallel non-leaf execution — `all: one two` where `one`, `two`
+  both have prereqs that must race via a shared wait-FILE channel).
+
+**Why `targets/WAIT` #7 and #11 remain deferred.**
+
+Both failing subtests have the shape:
+
+```text
+all : one two   # or: all : p1 .WAIT np1
+one: pre1 .WAIT pre2
+two: pre2 pre1
+pre1: ; @thelp.pl out start-$@ file PRE1 wait PRE2 out end-$@
+pre2: ; @thelp.pl wait PRE1 out $@ file PRE2
+```
+
+`pre1` (reached via `one`) and `pre2` (reached via `two`) must run
+concurrently so they can hand off through `PRE1`/`PRE2` sentinel files.
+Our current parallel fast-path kicks in only when a single target has
+multiple leaf prereqs in its prereq list. When the shared leaves live
+under different siblings of `all`, we build `one` fully before starting
+`two`, causing `pre1` to time out on `wait PRE2`.
+
+Fixing this requires one of:
+
+- **Prereq deduplication across siblings**: compute the transitive
+  leaf-prereq set of `all`'s children, dedupe, then schedule the dedupe
+  set as one parallel batch. Subtle because `.WAIT` must be honored
+  per-child (so `one`'s `.WAIT` between `pre1` and `pre2` still imposes
+  an intra-sibling serialization). Would also need to update
+  `build_target_for` on `one`/`two` to notice the pre-built leaves.
+- **Fully async scheduler**: restructure `build_target_for` into a
+  pending-job queue with a single pool; the sketch in Round 16 covers
+  this. Bigger change; gated behind the same RefCell-per-job refactor.
+
+Hold at 134/135 (99.3%) pending one of those paths.

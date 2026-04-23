@@ -564,6 +564,11 @@ pub struct Engine {
     /// Set to true by finalize_includes when an included makefile was
     /// remade and the process should re-exec itself.
     pub needs_reexec: Cell<bool>,
+    /// True while `finalize_includes` is running. Used by parallel
+    /// fork fast-paths to suppress child error printing — include
+    /// remake failures are swallowed (matching serial behavior where
+    /// `let _ = self.build_target(...)` discards errors).
+    pub in_include_remake: Cell<bool>,
     /// Block the re-exec sentinel return from `build()`. Set when a
     /// primary `-f` makefile failed to load — GNU make does not restart
     /// in that case; the missing makefile is reported as a goal instead.
@@ -750,6 +755,7 @@ impl Engine {
             buffered_kgo_errors: RefCell::new(None),
             posix_mode: RefCell::new(false),
             needs_reexec: Cell::new(false),
+            in_include_remake: Cell::new(false),
             suppress_reexec: Cell::new(false),
             build_depth: Cell::new(0),
             printed_entering: Cell::new(false),
@@ -1711,6 +1717,14 @@ impl Engine {
         if self.debug_basic() {
             eprintln!("Updating makefiles....");
         }
+        self.in_include_remake.set(true);
+        struct IncludeRemakeGuard<'a>(&'a Cell<bool>);
+        impl<'a> Drop for IncludeRemakeGuard<'a> {
+            fn drop(&mut self) {
+                self.0.set(false);
+            }
+        }
+        let _inc_guard = IncludeRemakeGuard(&self.in_include_remake);
         let pending: Vec<(String, bool, String, usize)> =
             self.pending_includes.borrow_mut().drain(..).collect();
 
@@ -3786,6 +3800,31 @@ impl Engine {
             return 0;
         }
 
+        // GNU make serializes builds when any exported recursive
+        // variable's value calls $(shell ...) — avoiding a token-losing
+        // race in the jobserver. We don't have a jobserver, but
+        // mirror the behavior to match observable output (and to
+        // avoid racy double-spawn of $@-dependent shell expansions).
+        {
+            let vars = self.vars.borrow();
+            let exports = self.exports.borrow();
+            let export_all = *self.export_all.borrow();
+            let unexports = self.unexports.borrow();
+            for (name, var) in vars.iter() {
+                if var.flavor != VarFlavor::Recursive {
+                    continue;
+                }
+                let is_exported =
+                    exports.contains(name) || (export_all && !unexports.contains(name));
+                if !is_exported {
+                    continue;
+                }
+                if var.value.contains("$(shell") || var.value.contains("${shell") {
+                    return 0;
+                }
+            }
+        }
+
         // Identify spawnable batch.
         let max_n = self.jobs;
         let mut batch: Vec<(String, bool)> = Vec::new();
@@ -3844,10 +3883,19 @@ impl Engine {
             }
             if pid == 0 {
                 // Child: build this prereq, exit with 0/1.
-                // Re-flush after potential output.
+                let suppress_err = self.in_include_remake.get();
                 let rc = match self.build_target_for(prereq, Some(target)) {
                     Ok(()) => 0,
-                    Err(_) => 1,
+                    Err(e) => {
+                        if !suppress_err && !e.is_empty() {
+                            if e.starts_with('[') {
+                                eprintln!("make: *** {e}");
+                            } else {
+                                eprintln!("make: *** {e}.");
+                            }
+                        }
+                        1
+                    }
                 };
                 let _ = std::io::stdout().flush();
                 let _ = std::io::stderr().flush();
@@ -3856,36 +3904,44 @@ impl Engine {
             pids.push((pid, prereq.clone(), *is_oo));
         }
 
-        // Parent: wait for all children. Track failures for -k semantics.
+        // Parent: wait for all children. Reap in completion order via waitpid(-1),
+        // so failures from earlier recipes print before later-completing ones.
+        let mut pending: std::collections::HashMap<crate::c_int, (String, bool)> =
+            pids.into_iter().map(|(p, t, oo)| (p, (t, oo))).collect();
         let mut any_failed = false;
-        for (cpid, prereq, _is_oo) in &pids {
+        let mut printed_waiting = false;
+        while !pending.is_empty() {
             let mut status: crate::c_int = 0;
-            let rc = unsafe { crate::waitpid(*cpid, &mut status as *mut _, 0) };
-            if rc < 0 {
+            let rc = unsafe { crate::waitpid(-1, &mut status as *mut _, 0) };
+            if rc <= 0 {
+                // ECHILD or error — stop.
                 any_failed = true;
-                continue;
+                break;
             }
-            // POSIX exit-status decoding: low 7 bits = signal, bit 7 =
-            // core dump, next 8 bits = exit status.
+            let (prereq, _is_oo) = match pending.remove(&rc) {
+                Some(v) => v,
+                None => continue, // Not our child.
+            };
             let exit_code = (status >> 8) & 0xff;
             let signaled = (status & 0x7f) != 0 && (status & 0x7f) != 0x7f;
             built_seen.insert(prereq.clone());
             if exit_code != 0 || signaled {
                 any_failed = true;
                 self.failed_targets.borrow_mut().insert(prereq.clone());
+                if !self.keep_going && !printed_waiting && !pending.is_empty() {
+                    if !self.in_include_remake.get() {
+                        eprintln!("make: *** Waiting for unfinished jobs....");
+                    }
+                    printed_waiting = true;
+                }
             } else {
-                // Success: mark built; if file now exists/changed mtime, mark rebuilt.
                 self.built_targets.borrow_mut().insert(prereq.clone());
                 if std::fs::metadata(prereq.as_str()).is_ok() {
                     self.rebuilt_targets.borrow_mut().insert(prereq.clone());
                 }
-                // The forked child ran the prereq's recipe — make sure
-                // the parent's "Nothing to be done" / "is up to date"
-                // diagnostic logic sees that work was performed.
                 *self.recipe_executed.borrow_mut() = true;
             }
         }
-        // Surface failures via the failure flag (consumed by the serial
         // post-loop) so the parent stops building dependent targets.
         if any_failed {
             self.parallel_batch_failed.set(true);
@@ -3899,9 +3955,6 @@ impl Engine {
     /// colon-with-multi-rule, no SE, no pattern rules required.
     fn is_simple_leaf(&self, target: &str) -> bool {
         if target.is_empty() || target.starts_with('.') {
-            return false;
-        }
-        if self.phony_targets.borrow().contains(target) {
             return false;
         }
         if self.target_vars.borrow().contains_key(target) {
