@@ -420,7 +420,8 @@ pub(crate) fn parse_args() -> Options {
                     process::exit(2);
                 }
             }
-            "--retry-connrefused" | "--retry-all-errors" => {}
+            "--retry-connrefused" => {}
+            "--retry-all-errors" => opts.retry_all_errors = true,
             "--expect100-timeout" => {
                 i += 1;
                 let _ = next_arg(&args, i, "--expect100-timeout");

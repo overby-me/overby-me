@@ -341,7 +341,16 @@ fn main() {
                 match perform(url_str, &effective_opts) {
                     Ok(r) => {
                         // Retry on 5xx and 429 (rate-limited).
-                        if (r.status >= 500 || r.status == 429) && attempt < opts.retry {
+                        if (r.status >= 500
+                            || r.status == 429
+                            || (opts.retry_all_errors
+                                && (r.partial_file
+                                    || r.timed_out
+                                    || r.recv_error
+                                    || r.weird_server_reply
+                                    || r.bad_content_encoding)))
+                            && attempt < opts.retry
+                        {
                             last_err = format!("HTTP {}", r.status);
                             if opts.include_headers {
                                 retry_prefix.extend_from_slice(&r.header_bytes);
