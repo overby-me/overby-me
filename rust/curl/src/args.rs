@@ -201,6 +201,29 @@ pub(crate) fn parse_args() -> Options {
         let arg = &args[i];
         match arg.as_str() {
             "-h" | "--help" => {
+                // Optional category/option argument: "-h all", "-h --insecure", etc.
+                // We don't implement per-option help text, but we must validate the
+                // argument and emit curl's exact "Incorrect option name" error for
+                // unknown options (test 1709).
+                if i + 1 < args.len() {
+                    let nxt = &args[i + 1];
+                    if !nxt.is_empty() && !nxt.starts_with('-') {
+                        // Category like "all", "http", "important", etc. — print
+                        // the full usage and exit successfully.
+                        print_usage();
+                        process::exit(0);
+                    }
+                    if nxt.starts_with("--") {
+                        // Look up the option in the help table; if absent, error.
+                        if known_long_option(nxt) {
+                            print_usage();
+                            process::exit(0);
+                        } else {
+                            eprintln!("Incorrect option name to show help for, see curl -h");
+                            process::exit(0);
+                        }
+                    }
+                }
                 print_usage();
                 process::exit(0);
             }
@@ -374,7 +397,22 @@ pub(crate) fn parse_args() -> Options {
             }
             "-m" | "--max-time" => {
                 i += 1;
-                let secs: f64 = next_arg(&args, i, "--max-time").parse().unwrap_or(0.0);
+                let val = next_arg(&args, i, "--max-time");
+                // curl rejects integer values that overflow with exit 2.
+                // Detect this via a u64 parse against the integer prefix.
+                // curl converts seconds to milliseconds via long arithmetic;
+                // a value whose ms representation overflows i64 is rejected.
+                let secs_parsed: Result<f64, _> = val.parse();
+                let bad = match &secs_parsed {
+                    Err(_) => true,
+                    Ok(v) => !v.is_finite() || *v < 0.0 || *v > (i64::MAX as f64) / 1000.0,
+                };
+                let secs: f64 = secs_parsed.unwrap_or(0.0);
+                if bad {
+                    eprintln!("curl: option -m: expected a proper numerical parameter");
+                    eprintln!("curl: try 'curl --help' or 'curl --manual' for more information");
+                    process::exit(2);
+                }
                 opts.max_time = Some(Duration::from_secs_f64(secs));
             }
             "-k" | "--insecure" => {
@@ -1420,6 +1458,162 @@ pub(crate) fn format_http_date(timestamp: i64) -> String {
     format!(
         "{}, {:02} {} {:04} {:02}:{:02}:{:02} GMT",
         dow_name, d, month_names[m as usize], y, hour, min, sec
+    )
+}
+
+fn known_long_option(name: &str) -> bool {
+    // Minimal allow-list for '-h <option>' validation. Includes the most
+    // common long options curl accepts. Unknown names trigger curl's
+    // "Incorrect option name to show help for" error (test 1709).
+    matches!(
+        name,
+        "--help"
+            | "--version"
+            | "--verbose"
+            | "--silent"
+            | "--show-error"
+            | "--fail"
+            | "--insecure"
+            | "--include"
+            | "--head"
+            | "--no-clobber"
+            | "--cookie"
+            | "--cookie-jar"
+            | "--data"
+            | "--data-raw"
+            | "--data-binary"
+            | "--data-urlencode"
+            | "--form"
+            | "--header"
+            | "--location"
+            | "--max-redirs"
+            | "--output"
+            | "--remote-name"
+            | "--remote-name-all"
+            | "--remote-header-name"
+            | "--user"
+            | "--user-agent"
+            | "--referer"
+            | "--request"
+            | "--retry"
+            | "--retry-delay"
+            | "--retry-max-time"
+            | "--retry-all-errors"
+            | "--retry-connrefused"
+            | "--connect-timeout"
+            | "--max-time"
+            | "--proxy"
+            | "--proxy-user"
+            | "--cacert"
+            | "--capath"
+            | "--cert"
+            | "--key"
+            | "--ca-native"
+            | "--no-ca-native"
+            | "--compressed"
+            | "--tr-encoding"
+            | "--no-tr-encoding"
+            | "--anyauth"
+            | "--basic"
+            | "--digest"
+            | "--ntlm"
+            | "--negotiate"
+            | "--next"
+            | "--follow"
+            | "--proto"
+            | "--proto-redir"
+            | "--proto-default"
+            | "--http1.0"
+            | "--http1.1"
+            | "--http2"
+            | "--ipv4"
+            | "--ipv6"
+            | "--resolve"
+            | "--connect-to"
+            | "--ignore-content-length"
+            | "--config"
+            | "--manual"
+            | "--url"
+            | "--write-out"
+            | "--dump-header"
+            | "--get"
+            | "--json"
+            | "--trace"
+            | "--trace-ascii"
+            | "--trace-time"
+            | "--stderr"
+            | "--no-progress-meter"
+            | "--progress-bar"
+            | "--styled-output"
+            | "--no-styled-output"
+            | "--disable"
+            | "--time-cond"
+            | "--continue-at"
+            | "--range"
+            | "--unix-socket"
+            | "--abstract-unix-socket"
+            | "--max-filesize"
+            | "--upload-file"
+            | "--append"
+            | "--alpn"
+            | "--no-alpn"
+            | "--tlsv1"
+            | "--tlsv1.0"
+            | "--tlsv1.1"
+            | "--tlsv1.2"
+            | "--tlsv1.3"
+            | "--ssl"
+            | "--ssl-reqd"
+            | "--http3"
+            | "--socks4"
+            | "--socks4a"
+            | "--socks5"
+            | "--socks5-hostname"
+            | "--krb"
+            | "--service-name"
+            | "--engine"
+            | "--cert-type"
+            | "--key-type"
+            | "--pass"
+            | "--cert-status"
+            | "--false-start"
+            | "--ssl-no-revoke"
+            | "--socks5-basic"
+            | "--socks5-gssapi"
+            | "--socks5-gssapi-nec"
+            | "--socks5-gssapi-service"
+            | "--http0.9"
+            | "--alt-svc"
+            | "--hsts"
+            | "--etag-compare"
+            | "--etag-save"
+            | "--keepalive-time"
+            | "--no-keepalive"
+            | "--tcp-fastopen"
+            | "--tcp-nodelay"
+            | "--limit-rate"
+            | "--speed-time"
+            | "--speed-limit"
+            | "--quote"
+            | "--post301"
+            | "--post302"
+            | "--post303"
+            | "--location-trusted"
+            | "--no-buffer"
+            | "--buffer"
+            | "--no-sessionid"
+            | "--sessionid"
+            | "--ciphers"
+            | "--tls13-ciphers"
+            | "--curves"
+            | "--variable"
+            | "--expect100-timeout"
+            | "--ftp-pasv"
+            | "--ftp-port"
+            | "--proxy1.0"
+            | "--http2-prior-knowledge"
+            | "--no-progress-bar"
+            | "--happy-eyeballs-timeout-ms"
     )
 }
 

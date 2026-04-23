@@ -353,6 +353,10 @@ fn main() {
                         {
                             last_err = format!("HTTP {}", r.status);
                             if opts.include_headers {
+                                // Include redirect chain bytes (e.g. 301)
+                                // before the final response headers so the
+                                // attempt is reproduced verbatim in -i output.
+                                retry_prefix.extend_from_slice(&r.redirect_headers);
                                 retry_prefix.extend_from_slice(&r.header_bytes);
                             }
                             retry_prefix.extend_from_slice(&r.body);

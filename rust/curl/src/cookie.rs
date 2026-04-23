@@ -296,10 +296,15 @@ pub(crate) fn parse_set_cookie_ex(
     // Exception: treat 127.0.0.1, ::1 and *.localhost as trustworthy origins
     // per W3C "Secure Contexts", matching curl's psl_loopback_p() exception.
     if validate_domain && secure && url.scheme != "https" {
-        let is_loopback = url.host == "127.0.0.1"
-            || url.host == "::1"
-            || url.host == "localhost"
-            || url.host.ends_with(".localhost");
+        // Use the request host (Host header), not the connection target,
+        // because curl's psl_loopback_p() check operates on the cookie's
+        // effective hostname. A request to 127.0.0.1 with -H "Host: foo.com"
+        // must NOT accept secure cookies.
+        let host = request_host.to_lowercase();
+        let is_loopback = host == "127.0.0.1"
+            || host == "::1"
+            || host == "localhost"
+            || host.ends_with(".localhost");
         if !is_loopback {
             return None;
         }

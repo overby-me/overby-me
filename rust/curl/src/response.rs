@@ -425,15 +425,69 @@ pub(crate) fn read_response(
             .iter()
             .any(|(k, v)| k == "transfer-encoding" && v.contains("chunked"));
 
-    // Reject responses whose Transfer-Encoding stack has more than 5 layers,
-    // matching curl's MAX_ENCODING_STACK guard (test 387).
-    let te_layer_count: usize = headers
+    // Collect Transfer-Encoding tokens (in order) for ordering and stack-depth
+    // validation. Per RFC 7230, chunked must be the last encoding in the chain
+    // (innermost). curl rejects any other order with CURLE_BAD_CONTENT_ENCODING.
+    let te_tokens: Vec<String> = headers
         .iter()
         .filter(|(k, _)| k == "transfer-encoding")
-        .flat_map(|(_, v)| v.split(','))
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .count();
+        .flat_map(|(_, v)| {
+            v.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_lowercase())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    // chunked must be either absent or the very last token (test 1546).
+    let chunked_misplaced = te_tokens
+        .iter()
+        .position(|t| t == "chunked")
+        .is_some_and(|p| p != te_tokens.len() - 1);
+    let te_layer_count = te_tokens.len();
+    if chunked_misplaced {
+        // Truncate header_bytes to exclude the offending Transfer-Encoding line
+        // (and the empty separator that follows it), matching curl which writes
+        // headers before the failure point and then aborts.
+        let mut truncated = Vec::new();
+        for line in header_bytes.split(|&b| b == b'\n') {
+            let lc: Vec<u8> = line
+                .iter()
+                .take(18)
+                .map(|b| b.to_ascii_lowercase())
+                .collect();
+            if lc.starts_with(b"transfer-encoding:") {
+                break;
+            }
+            truncated.extend_from_slice(line);
+            truncated.push(b'\n');
+        }
+        return Ok(Response {
+            trailer_bytes: Vec::new(),
+            status,
+            status_text,
+            headers,
+            body: Vec::new(),
+            header_bytes: truncated,
+            redirect_headers: Vec::new(),
+            num_connects: 0,
+            num_redirects: 0,
+            max_redirects_reached: false,
+            proto_redir_blocked: false,
+            weird_server_reply: false,
+            final_url: None,
+            redirect_url: None,
+            timed_out: false,
+            recv_error: false,
+            partial_file: false,
+            bad_content_encoding: true,
+            bad_encoding_too_many: false,
+            filesize_exceeded: false,
+            header_size_error: false,
+        });
+    }
+    // Reject responses whose Transfer-Encoding stack has more than 5 layers,
+    // matching curl's MAX_ENCODING_STACK guard (test 387).
     if te_layer_count > 5 {
         return Ok(Response {
             trailer_bytes: Vec::new(),
@@ -455,6 +509,114 @@ pub(crate) fn read_response(
             partial_file: false,
             bad_content_encoding: true,
             bad_encoding_too_many: true,
+            filesize_exceeded: false,
+            header_size_error: false,
+        });
+    }
+    // RFC 7231: only one Location header is allowed in a response.
+    // Multiple Location headers are a malformed response (test 772, exit 8).
+    let location_count = headers.iter().filter(|(k, _)| k == "location").count();
+    if location_count > 1 {
+        let mut partial_bytes = Vec::new();
+        let mut seen_location = false;
+        for line in header_bytes.split(|&b| b == b'\n') {
+            let lc: Vec<u8> = line
+                .iter()
+                .take(9)
+                .map(|b| b.to_ascii_lowercase())
+                .collect();
+            if lc.starts_with(b"location:") {
+                if seen_location {
+                    break;
+                }
+                seen_location = true;
+            }
+            partial_bytes.extend_from_slice(line);
+            partial_bytes.push(b'\n');
+        }
+        return Ok(Response {
+            trailer_bytes: Vec::new(),
+            status,
+            status_text,
+            headers,
+            body: Vec::new(),
+            header_bytes: partial_bytes,
+            redirect_headers: Vec::new(),
+            num_connects: 0,
+            num_redirects: 0,
+            max_redirects_reached: false,
+            proto_redir_blocked: false,
+            weird_server_reply: true,
+            final_url: None,
+            redirect_url: None,
+            timed_out: false,
+            recv_error: false,
+            partial_file: false,
+            bad_content_encoding: false,
+            bad_encoding_too_many: false,
+            filesize_exceeded: false,
+            header_size_error: false,
+        });
+    }
+    // RFC 7230 §3.3.2: if multiple Content-Length values appear (either
+    // multiple headers or comma-separated values within one), they must all be
+    // equal; otherwise the response is malformed (test 770/771).
+    let cl_values: Vec<String> = headers
+        .iter()
+        .filter(|(k, _)| k == "content-length")
+        .flat_map(|(_, v)| v.split(',').map(|s| s.trim().to_string()))
+        .filter(|s| !s.is_empty())
+        .collect();
+    let cl_parsed: Vec<Option<u64>> = cl_values.iter().map(|v| v.parse::<u64>().ok()).collect();
+    let cl_inconsistent = cl_parsed.len() > 1
+        && (cl_parsed.iter().any(|p| p.is_none()) || !cl_parsed.windows(2).all(|w| w[0] == w[1]));
+    // When multiple CL values agree, normalize all content-length headers to a
+    // single canonical numeric value so the rest of the body-length code path
+    // (which uses parse::<usize>()) accepts them.
+    if !cl_inconsistent && cl_parsed.len() > 1 {
+        let canonical = cl_parsed[0].unwrap().to_string();
+        for h in headers.iter_mut() {
+            if h.0 == "content-length" {
+                h.1 = canonical.clone();
+            }
+        }
+    }
+    if cl_inconsistent {
+        // Truncate to before the FIRST content-length header, then bail out
+        // with weird_server_reply (exit 8).
+        let mut partial_bytes = Vec::new();
+        for line in header_bytes.split(|&b| b == b'\n') {
+            let lc: Vec<u8> = line
+                .iter()
+                .take(15)
+                .map(|b| b.to_ascii_lowercase())
+                .collect();
+            if lc.starts_with(b"content-length:") {
+                break;
+            }
+            partial_bytes.extend_from_slice(line);
+            partial_bytes.push(b'\n');
+        }
+        return Ok(Response {
+            trailer_bytes: Vec::new(),
+            status,
+            status_text,
+            headers,
+            body: Vec::new(),
+            header_bytes: partial_bytes,
+            redirect_headers: Vec::new(),
+            num_connects: 0,
+            num_redirects: 0,
+            max_redirects_reached: false,
+            proto_redir_blocked: false,
+            weird_server_reply: true,
+            final_url: None,
+            redirect_url: None,
+            timed_out: false,
+            recv_error: false,
+            partial_file: false,
+            bad_content_encoding: false,
+            bad_encoding_too_many: false,
             filesize_exceeded: false,
             header_size_error: false,
         });
