@@ -1065,3 +1065,63 @@ parallel path is gated behind multiple checks; setting `-j1`
 post-load `-jN` and `-lN` handlers are also gated on cmdline
 not having set the same flag, so existing MAKEFLAGS-merge
 tests are unaffected.
+
+
+```text
+Round 18 (133/135 — parallel during include-remake + cmdline -j export, +3 subtests):
+
+1. **`fn parallel_remake_files`**: a generic helper that takes a
+   list of file targets, partitions them into "simple leaf"
+   spawnables, forks each via `libc::fork()` (capped at
+   `self.jobs`), waits for all, and updates
+   `built_targets`/`failed_targets`/`rebuilt_targets` in the
+   parent. Returns the set of files it spawned so callers can
+   skip them in their serial follow-up loops.
+2. **Phase 0 of `finalize_includes`**: now captures pre-remake
+   mtimes, calls `parallel_remake_files(loaded_includes)`, then
+   compares post-mtimes to set `any_include_remade`. The
+   subsequent serial loop skips entries that were spawned.
+3. **Phase 2 of `finalize_includes`**: calls
+   `parallel_remake_files(to_build_files)` before the per-entry
+   `BuildResult` loop. Successful spawned builds land in
+   `built_targets`, so `build_target` short-circuits in the
+   per-entry loop and the post-build error reporting still works.
+4. **Cmdline `-jN` now exported in MAKEFLAGS**: the `-j N` /
+   `--jobs N` and `-jN` argument handlers in `main.rs` were
+   setting `engine.jobs` but not pushing `-jN` into
+   `mflags_long`, so sub-makes invoked via `$(MAKE)` saw an
+   empty `MAKEFLAGS` and ran serially. Now both forms append
+   the right token. This is what unlocked test #4 (recursive
+   sub-make with `-include`).
+
+**Subtest gains.**
+
+- `features/parallelism`: 9 → 12 of 13 (passes #3, #4, #7).
+  Only #6 ("Waiting for unfinished jobs" cascading-failure
+  with `-k`) remains — needs phony-target parallelism, which
+  conflicts with test #5's serial-shell-blocking expectation
+  for `export HI = $(shell $($@.CMD))` (a pre-existing
+  automatic-vars-in-env-expansion gap, not parallel-related).
+- `targets/WAIT`: 12 of 14 (unchanged; #7 and #11 need
+  cross-target / parallel-non-leaf execution).
+
+**Why the last 3 subtests stay deferred.**
+
+- `features/parallelism` #6: cascading `-k` failures across
+  phony siblings. Allowing phony in `is_simple_leaf` immediately
+  regresses #5 (which requires `$@`-aware env-var expansion to
+  block one child for ~4s while the other runs). The right fix
+  is to make `lookup_var_with_auto` thread `$@` through
+  env-setup, then re-allow phony spawning. Self-contained but
+  touches expansion paths in many places.
+- `targets/WAIT` #7, #11: `all: one two` where both `one` and
+  `two` have prereqs and are themselves not leaves. Requires
+  forking non-leaves — the forked child would run a full
+  `build_target_for` subtree, touching ~25 RefCells; the parent
+  has no way to learn what the child did beyond filesystem
+  state. Tractable but invasive.
+
+Total subtest improvement across both rounds: 13 → 24 of 27
+(13 originally → +6 in Round 17 → +5 in Round 18). Categories
+remain at 133/135.
+```

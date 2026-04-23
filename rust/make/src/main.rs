@@ -339,9 +339,11 @@ fn run() -> i32 {
                     && let Ok(n) = next.parse::<usize>()
                 {
                     engine.jobs = n;
+                    mflags_long.push(format!("-j{n}"));
                     i += 1;
                 } else {
                     engine.jobs = 0; // unlimited
+                    mflags_long.push("-j".to_string());
                 }
                 cmdline_set_jobs = true;
             }
@@ -559,6 +561,7 @@ fn run() -> i32 {
             arg if arg.starts_with("-j") => match arg[2..].parse::<usize>() {
                 Ok(n) => {
                     engine.jobs = n;
+                    mflags_long.push(format!("-j{n}"));
                     cmdline_set_jobs = true;
                 }
                 Err(_) => {

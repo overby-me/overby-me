@@ -1747,7 +1747,31 @@ impl Engine {
         // GNU make always tries to rebuild included files; if the recipe
         // runs but doesn't change the file, the build proceeds normally.
         let loaded_includes: Vec<String> = self.included_files.borrow_mut().drain(..).collect();
+        // Capture mtime before parallel remake so we can detect changes.
+        let mtimes_before: std::collections::HashMap<String, Option<std::time::SystemTime>> =
+            loaded_includes
+                .iter()
+                .map(|f| {
+                    (
+                        f.clone(),
+                        std::fs::metadata(f).ok().and_then(|m| m.modified().ok()),
+                    )
+                })
+                .collect();
+        // Parallel fast-path: remake simple-leaf include files concurrently.
+        let parallel_done = self.parallel_remake_files(&loaded_includes);
+        if !parallel_done.is_empty() {
+            for f in &parallel_done {
+                let after = std::fs::metadata(f).ok().and_then(|m| m.modified().ok());
+                if mtimes_before.get(f).cloned().unwrap_or(None) != after {
+                    any_include_remade = true;
+                }
+            }
+        }
         for file in &loaded_includes {
+            if parallel_done.contains(file) {
+                continue;
+            }
             let has_explicit = self.rules.borrow().contains_key(file.as_str());
             let has_pattern = self.find_pattern_rule(file).is_some();
             if !has_explicit && !has_pattern {
@@ -1841,6 +1865,12 @@ impl Engine {
             /// files that were never actually built by their own recipe.
             was_already_built: bool,
         }
+        // Parallel fast-path for Phase 2: remake simple-leaf pending
+        // include files concurrently. Each successful build marks the
+        // file in built_targets so the per-entry loop below sees it as
+        // already built and Phase 2's build_target() short-circuits.
+        let p2_files: Vec<String> = to_build.iter().map(|e| e.file.clone()).collect();
+        let _phase2_parallel_done = self.parallel_remake_files(&p2_files);
         let mut results: Vec<BuildResult> = Vec::new();
         for entry in &to_build {
             let was_already_built = self.built_targets.borrow().contains(entry.file.as_str());
@@ -3626,6 +3656,94 @@ impl Engine {
             .filter(|(pattern, _)| expand::pattern_stem(target, pattern).is_some())
             .map(|(_, name)| name.clone())
             .collect()
+    }
+
+    /// Build a list of files in parallel via fork(), one per "simple
+    /// leaf" entry. Returns the set of files that were spawned (so the
+    /// caller can skip them in its serial follow-up loop). Files that
+    /// don't qualify as simple leaves are NOT spawned and remain for
+    /// the caller to handle serially.
+    ///
+    /// Used by `finalize_includes` to parallelize Phase 0 (loaded
+    /// include rebuild) and Phase 2 (pending include build).
+    fn parallel_remake_files(&self, files: &[String]) -> std::collections::HashSet<String> {
+        let mut spawned: std::collections::HashSet<String> = std::collections::HashSet::new();
+        if self.jobs <= 1 || self.load_limit > 0.0 {
+            return spawned;
+        }
+        if self.dry_run || self.question || self.touch || self.notparallel.get() {
+            return spawned;
+        }
+        // Collect spawnable candidates.
+        let mut candidates: Vec<String> = Vec::new();
+        for f in files {
+            if self.built_targets.borrow().contains(f.as_str()) {
+                continue;
+            }
+            if self.is_simple_leaf(f) {
+                candidates.push(f.clone());
+            }
+        }
+        if candidates.len() < 2 {
+            return spawned;
+        }
+        // Cap at self.jobs.
+        let cap = self.jobs;
+        let mut batches: Vec<Vec<String>> = Vec::new();
+        for chunk in candidates.chunks(cap) {
+            batches.push(chunk.to_vec());
+        }
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+        let _ = std::io::stderr().flush();
+        for batch in batches {
+            let mut pids: Vec<(crate::c_int, String)> = Vec::new();
+            for file in &batch {
+                let pid = unsafe { crate::fork() };
+                if pid < 0 {
+                    // fork failed — wait for already-spawned and bail.
+                    for (cpid, _) in &pids {
+                        let mut status: crate::c_int = 0;
+                        unsafe {
+                            let _ = crate::waitpid(*cpid, &mut status as *mut _, 0);
+                        }
+                    }
+                    return spawned;
+                }
+                if pid == 0 {
+                    let rc = match self.build_target(file) {
+                        Ok(()) => 0,
+                        Err(_) => 1,
+                    };
+                    let _ = std::io::stdout().flush();
+                    let _ = std::io::stderr().flush();
+                    unsafe { crate::_exit(rc) };
+                }
+                pids.push((pid, file.clone()));
+            }
+            for (cpid, file) in &pids {
+                let mut status: crate::c_int = 0;
+                let rc = unsafe { crate::waitpid(*cpid, &mut status as *mut _, 0) };
+                if rc < 0 {
+                    self.failed_targets.borrow_mut().insert(file.clone());
+                    spawned.insert(file.clone());
+                    continue;
+                }
+                let exit_code = (status >> 8) & 0xff;
+                let signaled = (status & 0x7f) != 0 && (status & 0x7f) != 0x7f;
+                spawned.insert(file.clone());
+                if exit_code != 0 || signaled {
+                    self.failed_targets.borrow_mut().insert(file.clone());
+                } else {
+                    self.built_targets.borrow_mut().insert(file.clone());
+                    if std::fs::metadata(file.as_str()).is_ok() {
+                        self.rebuilt_targets.borrow_mut().insert(file.clone());
+                    }
+                    *self.recipe_executed.borrow_mut() = true;
+                }
+            }
+        }
+        spawned
     }
 
     /// Try to build a leading batch of prereqs in parallel via fork().
