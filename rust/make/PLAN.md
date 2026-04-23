@@ -1221,14 +1221,19 @@ impact:
    stopping the batch early when no token is available. Tokens are
    released after waitpid reaps each child. `+`-prefixed recipes
    bypass token gating (they use the regular serial recipe path).
-4. ~~**Output-sync (`-O`).**~~ ✅ Implemented for `target` mode (and
-   accepted as a synonym for `recurse`/`job`/bare `-O`). When enabled,
+4. ~~**Output-sync (`-O`).**~~ ✅ Implemented for `none`, `line`, and
+   `target` modes (`recurse` and `job` alias to `target`). When enabled,
    each forked child's combined stdout/stderr is captured via a pipe
    and drained by a `std::thread`; the buffered output is flushed
-   atomically under a process-wide `Mutex` after `waitpid` reaps the
-   child, so different parallel recipes don't interleave. Modes
-   `none` and `target` covered; `line` not implemented (treated as
-   target).
+   atomically under a process-wide `Mutex`. In `target` mode the
+   drainer accumulates the whole child's output and flushes after
+   `waitpid`. In `line` mode (`drain_fd_line_buffered`) the drainer
+   flushes each newline-terminated line as it arrives and the
+   trailing partial line at EOF. Also fixed: args-taking short flags
+   (`-Omode`, `-j4`, `-l2.5`, `-I...`, `-W...`, `-o...`, `-f...`,
+   `-C...`) in MAKEFLAGS are no longer misparsed as cluster flags —
+   previously `-Onone` set `has_n = true` and forced dry-run,
+   echoing recipe bodies.
 5. ~~**`-l N` load average sampling.**~~ ✅ Implemented for Linux via
    `/proc/loadavg`. `try_parallel_batch` and `parallel_remake_files`
    now sample the 1-minute load average before each spawn batch and
