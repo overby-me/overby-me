@@ -1078,6 +1078,20 @@ impl Engine {
         self.set_var_with_origin(name, value, flavor, VarOrigin::File);
     }
 
+    /// Record the variable's definition site if it currently has the given
+    /// origin. Used to remember where File/Override/Default variables came
+    /// from so we can attribute errors raised during their later expansion.
+    fn record_var_source(&self, name: &str, expected_origin: VarOrigin) {
+        if let Some(actual) = self.vars.borrow().get(name).map(|v| v.origin)
+            && actual == expected_origin
+            && let Some((src, ln)) = self.current_source.borrow().clone()
+        {
+            self.var_source_locs
+                .borrow_mut()
+                .insert(name.to_string(), (src, ln));
+        }
+    }
+
     pub fn set_var_with_origin(
         &self,
         name: &str,
@@ -2346,6 +2360,7 @@ impl Engine {
                 // `export VAR = value` is an assignment plus an export.
                 self.process_assignment(assign, VarOrigin::File);
                 let expanded = expand::expand(&assign.name, self);
+                self.record_var_source(&expanded, VarOrigin::File);
                 self.exports.borrow_mut().insert(expanded);
             }
             Directive::Unexport(vars) => {
@@ -2367,11 +2382,14 @@ impl Engine {
                 // `unexport VAR = value` assigns and marks unexported.
                 self.process_assignment(assign, VarOrigin::File);
                 let expanded = expand::expand(&assign.name, self);
+                self.record_var_source(&expanded, VarOrigin::File);
                 self.exports.borrow_mut().remove(&expanded);
                 self.unexports.borrow_mut().insert(expanded);
             }
             Directive::Override(assign) => {
                 self.process_assignment(assign, VarOrigin::Override);
+                let expanded_name = expand::expand(&assign.name, self);
+                self.record_var_source(&expanded_name, VarOrigin::Override);
             }
             Directive::Define(name, op, lines, source, line_no) => {
                 let expanded_name = expand::expand(name, self);
@@ -2380,7 +2398,10 @@ impl Engine {
                     std::process::exit(2);
                 }
                 let body = lines.join("\n");
+                *self.current_source.borrow_mut() = Some((source.clone(), *line_no));
                 self.apply_define(&expanded_name, *op, &body, VarOrigin::File);
+                self.record_var_source(&expanded_name, VarOrigin::File);
+                *self.current_source.borrow_mut() = None;
             }
             Directive::OverrideDefine(name, op, lines, source, line_no) => {
                 let expanded_name = expand::expand(name, self);
@@ -2389,7 +2410,10 @@ impl Engine {
                     std::process::exit(2);
                 }
                 let body = lines.join("\n");
+                *self.current_source.borrow_mut() = Some((source.clone(), *line_no));
                 self.apply_define(&expanded_name, *op, &body, VarOrigin::Override);
+                self.record_var_source(&expanded_name, VarOrigin::Override);
+                *self.current_source.borrow_mut() = None;
             }
             Directive::Undefine(name, source, line_no) => {
                 // `undefine` from a makefile doesn't clobber command-line
@@ -2508,12 +2532,14 @@ impl Engine {
                 *self.current_source.borrow_mut() = Some((source.clone(), *line_no));
                 self.process_assignment(assign, VarOrigin::File);
                 let expanded_name = expand::expand(&assign.name, self);
+                self.record_var_source(&expanded_name, VarOrigin::File);
                 self.private_vars.borrow_mut().insert(expanded_name);
                 *self.current_source.borrow_mut() = None;
             }
             Directive::PrivateExportAssign(assign) => {
                 self.process_assignment(assign, VarOrigin::File);
                 let expanded_name = expand::expand(&assign.name, self);
+                self.record_var_source(&expanded_name, VarOrigin::File);
                 self.exports.borrow_mut().insert(expanded_name.clone());
                 self.private_vars.borrow_mut().insert(expanded_name.clone());
                 self.private_exports.borrow_mut().insert(expanded_name);
