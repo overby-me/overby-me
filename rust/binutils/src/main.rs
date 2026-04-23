@@ -3461,6 +3461,17 @@ fn readelf_display<'data, Elf: FileHeader>(
         readelf_hex_dump_section(elf, data, endian, sect, opts.decompress);
     }
 
+    // First pass: emit warnings for any -j/--display-section args that
+    // don't match any section. This matches GNU readelf's output order.
+    for sect in &opts.display_section {
+        if !readelf_section_exists(elf, data, endian, sect) {
+            println!();
+            println!(
+                "readelf: Warning: Section '{}' was not dumped because it does not exist",
+                sect
+            );
+        }
+    }
     for sect in &opts.display_section {
         readelf_display_section(elf, data, endian, sect);
     }
@@ -3782,6 +3793,33 @@ fn readelf_hex_dump_section<'data, Elf: FileHeader>(
     }
 }
 
+fn readelf_section_exists<'data, Elf: FileHeader>(
+    elf: &ElfFile<'data, Elf>,
+    data: &'data [u8],
+    endian: Elf::Endian,
+    sect: &str,
+) -> bool {
+    let Ok(sections) = elf.elf_header().sections(endian, data) else {
+        return false;
+    };
+    let target_idx: Option<usize> = sect.parse().ok();
+    for (i, section) in sections.iter().enumerate() {
+        let name = sections
+            .section_name(endian, section)
+            .ok()
+            .and_then(|n| std::str::from_utf8(n).ok())
+            .unwrap_or("");
+        if let Some(idx) = target_idx {
+            if i == idx {
+                return true;
+            }
+        } else if name == sect {
+            return true;
+        }
+    }
+    false
+}
+
 fn readelf_display_section<'data, Elf: FileHeader>(
     elf: &ElfFile<'data, Elf>,
     data: &'data [u8],
@@ -3814,15 +3852,15 @@ fn readelf_display_section<'data, Elf: FileHeader>(
             );
             return;
         }
+        // For REL/RELA sections, dump as a relocation table like GNU readelf.
+        if st == 4 || st == 9 {
+            readelf_dump_reloc_section(elf, data, endian, i);
+            return;
+        }
         // Default: hex dump
         readelf_hex_dump_section(elf, data, endian, sect, false);
         return;
     }
-    println!();
-    println!(
-        "readelf: Warning: Section '{}' was not dumped because it does not exist!",
-        sect
-    );
 }
 
 fn elf_section_flags_detail(flags: u64) -> String {
@@ -4000,14 +4038,7 @@ fn readelf_relocs<'data, Elf: FileHeader>(
     data: &'data [u8],
     endian: Elf::Endian,
 ) {
-    let is_64 = elf.elf_header().is_class_64();
-    let is_le = elf.elf_header().e_ident().data == 1;
-    let machine = elf.elf_header().e_machine(endian);
-
     if let Ok(sections) = elf.elf_header().sections(endian, data) {
-        // Build symbol name lookup from symtab sections
-        let all_sections: Vec<_> = sections.iter().collect();
-
         let any_relocs = sections.iter().any(|s| {
             let t = s.sh_type(endian);
             t == 4 || t == 9 || t == 19
@@ -4017,221 +4048,229 @@ fn readelf_relocs<'data, Elf: FileHeader>(
             println!("There are no relocations in this file.");
             return;
         }
+        for (idx, _section) in sections.iter().enumerate() {
+            readelf_dump_reloc_section(elf, data, endian, idx);
+        }
+    }
+}
 
-        for (_idx, section) in sections.iter().enumerate() {
-            let sh_type = section.sh_type(endian);
-            let name = sections
-                .section_name(endian, section)
-                .ok()
-                .and_then(|n| std::str::from_utf8(n).ok())
-                .unwrap_or("");
-            let sec_offset: u64 = section.sh_offset(endian).into();
+fn readelf_dump_reloc_section<'data, Elf: FileHeader>(
+    elf: &ElfFile<'data, Elf>,
+    data: &'data [u8],
+    endian: Elf::Endian,
+    section_idx: usize,
+) {
+    let is_64 = elf.elf_header().is_class_64();
+    let is_le = elf.elf_header().e_ident().data == 1;
+    let machine = elf.elf_header().e_machine(endian);
 
-            if sh_type == 9 {
-                // SHT_REL
-                if let Ok(Some((rels, _))) = section.rel(endian, data) {
-                    let link = section.sh_link(endian) as usize;
-                    let sym_names = readelf_build_sym_names::<Elf>(
-                        data,
-                        &all_sections,
-                        link,
-                        endian,
-                        is_64,
-                        is_le,
-                    );
+    let Ok(sections) = elf.elf_header().sections(endian, data) else {
+        return;
+    };
+    let all_sections: Vec<_> = sections.iter().collect();
+    let Some(section) = all_sections.get(section_idx).copied() else {
+        return;
+    };
+    let sh_type = section.sh_type(endian);
+    if sh_type != 4 && sh_type != 9 && sh_type != 19 {
+        return;
+    }
+    let name = sections
+        .section_name(endian, section)
+        .ok()
+        .and_then(|n| std::str::from_utf8(n).ok())
+        .unwrap_or("");
+    let sec_offset: u64 = section.sh_offset(endian).into();
 
+    if sh_type == 9 {
+        // SHT_REL
+        if let Ok(Some((rels, _))) = section.rel(endian, data) {
+            let link = section.sh_link(endian) as usize;
+            let sym_names =
+                readelf_build_sym_names::<Elf>(data, &all_sections, link, endian, is_64, is_le);
+
+            println!(
+                "\nRelocation section '{}' at offset 0x{:x} contains {} {}:",
+                name,
+                sec_offset,
+                rels.len(),
+                if rels.len() == 1 { "entry" } else { "entries" }
+            );
+            println!("  Offset          Info           Type           Sym. Value    Sym. Name");
+            for rel in rels {
+                let r_offset: u64 = rel.r_offset(endian).into();
+                let r_info: u64 = rel.r_info(endian).into();
+                let r_sym = rel.r_sym(endian);
+                let r_type = if is_64 {
+                    (r_info & 0xffffffff) as u32
+                } else {
+                    (r_info & 0xff) as u32
+                };
+                let type_name = elf_reloc_type_name(machine, r_type);
+                let (sym_value, sym_name) =
+                    sym_names.get(&r_sym).cloned().unwrap_or((0, String::new()));
+                if is_64 {
                     println!(
-                        "\nRelocation section '{}' at offset 0x{:x} contains {} {}:",
-                        name,
-                        sec_offset,
-                        rels.len(),
-                        if rels.len() == 1 { "entry" } else { "entries" }
+                        "{:012x}  {:012x} {:<18} {:016x} {}",
+                        r_offset, r_info, type_name, sym_value, sym_name
                     );
+                } else {
                     println!(
-                        "  Offset          Info           Type           Sym. Value    Sym. Name"
+                        "{:08x}  {:08x} {:<17} {:08x}   {}",
+                        r_offset, r_info, type_name, sym_value, sym_name
                     );
-                    for rel in rels {
-                        let r_offset: u64 = rel.r_offset(endian).into();
-                        let r_info: u64 = rel.r_info(endian).into();
-                        let r_sym = rel.r_sym(endian);
-                        let r_type = if is_64 {
-                            (r_info & 0xffffffff) as u32
-                        } else {
-                            (r_info & 0xff) as u32
-                        };
-                        let type_name = elf_reloc_type_name(machine, r_type);
-                        let (sym_value, sym_name) =
-                            sym_names.get(&r_sym).cloned().unwrap_or((0, String::new()));
-                        if is_64 {
-                            println!(
-                                "{:012x}  {:012x} {:<18} {:016x} {}",
-                                r_offset, r_info, type_name, sym_value, sym_name
-                            );
-                        } else {
-                            println!(
-                                "{:08x}  {:08x} {:<17} {:08x}   {}",
-                                r_offset, r_info, type_name, sym_value, sym_name
-                            );
-                        }
+                }
+            }
+        }
+    }
+
+    if sh_type == 4 {
+        // SHT_RELA
+        if let Ok(Some((relas, _))) = section.rela(endian, data) {
+            let link = section.sh_link(endian) as usize;
+            let sym_names =
+                readelf_build_sym_names::<Elf>(data, &all_sections, link, endian, is_64, is_le);
+
+            println!(
+                "\nRelocation section '{}' at offset 0x{:x} contains {} {}:",
+                name,
+                sec_offset,
+                relas.len(),
+                if relas.len() == 1 { "entry" } else { "entries" }
+            );
+            println!(
+                "  Offset          Info           Type           Sym. Value    Sym. Name + Addend"
+            );
+            for rela in relas {
+                let r_offset: u64 = rela.r_offset(endian).into();
+                let r_info: u64 = rela.r_info(endian, false).into();
+                let r_sym = rela.r_sym(endian, false);
+                let r_addend: i64 = rela.r_addend(endian).into();
+                let r_type = if is_64 {
+                    (r_info & 0xffffffff) as u32
+                } else {
+                    (r_info & 0xff) as u32
+                };
+                let type_name = elf_reloc_type_name(machine, r_type);
+                let (sym_value, sym_name) =
+                    sym_names.get(&r_sym).cloned().unwrap_or((0, String::new()));
+                if is_64 {
+                    if r_sym == 0 {
+                        println!(
+                            "{:012x}  {:012x} {:<34}     {:x}",
+                            r_offset, r_info, type_name, r_addend
+                        );
+                    } else {
+                        println!(
+                            "{:012x}  {:012x} {:<18}{:016x} {} + {:x}",
+                            r_offset, r_info, type_name, sym_value, sym_name, r_addend
+                        );
+                    }
+                } else {
+                    if r_sym == 0 {
+                        println!(
+                            "{:08x}  {:08x} {:<26}   {:x}",
+                            r_offset, r_info, type_name, r_addend
+                        );
+                    } else {
+                        println!(
+                            "{:08x}  {:08x} {:<17} {:08x}   {} + {:x}",
+                            r_offset, r_info, type_name, sym_value, sym_name, r_addend
+                        );
                     }
                 }
             }
+        }
+    }
 
-            if sh_type == 4 {
-                // SHT_RELA
-                if let Ok(Some((relas, _))) = section.rela(endian, data) {
-                    let link = section.sh_link(endian) as usize;
-                    let sym_names = readelf_build_sym_names::<Elf>(
-                        data,
-                        &all_sections,
-                        link,
-                        endian,
-                        is_64,
-                        is_le,
-                    );
-
-                    println!(
-                        "\nRelocation section '{}' at offset 0x{:x} contains {} {}:",
-                        name,
-                        sec_offset,
-                        relas.len(),
-                        if relas.len() == 1 { "entry" } else { "entries" }
-                    );
-                    println!(
-                        "  Offset          Info           Type           Sym. Value    Sym. Name + Addend"
-                    );
-                    for rela in relas {
-                        let r_offset: u64 = rela.r_offset(endian).into();
-                        let r_info: u64 = rela.r_info(endian, false).into();
-                        let r_sym = rela.r_sym(endian, false);
-                        let r_addend: i64 = rela.r_addend(endian).into();
-                        let r_type = if is_64 {
-                            (r_info & 0xffffffff) as u32
-                        } else {
-                            (r_info & 0xff) as u32
-                        };
-                        let type_name = elf_reloc_type_name(machine, r_type);
-                        let (sym_value, sym_name) =
-                            sym_names.get(&r_sym).cloned().unwrap_or((0, String::new()));
-                        if is_64 {
-                            if r_sym == 0 {
-                                println!(
-                                    "{:012x}  {:012x} {:<34}     {:x}",
-                                    r_offset, r_info, type_name, r_addend
-                                );
-                            } else {
-                                println!(
-                                    "{:012x}  {:012x} {:<18}{:016x} {} + {:x}",
-                                    r_offset, r_info, type_name, sym_value, sym_name, r_addend
-                                );
-                            }
-                        } else {
-                            if r_sym == 0 {
-                                println!(
-                                    "{:08x}  {:08x} {:<26}   {:x}",
-                                    r_offset, r_info, type_name, r_addend
-                                );
-                            } else {
-                                println!(
-                                    "{:08x}  {:08x} {:<17} {:08x}   {} + {:x}",
-                                    r_offset, r_info, type_name, sym_value, sym_name, r_addend
-                                );
-                            }
-                        }
-                    }
-                }
+    if sh_type == 19 {
+        // SHT_RELR
+        let mut sh_entsize: u64 = section.sh_entsize(endian).into();
+        if sh_entsize == 0 {
+            eprintln!(
+                "readelf: Error: Section {} has invalid sh_entsize of 0",
+                section_idx
+            );
+            let exp: u64 = if is_64 { 8 } else { 4 };
+            eprintln!(
+                "readelf: Error: (Using the expected size of {} for the rest of this dump)",
+                exp
+            );
+            sh_entsize = exp;
+        }
+        let sh_size: u64 = section.sh_size(endian).into();
+        let nentries = (sh_size / sh_entsize) as usize;
+        let off = sec_offset as usize;
+        if off + sh_size as usize > data.len() {
+            return;
+        }
+        let bytes = &data[off..off + sh_size as usize];
+        println!();
+        println!(
+            "Relocation section '{}' at offset 0x{:x} contains {} entries which relocate {} locations:",
+            name, sec_offset, nentries, nentries
+        );
+        println!("Index: Entry            Address           Symbolic Address");
+        let mut where_addr: u64 = 0;
+        let word_size: usize = if is_64 { 8 } else { 4 };
+        let width: usize = if is_64 { 16 } else { 8 };
+        for k in 0..nentries {
+            let pos = k * sh_entsize as usize;
+            if pos + word_size > bytes.len() {
+                break;
             }
-
-            if sh_type == 19 {
-                // SHT_RELR
-                let mut sh_entsize: u64 = section.sh_entsize(endian).into();
-                if sh_entsize == 0 {
-                    eprintln!(
-                        "readelf: Error: Section {} has invalid sh_entsize of 0",
-                        _idx
-                    );
-                    let exp: u64 = if is_64 { 8 } else { 4 };
-                    eprintln!(
-                        "readelf: Error: (Using the expected size of {} for the rest of this dump)",
-                        exp
-                    );
-                    sh_entsize = exp;
+            let entry: u64 = if is_64 {
+                let mut a = [0u8; 8];
+                a.copy_from_slice(&bytes[pos..pos + 8]);
+                if is_le {
+                    u64::from_le_bytes(a)
+                } else {
+                    u64::from_be_bytes(a)
                 }
-                let sh_size: u64 = section.sh_size(endian).into();
-                let nentries = (sh_size / sh_entsize) as usize;
-                let off = sec_offset as usize;
-                if off + sh_size as usize > data.len() {
-                    continue;
-                }
-                let bytes = &data[off..off + sh_size as usize];
-                println!();
+            } else {
+                let mut a = [0u8; 4];
+                a.copy_from_slice(&bytes[pos..pos + 4]);
+                let v = if is_le {
+                    u32::from_le_bytes(a)
+                } else {
+                    u32::from_be_bytes(a)
+                };
+                v as u64
+            };
+            if entry & 1 == 0 {
+                where_addr = entry;
                 println!(
-                    "Relocation section '{}' at offset 0x{:x} contains {} entries which relocate {} locations:",
-                    name, sec_offset, nentries, nentries
+                    "{:04}:  {:0width$x} {:0width$x}  <no sym>",
+                    k,
+                    entry,
+                    where_addr,
+                    width = width
                 );
-                println!("Index: Entry            Address           Symbolic Address");
-                let mut where_addr: u64 = 0;
-                let word_size: usize = if is_64 { 8 } else { 4 };
-                let width: usize = if is_64 { 16 } else { 8 };
-                for k in 0..nentries {
-                    let pos = k * sh_entsize as usize;
-                    if pos + word_size > bytes.len() {
-                        break;
-                    }
-                    let entry: u64 = if is_64 {
-                        let mut a = [0u8; 8];
-                        a.copy_from_slice(&bytes[pos..pos + 8]);
-                        if is_le {
-                            u64::from_le_bytes(a)
-                        } else {
-                            u64::from_be_bytes(a)
+                where_addr += word_size as u64;
+            } else {
+                let mut bitmap = entry >> 1;
+                let mut addr = where_addr;
+                let nbits = (word_size * 8 - 1) as u64;
+                let mut first_addr = where_addr;
+                let mut have_first = false;
+                while bitmap != 0 {
+                    if bitmap & 1 != 0 {
+                        if !have_first {
+                            first_addr = addr;
+                            have_first = true;
                         }
-                    } else {
-                        let mut a = [0u8; 4];
-                        a.copy_from_slice(&bytes[pos..pos + 4]);
-                        let v = if is_le {
-                            u32::from_le_bytes(a)
-                        } else {
-                            u32::from_be_bytes(a)
-                        };
-                        v as u64
-                    };
-                    if entry & 1 == 0 {
-                        where_addr = entry;
-                        println!(
-                            "{:04}:  {:0width$x} {:0width$x}  <no sym>",
-                            k,
-                            entry,
-                            where_addr,
-                            width = width
-                        );
-                        where_addr += word_size as u64;
-                    } else {
-                        let mut bitmap = entry >> 1;
-                        let mut addr = where_addr;
-                        let nbits = (word_size * 8 - 1) as u64;
-                        let mut first_addr = where_addr;
-                        let mut have_first = false;
-                        while bitmap != 0 {
-                            if bitmap & 1 != 0 {
-                                if !have_first {
-                                    first_addr = addr;
-                                    have_first = true;
-                                }
-                            }
-                            bitmap >>= 1;
-                            addr += word_size as u64;
-                        }
-                        println!(
-                            "{:04}:  {:0width$x} {:0width$x}  <no sym>",
-                            k,
-                            entry,
-                            first_addr,
-                            width = width
-                        );
-                        where_addr += nbits * word_size as u64;
                     }
+                    bitmap >>= 1;
+                    addr += word_size as u64;
                 }
+                println!(
+                    "{:04}:  {:0width$x} {:0width$x}  <no sym>",
+                    k,
+                    entry,
+                    first_addr,
+                    width = width
+                );
+                where_addr += nbits * word_size as u64;
             }
         }
     }
