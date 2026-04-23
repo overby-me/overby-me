@@ -445,6 +445,17 @@ fn validate_balanced_refs(text: &str, source: &str, line_no: usize) {
     }
 }
 
+/// Jobserver state. Either inherited from a parent make (via
+/// `--jobserver-auth=R,W`) or created fresh by a top-level make
+/// with `-jN > 1`.
+pub struct Jobserver {
+    pub read_fd: crate::c_int,
+    pub write_fd: crate::c_int,
+    /// True if we created the pipe (top-level); false if inherited.
+    #[allow(dead_code)]
+    pub owned: bool,
+}
+
 pub struct Engine {
     pub vars: RefCell<HashMap<String, Variable>>,
     rules: RefCell<HashMap<String, Vec<RuleEntry>>>,
@@ -718,6 +729,7 @@ pub struct Engine {
     /// after `pending_includes` is drained so match-anything `%`
     /// rules can still treat them as mentioned at build time.
     pub include_mentioned: RefCell<HashSet<String>>,
+    pub jobserver: RefCell<Option<Jobserver>>,
 }
 
 /// GNU make's directory-transfer stem substitution for pattern rules.
@@ -862,6 +874,7 @@ impl Engine {
             se_silence: std::cell::Cell::new(false),
             trying_pattern_rules: RefCell::new(Vec::new()),
             include_mentioned: RefCell::new(HashSet::new()),
+            jobserver: RefCell::new(None),
         };
 
         // Set default variables
@@ -3987,6 +4000,40 @@ impl Engine {
     /// don't qualify as simple leaves are NOT spawned and remain for
     /// the caller to handle serially.
     ///
+    /// Acquire a jobserver token (blocking). Returns Some(byte) on
+    /// success, None if no jobserver or read failed.
+    #[allow(dead_code)]
+    pub fn jobserver_acquire(&self) -> Option<u8> {
+        let read_fd = self.jobserver.borrow().as_ref().map(|j| j.read_fd)?;
+        let mut byte: u8 = 0;
+        let n = unsafe { crate::read(read_fd, &mut byte as *mut _, 1) };
+        if n == 1 { Some(byte) } else { None }
+    }
+
+    /// Try-acquire (non-blocking). Returns Some(byte) if a token was
+    /// available, None otherwise.
+    pub fn jobserver_try_acquire(&self) -> Option<u8> {
+        let read_fd = self.jobserver.borrow().as_ref().map(|j| j.read_fd)?;
+        let flags = unsafe { crate::fcntl(read_fd, crate::F_GETFL, 0) };
+        if flags < 0 {
+            return None;
+        }
+        let _ = unsafe { crate::fcntl(read_fd, crate::F_SETFL, flags | crate::O_NONBLOCK) };
+        let mut byte: u8 = 0;
+        let n = unsafe { crate::read(read_fd, &mut byte as *mut _, 1) };
+        let _ = unsafe { crate::fcntl(read_fd, crate::F_SETFL, flags) };
+        if n == 1 { Some(byte) } else { None }
+    }
+
+    /// Release a jobserver token by writing it back.
+    pub fn jobserver_release(&self, byte: u8) {
+        let write_fd = match self.jobserver.borrow().as_ref() {
+            Some(j) => j.write_fd,
+            None => return,
+        };
+        let _ = unsafe { crate::write(write_fd, &byte as *const _, 1) };
+    }
+
     /// Used by `finalize_includes` to parallelize Phase 0 (loaded
     /// include rebuild) and Phase 2 (pending include build).
     fn parallel_remake_files(&self, files: &[String]) -> std::collections::HashSet<String> {
@@ -4028,7 +4075,14 @@ impl Engine {
         let osync = self.output_sync.get();
         for batch in batches {
             let mut pids: Vec<ParallelChild> = Vec::new();
-            for file in &batch {
+            let mut tokens_held: Vec<u8> = Vec::new();
+            for (i, file) in batch.iter().enumerate() {
+                if i > 0 && self.jobserver.borrow().is_some() {
+                    match self.jobserver_try_acquire() {
+                        Some(b) => tokens_held.push(b),
+                        None => break,
+                    }
+                }
                 let pipe_fds = if osync != OutputSyncMode::None {
                     make_output_pipe()
                 } else {
@@ -4042,12 +4096,20 @@ impl Engine {
                             crate::close(wf);
                         }
                     }
+                    if i > 0
+                        && let Some(t) = tokens_held.pop()
+                    {
+                        self.jobserver_release(t);
+                    }
                     // fork failed — wait for already-spawned and bail.
                     for (cpid, _, _) in &pids {
                         let mut status: crate::c_int = 0;
                         unsafe {
                             let _ = crate::waitpid(*cpid, &mut status as *mut _, 0);
                         }
+                    }
+                    for tok in tokens_held {
+                        self.jobserver_release(tok);
                     }
                     return spawned;
                 }
@@ -4104,6 +4166,9 @@ impl Engine {
                     }
                     *self.recipe_executed.borrow_mut() = true;
                 }
+            }
+            for tok in tokens_held {
+                self.jobserver_release(tok);
             }
         }
         spawned
@@ -4317,11 +4382,22 @@ impl Engine {
         // Fork each batch entry. Parent collects via waitpid.
         let osync = self.output_sync.get();
         let mut pids: Vec<ParallelChildOO> = Vec::new();
+        // Tokens acquired from the jobserver (one per child beyond the
+        // first "free" slot). Released in the reap loop below.
+        let mut tokens_held: Vec<u8> = Vec::new();
         // Flush stdio before forking so children don't double-print.
         use std::io::Write;
         let _ = std::io::stdout().flush();
         let _ = std::io::stderr().flush();
-        for (prereq, is_oo) in &batch {
+        for (i, (prereq, is_oo)) in batch.iter().enumerate() {
+            // Token gating: first child runs on the implicit free slot;
+            // subsequent ones must acquire a jobserver token.
+            if i > 0 && self.jobserver.borrow().is_some() {
+                match self.jobserver_try_acquire() {
+                    Some(b) => tokens_held.push(b),
+                    None => break,
+                }
+            }
             let pipe_fds = if osync != OutputSyncMode::None {
                 make_output_pipe()
             } else {
@@ -4335,13 +4411,22 @@ impl Engine {
                         crate::close(wf);
                     }
                 }
-                // fork failed — fall back to serial for the rest.
+                // fork failed — release any token we just acquired for this slot.
+                if i > 0
+                    && let Some(t) = tokens_held.pop()
+                {
+                    self.jobserver_release(t);
+                }
+                // fall back to serial for the rest.
                 // Wait for any already-spawned children.
                 for (cpid, _, _, _) in &pids {
                     let mut status: crate::c_int = 0;
                     unsafe {
                         let _ = crate::waitpid(*cpid, &mut status as *mut _, 0);
                     }
+                }
+                for tok in tokens_held {
+                    self.jobserver_release(tok);
                 }
                 return 0;
             }
@@ -4439,6 +4524,10 @@ impl Engine {
                 self.built_targets.borrow_mut().insert(agg.clone());
                 built_seen.insert(agg.clone());
             }
+        }
+        // Release all jobserver tokens acquired for this batch.
+        for tok in tokens_held {
+            self.jobserver_release(tok);
         }
         idx - start
     }

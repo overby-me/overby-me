@@ -28,7 +28,17 @@ unsafe extern "C" {
     pub fn pipe(fds: *mut c_int) -> c_int;
     pub fn dup2(oldfd: c_int, newfd: c_int) -> c_int;
     pub fn close(fd: c_int) -> c_int;
+    pub fn read(fd: c_int, buf: *mut u8, count: usize) -> isize;
+    pub fn write(fd: c_int, buf: *const u8, count: usize) -> isize;
+    pub fn fcntl(fd: c_int, cmd: c_int, arg: c_int) -> c_int;
 }
+
+pub const F_GETFD: c_int = 1;
+pub const F_SETFD: c_int = 2;
+pub const FD_CLOEXEC: c_int = 1;
+pub const F_GETFL: c_int = 3;
+pub const F_SETFL: c_int = 4;
+pub const O_NONBLOCK: c_int = 2048;
 
 const SIGHUP: c_int = 1;
 const SIGINT: c_int = 2;
@@ -620,6 +630,12 @@ fn run() -> i32 {
             }
             arg if arg.starts_with("--shuffle=") => {
                 *engine.shuffle_mode.borrow_mut() = Some(arg["--shuffle=".len()..].to_string());
+            }
+            arg if arg.starts_with("--jobserver-auth=") => {
+                // Recognized; setup_jobserver picks this up from MAKEFLAGS env.
+            }
+            arg if arg.starts_with("--jobserver-fds=") => {
+                // GNU make legacy alias; same handling.
             }
             arg if arg.contains('=') => {
                 // Command-line variable assignment. Distinguish the
@@ -1424,6 +1440,53 @@ fn run() -> i32 {
         engine.suppress_reexec.set(true);
     }
 
+    // === Jobserver setup ===
+    setup_jobserver(&mut engine);
+
+    // Propagate jobserver auth via MAKEFLAGS so sub-makes inherit it.
+    if let Some(js) = engine.jobserver.borrow().as_ref() {
+        let auth = format!("--jobserver-auth={},{}", js.read_fd, js.write_fd);
+        // Append to the current MAKEFLAGS variable so sub-makes see it.
+        let cur = engine.lookup_var("MAKEFLAGS");
+        let new = if cur.is_empty() {
+            format!(" {auth}")
+        } else {
+            // Insert auth after the leading short-flag cluster but
+            // before the " -- $(MAKEOVERRIDES)" suffix if present.
+            if let Some(pos) = cur.find(" -- ") {
+                let mut v = cur[..pos].to_string();
+                v.push(' ');
+                v.push_str(&auth);
+                v.push_str(&cur[pos..]);
+                v
+            } else if let Some(pos) = cur.find("$(if $(MAKEOVERRIDES)") {
+                let mut v = cur[..pos].to_string();
+                if !v.ends_with(' ') && !v.is_empty() {
+                    v.push(' ');
+                }
+                v.push_str(&auth);
+                v.push_str(&cur[pos..]);
+                v
+            } else {
+                format!("{cur} {auth}")
+            }
+        };
+        let origin = {
+            let vars = engine.vars.borrow();
+            vars.get("MAKEFLAGS")
+                .map(|v| v.origin)
+                .unwrap_or(engine::VarOrigin::Default)
+        };
+        engine.vars.borrow_mut().insert(
+            "MAKEFLAGS".to_string(),
+            engine::Variable {
+                value: new,
+                flavor: engine::VarFlavor::Recursive,
+                origin,
+            },
+        );
+    }
+
     let rc = engine.build(&effective_targets);
 
     if print_database_flag {
@@ -1551,6 +1614,58 @@ fn run() -> i32 {
 
 /// Split a MAKEFLAGS string on whitespace, treating `\ ` (backslash-space)
 /// as an escaped space that does NOT split tokens.
+fn setup_jobserver(engine: &mut Engine) {
+    use crate::engine::Jobserver;
+
+    // 1. Inherit if MAKEFLAGS env contains --jobserver-auth=R,W.
+    let inherited = std::env::var("MAKEFLAGS").ok().and_then(|s| {
+        for tok in s.split_whitespace() {
+            let spec = tok
+                .strip_prefix("--jobserver-auth=")
+                .or_else(|| tok.strip_prefix("--jobserver-fds="));
+            if let Some(spec) = spec
+                && let Some((r, w)) = spec.split_once(',')
+                && let (Ok(rf), Ok(wf)) = (r.parse::<c_int>(), w.parse::<c_int>())
+            {
+                let ok = unsafe { crate::fcntl(rf, crate::F_GETFD, 0) } >= 0
+                    && unsafe { crate::fcntl(wf, crate::F_GETFD, 0) } >= 0;
+                if ok {
+                    return Some(Jobserver {
+                        read_fd: rf,
+                        write_fd: wf,
+                        owned: false,
+                    });
+                }
+            }
+        }
+        None
+    });
+
+    if let Some(js) = inherited {
+        *engine.jobserver.borrow_mut() = Some(js);
+        return;
+    }
+
+    // 2. Otherwise, if -jN > 1, create a fresh pipe and pre-fill N-1 tokens.
+    if engine.jobs > 1 {
+        let mut fds: [crate::c_int; 2] = [0, 0];
+        let rc = unsafe { crate::pipe(fds.as_mut_ptr()) };
+        if rc != 0 {
+            return;
+        }
+        let n = engine.jobs - 1;
+        let token: u8 = b'+';
+        for _ in 0..n {
+            let _ = unsafe { crate::write(fds[1], &token as *const _, 1) };
+        }
+        *engine.jobserver.borrow_mut() = Some(Jobserver {
+            read_fd: fds[0],
+            write_fd: fds[1],
+            owned: true,
+        });
+    }
+}
+
 fn split_makeflags(s: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
