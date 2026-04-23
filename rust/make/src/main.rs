@@ -98,6 +98,8 @@ fn main() {
 
 fn parse_output_sync(mode: &str) -> crate::engine::OutputSyncMode {
     match mode {
+        "" | "target" | "recurse" | "job" => crate::engine::OutputSyncMode::Target,
+        "line" => crate::engine::OutputSyncMode::Line,
         "none" => crate::engine::OutputSyncMode::None,
         _ => crate::engine::OutputSyncMode::Target,
     }
@@ -1314,6 +1316,15 @@ fn run() -> i32 {
             } else {
                 tok
             };
+            // Skip tokens whose first char is an args-taking short flag.
+            // Their argument characters (e.g. "-Onone", "-j4", "-l2.5")
+            // must not be interpreted as more flag chars.
+            if let Some(first) = chars.chars().next()
+                && matches!(first, 'I' | 'O' | 'j' | 'l' | 'W' | 'o' | 'f' | 'C')
+                && chars.len() > 1
+            {
+                continue;
+            }
             for ch in chars.chars() {
                 match ch {
                     'r' => has_r = true,

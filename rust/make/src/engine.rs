@@ -23,6 +23,8 @@ pub enum VarOrigin {
 pub enum OutputSyncMode {
     /// No buffering — output streams interleave as they're produced.
     None,
+    /// Flush each complete line atomically as it arrives.
+    Line,
     /// Buffer per-recipe; flush atomically at reap time.
     Target,
 }
@@ -35,6 +37,34 @@ fn drain_fd(fd: crate::c_int) -> Vec<u8> {
     let mut buf = Vec::new();
     let _ = file.read_to_end(&mut buf);
     buf
+}
+
+/// Drain a pipe fd line-by-line, flushing each complete line atomically
+/// under OUTPUT_LOCK. Returns any trailing partial line at EOF (so the
+/// caller can flush it once the child has exited).
+fn drain_fd_line_buffered(fd: crate::c_int) -> Vec<u8> {
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::io::FromRawFd;
+    let file = unsafe { std::fs::File::from_raw_fd(fd) };
+    let mut reader = BufReader::new(file);
+    let mut leftover: Vec<u8> = Vec::new();
+    loop {
+        let mut line: Vec<u8> = Vec::new();
+        match reader.read_until(b'\n', &mut line) {
+            Ok(0) => break, // EOF
+            Ok(_) => {
+                if line.last() == Some(&b'\n') {
+                    flush_buffered_output(&line);
+                } else {
+                    // Partial line at EOF — return so caller can flush.
+                    leftover = line;
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    leftover
 }
 
 /// Atomically write a buffered child output blob to real stdout, taking
@@ -4134,7 +4164,11 @@ impl Engine {
                     unsafe {
                         crate::close(wf);
                     }
-                    Some(std::thread::spawn(move || drain_fd(rf)))
+                    let mode = self.output_sync.get();
+                    Some(std::thread::spawn(move || match mode {
+                        OutputSyncMode::Line => drain_fd_line_buffered(rf),
+                        _ => drain_fd(rf),
+                    }))
                 } else {
                     None
                 };
@@ -4462,7 +4496,11 @@ impl Engine {
                 unsafe {
                     crate::close(wf);
                 }
-                Some(std::thread::spawn(move || drain_fd(rf)))
+                let mode = self.output_sync.get();
+                Some(std::thread::spawn(move || match mode {
+                    OutputSyncMode::Line => drain_fd_line_buffered(rf),
+                    _ => drain_fd(rf),
+                }))
             } else {
                 None
             };
