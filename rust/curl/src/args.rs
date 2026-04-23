@@ -282,6 +282,12 @@ pub(crate) fn parse_args() -> Options {
             "-L" | "--location" => {
                 opts.location = true;
             }
+            "--follow" => {
+                if opts.location {
+                    eprintln!("Warning: --follow overrides --location");
+                }
+                opts.location = true;
+            }
             "--location-trusted" => {
                 opts.location = true;
                 opts.location_trusted = true;
