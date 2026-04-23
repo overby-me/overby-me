@@ -592,6 +592,17 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
 
 ### Recent fixes
 
+- **`@_` post-hoc autoviv + writeback for anon-sub `->()` calls**: the
+  named-call path (`Expr::Call` -> `subs.get(name)`) already wired
+  `autoviv_lvalue_for_call` + `final_u` writeback for lvalue-shaped
+  args, but `Expr::CodeCall` (used by `sub { ... }->($h{k})` and
+  `&$cc($h{k})`) skipped both. Anonymous-sub call now mirrors the
+  named path: pre-call autoviv on each arg, post-call writeback when
+  the corresponding final `@_` slot differs from the value passed in.
+  Unblocks the `sub { $_[0] = X }->($h{k})` idiom (op/pos's defelem
+  block) for the on-exit case; `pos` reads through the same slot
+  during the call still need real `@_` slot aliasing.
+
 - **`local($a[i])` parens-form + array-element restore**: parser only
   recognised `local $a[i]` (bare form), so `local($a[i]) = X` and
   `local(@a[i,j]) = …` fell through to `parse_var_list` which dropped

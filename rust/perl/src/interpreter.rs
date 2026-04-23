@@ -3601,11 +3601,30 @@ impl Interpreter {
 
             Expr::CodeCall(callee, args) => {
                 let callee_val = self.eval_expr(callee);
+                // Pre-call autoviv on lvalue-shaped args, mirroring the
+                // named-call path so `$ref->{k}` slots exist before the
+                // sub runs and get written back via `@_`.
+                for arg in args.iter() {
+                    self.autoviv_lvalue_for_call(arg);
+                }
                 let arg_vals: Vec<Value> = args.iter().flat_map(|a| self.eval_list(a)).collect();
                 match callee_val {
                     Value::CodeRef(name) => {
                         if let Some((_params, body)) = self.subs.get(&name).cloned() {
-                            self.call_sub_named(&body, &arg_vals, Some(&name))
+                            let ret = self.call_sub_named(&body, &arg_vals, Some(&name));
+                            if let Some(final_u) = self.last_popped_underscore.take() {
+                                let pair_count = args.len().min(final_u.len()).min(arg_vals.len());
+                                for i in 0..pair_count {
+                                    let arg_expr = &args[i];
+                                    if !is_lvalue_shape(arg_expr) {
+                                        continue;
+                                    }
+                                    if !value_eq(&final_u[i], &arg_vals[i]) {
+                                        self.assign_to(arg_expr, final_u[i].clone());
+                                    }
+                                }
+                            }
+                            ret
                         } else {
                             Value::Undef
                         }
