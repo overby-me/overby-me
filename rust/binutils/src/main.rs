@@ -7658,6 +7658,33 @@ fn tool_strip(args: &[String]) -> i32 {
             continue;
         }
 
+        // In-place strip for executables/shared libraries (ET_EXEC/ET_DYN).
+        // The slow path via object::write::Object zeroes sh_addr and rebuilds
+        // the file as relocatable, which produces an unrunnable binary.
+        // For non-ET_REL files, do an in-place section header table edit.
+        if let Some(stripped) = strip_inplace_elf(
+            &data,
+            &StripInplaceOpts {
+                mode,
+                remove_sections: &remove_sections,
+                keep_symbols: &keep_symbols,
+            },
+        ) {
+            let out_path = output_file.as_deref().unwrap_or(file);
+            let mut final_out = stripped;
+            if strip_section_headers {
+                elf_strip_section_headers(&mut final_out);
+            }
+            if let Err(e) = fs::write(out_path, &final_out) {
+                eprintln!("strip: {out_path}: {e}");
+                errors += 1;
+            }
+            if let Some(mtime) = timestamps {
+                let _ = set_file_times(Path::new(out_path), mtime);
+            }
+            continue;
+        }
+
         let obj = match object::File::parse(&*data) {
             Ok(o) => o,
             Err(e) => {
@@ -9155,6 +9182,493 @@ fn elf_remove_empty_symtab(data: &mut Vec<u8>) {
         write_u16(data, 0x30, new_shnum as u16);
         write_u16(data, 0x32, new_shstrndx);
     }
+}
+
+struct StripInplaceOpts<'a> {
+    mode: StripMode,
+    remove_sections: &'a [String],
+    keep_symbols: &'a [String],
+}
+
+/// In-place ELF strip for executables (ET_EXEC) and shared libraries (ET_DYN).
+///
+/// The `object::write::Object`-based slow path zeroes `sh_addr` and rebuilds
+/// the file as if it were relocatable, which produces an unrunnable binary.
+/// For non-relocatable ELFs we instead leave all surviving section bytes at
+/// their original file offsets (so program headers and load addresses stay
+/// valid) and only filter the section header table and append a new one.
+///
+/// Returns `None` for files that aren't ELF executables/shared libs (e.g.
+/// ET_REL objects), letting the caller fall back to the slow path.
+fn strip_inplace_elf(data: &[u8], opts: &StripInplaceOpts<'_>) -> Option<Vec<u8>> {
+    if data.len() < 0x40 || &data[..4] != b"\x7fELF" {
+        return None;
+    }
+    let class = data[4];
+    let endian = data[5];
+    if class != 1 && class != 2 {
+        return None;
+    }
+    let le = endian == 1;
+
+    let r16 = |o: usize| -> u16 {
+        let mut b = [0u8; 2];
+        b.copy_from_slice(&data[o..o + 2]);
+        if le {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        }
+    };
+    let r32 = |o: usize| -> u32 {
+        let mut b = [0u8; 4];
+        b.copy_from_slice(&data[o..o + 4]);
+        if le {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        }
+    };
+    let r64 = |o: usize| -> u64 {
+        let mut b = [0u8; 8];
+        b.copy_from_slice(&data[o..o + 8]);
+        if le {
+            u64::from_le_bytes(b)
+        } else {
+            u64::from_be_bytes(b)
+        }
+    };
+
+    let e_type = r16(0x10);
+    if e_type != 2 && e_type != 3 {
+        return None;
+    }
+
+    let (shoff, shentsize, shnum, shstrndx) = if class == 2 {
+        (
+            r64(0x28) as usize,
+            r16(0x3a) as usize,
+            r16(0x3c) as usize,
+            r16(0x3e) as usize,
+        )
+    } else {
+        (
+            r32(0x20) as usize,
+            r16(0x2e) as usize,
+            r16(0x30) as usize,
+            r16(0x32) as usize,
+        )
+    };
+    if shoff == 0 || shnum == 0 || shstrndx >= shnum {
+        return None;
+    }
+    let expected_entsize = if class == 2 { 64 } else { 40 };
+    if shentsize != expected_entsize {
+        return None;
+    }
+    let total = shnum.checked_mul(shentsize)?;
+    if shoff.checked_add(total)? > data.len() {
+        return None;
+    }
+
+    #[derive(Clone)]
+    struct Shdr {
+        name: u32,
+        sh_type: u32,
+        sh_flags: u64,
+        sh_addr: u64,
+        sh_offset: u64,
+        sh_size: u64,
+        sh_link: u32,
+        sh_info: u32,
+        sh_addralign: u64,
+        sh_entsize: u64,
+    }
+
+    let mut headers: Vec<Shdr> = Vec::with_capacity(shnum);
+    for i in 0..shnum {
+        let h = shoff + i * shentsize;
+        let sh = if class == 2 {
+            Shdr {
+                name: r32(h),
+                sh_type: r32(h + 4),
+                sh_flags: r64(h + 8),
+                sh_addr: r64(h + 16),
+                sh_offset: r64(h + 24),
+                sh_size: r64(h + 32),
+                sh_link: r32(h + 40),
+                sh_info: r32(h + 44),
+                sh_addralign: r64(h + 48),
+                sh_entsize: r64(h + 56),
+            }
+        } else {
+            Shdr {
+                name: r32(h),
+                sh_type: r32(h + 4),
+                sh_flags: r32(h + 8) as u64,
+                sh_addr: r32(h + 12) as u64,
+                sh_offset: r32(h + 16) as u64,
+                sh_size: r32(h + 20) as u64,
+                sh_link: r32(h + 24),
+                sh_info: r32(h + 28),
+                sh_addralign: r32(h + 32) as u64,
+                sh_entsize: r32(h + 36) as u64,
+            }
+        };
+        headers.push(sh);
+    }
+
+    let shstr_off = headers[shstrndx].sh_offset as usize;
+    let shstr_size = headers[shstrndx].sh_size as usize;
+    let shstr_end = shstr_off.checked_add(shstr_size)?;
+    if shstr_end > data.len() {
+        return None;
+    }
+    let strtab = &data[shstr_off..shstr_end];
+    let name_of = |off: u32| -> &str {
+        let o = off as usize;
+        if o >= strtab.len() {
+            return "";
+        }
+        let mut e = o;
+        while e < strtab.len() && strtab[e] != 0 {
+            e += 1;
+        }
+        std::str::from_utf8(&strtab[o..e]).unwrap_or("")
+    };
+
+    let keep_symtab_pair = !opts.keep_symbols.is_empty();
+    let mut keep: Vec<bool> = vec![true; shnum];
+    for i in 1..shnum {
+        let name = name_of(headers[i].name);
+        if !opts.remove_sections.is_empty() && matches_selector_list(name, opts.remove_sections) {
+            keep[i] = false;
+            continue;
+        }
+        let is_symtab_pair = name == ".symtab" || name == ".strtab";
+        let is_debuglink = name == ".gnu.debuglink";
+        let is_dbg = is_debug_section(name);
+        match opts.mode {
+            StripMode::All => {
+                if (is_symtab_pair && !keep_symtab_pair) || is_debuglink || is_dbg {
+                    keep[i] = false;
+                }
+            }
+            StripMode::Debug => {
+                if is_debuglink || is_dbg {
+                    keep[i] = false;
+                }
+            }
+            StripMode::Unneeded => {
+                if is_dbg {
+                    keep[i] = false;
+                }
+            }
+        }
+    }
+
+    for i in 0..shnum {
+        if keep[i] && (headers[i].sh_type == 2 || headers[i].sh_type == 11) {
+            let lk = headers[i].sh_link as usize;
+            if lk < shnum {
+                keep[lk] = true;
+            }
+        }
+    }
+    keep[shstrndx] = true;
+
+    let mut newidx = vec![0u32; shnum];
+    let mut new_count = 0u32;
+    for i in 0..shnum {
+        if keep[i] {
+            newidx[i] = new_count;
+            new_count += 1;
+        }
+    }
+
+    if (new_count as usize) == shnum {
+        return Some(data.to_vec());
+    }
+
+    let ehdr_size: usize = if class == 2 { 64 } else { 52 };
+    let mut data_end: usize = ehdr_size;
+    for i in 0..shnum {
+        if !keep[i] {
+            continue;
+        }
+        if headers[i].sh_type == 8 {
+            continue;
+        }
+        let end = (headers[i].sh_offset as usize).saturating_add(headers[i].sh_size as usize);
+        if end > data_end {
+            data_end = end;
+        }
+    }
+    if data_end > data.len() {
+        data_end = data.len();
+    }
+    let phoff = if class == 2 {
+        r64(0x20) as usize
+    } else {
+        r32(0x1c) as usize
+    };
+    let phentsize = if class == 2 {
+        r16(0x36) as usize
+    } else {
+        r16(0x2a) as usize
+    };
+    let phnum = if class == 2 {
+        r16(0x38) as usize
+    } else {
+        r16(0x2c) as usize
+    };
+    let ph_end = phoff.saturating_add(phentsize.saturating_mul(phnum));
+    if ph_end <= data.len() && ph_end > data_end {
+        data_end = ph_end;
+    }
+
+    // Filter .symtab/.strtab when keep_symbols is non-empty.
+    // We collect the new bytes here and rewrite the section headers later.
+    let mut sym_overrides: Vec<(usize, u64, u64)> = Vec::new(); // (idx, new_offset, new_size)
+    let mut sym_extra_data: Vec<u8> = Vec::new();
+    let mut new_symtab_info: Option<u32> = None;
+    if !opts.keep_symbols.is_empty() {
+        // Find .symtab (and its linked strtab).
+        let mut symtab_idx: Option<usize> = None;
+        for i in 1..shnum {
+            if keep[i] && headers[i].sh_type == 2 && name_of(headers[i].name) == ".symtab" {
+                symtab_idx = Some(i);
+                break;
+            }
+        }
+        if let Some(si) = symtab_idx {
+            let strtab_idx = headers[si].sh_link as usize;
+            if strtab_idx < shnum && keep[strtab_idx] && headers[strtab_idx].sh_type == 3 {
+                let entsize = if class == 2 { 24usize } else { 16usize };
+                let sym_off = headers[si].sh_offset as usize;
+                let sym_size = headers[si].sh_size as usize;
+                let str_off = headers[strtab_idx].sh_offset as usize;
+                let str_size = headers[strtab_idx].sh_size as usize;
+                if sym_off + sym_size <= data.len()
+                    && str_off + str_size <= data.len()
+                    && entsize > 0
+                    && sym_size % entsize == 0
+                {
+                    let nsyms = sym_size / entsize;
+                    let strtab_bytes = &data[str_off..str_off + str_size];
+                    let read_name = |o: u32| -> &str {
+                        let o = o as usize;
+                        if o >= strtab_bytes.len() {
+                            return "";
+                        }
+                        let mut e = o;
+                        while e < strtab_bytes.len() && strtab_bytes[e] != 0 {
+                            e += 1;
+                        }
+                        std::str::from_utf8(&strtab_bytes[o..e]).unwrap_or("")
+                    };
+                    // Build filtered set: always keep symbol 0 (null).
+                    let mut keep_sym: Vec<bool> = vec![false; nsyms];
+                    if nsyms > 0 {
+                        keep_sym[0] = true;
+                    }
+                    for k in 1..nsyms {
+                        let h = sym_off + k * entsize;
+                        let st_name = if le {
+                            u32::from_le_bytes(data[h..h + 4].try_into().unwrap())
+                        } else {
+                            u32::from_be_bytes(data[h..h + 4].try_into().unwrap())
+                        };
+                        let name = read_name(st_name);
+                        if !name.is_empty() && opts.keep_symbols.iter().any(|s| s == name) {
+                            keep_sym[k] = true;
+                        }
+                    }
+                    // Build new strtab: starts with NUL, append unique kept names.
+                    let mut new_strtab: Vec<u8> = vec![0u8];
+                    let mut name_offsets: Vec<u32> = vec![0u32; nsyms];
+                    for k in 0..nsyms {
+                        if !keep_sym[k] {
+                            continue;
+                        }
+                        let h = sym_off + k * entsize;
+                        let st_name = if le {
+                            u32::from_le_bytes(data[h..h + 4].try_into().unwrap())
+                        } else {
+                            u32::from_be_bytes(data[h..h + 4].try_into().unwrap())
+                        };
+                        let name = read_name(st_name);
+                        if name.is_empty() {
+                            name_offsets[k] = 0;
+                        } else {
+                            name_offsets[k] = new_strtab.len() as u32;
+                            new_strtab.extend_from_slice(name.as_bytes());
+                            new_strtab.push(0);
+                        }
+                    }
+                    // Build new symtab and count locals (for sh_info).
+                    let mut new_symtab: Vec<u8> = Vec::new();
+                    let mut local_count: u32 = 0;
+                    let mut counting_locals = true;
+                    for k in 0..nsyms {
+                        if !keep_sym[k] {
+                            continue;
+                        }
+                        let h = sym_off + k * entsize;
+                        let mut entry = data[h..h + entsize].to_vec();
+                        let no = name_offsets[k];
+                        let nb = if le {
+                            no.to_le_bytes()
+                        } else {
+                            no.to_be_bytes()
+                        };
+                        entry[0..4].copy_from_slice(&nb);
+                        // st_info: binding in upper 4 bits.
+                        let st_info_off = if class == 2 { 4 } else { 12 };
+                        let binding = entry[st_info_off] >> 4;
+                        if counting_locals && binding == 0 {
+                            // STB_LOCAL
+                            local_count += 1;
+                        } else {
+                            counting_locals = false;
+                        }
+                        new_symtab.extend_from_slice(&entry);
+                    }
+                    // Place new strtab and symtab at end of out buffer (after data_end).
+                    // Align to 8.
+                    while sym_extra_data.len() % 8 != 0 {
+                        sym_extra_data.push(0);
+                    }
+                    let strtab_rel_off = sym_extra_data.len();
+                    sym_extra_data.extend_from_slice(&new_strtab);
+                    while sym_extra_data.len() % 8 != 0 {
+                        sym_extra_data.push(0);
+                    }
+                    let symtab_rel_off = sym_extra_data.len();
+                    sym_extra_data.extend_from_slice(&new_symtab);
+                    sym_overrides.push((
+                        strtab_idx,
+                        strtab_rel_off as u64,
+                        new_strtab.len() as u64,
+                    ));
+                    sym_overrides.push((si, symtab_rel_off as u64, new_symtab.len() as u64));
+                    new_symtab_info = Some(local_count);
+                }
+            }
+        }
+    }
+
+    let mut out = data[..data_end].to_vec();
+    while out.len() % 8 != 0 {
+        out.push(0);
+    }
+    let new_shstrndx = newidx[shstrndx];
+
+    let w32_buf = |buf: &mut [u8], o: usize, v: u32| {
+        let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        buf[o..o + 4].copy_from_slice(&b);
+    };
+    let w64_buf = |buf: &mut [u8], o: usize, v: u64| {
+        let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        buf[o..o + 8].copy_from_slice(&b);
+    };
+
+    // Append filtered .symtab/.strtab data (if any) to out, then record the
+    // absolute file offsets for those sections.
+    let extra_base = out.len();
+    out.extend_from_slice(&sym_extra_data);
+    while out.len() % 8 != 0 {
+        out.push(0);
+    }
+    let new_shoff_after = out.len();
+
+    for i in 0..shnum {
+        if !keep[i] {
+            continue;
+        }
+        let sh = &headers[i];
+        let new_link = if (sh.sh_link as usize) < shnum && keep[sh.sh_link as usize] {
+            newidx[sh.sh_link as usize]
+        } else {
+            0
+        };
+        let mut new_info = if (sh.sh_type == 9 || sh.sh_type == 4) && (sh.sh_info as usize) < shnum
+        {
+            if keep[sh.sh_info as usize] {
+                newidx[sh.sh_info as usize]
+            } else {
+                0
+            }
+        } else {
+            sh.sh_info
+        };
+        let mut sh_offset = sh.sh_offset;
+        let mut sh_size = sh.sh_size;
+        for &(idx, rel_off, sz) in &sym_overrides {
+            if idx == i {
+                sh_offset = (extra_base as u64) + rel_off;
+                sh_size = sz;
+            }
+        }
+        if sh.sh_type == 2 {
+            if let Some(lc) = new_symtab_info {
+                new_info = lc;
+            }
+        }
+
+        if class == 2 {
+            let mut buf = [0u8; 64];
+            w32_buf(&mut buf, 0, sh.name);
+            w32_buf(&mut buf, 4, sh.sh_type);
+            w64_buf(&mut buf, 8, sh.sh_flags);
+            w64_buf(&mut buf, 16, sh.sh_addr);
+            w64_buf(&mut buf, 24, sh_offset);
+            w64_buf(&mut buf, 32, sh_size);
+            w32_buf(&mut buf, 40, new_link);
+            w32_buf(&mut buf, 44, new_info);
+            w64_buf(&mut buf, 48, sh.sh_addralign);
+            w64_buf(&mut buf, 56, sh.sh_entsize);
+            out.extend_from_slice(&buf);
+        } else {
+            let mut buf = [0u8; 40];
+            w32_buf(&mut buf, 0, sh.name);
+            w32_buf(&mut buf, 4, sh.sh_type);
+            w32_buf(&mut buf, 8, sh.sh_flags as u32);
+            w32_buf(&mut buf, 12, sh.sh_addr as u32);
+            w32_buf(&mut buf, 16, sh_offset as u32);
+            w32_buf(&mut buf, 20, sh_size as u32);
+            w32_buf(&mut buf, 24, new_link);
+            w32_buf(&mut buf, 28, new_info);
+            w32_buf(&mut buf, 32, sh.sh_addralign as u32);
+            w32_buf(&mut buf, 36, sh.sh_entsize as u32);
+            out.extend_from_slice(&buf);
+        }
+    }
+
+    let w16m = |out: &mut [u8], o: usize, v: u16| {
+        let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        out[o..o + 2].copy_from_slice(&b);
+    };
+    let w32m = |out: &mut [u8], o: usize, v: u32| {
+        let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        out[o..o + 4].copy_from_slice(&b);
+    };
+    let w64m = |out: &mut [u8], o: usize, v: u64| {
+        let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        out[o..o + 8].copy_from_slice(&b);
+    };
+    let new_shoff = new_shoff_after;
+    if class == 2 {
+        w64m(&mut out, 0x28, new_shoff as u64);
+        w16m(&mut out, 0x3c, new_count as u16);
+        w16m(&mut out, 0x3e, new_shstrndx as u16);
+    } else {
+        w32m(&mut out, 0x20, new_shoff as u32);
+        w16m(&mut out, 0x30, new_count as u16);
+        w16m(&mut out, 0x32, new_shstrndx as u16);
+    }
+
+    Some(out)
 }
 
 fn elf_strip_section_headers(data: &mut Vec<u8>) {

@@ -66,7 +66,7 @@ Key design decisions:
 | `objdump-relocs` | objdump | ✅ PASS |
 | `addr2line-basic` | addr2line | ✅ PASS |
 
-### Upstream DejaGnu tests (187/220 passing)
+### Upstream DejaGnu tests (189/220 passing)
 
 | Test file | Pass | Fail | Total | Threshold |
 |-----------|------|------|-------|-----------|
@@ -76,10 +76,10 @@ Key design decisions:
 | ar.exp | **12** | 2 | 14 | minPass=12, maxFail=2 |
 | readelf.exp | **26** | 12 | 39 | minPass=26, maxFail=12 |
 | objdump.exp | **22** | 10 | 33 | minPass=19, maxFail=3 (standalone; `-all` sees 22) |
-| objcopy.exp | **104** | 11 | 116 | minPass=104, maxFail=11 |
+| objcopy.exp | **106** | 9 | 116 | minPass=106, maxFail=9 |
 | strings.exp | **1** | 0 | 1 | minPass=1, maxFail=0 |
 | addr2line.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
-| **Total** | **187** | **33** | **220** | |
+| **Total** | **189** | **31** | **220** | |
 
 ## Fixes applied
 
@@ -215,6 +215,8 @@ Two layers of testing:
 - [x] Fix objdump.exp failures (19→22/33): in-place ELF `sh_addr`/`e_entry` patching for `--change-section-address`, `--adjust-vma`, `--set-start`, `--adjust-start` (preserves all other ELF structure exactly)
 
 - [x] Fix readelf.exp failure (25→26/39): `-j`/`--display-section` on REL/RELA sections now emits a relocation table instead of a hex dump (GNU-compatible format; refactored `readelf_relocs` to share per-section printing via new `readelf_dump_reloc_section`)
+
+- [x] Fix strip on executables (104→106 objcopy.exp passes): in-place ELF section-table edit for ET_EXEC/ET_DYN preserves `sh_addr`, program-header layout, and PROGBITS/NOBITS distinction (slow `object::write::Object` path was producing unrunnable binaries by zeroing addresses); `-K` rewrites `.symtab`/`.strtab` instead of dropping them. Fixes `run stripped executable` and `run stripped executable with saving a symbol`.
 
 ## Next steps
 
