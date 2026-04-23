@@ -271,6 +271,13 @@ pub enum Stmt {
     /// `local $SIG{__DIE__} = sub {…}` idiom (temporarily install a die
     /// handler for the enclosing block).
     LocalHashElem(String, Expr, Option<Expr>),
+    /// `local @arr[i,j] = LIST` / `local %h{a,b} = LIST` — slice-form
+    /// localisation. `name` is `@arr` or `%h` (with sigil prefix to mark
+    /// array vs hash). The key list is the indices/keys; if `Some(rhs)`
+    /// is given, its list-context evaluation is destructured 1-1 onto
+    /// the slots, padding with undef. On scope exit each slot is restored
+    /// to its prior value (or marked deleted if originally absent).
+    LocalSlice(String, Vec<Expr>, Option<Expr>),
     Our(Vec<(String, Option<Expr>)>, bool),
 
     // Package

@@ -979,6 +979,41 @@ impl Parser {
                 "Can't localize through a reference".to_string(),
             )]);
         }
+        // `local(@NAME[i,j,...])` / `local(%NAME{a,b,...})` — slice
+        // localisation. Parse the key list and emit Stmt::LocalSlice.
+        if matches!(self.tok(), Token::LParen)
+            && (matches!(self.peek(1), Token::ArrayVar(_))
+                || matches!(self.peek(1), Token::HashVar(_)))
+            && matches!(self.peek(2), Token::LBracket | Token::LBrace)
+        {
+            let (var_name, is_hash) = match self.peek(1) {
+                Token::ArrayVar(n) => (format!("@{n}"), false),
+                Token::HashVar(n) => (format!("%{n}"), true),
+                _ => unreachable!(),
+            };
+            self.pos += 3; // ( @arr [   or   ( %h {
+            let mut keys = Vec::new();
+            loop {
+                let k = self.parse_expr();
+                keys.push(k);
+                if !self.eat(&Token::Comma) {
+                    break;
+                }
+            }
+            let close = if matches!(self.tok(), Token::RBracket) {
+                Token::RBracket
+            } else {
+                Token::RBrace
+            };
+            self.expect(&close);
+            self.expect(&Token::RParen);
+            let val = if self.eat(&Token::Assign) {
+                Some(self.parse_expr())
+            } else {
+                None
+            };
+            return Stmt::LocalSlice(var_name, keys, val);
+        }
         // `local($NAME{KEY})` / `local($NAME[IDX])` — paren-wrapped
         // single-element form. Same shape as the bare form below, just
         // with surrounding parens that we strip.
@@ -2935,7 +2970,81 @@ impl Parser {
 
             Token::Delete => {
                 self.pos += 1;
-                let arg = if self.eat(&Token::LParen) {
+                // `delete local $h{k}` / `delete local $a[i]` /
+                // `delete local @arr[i,j]` / `delete local %h{a,b}` —
+                // route to a synthetic `_delete_local` call carrying
+                // the variable shape. Marker arg #0 distinguishes the
+                // single (`elem`) vs slice (`aslice`/`hslice`) forms.
+                let inner_paren = self.eat(&Token::LParen);
+                if matches!(self.tok(), Token::Local) {
+                    self.pos += 1; // `local`
+                    if let Token::ScalarVar(name) = self.tok()
+                        && matches!(self.peek(1), Token::LBrace | Token::LBracket)
+                    {
+                        let var_name = name.clone();
+                        let is_hash = matches!(self.peek(1), Token::LBrace);
+                        self.pos += 2;
+                        let key = self.parse_expr();
+                        let close = if is_hash {
+                            &Token::RBrace
+                        } else {
+                            &Token::RBracket
+                        };
+                        self.expect(close);
+                        if inner_paren {
+                            self.expect(&Token::RParen);
+                        }
+                        let bucket = if is_hash {
+                            var_name
+                        } else {
+                            format!("@{var_name}")
+                        };
+                        return Expr::Call(
+                            "_delete_local".to_string(),
+                            vec![
+                                Expr::StringLit("elem".to_string()),
+                                Expr::StringLit(bucket),
+                                key,
+                            ],
+                        );
+                    }
+                    if (matches!(self.tok(), Token::ArrayVar(_))
+                        || matches!(self.tok(), Token::HashVar(_)))
+                        && matches!(self.peek(1), Token::LBracket | Token::LBrace)
+                    {
+                        let (var_name, is_hash) = match self.tok() {
+                            Token::ArrayVar(n) => (format!("@{n}"), false),
+                            Token::HashVar(n) => (format!("%{n}"), true),
+                            _ => unreachable!(),
+                        };
+                        self.pos += 2; // sigil + open bracket/brace
+                        let mut keys = Vec::new();
+                        loop {
+                            keys.push(self.parse_expr());
+                            if !self.eat(&Token::Comma) {
+                                break;
+                            }
+                        }
+                        let close = if matches!(self.tok(), Token::RBracket) {
+                            Token::RBracket
+                        } else {
+                            Token::RBrace
+                        };
+                        self.expect(&close);
+                        if inner_paren {
+                            self.expect(&Token::RParen);
+                        }
+                        let mut out = vec![
+                            Expr::StringLit(if is_hash { "hslice" } else { "aslice" }.to_string()),
+                            Expr::StringLit(var_name),
+                        ];
+                        out.extend(keys);
+                        return Expr::Call("_delete_local".to_string(), out);
+                    }
+                    // Unrecognised shape after `delete local`; fall through
+                    // and let the inner parse handle it.
+                }
+                let arg = if inner_paren {
                     let e = self.parse_expr();
                     self.expect(&Token::RParen);
                     e

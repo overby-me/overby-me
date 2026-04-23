@@ -592,6 +592,30 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
 
 ### Recent fixes
 
+- **`delete local` for hash/array element + slice**: parser detects
+  `Token::Delete` followed by `Token::Local` and routes through a new
+  synthetic `_delete_local` builtin that snapshots the slot(s),
+  schedules restore-on-scope-exit through the existing
+  `local_hash_elem_saves` machinery, then removes the slot(s) and
+  returns the prior value(s). Supports the four canonical shapes:
+  `delete local $h{k}`, `delete local $a[i]`,
+  `delete local @arr[i,j,...]`, `delete local %h{a,b,...}`.
+  Slice forms also set `last_list_val` so `my ($d, $z) = delete local
+  @a[4, 999]` destructures correctly. Added an
+  `array_set_undef_then_mark_deleted` helper that mutates the array
+  in place (without going through `set_array`, which clears
+  `deleted_slots`) so `exists $a[i]` reports false during the scope.
+  Lifts op/local from ~154/197 to ~176/197 passing within the diff.
+
+- **`local(@arr[i,j]) = LIST` / `local(%h{a,b}) = LIST` slice form**:
+  added `Stmt::LocalSlice(name, key_exprs, val_expr)`. Parser detects
+  `local ( ArrayVar [` or `local ( HashVar {` pairs and emits the new
+  variant; interpreter delegates to a per-slot `exec_local_elem_save`
+  helper that mirrors the single-element `LocalHashElem` path (snapshot
+  prior, set new from the destructured RHS, queue restore on scope
+  exit). Lift op/local from ~142/197 to ~154/197 passing within the
+  diff.
+
 - **`@_` post-hoc autoviv + writeback for anon-sub `->()` calls**: the
   named-call path (`Expr::Call` -> `subs.get(name)`) already wired
   `autoviv_lvalue_for_call` + `final_u` writeback for lvalue-shaped

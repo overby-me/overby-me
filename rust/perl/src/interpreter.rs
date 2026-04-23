@@ -1690,6 +1690,30 @@ impl Interpreter {
                 Flow::None
             }
 
+            Stmt::LocalSlice(name, key_exprs, val_expr) => {
+                // `local @arr[i,j] = LIST` / `local %h{a,b} = LIST` —
+                // delegate to LocalHashElem semantics per-slot, with the
+                // RHS evaluated once in list context and destructured.
+                let is_hash = name.starts_with('%');
+                let bare = name
+                    .trim_start_matches('@')
+                    .trim_start_matches('%')
+                    .to_string();
+                let bucket = if is_hash {
+                    bare.clone()
+                } else {
+                    format!("@{bare}")
+                };
+                let values: Vec<Value> = match val_expr {
+                    Some(e) => self.eval_list(e),
+                    None => Vec::new(),
+                };
+                for (i, key_expr) in key_exprs.iter().enumerate() {
+                    self.exec_local_elem_save(&bucket, key_expr, values.get(i).cloned());
+                }
+                Flow::None
+            }
+
             Stmt::Our(vars, list_ctx) => {
                 // `our` declares a global, optionally with an initializer.
                 // List-context (`our (…) = LIST`) destructures into all
@@ -4992,6 +5016,120 @@ impl Interpreter {
                     Value::Num(0.0)
                 }
             }
+            "_delete_local" => {
+                // Synthesised by parser for `delete local $h{k}` /
+                // `delete local $a[i]` / `delete local @arr[i,j]` /
+                // `delete local %h{a,b}`. Snapshot the slot(s), schedule
+                // restore on scope exit, then remove the slot(s) and
+                // return the prior value(s).
+                let kind = self.eval_expr(&args[0]).to_str();
+                let bucket = self.eval_expr(&args[1]).to_str();
+                if kind == "elem" {
+                    let key_expr = &args[2];
+                    let key = self.eval_expr(key_expr).to_str();
+                    if let Some(arr_name) = bucket.strip_prefix('@') {
+                        // local + delete array element.
+                        let idx_i = key.parse::<i64>().unwrap_or(0);
+                        // (key was stringified via to_str(); use eval again to be safe)
+                        let idx_i = self.eval_expr(key_expr).to_num() as i64;
+                        let arr = self.get_array(arr_name);
+                        let len = arr.len() as i64;
+                        let real = if idx_i < 0 { idx_i + len } else { idx_i };
+                        let prior = if real >= 0 && (real as usize) < arr.len() {
+                            Some(arr[real as usize].clone())
+                        } else {
+                            None
+                        };
+                        let was_present = prior.is_some()
+                            && !self
+                                .deleted_slots
+                                .get(arr_name)
+                                .is_some_and(|s| s.contains(&(real as usize)));
+                        if let Some(saves) = self.local_hash_elem_saves.last_mut() {
+                            saves.push((
+                                bucket.clone(),
+                                idx_i.to_string(),
+                                if was_present { prior.clone() } else { None },
+                            ));
+                        }
+                        if let Some(lens) = self.local_array_len_saves.last_mut() {
+                            lens.entry(arr_name.to_string()).or_insert(arr.len());
+                        }
+                        if real >= 0 {
+                            let ridx = real as usize;
+                            self.array_set_undef_then_mark_deleted(arr_name, ridx);
+                        }
+                        return prior.unwrap_or(Value::Undef);
+                    }
+                    // Hash slot.
+                    let hash = self.get_hash(&bucket);
+                    let prior = hash.get(&key).cloned();
+                    if let Some(saves) = self.local_hash_elem_saves.last_mut() {
+                        saves.push((bucket.clone(), key.clone(), prior.clone()));
+                    }
+                    // Remove the key now.
+                    let mut h = self.get_hash(&bucket);
+                    h.remove(&key);
+                    self.globals.hashes.insert(bucket.clone(), h);
+                    return prior.unwrap_or(Value::Undef);
+                }
+                if kind == "aslice" {
+                    let arr_name = bucket.trim_start_matches('@').to_string();
+                    let mut out = Vec::new();
+                    for key_expr in &args[2..] {
+                        let idx_i = self.eval_expr(key_expr).to_num() as i64;
+                        let arr = self.get_array(&arr_name);
+                        let len = arr.len() as i64;
+                        let real = if idx_i < 0 { idx_i + len } else { idx_i };
+                        let prior = if real >= 0 && (real as usize) < arr.len() {
+                            Some(arr[real as usize].clone())
+                        } else {
+                            None
+                        };
+                        let was_present = prior.is_some()
+                            && !self
+                                .deleted_slots
+                                .get(&arr_name)
+                                .is_some_and(|s| s.contains(&(real as usize)));
+                        if let Some(saves) = self.local_hash_elem_saves.last_mut() {
+                            saves.push((
+                                bucket.clone(),
+                                idx_i.to_string(),
+                                if was_present { prior.clone() } else { None },
+                            ));
+                        }
+                        if let Some(lens) = self.local_array_len_saves.last_mut() {
+                            lens.entry(arr_name.clone()).or_insert(arr.len());
+                        }
+                        if real >= 0 {
+                            let ridx = real as usize;
+                            self.array_set_undef_then_mark_deleted(&arr_name, ridx);
+                        }
+                        out.push(prior.unwrap_or(Value::Undef));
+                    }
+                    self.last_list_val = Some(out.clone());
+                    return out.last().cloned().unwrap_or(Value::Undef);
+                }
+                if kind == "hslice" {
+                    let hash_name = bucket.trim_start_matches('%').to_string();
+                    let mut out = Vec::new();
+                    for key_expr in &args[2..] {
+                        let key = self.eval_expr(key_expr).to_str();
+                        let hash = self.get_hash(&hash_name);
+                        let prior = hash.get(&key).cloned();
+                        if let Some(saves) = self.local_hash_elem_saves.last_mut() {
+                            saves.push((hash_name.clone(), key.clone(), prior.clone()));
+                        }
+                        let mut h = self.get_hash(&hash_name);
+                        h.remove(&key);
+                        self.globals.hashes.insert(hash_name.clone(), h);
+                        out.push(prior.unwrap_or(Value::Undef));
+                    }
+                    self.last_list_val = Some(out.clone());
+                    return out.last().cloned().unwrap_or(Value::Undef);
+                }
+                Value::Undef
+            }
             "delete" => {
                 if let Some(a) = args.first() {
                     match a {
@@ -7397,6 +7535,124 @@ impl Interpreter {
             .and_then(|h| h.get(key))
             .cloned()
             .unwrap_or(Value::Undef)
+    }
+
+    fn array_set_undef_then_mark_deleted(&mut self, arr_name: &str, ridx: usize) {
+        // Used by `_delete_local` to mark a slot deleted while the scope
+        // is alive. Avoids `set_array` (which clears `deleted_slots`).
+        // Mutates the storage in place via the same lookup logic.
+        let mut wrote = false;
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some(arr) = scope.arrays.get_mut(arr_name) {
+                if ridx < arr.len() {
+                    arr[ridx] = Value::Undef;
+                }
+                wrote = true;
+                break;
+            }
+        }
+        if !wrote && let Some(rc) = self.aliased_arrays.get(arr_name) {
+            let mut a = rc.borrow_mut();
+            if ridx < a.len() {
+                a[ridx] = Value::Undef;
+            }
+            wrote = true;
+        }
+        if !wrote
+            && let Some(arr) = self.globals.arrays.get_mut(arr_name)
+            && ridx < arr.len()
+        {
+            arr[ridx] = Value::Undef;
+        }
+        self.deleted_slots
+            .entry(arr_name.to_string())
+            .or_default()
+            .insert(ridx);
+        let dset = self
+            .deleted_slots
+            .get(arr_name)
+            .cloned()
+            .unwrap_or_default();
+        let shrink_in_place = |arr: &mut Vec<Value>| {
+            while let Some(last) = arr.len().checked_sub(1) {
+                if dset.contains(&last) {
+                    arr.pop();
+                } else {
+                    break;
+                }
+            }
+        };
+        let mut hit = false;
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some(arr) = scope.arrays.get_mut(arr_name) {
+                shrink_in_place(arr);
+                hit = true;
+                break;
+            }
+        }
+        if !hit && let Some(rc) = self.aliased_arrays.get(arr_name) {
+            let mut a = rc.borrow_mut();
+            shrink_in_place(&mut a);
+            hit = true;
+        }
+        if !hit && let Some(arr) = self.globals.arrays.get_mut(arr_name) {
+            shrink_in_place(arr);
+        }
+    }
+
+    fn exec_local_elem_save(
+        &mut self,
+        bucket: &str,
+        key_expr: &crate::ast::Expr,
+        val: Option<Value>,
+    ) {
+        if let Some(arr_name) = bucket.strip_prefix('@') {
+            let idx_val = self.eval_expr(key_expr);
+            let idx_i = idx_val.to_num() as i64;
+            let arr = self.get_array(arr_name);
+            let len = arr.len() as i64;
+            let real_idx = if idx_i < 0 { idx_i + len } else { idx_i };
+            let prior = if real_idx >= 0 && (real_idx as usize) < arr.len() {
+                Some(arr[real_idx as usize].clone())
+            } else {
+                None
+            };
+            let was_present = prior.is_some()
+                && !self
+                    .deleted_slots
+                    .get(arr_name)
+                    .is_some_and(|s| s.contains(&(real_idx as usize)));
+            if let Some(saves) = self.local_hash_elem_saves.last_mut() {
+                saves.push((
+                    bucket.to_string(),
+                    idx_i.to_string(),
+                    if was_present { prior } else { None },
+                ));
+            }
+            if let Some(lens) = self.local_array_len_saves.last_mut() {
+                lens.entry(arr_name.to_string()).or_insert(arr.len());
+            }
+            let new_val = val.unwrap_or(Value::Undef);
+            let mut a = self.get_array(arr_name);
+            if real_idx >= 0 {
+                let ridx = real_idx as usize;
+                if ridx >= a.len() {
+                    a.resize(ridx + 1, Value::Undef);
+                }
+                a[ridx] = new_val;
+                self.set_array(arr_name, a);
+            }
+            return;
+        }
+        // Hash slot.
+        let key = self.eval_expr(key_expr).to_str();
+        let hash = self.get_hash(bucket);
+        let prior = hash.get(&key).cloned();
+        if let Some(saves) = self.local_hash_elem_saves.last_mut() {
+            saves.push((bucket.to_string(), key.clone(), prior));
+        }
+        let new_val = val.unwrap_or(Value::Undef);
+        self.set_hash_element(bucket, &key, new_val);
     }
 
     fn set_hash_element(&mut self, name: &str, key: &str, val: Value) {
