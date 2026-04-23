@@ -154,7 +154,8 @@ fn validate_set_cookie_domain(
     }
 
     // Reject TLD-only domains (no dot in the stripped domain).
-    if !domain_lc.contains('.') {
+    // Exception: "localhost" is allowed per RFC 6761.
+    if !domain_lc.contains('.') && domain_lc != "localhost" {
         return None;
     }
 
