@@ -8,6 +8,11 @@
   commitlintrc = import ./commitlintrc.nix {inherit pkgs lib src;};
 in {
   enterShell = ''
+    # Only copy/symlink config files when running at the root of a git/jj repo
+    if [ ! -d .jj ] && [ ! -d .git ]; then
+      return 0 2>/dev/null || true
+    fi
+
     ln -sf ${./biome-nix.jsonc} biome.jsonc
     ln -sf ${./deno.jsonc} deno.jsonc
     ln -sf ${./lychee.toml} lychee.toml
