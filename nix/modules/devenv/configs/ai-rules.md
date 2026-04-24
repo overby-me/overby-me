@@ -29,6 +29,10 @@
   - `jj git push` — push to remote
   - `jj git fetch` — fetch from remote
 
+- **Always prefer `jj commit -m "msg"` over `jj describe -m "msg"`.** `jj commit` sets the description and creates a new empty change on top in one step, which is almost always the desired workflow. Only use `jj describe` when you specifically need to amend the description of a change without creating a new one (e.g. fixing a typo in a commit message before pushing).
+
+- **Never use `jj split` — it opens an interactive editor that an AI agent cannot control.** The command launches a TUI/editor for selecting changes, which will hang indefinitely in a non-interactive terminal. If you need to split changes, ask the user to do it manually.
+
 ## Pushing rules
 
 - **Never push directly to the default branch (`main`/`master`) unless the user explicitly asks for it.** Instead, create a new bookmark for your changes and push that. Only move the `main` bookmark and push to `main` when the user says something like "push to main" or "commit and push". Example workflow:
