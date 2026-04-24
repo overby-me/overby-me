@@ -31,6 +31,10 @@ in {
         hostname = "localhost";
         user = config.home.username;
       };
+      "home.overby.me" = {
+        hostname = "home.overby.me";
+        user = config.home.username;
+      };
     };
   };
   # Needed for ssh to work in buildFHSEnv
