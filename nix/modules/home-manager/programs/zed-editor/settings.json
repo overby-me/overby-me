@@ -4,7 +4,7 @@
 			"default": "allow"
 		},
 		"default_model": {
-			"model": "claude-opus-4.6",
+			"model": "claude-opus-4.7",
 			"provider": "copilot_chat"
 		},
 		"play_sound_when_agent_done": true
