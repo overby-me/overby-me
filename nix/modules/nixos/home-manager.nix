@@ -9,7 +9,9 @@
     inherit (inputs.self) users;
     useGlobalPkgs = true;
     useUserPackages = true;
-    backupFileExtension = "hm-backup";
+    backupCommand = ''
+      ${pkgs.coreutils}/bin/mv -f "$1" "$1.hm-backup"
+    '';
     extraSpecialArgs = {
       inherit inputs pkgs stateVersion src;
     };
