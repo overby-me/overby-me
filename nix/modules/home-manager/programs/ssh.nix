@@ -16,7 +16,7 @@ in {
       # If the decrypted key doesn't exist yet, start the agenix user service
       # (which prompts for Nitrokey touch) and wait before connecting.
       "agenix-trigger" = lib.mkIf hasSecrets {
-        match = ''exec "test -e %d/.ssh/id_ed25519 or systemctl --user start agenix"'';
+        match = ''exec "if not ('%d/.ssh/id_ed25519' | path exists) { systemctl --user start agenix }"'';
       };
       "*" = {
         addKeysToAgent = "yes";
