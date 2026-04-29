@@ -12,13 +12,33 @@
   ];
 
   boot = {
-    initrd.availableKernelModules = ["nvme" "xhci_pci" "thunderbolt" "usb_storage" "sd_mod"];
-    initrd.kernelModules = [];
+    initrd = {
+      availableKernelModules = ["nvme" "xhci_pci" "thunderbolt" "usb_storage" "sd_mod"];
+      kernelModules = [];
+
+      # LUKS2-encrypted root.  Unlock options:
+      #   - Passphrase (always, primary fallback).
+      #   - Nitrokey 3 FIDO2 hmac-secret (enrolled out-of-band with
+      #     `systemd-cryptenroll --fido2-device=auto /dev/nvme0n1p3`).
+      # systemd-initrd (boot.initrd.systemd.enable) is required for
+      # FIDO2 unlock and is enabled in modules/nixos/core/boot.nix.
+      luks.devices.cryptroot = {
+        # Outer LUKS partition UUID (run `blkid /dev/nvme0n1p3` after
+        # luksFormat, then update this).
+        device = "/dev/disk/by-uuid/REPLACE-WITH-LUKS-PARTITION-UUID";
+        allowDiscards = true;
+        bypassWorkqueues = true;
+        # FIDO2 keyslot is read from the LUKS header by systemd-cryptsetup;
+        # no extra option needed here as long as the keyslot exists.
+      };
+    };
     kernelModules = ["kvm-amd"];
     extraModulePackages = [];
   };
   fileSystems."/" = {
-    device = "/dev/disk/by-uuid/62735ab0-1583-4c09-9ba7-a0054f417bb1";
+    # Inner btrfs UUID (the filesystem inside /dev/mapper/cryptroot;
+    # run `blkid /dev/mapper/cryptroot` after mkfs.btrfs and update).
+    device = "/dev/disk/by-uuid/REPLACE-WITH-INNER-BTRFS-UUID";
     fsType = "btrfs";
     options = ["subvol=@" "noatime" "compress=zstd"];
   };
