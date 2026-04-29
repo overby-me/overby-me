@@ -106,18 +106,11 @@
         nixpkgs.follows = "nixpkgs";
       };
     };
-    peon-ping = {
-      url = "github:PeonPing/peon-ping";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-        flake-utils.follows = "flake-utils";
-      };
-    };
     nxv = {
       url = "github:jamesbrink/nxv";
       inputs = {
         nixpkgs.follows = "nixpkgs";
-        flake-utils.follows = "flake-utils";
+        flake-parts.follows = "flake-parts";
         rust-overlay.follows = "rust-overlay";
         crane.follows = "crane";
       };

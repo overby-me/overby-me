@@ -16,7 +16,7 @@
     p7zip
     uutils-diffutils
     ast-grep
-    diffoscope
+    # diffoscope  # disabled: pulls broken systemd-260.1 build from nixpkgs-unstable
     jless
     television
     yq-go # Needed by prettybat
