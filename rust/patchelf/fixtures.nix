@@ -13,8 +13,7 @@
 }:
 stdenv.mkDerivation {
   pname = "rust-patchelf-fixtures";
-  version = patchelf.version;
-  src = patchelf.src;
+  inherit (patchelf) version src;
 
   nativeBuildInputs = [autoreconfHook pkg-config];
 
