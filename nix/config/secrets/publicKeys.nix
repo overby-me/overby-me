@@ -4,5 +4,6 @@ rec {
   nitrokey3-fido2-hmac = "age1efazxe5tgepdv5czxzj5x844dj265dar4sej42qc8mjp2czulazslqutuw";
   phone-ssh-ed25519 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHhRXDKeALBSWplejvGMt4g4lc3e0W7JEM/KYPj9dM1J phone-host-key";
   home-ssh-ed25519 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMvZkUPUbFqMZk2w/V4ZQJd0xHsD8pZEfq47Do6kiTyF";
-  all = [noverby-ssh-ed25519 noverby-ssh-rsa nitrokey3-fido2-hmac phone-ssh-ed25519 home-ssh-ed25519];
+  gravitas-ssh-ed25519 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDBfdXLATD3DU/MGdHPVnWxy4jbv37ePZi5YJuZiywtz root@gravitas";
+  all = [noverby-ssh-ed25519 noverby-ssh-rsa nitrokey3-fido2-hmac phone-ssh-ed25519 home-ssh-ed25519 gravitas-ssh-ed25519];
 }
