@@ -181,7 +181,6 @@
 | [Datui 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/datui.nix) | [GitHub](https://github.com/derekwisong/datui) | Data exploration in the terminal |
 | [Mojo 🔥](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/mojo.nix) | [Modular](https://www.modular.com/mojo) | Mojo development toolchain |
 | [Envy 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/envy.nix) | [GitHub](https://github.com/mre/envy) | Environment variable loader |
-| [Nix-sweep 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/nix-sweep.nix) | [GitHub](https://github.com/jzbor/nix-sweep) | Nix garbage collector |
 | [Rcgen 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/rcgen.nix) | [GitHub](https://github.com/rustls/rcgen) | X.509 certificate generator |
 | [Starship-jj 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/starship-jj.nix) | [GitLab](https://gitlab.com/lanastara_foss/starship-jj) | Starship plugin for jj |
 

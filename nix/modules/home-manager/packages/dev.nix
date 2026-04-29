@@ -29,6 +29,7 @@
 
     # Nix dev
     nix-du
+    nix-sweep
     nix-diff-rs
     devenv
     nix-prefetch-git
