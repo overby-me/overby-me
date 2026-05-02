@@ -25,7 +25,7 @@
       luks.devices.cryptroot = {
         # Outer LUKS partition UUID (run `blkid /dev/nvme0n1p3` after
         # luksFormat, then update this).
-        device = "/dev/disk/by-uuid/REPLACE-WITH-LUKS-PARTITION-UUID";
+        device = "/dev/disk/by-uuid/d96f5bd4-16db-4564-8330-2d30deb59ab7";
         allowDiscards = true;
         bypassWorkqueues = true;
         # FIDO2 keyslot is read from the LUKS header by systemd-cryptsetup;
@@ -38,7 +38,7 @@
   fileSystems."/" = {
     # Inner btrfs UUID (the filesystem inside /dev/mapper/cryptroot;
     # run `blkid /dev/mapper/cryptroot` after mkfs.btrfs and update).
-    device = "/dev/disk/by-uuid/REPLACE-WITH-INNER-BTRFS-UUID";
+    device = "/dev/disk/by-uuid/47caaa9e-3ab1-428c-993d-e8aa5c2ee0bf";
     fsType = "btrfs";
     options = ["subvol=@" "noatime" "compress=zstd"];
   };
