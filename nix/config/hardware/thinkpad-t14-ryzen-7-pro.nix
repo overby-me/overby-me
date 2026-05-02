@@ -31,6 +31,15 @@
         # FIDO2 keyslot is read from the LUKS header by systemd-cryptsetup;
         # no extra option needed here as long as the keyslot exists.
       };
+      # Second device of the multi-device btrfs root filesystem.
+      # Both cryptroot and cryptdata must be unlocked before the root fs
+      # can be mounted.  Same passphrase as cryptroot, with its own FIDO2
+      # keyslot enrolled separately.
+      luks.devices.cryptdata = {
+        device = "/dev/disk/by-uuid/feb8cab6-5b94-4bbc-8f0e-6c257859d9de";
+        allowDiscards = true;
+        bypassWorkqueues = true;
+      };
     };
     kernelModules = ["kvm-amd"];
     extraModulePackages = [];
