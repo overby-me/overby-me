@@ -33,5 +33,28 @@
     veo
     cloud-hypervisor
     android-tools
+    {
+      # Decrypt the user SSH keys at boot using the host SSH key (no
+      # Nitrokey touch needed) and drop them straight into ~noverby/.ssh.
+      # The keys are also backed up in Bitwarden.
+      age.secrets = {
+        noverby-id_ed25519 = {
+          file = inputs.self.secrets.id_ed25519;
+          path = "/home/noverby/.ssh/id_ed25519";
+          owner = "noverby";
+          group = "users";
+          mode = "600";
+          symlink = false;
+        };
+        noverby-id_rsa = {
+          file = inputs.self.secrets.id_rsa;
+          path = "/home/noverby/.ssh/id_rsa";
+          owner = "noverby";
+          group = "users";
+          mode = "600";
+          symlink = false;
+        };
+      };
+    }
   ];
 }
