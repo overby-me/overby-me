@@ -6,7 +6,7 @@
 <a href="https://matrix.to/#/@niclas:overby.me"><img src="./web/homepage/public/icons/matrix.avif" width="32" height="32" alt="Matrix"></a>
 <a href="https://signal.me/#eu/BKjgrHvQhqgDPpy9p2VfcfVj6yx0mJtVGOX8GQ_2htxhX7cDxhREVad8oWL1qAMj"><img src="./web/homepage/public/icons/signal.avif" width="32" height="32" alt="Signal"></a>
 <a href="https://www.linkedin.com/in/niclasoverby"><img src="./web/homepage/public/icons/linkedin.avif" width="32" height="32" alt="LinkedIn"></a>
-<a href="https://github.com/noverby"><img src="./web/homepage/public/icons/github.avif" width="32" height="32" alt="GitHub"></a>
+<a href="https://github.com/overby-me"><img src="./web/homepage/public/icons/github.avif" width="32" height="32" alt="GitHub"></a>
 <a href="https://tangled.org/@overby.me"><img src="./web/homepage/public/icons/tangled.avif" width="32" height="32" alt="Tangled"></a>
 <a href="https://mas.to/@niclasoverby"><img src="./web/homepage/public/icons/mastodon.avif" width="32" height="32" alt="Mastodon"></a>
 <a href="https://bsky.app/profile/overby.me"><img src="./web/homepage/public/icons/bluesky.avif" width="32" height="32" alt="Bluesky"></a>
@@ -652,7 +652,7 @@
 
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
-| ✅ | Version Control | [Tangled 🇪🇺🌀](https://tangled.sh/@overby.me) | | | [Codeberg 🇪🇺](https://codeberg.org/overby-me), [Microsoft GitHub 🔒🇺🇸](https://github.com/noverby), [GitLab 🇺🇸](https://gitlab.com/noverby) |
+| ✅ | Version Control | [Tangled 🇪🇺🌀](https://tangled.sh/@overby.me) | | | [Codeberg 🇪🇺](https://codeberg.org/overby-me), [Microsoft GitHub 🔒🇺🇸](https://github.com/overby-me), [GitLab 🇺🇸](https://gitlab.com/noverby) |
 
 #### Finance
 

@@ -141,7 +141,7 @@ pub static NODES: &[GraphNode] = &[
         icon: "github.avif",
         color: None,
         opacity: None,
-        url: Some("https://github.com/noverby"),
+        url: Some("https://github.com/overby-me"),
     },
     GraphNode {
         id: "Codeberg",

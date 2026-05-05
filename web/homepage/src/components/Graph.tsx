@@ -123,7 +123,7 @@ const nodes = [
 		id: "GitHub",
 		desc: "GitHub\nProfile",
 		icon: "github.avif",
-		url: "https://github.com/noverby",
+		url: "https://github.com/overby-me",
 	},
 	{
 		id: "Codeberg",

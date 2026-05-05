@@ -59,7 +59,7 @@ let { WorkflowConfig, .. } = import "../nickel/contracts/tangled-workflow/workfl
       {
         name = "Mirror to GitHub",
         command = m%%"
-          git remote add github https://x-access-token:${GITHUB_MIRROR_TOKEN}@github.com/noverby/noverby.git 2>/dev/null || true
+          git remote add github https://x-access-token:${GITHUB_MIRROR_TOKEN}@github.com/overby-me/overby-me.git 2>/dev/null || true
           git push --force github HEAD:refs/heads/main
         "%%,
       },
