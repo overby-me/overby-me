@@ -2002,6 +2002,7 @@ impl Interpreter {
                     "re",
                     "sort",
                     "version",
+                    "builtin",
                 ];
                 if PRAGMAS.contains(&module.as_str()) {
                     if module == "bytes" {
@@ -4620,6 +4621,83 @@ impl Interpreter {
                 };
                 let n = val.to_num();
                 Value::Num(if n >= 0.0 { n.floor() } else { n.ceil() })
+            }
+            "ceil" => {
+                // builtin::ceil — smallest integer >= arg
+                let val = if args.is_empty() {
+                    self.get_var("_")
+                } else {
+                    self.eval_expr(&args[0])
+                };
+                Value::Num(val.to_num().ceil())
+            }
+            "floor" => {
+                // builtin::floor — largest integer <= arg
+                let val = if args.is_empty() {
+                    self.get_var("_")
+                } else {
+                    self.eval_expr(&args[0])
+                };
+                Value::Num(val.to_num().floor())
+            }
+            "trim" => {
+                // builtin::trim — strip leading/trailing whitespace
+                let val = if args.is_empty() {
+                    self.get_var("_")
+                } else {
+                    self.eval_expr(&args[0])
+                };
+                Value::Str(val.to_str().trim().to_string())
+            }
+            "true" => Value::Num(1.0),
+            "false" => Value::Num(0.0),
+            "is_bool" => {
+                if args.is_empty() {
+                    Value::Num(0.0)
+                } else {
+                    let v = self.eval_expr(&args[0]);
+                    Value::Num(if matches!(v, Value::Num(_)) { 1.0 } else { 0.0 })
+                }
+            }
+            "weaken" | "unweaken" | "blessed" | "refaddr" | "reftype" => {
+                // builtin equivalents of Scalar::Util — reuse the
+                // underlying behaviour where possible. blessed /
+                // refaddr / reftype also live as Scalar::Util fns
+                // and might already be wired up; keep these stubs
+                // returning useful defaults for unrecognised inputs.
+                if args.is_empty() {
+                    return Value::Undef;
+                }
+                let v = self.eval_expr(&args[0]);
+                match name {
+                    "blessed" => {
+                        let ptr = Self::ref_ptr(&v);
+                        if ptr == 0 {
+                            return Value::Undef;
+                        }
+                        match self.blessed_refs.get(&ptr) {
+                            Some(c) => Value::Str(c.clone()),
+                            None => Value::Undef,
+                        }
+                    }
+                    "refaddr" => {
+                        let ptr = Self::ref_ptr(&v);
+                        if ptr == 0 {
+                            Value::Undef
+                        } else {
+                            Value::Num(ptr as f64)
+                        }
+                    }
+                    "reftype" => {
+                        let t = v.ref_type();
+                        if t.is_empty() {
+                            Value::Undef
+                        } else {
+                            Value::Str(t.to_string())
+                        }
+                    }
+                    _ => Value::Num(1.0),
+                }
             }
             "length" => {
                 let val = if args.is_empty() {
@@ -11347,6 +11425,7 @@ fn compile_time_use_check_in(
         "re",
         "sort",
         "version",
+        "builtin",
     ];
     for stmt in stmts {
         match stmt {
