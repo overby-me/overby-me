@@ -309,6 +309,15 @@ pub struct Interpreter {
     /// helper so eval-defined subs report the eval-string pseudo-file
     /// rather than whatever file is on top of the dynamic stack.
     sub_def_loc: HashMap<String, (String, usize)>,
+    /// Maps a sub name → the package that was current at definition
+    /// time (different from the namespace prefix in the subs name —
+    /// `sub DB::foo` defined in `package main` has prefix `DB` but
+    /// def-package `main`). Used by eval-strings DB-magic to decide
+    /// whether to bring the callers lexicals into the lookup chain.
+    sub_def_package: HashMap<String, String>,
+    /// Stack of currently-executing sub names (top = innermost call).
+    /// Used to look up sub_def_package for DB-magic in `eval STRING`.
+    current_sub_stack: Vec<String>,
     /// Stack of files currently being loaded via require. Top is innermost.
     /// Subs hoisted while this is non-empty get their `sub_origin` set; calls
     /// to those subs from within the same load skip the file-scope push to
@@ -438,6 +447,8 @@ impl Interpreter {
             borrowed_file_scopes: std::collections::HashSet::new(),
             sub_origin: HashMap::new(),
             sub_def_loc: HashMap::new(),
+            sub_def_package: HashMap::new(),
+            current_sub_stack: Vec::new(),
             loading_files: Vec::new(),
             check_blocks: Vec::new(),
             init_blocks: Vec::new(),
@@ -515,6 +526,8 @@ impl Interpreter {
                     // eval-string trampoline.
                     self.sub_def_loc
                         .insert(name.clone(), (self.current_file.clone(), self.current_line));
+                    self.sub_def_package
+                        .insert(name.clone(), self.package.clone());
                 }
                 Stmt::Begin(body, end_line) => {
                     // BEGIN runs at compile time. `require`/`use` failing
@@ -1469,8 +1482,11 @@ impl Interpreter {
                     // / `_where()` inside the body report the definition
                     // site, not whichever file the dynamic stack carries
                     // when control happens to reach the body.
-                    self.sub_def_loc
-                        .insert(qualified, (self.current_file.clone(), self.current_line));
+                    self.sub_def_loc.insert(
+                        qualified.clone(),
+                        (self.current_file.clone(), self.current_line),
+                    );
+                    self.sub_def_package.insert(qualified, self.package.clone());
                 }
                 Flow::None
             }
@@ -7375,6 +7391,12 @@ impl Interpreter {
         let stashed_scopes = self.enter_named_sub_scope(name, closure_guard > 0);
         let pushed_origin = self.enter_file_scope(name);
         self.push_scope();
+        let pushed_sub_name = if let Some(n) = name {
+            self.current_sub_stack.push(n.to_string());
+            true
+        } else {
+            false
+        };
         // call_sub is the scalar-context entry point (`wantarray` returns
         // false inside). next_call_ctx (set by Stmt::Expr for void calls)
         // overrides this once. call_sub_list pushes 2 (list) instead.
@@ -7474,6 +7496,9 @@ impl Interpreter {
                     self.exit_file_scope(pushed_origin);
                     self.exit_named_sub_scope(stashed_scopes);
                     self.exit_closure_env(closure_guard);
+                    if pushed_sub_name {
+                        self.current_sub_stack.pop();
+                    }
                     if let Some((pkg, file, line)) = self.call_stack.pop() {
                         self.current_line = line;
                         self.current_file = file;
@@ -7542,6 +7567,12 @@ impl Interpreter {
         let stashed_scopes = self.enter_named_sub_scope(name, closure_guard > 0);
         let pushed_origin = self.enter_file_scope(name);
         self.push_scope();
+        let pushed_sub_name = if let Some(n) = name {
+            self.current_sub_stack.push(n.to_string());
+            true
+        } else {
+            false
+        };
         self.call_stack.push((
             self.package.clone(),
             self.current_file.clone(),
@@ -7613,6 +7644,9 @@ impl Interpreter {
                     self.exit_file_scope(pushed_origin);
                     self.exit_named_sub_scope(stashed_scopes);
                     self.exit_closure_env(closure_guard);
+                    if pushed_sub_name {
+                        self.current_sub_stack.pop();
+                    }
                     if let Some((pkg, file, line)) = self.call_stack.pop() {
                         self.current_line = line;
                         self.current_file = file;
@@ -11092,6 +11126,41 @@ impl Interpreter {
     // --- Eval string ---
 
     fn eval_string(&mut self, code: &str) -> Value {
+        // DB-package magic: when an `eval STRING` runs inside a sub
+        // *defined in* package `DB` (Perls debugger convention),
+        // reference perl resolves identifiers against the *callers*
+        // lexical chain rather than the subs own captured chain.
+        // Insert the dynamic frames previously stashed by
+        // `enter_named_sub_scope` at the *end* of self.scopes so
+        // lookups walk them first, then strip them back out before
+        // we return. We use sub_def_package to distinguish "defined
+        // in DB" (`package DB; sub foo {}` → def_pkg=DB) from "named
+        // DB::name but defined elsewhere" (`sub DB::foo {}` from
+        // package main → def_pkg=main).
+        let in_db_sub = self
+            .current_sub_stack
+            .last()
+            .and_then(|n| self.sub_def_package.get(n))
+            .map(|p| p == "DB" || p.starts_with("DB::"))
+            .unwrap_or(false);
+        let db_added: usize =
+            if in_db_sub && let Some(frames) = self.sub_scope_stack.last().cloned() {
+                let n = frames.len();
+                self.scopes.extend(frames);
+                n
+            } else {
+                0
+            };
+        let result = self.eval_string_inner(code);
+        if db_added > 0 {
+            for _ in 0..db_added {
+                self.scopes.pop();
+            }
+        }
+        result
+    }
+
+    fn eval_string_inner(&mut self, code: &str) -> Value {
         use crate::lexer::Lexer;
         use crate::parser::Parser;
 
