@@ -932,7 +932,31 @@ impl Parser {
     }
 
     fn parse_our_decl(&mut self) -> Stmt {
-        let (vars, list_ctx) = self.parse_var_list();
+        let (mut vars, list_ctx) = self.parse_var_list();
+        // `our $X++;` / `our $X--;` — Perl treats `our` as returning
+        // the var as an lvalue, so the `++`/`--` follows the
+        // declaration. Encode the post-op by stashing it as the var's
+        // init expression; the Stmt::Our handler detects this self-
+        // referential PostfixOp pattern and increments AFTER the
+        // lexical alias is installed.
+        if vars.len() == 1
+            && vars[0].1.is_none()
+            && !list_ctx
+            && (matches!(self.tok(), Token::PlusPlus) || matches!(self.tok(), Token::MinusMinus))
+        {
+            let is_inc = matches!(self.tok(), Token::PlusPlus);
+            self.pos += 1;
+            let raw = vars[0].0.trim_start_matches('$').to_string();
+            let var_expr = Expr::ScalarVar(raw);
+            vars[0].1 = Some(Expr::PostfixOp(
+                if is_inc {
+                    crate::ast::PostfixOp::Inc
+                } else {
+                    crate::ast::PostfixOp::Dec
+                },
+                Box::new(var_expr),
+            ));
+        }
         Stmt::Our(vars, list_ctx)
     }
 
@@ -3276,6 +3300,12 @@ impl Parser {
                         | Token::UndefKw
                         | Token::Not
                         | Token::Eval
+                        // `tie my $t, …` / `untie my $t` etc. — `my` in
+                        // expression position is a valid first-arg start
+                        // (yields the new lexical slot).
+                        | Token::My
+                        | Token::Our
+                        | Token::Local
                         | Token::ArrayDeref(_)
                         | Token::HashDeref(_)
                         | Token::ScalarDeref(_)
