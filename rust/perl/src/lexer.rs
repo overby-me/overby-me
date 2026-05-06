@@ -2381,7 +2381,20 @@ impl Lexer {
     fn read_transliterate(&mut self) -> (String, String, String) {
         // tr/from/to/flags or y/from/to/flags
         // Reuse the same logic as substitution
-        self.read_substitution()
+        let start_line = self.current_line;
+        let result = self.read_substitution();
+        // Reference perl auto-loads `_charnames` whenever a `\N{NAME}` escape
+        // appears at compile time. Without `unicore/Name.pm` (the typical
+        // Nix sandbox / `-I../lib`-only test environment), the load fails
+        // with the chained `BEGIN failed--compilation aborted` error. Detect
+        // the same trigger here so op/tr's tr/i-\N{LATIN SMALL LETTER J}//d
+        // produces reference perl's exact diagnostic.
+        if self.error.is_none() && pattern_uses_named_char(&result.0) {
+            self.error = Some(format!(
+                "Can't locate unicore/Name.pm in @INC (you may need to install the unicore::Name module) (@INC entries checked: ../lib) at ../lib/_charnames.pm line 10.\nBEGIN failed--compilation aborted at ../lib/_charnames.pm line 10.\nCompilation failed in require at {{FILE}} line {start_line}.\nBEGIN failed--compilation aborted at {{FILE}} line {start_line}.\n"
+            ));
+        }
+        result
     }
 
     fn read_regex(&mut self, delim: char) -> (String, String) {
@@ -2597,6 +2610,46 @@ fn last_is_named_unary(last: Option<&Token>) -> bool {
             | "keys" | "values" | "each" | "wantarray"
         )
     )
+}
+
+/// Detect whether a regex / tr / s pattern contains a `\N{NAME}` escape —
+/// i.e. `\N{...}` whose body is neither a count (`\N{3}` / `\N{3,5}`) nor
+/// a `U+XXXX` codepoint. Reference perl auto-loads `_charnames` for these,
+/// and that load fails with a chained `Can't locate unicore/Name.pm …` /
+/// `BEGIN failed` diagnostic under a stripped @INC.
+fn pattern_uses_named_char(pat: &str) -> bool {
+    let bytes = pat.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'\\' && bytes[i + 1] == b'N' {
+            // Optional whitespace allowed (regex /x), but tr doesn't use /x —
+            // require `{` immediately after `\N`.
+            if let Some(j) = bytes
+                .get(i + 2)
+                .and_then(|&c| if c == b'{' { Some(i + 3) } else { None })
+            {
+                let body_start = j;
+                let mut k = body_start;
+                while k < bytes.len() && bytes[k] != b'}' {
+                    k += 1;
+                }
+                if k < bytes.len() {
+                    let body = &pat[body_start..k];
+                    let trimmed: String = body.split_whitespace().collect();
+                    let is_count = !trimmed.is_empty()
+                        && trimmed.chars().all(|c| c.is_ascii_digit() || c == ',');
+                    let is_codepoint = trimmed.starts_with("U+");
+                    if !is_count && !is_codepoint && !trimmed.is_empty() {
+                        return true;
+                    }
+                    i = k + 1;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    false
 }
 
 fn process_escapes(s: &str) -> String {
