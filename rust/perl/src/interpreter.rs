@@ -4995,25 +4995,46 @@ impl Interpreter {
                 // handler set up by `local $SIG{__WARN__} = ...` fires
                 // the right number of times (op/join tests 9–10, 18).
                 let warnings_on = self.warnings_on || self.get_var("^W").to_num() != 0.0;
-                let sep_val = self.eval_expr(&args[0]);
                 let file = if self.current_file.is_empty() {
                     "-e".to_string()
                 } else {
                     self.current_file.clone()
                 };
                 let line = self.current_line;
-                if warnings_on && matches!(sep_val, Value::Undef) {
-                    self.emit_warning(&format!(
-                        "Use of uninitialized value in join or string at {file} line {line}.\n"
-                    ));
-                }
-                let sep = sep_val.to_str();
-                // Walk args one at a time, expanding lists in place.
-                // Critically, re-evaluate the *next* arg expressions
-                // after warning on an undef so a `__WARN__` handler that
-                // mutates a variable seen later in the list affects the
-                // value we read for it. Reference perl achieves the same
-                // via per-slot magic on @_; we approximate by deferring.
+                // The separator: evaluate eagerly UNLESS the source
+                // expression is a tied scalar. Reference perl skips
+                // FETCH on a tied-scalar separator when there are 0/1
+                // elements (op/join test 33 / 39). Plain `undef`,
+                // strings, etc. still evaluate eagerly so `join(undef,
+                // ())` can warn (test 18).
+                // Heuristic: if there are clearly 2+ elements (i.e.
+                // args.len() >= 3), evaluate the separator eagerly so
+                // its value is captured BEFORE elements are evaluated
+                // (matters for self-modifying tied separators — see
+                // op/join test 40 where each FETCH bumps the bound
+                // scalar by 3). For args.len() <= 2 the separator
+                // might not even be needed (test 33 / 39), and a tied
+                // separator's FETCH should be skipped.
+                let likely_multi_element = args.len() >= 3;
+                let sep_is_tied = matches!(
+                    &args[0],
+                    Expr::ScalarVar(n) | Expr::MyVar(n) | Expr::LocalVar(n)
+                        if self.tied_scalars.contains_key(n)
+                );
+                let sep_val_eager = if !sep_is_tied || likely_multi_element {
+                    let v = self.eval_expr(&args[0]);
+                    if warnings_on && matches!(v, Value::Undef) {
+                        self.emit_warning(&format!(
+                            "Use of uninitialized value in join or string at {file} line {line}.\n"
+                        ));
+                    }
+                    Some(v)
+                } else {
+                    None
+                };
+                // Walk args one at a time, expanding lists in place, so
+                // a `__WARN__` handler that mutates a variable seen
+                // later in the list affects the value we read for it.
                 let mut parts: Vec<String> = Vec::new();
                 let mut pending: std::collections::VecDeque<Value> =
                     std::collections::VecDeque::new();
@@ -5038,6 +5059,14 @@ impl Interpreter {
                     }
                     parts.push(v.to_str());
                 }
+                if parts.len() <= 1 {
+                    return Value::Str(parts.join(""));
+                }
+                let sep_val = if let Some(v) = sep_val_eager {
+                    v
+                } else {
+                    self.eval_expr(&args[0])
+                };
                 let sep = sep_val.to_str();
                 Value::Str(parts.join(&sep))
             }
