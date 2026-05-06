@@ -11650,7 +11650,12 @@ fn normalize_ctrl_var_name(s: &str) -> String {
 fn is_lvalue_shape(expr: &Expr) -> bool {
     matches!(
         expr,
-        Expr::ArrowElement(_, _, _) | Expr::HashElement(_, _) | Expr::ArrayElement(_, _)
+        Expr::ArrowElement(_, _, _)
+            | Expr::HashElement(_, _)
+            | Expr::ArrayElement(_, _)
+            | Expr::ScalarVar(_)
+            | Expr::MyVar(_)
+            | Expr::LocalVar(_)
     )
 }
 

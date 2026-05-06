@@ -6,7 +6,7 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**66/79 Nix tests passing** (83%) — selected tests from the upstream Perl test suite.
+**67/79 Nix tests passing** (85%) — selected tests from the upstream Perl test suite.
 
 Latest improvements (uncommitted-by-line-count, but landed via diff-size cuts):
 
