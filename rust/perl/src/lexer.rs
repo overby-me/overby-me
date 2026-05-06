@@ -2548,10 +2548,7 @@ impl Lexer {
         // body terminates on the first blank line).
         let tag_start = probe;
         if let Some(q) = quote {
-            while probe < self.input.len()
-                && self.input[probe] != q
-                && self.input[probe] != '\n'
-            {
+            while probe < self.input.len() && self.input[probe] != q && self.input[probe] != '\n' {
                 probe += 1;
             }
         } else {
@@ -2739,14 +2736,21 @@ impl Lexer {
         // Build the body string, stripping indentation for <<~ heredocs.
         let mut body = String::new();
         if ph.indent && !indent_prefix.is_empty() {
-            for line in &raw_lines {
+            for (i, line) in raw_lines.iter().enumerate() {
                 if let Some(stripped) = line.strip_prefix(&indent_prefix) {
                     body.push_str(stripped);
                 } else if line.trim().is_empty() {
-                    // Blank lines don't need to match the indentation
+                    // Blank lines don't need to match the indentation.
                 } else {
-                    // Insufficient indentation — include as-is (Perl would
-                    // error, but being lenient here is safer).
+                    // Reference perl: `Indentation on line N of here-doc
+                    // doesn't match delimiter at FILE line M.`
+                    if self.error.is_none() {
+                        self.error = Some(format!(
+                            "Indentation on line {} of here-doc doesn't match delimiter at {{FILE}} line {}.\n",
+                            i + 1,
+                            ph.start_line
+                        ));
+                    }
                     body.push_str(line);
                 }
                 body.push('\n');
