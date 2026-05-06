@@ -6671,11 +6671,14 @@ impl Interpreter {
         // helpers that rely on transitive access to the file scope via
         // sibling helper calls (the file scope gets shuffled in/out by
         // enter_file_scope and mutations from inner calls are lost).
-        // Left as a no-op for now; the `borrowed_file_scopes` mechanism
-        // in enter/exit_file_scope handles the critical case of nested
-        // calls into subs from the same required file sharing one live
-        // file scope so `$test++` in test.pl's `_ok` is visible to
-        // sibling helpers like `is`.
+        //
+        // A closure-only stash that splits the chain at the captured
+        // length passes some op/eval tests (60-62: fred3 inside an
+        // eval q{} that captures $yyy=9) but regresses 30-34
+        // (do_eval1's eval needs to see the *live* file-scope $x via
+        // the dynamic chain because Stmt::Sub's snapshot-at-definition
+        // can't propagate $x++ updates without per-Scope Rc sharing).
+        // Pick the safer option for now and leave this a no-op.
         false
     }
 
