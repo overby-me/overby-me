@@ -476,6 +476,14 @@ impl Interpreter {
             .insert(name.to_string(), Value::Str(val.to_string()));
     }
 
+    /// Enable global warnings (driven by the `-w` command-line switch).
+    /// Sets `$^W` so user code can read it, and flips `warnings_on` so
+    /// builtins emit "Use of uninitialized value …" through emit_warning.
+    pub fn enable_warnings(&mut self) {
+        self.warnings_on = true;
+        self.globals.vars.insert("^W".to_string(), Value::Num(1.0));
+    }
+
     pub fn run(&mut self, program: &[Stmt]) {
         // ${^GLOBAL_PHASE} starts as "START" while BEGIN blocks run.
         self.set_global_var("^GLOBAL_PHASE", Value::Str("START".to_string()));
@@ -2500,6 +2508,13 @@ impl Interpreter {
 
     fn exec_print(&mut self, fh: &Option<Expr>, args: &[Expr], add_newline: bool) {
         let fh_name = fh.as_ref().map(|e| self.eval_expr(e).to_str());
+        let warnings_on = self.warnings_on || self.get_var("^W").to_num() != 0.0;
+        let warn_file = if self.current_file.is_empty() {
+            "-e".to_string()
+        } else {
+            self.current_file.clone()
+        };
+        let warn_line = self.current_line;
 
         if args.is_empty() {
             // print with no args prints $_
@@ -2507,18 +2522,37 @@ impl Interpreter {
             self.write_to_handle(&fh_name, &val);
         } else {
             let sep = self.get_var(",").to_str();
-            // Expand arrays in list context
+            // Expand arrays in list context, emitting "Use of uninitialized
+            // value" warnings as each undef element is materialised so a
+            // user `$SIG{__WARN__}` handler can mutate later args.
             let mut values: Vec<String> = Vec::new();
             for arg in args {
+                let arg_label = match arg {
+                    Expr::ScalarVar(n) | Expr::MyVar(n) | Expr::LocalVar(n) => {
+                        format!(" ${n}")
+                    }
+                    _ => String::new(),
+                };
                 match arg {
                     Expr::ArrayVar(name) => {
                         let arr = self.get_array(name);
                         for v in &arr {
+                            if warnings_on && matches!(v, Value::Undef) {
+                                self.emit_warning(&format!(
+                                    "Use of uninitialized value in print at {warn_file} line {warn_line}.\n"
+                                ));
+                            }
                             values.push(v.to_str());
                         }
                     }
                     _ => {
-                        values.push(self.eval_expr(arg).to_str());
+                        let v = self.eval_expr(arg);
+                        if warnings_on && matches!(v, Value::Undef) {
+                            self.emit_warning(&format!(
+                                "Use of uninitialized value{arg_label} in print at {warn_file} line {warn_line}.\n"
+                            ));
+                        }
+                        values.push(v.to_str());
                     }
                 }
             }

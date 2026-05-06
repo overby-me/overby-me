@@ -59,6 +59,7 @@ fn run_interpreter() -> i32 {
     let mut script_file = String::new();
     let mut include_dirs: Vec<String> = Vec::new();
     let mut auto_newline = false; // -l flag
+    let mut warnings_flag = false; // -w flag
 
     let mut i = 1;
     while i < args.len() {
@@ -111,7 +112,7 @@ fn run_interpreter() -> i32 {
                 include_dirs.push(s[2..].to_string());
             }
             "-w" | "-W" => {
-                // Warnings — ignore for now
+                warnings_flag = true;
             }
             "-l" => {
                 auto_newline = true;
@@ -200,6 +201,9 @@ fn run_interpreter() -> i32 {
         // -l flag: set $\ (output record separator) to \n
         // and auto-chomp on input
         interp.set_special_var("\\", "\n");
+    }
+    if warnings_flag {
+        interp.enable_warnings();
     }
     if !script_file.is_empty() {
         interp.set_current_file(&script_file);
