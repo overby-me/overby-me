@@ -3563,6 +3563,12 @@ impl Interpreter {
                 // `$@` to a parse error if compilation fails, `$!` if the
                 // file can't be opened. Returns the value of the last
                 // expression in the file (or undef on error).
+                //
+                // Reference perl bumps PL_evalseq for `do FILE` even though
+                // diagnostics use the file path (not `(eval N)`) as the
+                // file label. Keep the counters in lock-step so subsequent
+                // `eval STRING`s in the same script report matching numbers.
+                self.eval_counter += 1;
                 use crate::lexer::Lexer;
                 use crate::parser::Parser;
                 let path = self.eval_expr(path_expr).to_str();
