@@ -738,6 +738,19 @@ impl Lexer {
             let token_count_before = tokens.len();
 
             if self.pos >= self.input.len() {
+                // Drain pending heredocs at EOF too — programs without a
+                // trailing newline (`map d<<<<""` with no `\n`) reach end-
+                // of-input before the newline branch fires, but their body
+                // attempt should still trigger the standard `Can't find
+                // string terminator` diagnostic. With `pos` already at
+                // EOF, `read_heredoc_body` sees no input and falls into
+                // its "unterminated" branch, setting `self.error`.
+                if !self.pending_heredocs.is_empty() {
+                    let pending = std::mem::take(&mut self.pending_heredocs);
+                    for ph in pending {
+                        let _ = self.read_heredoc_body(&ph);
+                    }
+                }
                 tokens.push(Token::EOF);
                 while self.token_lines.len() < tokens.len() {
                     self.token_lines.push(line_at_token_start);
