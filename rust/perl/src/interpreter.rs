@@ -6788,23 +6788,119 @@ impl Interpreter {
     fn unpack_list(fmt: &str, data: &str) -> Vec<Value> {
         let trimmed = fmt.trim();
         match trimmed {
-            "W*" | "U*" => data.chars().map(|c| Value::Num(c as u32 as f64)).collect(),
-            "C*" => data.bytes().map(|b| Value::Num(b as f64)).collect(),
+            "W*" | "U*" => Self::decode_codepoints(data)
+                .into_iter()
+                .map(|cp| Value::Num(cp as f64))
+                .collect(),
+            "C*" => Self::extended_utf8_bytes(data)
+                .into_iter()
+                .map(|b| Value::Num(b as f64))
+                .collect(),
             // `U0 (H2)*` — switch to byte mode, then emit one 2-digit
             // (lowercase) hex string per byte. The `(H2)*` group repeats
             // until the bytes run out.
-            "U0 (H2)*" | "U0(H2)*" => data
-                .as_bytes()
-                .iter()
+            "U0 (H2)*" | "U0(H2)*" => Self::extended_utf8_bytes(data)
+                .into_iter()
                 .map(|b| Value::Str(format!("{b:02x}")))
                 .collect(),
             // `U0 H*` — same byte-mode switch, but `H*` ungroups into a
             // single hex string covering every byte.
             "U0 H*" | "U0H*" => {
-                let s: String = data.as_bytes().iter().map(|b| format!("{b:02x}")).collect();
+                let s: String = Self::extended_utf8_bytes(data)
+                    .into_iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect();
                 vec![Value::Str(s)]
             }
             _ => Vec::new(),
+        }
+    }
+
+    /// Decode `s` into a sequence of Unicode codepoints, expanding our
+    /// internal `"\x00\x{HHHH}"` markers (used by `chr()` for surrogates
+    /// and codepoints > U+10FFFF that Rust `char` rejects) back to their
+    /// original codepoint.
+    fn decode_codepoints(s: &str) -> Vec<u32> {
+        let bytes = s.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == 0 && bytes.get(i + 1..i + 4) == Some(b"\\x{") {
+                if let Some(end_off) = bytes[i + 4..].iter().position(|&b| b == b'}') {
+                    let hex_str = std::str::from_utf8(&bytes[i + 4..i + 4 + end_off]).unwrap_or("");
+                    if let Ok(cp) = u32::from_str_radix(hex_str, 16) {
+                        out.push(cp);
+                        i += 4 + end_off + 1;
+                        continue;
+                    }
+                }
+            }
+            let first = bytes[i];
+            let len = if first < 0xC0 {
+                1
+            } else if first < 0xE0 {
+                2
+            } else if first < 0xF0 {
+                3
+            } else {
+                4
+            };
+            let end = (i + len).min(bytes.len());
+            if let Ok(piece) = std::str::from_utf8(&bytes[i..end]) {
+                if let Some(c) = piece.chars().next() {
+                    out.push(c as u32);
+                }
+            }
+            i = end;
+        }
+        out
+    }
+
+    /// Encode `s` to its underlying byte sequence, using extended (loose)
+    /// UTF-8 for our `"\x00\x{HHHH}"` markers so surrogates and out-of-
+    /// range codepoints round-trip via the same encoding reference perl
+    /// uses internally.
+    fn extended_utf8_bytes(s: &str) -> Vec<u8> {
+        let cps = Self::decode_codepoints(s);
+        let mut out = Vec::new();
+        for cp in cps {
+            Self::encode_extended_utf8(cp, &mut out);
+        }
+        out
+    }
+
+    /// Reference perl uses an extended UTF-8 encoding (the original 1992
+    /// FSS/UTF-8 form) that allows up to 6 bytes per codepoint and does
+    /// not exclude surrogates. Implemented here to match `unpack U0 …`
+    /// behaviour byte-for-byte for `chr(0xD800)` etc.
+    fn encode_extended_utf8(cp: u32, out: &mut Vec<u8>) {
+        if cp < 0x80 {
+            out.push(cp as u8);
+        } else if cp < 0x800 {
+            out.push(0xC0 | ((cp >> 6) as u8));
+            out.push(0x80 | ((cp & 0x3F) as u8));
+        } else if cp < 0x10000 {
+            out.push(0xE0 | ((cp >> 12) as u8));
+            out.push(0x80 | (((cp >> 6) & 0x3F) as u8));
+            out.push(0x80 | ((cp & 0x3F) as u8));
+        } else if cp < 0x20_0000 {
+            out.push(0xF0 | ((cp >> 18) as u8));
+            out.push(0x80 | (((cp >> 12) & 0x3F) as u8));
+            out.push(0x80 | (((cp >> 6) & 0x3F) as u8));
+            out.push(0x80 | ((cp & 0x3F) as u8));
+        } else if cp < 0x400_0000 {
+            out.push(0xF8 | ((cp >> 24) as u8));
+            out.push(0x80 | (((cp >> 18) & 0x3F) as u8));
+            out.push(0x80 | (((cp >> 12) & 0x3F) as u8));
+            out.push(0x80 | (((cp >> 6) & 0x3F) as u8));
+            out.push(0x80 | ((cp & 0x3F) as u8));
+        } else {
+            out.push(0xFC | ((cp >> 30) as u8));
+            out.push(0x80 | (((cp >> 24) & 0x3F) as u8));
+            out.push(0x80 | (((cp >> 18) & 0x3F) as u8));
+            out.push(0x80 | (((cp >> 12) & 0x3F) as u8));
+            out.push(0x80 | (((cp >> 6) & 0x3F) as u8));
+            out.push(0x80 | ((cp & 0x3F) as u8));
         }
     }
 
