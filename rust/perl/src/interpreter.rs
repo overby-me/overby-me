@@ -1374,7 +1374,24 @@ impl Interpreter {
                     } else {
                         format!("{}::{}", self.package, name)
                     };
-                    self.subs.insert(qualified, (params.clone(), body.clone()));
+                    self.subs
+                        .insert(qualified.clone(), (params.clone(), body.clone()));
+                    // Named subs declared inside an `eval STRING` (or any
+                    // dynamic body — `eval_depth > 0`) close over the
+                    // surrounding lexical scope, just like anonymous subs.
+                    // Reference perl's `eval q{ my $x = …; sub foo { … $x …; } }`
+                    // creates a fresh `foo` each time the eval runs, each
+                    // capturing its own `$x`. Mirror that by snapshotting the
+                    // current scopes into closure_envs keyed by the qualified
+                    // name. Top-level `sub foo {}` (eval_depth == 0) keeps the
+                    // legacy file-scope behaviour driven by `sub_origin`.
+                    if self.eval_depth > 0 {
+                        let captured: Vec<Scope> = self.scopes.clone();
+                        self.closure_envs.insert(
+                            qualified,
+                            std::rc::Rc::new(std::cell::RefCell::new(captured)),
+                        );
+                    }
                 }
                 Flow::None
             }
