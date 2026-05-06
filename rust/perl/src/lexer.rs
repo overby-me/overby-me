@@ -2803,6 +2803,41 @@ impl Lexer {
         interpolate
     }
 
+    /// Scan a heredoc body line for nested `<<TAG` declarations, read each
+    /// inner body inline (consuming lines from `self.input` immediately,
+    /// matching reference perls "drain pending heredocs at line end"
+    /// behaviour), and splice the inner body back into the line as a Perl
+    /// literal. Lets `@{[ <<E2 ]}` inside a `<<E1` body resolve correctly.
+    fn expand_inner_heredocs_in_line(&mut self, line: String) -> String {
+        let chars: Vec<char> = line.chars().collect();
+        let mut out = String::with_capacity(line.len());
+        let mut i = 0;
+        while i < chars.len() {
+            if chars[i] == '<'
+                && i + 1 < chars.len()
+                && chars[i + 1] == '<'
+                && let Some((consumed, tag, indent, interpolate)) =
+                    try_parse_heredoc_header(&chars, i)
+            {
+                let inner = PendingHeredoc {
+                    tag,
+                    indent,
+                    interpolate,
+                    target: HeredocTarget::Token(0),
+                    start_line: self.current_line,
+                };
+                let body = self.read_heredoc_body(&inner);
+                let lit = heredoc_body_as_perl_literal(&body, inner.interpolate);
+                out.push_str(&lit);
+                i += consumed;
+                continue;
+            }
+            out.push(chars[i]);
+            i += 1;
+        }
+        out
+    }
+
     fn read_heredoc_body(&mut self, ph: &PendingHeredoc) -> String {
         let mut raw_lines: Vec<String> = Vec::new();
         let mut terminated = false;
@@ -2826,7 +2861,7 @@ impl Lexer {
             // Strip a trailing \r so CRLF-terminated sources match the
             // tag and don't bleed \r into the captured body (reference
             // perl effectively reads source in text mode).
-            let cmp_line = line.strip_suffix('\r').unwrap_or(&line).to_string();
+            let mut cmp_line = line.strip_suffix('\r').unwrap_or(&line).to_string();
             if ph.indent {
                 // For indented heredocs (<<~), the terminator can be indented.
                 // Check if the line ends with the tag and everything before
@@ -2847,6 +2882,14 @@ impl Lexer {
             } else if cmp_line == ph.tag {
                 terminated = true;
                 break;
+            }
+            // Interpolating bodies can declare nested heredocs via
+            // `@{[ <<TAG ]}` islands. Read the inner body inline (it
+            // consumes the lines that would have followed THIS line)
+            // and splice its literal form back into `cmp_line` so the
+            // outer body parses the island as plain Perl code later.
+            if ph.interpolate {
+                cmp_line = self.expand_inner_heredocs_in_line(cmp_line);
             }
             raw_lines.push(cmp_line);
         }
