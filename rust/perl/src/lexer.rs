@@ -1680,6 +1680,7 @@ impl Lexer {
                             let next = self.ch();
                             let is_heredoc = next == '\''
                                 || next == '"'
+                                || next == '`'
                                 || next == '~'
                                 || next == '\\'
                                 || next.is_ascii_alphabetic()
@@ -2753,7 +2754,7 @@ impl Lexer {
             interpolate = false;
         }
 
-        let quote = if self.ch() == '\'' || self.ch() == '"' {
+        let quote = if self.ch() == '\'' || self.ch() == '"' || self.ch() == '`' {
             let q = self.ch();
             if q == '\'' {
                 interpolate = false;
@@ -2763,6 +2764,7 @@ impl Lexer {
         } else {
             None
         };
+        let quote_open_line = self.current_line;
 
         let mut tag = String::new();
         // Unquoted tags are identifiers — stop at anything non-alphanumeric.
@@ -2778,6 +2780,16 @@ impl Lexer {
         if let Some(q) = quote {
             if self.ch() == q {
                 self.pos += 1;
+            } else if self.error.is_none() {
+                // Reached newline / EOF before the closing quote of a
+                // quoted heredoc tag (`<<\`foo\``, `<<"foo"`, etc.).
+                // Reference perl emits the standard delim-unterminated
+                // message: `Unterminated delimiter for here document`.
+                let _ = quote_open_line;
+                self.error = Some(format!(
+                    "Unterminated delimiter for here document at {{FILE}} line {}.\n",
+                    quote_open_line
+                ));
             }
         }
 
