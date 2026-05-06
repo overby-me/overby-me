@@ -11805,6 +11805,62 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                         ));
                     }
                 }
+                // `\g0` / `\g{0}` / `\gN` / `\g-N` / `\g{N}` /
+                // `\g{-N}` — extended backref forms. Validate the
+                // numeric reference against total_groups and also
+                // catch `0` / `-0` (invalid) plus `-N` with N >
+                // total_groups (nonexistent or unclosed).
+                if nxt == 'g' {
+                    let mut k = i + 2;
+                    let mut in_brace = false;
+                    if k < chars.len() && chars[k] == '{' {
+                        in_brace = true;
+                        k += 1;
+                        while k < chars.len() && chars[k] == ' ' {
+                            k += 1;
+                        }
+                    }
+                    let negative = k < chars.len() && chars[k] == '-';
+                    if negative {
+                        k += 1;
+                    }
+                    let digits_start = k;
+                    while k < chars.len() && chars[k].is_ascii_digit() {
+                        k += 1;
+                    }
+                    if k > digits_start {
+                        let n: usize = chars[digits_start..k]
+                            .iter()
+                            .collect::<String>()
+                            .parse()
+                            .unwrap_or(0);
+                        if in_brace {
+                            while k < chars.len() && chars[k] == ' ' {
+                                k += 1;
+                            }
+                            if k < chars.len() && chars[k] == '}' {
+                                k += 1;
+                            }
+                        }
+                        let prefix: String = chars[..k].iter().collect();
+                        let suffix: String = chars[k..].iter().collect();
+                        if n == 0 {
+                            return Some(format!(
+                                "Reference to invalid group 0 in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                            ));
+                        }
+                        if n > total_groups {
+                            let label = if negative {
+                                "Reference to nonexistent or unclosed group"
+                            } else {
+                                "Reference to nonexistent group"
+                            };
+                            return Some(format!(
+                                "{label} in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                            ));
+                        }
+                    }
+                }
             }
             i += 2;
             continue;
