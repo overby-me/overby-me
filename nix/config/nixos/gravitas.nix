@@ -30,7 +30,6 @@
     services
     catppuccin
     home-manager
-    veo
     cloud-hypervisor
     android-tools
     {
