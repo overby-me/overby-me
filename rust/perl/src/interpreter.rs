@@ -7303,9 +7303,41 @@ impl Interpreter {
             self.globals.vars.insert(key, val);
             return;
         }
-        // Set in the innermost scope that has this variable, or create in global scope
+        // Set in the innermost scope that has this variable, or create in global scope.
+        // If the existing slot holds a `Value::Alias`, write *through* the
+        // RefCell so the alias's backing storage stays connected — required
+        // for `foreach (($#a)x2) { $_ *= 2 }` to propagate to $#a, and for
+        // `@_` argument-aliasing to flow back to the caller's lvalue.
         for scope in self.scopes.iter_mut().rev() {
             if let Some(slot) = scope.vars.get_mut(&key) {
+                if let Value::Alias(rc) = slot {
+                    let cell = rc.clone();
+                    let p = std::rc::Rc::as_ptr(&cell) as usize;
+                    if let Some(arr_rc) = self.arylen_refs.get(&p).cloned() {
+                        // Magic arylen cell: resize the bound array and
+                        // mirror the new last-index back into the cell
+                        // so subsequent reads see the same number.
+                        let target_idx = val.to_num() as i64;
+                        let new_len = if target_idx < 0 {
+                            0
+                        } else {
+                            (target_idx + 1) as usize
+                        };
+                        let mut arr = arr_rc.borrow_mut();
+                        if arr.len() > new_len {
+                            arr.truncate(new_len);
+                        } else {
+                            while arr.len() < new_len {
+                                arr.push(Value::Undef);
+                            }
+                        }
+                        drop(arr);
+                        *cell.borrow_mut() = Value::Num(target_idx as f64);
+                    } else {
+                        *cell.borrow_mut() = val;
+                    }
+                    return;
+                }
                 *slot = val;
                 return;
             }
@@ -8945,6 +8977,46 @@ impl Interpreter {
                     Expr::ArrayLit(_) | Expr::QW(_) | Expr::ArrayRef(_)
                 ) =>
             {
+                // Detect lvalue-propagating items in the LHS list — for
+                // now just `$#name` — and replace each with a magic
+                // cell whose pointer lives in `arylen_refs`. The
+                // ensuing per-iteration `$_` mutations then resize the
+                // bound array. (Perl: `for (($#a)x2) { $_ *= 2 }`
+                // doubles $#a twice.)
+                let lvalue_items: Option<Vec<Option<std::rc::Rc<std::cell::RefCell<Value>>>>> =
+                    if let Expr::ArrayLit(elems) = left.as_ref() {
+                        let mut out = Vec::with_capacity(elems.len());
+                        for e in elems {
+                            if let Expr::ArrayLen(name) = e
+                                && !name.starts_with('$')
+                            {
+                                let arr_rc = if let Some(rc) = self.aliased_arrays.get(name) {
+                                    rc.clone()
+                                } else {
+                                    let arr = self.globals.arrays.remove(name).unwrap_or_default();
+                                    let rc = std::rc::Rc::new(std::cell::RefCell::new(arr));
+                                    self.aliased_arrays.insert(name.to_string(), rc.clone());
+                                    rc
+                                };
+                                let len_now = (arr_rc.borrow().len() as i64) - 1;
+                                let cell = std::rc::Rc::new(std::cell::RefCell::new(Value::Num(
+                                    len_now as f64,
+                                )));
+                                let p = std::rc::Rc::as_ptr(&cell) as usize;
+                                self.arylen_refs.insert(p, arr_rc);
+                                out.push(Some(cell));
+                            } else {
+                                out.push(None);
+                            }
+                        }
+                        if out.iter().any(|o| o.is_some()) {
+                            Some(out)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
                 let items = self.eval_list(left);
                 let n_raw = self.eval_expr(right).to_num();
                 // Huge repeat counts (e.g. `(1) x ~1` — `~1` is max-unsigned)
@@ -8971,9 +9043,21 @@ impl Interpreter {
                 // the same storage cell, so `\$_[0] == \$_[1]` when the
                 // repeated list is passed to a sub. Wrap each unique item
                 // once in an Rc<RefCell<Value>>, then emit Aliases.
+                // For items where the LHS expression was lvalue (like
+                // `$#name`), reuse the magic cell pre-built above so
+                // mutations propagate.
                 let cells: Vec<std::rc::Rc<std::cell::RefCell<Value>>> = items
                     .into_iter()
-                    .map(|v| std::rc::Rc::new(std::cell::RefCell::new(v)))
+                    .enumerate()
+                    .map(|(i, v)| {
+                        if let Some(ref lvs) = lvalue_items
+                            && let Some(Some(cell)) = lvs.get(i)
+                        {
+                            cell.clone()
+                        } else {
+                            std::rc::Rc::new(std::cell::RefCell::new(v))
+                        }
+                    })
                     .collect();
                 let mut out = Vec::with_capacity(cells.len() * n as usize);
                 for _ in 0..n {
