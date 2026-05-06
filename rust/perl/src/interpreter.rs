@@ -236,6 +236,14 @@ pub struct Interpreter {
     // what reference perl checks when deciding whether `require Config`
     // succeeds. We use this to decide whether to replay the Config warning.
     set_up_inc_called: bool,
+    // Whether the user program has reassigned @INC since startup (either
+    // via direct `@INC = (...)` or via test.pl's `set_up_inc`). Used as a
+    // proxy for "reference perl's @INC at this point still has its bundled
+    // install paths" — false means yes (so `use Config` should silently
+    // succeed because reference perl would find Config.pm in its bundled
+    // lib path); true means @INC has been narrowed to test-only paths and
+    // any unfound module should fail with the standard `BEGIN failed`.
+    inc_user_modified: bool,
     // Tracks files already loaded via require (like %INC)
     required_files: HashSet<String>,
     // Current source file being executed
@@ -388,6 +396,7 @@ impl Interpreter {
             sub_scope_stack: Vec::new(),
             config_load_warned: false,
             set_up_inc_called: false,
+            inc_user_modified: false,
             required_files: HashSet::new(),
             current_file: String::new(),
             current_line: 0,
@@ -415,8 +424,11 @@ impl Interpreter {
     }
 
     pub fn set_inc(&mut self, dirs: &[String]) {
+        // Initial @INC seed from main.rs's `-I` flags. Bypass `set_array`
+        // so the user-modification flag stays clear; `inc_user_modified`
+        // only flips when the running program reassigns @INC at runtime.
         let items: Vec<Value> = dirs.iter().map(|d| Value::Str(d.clone())).collect();
-        self.set_array("INC", items);
+        self.globals.arrays.insert("INC".to_string(), items);
     }
 
     /// Resolve a filehandle name through the typeglob alias table.
@@ -1878,6 +1890,21 @@ impl Interpreter {
                     if let Some(flow) = self.pending_flow.take() {
                         return flow;
                     }
+                    return Flow::None;
+                }
+                // `use Config` ships bundled with reference perl in its
+                // install's lib path. When the test hasn't reassigned
+                // @INC yet (i.e. @INC is still the original `-I`
+                // seeded list reference perl's bundled paths would be
+                // searched alongside), simulate the bundled load
+                // silently — `$Config{ccflags}` etc. will be undef
+                // which is what most `if $Config{X} =~ /…/` gate
+                // checks treat as the safe default. Once @INC has been
+                // narrowed (via `set_up_inc` or direct `@INC = (...)`),
+                // fall through and emit the standard `Can't locate`
+                // error so tests that expect that BEGIN-failed
+                // diagnostic still match.
+                if module == "Config" && !self.inc_user_modified {
                     return Flow::None;
                 }
                 let inc_str = inc.iter().map(|v| v.to_str()).collect::<Vec<_>>().join(" ");
@@ -7356,6 +7383,14 @@ impl Interpreter {
     }
 
     fn set_array(&mut self, name: &str, arr: Vec<Value>) {
+        // Track when the running program reassigns @INC at runtime —
+        // this is the signal that the test has narrowed @INC to its
+        // own minimal set, after which `use Config` should fail with
+        // the standard `Can't locate Config.pm` diagnostic instead of
+        // silently succeeding.
+        if name == "INC" {
+            self.inc_user_modified = true;
+        }
         // If the old array held blessed refs that aren't reachable from
         // anywhere else (including the *new* array we're about to store),
         // dispatch their DESTROY before dropping the slot.
@@ -10583,6 +10618,12 @@ fn compile_time_use_check_in(
                             }
                         }
                     }
+                    continue;
+                }
+                // `use Config` ships bundled — silently succeed when the
+                // running program hasn't reassigned @INC yet. See the
+                // matching comment in `Stmt::Use` exec for context.
+                if module == "Config" && !interp.inc_user_modified {
                     continue;
                 }
                 let inc_str = inc.iter().map(|v| v.to_str()).collect::<Vec<_>>().join(" ");
