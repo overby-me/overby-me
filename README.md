@@ -566,7 +566,7 @@
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
 | ✅ | Language | [Rust 🦀](https://github.com/rust-lang/rust) | | [cxx 🦀](https://github.com/dtolnay/cxx), [bindgen 🦀](https://github.com/rust-lang/rust-bindgen), [GCC-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/gcc) | [C 💣](https://en.wikipedia.org/wiki/C_(programming_language)), [C++ 💣](https://en.wikipedia.org/wiki/C%2B%2B) |
-| 🚧 | Compiler Framework | [Mlir 💣](https://github.com/llvm/llvm-project/tree/main/mlir), [LLVM 💣](https://github.com/llvm/llvm-project) | [Cranelift 🦀](https://github.com/bytecodealliance/wasmtime/tree/main/cranelift) | ⬅️ | |
+| 🚧 | Compiler Framework | [Mlir 💣](https://github.com/llvm/llvm-project/tree/main/mlir), [LLVM 💣](https://github.com/llvm/llvm-project) | [Cranelift 🦀](https://github.com/bytecodealliance/wasmtime/tree/main/cranelift), [Krabby 🦀](https://codeberg.org/bal-e/krabby) | ⬅️ | |
 | 🚧 | Linker | [Mold 💣](https://github.com/rui314/mold) | [Wild 🦀](https://github.com/davidlattimore/wild) | [Binutils-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/binutils) | [GNU ld 💣](https://sourceware.org/binutils) |
 | ✅ | Formatter | [Rustfmt 🦀](https://github.com/rust-lang/rustfmt) | | 🆗 | |
 | ✅ | Linter | [Clippy 🦀](https://github.com/rust-lang/rust-clippy) | | 🆗 | |
