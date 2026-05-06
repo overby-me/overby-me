@@ -701,20 +701,27 @@ impl Lexer {
     }
 
     fn skip_pod(&mut self) {
-        // Skip =pod / =head1 / =cut blocks
+        // Skip =pod / =head1 / =cut blocks. POD ends only at a line that
+        // starts with `=cut` followed by whitespace or end-of-line —
+        // `=cute`, `=cut2`, `=cut_` keep us in POD (per perlpod and
+        // base/lex tests 53–55).
         while self.pos < self.input.len() {
             if self.ch() == '\n' {
                 self.pos += 1;
                 if self.pos < self.input.len() && self.ch() == '=' {
-                    // Check for =cut
-                    let rest: String = self.input[self.pos..].iter().take(4).collect();
-                    if rest == "=cut" || rest.starts_with("=cut") {
-                        // Skip to end of =cut line
+                    let rest: String = self.input[self.pos..].iter().take(5).collect();
+                    let after_cut = rest.chars().nth(4);
+                    let ends_pod = rest.starts_with("=cut")
+                        && match after_cut {
+                            None => true,
+                            Some(c) => c.is_whitespace() || c == '\r',
+                        };
+                    if ends_pod {
                         while self.pos < self.input.len() && self.ch() != '\n' {
                             self.pos += 1;
                         }
                         if self.pos < self.input.len() {
-                            self.pos += 1; // skip newline
+                            self.pos += 1;
                         }
                         return;
                     }
