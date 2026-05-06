@@ -2636,7 +2636,22 @@ impl Interpreter {
                 // calls "Regexp". We model it with a dedicated variant that
                 // stringifies as `(?^flags:pattern)` but is distinguishable
                 // from a plain string by `ref()` / `re::is_regexp` etc.
-                Value::Regex(pat.clone(), flags.clone())
+                // Interpolate variables now (reference perl compiles the
+                // pattern at qr-time, so the resulting regex is fixed and
+                // doesn't re-evaluate `$x` on each match).
+                let interpolated = self.interp_regex_pattern(pat);
+                if let Some(err) = validate_regex_pattern(&interpolated) {
+                    let file = if self.current_file.is_empty() {
+                        "-e".to_string()
+                    } else {
+                        self.current_file.clone()
+                    };
+                    let line = self.current_line;
+                    self.set_global_var("@", Value::Str(format!("{err} at {file} line {line}.\n")));
+                    self.pending_flow = Some(Flow::Die(format!("{err} at {file} line {line}.\n")));
+                    return Value::Undef;
+                }
+                Value::Regex(interpolated, flags.clone())
             }
             Expr::QW(words) => {
                 // In scalar context, returns last element
@@ -9079,12 +9094,36 @@ impl Interpreter {
         let chars: Vec<char> = pattern.chars().collect();
         let mut out = String::new();
         let mut i = 0;
+        // `\Q…\E` enters a quotemeta region: every literal char and the
+        // *value* of any interpolated variable inside is regex-escaped
+        // so the bytes match literally. Reference perl uses this as
+        // the implementation of `m/^\Q$expect/`.
+        let mut in_q = false;
         while i < chars.len() {
             let c = chars[i];
             if c == '\\' && i + 1 < chars.len() {
+                let nxt = chars[i + 1];
+                if nxt == 'Q' {
+                    in_q = true;
+                    i += 2;
+                    continue;
+                }
+                if nxt == 'E' {
+                    in_q = false;
+                    i += 2;
+                    continue;
+                }
                 out.push(c);
-                out.push(chars[i + 1]);
+                out.push(nxt);
                 i += 2;
+                continue;
+            }
+            if in_q && c != '$' && c != '@' {
+                if !c.is_ascii_alphanumeric() && c != '_' {
+                    out.push('\\');
+                }
+                out.push(c);
+                i += 1;
                 continue;
             }
             if (c == '$' || c == '@') && i + 1 < chars.len() {
@@ -9181,10 +9220,10 @@ impl Interpreter {
                             idx as usize
                         };
                         let v = arr.get(real_idx).cloned().unwrap_or(Value::Undef);
-                        out.push_str(&v.to_str());
+                        push_maybe_quotemeta(&mut out, &v.to_str(), in_q);
                     } else {
                         let v = self.get_var(&name).to_str();
-                        out.push_str(&v);
+                        push_maybe_quotemeta(&mut out, &v, in_q);
                         out.push('[');
                         out.push_str(&inner);
                         out.push(']');
@@ -9207,12 +9246,12 @@ impl Interpreter {
                         inner
                     };
                     let v = self.get_hash_element(&name, &key);
-                    out.push_str(&v.to_str());
+                    push_maybe_quotemeta(&mut out, &v.to_str(), in_q);
                     continue;
                 }
                 if sigil == '$' {
                     let v = self.get_var(&name).to_str();
-                    out.push_str(&v);
+                    push_maybe_quotemeta(&mut out, &v, in_q);
                 } else {
                     let list = self.get_array(&name);
                     let sep = self.get_var("\"").to_str();
@@ -9221,7 +9260,7 @@ impl Interpreter {
                         .map(|v| v.to_str())
                         .collect::<Vec<_>>()
                         .join(if sep.is_empty() { " " } else { &sep });
-                    out.push_str(&joined);
+                    push_maybe_quotemeta(&mut out, &joined, in_q);
                 }
                 continue;
             }
@@ -9242,6 +9281,18 @@ impl Interpreter {
         start: usize,
     ) -> (bool, usize) {
         let pattern = self.interp_regex_pattern(pattern);
+        if let Some(err) = validate_regex_pattern(&pattern) {
+            let file = if self.current_file.is_empty() {
+                "-e".to_string()
+            } else {
+                self.current_file.clone()
+            };
+            let line = self.current_line;
+            let msg = format!("{err} at {file} line {line}.\n");
+            self.set_global_var("@", Value::Str(msg.clone()));
+            self.pending_flow = Some(Flow::Die(msg));
+            return (false, start);
+        }
         let (pattern, flags) = unwrap_qr(&pattern, flags);
         let pattern = perl_backslash_n(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
@@ -11674,6 +11725,108 @@ fn expr_has_tail_call(expr: &Expr) -> bool {
         }),
         _ => false,
     }
+}
+
+/// Append `s` to `out`, regex-quoting non-alphanumerics if `quotemeta` is on.
+/// Used inside `\Q…\E` regions of an interpolated regex pattern so that
+/// the *value* of an interpolated `$var` is also escaped (perl's qr-time
+/// quotemeta semantics — `\Q` quotes both literal text AND interpolated
+/// content until the next `\E`).
+fn push_maybe_quotemeta(out: &mut String, s: &str, quotemeta: bool) {
+    if !quotemeta {
+        out.push_str(s);
+        return;
+    }
+    for c in s.chars() {
+        if !c.is_ascii_alphanumeric() && c != '_' {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+}
+
+/// Quickly catch the most common compile-time regex pitfalls reference
+/// perl rejects at qr//-time so tests like `re/regexp.t` test 112–114
+/// (`a[b-a]`, `a[]b`, `a[`) see the matching `Invalid [] range` /
+/// `Unmatched [` diagnostic instead of a silent compile-success. Only
+/// the bracketed-class checks are wired up; full pattern validation
+/// would duplicate the regex engine.
+fn validate_regex_pattern(pat: &str) -> Option<String> {
+    let chars: Vec<char> = pat.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' {
+            i += 2;
+            continue;
+        }
+        if c == '[' {
+            let class_start = i;
+            // Skip the optional leading negation `^` and an opening `]`
+            // (which reference perl treats as a literal `]` only when it
+            // is the very first character of the class).
+            i += 1;
+            if i < chars.len() && chars[i] == '^' {
+                i += 1;
+            }
+            if i < chars.len() && chars[i] == ']' {
+                i += 1;
+            }
+            // Scan until we find the closing `]` (escaped `]` doesn't
+            // count, escaped anything skips a char). Empty `[]` (i.e.
+            // `[]` immediately after the bracket — no chars) becomes
+            // `Unmatched [` because reference perl can't compile a
+            // truly-empty class.
+            let body_start = i;
+            let mut depth_ok = false;
+            while i < chars.len() {
+                let cc = chars[i];
+                if cc == '\\' && i + 1 < chars.len() {
+                    i += 2;
+                    continue;
+                }
+                if cc == ']' {
+                    depth_ok = true;
+                    break;
+                }
+                i += 1;
+            }
+            if !depth_ok {
+                let prefix: String = chars[..class_start + 1].iter().collect();
+                return Some(format!(
+                    "Unmatched [ in regex; marked by <-- HERE in m/{prefix} <-- HERE /"
+                ));
+            }
+            // Now `i` is the closing `]`. Validate ranges in
+            // chars[body_start..i] of the form `A-B` where A > B.
+            let class_body: Vec<char> = chars[body_start..i].to_vec();
+            let mut j = 0;
+            while j < class_body.len() {
+                if class_body[j] == '\\' {
+                    j += 2;
+                    continue;
+                }
+                if j + 2 < class_body.len() && class_body[j + 1] == '-' && class_body[j + 2] != ']'
+                {
+                    let lo = class_body[j];
+                    let hi = class_body[j + 2];
+                    if (lo as u32) > (hi as u32) {
+                        let prefix: String = chars[..i].iter().collect();
+                        return Some(format!(
+                            "Invalid [] range \"{lo}-{hi}\" in regex; marked by <-- HERE in m/{prefix} <-- HERE ]/"
+                        ));
+                    }
+                    j += 3;
+                    continue;
+                }
+                j += 1;
+            }
+            i += 1;
+            continue;
+        }
+        i += 1;
+    }
+    None
 }
 
 fn canon_var(name: &str) -> &str {
