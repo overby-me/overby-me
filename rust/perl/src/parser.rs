@@ -4033,7 +4033,9 @@ fn parse_interp_string(s: &str) -> Expr {
             && (chars[i + 1].is_ascii_alphabetic()
                 || chars[i + 1] == '_'
                 || chars[i + 1] == '{'
-                || chars[i + 1] == '$')
+                || chars[i + 1] == '$'
+                || chars[i + 1] == '-'
+                || chars[i + 1] == '+')
         {
             // Array interpolation
             if !lit.is_empty() {
@@ -4087,6 +4089,12 @@ fn parse_interp_string(s: &str) -> Expr {
                     i += 1;
                 }
                 parts.push(InterpPart::Expr(Box::new(Expr::ArrayDerefVar(name))));
+            } else if chars[i] == '-' || chars[i] == '+' {
+                // `@-` / `@+` — match-position special arrays. Single-
+                // character name; no further name chars consumed.
+                let name = chars[i].to_string();
+                i += 1;
+                parts.push(InterpPart::ArrayVar(name));
             } else {
                 let mut name = String::new();
                 while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
