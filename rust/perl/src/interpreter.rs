@@ -3522,9 +3522,15 @@ impl Interpreter {
                     v = match v {
                         Value::ScalarRef(r) => {
                             // Magic `\$#name` ref: deref reads the bound
-                            // array's current length.
+                            // array's current length. If the array is
+                            // "orphaned" (the only remaining strong
+                            // reference is our own entry in arylen_refs),
+                            // Perl returns undef.
                             let p = std::rc::Rc::as_ptr(&r) as usize;
                             if let Some(arr_rc) = self.arylen_refs.get(&p) {
+                                if std::rc::Rc::strong_count(arr_rc) <= 1 {
+                                    return Value::Undef;
+                                }
                                 let cur = (arr_rc.borrow().len() as i64) - 1;
                                 return Value::Num(cur as f64);
                             }
