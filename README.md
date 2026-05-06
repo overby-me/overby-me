@@ -207,7 +207,6 @@
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Cavif-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/cavif-rs/default.nix) | [GitHub](https://github.com/kornelski/cavif-rs) | AVIF image encoder |
 | [Layout 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/layout/default.nix) | [GitHub](https://github.com/nadavrot/layout) | Graphviz dot renderer |
 | [Vibe 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/vibe.nix) | [GitHub](https://github.com/TornaxO7/vibe) | Desktop audio visualizer |
 | [Wondermagick 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/wondermagick/default.nix) | [GitHub](https://github.com/Shnatsel/wondermagick) | Memory-safe ImageMagick replacement |
@@ -216,7 +215,6 @@
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Age-plugin-fido2prf 🐹](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/age-plugin-fido2prf.nix) | [GitHub](https://github.com/FiloSottile/typage) | FIDO2 PRF plugin for age |
 | [Forkfs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/forkfs.nix) | [GitHub](https://github.com/SUPERCILEX/forkfs) | Filesystem change sandbox for processes |
 | [Hakoniwa 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/hakoniwa.nix) | [GitHub](https://github.com/souk4711/hakoniwa) | Process isolation tool |
 
@@ -232,8 +230,6 @@
 | Package | Homepage | Description |
 |-|-|-|
 | [Busd 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/busd.nix) | [GitHub](https://github.com/dbus2/busd) | D-Bus bus implementation |
-| [Cpx 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/cpx.nix) | [GitHub](https://github.com/11happy/cpx) | Reimagined cp command |
-| [Lacy 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/lacy.nix) | [GitHub](https://github.com/timothebot/lacy) | Fast cd alternative |
 | [Sunsetc 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/sunsetc.nix) | [GitHub](https://github.com/mkj/sunset) | SSH client and server |
 
 </details>
