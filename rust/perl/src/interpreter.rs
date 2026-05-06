@@ -1440,15 +1440,14 @@ impl Interpreter {
                     // current scopes into closure_envs keyed by the qualified
                     // name. Top-level `sub foo {}` (eval_depth == 0) keeps the
                     // legacy file-scope behaviour driven by `sub_origin`.
-                    if self.eval_depth > 0 {
-                        // Promote each captured `my` slot to a shared
-                        // Rc<RefCell<Value>> alias so mutations made
-                        // through the live scope (e.g. `$x++` in the
-                        // surrounding block after the sub is defined)
-                        // are visible inside the sub body. Both
-                        // self.scopes and the cloned `captured` then
-                        // hold the same alias Rcs, achieving live-
-                        // view closure semantics for `my` lexicals.
+                    // Capture the surrounding lexical chain when the
+                    // sub is defined somewhere with non-trivial scopes
+                    // — either inside `eval STRING` (eval_depth > 0)
+                    // or nested inside a block with `my` lexicals.
+                    // Promote each slot to a shared Rc alias so
+                    // mutations propagate from outer scope into the
+                    // captured chain (live-view closure semantics).
+                    if self.eval_depth > 0 || self.scopes.len() > 1 {
                         for scope in self.scopes.iter_mut() {
                             for v in scope.vars.values_mut() {
                                 if !matches!(v, Value::Alias(_)) {
