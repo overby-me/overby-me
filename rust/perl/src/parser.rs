@@ -3397,7 +3397,24 @@ impl Parser {
                 // we don't yet model (e.g. UTF-8 identifiers, attributes),
                 // so we keep the silent-skip fallback for those.
                 let is_terminator = matches!(here, Token::Semi | Token::EOF);
-                if is_terminator && self.error.is_none() {
+                // A binary operator at primary position means the LHS is
+                // missing — `eval '&& 5'` etc. Reference perl reports
+                // `syntax error at … near "&&"`. Treat these as terminators
+                // for error-reporting purposes.
+                let is_binop_no_lhs = matches!(
+                    here,
+                    Token::LogAnd
+                        | Token::LogOr
+                        | Token::DefOr
+                        | Token::And
+                        | Token::Or
+                        | Token::Spaceship
+                        | Token::NumEq
+                        | Token::NumNe
+                        | Token::NumLe
+                        | Token::NumGe
+                );
+                if (is_terminator || is_binop_no_lhs) && self.error.is_none() {
                     let line = self.current_line();
                     let at_eof = matches!(here, Token::EOF);
                     let where_ = if at_eof {
@@ -4226,6 +4243,16 @@ fn token_display(t: &Token) -> String {
         Token::RBracket => "]".to_string(),
         Token::Comma => ",".to_string(),
         Token::EOF => "EOF".to_string(),
+        Token::LogAnd => "&&".to_string(),
+        Token::LogOr => "||".to_string(),
+        Token::DefOr => "//".to_string(),
+        Token::And => "and".to_string(),
+        Token::Or => "or".to_string(),
+        Token::Spaceship => "<=>".to_string(),
+        Token::NumEq => "==".to_string(),
+        Token::NumNe => "!=".to_string(),
+        Token::NumLe => "<=".to_string(),
+        Token::NumGe => ">=".to_string(),
         _ => format!("{t:?}"),
     }
 }
