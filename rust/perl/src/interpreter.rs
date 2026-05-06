@@ -11876,6 +11876,38 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                 "Nested quantifiers in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
             ));
         }
+        // `*` / `+` at the very start of the pattern (or right after
+        // `(` or `|`) has no preceding atom — reference perl emits
+        // "Quantifier follows nothing". `?` is also a quantifier, but
+        // `(?…)` group introducers consume `?` so we cant flag it
+        // here without false-positives. `\(` / `\)` are escapes (the
+        // `*` after them quantifies the literal paren) — check whether
+        // the preceding `(` is escaped before reporting.
+        if c == '*' || c == '+' {
+            let no_atom = if i == 0 {
+                true
+            } else if matches!(chars[i - 1], '(' | '|') {
+                // Is the preceding `(` escaped? Walk back any run of
+                // backslashes; an odd count means it was `\(` not `(`.
+                let escaped = chars[..i - 1]
+                    .iter()
+                    .rev()
+                    .take_while(|&&c| c == '\\')
+                    .count()
+                    % 2
+                    == 1;
+                !escaped
+            } else {
+                false
+            };
+            if no_atom {
+                let prefix: String = chars[..=i].iter().collect();
+                let suffix: String = chars[i + 1..].iter().collect();
+                return Some(format!(
+                    "Quantifier follows nothing in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                ));
+            }
+        }
         if c == '[' {
             let class_start = i;
             // Skip the optional leading negation `^` and an opening `]`
