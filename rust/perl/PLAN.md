@@ -6,19 +6,39 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**63/79 Nix tests passing** (80%) — selected tests from the upstream Perl test suite.
+**64/79 Nix tests passing** (81%) — selected tests from the upstream Perl test suite.
 
 Passing: base/if, base/cond, base/while, base/pat, base/num, base/translate,
 base/term, base/rs, cmd/elsif, cmd/for, cmd/mod, cmd/subval, cmd/switch,
 opbasic/arith, opbasic/qq, opbasic/magic_phase, op/arith2, op/auto, op/bop,
 op/chop, op/closure, op/cond, op/context, op/defined, op/delete, op/die,
-op/do, op/each, op/grep, op/hash, op/inc, op/index, op/lc, op/list, op/my,
-op/not, op/oct, op/pack, op/push, op/quotemeta, op/range, op/ref, op/reverse,
-op/sort, op/splice, op/split, op/sprintf, op/sub, op/substr, op/unshift,
-op/vec, op/wantarray, io/argv, io/fs, io/open, io/print, io/read, re/pat,
-re/subst, run/exit, run/switches.
+op/do, op/each, op/grep, op/hash, op/inc, op/index, op/lc, op/list, op/local,
+op/my, op/not, op/oct, op/pack, op/push, op/quotemeta, op/range, op/ref,
+op/reverse, op/sort, op/splice, op/split, op/sprintf, op/sub, op/substr,
+op/unshift, op/vec, op/wantarray, io/argv, io/fs, io/open, io/print, io/read,
+io/tell, re/pat, re/subst, run/exit, run/switches.
 
-Major unlocks in this cycle:
+Latest unlocks (op/local pass + diamond/unpack fixes):
+
+- **Auto-fail `<glob pattern>` to a File::Glob compile error.** Reference
+  perl auto-loads File::Glob when a `<…>` contains shell metacharacters
+  (whitespace, `*`, `?`, `[`, `{`); under the Nix sandbox / `-I../lib`-only
+  test environment File::Glob isn't on disk, so the load fails at compile
+  time with `Can't locate File/Glob.pm in @INC … BEGIN failed`. Lexer now
+  detects the same trigger and seeds `self.error` with reference perl's
+  exact diagnostic, so test diffs match byte-for-byte. Required to make
+  op/local stop at the same compile error reference perl does. Disambiguates
+  diamond-vs-`lt` first via `Token::expects_operand()` plus a hand-curated
+  list of `Ident` keywords that take a list operand (`scalar`, `print`,
+  `say`, `die`, `chomp`, …) so `$a<$b ? 1 : $a > -1 : 0` keeps lexing as
+  comparison, not a `Diamond("$b ? 1 : $a")`.
+- **`unpack "U0 (H2)*"` / `unpack "U0 H*"`** — switch-to-byte-mode followed
+  by per-byte (or all-bytes) lowercase-hex emission. Required for op/chr's
+  `hexes()` helper which converts a codepoint's UTF-8 encoding into space-
+  separated hex pairs. Both list-context and scalar-context unpack now route
+  through a shared `Self::unpack_list` helper.
+
+Earlier unlocks:
 
 - **True `@_` aliasing via `Value::Alias`** (Rc<RefCell<Value>>): list
   slices `(…)[i,j]` and list-repeat `(…) x N` build shared storage cells
@@ -85,7 +105,6 @@ Major unlocks in this cycle:
   eval'd code itself declares `use strict`, enforce vars-checking even
   when the surrounding scope didn't. Previously required the outer scope
   to opt in first.
-
 - `@_` is now dynamically scoped per-call (was being written to globals
   and overwritten on every sub call — this broke every test that used
   test.pl's `like()`/`is()` chains)
@@ -597,13 +616,11 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   was parsed as a bareword call to `no()` and silently did nothing —
   so `{ use bytes; ... no bytes; ... }` stayed in byte-mode for the
   rest of the block. Now intercepted in `eval_call`.
-
 - **Lexical `use warnings`** tracks a `warnings_on` flag alongside
   `bytes_mode` / `strict_vars`, saved/restored per-scope. When on,
   builtins like `join` emit "Use of uninitialized value" through
   `$SIG{__WARN__}` even without $^W. Unlocks op/join test 18
   (`should warn if separator is undef`).
-
 - **`s///r` non-destructive substitution flag**: previously the `/r` flag
   was ignored, so `my $r = $s =~ s/x/y/gr;` mutated $s and returned the
   count (0 or 1) instead of the modified copy. Now `/r` leaves the
@@ -612,7 +629,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   was the proximate failure cause of op/heredoc tests 48-66 (the
   "Eval'd Indented here-doc" and "Indented here-doc" variants that
   construct their prog via a $safe_start_delim).
-
 - **`pack "a*"` / `pack "a"` (binary string)**: previously
   unsupported (returned empty string), so `pack "a*", "\x{100}"`
   yielded "" and `use bytes`-aware concat tests in opbasic/concat
@@ -620,7 +636,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   the underlying UTF-8 bytes — Perl's binary-string semantics on a
   Rust `String`). `a` (no count) takes only the first byte. Unlocks
   opbasic/concat tests 21/22 (`perl #26905, left/right eq bytes`).
-
 - **`ord` / `substr` honor `use bytes`**: under the bytes pragma,
   `ord($s)` now returns the first UTF-8 byte's value (0..255) instead
   of the first character's codepoint, and `substr($s, OFFSET, LEN)`
@@ -633,7 +648,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   to UTF-8 (a 2-byte sequence whose first byte was returned as `255`).
   Matches reference perl byte-for-byte for the `pack("U", N) eq
   "\xC3\xBF"` family of tests.
-
 - **`die "msg"` appends `at FILE line N.\n` location suffix**: when
   the die argument is a plain string (not a reference) and lacks a
   trailing newline, perl appends the source location to the message —
@@ -642,7 +656,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   CodeRef) and bare `die;` re-raises remain untouched (matching
   reference perl). Fixes the eval-string error format used throughout
   test.pl (`x at (eval N) line 1.`).
-
 - **`delete local` for hash/array element + slice**: parser detects
   `Token::Delete` followed by `Token::Local` and routes through a new
   synthetic `_delete_local` builtin that snapshots the slot(s),
@@ -657,7 +670,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   in place (without going through `set_array`, which clears
   `deleted_slots`) so `exists $a[i]` reports false during the scope.
   Lifts op/local from ~154/197 to ~176/197 passing within the diff.
-
 - **`local(@arr[i,j]) = LIST` / `local(%h{a,b}) = LIST` slice form**:
   added `Stmt::LocalSlice(name, key_exprs, val_expr)`. Parser detects
   `local ( ArrayVar [` or `local ( HashVar {` pairs and emits the new
@@ -666,7 +678,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   prior, set new from the destructured RHS, queue restore on scope
   exit). Lift op/local from ~142/197 to ~154/197 passing within the
   diff.
-
 - **`@_` post-hoc autoviv + writeback for anon-sub `->()` calls**: the
   named-call path (`Expr::Call` -> `subs.get(name)`) already wired
   `autoviv_lvalue_for_call` + `final_u` writeback for lvalue-shaped
@@ -677,7 +688,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   Unblocks the `sub { $_[0] = X }->($h{k})` idiom (op/pos's defelem
   block) for the on-exit case; `pos` reads through the same slot
   during the call still need real `@_` slot aliasing.
-
 - **`local($a[i])` parens-form + array-element restore**: parser only
   recognised `local $a[i]` (bare form), so `local($a[i]) = X` and
   `local(@a[i,j]) = …` fell through to `parse_var_list` which dropped
@@ -694,7 +704,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   on scope exit (so `local($a[5])` against a 3-elem array doesn't leak
   undef padding at indices 3,4 on exit). Net: op/local goes from ~24
   passing in diff to ~142.
-
 - **Paired delimiter `\\` escape in q/qq/qr/qw/m/s**: the
   `read_delimited_string` scanner only recognised `\open` / `\close`
   as 2-char escapes inside paired delimiters (`q(...)`, `qq{...}`,
@@ -702,7 +711,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   the next char as a normal character. That meant `qq(<<\`\\)`consumed`\\)` and ran past the closing paren, scanning the rest of the
   source as one giant string. Adding `\\`as a 2-char escape (alongside`\open` / `\close`) prevents the runaway. Unblocks every`fresh_perl_*`case in op/heredoc that constructs program text via`qq(... \\)` — the
   test count goes from ~80 actual lines to ~924 of 1802.
-
 - **Regex interpolation: `$name[...]` is only a subscript when the
   brackets look like one**: in `interp_regex_pattern`, a `$name[...]`
   sequence was unconditionally treated as an array-element access,
@@ -714,7 +722,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   `$name` is interpolated as a scalar and `[...]` is emitted
   literally for the regex engine to handle as a char class. Fixes
   patterns like `/^$foo[$A-Z]$/` (base/lex test 26).
-
 - **`my $^X` / `my ${^XYZ}` parse-time error**: reference perl rejects
   declaring magic-globals with `my` and emits `Can't use global $^X in
   "my" at FILE line N.` at compile time. `parse_my_decl` already had a
@@ -723,7 +730,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   `$^X` and `${^XYZ}` lex to `ScalarVar("^…")`). The error is recorded
   via `self.error.get_or_insert(msg)` so `eval STRING` captures it in
   `$@`. Fixes base/lex tests 34–35.
-
 - **Interpolated `${NAME[idx]}` / `${NAME{key}}` accepts caret names**:
   the brace-disambiguator subscript form (e.g. `"${^TEST[0]}"` =
   `$ {^TEST}[0]`) only walked the inner-name end-pointer past `_` /
@@ -731,14 +737,12 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   scalar-block-deref path (which can't index an array). Added `^` to
   the first-char check. Fixes base/lex tests 39–41 (`${^TEST[0]}`,
   `${^TEST[1]}`).
-
 - **Brace-subscript form tolerates whitespace around the bracket**:
   `${ ^TEST [1] }` previously failed because `name_end` stopped at
   the space and the `after = " [1]"` slice didn't satisfy the
   `starts_with('[')` check. Trimming `after` (and the bracket
   contents `inside`) lets whitespace-padded forms like `${ NAME [N] }`
   reach the subscript path.
-
 - **`# line N "FILE"` directive**: Perl's lexical-line directive now
   renames the apparent source file + line for diagnostics (caller(),
   die, $0, etc.). Implemented end-to-end: the lexer detects
@@ -754,7 +758,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   `Parser::new_with_lines_and_files` keeps `new_with_lines` as a
   back-compat shim). Fixes base/lex tests 49–50 (the plink/plunk
   file-rename round-trip).
-
 - **`chr(N)` under `use bytes` for negative N**: previously returned
   U+FFFD for any negative input. Reference perl wraps mod 256, so
   `chr(-1) == "\xFF"`, `chr(-2) == "\xFE"`, `chr(-0.1) == "\x00"`.
@@ -802,7 +805,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   through the assignment fell into the `_ => {}` catch-all and
   silently did nothing. Added an arm that recurses into the inner
   target. Fixes opbasic/concat test 254 (`($a = 'A'.$b) .= 'c'`).
-
 - **`borrowed_file_scopes` for nested same-file sub calls**: when a sub
   from a required file (e.g. test.pl's `is`) calls another sub from the
   same file (e.g. `_ok`), the file scope was being popped and re-pushed
@@ -826,7 +828,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   Changed terminator matching to check whether the line ends with the
   tag and everything before it is whitespace. Fixes ~11 op/heredoc
   indented heredoc tests with space-containing delimiters.
-
 - **`my $$x` / `my @$x` / `my %$x` / `my $$$x` are parser errors**:
   reference perl rejects these at compile time as "Can't declare
   scalar/array/hash dereference in \"my\"". Our parser silently
@@ -922,7 +923,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   being silently dropped because `parse_sub_decl` consumed a sub with
   empty name, registered it in the global subs table under "", and
   emitted nothing as the call's last expression.
-
 - **Chained subscripts after element access**: `$arr[0][1]`, `$h{a}{b}`,
   `$ref->[0][0]`, `$_[0][0]` all parse as implicit arrow-deref now —
   previously a second `[idx]` / `{k}` after an `ArrayElement` /
@@ -942,7 +942,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   the entry after the handler returns. Same fix applied to the scalar,
   array, and per-iteration scope `DESTROY` paths. Unblocks op/undef
   tests 19-43 (`k$N: keys` / `k$N: values` / `k$N: each` family).
-
 - **Regex `/s` `/x` `/m` flag prefixes + `\N` translator**: regex_match
   and regex_match_pos now propagate `/s`, `/x`, `/m` flags into the
   rust-regex `(?…)` flag prefix (case-insensitive `/i` was already
@@ -950,7 +949,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   `\N`, `\N{N}`, and `\N{N,M}` (with `/x` whitespace). `\N{NAME}` and
   `\N{U+XXXX}` are still left alone. Improves re/regexp.t: ~106 fewer
   diff lines vs reference perl in local runs.
-
 - **`do FILE` runs in its own lexical scope**: previously a `do FILE`
   call did `push_scope` on top of the caller's scope stack, so my-vars
   declared in the calling file were visible inside the loaded file.
@@ -959,7 +957,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   around the load. Also reset `current_line` to 1 inside the load and
   restore on exit so post-`do` `caller()` lines aren't polluted by the
   loaded file's last LineMark.
-
 - **`eval STRING` resets `current_line` and restores it on exit**:
   the eval body's `Stmt::LineMark`s would leave `current_line` pointing
   inside the eval (typically 1) after returning. Subsequent `is(EVAL,
@@ -967,7 +964,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   `_where()` from test.pl reported `line 1` instead of the user's
   source line. Save and restore `current_line` at every eval-string
   return path. Fixes `[at op/eval.t line 33]` reporting and similar.
-
 - **`${IDENT[EXPR]}` / `${IDENT{EXPR}}` interpolation**: the
   brace-around-name disambiguator inside double-quoted strings
   (`"…${foo{$bar}}…"`) was being parsed as a scalar-ref deref of an
@@ -975,24 +971,20 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   now detects `IDENT` followed by `[…]` / `{…}` inside the braces and
   emits a regular `ArrayElement` / `HashElement` part. Fixes base/lex
   test 23.
-
 - **Bareword sub call without parens accepts unary `+` first arg**:
   for known subs (e.g. `is`, `ok` from test.pl) followed by `+`, our
   parser dropped the call entirely because `Token::Plus` wasn't in the
   argument-starter list. Adding it lets `is +()=eval '++', 0, 'desc'`
   parse as `is(+()=eval '++', 0, 'desc')`. Cleared a block of tests in
   op/eval.
-
 - **Postfix `->$*` scalar deref**: `$ref->$*` now parses (previously
   the lexer mangled `$*` into `$_`). The lexer now emits
   `ScalarVar("*")` for `$*` and the parser routes `->$*` into a
   scalar-block-deref so chains like `$x[0]->$*` follow the ref to its
   inner value.
-
 - **`Token::Tell` / `Token::Eof` are named-unary**: `tell *$fh`
   without parens now parses as `tell(*$fh)` instead of
   `tell() * $fh`. Required for the io/tell coercible-glob suite.
-
 - **`*$NAME` / `*{$NAME}` glob deref**: previously the lexer treated `*`
   followed by `$` as multiplication (since `$` isn't a glob-name char),
   so `tell *$fh` evaluated as `tell() * $fh` (returning -1). The lexer
@@ -1002,7 +994,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   symbol-table name string). Also added `Token::Tell` / `Token::Eof` to
   `last_is_named_unary` so `tell *$fh` (no parens) parses as a single
   named-unary call instead of `tell() * $fh`. Closes io/tell.
-
 - **`+(LIST) = RHS` keeps list-assignment shape**: unary `+` is parser
   noise, but our `Expr::Assign` arm only recognised the `(LHS) = RHS`
   list form when target was bare `Expr::ArrayLit`, so `+()=eval STRING`
@@ -1015,7 +1006,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   call is in list context, set `last_list_val = Some(vec![])` so the
   list-eval wrapper returns an empty list. Matches reference perl:
   `() = eval "die"` is 0.
-
 - **`do FILE`**: `Expr::DoFile` had no interpreter arm — `do "./script.pl"`
   silently did nothing. Implemented: read the file, lex+parse, exec stmts
   in a fresh scope while temporarily switching `current_file` so
@@ -1030,13 +1020,11 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   unambiguously starts an expression (string lit, scalar/array/hash var).
   Function-call paren (`print foo1(...)`) is excluded so existing
   bareword-sub-call patterns still parse correctly.
-
 - **`local($$ref)` / `local(@$ref)` / `local(%$ref)` raise**: at parse
   time we now detect a deref token immediately after `local` (or
   `local(`) and emit a `Stmt::Die("Can't localize through a reference")`
   instead of silently accepting the localisation. This matches perl's
   compile-time error and unblocks op/local tests 21–23.
-
 - **`exists` is named-unary, not list-op**: `exists $h{k} ? "" : "not "`
   was being parsed as `exists($h{k} ? "" : "not ")` (greedy list-op
   consumption of the whole ternary), so `exists` saw a non-hash-element
@@ -1050,7 +1038,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   returns the existing file size (matching POSIX/perl behaviour rather
   than the Rust default of position 0). Drops io/tell from 4 to 2
   sandbox failures (fixes tests 27 and 28).
-
 - **Coercible globs and tracking through `eof` / `seek`**: `$fh = *FH; tell($fh)`
   was returning -1 because `resolve_fh` didn't strip the `*` prefix that
   Glob values stringify to (`*main::FH`). Added a `strip_prefix('*')`
@@ -1064,7 +1051,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   subscript, returning `-1` instead of `undef`. Fixed by guarding the
   ArrayLen branch on `peek(1) != '['`, then emitting `ScalarVar("#")`
   for the `$#[…]` form so `parse_postfix` consumes the subscript.
-
 - **`$-` / `$+` and `$-[N]` / `$+[N]` lexing + interpolation**: the lexer
   was hitting the unknown-special-var fallback for `$-` and `$+`, which
   silently produced `$_`, so `$-[0]` became `$_[0]`. Added explicit
@@ -1076,7 +1062,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   `$@` non-empty. The Flow::Return arm in `eval_string` now resets `$@`
   to empty before unwinding (mirroring what we already do for the
   block form on success). Fixes op/eval test 42 (return-clears-$@).
-
 - **`$.` magic line counter + `local($.)` semantics**: `$.` now reads
   through a per-filehandle counter (`fh_line_counts[last_read_fh]`)
   bumped on every successful readline. `tell(FH)` switches the
@@ -1171,7 +1156,6 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
   BEGIN are skipped at runtime to avoid resetting BEGIN-set values, while
   declarations with initializers run normally (overriding BEGIN values).
   Fixes re/regexp.t's `$iters` variable and similar patterns.
-
 - Indented heredocs (`<<~`): the tilde modifier now strips the closing
   delimiter's leading whitespace from all body lines. Supports `<<~EOF`,
   `<<~"EOF"`, `<<~'EOF'`, and space between `~` and the delimiter
@@ -1504,22 +1488,22 @@ This is the largest phase. Key clusters:
 
 **run (2):** exit, switches
 
-### Passing (63)
+### Passing (64)
 
 base/cond, base/if, base/num, base/pat, base/rs, base/term, base/translate,
 base/while, cmd/elsif, cmd/for, cmd/mod, cmd/subval, cmd/switch,
 opbasic/arith, opbasic/magic_phase, opbasic/qq, op/arith2, op/auto, op/bop,
 op/chop, op/closure, op/cond, op/context, op/defined, op/delete, op/die,
-op/do, op/each, op/grep, op/hash, op/inc, op/index, op/lc, op/list, op/my,
-op/not, op/oct, op/ord, op/pack, op/push, op/quotemeta, op/range, op/ref,
-op/reverse, op/sort, op/splice, op/split, op/sprintf, op/sub, op/substr,
-op/unshift, op/vec, op/wantarray, io/argv, io/fs, io/open, io/print,
-io/read, io/tell, re/pat, re/subst, run/exit, run/switches
+op/do, op/each, op/grep, op/hash, op/inc, op/index, op/lc, op/list, op/local,
+op/my, op/not, op/oct, op/ord, op/pack, op/push, op/quotemeta, op/range,
+op/ref, op/reverse, op/sort, op/splice, op/split, op/sprintf, op/sub,
+op/substr, op/unshift, op/vec, op/wantarray, io/argv, io/fs, io/open,
+io/print, io/read, io/tell, re/pat, re/subst, run/exit, run/switches
 
-### Failing (16)
+### Failing (15)
 
 base/lex, opbasic/cmp, opbasic/concat,
-op/array, op/chr, op/eval, op/heredoc, op/join, op/length, op/local,
+op/array, op/chr, op/eval, op/heredoc, op/join, op/length,
 op/pos, op/print, op/repeat, op/tr, op/undef, re/regexp
 
 ### Next high-impact targets
