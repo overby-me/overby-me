@@ -9336,13 +9336,18 @@ impl Interpreter {
                     self.set_global_var("`", Value::Str(text[..start + m0.start()].to_string()));
                     self.set_global_var("'", Value::Str(text[start + m0.end()..].to_string()));
 
-                    // Store @- and @+ (match start/end offsets)
-                    let mut minus_arr = vec![Value::Num((start + m0.start()) as f64)];
-                    let mut plus_arr = vec![Value::Num((start + m0.end()) as f64)];
+                    // Store @- and @+ (match start/end offsets) using
+                    // char counts, not byte offsets — reference perl
+                    // reports characters in @-, @+, $-[N], $+[N] when
+                    // the string holds UTF-8 wide chars.
+                    let byte_to_char =
+                        |off: usize| -> usize { text[..start + off].chars().count() };
+                    let mut minus_arr = vec![Value::Num(byte_to_char(m0.start()) as f64)];
+                    let mut plus_arr = vec![Value::Num(byte_to_char(m0.end()) as f64)];
                     for i in 1..caps.len() {
                         if let Some(m) = caps.get(i) {
-                            minus_arr.push(Value::Num((start + m.start()) as f64));
-                            plus_arr.push(Value::Num((start + m.end()) as f64));
+                            minus_arr.push(Value::Num(byte_to_char(m.start()) as f64));
+                            plus_arr.push(Value::Num(byte_to_char(m.end()) as f64));
                         } else {
                             minus_arr.push(Value::Undef);
                             plus_arr.push(Value::Undef);
