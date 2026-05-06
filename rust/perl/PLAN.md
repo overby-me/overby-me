@@ -8,6 +8,15 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 **67/79 Nix tests passing** (85%) — selected tests from the upstream Perl test suite.
 
+Recent re/regexp.t and other improvements (cumulative this session):
+
+- `\Q…\E` quotemeta regions in regex patterns: every literal char and every interpolated `$x` / `@x` value gets regex-escaped so `m!^\Q$expect!` matches `$expect`s bytes literally. Cuts re/regexp.t diff substantially.
+- qr-time pattern validation (and runtime): `validate_regex_pattern` catches `[a-z]` reverse ranges, unmatched `[`, `]`-after-empty, `**`/`+*` nested quantifiers, `\N`/`\gN`/`\g{N}`/`\g-N`/`\g{-N}` references to nonexistent groups (and `\g0` invalid-group-0), trailing backslash, unmatched `(`/`)`, and `*`/`+` at no-atom positions (start of pattern, after `(` or `|` — with backslash awareness so `\(*` is allowed). Each emits the matching reference-perl diagnostic via Flow::Die so eval traps it like the real engine.
+- `@-` / `@+` match-position arrays now interpolate in strings (parser recognises `-`/`+` as single-char array names after `@`) AND report char offsets, not byte offsets, so `$+[0]` matches reference perl on UTF-8 strings.
+- Carp.pm and warnings/register.pm stub at `do_require` so warnings.pms `require Carp` (fired by overload warnings, deprecation messages) silently succeeds. Both ship in dist/Carp / dist/warnings::register and reference perl always finds them; we honour @INC strictly otherwise.
+- printf is now an expression-context list op (lets `eval { die } || printf` run the printf), `chr(0xD800)`-style markers round-trip through `unpack U0 (H2)*` via an extended (loose, 6-byte-allowed) UTF-8 encoder, nested heredocs in `<<E1` interpolation islands resolve at lex time, `-w` plumbs `$^W=1` and `print` of undef routes through `__WARN__`, `=cut` only ends POD when followed by whitespace/EOL, `sub_def_loc` records each subs definition file so `caller()` reports it across eval-string trampolines, `get_var` falls back to package-qualified globals, `is_lvalue_shape` covers ScalarVar/MyVar/LocalVar so anon-sub `@_` writeback works for plain scalars.
+- `utf8::upgrade`/`encode`/`downgrade`/`is_utf8` now return useful values (previously Undef), and `each @array` is supported. opbasic/cmp.t went 1288→0 (full pass) thanks to those.
+
 Latest unlocks (cumulative within this session):
 
 - `utf8::upgrade` / `utf8::encode` / `utf8::downgrade` / `utf8::is_utf8` now return useful values (previously Undef). The first two share an extended-UTF-8 byte counter (which already knew how to expand the chr-marker for surrogates) and unblock the `next if utf8::upgrade($x) == length $_` skip pattern that opbasic/cmp.t uses to filter @utf8 to ASCII-resistant strings. `each @array` adds an array-form to the each cursor machinery so the same test's final loop runs at all. Together: opbasic/cmp.t's diff went 1288 → 0 (full pass).
