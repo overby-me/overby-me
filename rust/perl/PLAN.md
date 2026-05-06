@@ -8,6 +8,18 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 **67/79 Nix tests passing** (85%) — selected tests from the upstream Perl test suite.
 
+Latest unlocks (cumulative within this session):
+
+- `utf8::upgrade` / `utf8::encode` / `utf8::downgrade` / `utf8::is_utf8` now return useful values (previously Undef). The first two share an extended-UTF-8 byte counter (which already knew how to expand the chr-marker for surrogates) and unblock the `next if utf8::upgrade($x) == length $_` skip pattern that opbasic/cmp.t uses to filter @utf8 to ASCII-resistant strings. `each @array` adds an array-form to the each cursor machinery so the same test's final loop runs at all. Together: opbasic/cmp.t's diff went 1288 → 0 (full pass).
+- printf is now a parsed expression-context list operator, not just a statement form. Lets `eval { die } || printf "fall"` actually run the printf when eval fails.
+- `chr(0xD800)` and other surrogate / >U+10FFFF codepoints round-trip through `unpack U0 (H2)*` correctly via a new extended (loose, 6-byte-allowed) UTF-8 encoder. Same encoder powers `unpack U*`/`W*`/`C*`. op/chr's diff: 63 → 16.
+- Nested heredocs inside `<<E1` interpolation islands resolve at lex time. The lexer now recursively reads the inner body inline (matching reference perl's "drain pending heredocs at line end" model) and splices it back into the outer body line as a Perl literal so `@{[ <<E2 ]}` parses as plain Perl.
+- `-w` and `$^W` are now plumbed: `Interpreter::enable_warnings()` gets called from main, sets warnings_on, seeds `$^W = 1`. `print` of an undef arg routes through `emit_warning` so a user `$SIG{__WARN__}` handler can fire and mutate inter-arg state.
+- `=cute` / `=cut2` / `=cut_` no longer end POD — only `=cut` followed by whitespace / EOL does. base/lex tests 53–55 (and their string-eval variants 56) fixed.
+- `sub_def_loc: HashMap<name, (file, line)>` records each sub's definition file at the time `Stmt::Sub` runs (whether top-level or inside an eval STRING). `call_sub_named` switches `current_file` to it while the body runs and restores from `call_stack` on every return path. caller() / `_where()` for subs reached via eval-string trampolines now report the right file. Trimmed op/eval's diff 146 → 93.
+- `get_var` falls through to package-qualified globals: bare `$X` in `package Foo` finds `$Foo::X` even without an `our $X` alias.
+- `is_lvalue_shape` now includes ScalarVar/MyVar/LocalVar so the @_-writeback path for anon-sub calls handles plain scalar args too: `sub { $_[0] = 10 }->($x); print $x` prints 10. (True aliasing — visibility before the sub returns — still requires Rc-shared storage; that's the open architectural change.)
+
 Latest improvements (uncommitted-by-line-count, but landed via diff-size cuts):
 
 - `printf` is now an expression-context list op so `eval { die } || printf "fall"` runs the `||` side instead of dropping the printf as a fresh statement that never executes after the failing eval.
