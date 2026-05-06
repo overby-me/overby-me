@@ -20,6 +20,33 @@ io/read, io/tell, re/pat, re/subst, run/exit, run/switches.
 
 Latest unlocks (op/local + op/tr + heredoc / glob / unpack / charname fixes):
 
+- **`use Config` silently succeeds while @INC is unmodified.** Reference
+  perl ships Config.pm bundled in its install lib path so `use Config`
+  loads even when no `-I` provides it. Tests that don't narrow @INC
+  (opbasic/cmp.t) rely on this; tests that strip @INC via `set_up_inc`
+  or direct `@INC = (...)` assignment expect the load to fail. A new
+  `inc_user_modified` flag — false at startup, set by any
+  `set_array("INC", …)` — distinguishes the two cases. Cuts opbasic/cmp's
+  diff from 13285 to 1288 lines.
+- **Heredocs inside `qq|…|` interpolation islands.** `qq|${\<<TAG}|` is
+  the Perl idiom for embedding a heredoc through a scalar deref of a
+  backslash-take-ref. The qq lexer now scans the captured body for
+  `${…}` / `@{…}` islands, looks for `<<TAG` headers inside them, and
+  queues a `PendingHeredoc` whose drain target is a new
+  `HeredocTarget::InterpMarker` that writes back into the qq token's
+  captured string. Unlocks op/heredoc test 6.
+- **Q-quote operators accept `#` as a delimiter.** `q#foo#`, `m#…#`,
+  `s#a#b#` etc. were silently consuming their bodies because our
+  ident-postlude `=>` lookahead and `read_delimited_string`'s
+  pre-delimiter skip both treated `#` as a comment. Both spots now
+  skip only horizontal whitespace before the delimiter so `#` is
+  preserved for the q-string handler.
+- **Backtick-quoted heredoc tags + unterminated detection.**
+  `<<\`TAG\`` (heredoc whose body runs as a shell command) now lex-
+  recognises as a heredoc start. When the closing quote (`` ` ``,
+  `'`, or `"`) is missing before EOF, emit reference perl's
+  `Unterminated delimiter for here document` diagnostic. Unlocks
+  op/heredoc test 43.
 - **Heredocs inside `s/PAT/REPL/`.** Reference perl treats `<<TAG`
   inside a substitution body as a heredoc directive whose body lives
   on the line(s) after the s///. Our `read_substitution()` now peeks
