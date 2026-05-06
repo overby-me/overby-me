@@ -5436,6 +5436,27 @@ impl Interpreter {
                 Value::Num(hash.len() as f64)
             }
             "each" => {
+                // `each @array` returns (index, value) pairs and shares
+                // the same cursor mechanism as `each %hash`.
+                if let Some(Expr::ArrayVar(name)) = args.first() {
+                    let cursor_key = format!("@{name}");
+                    let arr = self.get_array(name);
+                    let entry = self
+                        .each_cursors
+                        .entry(cursor_key.clone())
+                        .or_insert_with(|| ((0..arr.len()).map(|i| i.to_string()).collect(), 0));
+                    if entry.1 >= entry.0.len() {
+                        self.each_cursors.remove(&cursor_key);
+                        self.last_list_val = Some(Vec::new());
+                        return Value::Undef;
+                    }
+                    let idx_str = entry.0[entry.1].clone();
+                    let idx: usize = idx_str.parse().unwrap_or(0);
+                    entry.1 += 1;
+                    let v = arr.get(idx).cloned().unwrap_or(Value::Undef);
+                    self.last_list_val = Some(vec![Value::Num(idx as f64), v.clone()]);
+                    return Value::Num(idx as f64);
+                }
                 let (cursor_key, hash) = match self.resolve_hash_arg(args.first()) {
                     Some(p) => p,
                     None => return Value::Undef,
@@ -6209,6 +6230,53 @@ impl Interpreter {
             "utf8::unicode_to_native" => {
                 let val = self.eval_expr(&args[0]).to_num();
                 Value::Num(val)
+            }
+            "utf8::upgrade" => {
+                // Returns the byte length of `$x` as a UTF-8 string. We
+                // already store strings as UTF-8, so it's just s.len().
+                // The "in-place upgrade" side effect is a no-op for us
+                // but we still propagate the count so callers like
+                // opbasic/cmps `utf8::upgrade($u) == length $_` skip
+                // path computes the same arity reference perl does.
+                if !args.is_empty() {
+                    let v = self.eval_expr(&args[0]);
+                    let bytes = Self::extended_utf8_bytes(&v.to_str());
+                    Value::Num(bytes.len() as f64)
+                } else {
+                    Value::Num(0.0)
+                }
+            }
+            "utf8::encode" => {
+                // Encode `$x` to its UTF-8 byte sequence in place. Since
+                // the underlying String already holds UTF-8 bytes, the
+                // value-level representation is unchanged; we still
+                // return the byte length so encode-then-length call
+                // sites observe the same number reference perl returns.
+                if !args.is_empty() {
+                    let v = self.eval_expr(&args[0]);
+                    let bytes = Self::extended_utf8_bytes(&v.to_str());
+                    Value::Num(bytes.len() as f64)
+                } else {
+                    Value::Num(0.0)
+                }
+            }
+            "utf8::downgrade" => {
+                // Always succeed for us — we don't track a UTF-8 flag.
+                Value::Num(1.0)
+            }
+            "utf8::is_utf8" => {
+                // We don't track a UTF-8 flag; reference perls heuristic
+                // is "is the string considered to have characters above
+                // 0x7F encoded in UTF-8 internally". Approximate by
+                // checking whether any character has codepoint > 0x7F.
+                if !args.is_empty() {
+                    let v = self.eval_expr(&args[0]);
+                    let s = v.to_str();
+                    let has_high = s.chars().any(|c| c as u32 > 0x7F);
+                    Value::Num(if has_high { 1.0 } else { 0.0 })
+                } else {
+                    Value::Num(0.0)
+                }
             }
             "pack" => {
                 // Simplified pack - handle "d" format for double
