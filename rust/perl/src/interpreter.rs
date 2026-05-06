@@ -11779,6 +11779,17 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
             i += 2;
             continue;
         }
+        // `a**` / `a*?+` etc. are nested quantifiers — after a `*` /
+        // `+` / `?`, only `?` or `+` (modifying greedy/possessive)
+        // can follow. Catch the common form `**` / `++` / `?*`
+        // / `?+?` / etc. where a second `*` appears.
+        if (c == '*' || c == '+') && i + 1 < chars.len() && chars[i + 1] == '*' {
+            let prefix: String = chars[..=i + 1].iter().collect();
+            let suffix: String = chars[i + 2..].iter().collect();
+            return Some(format!(
+                "Nested quantifiers in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+            ));
+        }
         if c == '[' {
             let class_start = i;
             // Skip the optional leading negation `^` and an opening `]`
