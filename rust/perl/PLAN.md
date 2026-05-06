@@ -6,7 +6,7 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**64/79 Nix tests passing** (81%) — selected tests from the upstream Perl test suite.
+**65/79 Nix tests passing** (82%) — selected tests from the upstream Perl test suite.
 
 Passing: base/if, base/cond, base/while, base/pat, base/num, base/translate,
 base/term, base/rs, cmd/elsif, cmd/for, cmd/mod, cmd/subval, cmd/switch,
@@ -15,11 +15,25 @@ op/chop, op/closure, op/cond, op/context, op/defined, op/delete, op/die,
 op/do, op/each, op/grep, op/hash, op/inc, op/index, op/lc, op/list, op/local,
 op/my, op/not, op/oct, op/pack, op/push, op/quotemeta, op/range, op/ref,
 op/reverse, op/sort, op/splice, op/split, op/sprintf, op/sub, op/substr,
-op/unshift, op/vec, op/wantarray, io/argv, io/fs, io/open, io/print, io/read,
-io/tell, re/pat, re/subst, run/exit, run/switches.
+op/tr, op/unshift, op/vec, op/wantarray, io/argv, io/fs, io/open, io/print,
+io/read, io/tell, re/pat, re/subst, run/exit, run/switches.
 
-Latest unlocks (op/local pass + diamond/unpack fixes):
+Latest unlocks (op/local + op/tr + diamond/unpack/charname fixes):
 
+- **Compile-time `\N{NAME}` → `unicore/Name.pm` load failure.** Reference
+  perl auto-loads `_charnames` when a tr/y/s/m/qr pattern contains a
+  named-character escape (anything in `\N{…}` that isn't `\N{N}`,
+  `\N{N,M}` count syntax, or `\N{U+XXXX}` codepoint). Under the Nix
+  sandbox / `-I../lib`-only test environment `unicore/Name.pm` isn't on
+  disk, so reference perl emits the chained `Can't locate unicore/Name.pm
+  in @INC … BEGIN failed--compilation aborted at ../lib/_charnames.pm
+  line 10. Compilation failed in require at FILE line N. BEGIN failed--
+  compilation aborted at FILE line N.` diagnostic. Lex-time check in
+  `read_transliterate` (via the `pattern_uses_named_char` helper)
+  triggers the same error. Required to make op/tr stop at the same
+  compile error reference perl does (`\N{LATIN SMALL LETTER J}` at
+  line 519). Lex-time short-circuits before any runtime, so a top-level
+  `require Config;` earlier in the file is never reached.
 - **Auto-fail `<glob pattern>` to a File::Glob compile error.** Reference
   perl auto-loads File::Glob when a `<…>` contains shell metacharacters
   (whitespace, `*`, `?`, `[`, `{`); under the Nix sandbox / `-I../lib`-only
@@ -1488,7 +1502,7 @@ This is the largest phase. Key clusters:
 
 **run (2):** exit, switches
 
-### Passing (64)
+### Passing (65)
 
 base/cond, base/if, base/num, base/pat, base/rs, base/term, base/translate,
 base/while, cmd/elsif, cmd/for, cmd/mod, cmd/subval, cmd/switch,
@@ -1497,14 +1511,14 @@ op/chop, op/closure, op/cond, op/context, op/defined, op/delete, op/die,
 op/do, op/each, op/grep, op/hash, op/inc, op/index, op/lc, op/list, op/local,
 op/my, op/not, op/oct, op/ord, op/pack, op/push, op/quotemeta, op/range,
 op/ref, op/reverse, op/sort, op/splice, op/split, op/sprintf, op/sub,
-op/substr, op/unshift, op/vec, op/wantarray, io/argv, io/fs, io/open,
+op/substr, op/tr, op/unshift, op/vec, op/wantarray, io/argv, io/fs, io/open,
 io/print, io/read, io/tell, re/pat, re/subst, run/exit, run/switches
 
-### Failing (15)
+### Failing (14)
 
 base/lex, opbasic/cmp, opbasic/concat,
 op/array, op/chr, op/eval, op/heredoc, op/join, op/length,
-op/pos, op/print, op/repeat, op/tr, op/undef, re/regexp
+op/pos, op/print, op/repeat, op/undef, re/regexp
 
 ### Next high-impact targets
 
