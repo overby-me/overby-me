@@ -510,6 +510,11 @@ impl Interpreter {
                 Stmt::Sub { name, params, body } if !name.is_empty() => {
                     self.subs
                         .insert(name.clone(), (params.clone(), body.clone()));
+                    // Record top-level subs definition file so caller()
+                    // sees op/foo.t even when dispatched through an
+                    // eval-string trampoline.
+                    self.sub_def_loc
+                        .insert(name.clone(), (self.current_file.clone(), self.current_line));
                 }
                 Stmt::Begin(body, end_line) => {
                     // BEGIN runs at compile time. `require`/`use` failing
@@ -1441,13 +1446,15 @@ impl Interpreter {
                             qualified.clone(),
                             std::rc::Rc::new(std::cell::RefCell::new(captured)),
                         );
-                        // Record the eval-string pseudo-file the sub was
-                        // declared in so caller()/_where() inside the sub
-                        // report `(eval N)` rather than the dynamic
-                        // call-site file.
-                        self.sub_def_loc
-                            .insert(qualified, (self.current_file.clone(), self.current_line));
                     }
+                    // Record the file the sub was declared in. Both top
+                    // -level subs (defined in `op/foo.t`) and eval-string
+                    // subs (defined in `(eval N)`) need this so caller()
+                    // / `_where()` inside the body report the definition
+                    // site, not whichever file the dynamic stack carries
+                    // when control happens to reach the body.
+                    self.sub_def_loc
+                        .insert(qualified, (self.current_file.clone(), self.current_line));
                 }
                 Flow::None
             }
