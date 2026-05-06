@@ -11772,10 +11772,40 @@ fn push_maybe_quotemeta(out: &mut String, s: &str, quotemeta: bool) {
 /// would duplicate the regex engine.
 fn validate_regex_pattern(pat: &str) -> Option<String> {
     let chars: Vec<char> = pat.chars().collect();
+    // First pass: count capturing groups so we can validate `\N`
+    // backrefs against actually existing groups.
+    let mut total_groups: usize = 0;
+    let mut j = 0;
+    while j < chars.len() {
+        let c = chars[j];
+        if c == '\\' {
+            j += 2;
+            continue;
+        }
+        if c == '(' && !(j + 1 < chars.len() && chars[j + 1] == '?') {
+            total_groups += 1;
+        }
+        j += 1;
+    }
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
         if c == '\\' {
+            // `\N` (1..9) is a backref to capture group N; flag any
+            // reference past total_groups.
+            if i + 1 < chars.len() {
+                let nxt = chars[i + 1];
+                if nxt.is_ascii_digit() && nxt != '0' {
+                    let n = nxt.to_digit(10).unwrap() as usize;
+                    if n > total_groups {
+                        let prefix: String = chars[..=i + 1].iter().collect();
+                        let suffix: String = chars[i + 2..].iter().collect();
+                        return Some(format!(
+                            "Reference to nonexistent group in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                        ));
+                    }
+                }
+            }
             i += 2;
             continue;
         }
