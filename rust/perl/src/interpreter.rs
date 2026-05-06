@@ -11942,6 +11942,75 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
         }
         i += 1;
     }
+    // Trailing-backslash check: `a\` ends mid-escape and reference
+    // perl emits "Search pattern not terminated".
+    if let Some(&last) = chars.last()
+        && last == '\\'
+    {
+        // But only when the preceding char isn't *also* a backslash
+        // (which would have been consumed as a `\\` literal pair).
+        let escaped = chars.iter().rev().take_while(|&&c| c == '\\').count() % 2 == 1;
+        if escaped {
+            return Some(
+                "Search pattern not terminated or ternary operator parsed as search pattern"
+                    .to_string(),
+            );
+        }
+    }
+    // Paren-balance check (skipping char classes already consumed
+    // above, plus escaped `\(` / `\)`). Mismatched parens fire
+    // "Unmatched (" / "Unmatched )".
+    let mut depth: i32 = 0;
+    let mut k = 0;
+    let mut last_unmatched_close: Option<usize> = None;
+    while k < chars.len() {
+        let cc = chars[k];
+        if cc == '\\' {
+            k += 2;
+            continue;
+        }
+        if cc == '[' {
+            // Skip till matching `]` (escapes already accounted for).
+            k += 1;
+            while k < chars.len() {
+                if chars[k] == '\\' {
+                    k += 2;
+                    continue;
+                }
+                if chars[k] == ']' {
+                    break;
+                }
+                k += 1;
+            }
+            if k < chars.len() {
+                k += 1;
+            }
+            continue;
+        }
+        if cc == '(' {
+            depth += 1;
+        } else if cc == ')' {
+            if depth == 0 {
+                last_unmatched_close = Some(k);
+                break;
+            }
+            depth -= 1;
+        }
+        k += 1;
+    }
+    if let Some(pos) = last_unmatched_close {
+        let prefix: String = chars[..=pos].iter().collect();
+        let suffix: String = chars[pos + 1..].iter().collect();
+        return Some(format!(
+            "Unmatched ) in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+        ));
+    }
+    if depth > 0 {
+        let prefix: String = chars.iter().collect();
+        return Some(format!(
+            "Unmatched ( in regex; marked by <-- HERE in m/{prefix} <-- HERE /"
+        ));
+    }
     None
 }
 
