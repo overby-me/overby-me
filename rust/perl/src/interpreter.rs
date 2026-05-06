@@ -304,6 +304,11 @@ pub struct Interpreter {
     /// push the file's persistent scope as an outer lexical frame so closures
     /// over file-level `my` vars resolve.
     sub_origin: HashMap<String, String>,
+    /// Maps a sub name → the (file, line) where its `sub` keyword sat at
+    /// definition time. Used by `caller()` and the test-pls `_where()`
+    /// helper so eval-defined subs report the eval-string pseudo-file
+    /// rather than whatever file is on top of the dynamic stack.
+    sub_def_loc: HashMap<String, (String, usize)>,
     /// Stack of files currently being loaded via require. Top is innermost.
     /// Subs hoisted while this is non-empty get their `sub_origin` set; calls
     /// to those subs from within the same load skip the file-scope push to
@@ -432,6 +437,7 @@ impl Interpreter {
             file_scopes: HashMap::new(),
             borrowed_file_scopes: std::collections::HashSet::new(),
             sub_origin: HashMap::new(),
+            sub_def_loc: HashMap::new(),
             loading_files: Vec::new(),
             check_blocks: Vec::new(),
             init_blocks: Vec::new(),
@@ -1432,9 +1438,15 @@ impl Interpreter {
                     if self.eval_depth > 0 {
                         let captured: Vec<Scope> = self.scopes.clone();
                         self.closure_envs.insert(
-                            qualified,
+                            qualified.clone(),
                             std::rc::Rc::new(std::cell::RefCell::new(captured)),
                         );
+                        // Record the eval-string pseudo-file the sub was
+                        // declared in so caller()/_where() inside the sub
+                        // report `(eval N)` rather than the dynamic
+                        // call-site file.
+                        self.sub_def_loc
+                            .insert(qualified, (self.current_file.clone(), self.current_line));
                     }
                 }
                 Flow::None
@@ -7207,6 +7219,18 @@ impl Interpreter {
             }
         }
 
+        // For subs declared inside an `eval STRING`, switch current_file
+        // to the eval pseudo-file so caller()/_where() inside the body
+        // reports `(eval N)` instead of the dynamic call-sites file (op
+        // /eval.t tests 51–54). The bodys own LineMark stmts will
+        // overwrite current_line as they execute.
+        if let Some(n) = name
+            && let Some((def_file, def_line)) = self.sub_def_loc.get(n).cloned()
+        {
+            self.current_file = def_file;
+            self.current_line = def_line;
+        }
+
         // @_ is dynamically scoped per call — install it in the innermost
         // scope so it masks any outer @_ without mutating the caller's.
         self.scopes
@@ -7266,8 +7290,9 @@ impl Interpreter {
                     self.exit_file_scope(pushed_origin);
                     self.exit_named_sub_scope(stashed_scopes);
                     self.exit_closure_env(closure_guard);
-                    if let Some((pkg, _, line)) = self.call_stack.pop() {
+                    if let Some((pkg, file, line)) = self.call_stack.pop() {
                         self.current_line = line;
+                        self.current_file = file;
                         self.package = pkg;
                     }
                     self.call_context.pop();
@@ -7306,8 +7331,9 @@ impl Interpreter {
         self.exit_closure_env(closure_guard);
         // Restore caller's source line so `caller()` in subsequent code
         // reports the call-site, not the sub body's last line-mark.
-        if let Some((pkg, _, line)) = self.call_stack.pop() {
+        if let Some((pkg, file, line)) = self.call_stack.pop() {
             self.current_line = line;
+            self.current_file = file;
             self.package = pkg;
         }
         self.call_context.pop();
@@ -7403,8 +7429,9 @@ impl Interpreter {
                     self.exit_file_scope(pushed_origin);
                     self.exit_named_sub_scope(stashed_scopes);
                     self.exit_closure_env(closure_guard);
-                    if let Some((pkg, _, line)) = self.call_stack.pop() {
+                    if let Some((pkg, file, line)) = self.call_stack.pop() {
                         self.current_line = line;
+                        self.current_file = file;
                         self.package = pkg;
                     }
                     self.call_context.pop();
@@ -7437,8 +7464,9 @@ impl Interpreter {
         self.exit_file_scope(pushed_origin);
         self.exit_named_sub_scope(stashed_scopes);
         self.exit_closure_env(closure_guard);
-        if let Some((pkg, _, line)) = self.call_stack.pop() {
+        if let Some((pkg, file, line)) = self.call_stack.pop() {
             self.current_line = line;
+            self.current_file = file;
             self.package = pkg;
         }
         self.call_context.pop();
