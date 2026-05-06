@@ -3200,13 +3200,14 @@ impl Parser {
                 }
             }
 
-            // print/say/die/warn in expression context
-            Token::Print | Token::Say | Token::Die | Token::Warn => {
+            // print/say/die/warn/printf in expression context
+            Token::Print | Token::Say | Token::Die | Token::Warn | Token::Printf => {
                 let func = match self.tok() {
                     Token::Print => "print",
                     Token::Say => "say",
                     Token::Die => "die",
                     Token::Warn => "warn",
+                    Token::Printf => "printf",
                     _ => unreachable!(),
                 }
                 .to_string();

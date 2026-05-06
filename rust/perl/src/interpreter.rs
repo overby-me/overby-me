@@ -4311,6 +4311,15 @@ impl Interpreter {
                 self.write_to_handle(&None, &output);
                 Value::Num(1.0)
             }
+            "printf" => {
+                if !args.is_empty() {
+                    let fmt = self.eval_expr(&args[0]).to_str();
+                    let vals: Vec<Value> = args[1..].iter().map(|a| self.eval_expr(a)).collect();
+                    let result = self.sprintf_impl(&fmt, &vals);
+                    self.write_to_handle(&None, &result);
+                }
+                Value::Num(1.0)
+            }
             "die" => {
                 let msg = args
                     .iter()
