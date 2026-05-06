@@ -3468,7 +3468,25 @@ impl Interpreter {
                     // later `local @name` swapping the array doesn't
                     // hijack writes meant for the original.
                     Expr::ArrayLen(name) if !name.starts_with('$') => {
-                        let arr_rc = if let Some(rc) = self.aliased_arrays.get(name) {
+                        // Resolve the array's backing storage. Lexical
+                        // `my @a` is found in self.scopes; we snapshot
+                        // its current contents into a fresh Rc that
+                        // outlives the scope (so a `\$#a` taken inside
+                        // a `do {…}` block stays valid as a ref but
+                        // becomes "orphaned" — strong_count == 1 — once
+                        // the scope exits, matching reference perl's
+                        // "$# on freed array is undef" behaviour).
+                        // Globals migrate into aliased_arrays as before.
+                        let mut found_lexical: Option<Vec<Value>> = None;
+                        for scope in self.scopes.iter().rev() {
+                            if let Some(arr) = scope.arrays.get(name) {
+                                found_lexical = Some(arr.clone());
+                                break;
+                            }
+                        }
+                        let arr_rc = if let Some(arr) = found_lexical {
+                            std::rc::Rc::new(std::cell::RefCell::new(arr))
+                        } else if let Some(rc) = self.aliased_arrays.get(name) {
                             rc.clone()
                         } else {
                             let arr = self.globals.arrays.remove(name).unwrap_or_default();
