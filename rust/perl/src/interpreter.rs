@@ -4806,7 +4806,18 @@ impl Interpreter {
                     }
                 }
                 let class = if args.len() >= 2 {
-                    self.eval_expr(&args[1]).to_str()
+                    let v = self.eval_expr(&args[1]);
+                    // `tie $x, $obj` — when the second arg is a blessed
+                    // reference (e.g. `tie $x, bless []`), use the ref's
+                    // class. Otherwise stringify (the bareword/string form).
+                    let p = Self::ref_ptr(&v);
+                    if p != 0
+                        && let Some(c) = self.blessed_refs.get(&p)
+                    {
+                        c.clone()
+                    } else {
+                        v.to_str()
+                    }
                 } else {
                     return Value::Undef;
                 };
@@ -7420,6 +7431,20 @@ impl Interpreter {
 
     fn set_var(&mut self, name: &str, val: Value) {
         let key = canon_var(name).to_string();
+        // Tied scalars: route writes through `class::STORE(obj, val)`.
+        // Skip when we're already inside a tie handler so a STORE that
+        // itself writes the same tied scalar doesn't recurse forever.
+        if self.in_tie_handler == 0
+            && let Some((class, obj)) = self.tied_scalars.get(&key).cloned()
+        {
+            let store_key = format!("{class}::STORE");
+            if let Some((_p, body)) = self.subs.get(&store_key).cloned() {
+                self.in_tie_handler += 1;
+                self.call_sub_named(&body, &[obj, val], Some(&store_key));
+                self.in_tie_handler -= 1;
+                return;
+            }
+        }
         // Magic $.: writing it updates the current filehandle's line
         // counter so that subsequent reads from that handle resume from
         // the new value. Still writes the global slot too, since that
