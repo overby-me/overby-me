@@ -10833,6 +10833,20 @@ impl Interpreter {
             return Value::Num(1.0);
         }
 
+        // Stub a few core-bundled .pm files reference perl always finds
+        // even when @INC is otherwise narrow: warnings.pms `require
+        // Carp` is the most visible offender — fired by overload
+        // warnings, deprecation messages, etc. Returning successfully
+        // (without actually loading code) keeps tests warning-handler
+        // paths working. Reference perl ships these in dist/Carp and
+        // they are always findable regardless of how `set_up_inc`
+        // narrows @INC.
+        if matches!(filename, "Carp.pm" | "warnings/register.pm") {
+            self.required_files.insert(filename.to_string());
+            self.set_hash_element("INC", filename, Value::Str(filename.to_string()));
+            return Value::Num(1.0);
+        }
+
         // Resolve the file path
         let path = if filename.starts_with('/')
             || filename.starts_with("./")
