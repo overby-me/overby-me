@@ -7490,8 +7490,25 @@ impl Interpreter {
         if let Some(rc) = self.aliased_vars.get(key) {
             return rc.borrow().clone();
         }
-        // Check globals
-        self.globals.vars.get(key).cloned().unwrap_or(Value::Undef)
+        // Check globals — try the bare name first, then package-
+        // qualify if not found. Reference perl's `$X` in package Foo
+        // accesses `$Foo::X`. Our usual setup leaves the alias slot
+        // bare for main, but a direct assignment like
+        // `$main::r = "good"` (no `our`) writes to globals["main::r"]
+        // and a later bare `$r` read should still find it.
+        if let Some(v) = self.globals.vars.get(key) {
+            return v.clone();
+        }
+        if !key.contains("::") {
+            let qualified = format!("{}::{}", self.package, key);
+            if let Some(rc) = self.aliased_vars.get(&qualified) {
+                return rc.borrow().clone();
+            }
+            if let Some(v) = self.globals.vars.get(&qualified) {
+                return v.clone();
+            }
+        }
+        Value::Undef
     }
 
     fn set_var(&mut self, name: &str, val: Value) {
