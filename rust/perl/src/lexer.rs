@@ -376,6 +376,14 @@ enum HeredocTarget {
         token_idx: usize,
         marker: String,
     },
+    /// Replace a unique marker substring inside an InterpString token's
+    /// captured body. Used when `<<TAG` appears inside a `qq|${\<<TAG}|`
+    /// — the qq body is captured on the same line but the heredoc body
+    /// arrives on subsequent lines.
+    InterpMarker {
+        token_idx: usize,
+        marker: String,
+    },
 }
 
 struct PendingHeredoc {
@@ -816,6 +824,16 @@ impl Lexer {
                                         *pat = pat.replace(marker, &lit);
                                     }
                                 }
+                                HeredocTarget::InterpMarker { token_idx, marker } => {
+                                    let lit = heredoc_body_as_perl_literal(&body, ph.interpolate);
+                                    match tokens.get_mut(*token_idx) {
+                                        Some(Token::InterpString(s))
+                                        | Some(Token::StringLit(s)) => {
+                                            *s = s.replace(marker, &lit);
+                                        }
+                                        _ => {}
+                                    }
+                                }
                             }
                         }
                     }
@@ -1211,7 +1229,11 @@ impl Lexer {
                             continue;
                         }
                         "qq" if !self.ch().is_alphanumeric() && self.ch() != '_' => {
-                            let s = self.read_qq_string();
+                            // Reserve the slot for the upcoming token now so
+                            // any heredocs queued from inside the qq body
+                            // (e.g. `qq|${\<<TAG}|`) can target it.
+                            let slot_idx = tokens.len();
+                            let s = self.read_qq_string_at(slot_idx);
                             // qq// is double-quote-equivalent. Route through
                             // InterpString iff there's an *unescaped* sigil
                             // (a real $ / @, not the \x01 / \x02 placeholders
@@ -2333,6 +2355,83 @@ impl Lexer {
         process_escapes(&s)
     }
 
+    /// Like `read_qq_string` but registers any `<<TAG` heredocs that appear
+    /// inside the qq body's `${...}` / `@{...}` interpolation islands as
+    /// pending heredocs targeting the upcoming token at `target_idx`.
+    /// `target_idx` should be the index where the qq token will land —
+    /// typically `tokens.len()` at the call site.
+    fn read_qq_string_at(&mut self, target_idx: usize) -> String {
+        let (_, _, raw) = self.read_delimited_string();
+        // Scan for `<<TAG` (or `<<~TAG`, `<<'TAG'`, `<<"TAG"`, `<<\TAG`)
+        // inside `${…}` / `@{…}` blocks. Anything outside such blocks is
+        // ordinary qq text where `<<` is just two literal characters.
+        // Replace each detected directive with a unique \x01HD<N>\x01
+        // marker and queue a heredoc whose drain target writes back to
+        // the qq token's captured string.
+        let chars: Vec<char> = raw.chars().collect();
+        let mut out = String::with_capacity(raw.len());
+        let mut i = 0;
+        while i < chars.len() {
+            // Detect entry into `${…}` / `@{…}`.
+            if (chars[i] == '$' || chars[i] == '@') && i + 1 < chars.len() && chars[i + 1] == '{' {
+                out.push(chars[i]);
+                out.push(chars[i + 1]);
+                i += 2;
+                let mut depth = 1usize;
+                while i < chars.len() && depth > 0 {
+                    if chars[i] == '{' {
+                        depth += 1;
+                        out.push(chars[i]);
+                        i += 1;
+                    } else if chars[i] == '}' {
+                        depth -= 1;
+                        out.push(chars[i]);
+                        i += 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    } else if chars[i] == '<' && i + 1 < chars.len() && chars[i + 1] == '<' {
+                        // Try to register a heredoc starting at this `<<`.
+                        // We need a header parser similar to
+                        // try_register_heredoc_in_subst, but reading from
+                        // the captured `chars` (not `self.input`). Reuse
+                        // a small helper that returns (consumed_len, tag,
+                        // indent, interpolate) on success.
+                        match try_parse_heredoc_header(&chars, i) {
+                            Some((consumed, tag, indent, interpolate)) => {
+                                self.subst_marker_counter += 1;
+                                let marker = format!("\x01HD{}\x01", self.subst_marker_counter);
+                                out.push_str(&marker);
+                                self.pending_heredocs.push(PendingHeredoc {
+                                    tag,
+                                    indent,
+                                    interpolate,
+                                    target: HeredocTarget::InterpMarker {
+                                        token_idx: target_idx,
+                                        marker,
+                                    },
+                                    start_line: self.current_line,
+                                });
+                                i += consumed;
+                            }
+                            None => {
+                                out.push(chars[i]);
+                                i += 1;
+                            }
+                        }
+                    } else {
+                        out.push(chars[i]);
+                        i += 1;
+                    }
+                }
+                continue;
+            }
+            out.push(chars[i]);
+            i += 1;
+        }
+        process_escapes(&out)
+    }
+
     fn read_qw(&mut self) -> Vec<String> {
         let (open, close, s) = self.read_delimited_string();
         // qw// is semantically `split ' ', q(...)`, so the same minimal
@@ -2796,6 +2895,65 @@ fn last_is_named_unary(last: Option<&Token>) -> bool {
             | "keys" | "values" | "each" | "wantarray"
         )
     )
+}
+
+/// Try to parse a `<<TAG` heredoc header starting at `chars[i]`. Returns
+/// (consumed_chars, tag, indent, interpolate) on success, None otherwise.
+/// Mirrors `try_register_heredoc_in_subst` but reads from a `&[char]`
+/// slice rather than `self.input`, so callers post-processing a captured
+/// body can use it.
+fn try_parse_heredoc_header(chars: &[char], i: usize) -> Option<(usize, String, bool, bool)> {
+    if i + 1 >= chars.len() || chars[i] != '<' || chars[i + 1] != '<' {
+        return None;
+    }
+    let mut probe = i + 2;
+    let mut indent = false;
+    if probe < chars.len() && chars[probe] == '~' {
+        indent = true;
+        probe += 1;
+        while probe < chars.len() && (chars[probe] == ' ' || chars[probe] == '\t') {
+            probe += 1;
+        }
+    }
+    let mut interpolate = true;
+    if probe < chars.len() && chars[probe] == '\\' {
+        probe += 1;
+        interpolate = false;
+    }
+    let quote = if probe < chars.len() && (chars[probe] == '\'' || chars[probe] == '"') {
+        let q = chars[probe];
+        if q == '\'' {
+            interpolate = false;
+        }
+        probe += 1;
+        Some(q)
+    } else {
+        None
+    };
+    let tag_start = probe;
+    if let Some(q) = quote {
+        while probe < chars.len() && chars[probe] != q && chars[probe] != '\n' {
+            probe += 1;
+        }
+    } else {
+        if probe >= chars.len() || !(chars[probe] == '_' || chars[probe].is_ascii_alphabetic()) {
+            return None;
+        }
+        while probe < chars.len() && (chars[probe] == '_' || chars[probe].is_ascii_alphanumeric()) {
+            probe += 1;
+        }
+        if tag_start == probe {
+            return None;
+        }
+    }
+    let tag: String = chars[tag_start..probe].iter().collect();
+    if let Some(q) = quote
+        && probe < chars.len()
+        && chars[probe] == q
+    {
+        probe += 1;
+    }
+    Some((probe - i, tag, indent, interpolate))
 }
 
 /// Format a heredoc body as a Perl string literal that can be spliced into
