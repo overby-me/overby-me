@@ -133,16 +133,29 @@ fn run_interpreter() -> i32 {
     }
 
     if !script_file.is_empty() {
-        match fs::read(&script_file) {
-            // Perl scripts are traditionally byte-oriented — some tests
-            // ship Latin-1 content. Decode lossily so the lexer always
-            // sees valid UTF-8 (invalid bytes become U+FFFD).
-            Ok(bytes) => {
-                program_text = String::from_utf8_lossy(&bytes).into_owned();
-            }
-            Err(e) => {
-                eprintln!("Can't open perl script \"{}\": {}", script_file, e);
+        if script_file == "-" {
+            // Read program from stdin. Reference perl reports the file
+            // label as `-` for diagnostics, which we keep here so error
+            // messages match byte-for-byte under fresh_perl etc.
+            use std::io::Read;
+            let mut bytes = Vec::new();
+            if let Err(e) = std::io::stdin().read_to_end(&mut bytes) {
+                eprintln!("Can't read perl script from stdin: {}", e);
                 std::process::exit(2);
+            }
+            program_text = String::from_utf8_lossy(&bytes).into_owned();
+        } else {
+            match fs::read(&script_file) {
+                // Perl scripts are traditionally byte-oriented — some tests
+                // ship Latin-1 content. Decode lossily so the lexer always
+                // sees valid UTF-8 (invalid bytes become U+FFFD).
+                Ok(bytes) => {
+                    program_text = String::from_utf8_lossy(&bytes).into_owned();
+                }
+                Err(e) => {
+                    eprintln!("Can't open perl script \"{}\": {}", script_file, e);
+                    std::process::exit(2);
+                }
             }
         }
     }

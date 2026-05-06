@@ -353,14 +353,36 @@ pub struct Lexer {
     cur_token_count: usize,
     /// Added to `current_line` after recompute to honour `# line N` directives.
     line_offset: isize,
+    /// Monotonic counter for unique heredoc-marker placeholders inserted
+    /// into Substitution token strings — see `try_register_heredoc_in_subst`.
+    subst_marker_counter: usize,
+}
+
+/// Where a queued heredoc's body should be spliced in once it's read.
+enum HeredocTarget {
+    /// Replace the placeholder StringLit/InterpString token at this index.
+    /// This is the standard case for `print <<EOF;` etc.
+    Token(usize),
+    /// Replace a unique marker substring inside a Substitution token's
+    /// captured pattern or replacement string. Used when `<<TAG` appears
+    /// inside `s/PAT/REPL/e` — the heredoc body lives on the next line(s)
+    /// in the source, but we capture REPL as a raw string ahead of time
+    /// and need to splice the body back in once it's read.
+    SubstReplMarker {
+        token_idx: usize,
+        marker: String,
+    },
+    SubstPatMarker {
+        token_idx: usize,
+        marker: String,
+    },
 }
 
 struct PendingHeredoc {
     tag: String,
     indent: bool,
     interpolate: bool,
-    /// Index into `tokens` of the placeholder StringLit we'll replace.
-    placeholder_idx: usize,
+    target: HeredocTarget,
     /// Line number of the `<<TAG` opening marker. Reference perl reports
     /// unterminated heredocs at this line.
     start_line: usize,
@@ -479,6 +501,7 @@ impl Lexer {
             file_overrides: Vec::new(),
             cur_token_count: 0,
             line_offset: 0,
+            subst_marker_counter: 0,
         }
     }
 
@@ -755,11 +778,31 @@ impl Lexer {
                         let pending = std::mem::take(&mut self.pending_heredocs);
                         for ph in pending {
                             let body = self.read_heredoc_body(&ph);
-                            match tokens.get_mut(ph.placeholder_idx) {
-                                Some(Token::StringLit(s)) | Some(Token::InterpString(s)) => {
-                                    *s = body;
+                            match &ph.target {
+                                HeredocTarget::Token(idx) => match tokens.get_mut(*idx) {
+                                    Some(Token::StringLit(s)) | Some(Token::InterpString(s)) => {
+                                        *s = body;
+                                    }
+                                    _ => {}
+                                },
+                                HeredocTarget::SubstReplMarker { token_idx, marker } => {
+                                    if let Some(Token::Substitution(_, repl, _)) =
+                                        tokens.get_mut(*token_idx)
+                                    {
+                                        let lit =
+                                            heredoc_body_as_perl_literal(&body, ph.interpolate);
+                                        *repl = repl.replace(marker, &lit);
+                                    }
                                 }
-                                _ => {}
+                                HeredocTarget::SubstPatMarker { token_idx, marker } => {
+                                    if let Some(Token::Substitution(pat, _, _)) =
+                                        tokens.get_mut(*token_idx)
+                                    {
+                                        let lit =
+                                            heredoc_body_as_perl_literal(&body, ph.interpolate);
+                                        *pat = pat.replace(marker, &lit);
+                                    }
+                                }
                             }
                         }
                     }
@@ -1206,7 +1249,8 @@ impl Lexer {
                             continue;
                         }
                         "s" if !self.ch().is_alphanumeric() && self.ch() != '_' => {
-                            let (pat, repl, flags) = self.read_substitution();
+                            let token_idx = tokens.len();
+                            let (pat, repl, flags) = self.read_substitution(token_idx);
                             tokens.push(Token::Substitution(pat, repl, flags));
                             continue;
                         }
@@ -2306,7 +2350,7 @@ impl Lexer {
         (pat, flags)
     }
 
-    fn read_substitution(&mut self) -> (String, String, String) {
+    fn read_substitution(&mut self, subst_token_idx: usize) -> (String, String, String) {
         // s/pattern/replacement/flags
         // The delimiter can be any non-alphanumeric character
         let open = self.advance();
@@ -2330,6 +2374,14 @@ impl Lexer {
             } else if self.ch() == '\\' {
                 pat.push(self.advance());
                 if self.pos < self.input.len() {
+                    pat.push(self.advance());
+                }
+            } else if self.ch() == '<' && self.peek(1) == '<' {
+                if let Some(marker) =
+                    self.try_register_heredoc_in_subst(subst_token_idx, /*in_repl=*/ false)
+                {
+                    pat.push_str(&marker);
+                } else {
                     pat.push(self.advance());
                 }
             } else {
@@ -2369,6 +2421,14 @@ impl Lexer {
                 if self.pos < self.input.len() {
                     repl.push(self.advance());
                 }
+            } else if self.ch() == '<' && self.peek(1) == '<' {
+                if let Some(marker) =
+                    self.try_register_heredoc_in_subst(subst_token_idx, /*in_repl=*/ true)
+                {
+                    repl.push_str(&marker);
+                } else {
+                    repl.push(self.advance());
+                }
             } else {
                 repl.push(self.advance());
             }
@@ -2380,9 +2440,11 @@ impl Lexer {
 
     fn read_transliterate(&mut self) -> (String, String, String) {
         // tr/from/to/flags or y/from/to/flags
-        // Reuse the same logic as substitution
+        // Reuse the same logic as substitution. The `subst_token_idx` here
+        // is unused (heredocs aren't valid inside `tr///` patterns) but the
+        // shared helper still needs a valid value.
         let start_line = self.current_line;
-        let result = self.read_substitution();
+        let result = self.read_substitution(usize::MAX);
         // Reference perl auto-loads `_charnames` whenever a `\N{NAME}` escape
         // appears at compile time. Without `unicore/Name.pm` (the typical
         // Nix sandbox / `-I../lib`-only test environment), the load fails
@@ -2434,6 +2496,113 @@ impl Lexer {
             flags.push(self.advance());
         }
         flags
+    }
+
+    /// When read_substitution sees `<<` inside a pattern or replacement,
+    /// peek ahead to see if it's a real heredoc start (tag, optionally
+    /// quoted, optionally indented `~`, optionally backslash-escaped). If
+    /// yes, register a queued heredoc whose body will be spliced into the
+    /// captured string at this position via a unique marker. Returns the
+    /// marker for the caller to splice into the captured string in place
+    /// of the `<<TAG` source bytes. Returns None if `<<` was actually a
+    /// left-shift (no heredoc tag follows) — caller falls back to
+    /// consuming `<` as a literal char.
+    fn try_register_heredoc_in_subst(&mut self, token_idx: usize, in_repl: bool) -> Option<String> {
+        // We're sitting on the first `<`. Confirm the second is also `<`.
+        debug_assert_eq!(self.ch(), '<');
+        debug_assert_eq!(self.peek(1), '<');
+        // Look past the `<<` and any optional `~` / whitespace / `\` / quote
+        // for a tag identifier. If we don't find one, this is a left-shift
+        // expression embedded in the substitution body — don't transform it.
+        let mut probe = self.pos + 2;
+        let mut indent = false;
+        if probe < self.input.len() && self.input[probe] == '~' {
+            indent = true;
+            probe += 1;
+            while probe < self.input.len()
+                && (self.input[probe] == ' ' || self.input[probe] == '\t')
+            {
+                probe += 1;
+            }
+        }
+        let mut interpolate = true;
+        if probe < self.input.len() && self.input[probe] == '\\' {
+            probe += 1;
+            interpolate = false;
+        }
+        let quote = if probe < self.input.len()
+            && (self.input[probe] == '\'' || self.input[probe] == '"')
+        {
+            let q = self.input[probe];
+            if q == '\'' {
+                interpolate = false;
+            }
+            probe += 1;
+            Some(q)
+        } else {
+            None
+        };
+        // The tag must start with a letter / underscore for unquoted form;
+        // quoted form allows arbitrary chars up to the closing quote (and
+        // may legally be empty — `<<""` / `<<~""` are valid heredocs whose
+        // body terminates on the first blank line).
+        let tag_start = probe;
+        if let Some(q) = quote {
+            while probe < self.input.len()
+                && self.input[probe] != q
+                && self.input[probe] != '\n'
+            {
+                probe += 1;
+            }
+        } else {
+            if probe >= self.input.len()
+                || !(self.input[probe] == '_' || self.input[probe].is_ascii_alphabetic())
+            {
+                return None;
+            }
+            while probe < self.input.len()
+                && (self.input[probe] == '_' || self.input[probe].is_ascii_alphanumeric())
+            {
+                probe += 1;
+            }
+            if tag_start == probe {
+                return None;
+            }
+        }
+        let tag: String = self.input[tag_start..probe].iter().collect();
+        // Skip the closing quote if present.
+        if let Some(q) = quote
+            && probe < self.input.len()
+            && self.input[probe] == q
+        {
+            probe += 1;
+        }
+        // Commit: jump self.pos past the `<<…TAG` source bytes and queue a
+        // heredoc whose body will be spliced into the captured string at
+        // the marker position.
+        let start_line = self.current_line;
+        self.pos = probe;
+        self.subst_marker_counter += 1;
+        let marker = format!("\x01HD{}\x01", self.subst_marker_counter);
+        let target = if in_repl {
+            HeredocTarget::SubstReplMarker {
+                token_idx,
+                marker: marker.clone(),
+            }
+        } else {
+            HeredocTarget::SubstPatMarker {
+                token_idx,
+                marker: marker.clone(),
+            }
+        };
+        self.pending_heredocs.push(PendingHeredoc {
+            tag,
+            indent,
+            interpolate,
+            target,
+            start_line,
+        });
+        Some(marker)
     }
 
     /// Parse the `<<TAG` header: read the tag + flags, register a pending
@@ -2494,7 +2663,7 @@ impl Lexer {
             tag,
             indent,
             interpolate,
-            placeholder_idx,
+            target: HeredocTarget::Token(placeholder_idx),
             start_line: self.current_line,
         });
         interpolate
@@ -2610,6 +2779,50 @@ fn last_is_named_unary(last: Option<&Token>) -> bool {
             | "keys" | "values" | "each" | "wantarray"
         )
     )
+}
+
+/// Format a heredoc body as a Perl string literal that can be spliced into
+/// a captured `s/PAT/REPL/` body. Use single-quoted form for non-interpolating
+/// heredocs (`<<'EOF'`) so `$`, `@`, `\` are kept literal; double-quoted form
+/// for interpolating heredocs so embedded variables / escape sequences keep
+/// their normal interpolation. Either way escape the chosen delimiter so the
+/// generated literal parses without needing balanced inner content.
+fn heredoc_body_as_perl_literal(body: &str, interpolate: bool) -> String {
+    if !interpolate {
+        // q[…] keeps everything literal. Escape `[` and `]` to avoid the
+        // bracketed delimiter ending early.
+        let mut out = String::from("q[");
+        for c in body.chars() {
+            if c == '[' || c == ']' || c == '\\' {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+        out.push(']');
+        out
+    } else {
+        // The interpolating heredoc has *already* had its `\n`, `\t`, etc.
+        // expanded to real bytes by `process_escapes`. Re-quote those so the
+        // double-quoted Perl literal we produce doesn't try to expand them
+        // again. Variables (`$x` / `@x`) we leave literally so the eval-time
+        // interpolation reaches them.
+        let mut out = String::from("\"");
+        for c in body.chars() {
+            match c {
+                '"' | '\\' => {
+                    out.push('\\');
+                    out.push(c);
+                }
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                '\0' => out.push_str("\\0"),
+                _ => out.push(c),
+            }
+        }
+        out.push('"');
+        out
+    }
 }
 
 /// Detect whether a regex / tr / s pattern contains a `\N{NAME}` escape —

@@ -6196,18 +6196,30 @@ impl Interpreter {
                 let prog = self
                     .eval_expr(args.first().unwrap_or(&Expr::StringLit(String::new())))
                     .to_str();
-                let tmpfile = format!(
-                    "/tmp/rust_perl_fresh_{}_{}.pl",
-                    std::process::id(),
-                    self.anon_sub_counter
-                );
-                self.anon_sub_counter += 1;
-                let _ = std::fs::write(&tmpfile, &prog);
+                // Pipe the program via stdin (so `$0` / die-line file label
+                // shows up as `-`, matching reference perl's `fresh_perl`
+                // which streams the program in the same way). Writing a
+                // tempfile would surface the tempfile path inside die /
+                // warn diagnostics and break byte-for-byte test diffs.
                 let exe = std::env::current_exe()
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_else(|_| "perl".to_string());
-                let output = std::process::Command::new(&exe).arg(&tmpfile).output();
-                let _ = std::fs::remove_file(&tmpfile);
+                use std::io::Write;
+                use std::process::Stdio;
+                let mut child = match std::process::Command::new(&exe)
+                    .arg("-")
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                {
+                    Ok(c) => c,
+                    Err(_) => return Value::Undef,
+                };
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = stdin.write_all(prog.as_bytes());
+                }
+                let output = child.wait_with_output();
                 let results = match output {
                     Ok(out) => {
                         let mut combined = String::from_utf8_lossy(&out.stdout).to_string();
