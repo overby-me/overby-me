@@ -2887,6 +2887,32 @@ fn process_escapes(s: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
     let mut i = 0;
     while i < chars.len() {
+        // `${EXPR}` / `@{EXPR}` opens a Perl-code interpolation island. Pass
+        // the bytes through verbatim so backslash sequences inside (e.g. the
+        // `\"` in `${\"world"}`, or a `\<<TAG` heredoc reference) keep their
+        // source-level meaning when the inner expression is reparsed by
+        // parse_interp_string. Track brace depth so nested `{...}` works.
+        if (chars[i] == '$' || chars[i] == '@') && i + 1 < chars.len() && chars[i + 1] == '{' {
+            result.push(chars[i]);
+            result.push(chars[i + 1]);
+            i += 2;
+            let mut depth = 1;
+            while i < chars.len() && depth > 0 {
+                if chars[i] == '{' {
+                    depth += 1;
+                } else if chars[i] == '}' {
+                    depth -= 1;
+                    if depth == 0 {
+                        result.push('}');
+                        i += 1;
+                        break;
+                    }
+                }
+                result.push(chars[i]);
+                i += 1;
+            }
+            continue;
+        }
         if chars[i] == '\\' && i + 1 < chars.len() {
             i += 1;
             match chars[i] {
