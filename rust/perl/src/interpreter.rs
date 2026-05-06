@@ -129,6 +129,17 @@ pub struct Interpreter {
     /// taken. Stored as `Rc<RefCell<Value>>` so `\$name` and `$name`
     /// share one underlying slot.
     aliased_vars: HashMap<String, std::rc::Rc<std::cell::RefCell<Value>>>,
+    /// `\$#name` produces a magic scalar ref. Each cell pointer maps to
+    /// the bound array's backing Rc — so `local @name` (which swaps
+    /// `aliased_arrays[name]` to a fresh Rc) keeps pre-`local` refs
+    /// pointing at the original storage and post-`local` refs at the
+    /// new one.
+    arylen_refs: HashMap<usize, std::rc::Rc<std::cell::RefCell<Vec<Value>>>>,
+    /// Saved (name, Rc) pairs so `pop_scope` / `restore_locals` can put
+    /// the original aliased-array Rc back when a `local @name` block
+    /// exits. Stack of frames matching local_array_saves.
+    #[allow(clippy::type_complexity)]
+    local_aliased_array_saves: Vec<Vec<(String, std::rc::Rc<std::cell::RefCell<Vec<Value>>>)>>,
     /// Deleted slot indices per array name. `delete $arr[N]` inserts `N`;
     /// `exists $arr[N]` then reports false. After each delete we also
     /// contract trailing runs of deleted/undef slots so `scalar @arr`
@@ -371,6 +382,8 @@ impl Interpreter {
             aliased_arrays: HashMap::new(),
             aliased_hashes: HashMap::new(),
             aliased_vars: HashMap::new(),
+            arylen_refs: HashMap::new(),
+            local_aliased_array_saves: Vec::new(),
             deleted_slots: HashMap::new(),
             pos_offsets: HashMap::new(),
             readonly_vars: std::collections::HashSet::new(),
@@ -1610,6 +1623,22 @@ impl Interpreter {
                             let prev_arr = self.get_array(var_name);
                             if let Some(saves) = self.local_array_saves.last_mut() {
                                 saves.push((var_name.to_string(), prev_arr));
+                            }
+                            // If the array has been ref'd (it has an
+                            // entry in `aliased_arrays`), swap the Rc
+                            // for a fresh empty one so any outstanding
+                            // refs created BEFORE this `local` keep
+                            // pointing at the original storage. The
+                            // matching `restore_locals` puts the
+                            // original Rc back on scope exit.
+                            if let Some(orig_rc) = self.aliased_arrays.get(var_name).cloned() {
+                                if let Some(saves) = self.local_aliased_array_saves.last_mut() {
+                                    saves.push((var_name.to_string(), orig_rc));
+                                }
+                                self.aliased_arrays.insert(
+                                    var_name.to_string(),
+                                    std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+                                );
                             }
                             let items = if init.is_some() {
                                 self.eval_list(init.as_ref().unwrap())
@@ -3322,6 +3351,28 @@ impl Interpreter {
             Expr::Ref(expr) => {
                 // Produce a reference appropriate to the referent.
                 match expr.as_ref() {
+                    // `\$#name` — magic scalar ref bound to the array's
+                    // backing Rc. Reads via `$$ref` return the bound
+                    // array's `$#name`; writes via `$$ref = N` resize
+                    // it. By pinning the Rc (rather than the name), a
+                    // later `local @name` swapping the array doesn't
+                    // hijack writes meant for the original.
+                    Expr::ArrayLen(name) if !name.starts_with('$') => {
+                        let arr_rc = if let Some(rc) = self.aliased_arrays.get(name) {
+                            rc.clone()
+                        } else {
+                            let arr = self.globals.arrays.remove(name).unwrap_or_default();
+                            let rc = std::rc::Rc::new(std::cell::RefCell::new(arr));
+                            self.aliased_arrays.insert(name.to_string(), rc.clone());
+                            rc
+                        };
+                        let len_now = (arr_rc.borrow().len() as i64) - 1;
+                        let cell =
+                            std::rc::Rc::new(std::cell::RefCell::new(Value::Num(len_now as f64)));
+                        let p = std::rc::Rc::as_ptr(&cell) as usize;
+                        self.arylen_refs.insert(p, arr_rc);
+                        return Value::ScalarRef(cell);
+                    }
                     Expr::ArrayVar(name) => {
                         // If the target is a lexical `my @arr`, take a ref
                         // into that lexical slot directly (copy semantics —
@@ -3469,7 +3520,16 @@ impl Interpreter {
                 let mut v = self.get_var(base);
                 for _ in 0..=extras {
                     v = match v {
-                        Value::ScalarRef(r) => r.borrow().clone(),
+                        Value::ScalarRef(r) => {
+                            // Magic `\$#name` ref: deref reads the bound
+                            // array's current length.
+                            let p = std::rc::Rc::as_ptr(&r) as usize;
+                            if let Some(arr_rc) = self.arylen_refs.get(&p) {
+                                let cur = (arr_rc.borrow().len() as i64) - 1;
+                                return Value::Num(cur as f64);
+                            }
+                            r.borrow().clone()
+                        }
                         Value::Str(s) if !s.is_empty() => self.get_var(&s),
                         other => {
                             if extras == 0 {
@@ -7003,6 +7063,12 @@ impl Interpreter {
                 }
             }
         }
+        // Restore any aliased-array Rc swaps `local @name` made.
+        if let Some(saves) = self.local_aliased_array_saves.pop() {
+            for (name, orig_rc) in saves.into_iter().rev() {
+                self.aliased_arrays.insert(name, orig_rc);
+            }
+        }
         if let Some(saves) = self.local_fh_alias_saves.pop() {
             for (name, prev) in saves.into_iter().rev() {
                 match prev {
@@ -7961,6 +8027,7 @@ impl Interpreter {
         // when that block exits — not only when the enclosing sub returns.
         self.local_saves.push(Vec::new());
         self.local_array_saves.push(Vec::new());
+        self.local_aliased_array_saves.push(Vec::new());
         self.local_fh_alias_saves.push(Vec::new());
         self.local_hash_elem_saves.push(Vec::new());
         self.local_array_len_saves
@@ -8202,7 +8269,29 @@ impl Interpreter {
                 }
                 match v {
                     Value::ScalarRef(r) => {
-                        *r.borrow_mut() = val;
+                        // Magic `\$#name` ref: assignment resizes the
+                        // bound array's backing storage.
+                        let p = std::rc::Rc::as_ptr(&r) as usize;
+                        if let Some(arr_rc) = self.arylen_refs.get(&p).cloned() {
+                            let target_idx = val.to_num() as i64;
+                            let new_len = if target_idx < 0 {
+                                0
+                            } else {
+                                (target_idx + 1) as usize
+                            };
+                            let mut arr = arr_rc.borrow_mut();
+                            if arr.len() > new_len {
+                                arr.truncate(new_len);
+                            } else {
+                                while arr.len() < new_len {
+                                    arr.push(Value::Undef);
+                                }
+                            }
+                            drop(arr);
+                            *r.borrow_mut() = Value::Num(target_idx as f64);
+                        } else {
+                            *r.borrow_mut() = val;
+                        }
                     }
                     Value::Str(s) if !s.is_empty() => {
                         let vname = normalize_ctrl_var_name(&s);
