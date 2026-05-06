@@ -6,7 +6,17 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**65/79 Nix tests passing** (82%) — selected tests from the upstream Perl test suite.
+**66/79 Nix tests passing** (83%) — selected tests from the upstream Perl test suite.
+
+Latest improvements (uncommitted-by-line-count, but landed via diff-size cuts):
+
+- `printf` is now an expression-context list op so `eval { die } || printf "fall"` runs the `||` side instead of dropping the printf as a fresh statement that never executes after the failing eval.
+- `chr(0xD800)` and other surrogate / >U+10FFFF codepoints round-trip through `unpack` correctly via a new extended-UTF-8 codec (allows the legacy 6-byte form perl uses internally for non-strict UTF-8). Op/chr's diff: 63 → 16.
+- Nested heredocs inside `<<E1` interpolation islands resolve at lex time. Recursively read inner bodies inline and splice them back into the outer body line as a Perl literal (matches reference perl's "drain pending heredocs at line end" model).
+- `-w` switch is plumbed through main → `Interpreter::enable_warnings` (sets `$^W = 1`, flips `warnings_on`); print emits "Use of uninitialized value" through `__WARN__` so user handlers can mutate inter-arg state.
+- `=cute` / `=cut2` / `=cut_` no longer end POD — only `=cut` followed by whitespace/EOL does.
+- `sub_def_loc: HashMap<name, (file, line)>` records each sub's definition file. `call_sub_named` now switches `current_file` while the body runs and restores it from `call_stack` on every return path, so callers reached through eval-string trampolines see `op/eval.t` (or the eval pseudo-file the sub was actually declared in) — not whichever file the dynamic stack carried at the call site. Trimmed op/eval's diff 146 → 93.
+- `get_var` falls through to package-qualified globals: bare `$X` inside `package Foo` now finds `$Foo::X` even when no `our $X` alias was set up.
 
 Passing: base/if, base/cond, base/while, base/pat, base/num, base/translate,
 base/term, base/rs, cmd/elsif, cmd/for, cmd/mod, cmd/subval, cmd/switch,
