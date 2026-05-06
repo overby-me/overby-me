@@ -1212,8 +1212,15 @@ impl Lexer {
                     }
                     let ident = self.read_ident();
 
-                    // Check for => (fat comma) - the ident is auto-quoted
-                    self.skip_whitespace_and_comments();
+                    // Check for => (fat comma) - the ident is auto-quoted.
+                    // Skip ONLY whitespace here, not comments — `#` is a
+                    // valid quote-operator delimiter (`q#hello#`) and
+                    // consuming it as a comment would eat the body. For
+                    // q/qq/qw/qr/m/s/tr/y the next char after whitespace
+                    // is the delimiter, never a comment.
+                    while self.pos < self.input.len() && (self.ch() == ' ' || self.ch() == '\t') {
+                        self.pos += 1;
+                    }
                     if self.ch() == '=' && self.peek(1) == '>' {
                         self.pos += 2;
                         tokens.push(Token::StringLit(ident));
@@ -2265,11 +2272,17 @@ impl Lexer {
     }
 
     fn read_delimited_string(&mut self) -> (char, char, String) {
-        // Skip whitespace/comments before delimiter
-        self.skip_whitespace_and_comments();
-        while self.ch() == '\n' {
+        // Skip plain whitespace before the delimiter — but NOT comments.
+        // `#` is a perfectly valid delimiter (`q#foo#`), and treating it
+        // as a comment would consume the q's body. We do allow newlines
+        // between the operator name and its delimiter to match Perl.
+        while self.pos < self.input.len()
+            && (self.ch() == ' ' || self.ch() == '\t' || self.ch() == '\n')
+        {
+            if self.ch() == '\n' {
+                self.current_line += 1;
+            }
             self.pos += 1;
-            self.skip_whitespace_and_comments();
         }
 
         let open = self.advance();
