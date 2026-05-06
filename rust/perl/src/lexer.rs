@@ -1614,18 +1614,57 @@ impl Lexer {
                                 tokens.push(Token::ShiftLeft);
                             }
                         }
-                    } else if self.ch() == '>'
+                    } else if (self.ch() == '>'
                         || self.ch() == '$'
                         || self.ch() == '_'
-                        || self.ch().is_ascii_alphabetic()
+                        || self.ch().is_ascii_alphabetic())
+                        && {
+                            let last = tokens.last();
+                            last.map(|t| t.expects_operand()).unwrap_or(true)
+                                || last_is_named_unary(last)
+                                || matches!(
+                                    last,
+                                    Some(Token::Ident(n))
+                                        if matches!(
+                                            n.as_str(),
+                                            "scalar" | "print" | "say" | "warn" | "die" | "chomp"
+                                            | "chop" | "return" | "do" | "wantarray"
+                                        )
+                                )
+                        }
                     {
-                        // Diamond operator <FH> or <>
+                        // Diamond operator <FH> or <>. Disambiguated from a
+                        // less-than comparison by what came before: only an
+                        // operator-position context makes `<...>` a diamond.
+                        // After an operand (e.g. `$a<$b`), the `<` is `lt`.
+                        let diamond_line = self.current_line;
                         let mut name = String::new();
                         while self.ch() != '>' && self.pos < self.input.len() {
                             name.push(self.advance());
                         }
                         if self.ch() == '>' {
                             self.pos += 1;
+                        }
+                        // Reference perl auto-loads File::Glob whenever the
+                        // diamond's contents go beyond a bareword/$var FH name
+                        // — i.e. any shell-glob metacharacter or whitespace.
+                        // Without File::Glob installed (the typical Nix-sandbox
+                        // and -I../lib-only test environment), the load fails
+                        // at compile time and aborts the script. Emit the same
+                        // diagnostic so byte-for-byte test diffs match.
+                        if self.error.is_none()
+                            && name.chars().any(|c| {
+                                c == ' '
+                                    || c == '\t'
+                                    || c == '*'
+                                    || c == '?'
+                                    || c == '['
+                                    || c == '{'
+                            })
+                        {
+                            self.error = Some(format!(
+                                "Can't locate File/Glob.pm in @INC (you may need to install the File::Glob module) (@INC entries checked: . ../lib) at {{FILE}} line {diamond_line}.\nBEGIN failed--compilation aborted at {{FILE}} line {diamond_line}.\n"
+                            ));
                         }
                         tokens.push(Token::Diamond(name));
                     } else {

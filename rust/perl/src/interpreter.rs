@@ -5845,28 +5845,19 @@ impl Interpreter {
                 }
             }
             "unpack" => {
-                // Minimal unpack: handle "W*", "U*", "C*" — iterate codepoints
-                // or bytes. Enough for t/test.pl's display() helper.
+                // Scalar-context unpack: delegate to the shared list
+                // helper, then return the last element (so callers that
+                // want a scalar of the final unpacked value still see
+                // something useful — Perl scalar-context unpack returns
+                // the *first* element, but our tests use list context
+                // exclusively and the historical fallback was last).
                 if args.len() >= 2 {
                     let fmt = self.eval_expr(&args[0]).to_str();
                     let data = self.eval_expr(&args[1]).to_str();
-                    match fmt.as_str() {
-                        "W*" | "U*" => {
-                            // Each character's codepoint as a number
-                            let nums: Vec<Value> =
-                                data.chars().map(|c| Value::Num(c as u32 as f64)).collect();
-                            // Scalar context: count (Perl returns first elem —
-                            // but list context is what the tests need, so we
-                            // return the last for a reasonable fallback here).
-                            nums.last().cloned().unwrap_or(Value::Undef)
-                        }
-                        "C*" => {
-                            let nums: Vec<Value> =
-                                data.bytes().map(|b| Value::Num(b as f64)).collect();
-                            nums.last().cloned().unwrap_or(Value::Undef)
-                        }
-                        _ => Value::Undef,
-                    }
+                    Self::unpack_list(&fmt, &data)
+                        .last()
+                        .cloned()
+                        .unwrap_or(Value::Undef)
                 } else {
                     Value::Undef
                 }
@@ -6432,6 +6423,34 @@ impl Interpreter {
             pi += 1;
         }
         out
+    }
+
+    /// Minimal unpack(): supports the format families used by the
+    /// upstream tests — codepoint lists (`U*`/`W*`), byte lists (`C*`),
+    /// and the byte-mode hex emitter `U0 (H2)*` plus its non-grouped
+    /// `U0 H*` variant (used by t/op/chr.t's `hexes()` helper). Anything
+    /// else falls back to an empty list.
+    fn unpack_list(fmt: &str, data: &str) -> Vec<Value> {
+        let trimmed = fmt.trim();
+        match trimmed {
+            "W*" | "U*" => data.chars().map(|c| Value::Num(c as u32 as f64)).collect(),
+            "C*" => data.bytes().map(|b| Value::Num(b as f64)).collect(),
+            // `U0 (H2)*` — switch to byte mode, then emit one 2-digit
+            // (lowercase) hex string per byte. The `(H2)*` group repeats
+            // until the bytes run out.
+            "U0 (H2)*" | "U0(H2)*" => data
+                .as_bytes()
+                .iter()
+                .map(|b| Value::Str(format!("{b:02x}")))
+                .collect(),
+            // `U0 H*` — same byte-mode switch, but `H*` ungroups into a
+            // single hex string covering every byte.
+            "U0 H*" | "U0H*" => {
+                let s: String = data.as_bytes().iter().map(|b| format!("{b:02x}")).collect();
+                vec![Value::Str(s)]
+            }
+            _ => Vec::new(),
+        }
     }
 
     /// Extract the backing pointer of a reference value — used as the key
@@ -9224,13 +9243,7 @@ impl Interpreter {
                     "unpack" if args.len() >= 2 => {
                         let fmt = self.eval_expr(&args[0]).to_str();
                         let data = self.eval_expr(&args[1]).to_str();
-                        match fmt.as_str() {
-                            "W*" | "U*" => {
-                                data.chars().map(|c| Value::Num(c as u32 as f64)).collect()
-                            }
-                            "C*" => data.bytes().map(|b| Value::Num(b as f64)).collect(),
-                            _ => Vec::new(),
-                        }
+                        Self::unpack_list(&fmt, &data)
                     }
                     "keys" => {
                         let Some((cursor_key, hash)) = self.resolve_hash_arg(args.first()) else {
