@@ -37,6 +37,6 @@
     nix-init
     comma
     nurl
-    pkgs.nxv
+    nxv
   ];
 }

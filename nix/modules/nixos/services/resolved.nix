@@ -18,9 +18,9 @@
 
   services.resolved = {
     enable = true;
-    extraConfig = ''
-      DNSOverTLS=yes
-      MulticastDNS=resolve
-    '';
+    settings.Resolve = {
+      DNSOverTLS = true;
+      MulticastDNS = "resolve";
+    };
   };
 }

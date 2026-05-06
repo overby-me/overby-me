@@ -15,7 +15,7 @@
     };
 
     # Nix
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
     lix = {
       url = "git+https://git.lix.systems/lix-project/lix?ref=refs/tags/2.95.0";
@@ -36,7 +36,7 @@
       url = "github:nvmd/nixos-raspberrypi/main";
     };
     home-manager = {
-      url = "github:nix-community/home-manager/release-25.11";
+      url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     agenix = {
@@ -91,28 +91,10 @@
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.home-manager.follows = "home-manager";
     };
-    zed = {
-      url = "github:zed-industries/zed";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-        crane.follows = "crane";
-        rust-overlay.follows = "rust-overlay";
-        flake-parts.follows = "flake-parts";
-      };
-    };
     tangled = {
       url = "git+https://tangled.org/tangled.org/core";
       inputs = {
         nixpkgs.follows = "nixpkgs";
-      };
-    };
-    nxv = {
-      url = "github:jamesbrink/nxv";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-        flake-parts.follows = "flake-parts";
-        rust-overlay.follows = "rust-overlay";
-        crane.follows = "crane";
       };
     };
 
@@ -123,7 +105,7 @@
       inputs.systems.follows = "systems";
     };
     catppuccin = {
-      url = "github:catppuccin/nix/release-25.11";
+      url = "github:catppuccin/nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     nix-wallpaper = {
