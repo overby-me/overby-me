@@ -6966,22 +6966,40 @@ impl Interpreter {
     /// already had their captured env spliced in by `enter_closure_env`.
     /// Returns whether we stashed anything (so the matching exit knows
     /// to restore).
-    fn enter_named_sub_scope(&mut self, _name: Option<&str>, _did_closure: bool) -> bool {
-        // Named subs *should* not see the dynamic caller's lexicals
-        // (Perl: they close over file scope, not the call site). Doing
-        // this naively (stash + clear self.scopes) regresses test.pl
-        // helpers that rely on transitive access to the file scope via
-        // sibling helper calls (the file scope gets shuffled in/out by
-        // enter_file_scope and mutations from inner calls are lost).
-        //
-        // A closure-only stash that splits the chain at the captured
-        // length passes some op/eval tests (60-62: fred3 inside an
-        // eval q{} that captures $yyy=9) but regresses 30-34
-        // (do_eval1's eval needs to see the *live* file-scope $x via
-        // the dynamic chain because Stmt::Sub's snapshot-at-definition
-        // can't propagate $x++ updates without per-Scope Rc sharing).
-        // Pick the safer option for now and leave this a no-op.
-        false
+    fn enter_named_sub_scope(&mut self, name: Option<&str>, did_closure: bool) -> bool {
+        // For NAMED subs that have a captured closure env (i.e. were
+        // defined inside an `eval STRING` — see Stmt::Sub), Perl says
+        // the eval inside the sub sees the captured lexicals, NOT the
+        // dynamic caller's. Implement this by stashing the dynamic
+        // frames *above* the captured ones; on return,
+        // exit_named_sub_scope re-appends them. Anonymous subs (which
+        // legitimately use the dynamic chain — e.g. SIG-handler
+        // closures that mutate `@error` from the caller's local
+        // scope) are explicitly excluded.
+        if !did_closure {
+            return false;
+        }
+        let n = match name {
+            Some(s) => s,
+            None => return false,
+        };
+        if n.starts_with("__anon_") {
+            return false;
+        }
+        // closure_call_stack's top entry stores the captured env Rc.
+        // Its length tells us how many bottom frames are the captured
+        // ones; everything above is the dynamic caller's chain.
+        let captured_len = self
+            .closure_call_stack
+            .last()
+            .map(|(_, _, env)| env.borrow().len())
+            .unwrap_or(0);
+        if self.scopes.len() <= captured_len {
+            return false;
+        }
+        let dynamic_above_captured: Vec<Scope> = self.scopes.split_off(captured_len);
+        self.sub_scope_stack.push(dynamic_above_captured);
+        true
     }
 
     /// Pair to `enter_named_sub_scope`: re-append the dynamic caller's
