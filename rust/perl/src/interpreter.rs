@@ -1441,6 +1441,23 @@ impl Interpreter {
                     // name. Top-level `sub foo {}` (eval_depth == 0) keeps the
                     // legacy file-scope behaviour driven by `sub_origin`.
                     if self.eval_depth > 0 {
+                        // Promote each captured `my` slot to a shared
+                        // Rc<RefCell<Value>> alias so mutations made
+                        // through the live scope (e.g. `$x++` in the
+                        // surrounding block after the sub is defined)
+                        // are visible inside the sub body. Both
+                        // self.scopes and the cloned `captured` then
+                        // hold the same alias Rcs, achieving live-
+                        // view closure semantics for `my` lexicals.
+                        for scope in self.scopes.iter_mut() {
+                            for v in scope.vars.values_mut() {
+                                if !matches!(v, Value::Alias(_)) {
+                                    let inner = std::mem::replace(v, Value::Undef);
+                                    let rc = std::rc::Rc::new(std::cell::RefCell::new(inner));
+                                    *v = Value::Alias(rc);
+                                }
+                            }
+                        }
                         let captured: Vec<Scope> = self.scopes.clone();
                         self.closure_envs.insert(
                             qualified.clone(),
@@ -7815,10 +7832,15 @@ impl Interpreter {
             }
             return Value::Undef;
         }
-        // Check lexical scopes from innermost to outermost
+        // Check lexical scopes from innermost to outermost. If the
+        // slot holds a `Value::Alias`, follow the Rc transparently so
+        // pattern-matches like `if let Value::Str(s) = …` still see
+        // the underlying value (alias-promoted closure-captured slots
+        // would otherwise escape as `Value::Alias` and break those
+        // matches — see Stmt::Sub closure capture).
         for scope in self.scopes.iter().rev() {
             if let Some(val) = scope.vars.get(key) {
-                return val.clone();
+                return val.resolve();
             }
         }
         // Check live-aliased globals (where `\$name` was taken).
