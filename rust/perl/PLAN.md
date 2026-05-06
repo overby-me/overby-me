@@ -18,39 +18,60 @@ op/reverse, op/sort, op/splice, op/split, op/sprintf, op/sub, op/substr,
 op/tr, op/unshift, op/vec, op/wantarray, io/argv, io/fs, io/open, io/print,
 io/read, io/tell, re/pat, re/subst, run/exit, run/switches.
 
-Latest unlocks (op/local + op/tr + diamond/unpack/charname fixes):
+Latest unlocks (op/local + op/tr + heredoc / glob / unpack / charname fixes):
 
-- **Compile-time `\N{NAME}` → `unicore/Name.pm` load failure.** Reference
-  perl auto-loads `_charnames` when a tr/y/s/m/qr pattern contains a
-  named-character escape (anything in `\N{…}` that isn't `\N{N}`,
-  `\N{N,M}` count syntax, or `\N{U+XXXX}` codepoint). Under the Nix
-  sandbox / `-I../lib`-only test environment `unicore/Name.pm` isn't on
-  disk, so reference perl emits the chained `Can't locate unicore/Name.pm
-  in @INC … BEGIN failed--compilation aborted at ../lib/_charnames.pm
-  line 10. Compilation failed in require at FILE line N. BEGIN failed--
-  compilation aborted at FILE line N.` diagnostic. Lex-time check in
-  `read_transliterate` (via the `pattern_uses_named_char` helper)
-  triggers the same error. Required to make op/tr stop at the same
-  compile error reference perl does (`\N{LATIN SMALL LETTER J}` at
-  line 519). Lex-time short-circuits before any runtime, so a top-level
-  `require Config;` earlier in the file is never reached.
+- **Heredocs inside `s/PAT/REPL/`.** Reference perl treats `<<TAG`
+  inside a substitution body as a heredoc directive whose body lives
+  on the line(s) after the s///. Our `read_substitution()` now peeks
+  for `<<TAG` (with optional `~`, `\\`, `'/"` quotes), generates a
+  unique `\x01HD<N>\x01` marker, splices the marker into the captured
+  pattern/replacement, and queues a `PendingHeredoc` whose target is
+  a `SubstReplMarker` / `SubstPatMarker`. The drain logic substitutes
+  the body — wrapped via the `heredoc_body_as_perl_literal` helper —
+  as a Perl `q[…]` literal (non-interp) or `"…"` literal (interp) so
+  the `/e` re-eval treats it as a string. Cuts op/heredoc's diff from
+  753 to 57 lines (44+ "Eval'd Indented here-doc" tests now pass).
+- **`fresh_perl` helper pipes via stdin.** Reference perl streams the
+  test program in the same way, so die/warn diagnostics show `- line N`
+  as the file label. Writing a tempfile leaked the path into errors and
+  broke byte-for-byte test diffs. main.rs now recognises `-` as
+  "read program from stdin".
+- **EOF heredoc drain.** Programs without a trailing newline still
+  trigger the `Can't find string terminator` diagnostic — the lexer's
+  EOF branch now runs the same drain pass as the newline branch.
+- **Indented-heredoc indentation check.** `<<~EOF` body lines whose
+  leading whitespace doesn't match the closing delimiter's indentation
+  emit reference perl's `Indentation on line N of here-doc doesn't
+  match delimiter` error.
+- **Empty heredoc tag (`<<""` / `<<~""`).** Now lex-recognised inside
+  s/// — the body terminates on the first blank line.
+- **`do FILE` increments the eval counter.** Subsequent `eval STRING`
+  calls in the same script now report `(eval N)` numbers matching
+  reference perl byte-for-byte. Trims op/eval's diff by 24 lines.
+- **`${EXPR}` / `@{EXPR}` interp islands keep backslashes.**
+  `process_escapes()` previously ate the `\` in `qq|${\"world"}|`
+  before the inner Perl-code parse ran. Fixed by skipping escape
+  processing inside brace-balanced `${…}` / `@{…}` segments.
 - **Auto-fail `<glob pattern>` to a File::Glob compile error.** Reference
   perl auto-loads File::Glob when a `<…>` contains shell metacharacters
   (whitespace, `*`, `?`, `[`, `{`); under the Nix sandbox / `-I../lib`-only
   test environment File::Glob isn't on disk, so the load fails at compile
   time with `Can't locate File/Glob.pm in @INC … BEGIN failed`. Lexer now
   detects the same trigger and seeds `self.error` with reference perl's
-  exact diagnostic, so test diffs match byte-for-byte. Required to make
-  op/local stop at the same compile error reference perl does. Disambiguates
-  diamond-vs-`lt` first via `Token::expects_operand()` plus a hand-curated
-  list of `Ident` keywords that take a list operand (`scalar`, `print`,
-  `say`, `die`, `chomp`, …) so `$a<$b ? 1 : $a > -1 : 0` keeps lexing as
-  comparison, not a `Diamond("$b ? 1 : $a")`.
+  exact diagnostic. Required to make op/local stop at the same compile
+  error reference perl does. Disambiguates diamond-vs-`lt` first via
+  `Token::expects_operand()` plus a hand-curated list of `Ident` keywords
+  that take a list operand (`scalar`, `print`, `say`, `die`, `chomp`, …)
+  so `$a<$b ? 1 : $a > -1 : 0` keeps lexing as comparison.
 - **`unpack "U0 (H2)*"` / `unpack "U0 H*"`** — switch-to-byte-mode followed
   by per-byte (or all-bytes) lowercase-hex emission. Required for op/chr's
-  `hexes()` helper which converts a codepoint's UTF-8 encoding into space-
-  separated hex pairs. Both list-context and scalar-context unpack now route
-  through a shared `Self::unpack_list` helper.
+  `hexes()` helper.
+- **Compile-time `\N{NAME}` → `unicore/Name.pm` load failure.** Reference
+  perl auto-loads `_charnames` when a tr/y/s/m/qr pattern contains a
+  named-character escape. Under the Nix sandbox / `-I../lib`-only test
+  environment `unicore/Name.pm` isn't on disk; lex-time check in
+  `read_transliterate` triggers the same `Can't locate unicore/Name.pm`
+  / `BEGIN failed` chain. Unlocks op/tr.
 
 Earlier unlocks:
 
