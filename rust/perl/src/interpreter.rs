@@ -4412,12 +4412,12 @@ impl Interpreter {
                 Value::Str(s.repeat(n))
             }
 
-            BinOp::NumEq => Value::Num(if l.to_num() == r.to_num() { 1.0 } else { 0.0 }),
-            BinOp::NumNe => Value::Num(if l.to_num() != r.to_num() { 1.0 } else { 0.0 }),
-            BinOp::NumLt => Value::Num(if l.to_num() < r.to_num() { 1.0 } else { 0.0 }),
-            BinOp::NumGt => Value::Num(if l.to_num() > r.to_num() { 1.0 } else { 0.0 }),
-            BinOp::NumLe => Value::Num(if l.to_num() <= r.to_num() { 1.0 } else { 0.0 }),
-            BinOp::NumGe => Value::Num(if l.to_num() >= r.to_num() { 1.0 } else { 0.0 }),
+            BinOp::NumEq => bool_value(l.to_num() == r.to_num()),
+            BinOp::NumNe => bool_value(l.to_num() != r.to_num()),
+            BinOp::NumLt => bool_value(l.to_num() < r.to_num()),
+            BinOp::NumGt => bool_value(l.to_num() > r.to_num()),
+            BinOp::NumLe => bool_value(l.to_num() <= r.to_num()),
+            BinOp::NumGe => bool_value(l.to_num() >= r.to_num()),
             BinOp::Spaceship => {
                 let a = l.to_num();
                 let b = r.to_num();
@@ -4430,12 +4430,12 @@ impl Interpreter {
                 })
             }
 
-            BinOp::StrEq => Value::Num(if l.to_str() == r.to_str() { 1.0 } else { 0.0 }),
-            BinOp::StrNe => Value::Num(if l.to_str() != r.to_str() { 1.0 } else { 0.0 }),
-            BinOp::StrLt => Value::Num(if l.to_str() < r.to_str() { 1.0 } else { 0.0 }),
-            BinOp::StrGt => Value::Num(if l.to_str() > r.to_str() { 1.0 } else { 0.0 }),
-            BinOp::StrLe => Value::Num(if l.to_str() <= r.to_str() { 1.0 } else { 0.0 }),
-            BinOp::StrGe => Value::Num(if l.to_str() >= r.to_str() { 1.0 } else { 0.0 }),
+            BinOp::StrEq => bool_value(l.to_str() == r.to_str()),
+            BinOp::StrNe => bool_value(l.to_str() != r.to_str()),
+            BinOp::StrLt => bool_value(l.to_str() < r.to_str()),
+            BinOp::StrGt => bool_value(l.to_str() > r.to_str()),
+            BinOp::StrLe => bool_value(l.to_str() <= r.to_str()),
+            BinOp::StrGe => bool_value(l.to_str() >= r.to_str()),
             BinOp::StrCmp => {
                 let a = l.to_str();
                 let b = r.to_str();
@@ -11991,6 +11991,16 @@ fn isa_walk(interp: &Interpreter, class: &str, target: &str) -> bool {
         }
     }
     false
+}
+
+/// Perl booleans from comparison ops: `1` for true, `""` (empty string) for
+/// false. Empty string is the documented stringification of perl's PL_sv_no.
+fn bool_value(b: bool) -> Value {
+    if b {
+        Value::Num(1.0)
+    } else {
+        Value::Str(String::new())
+    }
 }
 
 fn compile_time_use_check(
