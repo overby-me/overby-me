@@ -2629,6 +2629,7 @@ struct ReadelfOpts {
     show_debug_info: bool,
     show_debug_str: bool,
     show_debug_macro: bool,
+    process_links: bool,
     show_header: bool,
     show_sections: bool,
     show_section_details: bool,
@@ -2685,6 +2686,7 @@ fn tool_readelf(args: &[String]) -> i32 {
                 opts.show_sections = true;
             }
             "-W" | "--wide" => opts.wide = true,
+            "-P" | "--process-links" => opts.process_links = true,
             "-C" | "--demangle" => opts.demangle = true,
             "-p" | "--string-dump" => {
                 if i + 1 < args.len() {
@@ -2937,8 +2939,35 @@ fn tool_readelf(args: &[String]) -> i32 {
             println!();
             println!("File: {file}");
         }
-        if !readelf_dispatch(&data, file, &opts) {
+        let loaded_from = if opts.process_links {
+            Some(file.as_str())
+        } else {
+            None
+        };
+        if !readelf_dispatch_loaded(&data, file, &opts, loaded_from) {
             errors += 1;
+        }
+        // With -P (process-links), follow the link and process its DWARF too.
+        if opts.process_links
+            && let Some((alt_data, alt_path)) = readelf_find_alt_link(file, &data)
+        {
+            // For the linked file, only show DWARF dumps (no header/sections).
+            let mut alt_opts = opts.clone();
+            alt_opts.show_header = false;
+            alt_opts.show_sections = false;
+            alt_opts.show_section_details = false;
+            alt_opts.show_program_headers = false;
+            alt_opts.show_symbols = false;
+            alt_opts.show_dynamic = false;
+            alt_opts.show_relocs = false;
+            alt_opts.show_notes = false;
+            alt_opts.show_debug_links = false;
+            // Don't recurse: the alt file's own .gnu_debugaltlink (if any)
+            // is not followed.
+            alt_opts.process_links = false;
+            if !readelf_dispatch_loaded(&alt_data, &alt_path, &alt_opts, Some(&alt_path)) {
+                // ignore alt failures
+            }
         }
     }
 
@@ -2946,16 +2975,52 @@ fn tool_readelf(args: &[String]) -> i32 {
 }
 
 fn readelf_dispatch(data: &[u8], file: &str, opts: &ReadelfOpts) -> bool {
+    readelf_dispatch_loaded(data, file, opts, None)
+}
+
+fn readelf_dispatch_loaded(
+    data: &[u8],
+    file: &str,
+    opts: &ReadelfOpts,
+    loaded_from: Option<&str>,
+) -> bool {
     if let Ok(elf) = ElfFile::<object::elf::FileHeader64<object::Endianness>>::parse(data) {
-        readelf_display(&elf, data, file, opts);
+        readelf_display(&elf, data, file, opts, loaded_from);
         true
     } else if let Ok(elf) = ElfFile::<object::elf::FileHeader32<object::Endianness>>::parse(data) {
-        readelf_display(&elf, data, file, opts);
+        readelf_display(&elf, data, file, opts, loaded_from);
         true
     } else {
         eprintln!("readelf: Error: Not an ELF file - {file}");
         false
     }
+}
+
+/// Find the linked file via .gnu_debugaltlink. Returns (data, path).
+fn readelf_find_alt_link(file_path: &str, data: &[u8]) -> Option<(Vec<u8>, String)> {
+    let obj = object::File::parse(data).ok()?;
+    use object::ObjectSection;
+    let alt_name = obj
+        .section_by_name(".gnu_debugaltlink")
+        .and_then(|s| s.data().ok())?;
+    let nul = alt_name.iter().position(|&b| b == 0).unwrap_or(alt_name.len());
+    let path = std::str::from_utf8(&alt_name[..nul]).ok()?.to_string();
+    if path.is_empty() {
+        return None;
+    }
+    let parent = std::path::Path::new(file_path)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_default();
+    let candidates = [parent.join(&path).to_string_lossy().into_owned(), path.clone()];
+    for c in &candidates {
+        if std::path::Path::new(c).exists()
+            && let Ok(d) = fs::read(c)
+        {
+            return Some((d, c.clone()));
+        }
+    }
+    None
 }
 
 fn readelf_process_archive(data: &[u8], file: &str, opts: &ReadelfOpts) -> bool {
@@ -3030,6 +3095,7 @@ fn readelf_display<'data, Elf: FileHeader>(
     data: &'data [u8],
     _file: &str,
     opts: &ReadelfOpts,
+    loaded_from: Option<&str>,
 ) {
     let show_header = opts.show_header;
     let show_sections = opts.show_sections;
@@ -3567,16 +3633,19 @@ fn readelf_display<'data, Elf: FileHeader>(
         readelf_debug_loc(elf, data, endian);
     }
 
-    if opts.show_debug_links {
+    // -K dumps the link section CONTENTS by default; with -P we follow
+    // the link instead and the link sections are not printed.
+    if opts.show_debug_links && !opts.process_links {
         readelf_debug_links(elf, data, endian);
     }
 
-    if opts.show_debug_info {
-        readelf_debug_info(elf, data, endian);
+    // For -ws / -wi, GNU prints .debug_str BEFORE .debug_info.
+    if opts.show_debug_str {
+        readelf_debug_str_loaded(elf, data, endian, loaded_from);
     }
 
-    if opts.show_debug_str {
-        readelf_debug_str(elf, data, endian);
+    if opts.show_debug_info {
+        readelf_debug_info_loaded(elf, data, endian, loaded_from);
     }
 
     if opts.show_debug_macro {
@@ -5176,9 +5245,9 @@ fn tool_objdump(args: &[String]) -> i32 {
                 } else {
                     None
                 };
-                if let Ok(elf) = ElfFile::<object::elf::FileHeader64<object::Endianness>>::parse(
-                    &*data_bytes,
-                ) {
+                if let Ok(elf) =
+                    ElfFile::<object::elf::FileHeader64<object::Endianness>>::parse(&*data_bytes)
+                {
                     let endian = elf.endian();
                     if show_debug_str {
                         readelf_debug_str_loaded(&elf, &data_bytes, endian, loaded_from);
@@ -5189,7 +5258,9 @@ fn tool_objdump(args: &[String]) -> i32 {
                     if show_debug_ranges {
                         readelf_debug_ranges(&elf, &data_bytes, endian);
                     }
-                } else if let Ok(elf) = ElfFile::<object::elf::FileHeader32<object::Endianness>>::parse(&*data_bytes) {
+                } else if let Ok(elf) =
+                    ElfFile::<object::elf::FileHeader32<object::Endianness>>::parse(&*data_bytes)
+                {
                     let endian = elf.endian();
                     if show_debug_str {
                         readelf_debug_str_loaded(&elf, &data_bytes, endian, loaded_from);
@@ -5204,7 +5275,6 @@ fn tool_objdump(args: &[String]) -> i32 {
             }
             continue;
         }
-
 
         let data = match fs::read(file) {
             Ok(d) => d,
@@ -12005,6 +12075,54 @@ fn readelf_debug_info<'data, Elf: FileHeader>(
     readelf_debug_info_loaded(elf, data, endian, None);
 }
 
+/// Try to follow `.gnu_debugaltlink` and return the linked file's
+/// `.debug_abbrev` and `.debug_str` data, plus the path it was loaded from.
+fn read_alt_link_data(file_path: &str) -> Option<(Vec<u8>, Vec<u8>, String)> {
+    let data = fs::read(file_path).ok()?;
+    let obj = object::File::parse(&*data).ok()?;
+    use object::ObjectSection;
+    let alt_name = obj
+        .section_by_name(".gnu_debugaltlink")
+        .and_then(|s| s.data().ok())?;
+    let nul = alt_name
+        .iter()
+        .position(|&b| b == 0)
+        .unwrap_or(alt_name.len());
+    let path = std::str::from_utf8(&alt_name[..nul]).ok()?.to_string();
+    if path.is_empty() {
+        return None;
+    }
+    let parent = std::path::Path::new(file_path)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_default();
+    let candidates = [
+        parent.join(&path).to_string_lossy().into_owned(),
+        path.clone(),
+    ];
+    let mut full_path: Option<String> = None;
+    for c in &candidates {
+        if std::path::Path::new(c).exists() {
+            full_path = Some(c.clone());
+            break;
+        }
+    }
+    let full_path = full_path?;
+    let alt_data = fs::read(&full_path).ok()?;
+    let alt_obj = object::File::parse(&*alt_data).ok()?;
+    let abbrev = alt_obj
+        .section_by_name(".debug_abbrev")
+        .and_then(|s| s.uncompressed_data().ok())
+        .map(|c| c.into_owned())
+        .unwrap_or_default();
+    let strs = alt_obj
+        .section_by_name(".debug_str")
+        .and_then(|s| s.uncompressed_data().ok())
+        .map(|c| c.into_owned())
+        .unwrap_or_default();
+    Some((abbrev, strs, full_path))
+}
+
 fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
     _elf: &ElfFile<'data, Elf>,
     data: &'data [u8],
@@ -12069,7 +12187,7 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
     };
 
     let info = read_sect(&info_sect);
-    let abbrev = abbrev_sect.as_ref().map(read_sect).unwrap_or_default();
+    let mut abbrev = abbrev_sect.as_ref().map(read_sect).unwrap_or_default();
     let debug_str = obj
         .section_by_name(".debug_str")
         .or_else(|| obj.section_by_name(".zdebug_str"))
@@ -12086,6 +12204,17 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
         .as_ref()
         .map(read_sect)
         .unwrap_or_default();
+    // Follow .gnu_debugaltlink: if abbrev is missing, load it from the
+    // linked file. Always load alt's .debug_str for DW_FORM_GNU_strp_alt.
+    let mut alt_debug_str: Vec<u8> = Vec::new();
+    if let Some(file_path) = loaded_from
+        && let Some((alt_abbrev, alt_str, _alt_path)) = read_alt_link_data(file_path)
+    {
+        if abbrev.is_empty() && !alt_abbrev.is_empty() {
+            abbrev = alt_abbrev;
+        }
+        alt_debug_str = alt_str;
+    }
 
     let header_suffix = match loaded_from {
         Some(path) => format!(" (loaded from {})", path),
@@ -12218,6 +12347,7 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
                     &debug_str_offsets,
                     cu_start,
                     header_len_field,
+                    &alt_debug_str,
                 );
                 let attr_name_str = dwarf_attr_name(*attr_name);
                 // If value starts with a tab, don't add a leading space — matches GNU
@@ -12437,6 +12567,7 @@ fn read_and_format_attr(
     _debug_str_offsets: &[u8],
     _cu_start: usize,
     _hdr_len_field: usize,
+    alt_debug_str: &[u8],
 ) -> String {
     // DW_FORM_*  values per DWARF spec
     match form {
@@ -12534,6 +12665,7 @@ fn read_and_format_attr(
             read_and_format_attr(
                 p, f, 0, addr_size, is_64, version, attr_name,
                 debug_str, debug_line_str, _debug_str_offsets, _cu_start, _hdr_len_field,
+                alt_debug_str,
             )
         }
         0x17 /* sec_offset */ => {
@@ -12603,6 +12735,15 @@ fn read_and_format_attr(
             format!("(addr_index: 0x{:x})", v)
         }
         0x2c /* addrx4 */ => format!("(addr_index: 0x{:x})", p.read_u32().unwrap_or(0)),
+        0x1f21 /* DW_FORM_GNU_strp_alt */ => {
+            let off = if is_64 {
+                p.read_u64().unwrap_or(0)
+            } else {
+                p.read_u32().unwrap_or(0) as u64
+            };
+            let s = read_cstr_at(alt_debug_str, off as usize);
+            format!("(alt indirect string, offset: 0x{:x}) {}", off, s)
+        }
         _ => format!("<unsupported FORM 0x{:x}>", form),
     }
 }

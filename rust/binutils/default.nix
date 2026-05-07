@@ -204,13 +204,13 @@
       }
       {
         exp = "readelf.exp";
-        minPass = 31;
-        maxFail = 7;
+        minPass = 32;
+        maxFail = 6;
       }
       {
         exp = "objdump.exp";
-        minPass = 29;
-        maxFail = 3;
+        minPass = 30;
+        maxFail = 2;
       }
       {
         exp = "objcopy.exp";
