@@ -5014,6 +5014,7 @@ fn tool_objdump(args: &[String]) -> i32 {
     let mut show_line_numbers = false;
     let mut show_debug_ranges = false;
     let mut show_debug_str = false;
+    let mut show_debug_abbrev = false;
     let mut wide = false;
     let mut input_target: Option<String> = None;
     let mut show_info = false;
@@ -5105,7 +5106,11 @@ fn tool_objdump(args: &[String]) -> i32 {
                 "--show-all-symbols" => show_all_symbols = true,
                 "--disassemble-zeroes" => disassemble_zeroes = true,
                 "-W" => {
-                    // Accept but ignore DWARF flags for now (they require complex DWARF parsing)
+                    // -W alone means "dump all DWARF sections" (== -Wa -Wi -WR -Ws ...).
+                    emit_wi_placeholder = true;
+                    show_debug_ranges = true;
+                    show_debug_str = true;
+                    show_debug_abbrev = true;
                 }
                 "-Z" | "--decompress" => {
                     decompress = true;
@@ -5136,6 +5141,12 @@ fn tool_objdump(args: &[String]) -> i32 {
                     if arg.contains('R') || arg.contains('r') {
                         show_debug_ranges = true;
                     }
+                    if arg.contains('a') {
+                        show_debug_abbrev = true;
+                    }
+                    if arg.contains('s') {
+                        show_debug_str = true;
+                    }
                 }
                 _ if arg.starts_with("--dwarf=") || arg.starts_with("--debug-dump=") => {
                     let v = arg.split_once('=').unwrap().1;
@@ -5148,6 +5159,9 @@ fn tool_objdump(args: &[String]) -> i32 {
                         }
                         "str" | "Str" | "s" => {
                             show_debug_str = true;
+                        }
+                        "abbrev" | "a" => {
+                            show_debug_abbrev = true;
                         }
                         _ => {}
                     }
@@ -5220,7 +5234,7 @@ fn tool_objdump(args: &[String]) -> i32 {
 
     let mut errors = 0;
     for file in &files {
-        if emit_wi_placeholder || show_debug_ranges || show_debug_str {
+        if emit_wi_placeholder || show_debug_ranges || show_debug_str || show_debug_abbrev {
             // Delegate DWARF section dumping to readelf implementations.
             // Build the list of files to process: with --process-links, linked files come first.
             let mut to_process: Vec<String> = Vec::new();
@@ -5277,6 +5291,9 @@ fn tool_objdump(args: &[String]) -> i32 {
                     if show_debug_ranges {
                         readelf_debug_ranges(&elf, &data_bytes, endian);
                     }
+                    if show_debug_abbrev {
+                        readelf_debug_abbrev(&elf, &data_bytes, endian);
+                    }
                 } else if let Ok(elf) =
                     ElfFile::<object::elf::FileHeader32<object::Endianness>>::parse(&*data_bytes)
                 {
@@ -5289,6 +5306,9 @@ fn tool_objdump(args: &[String]) -> i32 {
                     }
                     if show_debug_ranges {
                         readelf_debug_ranges(&elf, &data_bytes, endian);
+                    }
+                    if show_debug_abbrev {
+                        readelf_debug_abbrev(&elf, &data_bytes, endian);
                     }
                 }
             }
@@ -12220,11 +12240,21 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
 
     let is_le = obj.is_little_endian();
 
-    // Reloc-aware section reader.
+    // Reloc-aware section reader. Falls back to legacy ZLIB decompression
+    // when `uncompressed_data()` doesn't recognize the format (e.g.
+    // `.zdebug_*` sections with the GNU `ZLIB` magic prefix).
     let read_sect = |sect: &object::Section<'_, '_>| -> Vec<u8> {
-        let raw = sect.uncompressed_data().ok();
-        let raw_bytes: &[u8] = raw.as_ref().map(|c| c.as_ref()).unwrap_or(&[]);
-        let mut buf = raw_bytes.to_vec();
+        let owned: Vec<u8> = match sect.uncompressed_data() {
+            Ok(d) => d.into_owned(),
+            Err(_) => match sect.data() {
+                Ok(raw) if raw.len() >= 12 && &raw[..4] == b"ZLIB" => {
+                    decompress_legacy_zlib(&raw[12..])
+                }
+                Ok(raw) => raw.to_vec(),
+                Err(_) => Vec::new(),
+            },
+        };
+        let mut buf = owned;
         for (offset, reloc) in sect.relocations() {
             if let object::RelocationTarget::Symbol(sym_idx) = reloc.target() {
                 if let Ok(sym) = obj.symbol_by_index(sym_idx) {
