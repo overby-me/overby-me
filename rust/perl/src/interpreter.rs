@@ -4712,14 +4712,30 @@ impl Interpreter {
                 Value::Undef // caller should check $@
             }
             "warn" => {
-                let msg = args
+                let mut msg = args
                     .iter()
                     .map(|a| self.eval_expr(a).to_str())
                     .collect::<Vec<_>>()
                     .join("");
-                eprint!("{msg}");
                 if !msg.ends_with('\n') {
-                    eprintln!();
+                    let file = if self.current_file.is_empty() {
+                        "-e".to_string()
+                    } else {
+                        self.current_file.clone()
+                    };
+                    let line = self.current_line;
+                    msg.push_str(&format!(" at {file} line {line}.\n"));
+                }
+                // Route through `$SIG{__WARN__}` if a handler is
+                // installed — `local $SIG{__WARN__} = \&wrn` replaces
+                // the default stderr emission with the user handler.
+                let handler = self.get_hash_element("SIG", "__WARN__");
+                if let Value::CodeRef(name) = handler
+                    && let Some((_params, body)) = self.subs.get(&name).cloned()
+                {
+                    self.call_sub_named(&body, &[Value::Str(msg)], Some(&name));
+                } else {
+                    eprint!("{msg}");
                 }
                 Value::Num(1.0)
             }
