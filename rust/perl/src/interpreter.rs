@@ -7545,6 +7545,10 @@ impl Interpreter {
         self.exit_file_scope(pushed_origin);
         self.exit_named_sub_scope(stashed_scopes);
         self.exit_closure_env(closure_guard);
+        if pushed_sub_name {
+            self.current_sub_stack.pop();
+            self.current_sub_scope_start.pop();
+        }
         // Restore caller's source line so `caller()` in subsequent code
         // reports the call-site, not the sub body's last line-mark.
         if let Some((pkg, file, line)) = self.call_stack.pop() {
@@ -7692,6 +7696,10 @@ impl Interpreter {
         self.exit_file_scope(pushed_origin);
         self.exit_named_sub_scope(stashed_scopes);
         self.exit_closure_env(closure_guard);
+        if pushed_sub_name {
+            self.current_sub_stack.pop();
+            self.current_sub_scope_start.pop();
+        }
         if let Some((pkg, file, line)) = self.call_stack.pop() {
             self.current_line = line;
             self.current_file = file;
