@@ -12070,6 +12070,17 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                 false
             };
             if no_atom {
+                // `(*)` / `(*VERB)` is reference perls "verb" group
+                // syntax — report "Unknown verb" instead of
+                // "Quantifier follows nothing" when the matched
+                // form looks like an empty `(*)` or unknown verb.
+                if c == '*' && i >= 1 && chars[i - 1] == '(' {
+                    let prefix: String = chars[..=i].iter().collect();
+                    let suffix: String = chars[i + 1..].iter().collect();
+                    return Some(format!(
+                        "Unknown verb in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                    ));
+                }
                 let prefix: String = chars[..=i].iter().collect();
                 let suffix: String = chars[i + 1..].iter().collect();
                 return Some(format!(
