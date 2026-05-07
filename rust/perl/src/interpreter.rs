@@ -9529,6 +9529,7 @@ impl Interpreter {
         }
         let (pattern, flags) = unwrap_qr(&pattern, flags);
         let pattern = perl_backslash_n(&pattern);
+        let pattern = strip_regex_comments(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -9616,6 +9617,7 @@ impl Interpreter {
         // peel it back out so the regex engine sees a plain pattern.
         let (pattern, flags) = unwrap_qr(&pattern, flags);
         let pattern = perl_backslash_n(&pattern);
+        let pattern = strip_regex_comments(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -12554,6 +12556,64 @@ fn perl_hex(s: &str) -> i64 {
 /// Perl's `$` (in non-/m mode) matches end-of-string OR just before a
 /// final newline; Rust's `$` only matches end-of-string. Rewrite each
 /// unescaped, non-class-character `$` that appears at end-of-pattern,
+/// Strip Perl-style `(?#…)` regex comments. The Rust regex crate
+/// doesn't recognise this construct, so leaving it in turns the
+/// comment text into part of the match. Skips inside `[…]` classes
+/// and respects `\(` / `\)` escapes.
+fn strip_regex_comments(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class
+            && c == '('
+            && i + 2 < chars.len()
+            && chars[i + 1] == '?'
+            && chars[i + 2] == '#'
+        {
+            // Skip until the matching `)`. Backslash-escapes inside
+            // are honoured so `\)` doesn't terminate the comment.
+            let mut k = i + 3;
+            while k < chars.len() {
+                if chars[k] == '\\' && k + 1 < chars.len() {
+                    k += 2;
+                    continue;
+                }
+                if chars[k] == ')' {
+                    k += 1;
+                    break;
+                }
+                k += 1;
+            }
+            i = k;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 /// before `|`, or before `)` into `(?:\n?$)`. Skips alternations and
 /// inner subexpressions only minimally — it's a heuristic, not a full
 /// regex parser.
