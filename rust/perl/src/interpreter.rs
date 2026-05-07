@@ -190,6 +190,15 @@ pub struct Interpreter {
     /// `@_` aliasing with post-hoc writeback. Enough for
     /// `autov($href->{b})` / `sub { $_[0] = 23 }`.
     last_popped_underscore: Option<Vec<Value>>,
+    /// Stack of caller arg-expression lists, one frame per active sub
+    /// call. When `$_[i] = X` is assigned inside a sub, the top frame's
+    /// entry at index `i` (if it's an lvalue shape) is also assigned —
+    /// so the source array element / hash slot updates immediately
+    /// rather than waiting for `last_popped_underscore` writeback at
+    /// sub return. Without this, `is $plink[0], 2` inside a sub that
+    /// just did `$_[0] = 2` reads the stale value (op/array tests
+    /// 130-131).
+    underscore_arg_sources: Vec<Vec<Expr>>,
     /// Lexical `use bytes` depth. Incremented by `use bytes`, decremented
     /// by `no bytes` or scope exit; when > 0, builtins like `length`,
     /// `chr` behave in byte-mode (count/emit UTF-8 bytes rather than
@@ -444,6 +453,7 @@ impl Interpreter {
             pos_offsets: HashMap::new(),
             readonly_vars: std::collections::HashSet::new(),
             last_popped_underscore: None,
+            underscore_arg_sources: Vec::new(),
             bytes_mode_saves: Vec::new(),
             bytes_mode: false,
             strict_vars_saves: Vec::new(),
@@ -4341,7 +4351,9 @@ impl Interpreter {
                 match callee_val {
                     Value::CodeRef(name) => {
                         if let Some((_params, body)) = self.subs.get(&name).cloned() {
+                            self.underscore_arg_sources.push(args.to_vec());
                             let ret = self.call_sub_named(&body, &arg_vals, Some(&name));
+                            self.underscore_arg_sources.pop();
                             if let Some(final_u) = self.last_popped_underscore.take() {
                                 let pair_count = args.len().min(final_u.len()).min(arg_vals.len());
                                 for i in 0..pair_count {
@@ -7420,7 +7432,9 @@ impl Interpreter {
                         for arg in args.iter() {
                             self.autoviv_lvalue_for_call(arg);
                         }
+                        self.underscore_arg_sources.push(args.to_vec());
                         let ret = self.call_sub_named(&body, &arg_vals, Some(candidate));
+                        self.underscore_arg_sources.pop();
                         if let Some(final_u) = self.last_popped_underscore.take() {
                             let pair_count = args.len().min(final_u.len()).min(arg_vals.len());
                             for i in 0..pair_count {
@@ -9854,6 +9868,36 @@ impl Interpreter {
             }
             Expr::ArrayElement(name, index) => {
                 let raw = self.eval_expr(index).to_num() as i64;
+                // `$_[i] = X` inside a sub: also assign through to the
+                // call-site arg expression so reads of the source slot
+                // (e.g. `$plink[0]`) inside the sub see the updated
+                // value immediately, not waiting for sub-return
+                // writeback. This unblocks op/array tests 130-131,
+                // 133, 135 where `is $plink[0], 2` runs after
+                // `$_[0] = 2` in the same sub. Only mirror when @_
+                // really aliases a 1:1 source position; out-of-range
+                // and non-lvalue-shape entries are skipped.
+                if name == "_"
+                    && raw >= 0
+                    && let Some(sources) = self.underscore_arg_sources.last().cloned()
+                {
+                    let i = raw as usize;
+                    if let Some(src) = sources.get(i)
+                        && is_lvalue_shape(src)
+                    {
+                        // Recurse into assign_to with the source
+                        // expression; pending_flow propagation gives
+                        // the test the chance to catch errors via
+                        // `eval { $_[i] = … }` inside the sub.
+                        let saved = self.underscore_arg_sources.pop();
+                        self.assign_to(src, val.clone());
+                        if let Some(s) = saved {
+                            self.underscore_arg_sources.push(s);
+                        }
+                        // Fall through to also update @_[i] so the
+                        // sub's later reads of `$_[i]` see the value.
+                    }
+                }
                 let mut arr = self.get_array(name);
                 let idx = if raw < 0 {
                     let from_end = arr.len() as i64 + raw;
