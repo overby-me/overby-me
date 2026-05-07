@@ -7,6 +7,40 @@ use crate::options::Options;
 use crate::tls::{InsecureVerifier, make_tls_config};
 use crate::url::ParsedUrl;
 
+/// Match --connect-to entries ("HOST1:PORT1:HOST2:PORT2") against the
+/// requested host/port. An empty HOST1 or PORT1 acts as a wildcard. Returns
+/// the (host, port) we should actually connect to.
+fn connect_to_override(host: &str, port: u16, entries: &[String]) -> Option<(String, u16)> {
+    let host_norm = host.trim_end_matches('.').to_ascii_lowercase();
+    for entry in entries {
+        let parts: Vec<&str> = entry.splitn(4, ':').collect();
+        if parts.len() != 4 {
+            continue;
+        }
+        let (h1, p1, h2, p2) = (parts[0], parts[1], parts[2], parts[3]);
+        if !h1.is_empty() && h1.trim_end_matches('.').to_ascii_lowercase() != host_norm {
+            continue;
+        }
+        if !p1.is_empty() && p1.parse::<u16>().ok() != Some(port) {
+            continue;
+        }
+        let new_host = if h2.is_empty() {
+            host.to_string()
+        } else {
+            h2.to_string()
+        };
+        let new_port = if p2.is_empty() {
+            port
+        } else if let Ok(p) = p2.parse::<u16>() {
+            p
+        } else {
+            port
+        };
+        return Some((new_host, new_port));
+    }
+    None
+}
+
 /// Match --resolve entries ("host:port:addr") against the requested host:port.
 /// Returns the destination "addr:port" string when a match is found.
 /// Hostnames match case-insensitively and a trailing dot is ignored on either side.
@@ -141,6 +175,8 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
     // The decision about plain proxy vs CONNECT tunnel is handled separately.
     let (connect_host, connect_port) = if let Some(ref proxy) = opts.proxy {
         parse_proxy(proxy)?
+    } else if let Some((h, p)) = connect_to_override(&url.host, url.port, &opts.connect_tos) {
+        (h, p)
     } else {
         (url.host.clone(), url.port)
     };
@@ -164,14 +200,18 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
     };
 
     // Resolve DNS first, so DNS failures can be distinguished from connection failures.
+    let dns_kind = if opts.proxy.is_some() {
+        "proxy"
+    } else {
+        "host"
+    };
     let addrs: Vec<_> = std::net::ToSocketAddrs::to_socket_addrs(&addr)
-        .map_err(|e| format!("DNS resolution failed for {}: {e}", connect_host))?
+        .map_err(|e| format!("DNS resolution failed for {dns_kind} {connect_host}: {e}"))?
         .collect();
 
     if addrs.is_empty() {
         return Err(format!(
-            "DNS resolution failed for {}: no addresses returned",
-            connect_host
+            "DNS resolution failed for {dns_kind} {connect_host}: no addresses returned"
         ));
     }
 

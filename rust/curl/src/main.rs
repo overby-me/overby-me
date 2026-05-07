@@ -339,6 +339,8 @@ fn main() {
             o.upload_file = puo.upload_file.clone();
             o.head = puo.head;
             o.get = puo.get;
+            o.connect_tos = puo.connect_tos.clone();
+            o.no_basic = puo.no_basic;
             o
         } else {
             opts.clone()
@@ -695,6 +697,7 @@ fn main() {
                 } else {
                     None
                 };
+                let used_cd_filename = cd_filename.is_some();
                 // -J / -O: an explicit `-o` always wins over the
                 // Content-Disposition or URL-derived name (tests 1368-1371).
                 let explicit_o = opts.outputs.get(url_idx).cloned();
@@ -804,7 +807,8 @@ fn main() {
                     || (fail_http_error && !opts.fail_with_body)
                     || resume_range_refused
                     || resume_fully_covered
-                    || time_cond_not_met;
+                    || time_cond_not_met
+                    || (resp.status == 304 && opts.etag_compare.is_some());
 
                 // Write output.
                 let write_body = !effective_opts.head && !skip_body;
@@ -848,6 +852,24 @@ fn main() {
                     exit_code = 23;
                 }
 
+                // -J without explicit -o refuses to overwrite a file that
+                // already exists (CURLE_WRITE_ERROR / exit 23, test 1460).
+                let mut j_refuse_overwrite = false;
+                if opts.remote_header_name
+                    && used_cd_filename
+                    && explicit_o.is_none()
+                    && !nc_failed
+                    && let Some(ref p) = output_path
+                    && p.exists()
+                {
+                    eprintln!(
+                        "curl: (23) Failed to open the file {}: File exists",
+                        p.display()
+                    );
+                    exit_code = 23;
+                    j_refuse_overwrite = true;
+                }
+
                 let write_file = |path: &PathBuf, data: &[u8]| -> std::io::Result<()> {
                     use std::io::Write;
                     let mut f = fs::OpenOptions::new()
@@ -859,7 +881,7 @@ fn main() {
                     f.write_all(data)
                 };
 
-                if nc_failed {
+                if nc_failed || j_refuse_overwrite {
                     // Skip writing the body — exit 23 already set.
                 } else if let Some(ref path) = output_path {
                     if opts.create_dirs
@@ -978,7 +1000,10 @@ fn main() {
                             url_idx,
                             exit_code,
                             &error_msg,
-                            opts.referer.as_deref().unwrap_or(""),
+                            resp.final_referer
+                                .as_deref()
+                                .or(opts.referer.as_deref())
+                                .unwrap_or(""),
                         );
                         chunks_by_dest.push((dest, gated, formatted));
                     }
@@ -1046,6 +1071,8 @@ fn main() {
                     exit_code = 100; // CURLE_TOO_MANY_HEADERS (test 747)
                 } else if e.starts_with("onion: ") {
                     exit_code = 6; // Couldn't resolve host (RFC 7686 refusal)
+                } else if e.contains("DNS resolution failed for proxy") {
+                    exit_code = 5; // CURLE_COULDNT_RESOLVE_PROXY
                 } else if e.contains("DNS resolution failed") {
                     exit_code = 6; // Could not resolve host
                 } else if e.contains("connection failed") || e.contains("Connection refused") {

@@ -98,6 +98,7 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
     if let Some(ref upload) = opts.upload_file
         && path.ends_with('/')
         && upload.to_str() != Some("-")
+        && upload.to_str() != Some(".")
         && let Some(name) = upload.file_name().and_then(|n| n.to_str())
     {
         path.push_str(&encode_path_component(name));
@@ -158,6 +159,7 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
     let auth_user = opts.user.as_deref().or(url.userinfo.as_deref());
     if let Some(user) = auth_user
         && !opts.defer_auth
+        && !opts.no_basic
     {
         let encoded = base64_encode(user.as_bytes());
         req.push_str(&format!("Authorization: Basic {encoded}\r\n"));
@@ -312,7 +314,10 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
     // Chunked request encoding: either the user set `Transfer-Encoding:
     // chunked` explicitly, or we inferred it because the body length is
     // unknown ahead of time (stdin upload via `-T -` on HTTP/1.1).
-    let is_stdin_upload = opts.upload_file.as_deref().and_then(|p| p.to_str()) == Some("-");
+    let is_stdin_upload = matches!(
+        opts.upload_file.as_deref().and_then(|p| p.to_str()),
+        Some("-" | ".")
+    );
     let http10 = opts.http_version.as_deref() == Some("1.0");
     let user_chunked = opts.headers.iter().any(|(k, v)| {
         k.eq_ignore_ascii_case("transfer-encoding") && v.to_ascii_lowercase().contains("chunked")
@@ -538,7 +543,7 @@ fn build_body(opts: &Options, boundary: Option<&str>) -> Option<Vec<u8>> {
     }
 
     if let Some(ref path) = opts.upload_file {
-        if path.to_str() == Some("-") {
+        if matches!(path.to_str(), Some("-" | ".")) {
             let mut data = Vec::new();
             let _ = io::stdin().read_to_end(&mut data);
             return Some(data);
@@ -1388,7 +1393,10 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
 
     // HTTP/1.0 + stdin upload: no chunked encoding available so we can't ship
     // the body without an a-priori Content-Length. curl exits 25 (test 1069).
-    let is_stdin_upload = opts.upload_file.as_deref().and_then(|p| p.to_str()) == Some("-");
+    let is_stdin_upload = matches!(
+        opts.upload_file.as_deref().and_then(|p| p.to_str()),
+        Some("-" | ".")
+    );
     let http10 = opts.http_version.as_deref() == Some("1.0");
     let user_chunked = opts.headers.iter().any(|(k, v)| {
         k.eq_ignore_ascii_case("transfer-encoding") && v.to_ascii_lowercase().contains("chunked")
@@ -1528,6 +1536,16 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
     loop {
         let url = parse_url(&current_url)?;
 
+        // Lift URL-embedded userinfo into opts.user so it persists across
+        // relative-path redirects — those redirects build a new URL without
+        // userinfo, so without this lift the Authorization header would
+        // disappear on same-host redirects (test 2081).
+        if opts.user.is_none()
+            && let Some(ref ui) = url.userinfo
+        {
+            opts.user = Some(ui.clone());
+        }
+
         let resp = execute_request(&url, &opts, redirect_headers.len())?;
         connects += 1;
 
@@ -1610,6 +1628,7 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                 final_resp.num_redirects = redirects;
                 final_resp.max_redirects_reached = true;
                 final_resp.final_url = Some(current_url.clone());
+                final_resp.final_referer = opts.referer.clone();
                 final_resp.redirect_url = redirect_url;
                 return Ok(final_resp);
             }
@@ -1622,6 +1641,7 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                     final_resp.num_connects = connects;
                     final_resp.num_redirects = redirects;
                     final_resp.final_url = Some(current_url.clone());
+                    final_resp.final_referer = opts.referer.clone();
                     return Ok(final_resp);
                 }
 
@@ -1742,6 +1762,7 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                         final_resp.num_redirects = redirects - 1;
                         final_resp.proto_redir_blocked = true;
                         final_resp.final_url = Some(current_url.clone());
+                        final_resp.final_referer = opts.referer.clone();
                         final_resp.redirect_url = Some(current_url.clone());
                         return Ok(final_resp);
                     }
@@ -1832,6 +1853,7 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
         final_resp.num_connects = connects;
         final_resp.num_redirects = redirects;
         final_resp.final_url = Some(current_url.clone());
+        final_resp.final_referer = opts.referer.clone();
         final_resp.redirect_url = redirect_url;
         return Ok(final_resp);
     }

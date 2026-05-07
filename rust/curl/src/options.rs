@@ -21,6 +21,8 @@ pub(crate) struct PerUrlOptions {
     pub(crate) upload_file: Option<PathBuf>,
     pub(crate) head: bool,
     pub(crate) get: bool,
+    pub(crate) connect_tos: Vec<String>,
+    pub(crate) no_basic: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -50,6 +52,7 @@ pub struct Options {
     pub(crate) tr_encoding: bool,
     pub(crate) max_redirs: usize,
     pub(crate) proto_redir: Option<String>,
+    pub(crate) proto_default: Option<String>,
     pub(crate) max_filesize: Option<u64>,
     pub(crate) retry_max_time: Option<u64>,
     pub(crate) verbose: bool,
@@ -83,6 +86,9 @@ pub struct Options {
     pub(crate) request_target: Option<String>,
     /// "host:port:addr" entries for --resolve.
     pub(crate) resolves: Vec<String>,
+    /// "HOST1:PORT1:HOST2:PORT2" entries for --connect-to.
+    pub(crate) connect_tos: Vec<String>,
+    pub(crate) no_basic: bool,
     pub(crate) cacert: Option<PathBuf>,
     pub(crate) cert: Option<PathBuf>,
     pub(crate) cert_key: Option<PathBuf>,
@@ -149,6 +155,7 @@ impl Default for Options {
             tr_encoding: false,
             max_redirs: 50,
             proto_redir: None,
+            proto_default: None,
             max_filesize: None,
             retry_max_time: None,
             verbose: false,
@@ -181,6 +188,8 @@ impl Default for Options {
             path_as_is: false,
             request_target: None,
             resolves: Vec::new(),
+            connect_tos: Vec::new(),
+            no_basic: false,
             cacert: None,
             cert: None,
             cert_key: None,

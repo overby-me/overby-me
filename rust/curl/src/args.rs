@@ -172,6 +172,8 @@ fn snapshot_per_url(opts: &Options) -> PerUrlOptions {
         upload_file: opts.upload_file.clone(),
         head: opts.head,
         get: opts.get,
+        connect_tos: opts.connect_tos.clone(),
+        no_basic: opts.no_basic,
     }
 }
 
@@ -673,6 +675,18 @@ pub(crate) fn parse_args() -> Options {
                 let val = next_arg(&args, i, "--proto-redir");
                 opts.proto_redir = Some(val.to_string());
             }
+            "--proto-default" => {
+                i += 1;
+                let val = next_arg(&args, i, "--proto-default");
+                // Only http/https are real schemes we recognize. Anything else
+                // is unsupported (exit 1, test 2044).
+                let lower = val.to_ascii_lowercase();
+                if lower != "http" && lower != "https" {
+                    eprintln!("curl: (1) Unsupported protocol scheme '{val}'");
+                    process::exit(1);
+                }
+                opts.proto_default = Some(lower);
+            }
             "-G" | "--get" => {
                 opts.get = true;
             }
@@ -721,6 +735,11 @@ pub(crate) fn parse_args() -> Options {
                 i += 1;
                 let val = next_arg(&args, i, "--resolve");
                 opts.resolves.push(val);
+            }
+            "--connect-to" => {
+                i += 1;
+                let val = next_arg(&args, i, "--connect-to");
+                opts.connect_tos.push(val);
             }
             "-K" | "--config" => {
                 i += 1;
@@ -785,7 +804,12 @@ pub(crate) fn parse_args() -> Options {
                 opts.defer_auth = true;
             }
             "--basic" => {
-                // Default — -u alone sends Basic auth on first request.
+                opts.no_basic = false;
+            }
+            "--no-basic" => {
+                // Disables Basic auth for this URL group; -u credentials are
+                // still parsed but not sent as Authorization (test 2040).
+                opts.no_basic = true;
             }
             "-z" | "--time-cond" => {
                 i += 1;
@@ -843,6 +867,8 @@ pub(crate) fn parse_args() -> Options {
                 opts.upload_file = None;
                 opts.head = false;
                 opts.get = false;
+                opts.connect_tos.clear();
+                opts.no_basic = false;
                 expecting_url_after_next = true;
                 i += 1;
                 continue;
@@ -986,6 +1012,8 @@ pub(crate) fn parse_args() -> Options {
                                 opts.upload_file = None;
                                 opts.head = false;
                                 opts.get = false;
+                                opts.connect_tos.clear();
+                                opts.no_basic = false;
                             }
                             'N' => {} // --no-buffer, ignored
                             'p' => opts.proxy_tunnel = true,
