@@ -647,6 +647,68 @@
         name = "cygwin";
       }
 
+      # --- t/uni/ (selected) ---
+      {
+        category = "uni";
+        name = "eval";
+      }
+      {
+        category = "uni";
+        name = "fold";
+      }
+      {
+        category = "uni";
+        name = "greek";
+      }
+
+      # --- t/class/ (selected) ---
+      {
+        category = "class";
+        name = "accessor";
+      }
+      {
+        category = "class";
+        name = "class";
+      }
+      {
+        category = "class";
+        name = "construct";
+      }
+      {
+        category = "class";
+        name = "destruct";
+      }
+      {
+        category = "class";
+        name = "field";
+      }
+      {
+        category = "class";
+        name = "gh22169";
+      }
+      {
+        category = "class";
+        name = "inherit";
+      }
+      {
+        category = "class";
+        name = "method";
+      }
+      {
+        category = "class";
+        name = "phasers";
+      }
+      {
+        category = "class";
+        name = "threads";
+      }
+
+      # --- t/japh/ (selected) ---
+      {
+        category = "japh";
+        name = "abigail";
+      }
+
       # --- t/mro/ (selected) ---
       {
         category = "mro";
