@@ -4925,6 +4925,7 @@ fn tool_objdump(args: &[String]) -> i32 {
     let mut source_comment: Option<String> = None;
     let mut show_line_numbers = false;
     let mut show_debug_ranges = false;
+    let mut wide = false;
     let mut input_target: Option<String> = None;
     let mut show_info = false;
     let mut show_full_contents = false;
@@ -5001,6 +5002,9 @@ fn tool_objdump(args: &[String]) -> i32 {
                 }
                 "-l" | "--line-numbers" => {
                     show_line_numbers = true;
+                }
+                "-w" | "--wide" => {
+                    wide = true;
                 }
                 "-h" | "--section-headers" | "--headers" => show_headers = true,
                 "-t" | "--syms" => show_symbols = true,
@@ -5207,6 +5211,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                     show_source,
                     source_comment.as_deref(),
                     show_line_numbers,
+                    wide,
                 );
             }
         } else if let Some(info) = parse_srec(&data) {
@@ -5272,6 +5277,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                         show_source,
                         source_comment.as_deref(),
                         show_line_numbers,
+                        wide,
                     );
                 }
             }
@@ -5298,6 +5304,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                 show_source,
                 source_comment.as_deref(),
                 show_line_numbers,
+                wide,
             );
         }
     }
@@ -5413,6 +5420,7 @@ fn objdump_process_object(
     show_source: bool,
     source_comment: Option<&str>,
     show_line_numbers: bool,
+    wide: bool,
 ) {
     use object::ObjectSymbol as _;
 
@@ -5540,7 +5548,15 @@ fn objdump_process_object(
             .collect();
 
         println!("\nSections:");
-        println!("Idx Name          Size      VMA               LMA               File off  Algn");
+        if wide {
+            println!(
+                "Idx Name               Size      VMA               LMA               File off  Algn  Flags"
+            );
+        } else {
+            println!(
+                "Idx Name          Size      VMA               LMA               File off  Algn"
+            );
+        }
         for (i, section) in alloc_sections.iter().enumerate() {
             let name = section.name().unwrap_or("");
             let size = section.size();
@@ -5568,10 +5584,6 @@ fn objdump_process_object(
                 _ => (0u64, 1u32),
             };
 
-            println!(
-                "{i:>3} {name:<13} {size:08x}  {addr:016x}  {addr:016x}  {file_off:08x}  2**{align_pow}"
-            );
-
             let mut flags_list: Vec<&str> = Vec::new();
             let is_nobits = sh_type == 8;
             if !is_nobits {
@@ -5594,7 +5606,17 @@ fn objdump_process_object(
             } else if sh_flags & 0x2 != 0 && !is_nobits {
                 flags_list.push("DATA");
             }
-            println!("                  {}", flags_list.join(", "));
+            if wide {
+                println!(
+                    "{i:>3} {name:<18} {size:08x}  {addr:016x}  {addr:016x}  {file_off:08x}  2**{align_pow}  {}",
+                    flags_list.join(", ")
+                );
+            } else {
+                println!(
+                    "{i:>3} {name:<13} {size:08x}  {addr:016x}  {addr:016x}  {file_off:08x}  2**{align_pow}"
+                );
+                println!("                  {}", flags_list.join(", "));
+            }
         }
     }
 

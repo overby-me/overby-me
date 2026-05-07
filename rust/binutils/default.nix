@@ -209,8 +209,8 @@
       }
       {
         exp = "objdump.exp";
-        minPass = 28;
-        maxFail = 4;
+        minPass = 29;
+        maxFail = 3;
       }
       {
         exp = "objcopy.exp";
