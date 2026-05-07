@@ -356,6 +356,14 @@
       }
       {
         category = "op";
+        name = "bool";
+      }
+      {
+        category = "comp";
+        name = "cmdopt";
+      }
+      {
+        category = "op";
         name = "coresubs";
       }
       {
@@ -751,6 +759,10 @@
       {
         category = "perf";
         name = "opcount";
+      }
+      {
+        category = "perf";
+        name = "optree";
       }
       {
         category = "perf";

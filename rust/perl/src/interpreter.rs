@@ -2135,7 +2135,7 @@ impl Interpreter {
                 Flow::None
             }
 
-            Stmt::Use(module, _args) => {
+            Stmt::Use(module, _args, end_line) => {
                 // Pragmas / widely-used-but-we-ignore modules: silent success.
                 // Anything else: try to find `Module/Name.pm` in @INC and fail
                 // with Perl's exact error format if absent, so suites that
@@ -2227,7 +2227,13 @@ impl Interpreter {
                 } else {
                     self.current_file.clone()
                 };
-                let line = self.current_line;
+                // Reference perl blames the `use` statement's terminating
+                // line (the `;` for a multi-line `use Foo qw(...)`).
+                let line = if *end_line > 0 {
+                    *end_line
+                } else {
+                    self.current_line
+                };
                 // Reference perl omits the "you may need to install"
                 // hint for single-letter module names (`use B;` etc.),
                 // empirically confirmed across 5.42 Perl. Match that.
@@ -11673,7 +11679,7 @@ impl Interpreter {
             .collect();
         let inner_uses_strict = stmts
             .iter()
-            .any(|s| matches!(s, Stmt::Use(m, _) if m == "strict"));
+            .any(|s| matches!(s, Stmt::Use(m, _, _) if m == "strict"));
         if (self.strict_vars || inner_uses_strict)
             && let Some(err) =
                 strict_vars_check_with_known(&stmts, &self.current_file, &known_outer)
@@ -12216,9 +12222,12 @@ fn compile_time_use_check_in_inner(
             Stmt::FileMark(f) => {
                 effective_path = f.clone();
             }
-            Stmt::Use(module, _args) => {
+            Stmt::Use(module, _args, end_line) => {
                 if PRAGMAS.contains(&module.as_str()) {
                     continue;
+                }
+                if *end_line > 0 {
+                    *line = *end_line;
                 }
                 let filename = format!("{}.pm", module.replace("::", "/"));
                 // Honour `$INC{filename}` set by an earlier `BEGIN`

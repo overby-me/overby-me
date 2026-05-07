@@ -1359,8 +1359,12 @@ impl Parser {
         } else {
             self.parse_list_expr()
         };
+        // `current_line()` here refers to the line of the next token —
+        // for a typical `use Module qw(...);` that's the `;` line, which
+        // is what reference perl blames on a missing-module abort.
+        let end_line = self.current_line();
         self.eat(&Token::Semi);
-        Stmt::Use(module, args)
+        Stmt::Use(module, args, end_line)
     }
 
     // --- Expression parsing with precedence climbing ---

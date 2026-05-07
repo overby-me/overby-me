@@ -285,7 +285,10 @@ pub enum Stmt {
     Package(String),
 
     // Use/require
-    Use(String, Vec<Expr>),
+    /// `use Module [LIST];` — the third field is the line of the
+    /// terminating `;` (or last token), used so the missing-module
+    /// diagnostic blames the statement's end line as reference perl does.
+    Use(String, Vec<Expr>, usize),
     Require(Expr),
 
     // BEGIN/END. The optional usize on Begin is the source line of the
