@@ -9749,6 +9749,20 @@ impl Interpreter {
                             self.subs.insert(local_name, body);
                         }
                     }
+                    Value::ArrayRef(r) => {
+                        // `*foo = \@array` — install the backing storage
+                        // as the array slot for `foo`. Subsequent reads
+                        // / writes through @foo see the same elements.
+                        self.aliased_arrays.insert(local_name, r);
+                    }
+                    Value::HashRef(r) => {
+                        // `*foo = \%hash` — same idea, hash slot.
+                        self.aliased_hashes.insert(local_name, r);
+                    }
+                    Value::ScalarRef(r) => {
+                        // `*foo = \$scalar` — alias the scalar slot.
+                        self.aliased_vars.insert(local_name, r);
+                    }
                     _ => {}
                 }
             }
