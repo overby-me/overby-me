@@ -1463,7 +1463,11 @@ impl Parser {
     // --- Expression parsing with precedence climbing ---
 
     pub fn parse_expr(&mut self) -> Expr {
-        self.parse_assign()
+        // Perl precedence: `not`, `and`, `or`/`xor` are lower-precedence
+        // than `=` (so `$r = expr or die` parses as `($r = expr) or die`).
+        // Walk down low → high: or/xor → and → not → assignment → ternary
+        // → … → primary.
+        self.parse_or()
     }
 
     fn parse_assign(&mut self) -> Expr {
@@ -1572,9 +1576,11 @@ impl Parser {
     }
 
     fn parse_range(&mut self) -> Expr {
-        let left = self.parse_or();
+        // `or`/`and`/`not` are *lower* precedence than `..` — drop down
+        // into the logical-or tier directly.
+        let left = self.parse_log_or();
         if self.eat(&Token::DotDot) {
-            let right = self.parse_or();
+            let right = self.parse_log_or();
             Expr::Range(Box::new(left), Box::new(right))
         } else {
             left
@@ -1615,7 +1621,10 @@ impl Parser {
             let expr = self.parse_not();
             Expr::UnaryOp(UnaryOp::Not, Box::new(expr))
         } else {
-            self.parse_log_or()
+            // `not`/`and`/`or` are lower precedence than `=` — drop down
+            // into the assignment-and-ternary tier so `$r = … or die`
+            // parses as `($r = …) or die` (matching Perl precedence).
+            self.parse_assign()
         }
     }
 
