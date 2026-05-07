@@ -1255,6 +1255,17 @@ impl Lexer {
                     }
                     let ident = self.read_ident();
 
+                    // `__END__` and `__DATA__` end source-code parsing.
+                    // Everything after is data (accessible via the DATA
+                    // filehandle for `__DATA__`, ignored for `__END__`).
+                    // Reference perl stops tokenising at this point; we
+                    // mirror that by advancing self.pos to EOF so the
+                    // outer loop terminates cleanly.
+                    if ident == "__END__" || ident == "__DATA__" {
+                        self.pos = self.input.len();
+                        break;
+                    }
+
                     // Check for => (fat comma) - the ident is auto-quoted.
                     // Skip ONLY whitespace here, not comments — `#` is a
                     // valid quote-operator delimiter (`q#hello#`) and
