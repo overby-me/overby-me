@@ -4558,6 +4558,26 @@ impl Interpreter {
         match op {
             UnaryOp::Neg => {
                 let val = self.eval_expr(expr);
+                // Perl's unary minus quirk: when the operand is a
+                // string starting with an ASCII letter or `_`, prepend
+                // `-`. If it starts with `-`, swap to `+`; with `+`,
+                // swap to `-`. Otherwise numeric negate. `use integer`
+                // does NOT change this textual behaviour.
+                if let Value::Str(s) = &val
+                    && let Some(first) = s.chars().next()
+                {
+                    if first == '-' {
+                        let rest: String = s.chars().skip(1).collect();
+                        return Value::Str(format!("+{rest}"));
+                    }
+                    if first == '+' {
+                        let rest: String = s.chars().skip(1).collect();
+                        return Value::Str(format!("-{rest}"));
+                    }
+                    if first.is_ascii_alphabetic() || first == '_' {
+                        return Value::Str(format!("-{s}"));
+                    }
+                }
                 Value::Num(-val.to_num())
             }
             UnaryOp::Pos => {
