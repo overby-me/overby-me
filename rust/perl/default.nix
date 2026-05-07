@@ -614,6 +614,34 @@
         category = "op";
         name = "sleep";
       }
+      {
+        category = "op";
+        name = "threads-dirh";
+      }
+      {
+        category = "op";
+        name = "threads";
+      }
+      {
+        category = "op";
+        name = "tiehash";
+      }
+      {
+        category = "op";
+        name = "time_loop";
+      }
+      {
+        category = "op";
+        name = "try";
+      }
+      {
+        category = "op";
+        name = "ver";
+      }
+      {
+        category = "op";
+        name = "waitpid";
+      }
 
       # --- t/comp/ (selected) ---
       {
@@ -1173,6 +1201,10 @@
       {
         category = "run";
         name = "todo";
+      }
+      {
+        category = "run";
+        name = "switchx2";
       }
     ];
   in
