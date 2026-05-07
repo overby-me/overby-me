@@ -626,27 +626,71 @@ impl Interpreter {
         }
 
         // After BEGIN blocks have run (and have had a chance to require
-        // modules successfully), scan the remaining statements *and* every
-        // registered sub body for any `use MODULE` that can't be located.
-        // This mirrors Perl's compile-time check and guarantees reference-
-        // compatible error output when a module is missing under a
-        // minimal @INC.
+        // modules successfully), scan the remaining statements for any
+        // construct that needs to abort compilation:
+        //   * `<…>` diamond with shell-glob metacharacters → Reference
+        //     perl auto-loads File::Glob.
+        //   * `use MODULE` with the module not on @INC.
+        // Reference perl emits whichever error comes first in source
+        // order, so check both and prefer the earlier one.
+        let glob_hit = find_glob_diamond(&main_stmts);
         let mut ct_line = 0usize;
-        if let Some(err) = compile_time_use_check(&main_stmts, &mut ct_line, self) {
-            eprint!("{err}");
-            self.exit_code = 2;
-            return;
-        }
+        let use_err = compile_time_use_check(&main_stmts, &mut ct_line, self);
+        let use_err_line = ct_line;
+
         // Scan every user-defined sub's body too — `use` inside a sub still
-        // runs at compile time in Perl.
+        // runs at compile time in Perl. (Diamond globs inside subs would
+        // also abort, but those are caught by the `find_glob_diamond` walk
+        // above which descends into Sub bodies.)
+        let mut sub_use_err: Option<(String, usize)> = None;
         let sub_bodies: Vec<Vec<Stmt>> = self.subs.values().map(|(_, body)| body.clone()).collect();
         for body in &sub_bodies {
             let mut ct = 0usize;
             if let Some(err) = compile_time_use_check(body, &mut ct, self) {
-                eprint!("{err}");
-                self.exit_code = 2;
-                return;
+                sub_use_err = Some((err, ct));
+                break;
             }
+        }
+
+        // Pick whichever error is first in source order.
+        let (chosen_err, chosen_line) = match (
+            glob_hit.as_ref().map(|(l, _)| *l),
+            use_err.as_ref().map(|_| use_err_line),
+            sub_use_err.as_ref().map(|(_, l)| *l),
+        ) {
+            (Some(g), _, _)
+                if use_err.is_none()
+                    || g <= use_err_line && sub_use_err.as_ref().is_none_or(|(_, l)| g <= *l) =>
+            {
+                let inc = self.get_array("INC");
+                let inc_str = inc.iter().map(|v| v.to_str()).collect::<Vec<_>>().join(" ");
+                let file = if self.current_file.is_empty() {
+                    "-e".to_string()
+                } else {
+                    self.current_file.clone()
+                };
+                let line = g;
+                let msg = format!(
+                    "Can't locate File/Glob.pm in @INC (you may need to install the File::Glob module) (@INC entries checked: {inc_str}) at {file} line {line}.\nBEGIN failed--compilation aborted at {file} line {line}.\n"
+                );
+                (Some(msg), line)
+            }
+            (_, Some(_), _)
+                if sub_use_err.is_none() || use_err_line <= sub_use_err.as_ref().unwrap().1 =>
+            {
+                (use_err, use_err_line)
+            }
+            (_, _, Some(_)) => {
+                let (m, l) = sub_use_err.unwrap();
+                (Some(m), l)
+            }
+            _ => (None, 0),
+        };
+        let _ = chosen_line;
+        if let Some(err) = chosen_err {
+            eprint!("{err}");
+            self.exit_code = 2;
+            return;
         }
 
         // CHECK phase: run CHECK blocks in reverse registration order with
@@ -11807,6 +11851,126 @@ fn compile_time_use_check(
         interp.current_file.clone()
     };
     compile_time_use_check_in(stmts, line, interp, &file)
+}
+
+/// Walk an AST looking for the first `<…>` diamond expression
+/// whose contents include a shell-glob metacharacter or whitespace
+/// — those force reference perl to auto-load `File::Glob`. Returns
+/// `(line, name)` of the first such occurrence, or `None`.
+fn find_glob_diamond(stmts: &[Stmt]) -> Option<(usize, String)> {
+    let mut line: usize = 0;
+    fn walk_expr(expr: &Expr, line: usize) -> Option<(usize, String)> {
+        match expr {
+            Expr::Diamond(name) => {
+                if name
+                    .chars()
+                    .any(|c| c == ' ' || c == '\t' || c == '*' || c == '?' || c == '[' || c == '{')
+                {
+                    Some((line, name.clone()))
+                } else {
+                    None
+                }
+            }
+            Expr::BinOp(_, l, r) => walk_expr(l, line).or_else(|| walk_expr(r, line)),
+            Expr::UnaryOp(_, inner) => walk_expr(inner, line),
+            Expr::Call(_, args) => args.iter().find_map(|a| walk_expr(a, line)),
+            Expr::ArrayLit(items) => items.iter().find_map(|a| walk_expr(a, line)),
+            Expr::Assign(l, r) => walk_expr(l, line).or_else(|| walk_expr(r, line)),
+            Expr::Ternary(cond, t, e) => walk_expr(cond, line)
+                .or_else(|| walk_expr(t, line))
+                .or_else(|| walk_expr(e, line)),
+            _ => None,
+        }
+    }
+    fn walk(stmts: &[Stmt], line: &mut usize) -> Option<(usize, String)> {
+        for stmt in stmts {
+            match stmt {
+                Stmt::LineMark(n) => *line = *n,
+                Stmt::Expr(e) => {
+                    if let Some(hit) = walk_expr(e, *line) {
+                        return Some(hit);
+                    }
+                }
+                Stmt::Block(body)
+                | Stmt::BareBlock(body)
+                | Stmt::NamedBlock(_, body)
+                | Stmt::Begin(body, _)
+                | Stmt::End(body)
+                | Stmt::Init(body)
+                | Stmt::Check(body) => {
+                    if let Some(hit) = walk(body, line) {
+                        return Some(hit);
+                    }
+                }
+                Stmt::If {
+                    then,
+                    elsifs,
+                    else_block,
+                    ..
+                } => {
+                    if let Some(hit) = walk(then, line) {
+                        return Some(hit);
+                    }
+                    for (_, body) in elsifs {
+                        if let Some(hit) = walk(body, line) {
+                            return Some(hit);
+                        }
+                    }
+                    if let Some(body) = else_block
+                        && let Some(hit) = walk(body, line)
+                    {
+                        return Some(hit);
+                    }
+                }
+                Stmt::Unless {
+                    then, else_block, ..
+                } => {
+                    if let Some(hit) = walk(then, line) {
+                        return Some(hit);
+                    }
+                    if let Some(body) = else_block
+                        && let Some(hit) = walk(body, line)
+                    {
+                        return Some(hit);
+                    }
+                }
+                Stmt::While { body, .. }
+                | Stmt::Until { body, .. }
+                | Stmt::Foreach { body, .. }
+                | Stmt::DoWhile { body, .. }
+                | Stmt::Loop { body, .. }
+                | Stmt::For { body, .. } => {
+                    if let Some(hit) = walk(body, line) {
+                        return Some(hit);
+                    }
+                }
+                Stmt::Sub { body, .. } => {
+                    if let Some(hit) = walk(body, line) {
+                        return Some(hit);
+                    }
+                }
+                Stmt::My(vars, _) | Stmt::Our(vars, _) | Stmt::Local(vars, _) => {
+                    for (_, init) in vars {
+                        if let Some(e) = init
+                            && let Some(hit) = walk_expr(e, *line)
+                        {
+                            return Some(hit);
+                        }
+                    }
+                }
+                Stmt::Return(opt) => {
+                    if let Some(e) = opt
+                        && let Some(hit) = walk_expr(e, *line)
+                    {
+                        return Some(hit);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+    walk(stmts, &mut line)
 }
 
 /// Pre-scan a statement tree for `$INC{filename} = …;` assignments

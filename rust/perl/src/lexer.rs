@@ -1814,27 +1814,14 @@ impl Lexer {
                         if self.ch() == '>' {
                             self.pos += 1;
                         }
-                        // Reference perl auto-loads File::Glob whenever the
-                        // diamond's contents go beyond a bareword/$var FH name
-                        // — i.e. any shell-glob metacharacter or whitespace.
-                        // Without File::Glob installed (the typical Nix-sandbox
-                        // and -I../lib-only test environment), the load fails
-                        // at compile time and aborts the script. Emit the same
-                        // diagnostic so byte-for-byte test diffs match.
-                        if self.error.is_none()
-                            && name.chars().any(|c| {
-                                c == ' '
-                                    || c == '\t'
-                                    || c == '*'
-                                    || c == '?'
-                                    || c == '['
-                                    || c == '{'
-                            })
-                        {
-                            self.error = Some(format!(
-                                "Can't locate File/Glob.pm in @INC (you may need to install the File::Glob module) (@INC entries checked: . ../lib) at {{FILE}} line {diamond_line}.\nBEGIN failed--compilation aborted at {{FILE}} line {diamond_line}.\n"
-                            ));
-                        }
+                        // The runtime side picks up File::Glob loading
+                        // when the diamonds contents need globbing
+                        // (any shell-glob metacharacter or whitespace).
+                        // We dont produce the lex-time error any more
+                        // — at lex time we dont know the real @INC,
+                        // and tests that customise @INC need the
+                        // diagnostic to reflect it.
+                        let _ = diamond_line;
                         tokens.push(Token::Diamond(name));
                     } else {
                         tokens.push(Token::NumLt);
