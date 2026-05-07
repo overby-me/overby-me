@@ -3714,6 +3714,7 @@ fn readelf_notes<'data, Elf: FileHeader>(
     endian: Elf::Endian,
 ) {
     let is_le = elf.elf_header().e_ident().data == 1;
+    let is_64 = elf.elf_header().is_class_64();
     let Ok(sections) = elf.elf_header().sections(endian, data) else {
         return;
     };
@@ -3733,9 +3734,13 @@ fn readelf_notes<'data, Elf: FileHeader>(
             continue;
         }
         let bytes = &data[off as usize..(off + size) as usize];
+        let is_build_attrs = sec_name == ".gnu.build.attributes";
         println!();
         println!("Displaying notes found in: {}", sec_name);
         println!("  Owner                Data size 	Description");
+        // For GNU build attributes, track previous addresses to inherit.
+        let mut prev_start: u64 = 0;
+        let mut prev_end: u64 = 0;
         let mut p = 0usize;
         while p + 12 <= bytes.len() {
             let read_u32 = |b: &[u8]| -> u32 {
@@ -3745,6 +3750,17 @@ fn readelf_notes<'data, Elf: FileHeader>(
                     u32::from_be_bytes([b[0], b[1], b[2], b[3]])
                 }
             };
+            let read_u64 = |b: &[u8]| -> u64 {
+                if is_le {
+                    u64::from_le_bytes([
+                        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+                    ])
+                } else {
+                    u64::from_be_bytes([
+                        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+                    ])
+                }
+            };
             let namesz = read_u32(&bytes[p..p + 4]) as usize;
             let descsz = read_u32(&bytes[p + 4..p + 8]) as usize;
             let ntype = read_u32(&bytes[p + 8..p + 12]);
@@ -3752,24 +3768,180 @@ fn readelf_notes<'data, Elf: FileHeader>(
             if p + namesz > bytes.len() {
                 break;
             }
-            let name_end = bytes[p..p + namesz]
-                .iter()
-                .position(|&b| b == 0)
-                .unwrap_or(namesz);
-            let owner = std::str::from_utf8(&bytes[p..p + name_end]).unwrap_or("");
+            let name_raw = &bytes[p..p + namesz];
+            let name_end = name_raw.iter().position(|&b| b == 0).unwrap_or(namesz);
+            let owner_bytes = &name_raw[..name_end];
+            let owner = std::str::from_utf8(owner_bytes).unwrap_or("");
             p += namesz;
             // align to 4
             p = (p + 3) & !3;
             if p + descsz > bytes.len() {
                 break;
             }
-            let _desc = &bytes[p..p + descsz];
+            let desc = &bytes[p..p + descsz];
             p += descsz;
             p = (p + 3) & !3;
-            let type_str = elf_note_type_name(owner, ntype);
-            println!("  {:<20} 0x{:08x}	{}", owner, descsz, type_str);
+
+            if is_build_attrs && owner_bytes.starts_with(b"GA") && owner_bytes.len() >= 4 {
+                // GNU build attribute name layout:
+                //   "GA" + type marker (1 char: $/*/+/!) + identifier byte + value
+                let type_marker = owner_bytes[2] as char;
+                let attr_id = owner_bytes[3];
+                // For known identifiers (1..=8), name is in <>, value follows.
+                // For unknown identifiers, the rest is a "key:value" string
+                // (printable ASCII identifier name).
+                let (attr_name, value_off, separator) = match attr_id {
+                    1 => ("<version>", 4, ""),
+                    2 => ("<stack prot>", 4, ""),
+                    3 => ("<relro>", 4, ""),
+                    4 => ("<stack size>", 4, ""),
+                    5 => ("<tool>", 4, ""),
+                    6 => ("<ABI>", 4, ""),
+                    7 => ("<PIC>", 4, ""),
+                    8 => ("<short enum>", 4, ""),
+                    _ => {
+                        if (0x20..=0x7e).contains(&attr_id) {
+                            // Printable identifier: "name:value" format
+                            ("", 3, "")
+                        } else {
+                            ("<unknown>", 4, "")
+                        }
+                    }
+                };
+                let _ = separator;
+                let value = &owner_bytes[value_off..];
+                // For unknown printable identifiers, find the colon-separated
+                // name and value.
+                let (custom_name, custom_val) = if attr_name.is_empty() {
+                    if let Some(colon) = value.iter().position(|&b| b == b':') {
+                        let n = std::str::from_utf8(&value[..colon])
+                            .unwrap_or("")
+                            .to_string();
+                        let v_bytes = &value[colon + 1..];
+                        (n, v_bytes.to_vec())
+                    } else {
+                        let n = std::str::from_utf8(value).unwrap_or("").to_string();
+                        (n, Vec::new())
+                    }
+                } else {
+                    (String::new(), Vec::new())
+                };
+                let value_for_display: &[u8] = if attr_name.is_empty() {
+                    &custom_val
+                } else {
+                    value
+                };
+                let value_str = if type_marker == '*' {
+                    // Numeric: value is little-endian bytes
+                    let mut v: u64 = 0;
+                    for (i, &b) in value_for_display.iter().enumerate() {
+                        if i >= 8 {
+                            break;
+                        }
+                        if is_le {
+                            v |= (b as u64) << (i * 8);
+                        } else {
+                            v = (v << 8) | (b as u64);
+                        }
+                    }
+                    // Decode value to string for known IDs.
+                    let decoded = match attr_id {
+                        7 /* PIC */ => match v {
+                            0 => Some("static"),
+                            1 => Some("pic"),
+                            2 => Some("PIC"),
+                            3 => Some("pie"),
+                            4 => Some("PIE"),
+                            _ => None,
+                        },
+                        2 /* STACK_PROT */ => match v {
+                            0 => Some("off"),
+                            1 => Some("on"),
+                            2 => Some("all"),
+                            3 => Some("strong"),
+                            4 => Some("explicit"),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    decoded.map(|s| s.to_string()).unwrap_or_else(|| format!("0x{:x}", v))
+                } else if type_marker == '+' {
+                    "true".to_string()
+                } else if type_marker == '!' {
+                    "false".to_string()
+                } else {
+                    // String value
+                    let s_end = value_for_display
+                        .iter()
+                        .position(|&b| b == 0)
+                        .unwrap_or(value_for_display.len());
+                    std::str::from_utf8(&value_for_display[..s_end])
+                        .unwrap_or("")
+                        .to_string()
+                };
+                let owner_disp = if attr_name.is_empty() {
+                    format!("GA{}{}:{}", type_marker, custom_name, value_str)
+                } else {
+                    format!("GA{}{}{}", type_marker, attr_name, value_str)
+                };
+                let type_disp = match ntype {
+                    0x100 => "OPEN",
+                    0x101 => "func",
+                    _ => "?",
+                };
+                // Description: addresses (start, end) for OPEN/func.
+                let mut start = prev_start;
+                let mut end = prev_end;
+                let addr_size = if is_64 { 8 } else { 4 };
+                if descsz >= addr_size * 2 {
+                    if is_64 {
+                        start = read_u64(&desc[0..8]);
+                        end = read_u64(&desc[8..16]);
+                    } else {
+                        start = read_u32(&desc[0..4]) as u64;
+                        end = read_u32(&desc[4..8]) as u64;
+                    }
+                    prev_start = start;
+                    prev_end = end;
+                }
+                let mut region = format!("Applies to region from {:#x} to {:#x}", start, end);
+                // For func notes, optionally append the function name from the
+                // first symbol that covers this region.
+                if ntype == 0x101 {
+                    if let Some(sym_name) = lookup_symbol_at(elf, data, endian, start) {
+                        region.push_str(&format!(" ({})", sym_name));
+                    }
+                }
+                println!(
+                    "  {:<20} 0x{:08x}	{}	{}",
+                    owner_disp, descsz, type_disp, region
+                );
+            } else {
+                let type_str = elf_note_type_name(owner, ntype);
+                println!("  {:<20} 0x{:08x}	{}", owner, descsz, type_str);
+            }
         }
     }
+}
+
+fn lookup_symbol_at<'data, Elf: FileHeader>(
+    _elf: &ElfFile<'data, Elf>,
+    data: &'data [u8],
+    _endian: Elf::Endian,
+    addr: u64,
+) -> Option<String> {
+    use object::{Object as _, ObjectSymbol as _};
+    let obj = object::File::parse(data).ok()?;
+    for sym in obj.symbols() {
+        if sym.address() == addr {
+            if let Ok(name) = sym.name() {
+                if !name.is_empty() {
+                    return Some(name.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 fn elf_note_type_name(owner: &str, ntype: u32) -> String {
