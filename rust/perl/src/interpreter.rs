@@ -12220,10 +12220,13 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
     }
     // Paren-balance check (skipping char classes already consumed
     // above, plus escaped `\(` / `\)`). Mismatched parens fire
-    // "Unmatched (" / "Unmatched )".
+    // "Unmatched (" / "Unmatched )" — except an unmatched `(?…`
+    // (where the form was never completed) gets the more specific
+    // "Sequence (? incomplete" reference perl reports.
     let mut depth: i32 = 0;
     let mut k = 0;
     let mut last_unmatched_close: Option<usize> = None;
+    let mut unmatched_starts: Vec<usize> = Vec::new();
     while k < chars.len() {
         let cc = chars[k];
         if cc == '\\' {
@@ -12250,12 +12253,14 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
         }
         if cc == '(' {
             depth += 1;
+            unmatched_starts.push(k);
         } else if cc == ')' {
             if depth == 0 {
                 last_unmatched_close = Some(k);
                 break;
             }
             depth -= 1;
+            unmatched_starts.pop();
         }
         k += 1;
     }
@@ -12267,6 +12272,18 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
         ));
     }
     if depth > 0 {
+        // If the LAST unmatched `(` is part of a `(?…` group form,
+        // reference perl reports the more specific "Sequence (?
+        // incomplete" instead of generic "Unmatched (".
+        if let Some(&last) = unmatched_starts.last()
+            && last + 1 < chars.len()
+            && chars[last + 1] == '?'
+        {
+            let prefix: String = chars.iter().collect();
+            return Some(format!(
+                "Sequence (? incomplete in regex; marked by <-- HERE in m/{prefix} <-- HERE /"
+            ));
+        }
         let prefix: String = chars.iter().collect();
         return Some(format!(
             "Unmatched ( in regex; marked by <-- HERE in m/{prefix} <-- HERE /"
