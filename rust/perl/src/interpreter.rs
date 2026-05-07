@@ -9586,6 +9586,27 @@ impl Interpreter {
                     self.set_global_var("`", Value::Str(text[..start + m0.start()].to_string()));
                     self.set_global_var("'", Value::Str(text[start + m0.end()..].to_string()));
 
+                    // `$+` is the last successfully captured group's
+                    // value (highest-numbered group that matched);
+                    // `$^N` mirrors the most recently *closed* one,
+                    // which for a flat (non-nested) pattern is the
+                    // same. Walk caps in reverse to find the highest
+                    // matched index.
+                    let mut last_cap: Option<String> = None;
+                    for i in (1..caps.len()).rev() {
+                        if let Some(m) = caps.get(i) {
+                            last_cap = Some(m.as_str().to_string());
+                            break;
+                        }
+                    }
+                    if let Some(s) = last_cap {
+                        self.set_global_var("+", Value::Str(s.clone()));
+                        self.set_global_var("^N", Value::Str(s));
+                    } else {
+                        self.set_global_var("+", Value::Undef);
+                        self.set_global_var("^N", Value::Undef);
+                    }
+
                     // Store @- and @+ (match start/end offsets) using
                     // char counts, not byte offsets — reference perl
                     // reports characters in @-, @+, $-[N], $+[N] when
