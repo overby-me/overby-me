@@ -1459,9 +1459,20 @@ fn tool_nm(args: &[String]) -> i32 {
                         nm_print_symbols(&obj, &display_name, member_data, &opts);
                     }
                     Err(_) => {
-                        // Foreign object - show "no symbols"
-                        println!("\n{name}:");
-                        println!("{name}: no symbols");
+                        // Foreign object: try Tektronix Hex.
+                        println!();
+                        println!("{name}:");
+                        if let Some(syms) = parse_tekhex_symbols(member_data)
+                            && !syms.is_empty()
+                        {
+                            let mut syms = syms;
+                            syms.sort_by(|a, b| a.name.cmp(&b.name));
+                            for s in &syms {
+                                println!("{:08x} {} {}", s.value, s.type_char, s.name);
+                            }
+                        } else {
+                            eprintln!("nm: {name}: no symbols");
+                        }
                     }
                 }
             }
@@ -8030,6 +8041,125 @@ fn objcopy_binary_to_elf(
         return 1;
     }
     0
+}
+
+/// Parsed Tektronix symbol: (value, type_char, name).
+struct TekHexSymbol {
+    value: u64,
+    type_char: char,
+    name: String,
+}
+
+/// Parse Tektronix symbol records and return a list of symbols. Each symbol
+/// record entry has a tag byte, a name, and a value.
+fn parse_tekhex_symbols(data: &[u8]) -> Option<Vec<TekHexSymbol>> {
+    let s = std::str::from_utf8(data).ok()?;
+    if !s.starts_with('%') {
+        return None;
+    }
+    fn getvalue(body: &str, p: &mut usize) -> Option<u64> {
+        if *p >= body.len() {
+            return None;
+        }
+        let count_char = body.as_bytes()[*p] as char;
+        *p += 1;
+        let mut count = count_char.to_digit(16)? as usize;
+        if count == 0 {
+            count = 16;
+        }
+        if *p + count > body.len() {
+            return None;
+        }
+        let v = u64::from_str_radix(&body[*p..*p + count], 16).ok()?;
+        *p += count;
+        Some(v)
+    }
+    fn getsym(body: &str, p: &mut usize) -> Option<String> {
+        if *p >= body.len() {
+            return None;
+        }
+        let count_char = body.as_bytes()[*p] as char;
+        *p += 1;
+        let mut count = count_char.to_digit(16)? as usize;
+        if count == 0 {
+            count = 16;
+        }
+        if *p + count > body.len() {
+            return None;
+        }
+        let s = body[*p..*p + count].to_string();
+        *p += count;
+        Some(s)
+    }
+    let mut symbols: Vec<TekHexSymbol> = Vec::new();
+    for raw in s.lines() {
+        let line = raw.trim_end_matches(['\r', '\n']);
+        if line.is_empty() || !line.starts_with('%') {
+            continue;
+        }
+        let body = &line[1..];
+        if body.len() < 5 {
+            continue;
+        }
+        let rtype = body.chars().nth(2)?;
+        if rtype != '3' {
+            continue;
+        }
+        let mut p = 5;
+        let section_name = match getsym(body, &mut p) {
+            Some(s) => s,
+            None => continue,
+        };
+        // Determine type char from section name.
+        // "*ABS*" → 'A', ".text" → 'T', else default 'D' for data sections.
+        let default_type = if section_name == "*ABS*" {
+            'A'
+        } else if section_name == ".text" || section_name.starts_with(".text.") {
+            'T'
+        } else {
+            'D'
+        };
+        while p < body.len() {
+            let tag = body.as_bytes()[p] as char;
+            p += 1;
+            match tag {
+                '1' => {
+                    // Section range: skip start, end
+                    let _ = getvalue(body, &mut p);
+                    let _ = getvalue(body, &mut p);
+                }
+                '0' | '2' | '3' | '4' | '6' | '7' | '8' => {
+                    // Symbol entry
+                    let name = match getsym(body, &mut p) {
+                        Some(s) => s,
+                        None => break,
+                    };
+                    let value = match getvalue(body, &mut p) {
+                        Some(v) => v,
+                        None => break,
+                    };
+                    // BSF_GLOBAL for tags '0'..='4', BSF_LOCAL for '5'..='8'.
+                    // Absolute when stype is '2' or '6', or section is "*ABS*".
+                    let is_absolute = tag == '2' || tag == '6' || section_name == "*ABS*";
+                    let is_local = matches!(tag, '5' | '6' | '7' | '8');
+                    let type_char = if is_absolute {
+                        if is_local { 'a' } else { 'A' }
+                    } else if is_local {
+                        default_type.to_ascii_lowercase()
+                    } else {
+                        default_type
+                    };
+                    symbols.push(TekHexSymbol {
+                        value,
+                        type_char,
+                        name,
+                    });
+                }
+                _ => break,
+            }
+        }
+    }
+    Some(symbols)
 }
 
 /// Parse Tektronix Extended Hex format. Returns Some(bytes) on success.
