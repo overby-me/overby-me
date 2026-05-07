@@ -823,6 +823,14 @@ pub(crate) fn parse_args() -> Options {
                 // servers that don't challenge, the first request has no auth.
                 opts.defer_auth = true;
             }
+            "--netrc-optional" => {
+                // We don't read netrc; this is a no-op so tests like 495
+                // (URL-userinfo + --netrc-optional) get past arg parsing.
+            }
+            "--netrc-file" => {
+                i += 1;
+                let _ = next_arg(&args, i, "--netrc-file");
+            }
             "--basic" => {
                 opts.no_basic = false;
             }
