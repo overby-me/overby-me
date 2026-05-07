@@ -660,6 +660,168 @@
         category = "uni";
         name = "greek";
       }
+      {
+        category = "uni";
+        name = "labels";
+      }
+      {
+        category = "uni";
+        name = "latin2";
+      }
+      {
+        category = "uni";
+        name = "lex_utf8";
+      }
+      {
+        category = "uni";
+        name = "overload";
+      }
+      {
+        category = "uni";
+        name = "readline";
+      }
+      {
+        category = "uni";
+        name = "stash";
+      }
+      {
+        category = "uni";
+        name = "store";
+      }
+      {
+        category = "uni";
+        name = "tr";
+      }
+
+      # --- t/test_pl/ ---
+      {
+        category = "test_pl";
+        name = "display";
+      }
+      {
+        category = "test_pl";
+        name = "plan_skip_all";
+      }
+
+      # --- t/perf/ (selected) ---
+      {
+        category = "perf";
+        name = "opcount";
+      }
+      {
+        category = "perf";
+        name = "speed";
+      }
+      {
+        category = "perf";
+        name = "taint";
+      }
+
+      # --- t/porting/ (selected) ---
+      {
+        category = "porting";
+        name = "authors";
+      }
+      {
+        category = "porting";
+        name = "bench";
+      }
+      {
+        category = "porting";
+        name = "customized";
+      }
+      {
+        category = "porting";
+        name = "FindExt";
+      }
+      {
+        category = "porting";
+        name = "libperl";
+      }
+      {
+        category = "porting";
+        name = "maintainers";
+      }
+      {
+        category = "porting";
+        name = "perlfunc";
+      }
+      {
+        category = "porting";
+        name = "pod_rules";
+      }
+      {
+        category = "porting";
+        name = "re_context";
+      }
+      {
+        category = "porting";
+        name = "ss_dup";
+      }
+      {
+        category = "porting";
+        name = "update_authors";
+      }
+      {
+        category = "porting";
+        name = "cpphdrcheck";
+      }
+
+      # --- t/bigmem/ ---
+      {
+        category = "bigmem";
+        name = "hash";
+      }
+      {
+        category = "bigmem";
+        name = "index";
+      }
+      {
+        category = "bigmem";
+        name = "pos";
+      }
+      {
+        category = "bigmem";
+        name = "read";
+      }
+      {
+        category = "bigmem";
+        name = "regexp";
+      }
+      {
+        category = "bigmem";
+        name = "stack_over";
+      }
+      {
+        category = "bigmem";
+        name = "stack";
+      }
+      {
+        category = "bigmem";
+        name = "str";
+      }
+      {
+        category = "bigmem";
+        name = "subst2";
+      }
+      {
+        category = "bigmem";
+        name = "subst";
+      }
+      {
+        category = "bigmem";
+        name = "sv_gets";
+      }
+      {
+        category = "bigmem";
+        name = "vec";
+      }
+
+      # --- t/benchmark/ ---
+      {
+        category = "benchmark";
+        name = "gh7094-speed-up-keys-on-empty-hash";
+      }
 
       # --- t/class/ (selected) ---
       {
