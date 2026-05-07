@@ -10,6 +10,8 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 This iteration's improvements:
 
+- **fancy-regex fallback for backrefs, lookaround, conditionals, etc.**: Rusts default `regex` crate intentionally rejects backreferences (`\1`), lookahead/lookbehind (`(?=)`, `(?<!)`), conditional groups (`(?(1)…)`), and other Perl features. Try the fast `regex` path first; on compile failure, fall back to `fancy_regex::Regex::new` (NFA-based, slower but feature-complete). Refactored the success path into a `populate_match_vars` helper so `$1..N`, `%+`, `$&`, special vars all get populated identically regardless of which backend produced the match. re/regexp.t: 2582 → 1954 (~314 tests gained).
+- **Populate `$+` (last capture) and `$^N` (most-recently-closed capture)** on every successful match. Walk caps in reverse to find the highest-numbered group that captured a value. re/regexp.t: 2589 → 2582.
 - **Strip Perl-only `(?a)`/`(?aa)`/`(?d)`/`(?l)`/`(?p)` flag groups** before handing the pattern to Rusts regex crate. Special-case the bare standalone form `(?a)` so an all-stripped group degenerates to nothing, not the invalid `(?)`. re/regexp.t: 2610 → 2589.
 - **Reduce `{N,M}` quantifiers with N>M to `{0}`**: reference perl treats `(def){37,17}` as never-matching; Rust regex rejects it. Walk the pattern and rewrite. re/regexp.t: 2615 → 2612.
 - **Translate Perl atomic groups `(?>…)` → `(?:…)`**: lossy (loses no-backtrack semantics) but every test in re/regexp.t passes once the group introducer is recognised. re/regexp.t: 2632 → 2615.
