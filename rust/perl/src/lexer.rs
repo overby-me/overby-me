@@ -1322,24 +1322,43 @@ impl Lexer {
                             && self.ch() != '='
                             && self.ch() != ';'
                             && self.ch() != ','
-                            && self.ch() != ')' =>
+                            && self.ch() != ')'
+                            && self.ch() != '}'
+                            && self.ch() != ']' =>
                         {
                             // `m/pat/flags` — explicit match regex. Emit as
                             // RegexLit so `$x =~ m/…/` (and the bare regex
                             // context for `m/…/` matching against `$_`) works
                             // identically to `/…/`. Guard against taking a
-                            // bareword `m` at end-of-expression as regex.
+                            // bareword `m` at end-of-expression or as the
+                            // last item inside a `$h{m}` / `$a[m]` subscript
+                            // as a regex.
                             let (pat, flags) = self.read_qr();
                             tokens.push(Token::RegexLit(pat, flags));
                             continue;
                         }
-                        "s" if !self.ch().is_alphanumeric() && self.ch() != '_' => {
+                        "s" if !self.ch().is_alphanumeric()
+                            && self.ch() != '_'
+                            && self.ch() != ','
+                            && self.ch() != ';'
+                            && self.ch() != ')'
+                            && self.ch() != '}'
+                            && self.ch() != ']' =>
+                        {
                             let token_idx = tokens.len();
                             let (pat, repl, flags) = self.read_substitution(token_idx);
                             tokens.push(Token::Substitution(pat, repl, flags));
                             continue;
                         }
-                        "tr" | "y" if !self.ch().is_alphanumeric() && self.ch() != '_' => {
+                        "tr" | "y"
+                            if !self.ch().is_alphanumeric()
+                                && self.ch() != '_'
+                                && self.ch() != ','
+                                && self.ch() != ';'
+                                && self.ch() != ')'
+                                && self.ch() != '}'
+                                && self.ch() != ']' =>
+                        {
                             let (from, to, flags) = self.read_transliterate();
                             tokens.push(Token::Transliterate(from, to, flags));
                             continue;
