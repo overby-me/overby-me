@@ -346,6 +346,42 @@
         category = "op";
         name = "wantarray";
       }
+      {
+        category = "op";
+        name = "avhv";
+      }
+      {
+        category = "op";
+        name = "coresubs";
+      }
+      {
+        category = "op";
+        name = "dbm";
+      }
+      {
+        category = "op";
+        name = "overload_integer";
+      }
+      {
+        category = "op";
+        name = "svflags";
+      }
+      {
+        category = "op";
+        name = "taint";
+      }
+      {
+        category = "op";
+        name = "tie_fetch_count";
+      }
+      {
+        category = "op";
+        name = "tiehandle";
+      }
+      {
+        category = "op";
+        name = "utftaint";
+      }
 
       # --- t/io/ (selected) ---
       {
