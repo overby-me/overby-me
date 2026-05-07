@@ -12252,6 +12252,28 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
             continue;
         }
         if cc == '(' {
+            // `(?<X…)` named-capture group: X must be a non-digit
+            // word character. Reference perl emits "Group name must
+            // start with a non-digit word character" for `(?<%)`,
+            // `(?<1foo)`, etc.
+            if k + 2 < chars.len()
+                && chars[k + 1] == '?'
+                && chars[k + 2] == '<'
+                && k + 3 < chars.len()
+            {
+                let next = chars[k + 3];
+                // Allowed: `(?<=` lookbehind, `(?<!` neg lookbehind,
+                // `(?<` followed by a non-digit word char (a-zA-Z_).
+                let is_lookbehind = next == '=' || next == '!';
+                let is_word_start = next == '_' || next.is_ascii_alphabetic();
+                if !is_lookbehind && !is_word_start {
+                    let prefix: String = chars[..=k + 3].iter().collect();
+                    let suffix: String = chars[k + 4..].iter().collect();
+                    return Some(format!(
+                        "Group name must start with a non-digit word character in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                    ));
+                }
+            }
             depth += 1;
             unmatched_starts.push(k);
         } else if cc == ')' {
