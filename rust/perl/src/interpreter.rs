@@ -12452,6 +12452,11 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                     // Reference perl warns ("False [] range") at runtime
                     // but doesn't refuse to compile, so we let it through.
                     && class_body[j + 2] != '\\'
+                    // Same exemption for `[a-[:digit:]]` — the high end
+                    // is a POSIX-class introducer, not a literal char.
+                    && class_body[j + 2] != '['
+                    // And for low-side POSIX (`[[:digit:]-z]`).
+                    && class_body[j] != ']'
                 {
                     let lo = class_body[j];
                     let hi = class_body[j + 2];
