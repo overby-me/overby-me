@@ -3971,34 +3971,43 @@ fn lookup_symbol_at<'data, Elf: FileHeader>(
 
 /// Look up the first non-FUNC symbol whose value falls within [start, end).
 /// Used to annotate OPEN-type GNU build attribute notes with the source
-/// symbol that the region covers.
+/// symbol that the region covers. Prefers GLOBAL bindings over LOCAL.
 fn lookup_symbol_in_range(data: &[u8], start: u64, end: u64) -> Option<String> {
     use object::{Object as _, ObjectSymbol as _};
     let obj = object::File::parse(data).ok()?;
+    let mut best: Option<String> = None;
+    let mut best_is_global = false;
     for sym in obj.symbols() {
         let v = sym.address();
         if v < start || v >= end {
             continue;
         }
-        if matches!(sym.kind(), object::SymbolKind::Text) {
+        let Ok(name) = sym.name() else { continue };
+        if name.is_empty() {
             continue;
         }
-        if let Ok(name) = sym.name() {
-            if !name.is_empty() {
-                return Some(name.to_string());
-            }
+        let is_global = sym.is_global();
+        if best.is_none() {
+            best = Some(name.to_string());
+            best_is_global = is_global;
+            continue;
+        }
+        if is_global && !best_is_global {
+            best = Some(name.to_string());
+            best_is_global = is_global;
         }
     }
-    None
+    best
 }
 
 /// Look up a symbol at the given address. When `prefer_func` is true,
-/// prefer a STT_FUNC symbol; otherwise prefer a non-FUNC symbol.
+/// require a STT_FUNC symbol; otherwise prefer a non-FUNC symbol. In
+/// both cases, prefer GLOBAL symbols over LOCAL when available.
 fn lookup_symbol_at_typed(data: &[u8], addr: u64, prefer_func: bool) -> Option<String> {
     use object::{Object as _, ObjectSymbol as _};
     let obj = object::File::parse(data).ok()?;
     let mut best: Option<String> = None;
-    let mut best_is_func = false;
+    let mut best_score = -1i32;
     for sym in obj.symbols() {
         if sym.address() != addr {
             continue;
@@ -4008,19 +4017,21 @@ fn lookup_symbol_at_typed(data: &[u8], addr: u64, prefer_func: bool) -> Option<S
             continue;
         }
         let is_func = matches!(sym.kind(), object::SymbolKind::Text);
-        // First match.
-        if best.is_none() {
-            best = Some(name.to_string());
-            best_is_func = is_func;
+        // For func notes, *require* a STT_FUNC symbol.
+        if prefer_func && !is_func {
             continue;
         }
-        // Replace if current is the preferred kind and existing isn't.
-        if prefer_func && is_func && !best_is_func {
+        let kind_match = if prefer_func { is_func } else { !is_func };
+        let mut score: i32 = 0;
+        if kind_match {
+            score += 2;
+        }
+        if sym.is_global() {
+            score += 1;
+        }
+        if score > best_score {
             best = Some(name.to_string());
-            best_is_func = is_func;
-        } else if !prefer_func && !is_func && best_is_func {
-            best = Some(name.to_string());
-            best_is_func = is_func;
+            best_score = score;
         }
     }
     best
