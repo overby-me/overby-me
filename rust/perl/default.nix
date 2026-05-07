@@ -964,6 +964,46 @@
       }
       {
         category = "io";
+        name = "eintr_print";
+      }
+      {
+        category = "io";
+        name = "eintr";
+      }
+      {
+        category = "io";
+        name = "errnosig";
+      }
+      {
+        category = "io";
+        name = "fflush";
+      }
+      {
+        category = "io";
+        name = "getcwd";
+      }
+      {
+        category = "io";
+        name = "msg";
+      }
+      {
+        category = "io";
+        name = "perlio";
+      }
+      {
+        category = "io";
+        name = "sem";
+      }
+      {
+        category = "io";
+        name = "semctl";
+      }
+      {
+        category = "io";
+        name = "shm";
+      }
+      {
+        category = "io";
         name = "fs";
       }
       {
@@ -1035,6 +1075,58 @@
       {
         category = "re";
         name = "regex_sets";
+      }
+      {
+        category = "re";
+        name = "bigfuzzy_not_utf8";
+      }
+      {
+        category = "re";
+        name = "pat_advanced";
+      }
+      {
+        category = "re";
+        name = "speed";
+      }
+      {
+        category = "re";
+        name = "strict";
+      }
+      {
+        category = "re";
+        name = "subst_thr";
+      }
+      {
+        category = "re";
+        name = "substT";
+      }
+      {
+        category = "re";
+        name = "fold_grind_8";
+      }
+      {
+        category = "re";
+        name = "fold_grind_aa";
+      }
+      {
+        category = "re";
+        name = "fold_grind_a";
+      }
+      {
+        category = "re";
+        name = "fold_grind_d";
+      }
+      {
+        category = "re";
+        name = "fold_grind_l";
+      }
+      {
+        category = "re";
+        name = "fold_grind_T";
+      }
+      {
+        category = "re";
+        name = "fold_grind_u";
       }
 
       # --- t/run/ (selected) ---
