@@ -904,11 +904,11 @@ impl Parser {
             self.error.get_or_insert(msg);
             return Stmt::Nop;
         }
-        // Reject `my $^X`, `my ${^XYZ}`, etc. Reference perl errors:
-        // `Can't use global $^X in "my" at FILE line N`. Both $^X and
-        // ${^XYZ} lex to ScalarVar with a name starting with `^`.
+        // Reject `my $^X`, `my ${^XYZ}`, `my $_`, etc. Reference perl
+        // errors with `Can't use global $X in "my" at FILE line N`
+        // for any of the punctuation/caret special variables.
         if let Some(Token::ScalarVar(name)) = self.tokens.get(probe_pos)
-            && name.starts_with('^')
+            && (name.starts_with('^') || name == "_")
         {
             let line = self.token_lines.get(probe_pos).copied().unwrap_or(0);
             let file = "{FILE}".to_string();

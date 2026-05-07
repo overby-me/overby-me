@@ -382,6 +382,10 @@
         category = "op";
         name = "utftaint";
       }
+      {
+        category = "op";
+        name = "mydef";
+      }
 
       # --- t/io/ (selected) ---
       {
