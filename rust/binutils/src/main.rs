@@ -3773,9 +3773,21 @@ fn readelf_notes<'data, Elf: FileHeader>(
                 break;
             }
             let name_raw = &bytes[p..p + namesz];
-            let name_end = name_raw.iter().position(|&b| b == 0).unwrap_or(namesz);
-            let owner_bytes = &name_raw[..name_end];
-            let owner = std::str::from_utf8(owner_bytes).unwrap_or("");
+            // For GNU build attribute notes, the "name" field includes the
+            // value bytes after the human-readable prefix; truncating at
+            // the first null would drop them. For other notes, the name is
+            // a NUL-terminated string and we use the prefix only.
+            let owner_bytes: &[u8] = if name_raw.starts_with(b"GA") && name_raw.len() >= 4 {
+                name_raw
+            } else {
+                let n = name_raw.iter().position(|&b| b == 0).unwrap_or(namesz);
+                &name_raw[..n]
+            };
+            let owner = if owner_bytes.starts_with(b"GA") {
+                ""
+            } else {
+                std::str::from_utf8(owner_bytes).unwrap_or("")
+            };
             p += namesz;
             // align to 4
             p = (p + 3) & !3;
@@ -3814,19 +3826,19 @@ fn readelf_notes<'data, Elf: FileHeader>(
                 };
                 let _ = separator;
                 let value = &owner_bytes[value_off..];
-                // For unknown printable identifiers, find the colon-separated
-                // name and value.
+                // For unknown printable identifiers, the layout is:
+                //   <name>\0<value bytes ...>
                 let (custom_name, custom_val) = if attr_name.is_empty() {
-                    if let Some(colon) = value.iter().position(|&b| b == b':') {
-                        let n = std::str::from_utf8(&value[..colon])
-                            .unwrap_or("")
-                            .to_string();
-                        let v_bytes = &value[colon + 1..];
-                        (n, v_bytes.to_vec())
+                    let nul = value.iter().position(|&b| b == 0).unwrap_or(value.len());
+                    let n = std::str::from_utf8(&value[..nul])
+                        .unwrap_or("")
+                        .to_string();
+                    let v_bytes = if nul + 1 <= value.len() {
+                        &value[nul + 1..]
                     } else {
-                        let n = std::str::from_utf8(value).unwrap_or("").to_string();
-                        (n, Vec::new())
-                    }
+                        &[][..]
+                    };
+                    (n, v_bytes.to_vec())
                 } else {
                     (String::new(), Vec::new())
                 };
@@ -11057,13 +11069,17 @@ fn objcopy_merge_build_attribute_notes(data: &[u8]) -> Option<Vec<u8>> {
         }
     }
     // Sort: OPEN (0x100) before func (0x101); within same type, by
-    // (start ASC, end DESC). Within same (start, end), preserve first
-    // occurrence input order.
+    // (start ASC, end DESC). Within same (start, end), order by attribute
+    // identifier byte (i.e., the byte after the type marker), which
+    // groups builtin IDs (1..=8) first then printable custom IDs.
     groups.sort_by(|a, b| {
+        let id_a = if a.name.len() >= 4 { a.name[3] } else { 0 };
+        let id_b = if b.name.len() >= 4 { b.name[3] } else { 0 };
         a.ntype
             .cmp(&b.ntype)
             .then_with(|| a.start.cmp(&b.start))
             .then_with(|| b.end.cmp(&a.end))
+            .then_with(|| id_a.cmp(&id_b))
             .then_with(|| a.first_idx.cmp(&b.first_idx))
     });
     // Build new section data. For each group, emit a note with full desc
