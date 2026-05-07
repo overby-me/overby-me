@@ -15536,6 +15536,11 @@ fn format_data_attr(attr_name: u64, v: u64) -> String {
     if attr_name == 0x12 {
         return format!("0x{:x}", v);
     }
+    // 0x2131 = DW_AT_GNU_dwo_id, 0x76 = DW_AT_dwo_name (DWARF5 dwo_id 0x77)
+    // GNU readelf prints the 8-byte hash as 0x.{16}.
+    if attr_name == 0x2131 || attr_name == 0x77 {
+        return format!("0x{:016x}", v);
+    }
     // DW_AT_language = 0x13
     if attr_name == 0x13 {
         let lang = match v {
