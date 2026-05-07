@@ -12037,7 +12037,7 @@ fn compile_time_use_check_in(
 ) -> Option<String> {
     let mut preloaded: std::collections::HashSet<String> = std::collections::HashSet::new();
     collect_preloaded_inc_keys(stmts, &mut preloaded);
-    compile_time_use_check_in_inner(stmts, line, interp, _file_path, &preloaded)
+    compile_time_use_check_in_inner(stmts, line, interp, _file_path, &preloaded, false)
 }
 
 fn compile_time_use_check_in_inner(
@@ -12046,6 +12046,7 @@ fn compile_time_use_check_in_inner(
     interp: &Interpreter,
     _file_path: &str,
     preloaded: &std::collections::HashSet<String>,
+    in_sub: bool,
 ) -> Option<String> {
     const PRAGMAS: &[&str] = &[
         "strict",
@@ -12157,14 +12158,65 @@ fn compile_time_use_check_in_inner(
                     "Can't locate {filename} in @INC{install_hint} (@INC entries checked: {inc_str}) at {_file_path} line {line}.\nBEGIN failed--compilation aborted at {_file_path} line {line}.\n"
                 ));
             }
+            // `require Module::Name;` at top level of a .pm being
+            // loaded: reference perls compile chain treats this as
+            // a missing-module abort. Only fires inside the
+            // recursive walk (`_file_path` ends in `.pm`); the
+            // top-level scripts requires fire at runtime via
+            // Stmt::Require. We also limit by *depth*: the walker
+            // descends into BareBlock/Block, but a `require` inside
+            // a Sub body or a conditional only runs when reached, so
+            // it shouldn't abort compilation. The `compile_time_use_check_in_inner`
+            // visits Sub bodies for chained `use` checks; for
+            // requires we want only the top frame. Skip the require
+            // arm whenever we're inside a sub by tracking an
+            // additional flag — implemented by a wrapper that
+            // doesn't descend into Sub for require purposes.
+            Stmt::Require(expr) if _file_path.ends_with(".pm") && !in_sub => {
+                if let Expr::StringLit(s) = expr
+                    && !s.contains('/')
+                    && !s.contains('.')
+                    && s.chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                {
+                    let filename = format!("{}.pm", s.replace("::", "/"));
+                    if preloaded.contains(&filename)
+                        || !matches!(interp.get_hash_element("INC", &filename), Value::Undef)
+                    {
+                        continue;
+                    }
+                    let inc = interp.get_array("INC");
+                    let mut found = false;
+                    for dir in &inc {
+                        let p = std::path::PathBuf::from(dir.to_str()).join(&filename);
+                        if p.is_file() {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if found {
+                        continue;
+                    }
+                    let inc_str = inc.iter().map(|v| v.to_str()).collect::<Vec<_>>().join(" ");
+                    let install_hint = if s.len() <= 1 {
+                        String::new()
+                    } else {
+                        format!(" (you may need to install the {s} module)")
+                    };
+                    return Some(format!(
+                        "Can't locate {filename} in @INC{install_hint} (@INC entries checked: {inc_str}) at {_file_path} line {line}.\n"
+                    ));
+                }
+            }
             Stmt::Block(body)
             | Stmt::BareBlock(body)
             | Stmt::NamedBlock(_, body)
             | Stmt::Begin(body, _)
             | Stmt::End(body) => {
-                if let Some(e) =
-                    compile_time_use_check_in_inner(body, line, interp, _file_path, preloaded)
-                {
+                if let Some(e) = compile_time_use_check_in_inner(
+                    body, line, interp, _file_path, preloaded, in_sub,
+                ) {
                     return Some(e);
                 }
             }
@@ -12174,22 +12226,22 @@ fn compile_time_use_check_in_inner(
                 else_block,
                 ..
             } => {
-                if let Some(e) =
-                    compile_time_use_check_in_inner(then, line, interp, _file_path, preloaded)
-                {
+                if let Some(e) = compile_time_use_check_in_inner(
+                    then, line, interp, _file_path, preloaded, in_sub,
+                ) {
                     return Some(e);
                 }
                 for (_, body) in elsifs {
-                    if let Some(e) =
-                        compile_time_use_check_in_inner(body, line, interp, _file_path, preloaded)
-                    {
+                    if let Some(e) = compile_time_use_check_in_inner(
+                        body, line, interp, _file_path, preloaded, in_sub,
+                    ) {
                         return Some(e);
                     }
                 }
                 if let Some(body) = else_block {
-                    if let Some(e) =
-                        compile_time_use_check_in_inner(body, line, interp, _file_path, preloaded)
-                    {
+                    if let Some(e) = compile_time_use_check_in_inner(
+                        body, line, interp, _file_path, preloaded, in_sub,
+                    ) {
                         return Some(e);
                     }
                 }
@@ -12197,15 +12249,15 @@ fn compile_time_use_check_in_inner(
             Stmt::Unless {
                 then, else_block, ..
             } => {
-                if let Some(e) =
-                    compile_time_use_check_in_inner(then, line, interp, _file_path, preloaded)
-                {
+                if let Some(e) = compile_time_use_check_in_inner(
+                    then, line, interp, _file_path, preloaded, in_sub,
+                ) {
                     return Some(e);
                 }
                 if let Some(body) = else_block {
-                    if let Some(e) =
-                        compile_time_use_check_in_inner(body, line, interp, _file_path, preloaded)
-                    {
+                    if let Some(e) = compile_time_use_check_in_inner(
+                        body, line, interp, _file_path, preloaded, in_sub,
+                    ) {
                         return Some(e);
                     }
                 }
@@ -12225,30 +12277,30 @@ fn compile_time_use_check_in_inner(
                 continue_body,
                 ..
             } => {
-                if let Some(e) =
-                    compile_time_use_check_in_inner(body, line, interp, _file_path, preloaded)
-                {
+                if let Some(e) = compile_time_use_check_in_inner(
+                    body, line, interp, _file_path, preloaded, in_sub,
+                ) {
                     return Some(e);
                 }
                 if let Some(cont) = continue_body {
-                    if let Some(e) =
-                        compile_time_use_check_in_inner(cont, line, interp, _file_path, preloaded)
-                    {
+                    if let Some(e) = compile_time_use_check_in_inner(
+                        cont, line, interp, _file_path, preloaded, in_sub,
+                    ) {
                         return Some(e);
                     }
                 }
             }
             Stmt::DoWhile { body, .. } | Stmt::Loop { body, .. } => {
-                if let Some(e) =
-                    compile_time_use_check_in_inner(body, line, interp, _file_path, preloaded)
-                {
+                if let Some(e) = compile_time_use_check_in_inner(
+                    body, line, interp, _file_path, preloaded, in_sub,
+                ) {
                     return Some(e);
                 }
             }
             Stmt::For { body, .. } => {
-                if let Some(e) =
-                    compile_time_use_check_in_inner(body, line, interp, _file_path, preloaded)
-                {
+                if let Some(e) = compile_time_use_check_in_inner(
+                    body, line, interp, _file_path, preloaded, in_sub,
+                ) {
                     return Some(e);
                 }
             }
@@ -12257,9 +12309,9 @@ fn compile_time_use_check_in_inner(
                 continue_body,
                 ..
             } => {
-                if let Some(e) =
-                    compile_time_use_check_in_inner(body, line, interp, _file_path, preloaded)
-                {
+                if let Some(e) = compile_time_use_check_in_inner(
+                    body, line, interp, _file_path, preloaded, in_sub,
+                ) {
                     return Some(e);
                 }
                 if let Some(e) = compile_time_use_check_in_inner(
@@ -12268,14 +12320,15 @@ fn compile_time_use_check_in_inner(
                     interp,
                     _file_path,
                     preloaded,
+                    in_sub,
                 ) {
                     return Some(e);
                 }
             }
             Stmt::Sub { body, .. } => {
-                if let Some(e) =
-                    compile_time_use_check_in_inner(body, line, interp, _file_path, preloaded)
-                {
+                if let Some(e) = compile_time_use_check_in_inner(
+                    body, line, interp, _file_path, preloaded, /*in_sub=*/ true,
+                ) {
                     return Some(e);
                 }
             }
@@ -12290,6 +12343,7 @@ fn compile_time_use_check_in_inner(
                     interp,
                     _file_path,
                     preloaded,
+                    in_sub,
                 ) {
                     return Some(e);
                 }
