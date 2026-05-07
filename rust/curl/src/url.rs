@@ -19,39 +19,50 @@ pub(crate) fn expand_glob(url: &str) -> Result<Vec<(String, Vec<String>)>, Strin
                 continue;
             }
         }
-        if c == b'{'
-            && let Some(end) = find_matching(bytes, i, b'{', b'}')
-        {
-            let alts: Vec<String> = std::str::from_utf8(&bytes[i + 1..end])
-                .unwrap_or("")
-                .split(',')
-                .map(|s| s.to_string())
-                .collect();
-            out = cross(out, alts);
-            i = end + 1;
-            continue;
+        if c == b'{' {
+            if let Some(end) = find_matching(bytes, i, b'{', b'}') {
+                let alts: Vec<String> = std::str::from_utf8(&bytes[i + 1..end])
+                    .unwrap_or("")
+                    .split(',')
+                    .map(|s| s.to_string())
+                    .collect();
+                out = cross(out, alts);
+                i = end + 1;
+                continue;
+            }
+            // Unmatched `{` — curl reports CURLE_URL_MALFORMAT (test 1234).
+            return Err(format!("curl: (3) unmatched brace in URL: {url}"));
         }
-        if c == b'['
-            && let Some(end) = find_matching(bytes, i, b'[', b']')
-        {
-            let spec = std::str::from_utf8(&bytes[i + 1..end]).unwrap_or("");
-            match parse_range(spec) {
-                Ok(Some(expanded)) => {
-                    out = cross(out, expanded);
-                    i = end + 1;
-                    continue;
+        if c == b'[' {
+            if let Some(end) = find_matching(bytes, i, b'[', b']') {
+                let spec = std::str::from_utf8(&bytes[i + 1..end]).unwrap_or("");
+                match parse_range(spec) {
+                    Ok(Some(expanded)) => {
+                        out = cross(out, expanded);
+                        i = end + 1;
+                        continue;
+                    }
+                    Ok(None) => {
+                        // Not a valid range spec -- treat as literal characters
+                    }
+                    Err(_) => {
+                        // Bad range (e.g. start > end). Report with position info.
+                        // Point the caret one past the closing ']', matching curl.
+                        let pos = end + 2; // 1-based position after ']'
+                        let spaces = " ".repeat(pos - 1);
+                        return Err(format!(
+                            "curl: (3) bad range in URL position {pos}:\n{url}\n{spaces}^"
+                        ));
+                    }
                 }
-                Ok(None) => {
-                    // Not a valid range spec -- treat as literal characters
-                }
-                Err(_) => {
-                    // Bad range (e.g. start > end). Report with position info.
-                    // Point the caret one past the closing ']', matching curl.
-                    let pos = end + 2; // 1-based position after ']'
-                    let spaces = " ".repeat(pos - 1);
-                    return Err(format!(
-                        "curl: (3) bad range in URL position {pos}:\n{url}\n{spaces}^"
-                    ));
+            } else {
+                // Unmatched `[`. If the unbalanced run contains a `-` it looks
+                // like an attempted range; reject as malformed (test 1289).
+                // Otherwise fall through and treat as a literal byte (so plain
+                // IPv4 URLs with no glob syntax keep working).
+                let rest = std::str::from_utf8(&bytes[i + 1..]).unwrap_or("");
+                if rest.contains('-') {
+                    return Err(format!("curl: (3) unmatched bracket in URL: {url}"));
                 }
             }
         }
@@ -190,6 +201,17 @@ pub fn parse_url(raw: &str) -> Result<ParsedUrl, String> {
     // Strip fragment — it's never sent to the server.
     let rest = rest.split('#').next().unwrap_or(rest);
 
+    // Tolerate one extra leading slash after the scheme separator
+    // (slashes between scheme and authority); two or more extra leading
+    // slashes are malformed.
+    let rest = if rest.starts_with("//") {
+        return Err(format!("malformed URL: {raw}"));
+    } else if let Some(stripped) = rest.strip_prefix('/') {
+        stripped
+    } else {
+        rest
+    };
+
     // Split at first / or ? (whichever comes first) to separate authority from path.
     let slash_pos = rest.find('/');
     let query_pos = rest.find('?');
@@ -213,8 +235,16 @@ pub fn parse_url(raw: &str) -> Result<ParsedUrl, String> {
     };
 
     // Handle userinfo@ prefix — if present, return it for Basic auth use.
+    // Multiple `@` in the authority is malformed (RFC 3986); userinfo may not
+    // itself contain a raw `@` — curl rejects such URLs (test 1260).
     let (userinfo, host_port) = match authority.rfind('@') {
-        Some(i) => (Some(&authority[..i]), &authority[i + 1..]),
+        Some(i) => {
+            let ui = &authority[..i];
+            if ui.contains('@') {
+                return Err("malformed URL: multiple @ in authority".to_string());
+            }
+            (Some(ui), &authority[i + 1..])
+        }
         None => (None, authority),
     };
 
@@ -246,6 +276,30 @@ pub fn parse_url(raw: &str) -> Result<ParsedUrl, String> {
 
     if host.is_empty() {
         return Err("empty host".into());
+    }
+
+    // Reject `:` characters in the (non-IPv6) host portion. After stripping
+    // IPv6 brackets these would indicate rubbish like `host:8080:80` (test 1260).
+    if !host_port.starts_with('[') && host.contains(':') {
+        return Err(format!("malformed URL: stray colon in host: {host}"));
+    }
+
+    // Whitespace and ASCII control bytes in the host are not legal — reject
+    // them outright with CURLE_URL_MALFORMAT (test 1264).
+    if host.bytes().any(|b| b <= 0x20 || b == 0x7F) {
+        return Err(format!("malformed URL: whitespace in host: {host}"));
+    }
+    // After stripping IPv6 brackets, additional rubbish like `[host]extra`
+    // means the URL had garbage between `]` and the port/path (test 1263).
+    if host_port.starts_with('[')
+        && let Some(end) = host_port.find(']')
+        && let Some(after) = host_port.get(end + 1..)
+        && !after.is_empty()
+        && !after.starts_with(':')
+    {
+        return Err(format!(
+            "malformed URL: rubbish after IPv6 bracket: {host_port}"
+        ));
     }
 
     // curl limits hostnames to 65535 bytes (CURLE_URL_MALFORMAT / exit 3).

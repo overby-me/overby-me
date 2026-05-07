@@ -62,6 +62,7 @@ pub(crate) fn read_response(
     let mut reader = BufReader::new(conn);
 
     // 1xx responses are interim — skip them and read the real response that follows.
+    let mut saw_interim = false;
     let mut header_bytes = Vec::new();
     let status_line;
     loop {
@@ -101,10 +102,23 @@ pub(crate) fn read_response(
             }
             return Err("empty reply from server".into());
         }
-        // HTTP/0.9 opt-in: servers respond with body only, no status line or
-        // headers. When the first line isn't an HTTP/N.N status, treat the
-        // whole response as body with a synthetic 200 status.
-        if http09 && !line.starts_with("HTTP/") {
+        // HTTP/0.9: servers respond with body only, no status line or headers.
+        // Curl defaults to allowing 0.9 (`--http0.9`); `--no-http0.9` makes
+        // such responses an error (CURLE_UNSUPPORTED_PROTOCOL / exit 1).
+        // After we've consumed an interim 1xx response, garbage instead of a
+        // proper HTTP/x.y status is "weird server reply" (exit 8, test 1480).
+        if !line.starts_with("HTTP/") {
+            if saw_interim {
+                return Err("weird_server_reply: bogus follow-up after interim".to_string());
+            }
+            if !http09 {
+                return Err("unsupported protocol: HTTP/0.9 disabled".to_string());
+            }
+            // HEAD must not receive a body, so an HTTP/0.9 (body-only) reply
+            // is "weird" — curl exits 8 (test 1144).
+            if is_head {
+                return Err("weird_server_reply: HTTP/0.9 body in response to HEAD".to_string());
+            }
             let mut body = line.into_bytes();
             let _ = reader.read_to_end(&mut body);
             return Ok(Response {
@@ -141,6 +155,7 @@ pub(crate) fn read_response(
             .unwrap_or(0);
         if (100..200).contains(&code) {
             // Consume headers of the interim response, then loop for the real one.
+            saw_interim = true;
             loop {
                 let mut hl = String::new();
                 let n = reader
@@ -172,6 +187,12 @@ pub(crate) fn read_response(
             "weird_server_reply: unsupported protocol: {}",
             parts[0]
         ));
+    }
+    // Status code must be exactly three digits per RFC 7230 §3.1.2.
+    // curl rejects single- or two-digit codes, leading-zero codes longer than
+    // three, etc., with CURLE_UNSUPPORTED_PROTOCOL (test 1431/1432).
+    if parts[1].len() != 3 || !parts[1].chars().all(|c| c.is_ascii_digit()) {
+        return Err(format!("invalid status code: {}", parts[1]));
     }
     let status: u16 = parts[1]
         .parse()
@@ -267,6 +288,11 @@ pub(crate) fn read_response(
 
         if is_cont {
             if let Some(ref mut folded) = pending_folded {
+                // Strip trailing whitespace on the existing buffer before
+                // joining so a "Header: val\t" + " " + "more" produces
+                // "Header: val more" (test 1274).
+                let trimmed_end = folded.trim_end_matches([' ', '\t']).to_string();
+                *folded = trimmed_end;
                 folded.push(' ');
                 folded.push_str(trimmed.trim_start());
                 // Folded mode — once a continuation arrives we never emit the
@@ -274,7 +300,10 @@ pub(crate) fn read_response(
                 pending_raw = None;
             } else if let Some(prev_raw) = pending_raw.take() {
                 // Convert the previously-seen raw line into folded form.
-                let prev_trim = prev_raw.trim_end_matches(['\r', '\n']).to_string();
+                let prev_trim = prev_raw
+                    .trim_end_matches(['\r', '\n'])
+                    .trim_end_matches([' ', '\t'])
+                    .to_string();
                 let mut folded = prev_trim;
                 folded.push(' ');
                 folded.push_str(trimmed.trim_start());
@@ -339,6 +368,11 @@ pub(crate) fn read_response(
         pending_ending = this_ending;
     }
 
+    // Reject responses with more than 5000 individual header lines —
+    // matches curl's CURLE_TOO_MANY_HEADERS guard (exit 100, test 747).
+    if headers.len() > 5000 {
+        return Err(format!("too many response headers: {}", headers.len()));
+    }
     // Check header size limits.
     if header_bytes.len() > MAX_HEADER_SIZE {
         return Ok(Response {
@@ -439,11 +473,12 @@ pub(crate) fn read_response(
                 .collect::<Vec<_>>()
         })
         .collect();
-    // chunked must be either absent or the very last token (test 1546).
-    let chunked_misplaced = te_tokens
-        .iter()
-        .position(|t| t == "chunked")
-        .is_some_and(|p| p != te_tokens.len() - 1);
+    // chunked must be either absent or appear as the very last token. Repeated
+    // `chunked` tokens are tolerated as long as the *last* token is still
+    // chunked (test 1483); only chunked-then-something-else is malformed
+    // (test 1546).
+    let chunked_misplaced = te_tokens.iter().any(|t| t == "chunked")
+        && te_tokens.last().map(|s| s.as_str()) != Some("chunked");
     let te_layer_count = te_tokens.len();
     if chunked_misplaced {
         // Truncate header_bytes to exclude the offending Transfer-Encoding line
@@ -469,6 +504,36 @@ pub(crate) fn read_response(
             headers,
             body: Vec::new(),
             header_bytes: truncated,
+            redirect_headers: Vec::new(),
+            num_connects: 0,
+            num_redirects: 0,
+            max_redirects_reached: false,
+            proto_redir_blocked: false,
+            weird_server_reply: false,
+            final_url: None,
+            redirect_url: None,
+            timed_out: false,
+            recv_error: false,
+            partial_file: false,
+            bad_content_encoding: true,
+            bad_encoding_too_many: false,
+            filesize_exceeded: false,
+            header_size_error: false,
+        });
+    }
+    // Reject Transfer-Encoding values the client didn't request. Without
+    // `--tr-encoding` we accept only `chunked`/`identity` (the no-op forms).
+    // Anything else means the server compressed unsolicited (test 1496).
+    // `--raw` bypasses this check — the user explicitly asked for raw bytes
+    // (test 319).
+    if !tr_decompress && !raw && te_tokens.iter().any(|t| t != "chunked" && t != "identity") {
+        return Ok(Response {
+            trailer_bytes: Vec::new(),
+            status,
+            status_text,
+            headers,
+            body: Vec::new(),
+            header_bytes,
             redirect_headers: Vec::new(),
             num_connects: 0,
             num_redirects: 0,
@@ -514,9 +579,14 @@ pub(crate) fn read_response(
         });
     }
     // RFC 7231: only one Location header is allowed in a response.
-    // Multiple Location headers are a malformed response (test 772, exit 8).
-    let location_count = headers.iter().filter(|(k, _)| k == "location").count();
-    if location_count > 1 {
+    // Multiple Location headers with disagreeing values are a malformed
+    // response (test 772, exit 8). Identical duplicates are tolerated and
+    // collapsed to a single value (test 773).
+    let location_values: Vec<&str> = headers
+        .iter()
+        .filter_map(|(k, v)| (k == "location").then_some(v.as_str()))
+        .collect();
+    if location_values.len() > 1 && !location_values.iter().all(|v| v == &location_values[0]) {
         let mut partial_bytes = Vec::new();
         let mut seen_location = false;
         for line in header_bytes.split(|&b| b == b'\n') {
@@ -556,6 +626,20 @@ pub(crate) fn read_response(
             bad_encoding_too_many: false,
             filesize_exceeded: false,
             header_size_error: false,
+        });
+    }
+    // Collapse duplicate-but-identical Location headers to a single entry so
+    // downstream redirect logic doesn't see them twice.
+    if location_values.len() > 1 {
+        let mut seen = false;
+        headers.retain(|(k, _)| {
+            if k == "location" {
+                if seen {
+                    return false;
+                }
+                seen = true;
+            }
+            true
         });
     }
     // RFC 7230 §3.3.2: if multiple Content-Length values appear (either
@@ -953,7 +1037,12 @@ fn read_chunked_body(reader: &mut impl BufRead) -> Result<(Vec<u8>, ChunkErr, Ve
                         {
                             break;
                         }
-                        trailer_bytes.extend_from_slice(trailer_line.as_bytes());
+                        // Normalize trailer line ending to CRLF — curl always
+                        // emits trailer lines with CRLF even when the wire
+                        // bytes used bare LF (test 1417).
+                        let line_norm = trailer_line.trim_end_matches(['\r', '\n']);
+                        trailer_bytes.extend_from_slice(line_norm.as_bytes());
+                        trailer_bytes.extend_from_slice(b"\r\n");
                     }
                 }
             }
@@ -967,8 +1056,9 @@ fn read_chunked_body(reader: &mut impl BufRead) -> Result<(Vec<u8>, ChunkErr, Ve
             return Ok((body, ChunkErr::Partial, Vec::new()));
         }
         body.extend_from_slice(&chunk);
-        // Read trailing CRLF after chunk data.
-        let mut crlf = [0u8; 2];
-        let _ = reader.read_exact(&mut crlf);
+        // Read trailing line terminator after chunk data. Spec says CRLF, but
+        // some servers / test fixtures use bare LF — read_line consumes either.
+        let mut sep = String::new();
+        let _ = reader.read_line(&mut sep);
     }
 }

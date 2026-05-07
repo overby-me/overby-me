@@ -233,12 +233,15 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
             req.push_str(&format!("Proxy-Authorization: Basic {encoded}\r\n"));
         }
 
-        // User-Agent (unless suppressed by custom header)
-        let has_ua = opts
-            .headers
+        // User-Agent on CONNECT: default UA (or `--user-agent`) comes before
+        // Proxy-Connection (test 749). When `--proxy-header User-Agent: ...`
+        // is set, the default is suppressed and the proxy-header version is
+        // emitted at the very end with the rest of the proxy headers (test 287).
+        let proxy_ua = opts
+            .proxy_headers
             .iter()
             .any(|(k, _)| k.eq_ignore_ascii_case("user-agent"));
-        if !has_ua {
+        if !proxy_ua {
             let ua = opts.user_agent.as_deref().unwrap_or("curl/8.0.0");
             if !ua.is_empty() {
                 req.push_str(&format!("User-Agent: {ua}\r\n"));
@@ -246,6 +249,14 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
         }
 
         req.push_str("Proxy-Connection: Keep-Alive\r\n");
+
+        // --proxy-header values go after Proxy-Connection on CONNECT.
+        for (k, v) in &opts.proxy_headers {
+            if v.is_empty() || v == "\x00" {
+                continue;
+            }
+            req.push_str(&format!("{k}: {v}\r\n"));
+        }
         req.push_str("\r\n");
 
         use std::io::{BufRead, BufReader};
@@ -281,7 +292,7 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
         }
 
         if status_code != 200 {
-            return Err(format!("CONNECT tunnel failed with status {status_code}"));
+            return Err(format!("CONNECT tunnel failed, response {status_code}"));
         }
 
         connect_headers = response_bytes;

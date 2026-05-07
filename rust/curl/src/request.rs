@@ -63,6 +63,18 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         {
             req.push_str("Accept: */*\r\n");
         }
+        // Proxy-Connection (matches non-request-target path).
+        if opts.proxy.is_some()
+            && url.scheme == "http"
+            && !opts.proxy_tunnel
+            && !opts.no_keepalive
+            && !opts
+                .headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("proxy-connection"))
+        {
+            req.push_str("Proxy-Connection: Keep-Alive\r\n");
+        }
         for (key, val) in &opts.headers {
             if key.eq_ignore_ascii_case("host") {
                 continue;
@@ -90,6 +102,9 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
     {
         path.push_str(&encode_path_component(name));
     }
+    // Percent-encode high-bit bytes (e.g. raw UTF-8 received in a Location
+    // header) so the request line stays ASCII-clean.
+    let path = pct_encode_high(&path);
 
     // When going through an HTTP proxy, use the full absolute URL in the request line.
     let request_target = if opts.proxy.is_some() && url.scheme == "http" && !opts.proxy_tunnel {
@@ -175,11 +190,21 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         }
     }
 
-    // Check if custom headers override defaults.
+    // For HTTP-via-proxy (no CONNECT tunnel), --proxy-header values are sent
+    // on the same request as -H, so check both lists when deciding whether to
+    // emit a default header (e.g. Proxy-Connection).
+    let proxy_headers_active = opts.proxy.is_some() && url.scheme == "http" && !opts.proxy_tunnel;
     let has_custom = |name: &str| {
-        opts.headers
+        let in_headers = opts
+            .headers
             .iter()
-            .any(|(k, _)| k.eq_ignore_ascii_case(name))
+            .any(|(k, _)| k.eq_ignore_ascii_case(name));
+        let in_proxy = proxy_headers_active
+            && opts
+                .proxy_headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case(name));
+        in_headers || in_proxy
     };
 
     // User-Agent. An explicit empty string (-A "") suppresses the header,
@@ -195,7 +220,13 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
     }
 
     // Proxy-Connection header — curl sends this for HTTP proxy requests.
-    if opts.proxy.is_some() && url.scheme == "http" && !opts.proxy_tunnel && !opts.no_keepalive {
+    // A user-supplied -H "Proxy-Connection: ..." replaces ours (emitted later).
+    if opts.proxy.is_some()
+        && url.scheme == "http"
+        && !opts.proxy_tunnel
+        && !opts.no_keepalive
+        && !has_custom("proxy-connection")
+    {
         req.push_str("Proxy-Connection: Keep-Alive\r\n");
     }
 
@@ -211,9 +242,19 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
     }
 
     // --tr-encoding: announce we accept gzip Transfer-Encoding via TE/Connection.
+    // If the user supplied a `-H "Connection: ..."` header we append "TE" to
+    // the *first* user value rather than emitting a separate Connection header
+    // (matches curl's behavior — see test 1125).
     if opts.tr_encoding {
         req.push_str("TE: gzip\r\n");
-        req.push_str("Connection: TE\r\n");
+        let user_conn = opts.headers.iter().position(|(k, v)| {
+            k.eq_ignore_ascii_case("connection") && !v.is_empty() && v != "\x00"
+        });
+        if user_conn.is_none() {
+            req.push_str("Connection: TE\r\n");
+        }
+        // The user's Connection header (if any) is rewritten in the user-header
+        // emission loop below so we don't duplicate it here.
     }
 
     // --etag-compare: send If-None-Match with the etag read from FILE.
@@ -301,7 +342,15 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
     // - "\x00" marker (from -H "X-Header;") sends header with no value.
     // - Normal value sends "Key: value\r\n".
     // Skip the Host header here — it was already emitted above.
-    for (key, val) in &opts.headers {
+    // For HTTP-via-proxy (no CONNECT), --proxy-header entries are sent on the
+    // same request as -H so include them after the regular -H list.
+    let user_header_iter = opts.headers.iter().chain(if proxy_headers_active {
+        opts.proxy_headers.iter()
+    } else {
+        [].iter()
+    });
+    let mut conn_te_appended = false;
+    for (key, val) in user_header_iter {
         if key.eq_ignore_ascii_case("host") {
             continue;
         }
@@ -313,6 +362,18 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
             && !val.to_ascii_lowercase().contains("boundary=")
         {
             req.push_str(&format!("{key}: {val}; boundary={b}\r\n"));
+            continue;
+        }
+        // When --tr-encoding is set, the first user-supplied Connection header
+        // gets ", TE" appended to its value so we don't emit a duplicate
+        // Connection: TE header (test 1125).
+        if opts.tr_encoding
+            && !conn_te_appended
+            && key.eq_ignore_ascii_case("connection")
+            && val != "\x00"
+        {
+            req.push_str(&format!("{key}: {val}, TE\r\n"));
+            conn_te_appended = true;
             continue;
         }
         if val == "\x00" {
@@ -352,11 +413,14 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         // uploading from stdin (-T -). Skip for HTTP/1.0 or if user suppressed it.
         // See lib/http.h EXPECT_100_THRESHOLD in curl source.
         let auto_expect = !has_expect && !http10 && (is_stdin_upload || body.len() >= 1024 * 1024);
-        if auto_expect {
-            req.push_str("Expect: 100-continue\r\n");
-        }
+        // A user-supplied "Expect: 100-continue" also activates the handshake
+        // so we wait for the server's interim response before sending the body.
+        let user_expect = opts.headers.iter().any(|(k, v)| {
+            k.eq_ignore_ascii_case("expect") && v.eq_ignore_ascii_case("100-continue")
+        });
+        let do_expect_handshake = auto_expect || (user_expect && !http10);
 
-        // Content-Type last.
+        // Content-Type comes before Expect (matches curl ordering).
         if !has_content_type {
             if let Some(ref b) = boundary {
                 req.push_str(&format!(
@@ -366,9 +430,13 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
                 req.push_str("Content-Type: application/x-www-form-urlencoded\r\n");
             }
         }
-        // When Expect: 100-continue was auto-added, return headers and body
-        // separately so the caller can implement the 100-continue handshake.
+        // Expect: 100-continue last (after Content-Type), matching curl.
         if auto_expect {
+            req.push_str("Expect: 100-continue\r\n");
+        }
+        // When Expect: 100-continue is in play (auto or user), return headers
+        // and body separately so the caller can implement the handshake.
+        if do_expect_handshake {
             req.push_str("\r\n");
             let header_bytes = req.into_bytes();
             let body_bytes = if user_chunked {
@@ -717,7 +785,7 @@ fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options)
                     if !domain_matches(&request_host, domain) {
                         continue;
                     }
-                    if !path.starts_with(cookie_path) {
+                    if !path_matches(path, cookie_path) {
                         continue;
                     }
                     file_pairs.push((
@@ -766,7 +834,7 @@ fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options)
         if !domain_matches(&request_host, domain) {
             continue;
         }
-        if !path.starts_with(cookie_path) {
+        if !path_matches(path, cookie_path) {
             continue;
         }
         file_pairs.push((
@@ -806,6 +874,24 @@ fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options)
     all.join("; ")
 }
 
+/// RFC 6265 §5.1.4 path matching: the cookie's path-attribute matches the
+/// request URI's path component if (a) they're identical, (b) the cookie path
+/// is a prefix of the request path AND ends with `/`, or (c) the cookie path
+/// is a prefix and the next byte in the request path is `/`. Anything else
+/// is a non-match — `/hoge` does NOT cover `/hogege` (test 1228).
+fn path_matches(request_path: &str, cookie_path: &str) -> bool {
+    if cookie_path.is_empty() {
+        return true;
+    }
+    if request_path == cookie_path {
+        return true;
+    }
+    if !request_path.starts_with(cookie_path) {
+        return false;
+    }
+    cookie_path.ends_with('/') || request_path.as_bytes().get(cookie_path.len()) == Some(&b'/')
+}
+
 /// Netscape-style cookie domain match.
 /// Cookie domain starting with '.' matches host with that suffix.
 /// Cookie domain without '.' matches the exact host.
@@ -839,6 +925,21 @@ fn encode_path_component(s: &str) -> String {
             _ => {
                 out.push_str(&format!("%{b:02x}"));
             }
+        }
+    }
+    out
+}
+
+/// Percent-encode high-bit (non-ASCII) bytes in a request-line path. Existing
+/// %XX escapes and ASCII bytes are passed through unchanged. Used for redirect
+/// targets where the Location header may contain raw UTF-8 (test 1138).
+fn pct_encode_high(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for &b in s.as_bytes() {
+        if b >= 0x80 {
+            out.push_str(&format!("%{b:02X}"));
+        } else {
+            out.push(b as char);
         }
     }
     out
@@ -1285,11 +1386,55 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
         }
     }
 
-    // NO_PROXY / no_proxy: bypass proxy for matching hosts.
-    if opts.proxy.is_some() {
-        let no_proxy = std::env::var("no_proxy")
-            .or_else(|_| std::env::var("NO_PROXY"))
+    // HTTP/1.0 + stdin upload: no chunked encoding available so we can't ship
+    // the body without an a-priori Content-Length. curl exits 25 (test 1069).
+    let is_stdin_upload = opts.upload_file.as_deref().and_then(|p| p.to_str()) == Some("-");
+    let http10 = opts.http_version.as_deref() == Some("1.0");
+    let user_chunked = opts.headers.iter().any(|(k, v)| {
+        k.eq_ignore_ascii_case("transfer-encoding") && v.to_ascii_lowercase().contains("chunked")
+    });
+    if is_stdin_upload && http10 && !user_chunked {
+        return Err(
+            "upload_failed: HTTP/1.0 cannot upload from stdin without Content-Length".into(),
+        );
+    }
+
+    // Pick up proxy from env when none was given via the CLI: http_proxy
+    // (HTTP only — historical: only the lowercase form) or ALL_PROXY.
+    if opts.proxy.is_none() {
+        let scheme_lc = url_str
+            .split_once("://")
+            .map(|(s, _)| s.to_ascii_lowercase())
             .unwrap_or_default();
+        let env = if scheme_lc == "https" {
+            std::env::var("HTTPS_PROXY")
+                .or_else(|_| std::env::var("https_proxy"))
+                .ok()
+        } else if scheme_lc == "http" {
+            std::env::var("http_proxy").ok()
+        } else {
+            None
+        };
+        let proxy = env.or_else(|| {
+            std::env::var("ALL_PROXY")
+                .or_else(|_| std::env::var("all_proxy"))
+                .ok()
+        });
+        if let Some(p) = proxy
+            && !p.is_empty()
+        {
+            opts.proxy = Some(p);
+        }
+    }
+
+    // NO_PROXY / no_proxy: bypass proxy for matching hosts. The CLI
+    // `--noproxy` option overrides the env var.
+    if opts.proxy.is_some() {
+        let no_proxy = opts.noproxy.clone().unwrap_or_else(|| {
+            std::env::var("no_proxy")
+                .or_else(|_| std::env::var("NO_PROXY"))
+                .unwrap_or_default()
+        });
         if no_proxy == "*" {
             opts.proxy = None;
             opts.proxy_user = None;
@@ -1386,6 +1531,68 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
         let resp = execute_request(&url, &opts, redirect_headers.len())?;
         connects += 1;
 
+        // When the cookie engine is active, accumulate Set-Cookie response
+        // headers so subsequent redirects within this perform() call (and
+        // future per-URL cookie lookups in main.rs) see them. The same logic
+        // runs again in main.rs against the final response — that's a no-op
+        // when the cookie was already captured here.
+        if opts.cookie_engine {
+            let host_for_cookies = opts
+                .headers
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("host"))
+                .map(|(_, v)| v.split(':').next().unwrap_or(v).to_string())
+                .unwrap_or_else(|| url.host.clone());
+            for (k, v) in &resp.headers {
+                if k == "set-cookie"
+                    && let Some(line) =
+                        crate::cookie::format_cookie_line(v, &url, &host_for_cookies)
+                {
+                    let fields: Vec<&str> = line.split('\t').collect();
+                    if fields.len() >= 7 {
+                        let new_dom = fields[0].strip_prefix("#HttpOnly_").unwrap_or(fields[0]);
+                        let np = fields[2];
+                        let nn = fields[5];
+                        opts.memory_cookies.retain(|existing| {
+                            let ef: Vec<&str> = existing.split('\t').collect();
+                            if ef.len() >= 7 {
+                                let ed = ef[0].strip_prefix("#HttpOnly_").unwrap_or(ef[0]);
+                                !(ed == new_dom && ef[2] == np && ef[5] == nn)
+                            } else {
+                                true
+                            }
+                        });
+                    }
+                    if !crate::cookie::is_jar_line_expired(&line) {
+                        // Cap at 50 cookies per domain (matches curl's
+                        // CMAX_COOKIES_PER_DOMAIN; new entries past the cap are
+                        // dropped — test 444).
+                        let new_dom = line
+                            .split('\t')
+                            .next()
+                            .map(|s| s.strip_prefix("#HttpOnly_").unwrap_or(s).to_string())
+                            .unwrap_or_default();
+                        let cnt = opts
+                            .memory_cookies
+                            .iter()
+                            .filter(|c| {
+                                c.split('\t')
+                                    .next()
+                                    .map(|s| {
+                                        s.strip_prefix("#HttpOnly_").unwrap_or(s)
+                                            == new_dom.as_str()
+                                    })
+                                    .unwrap_or(false)
+                            })
+                            .count();
+                        if cnt < 50 {
+                            opts.memory_cookies.push(line);
+                        }
+                    }
+                }
+            }
+        }
+
         // Handle redirects.
         if opts.location && (301..=308).contains(&resp.status) {
             if redirects >= opts.max_redirs {
@@ -1436,8 +1643,21 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
 
                 // Resolve relative URLs per RFC 3986 §5.2. For a relative path,
                 // strip the query from the base and replace the last path segment.
-                if location.starts_with("http://") || location.starts_with("https://") {
+                // Any "scheme://..." form (even unsupported schemes like
+                // gopher://) is treated as absolute so it is later rejected as
+                // an unsupported protocol rather than appended to the base
+                // path (test 1563).
+                let abs_scheme = location.split_once("://").is_some_and(|(s, _)| {
+                    !s.is_empty()
+                        && s.chars()
+                            .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.')
+                });
+                if abs_scheme {
                     current_url = location;
+                } else if location.starts_with("//") {
+                    // Protocol-relative URL — keep the base scheme, replace
+                    // host+path with what follows the leading `//`.
+                    current_url = format!("{}:{location}", url.scheme);
                 } else if location.starts_with('/') {
                     current_url = format!("{}://{}:{}{}", url.scheme, url.host, url.port, location);
                 } else if location.starts_with('?') {
@@ -1527,17 +1747,21 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                     }
                 }
 
-                // RFC 7231: on 301/302/303, a POST becomes a GET (and its body
-                // is dropped) unless the user opts in via --post301, --post302,
-                // or --post303 to preserve the POST method and body.
+                // RFC 7231: on 301/302, a POST becomes a GET (and its body is
+                // dropped) unless the user opts in via --post301/--post302 to
+                // preserve the POST. PUT is preserved by default (test 1051).
+                // 303 typically changes to GET; --post303 preserves the POST
+                // (test 1332).
                 if matches!(resp.status, 301..=303) {
+                    let is_post = opts.data.is_some() || !opts.form_fields.is_empty();
                     let preserve = match resp.status {
                         301 => opts.post301,
                         302 => opts.post302,
                         303 => opts.post303,
                         _ => false,
                     };
-                    if !preserve {
+                    let convert = is_post && !preserve;
+                    if convert {
                         opts.data = None;
                         opts.form_fields.clear();
                         opts.upload_file = None;
@@ -1576,6 +1800,15 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                     }
                 }
 
+                // --referer "...;auto" updates Referer to the URL we just
+                // came from on each redirect (test 1067).
+                if opts.auto_referer {
+                    opts.referer = Some(format!(
+                        "{}://{}:{}{}",
+                        url.scheme, url.host, url.port, url.path
+                    ));
+                }
+
                 if opts.verbose {
                     eprintln!("* Following redirect to {current_url}");
                 }
@@ -1608,17 +1841,20 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
 /// URL that would be followed. Mirrors the RFC 3986 §5.2 logic used during
 /// redirect following.
 fn resolve_redirect(url: &ParsedUrl, location: &str) -> String {
-    if location.starts_with("http://") || location.starts_with("https://") {
-        // If the absolute URL has no path (only scheme://host[:port]), append
-        // a trailing "/" so it matches curl's normalized form.
-        let after_scheme = location
-            .split_once("://")
-            .map(|(_, r)| r)
-            .unwrap_or(location);
-        if !after_scheme.contains('/') {
-            return format!("{location}/");
+    // Any "scheme://..." form is treated as an absolute URL — even when the
+    // scheme is one we don't support (test 1159's `ht3p://...`). curl returns
+    // the literal Location value via %{redirect_url} in that case.
+    if let Some((scheme, rest)) = location.split_once("://") {
+        let scheme_ok = !scheme.is_empty()
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.');
+        if scheme_ok {
+            if (scheme == "http" || scheme == "https") && !rest.contains('/') {
+                return format!("{location}/");
+            }
+            return location.to_string();
         }
-        return location.to_string();
     }
     if let Some(rest) = location.strip_prefix("//") {
         return format!("{}://{}", url.scheme, rest);

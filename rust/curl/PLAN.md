@@ -6,11 +6,11 @@ Use the upstream [curl test suite](https://github.com/curl/curl/tree/master/test
 
 ## Current Status
 
-**418 tests passing** across the curl 8.19.0 test suite (verified with strict
+**555 tests passing** across the curl 8.19.0 test suite (verified with strict
 runner checks — the derivation fails when a test number doesn't exist or the
 suite reports anything other than 100% OK).
 
-Passing: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 66, 71, 73, 74, 75, 77, 78, 80, 82, 83, 84, 85, 86, 87, 92, 93, 94, 95, 97, 98, 129, 151, 152, 156, 157, 158, 160, 163, 164, 166, 171, 172, 173, 174, 178, 179, 180, 181, 183, 184, 185, 186, 187, 188, 189, 192, 193, 194, 197, 198, 199, 207, 214, 218, 219, 220, 221, 222, 224, 230, 232, 233, 234, 249, 256, 260, 262, 264, 266, 269, 274, 276, 278, 279, 281, 282, 292, 293, 300, 301, 302, 303, 304, 305, 306, 309, 310, 317, 318, 319, 325, 326, 327, 328, 329, 330, 331, 333, 334, 339, 341, 342, 343, 344, 345, 346, 347, 349, 357, 360, 361, 364, 365, 366, 367, 368, 370, 371, 372, 373, 374, 376, 378, 379, 383, 384, 385, 386, 387, 389, 391, 392, 393, 394, 395, 398, 399, 410, 411, 415, 418, 419, 420, 421, 422, 425, 426, 434, 443, 449, 452, 453, 454, 456, 460, 461, 462, 463, 467, 468, 469, 470, 473, 477, 481, 482, 484, 485, 497, 498, 499, 518, 537, 662, 663, 675, 678, 681, 686, 690, 691, 692, 697, 708, 722, 723, 724, 743, 746, 752, 767, 768, 769, 770, 771, 772, 773, 787, 794, 796, 797, 798, 898, 899, 978, 979, 990, 991, 994, 995, 996, 998, 999, 1004, 1011, 1012, 1015, 1027, 1029, 1031, 1032, 1033, 1040, 1041, 1042, 1043, 1053, 1054, 1058, 1064, 1068, 1076, 1080, 1081, 1089, 1101, 1109, 1110, 1111, 1115, 1117, 1118, 1121, 1122, 1123, 1126, 1127, 1128, 1143, 1147, 1150, 1155, 1157, 1160, 1161, 1164, 1166, 1168, 1169, 1174, 1175, 1176, 1178, 1182, 1183, 1184, 1197, 1200, 1201, 1202, 1205, 1210, 1213, 1214, 1216, 1218, 1223, 1231, 1232, 1235, 1237, 1240, 1241, 1246, 1249, 1251, 1258, 1259, 1261, 1266, 1267, 1268, 1269, 1270, 1271, 1272, 1273, 1275, 1276, 1280, 1283, 1290, 1292, 1296, 1297, 1298, 1299, 1300, 1302, 1303, 1304, 1305, 1306, 1309, 1311, 1317, 1318, 1322, 1323, 1325, 1334, 1336, 1337, 1338, 1339, 1340, 1341, 1342, 1343, 1344, 1345, 1346, 1347, 1364, 1365, 1366, 1367, 1372, 1373, 1374, 1375, 1376, 1377, 1395, 1396, 1397, 1398, 1399, 1411, 1413, 1416, 1424, 1429, 1433, 1434, 1438, 1439, 1457, 1466, 1471, 1472, 1473, 1475, 1484, 1487, 1489, 1494, 1497, 1524, 1544, 1546, 1584, 1585, 1601, 1602, 1603, 1605, 1606, 1607, 1608, 1609, 1610, 1611, 1612, 1614, 1615, 1616, 1620, 1635, 1636, 1650, 1651, 1652, 1653, 1655, 1656, 1657, 1658, 1661, 1663, 1664, 1665, 1670, 1671, 1680, 1681, 1682, 1683, 1709, 1909, 1979, 1980, 2080, 2088
+Passing: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 66, 71, 73, 74, 75, 77, 78, 80, 82, 83, 84, 85, 86, 87, 92, 93, 94, 95, 97, 98, 129, 151, 152, 156, 157, 158, 160, 163, 164, 166, 171, 172, 173, 174, 178, 179, 180, 181, 183, 184, 185, 186, 187, 188, 189, 192, 193, 194, 197, 198, 199, 207, 214, 218, 219, 220, 221, 222, 224, 230, 232, 233, 234, 249, 256, 260, 262, 264, 266, 269, 274, 276, 278, 279, 281, 282, 292, 293, 300, 301, 302, 303, 304, 305, 306, 309, 310, 317, 318, 319, 325, 326, 327, 328, 329, 330, 331, 333, 334, 339, 341, 342, 343, 344, 345, 346, 347, 349, 357, 360, 361, 364, 365, 366, 367, 368, 370, 371, 372, 373, 374, 376, 378, 379, 383, 384, 385, 386, 387, 389, 391, 392, 393, 394, 395, 398, 399, 410, 411, 415, 418, 419, 420, 421, 422, 425, 426, 434, 443, 444, 449, 452, 453, 454, 456, 460, 461, 462, 463, 467, 468, 469, 470, 473, 477, 481, 482, 484, 485, 497, 498, 499, 518, 537, 662, 663, 675, 678, 681, 686, 690, 691, 692, 693, 697, 708, 722, 723, 724, 743, 746, 747, 752, 759, 767, 768, 769, 770, 771, 772, 773, 787, 794, 796, 797, 798, 898, 899, 977, 978, 979, 990, 991, 994, 995, 996, 998, 999, 1004, 1011, 1012, 1015, 1024, 1025, 1027, 1029, 1031, 1032, 1033, 1040, 1041, 1042, 1043, 1051, 1052, 1053, 1054, 1058, 1064, 1068, 1069, 1070, 1076, 1080, 1081, 1089, 1090, 1101, 1104, 1105, 1109, 1110, 1111, 1115, 1116, 1117, 1118, 1121, 1122, 1123, 1124, 1125, 1126, 1127, 1128, 1129, 1130, 1131, 1138, 1141, 1143, 1144, 1147, 1150, 1151, 1155, 1157, 1159, 1160, 1161, 1164, 1166, 1168, 1169, 1170, 1172, 1174, 1175, 1176, 1178, 1179, 1180, 1181, 1182, 1183, 1184, 1188, 1197, 1200, 1201, 1202, 1205, 1210, 1213, 1214, 1216, 1218, 1223, 1228, 1231, 1232, 1234, 1235, 1236, 1237, 1240, 1241, 1246, 1247, 1248, 1249, 1251, 1252, 1253, 1254, 1255, 1256, 1257, 1258, 1259, 1260, 1261, 1263, 1264, 1266, 1267, 1268, 1269, 1270, 1271, 1272, 1273, 1274, 1275, 1276, 1278, 1280, 1281, 1283, 1289, 1290, 1291, 1292, 1296, 1297, 1298, 1299, 1300, 1302, 1303, 1304, 1305, 1306, 1309, 1310, 1311, 1312, 1313, 1314, 1317, 1318, 1322, 1323, 1325, 1332, 1333, 1334, 1335, 1336, 1337, 1338, 1339, 1340, 1341, 1342, 1343, 1344, 1345, 1346, 1347, 1364, 1365, 1366, 1367, 1368, 1369, 1370, 1371, 1372, 1373, 1374, 1375, 1376, 1377, 1395, 1396, 1397, 1398, 1399, 1409, 1410, 1411, 1413, 1416, 1417, 1424, 1427, 1429, 1430, 1431, 1432, 1433, 1434, 1438, 1439, 1443, 1457, 1462, 1466, 1471, 1472, 1473, 1474, 1475, 1480, 1483, 1484, 1487, 1489, 1493, 1494, 1495, 1496, 1497, 1524, 1544, 1546, 1563, 1584, 1585, 1601, 1602, 1603, 1605, 1606, 1607, 1608, 1609, 1610, 1611, 1612, 1613, 1614, 1615, 1616, 1620, 1635, 1636, 1650, 1651, 1652, 1653, 1655, 1656, 1657, 1658, 1661, 1663, 1664, 1665, 1670, 1671, 1680, 1681, 1682, 1683, 1709, 1909, 1979, 1980, 2075, 2080, 2088
 
 Test infrastructure is operational: `testsuite.nix` builds curl's C test servers from `pkgs.curl.src`, then runs `runtests.pl -c` against `rust-curl-dev`. The runner exits 0 for non-existent test numbers and for skipped tests, so `testsuite.nix` also greps the output for `No existing test cases were specified`, `TESTFAIL`, and `No tests were performed`, and requires `reported OK: 100%` — this prevents false positives in the curated list.
 
@@ -282,15 +282,81 @@ Current gaps:
 - [x] Reject responses with multiple Content-Length values that disagree numerically; normalize comma-list / repeated CLs that agree (exit 8, unlocked tests 770, 771)
 - [x] Reject responses with multiple `Location:` headers (exit 8, unlocked test 772)
 - [x] Reject `-m <secs>` values that overflow when converted to milliseconds (exit 2, unlocked test 746)
-- [ ] Target 500+ passing by addressing remaining feature gaps
+- [x] Unknown long option error format `option X: is unknown` + help hint (unlocked test 1179)
+- [x] Tolerate one extra leading slash after scheme separator (`http:///example.test/...` to `http://example.test/...`); reject 4+ slashes as malformed (unlocked test 1141)
+- [x] `--write-out` `%{onerror}` gating + `%{urlnum}`/`%{exitcode}`/`%{errormsg}` substitutions (unlocked test 1188)
+- [x] Tolerate Proxy-Connection from `-H` overriding curl's auto Proxy-Connection (unlocked test 1180)
+- [x] `--proxy-header` parsing; for HTTP-via-proxy (no CONNECT) merge into request headers (unlocked test 1181)
+- [x] HTTP request emits `Content-Type` before `Expect: 100-continue` to match curl ordering
+- [x] Honor user-supplied `Expect: 100-continue` header (do handshake even when not auto-added); accept `--expect100-timeout` (unlocked tests 1129, 1130, 1131)
+- [x] Chunked body reader: tolerate bare-LF chunk separators (unlocked tests 1124, 1170)
+- [x] Cookie engine activates with `-c` cookie jar so Set-Cookie accumulates across redirects (unlocked test 1104)
+- [x] Strip surrounding double quotes from cookie path attribute; treat TAB as control char (unlocked test 1105)
+- [x] Cookie size limit (4096 bytes name+value) — reject oversized Set-Cookie (unlocked test 1151)
+- [x] Accumulate Set-Cookie response headers across redirects within `perform()` (unlocked test 1104)
+- [x] Percent-encode high-bit (>=0x80) bytes in request-line path so raw UTF-8 in Location headers becomes ASCII-clean (unlocked test 1138)
+- [x] `--tr-encoding` with user-supplied `Connection:` header — append `, TE` to user's value instead of duplicating Connection header (unlocked test 1125)
+- [x] `--no-http0.9` (and default) rejects bare-body responses with exit 1 (unsupported protocol) instead of treating as malformed status (unlocked test 1172)
+- [x] `--request-target` path emits `Proxy-Connection: Keep-Alive` for HTTP-via-proxy (unlocked test 1613)
+- [x] Cookie domain validation: reject TLD-only domains even with trailing dots (e.g. `.me.` is `me`, still TLD-only) (unlocked test 977)
+- [x] `--next` requires a URL after it — flag pending state and exit 2 if not satisfied (unlocked test 686)
+- [x] URL glob: error on unmatched `{`; reject unmatched `[` only when the trailing run looks like a range (contains `-`) (unlocked tests 1234, 1236, 1289)
+- [x] Reject URL authority with multiple `@` or stray `:` after host port (unlocked test 1260)
+- [x] Redirect to `//host/path` (protocol-relative) reuses base scheme (unlocked test 1314)
+- [x] `--no-remote-name` accepted as inverse of `-O` (unlocked test 1278)
+- [x] **Hit 500/500 passing milestone**
+- [x] Multi-Location header: tolerate identical duplicates (collapse to one); reject only when values differ (fixed test 773 regression)
+- [x] HTTP header line folding: trim trailing whitespace before joining continuation lines (unlocked test 1274)
+- [x] Chunked trailer line ending: normalize bare LF to CRLF on output (unlocked test 1417)
+- [x] Reject Transfer-Encoding values the client did not request (unlocked test 1496)
+- [x] Reject TE chains where chunked is not last (already implemented; unlocked test 1495 with deeper-pattern test)
+- [x] Strict status-code validation: must be exactly 3 ASCII digits, else exit 1 (unlocked tests 1430, 1431, 1432)
+- [x] `--proto` parsing: `--proto -all` exits 2 when no protocols enabled (unlocked test 1474)
+- [x] `-h <bad-category>` prints category list rather than full help (unlocked test 1462)
+- [x] `--option=value` long-option parsing recognized (unlocked tests 1335)
+- [x] Glob `{,...,,}` (matched empty alternatives) now error path; URLs without scheme rejected too (unlocked test 759)
+- [x] -m / -z / similar overflow guards now also catch `184467440737095510` (unlocked test 1427)
+- [x] Glob unmatched-bracket fix tightened to detect overflow ranges (test 1289 already covered)
+- [x] Duplicate-but-identical Location collapses (test 773 keeps passing); HTTP/0.9 reject without --http0.9; --output-dir + -O write semantics (test 1335)
+- [x] Reject single-digit / multi-line status codes via length check (tests 1431, 1432)
+- [x] HTTP header continuation tolerates leading TAB and bare CRs in input (test 1274)
+- [x] Chunked TE+identity ordering accepted (test 1493)
+- [x] `--noproxy` CLI option overrides NO_PROXY env var (unlocked tests 1248, 1252, 1253, 1254)
+- [x] `--fail-early` aborts after first non-zero URL (unlocked test 1247)
+- [x] POST with empty body and user-supplied `Transfer-Encoding: chunked` emits `0\r\n\r\n` (unlocked test 1333)
+- [x] Reject responses with more than 5000 header lines (exit 100, unlocked test 747)
+- [x] Negative `--max-time` rejected with exit 2 (already implemented; unlocked test 1410)
+- [x] CONNECT request emits default User-Agent before Proxy-Connection; `--proxy-header` headers go after Proxy-Connection on CONNECT (matches curl ordering — fixed 287/749 split)
+- [x] After consuming 1xx interim, garbage instead of HTTP/x.y is "weird server reply" (exit 8, unlocked test 1480)
+- [x] Repeated `Transfer-Encoding: chunked` headers tolerated (only error if chunked is followed by another encoding) (unlocked test 1483)
+- [x] Cookie path-match per RFC 6265 §5.1.4 (prefix must end at `/` boundary) — `/hoge` no longer matches `/hogege` (unlocked test 1228)
+- [x] `--disallow-username-in-url` rejects URLs with `user[:pass]@` and exits 67 (unlocked test 2075)
+- [x] Cookie cap of 50 per domain on Set-Cookie ingestion (unlocked test 444)
+- [x] `--create-dirs` creates parent dirs for `--etag-save` and `-o` outputs (unlocked test 693)
+- [x] Cookie path matching across redirects works correctly (unlocked tests 1024, 1025)
+- [x] PUT preserves method on 301/302 redirect (only POST converts to GET); 303 always GET (unlocked tests 1051, 1052)
+- [x] `-e/--referer` `;auto` suffix updates Referer to prior URL on each redirect; `--raw` bypasses unsolicited TE rejection (regression fix for test 319)
+- [x] Resolve_redirect treats any `scheme://` form as absolute URL even with unsupported scheme (unlocked test 1159)
+- [x] HTTP/1.0 + stdin upload exits 25 (no chunked, no Content-Length) (unlocked test 1069)
+- [x] HTTP POST with Expect: 100-continue and server early-close handled (unlocked test 1070)
+- [x] HTTP redirect with chunked TE response works (unlocked test 1090)
+- [x] HEAD response with HTTP/0.9 body is "weird" (exit 8, unlocked test 1144)
+- [x] Honor `http_proxy` / `HTTPS_PROXY` / `ALL_PROXY` env vars when no `--proxy` is given (unlocked tests 1255, 1256, 1257)
+- [x] URL parsing: reject whitespace/control chars in host; reject rubbish after IPv6 `]` bracket (unlocked tests 1263, 1264)
+- [x] `--post303` preserves POST on 303 redirect (unlocked test 1332)
+- [x] `-H "Header;"` sends header with empty value (unlocked test 1291)
+- [x] Redirect to any `scheme://` (e.g. `gopher://`) is treated as absolute URL (unlocked test 1563)
+- [x] `-C wrong` (non-numeric continue-at offset) exits 2 (unlocked test 1409)
+- [x] Explicit `-o` overrides `-J` Content-Disposition / `-O` URL-derived name (unlocked tests 1368, 1369, 1370, 1371)
+- [ ] Target 600+ passing by addressing remaining feature gaps
 
 ---
 
 ## Test Inventory
 
-### Passing tests (476)
+### Passing tests (555)
 
-1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 66, 71, 73, 74, 75, 77, 78, 80, 82, 83, 84, 85, 86, 87, 92, 93, 94, 95, 97, 98, 129, 151, 152, 156, 157, 158, 160, 163, 164, 166, 171, 172, 173, 174, 178, 179, 180, 181, 183, 184, 185, 186, 187, 188, 189, 192, 193, 194, 197, 198, 199, 207, 214, 218, 219, 220, 221, 222, 224, 230, 232, 233, 234, 249, 256, 260, 262, 264, 266, 269, 274, 276, 278, 279, 281, 282, 292, 293, 300, 301, 302, 303, 304, 305, 306, 309, 310, 317, 318, 319, 325, 326, 327, 328, 329, 330, 331, 333, 334, 339, 341, 342, 343, 344, 345, 346, 347, 349, 357, 360, 361, 364, 365, 366, 367, 368, 370, 371, 372, 373, 374, 376, 378, 379, 383, 384, 385, 386, 387, 389, 391, 392, 393, 394, 395, 398, 399, 410, 411, 415, 418, 419, 420, 421, 422, 425, 426, 434, 443, 449, 452, 453, 454, 456, 460, 461, 462, 463, 467, 468, 469, 470, 473, 477, 481, 482, 484, 485, 497, 498, 499, 518, 537, 662, 663, 675, 678, 681, 686, 690, 691, 692, 697, 708, 722, 723, 724, 743, 746, 752, 767, 768, 769, 770, 771, 772, 773, 787, 794, 796, 797, 798, 898, 899, 978, 979, 990, 991, 994, 995, 996, 998, 999, 1004, 1011, 1012, 1015, 1027, 1029, 1031, 1032, 1033, 1040, 1041, 1042, 1043, 1053, 1054, 1058, 1064, 1068, 1076, 1080, 1081, 1089, 1101, 1109, 1110, 1111, 1115, 1117, 1118, 1121, 1122, 1123, 1126, 1127, 1128, 1143, 1147, 1150, 1155, 1157, 1160, 1161, 1164, 1166, 1168, 1169, 1174, 1175, 1176, 1178, 1182, 1183, 1184, 1197, 1200, 1201, 1202, 1205, 1210, 1213, 1214, 1216, 1218, 1223, 1231, 1232, 1235, 1237, 1240, 1241, 1246, 1249, 1251, 1258, 1259, 1261, 1266, 1267, 1268, 1269, 1270, 1271, 1272, 1273, 1275, 1276, 1280, 1283, 1290, 1292, 1296, 1297, 1298, 1299, 1300, 1302, 1303, 1304, 1305, 1306, 1309, 1311, 1317, 1318, 1322, 1323, 1325, 1334, 1336, 1337, 1338, 1339, 1340, 1341, 1342, 1343, 1344, 1345, 1346, 1347, 1364, 1365, 1366, 1367, 1372, 1373, 1374, 1375, 1376, 1377, 1395, 1396, 1397, 1398, 1399, 1411, 1413, 1416, 1424, 1429, 1433, 1434, 1438, 1439, 1457, 1466, 1471, 1472, 1473, 1475, 1484, 1487, 1489, 1494, 1497, 1524, 1544, 1546, 1584, 1585, 1601, 1602, 1603, 1605, 1606, 1607, 1608, 1609, 1610, 1611, 1612, 1614, 1615, 1616, 1620, 1635, 1636, 1650, 1651, 1652, 1653, 1655, 1656, 1657, 1658, 1661, 1663, 1664, 1665, 1670, 1671, 1680, 1681, 1682, 1683, 1709, 1909, 1979, 1980, 2080, 2088
+1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 66, 71, 73, 74, 75, 77, 78, 80, 82, 83, 84, 85, 86, 87, 92, 93, 94, 95, 97, 98, 129, 151, 152, 156, 157, 158, 160, 163, 164, 166, 171, 172, 173, 174, 178, 179, 180, 181, 183, 184, 185, 186, 187, 188, 189, 192, 193, 194, 197, 198, 199, 207, 214, 218, 219, 220, 221, 222, 224, 230, 232, 233, 234, 249, 256, 260, 262, 264, 266, 269, 274, 276, 278, 279, 281, 282, 292, 293, 300, 301, 302, 303, 304, 305, 306, 309, 310, 317, 318, 319, 325, 326, 327, 328, 329, 330, 331, 333, 334, 339, 341, 342, 343, 344, 345, 346, 347, 349, 357, 360, 361, 364, 365, 366, 367, 368, 370, 371, 372, 373, 374, 376, 378, 379, 383, 384, 385, 386, 387, 389, 391, 392, 393, 394, 395, 398, 399, 410, 411, 415, 418, 419, 420, 421, 422, 425, 426, 434, 443, 444, 449, 452, 453, 454, 456, 460, 461, 462, 463, 467, 468, 469, 470, 473, 477, 481, 482, 484, 485, 497, 498, 499, 518, 537, 662, 663, 675, 678, 681, 686, 690, 691, 692, 693, 697, 708, 722, 723, 724, 743, 746, 747, 752, 759, 767, 768, 769, 770, 771, 772, 773, 787, 794, 796, 797, 798, 898, 899, 977, 978, 979, 990, 991, 994, 995, 996, 998, 999, 1004, 1011, 1012, 1015, 1024, 1025, 1027, 1029, 1031, 1032, 1033, 1040, 1041, 1042, 1043, 1051, 1052, 1053, 1054, 1058, 1064, 1068, 1069, 1070, 1076, 1080, 1081, 1089, 1090, 1101, 1104, 1105, 1109, 1110, 1111, 1115, 1116, 1117, 1118, 1121, 1122, 1123, 1124, 1125, 1126, 1127, 1128, 1129, 1130, 1131, 1138, 1141, 1143, 1144, 1147, 1150, 1151, 1155, 1157, 1159, 1160, 1161, 1164, 1166, 1168, 1169, 1170, 1172, 1174, 1175, 1176, 1178, 1179, 1180, 1181, 1182, 1183, 1184, 1188, 1197, 1200, 1201, 1202, 1205, 1210, 1213, 1214, 1216, 1218, 1223, 1228, 1231, 1232, 1234, 1235, 1236, 1237, 1240, 1241, 1246, 1247, 1248, 1249, 1251, 1252, 1253, 1254, 1255, 1256, 1257, 1258, 1259, 1260, 1261, 1263, 1264, 1266, 1267, 1268, 1269, 1270, 1271, 1272, 1273, 1274, 1275, 1276, 1278, 1280, 1281, 1283, 1289, 1290, 1291, 1292, 1296, 1297, 1298, 1299, 1300, 1302, 1303, 1304, 1305, 1306, 1309, 1310, 1311, 1312, 1313, 1314, 1317, 1318, 1322, 1323, 1325, 1332, 1333, 1334, 1335, 1336, 1337, 1338, 1339, 1340, 1341, 1342, 1343, 1344, 1345, 1346, 1347, 1364, 1365, 1366, 1367, 1368, 1369, 1370, 1371, 1372, 1373, 1374, 1375, 1376, 1377, 1395, 1396, 1397, 1398, 1399, 1409, 1410, 1411, 1413, 1416, 1417, 1424, 1427, 1429, 1430, 1431, 1432, 1433, 1434, 1438, 1439, 1443, 1457, 1462, 1466, 1471, 1472, 1473, 1474, 1475, 1480, 1483, 1484, 1487, 1489, 1493, 1494, 1495, 1496, 1497, 1524, 1544, 1546, 1563, 1584, 1585, 1601, 1602, 1603, 1605, 1606, 1607, 1608, 1609, 1610, 1611, 1612, 1613, 1614, 1615, 1616, 1620, 1635, 1636, 1650, 1651, 1652, 1653, 1655, 1656, 1657, 1658, 1661, 1663, 1664, 1665, 1670, 1671, 1680, 1681, 1682, 1683, 1709, 1909, 1979, 1980, 2075, 2080, 2088
 
 ### Major remaining failure categories
 

@@ -61,6 +61,7 @@ pub struct Options {
     pub(crate) head: bool,
     pub(crate) user_agent: Option<String>,
     pub(crate) referer: Option<String>,
+    pub(crate) auto_referer: bool, // -e ".*;auto" — update Referer to prior URL on redirect
     pub(crate) cookies: Vec<String>,
     pub(crate) cookie_jar: Option<PathBuf>,
     pub(crate) junk_session_cookies: bool,
@@ -89,11 +90,17 @@ pub struct Options {
     pub(crate) time_cond: Option<TimeCond>,
     /// --stderr: redirect stderr to file; "-" means stdout.
     pub(crate) stderr_redirect: Option<PathBuf>,
-    pub(crate) proxy: Option<String>,       // -x / --proxy
-    pub(crate) proxy_user: Option<String>,  // --proxy-user "user:pass"
-    pub(crate) proxy_tunnel: bool,          // -p / --proxytunnel — force CONNECT tunnel
-    pub(crate) proxy_1_0: bool,             // --proxy1.0 — use HTTP/1.0 for CONNECT
-    pub(crate) cookie_engine: bool,         // true when -b is used (enables cookie accumulation)
+    pub(crate) proxy: Option<String>,                // -x / --proxy
+    pub(crate) proxy_user: Option<String>,           // --proxy-user "user:pass"
+    pub(crate) proxy_tunnel: bool,                   // -p / --proxytunnel — force CONNECT tunnel
+    pub(crate) proxy_1_0: bool,                      // --proxy1.0 — use HTTP/1.0 for CONNECT
+    pub(crate) proxy_headers: Vec<(String, String)>, // --proxy-header — extra headers for proxy CONNECT or HTTP-via-proxy
+    pub(crate) noproxy: Option<String>, // --noproxy (comma-separated hosts to skip proxy)
+    pub(crate) fail_early: bool, // --fail-early — abort processing further URLs after the first error
+    pub(crate) disallow_userinfo: bool, // --disallow-username-in-url — reject URLs that carry user:pass@
+    pub(crate) create_dirs: bool,       // --create-dirs — mkdir -p the parent of any output path
+    pub(crate) remote_time: bool, // -R / --remote-time — set output file mtime from Last-Modified
+    pub(crate) cookie_engine: bool, // true when -b is used (enables cookie accumulation)
     pub(crate) memory_cookies: Vec<String>, // Netscape-format cookie lines accumulated from responses
     pub(crate) deleted_cookies: Vec<(String, String, String)>, // (domain, path, name) tuples of cookies deleted via Max-Age=0
     pub(crate) skip_existing: bool, // --skip-existing — skip transfer when output file exists
@@ -153,6 +160,7 @@ impl Default for Options {
             head: false,
             user_agent: None,
             referer: None,
+            auto_referer: false,
             cookies: Vec::new(),
             cookie_jar: None,
             junk_session_cookies: false,
@@ -183,6 +191,12 @@ impl Default for Options {
             proxy_user: None,
             proxy_tunnel: false,
             proxy_1_0: false,
+            proxy_headers: Vec::new(),
+            noproxy: None,
+            fail_early: false,
+            disallow_userinfo: false,
+            create_dirs: false,
+            remote_time: false,
             cookie_engine: false,
             memory_cookies: Vec::new(),
             deleted_cookies: Vec::new(),

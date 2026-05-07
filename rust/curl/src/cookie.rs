@@ -85,8 +85,11 @@ impl Cookie {
 
 fn has_control_chars(s: &str) -> bool {
     for b in s.bytes() {
+        // Reject any C0 control byte including TAB (0x09) and the DEL byte
+        // (0x7F). Curl rejects cookies whose name or value contains a TAB
+        // (test 1105) since TAB delimits fields in the Netscape jar format.
         match b {
-            0x00..=0x08 | 0x0A..=0x1F | 0x7F => return true,
+            0x00..=0x1F | 0x7F => return true,
             _ => {}
         }
     }
@@ -153,9 +156,11 @@ fn validate_set_cookie_domain(
         return None;
     }
 
-    // Reject TLD-only domains (no dot in the stripped domain).
-    // Exception: "localhost" is allowed per RFC 6761.
-    if !domain_lc.contains('.') && domain_lc != "localhost" {
+    // Reject TLD-only domains. After trimming trailing dots, the remaining
+    // string must contain at least one inner dot to be a valid superdomain.
+    // "me", "me." and ".me." all reduce to "me" which is TLD-only.
+    let trimmed_for_tld = domain_lc.trim_end_matches('.');
+    if !trimmed_for_tld.contains('.') && trimmed_for_tld != "localhost" {
         return None;
     }
 
@@ -203,6 +208,12 @@ pub(crate) fn parse_set_cookie_ex(
         return None;
     }
 
+    // RFC 6265 §6.1: each cookie is limited to 4096 bytes (name + value
+    // combined). curl rejects oversized cookies entirely (test 1151).
+    if name.len() + value.len() > 4096 {
+        return None;
+    }
+
     let mut domain_attr: Option<String> = None;
     let mut path_attr: Option<String> = None;
     let mut secure = false;
@@ -224,7 +235,13 @@ pub(crate) fn parse_set_cookie_ex(
                         domain_attr = Some(val.to_string());
                     }
                     "path" => {
-                        path_attr = Some(val.to_string());
+                        // Strip optional surrounding double quotes (e.g.
+                        // Set-Cookie: ...; path="/silly/" — test 1105).
+                        let v = val
+                            .strip_prefix('"')
+                            .and_then(|s| s.strip_suffix('"'))
+                            .unwrap_or(val);
+                        path_attr = Some(v.to_string());
                     }
                     "max-age" => {
                         if let Ok(n) = val.parse::<i64>() {
@@ -401,20 +418,37 @@ pub(crate) fn save_cookie_jar(
 
     // Closure to add a cookie, deduplicating by (domain, path, name).
     // Expired cookies (Max-Age=0 / past Expires) act as deletions:
-    // they remove matching entries and are NOT themselves kept.
+    // they remove matching entries and are NOT themselves kept. Drops new
+    // cookies that would push the per-domain count over 50 (matches curl's
+    // CMAX_COOKIES_PER_DOMAIN — test 444).
     let mut add_cookie = |cookie: Cookie| {
         let domain_key = cookie
             .domain
             .strip_prefix("#HttpOnly_")
             .unwrap_or(&cookie.domain)
             .to_string();
+        let mut replaced = false;
         cookies.retain(|c| {
             let d = c.domain.strip_prefix("#HttpOnly_").unwrap_or(&c.domain);
-            !(d == domain_key && c.path == cookie.path && c.name == cookie.name)
+            let same_key = d == domain_key && c.path == cookie.path && c.name == cookie.name;
+            if same_key {
+                replaced = true;
+            }
+            !same_key
         });
-        if !cookie.is_expired() {
-            cookies.push(cookie);
+        if cookie.is_expired() {
+            return;
         }
+        if !replaced {
+            let same_domain = cookies
+                .iter()
+                .filter(|c| c.domain.strip_prefix("#HttpOnly_").unwrap_or(&c.domain) == domain_key)
+                .count();
+            if same_domain >= 50 {
+                return;
+            }
+        }
+        cookies.push(cookie);
     };
 
     // Phase 1: Load from -b input files.

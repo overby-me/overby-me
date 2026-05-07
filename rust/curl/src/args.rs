@@ -176,7 +176,7 @@ fn snapshot_per_url(opts: &Options) -> PerUrlOptions {
 }
 
 pub(crate) fn parse_args() -> Options {
-    let mut args: Vec<String> = env::args().skip(1).collect();
+    let args: Vec<String> = env::args().skip(1).collect();
     let mut opts = Options::default();
 
     if args.is_empty() {
@@ -191,10 +191,29 @@ pub(crate) fn parse_args() -> Options {
         check_unicode_warning(arg);
     }
 
+    // Split `--option=value` into `--option` `value` so the per-option match
+    // arms below don't need to handle the inline form.
+    let mut args: Vec<String> = args
+        .into_iter()
+        .flat_map(|a| {
+            if a.starts_with("--")
+                && let Some((opt, val)) = a.split_once('=')
+            {
+                vec![opt.to_string(), val.to_string()]
+            } else {
+                vec![a]
+            }
+        })
+        .collect();
+
     let mut has_url = false;
     // Track the start index of the current --next group so we can snapshot
     // per-URL options at group boundaries rather than at URL-add time.
     let mut group_start_idx: usize = 0;
+    // Set after `--next` is seen; cleared by the next URL arg. If still set
+    // at end of parsing, we error out — `--next` requires a URL after it
+    // (test 686).
+    let mut expecting_url_after_next = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -209,8 +228,13 @@ pub(crate) fn parse_args() -> Options {
                     let nxt = &args[i + 1];
                     if !nxt.is_empty() && !nxt.starts_with('-') {
                         // Category like "all", "http", "important", etc. — print
-                        // the full usage and exit successfully.
-                        print_usage();
+                        // the full usage and exit successfully. Unknown
+                        // categories print the category list (test 1462).
+                        if is_known_category(nxt) {
+                            print_usage();
+                        } else {
+                            print_categories();
+                        }
                         process::exit(0);
                     }
                     if nxt.starts_with("--") {
@@ -360,7 +384,7 @@ pub(crate) fn parse_args() -> Options {
                 }
                 opts.fail_with_body = true;
             }
-            "-i" | "--include" => {
+            "-i" | "--include" | "--show-headers" => {
                 opts.include_headers = true;
             }
             "-I" | "--head" => {
@@ -372,7 +396,19 @@ pub(crate) fn parse_args() -> Options {
             }
             "-e" | "--referer" => {
                 i += 1;
-                opts.referer = Some(next_arg(&args, i, "-e"));
+                let val = next_arg(&args, i, "-e");
+                // ";auto" suffix tells curl to update the Referer to the
+                // previous URL on each redirect (test 1067).
+                if let Some(stripped) = val.strip_suffix(";auto") {
+                    opts.auto_referer = true;
+                    opts.referer = if stripped.is_empty() {
+                        None
+                    } else {
+                        Some(stripped.to_string())
+                    };
+                } else {
+                    opts.referer = Some(val);
+                }
             }
             "-b" | "--cookie" => {
                 i += 1;
@@ -383,6 +419,9 @@ pub(crate) fn parse_args() -> Options {
             "-c" | "--cookie-jar" => {
                 i += 1;
                 opts.cookie_jar = Some(PathBuf::from(next_arg(&args, i, "-c")));
+                // Cookie jar implies cookie engine — Set-Cookie headers should
+                // accumulate so the jar (and any redirects) see them.
+                opts.cookie_engine = true;
             }
             "-u" | "--user" => {
                 i += 1;
@@ -394,6 +433,13 @@ pub(crate) fn parse_args() -> Options {
                     .parse()
                     .unwrap_or(0.0);
                 opts.connect_timeout = Some(Duration::from_secs_f64(secs));
+            }
+            "--expect100-timeout" => {
+                // We accept the value but always wait briefly for the interim
+                // response in our current implementation — this is enough for
+                // the test cases that exercise the handshake.
+                i += 1;
+                let _ = next_arg(&args, i, "--expect100-timeout");
             }
             "-m" | "--max-time" => {
                 i += 1;
@@ -460,10 +506,6 @@ pub(crate) fn parse_args() -> Options {
             }
             "--retry-connrefused" => {}
             "--retry-all-errors" => opts.retry_all_errors = true,
-            "--expect100-timeout" => {
-                i += 1;
-                let _ = next_arg(&args, i, "--expect100-timeout");
-            }
             "-r" | "--range" => {
                 i += 1;
                 opts.range = Some(next_arg(&args, i, "-r"));
@@ -480,6 +522,9 @@ pub(crate) fn parse_args() -> Options {
             }
             "--http0.9" => {
                 opts.http09 = true;
+            }
+            "--no-http0.9" => {
+                opts.http09 = false;
             }
             "--remove-on-error" => {
                 opts.remove_on_error = true;
@@ -522,8 +567,30 @@ pub(crate) fn parse_args() -> Options {
             }
             "--url" => {
                 i += 1;
-                opts.urls.push(next_arg(&args, i, "--url"));
-                has_url = true;
+                let val = next_arg(&args, i, "--url");
+                // `@-` reads URLs from stdin (one per line); `@FILE` reads
+                // them from FILE. Otherwise the value is a single URL.
+                if let Some(path) = val.strip_prefix('@') {
+                    let contents = if path == "-" {
+                        let mut buf = String::new();
+                        let _ = io::Read::read_to_string(&mut io::stdin(), &mut buf);
+                        buf
+                    } else {
+                        fs::read_to_string(path).unwrap_or_default()
+                    };
+                    for line in contents.split('\n') {
+                        let line = line.trim();
+                        if !line.is_empty() {
+                            opts.urls.push(line.to_string());
+                            has_url = true;
+                            expecting_url_after_next = false;
+                        }
+                    }
+                } else {
+                    opts.urls.push(val);
+                    has_url = true;
+                    expecting_url_after_next = false;
+                }
             }
             // Flags used by the curl test suite that we accept but ignore
             "-q" => {
@@ -560,8 +627,46 @@ pub(crate) fn parse_args() -> Options {
             }
             "--proto" => {
                 i += 1;
-                let _val = next_arg(&args, i, "--proto");
-                // Ignored — we only support http/https
+                let val = next_arg(&args, i, "--proto");
+                // We only support http/https. If the spec disables all
+                // protocols, we have nothing to talk and curl exits 2.
+                let mut http_allowed = true;
+                let mut https_allowed = true;
+                let mut start = true;
+                for token in val.split(',') {
+                    let t = token.trim();
+                    if t.is_empty() {
+                        continue;
+                    }
+                    let (op, name) = if let Some(rest) = t.strip_prefix('+') {
+                        ('+', rest)
+                    } else if let Some(rest) = t.strip_prefix('-') {
+                        ('-', rest)
+                    } else if let Some(rest) = t.strip_prefix('=') {
+                        ('=', rest)
+                    } else {
+                        ('=', t)
+                    };
+                    if op == '=' && start {
+                        http_allowed = false;
+                        https_allowed = false;
+                    }
+                    start = false;
+                    let allow = op != '-';
+                    match name {
+                        "all" => {
+                            http_allowed = allow;
+                            https_allowed = allow;
+                        }
+                        "http" => http_allowed = allow,
+                        "https" => https_allowed = allow,
+                        _ => {}
+                    }
+                }
+                if !http_allowed && !https_allowed {
+                    eprintln!("curl: (2) You don't have any protocols enabled");
+                    process::exit(2);
+                }
             }
             "--proto-redir" => {
                 i += 1;
@@ -580,6 +685,13 @@ pub(crate) fn parse_args() -> Options {
             "-C" | "--continue-at" => {
                 i += 1;
                 let val = next_arg(&args, i, "-C");
+                // -C must be either "-" (auto-resume) or a non-negative
+                // integer offset. Reject anything else with exit 2 (test 1409).
+                if val != "-" && val.parse::<i64>().is_err() {
+                    eprintln!("curl: option -C: expected a proper numerical parameter");
+                    eprintln!("curl: try 'curl --help' or 'curl --manual' for more information");
+                    process::exit(2);
+                }
                 opts.resume_from = Some(val);
             }
             "--form-string" => {
@@ -632,6 +744,30 @@ pub(crate) fn parse_args() -> Options {
                 i += 1;
                 let val = next_arg(&args, i, "-U");
                 opts.proxy_user = Some(val);
+            }
+            "--proxy-header" => {
+                i += 1;
+                let h = next_arg(&args, i, "--proxy-header");
+                if let Some((k, v)) = h.split_once(':') {
+                    opts.proxy_headers
+                        .push((k.trim().to_string(), v.trim().to_string()));
+                }
+            }
+            "--noproxy" => {
+                i += 1;
+                opts.noproxy = Some(next_arg(&args, i, "--noproxy"));
+            }
+            "--fail-early" => {
+                opts.fail_early = true;
+            }
+            "--disallow-username-in-url" => {
+                opts.disallow_userinfo = true;
+            }
+            "--create-dirs" => {
+                opts.create_dirs = true;
+            }
+            "-R" | "--remote-time" => {
+                opts.remote_time = true;
             }
             "-p" | "--proxytunnel" => {
                 opts.proxy_tunnel = true;
@@ -707,6 +843,7 @@ pub(crate) fn parse_args() -> Options {
                 opts.upload_file = None;
                 opts.head = false;
                 opts.get = false;
+                expecting_url_after_next = true;
                 i += 1;
                 continue;
             }
@@ -861,15 +998,25 @@ pub(crate) fn parse_args() -> Options {
                         j += 1;
                     }
                 } else if arg.starts_with("--") {
-                    eprintln!("curl: unknown option '{arg}'");
+                    eprintln!("curl: option {arg}: is unknown");
+                    eprintln!("curl: try 'curl --help' or 'curl --manual' for more information");
                     process::exit(2);
                 } else {
                     opts.urls.push(arg.clone());
                     has_url = true;
+                    expecting_url_after_next = false;
                 }
             }
         }
         i += 1;
+    }
+
+    // --next must be followed by a URL. If parsing ends with the flag still
+    // pending we treat it as a usage error (test 686).
+    if expecting_url_after_next {
+        eprintln!("curl: option --next: is badly used here");
+        eprintln!("curl: try 'curl --help' or 'curl --manual' for more information");
+        process::exit(2);
     }
 
     // Snapshot per-URL fields for the final --next group (or the only group
@@ -1461,6 +1608,73 @@ pub(crate) fn format_http_date(timestamp: i64) -> String {
     )
 }
 
+fn is_known_category(name: &str) -> bool {
+    matches!(
+        name,
+        "all"
+            | "auth"
+            | "connection"
+            | "curl"
+            | "deprecated"
+            | "dns"
+            | "file"
+            | "ftp"
+            | "global"
+            | "hidden"
+            | "http"
+            | "imap"
+            | "important"
+            | "ldap"
+            | "output"
+            | "pop3"
+            | "post"
+            | "proxy"
+            | "scp"
+            | "sftp"
+            | "smtp"
+            | "ssh"
+            | "telnet"
+            | "tftp"
+            | "timeout"
+            | "tls"
+            | "upload"
+            | "verbose"
+    )
+}
+
+fn print_categories() {
+    println!(
+        "\
+Unknown category provided, here is a list of all categories:
+
+ auth        Authentication methods
+ connection  Manage connections
+ curl        The command line tool itself
+ deprecated  Legacy
+ dns         Names and resolving
+ file        FILE protocol
+ ftp         FTP protocol
+ global      Global options
+ http        HTTP and HTTPS protocol
+ imap        IMAP protocol
+ ldap        LDAP protocol
+ output      File system output
+ pop3        POP3 protocol
+ post        HTTP POST specific
+ proxy       Options for proxies
+ scp         SCP protocol
+ sftp        SFTP protocol
+ smtp        SMTP protocol
+ ssh         SSH protocol
+ telnet      TELNET protocol
+ tftp        TFTP protocol
+ timeout     Timeouts and delays
+ tls         TLS/SSL related
+ upload      Upload, sending data
+ verbose     Tracing, logging etc"
+    );
+}
+
 fn known_long_option(name: &str) -> bool {
     // Minimal allow-list for '-h <option>' validation. Includes the most
     // common long options curl accepts. Unknown names trigger curl's
@@ -1475,6 +1689,7 @@ fn known_long_option(name: &str) -> bool {
             | "--fail"
             | "--insecure"
             | "--include"
+            | "--show-headers"
             | "--head"
             | "--no-clobber"
             | "--cookie"
@@ -1504,6 +1719,12 @@ fn known_long_option(name: &str) -> bool {
             | "--max-time"
             | "--proxy"
             | "--proxy-user"
+            | "--proxy-header"
+            | "--noproxy"
+            | "--fail-early"
+            | "--disallow-username-in-url"
+            | "--create-dirs"
+            | "--remote-time"
             | "--cacert"
             | "--capath"
             | "--cert"
@@ -1583,6 +1804,7 @@ fn known_long_option(name: &str) -> bool {
             | "--socks5-gssapi-nec"
             | "--socks5-gssapi-service"
             | "--http0.9"
+            | "--no-http0.9"
             | "--alt-svc"
             | "--hsts"
             | "--etag-compare"

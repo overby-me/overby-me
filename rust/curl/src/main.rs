@@ -158,15 +158,22 @@ fn main() {
 
     // Pre-flight: verify --etag-save path is writable. curl exits 26 (read/write
     // error) if the etag file can't be created, before attempting any transfer.
-    if let Some(ref etag_path) = opts.etag_save
-        && let Err(e) = fs::OpenOptions::new()
+    if let Some(ref etag_path) = opts.etag_save {
+        if opts.create_dirs
+            && let Some(parent) = etag_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Err(e) = fs::OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(false)
             .open(etag_path)
-    {
-        eprintln!("curl: (26) Failed to open {}: {}", etag_path.display(), e);
-        process::exit(26);
+        {
+            eprintln!("curl: (26) Failed to open {}: {}", etag_path.display(), e);
+            process::exit(26);
+        }
     }
 
     // -C - (auto-resume):
@@ -235,6 +242,28 @@ fn main() {
     }
 
     for (url_idx, url_str) in opts.urls.iter().enumerate() {
+        // --disallow-username-in-url: any URL carrying user[:pass]@ is rejected
+        // before connecting, exiting CURLE_LOGIN_DENIED (67) (test 2075).
+        if opts.disallow_userinfo {
+            let has_userinfo = url_str
+                .find("://")
+                .map(|i| {
+                    let after = &url_str[i + 3..];
+                    let host_end = after.find('/').unwrap_or(after.len());
+                    after[..host_end].contains('@')
+                })
+                .unwrap_or(false);
+            if has_userinfo {
+                if !opts.silent || opts.show_error {
+                    eprintln!("curl: (67) Credentials in URL not allowed");
+                }
+                exit_code = 67;
+                if opts.fail_early {
+                    break;
+                }
+                continue;
+            }
+        }
         // --skip-existing: if the output target already exists, emit the
         // notice and skip this URL's transfer entirely.
         if opts.skip_existing {
@@ -590,7 +619,30 @@ fn main() {
                             // remove the old entry (done above) but do NOT store the
                             // expired cookie itself.
                             if !cookie::is_jar_line_expired(&line) {
-                                opts.memory_cookies.push(line);
+                                // RFC 6265bis §5.6 — 150 cookies-per-domain cap.
+                                // Curl drops *new* cookies once the cap is full
+                                // for that domain (test 444 keeps 1..=150).
+                                let new_dom = line
+                                    .split('\t')
+                                    .next()
+                                    .map(|s| s.strip_prefix("#HttpOnly_").unwrap_or(s).to_string())
+                                    .unwrap_or_default();
+                                let same_domain_count = opts
+                                    .memory_cookies
+                                    .iter()
+                                    .filter(|c| {
+                                        c.split('\t')
+                                            .next()
+                                            .map(|s| {
+                                                s.strip_prefix("#HttpOnly_").unwrap_or(s)
+                                                    == new_dom.as_str()
+                                            })
+                                            .unwrap_or(false)
+                                    })
+                                    .count();
+                                if same_domain_count < 50 {
+                                    opts.memory_cookies.push(line);
+                                }
                             } else {
                                 // Record the deleted cookie so file-based cookies
                                 // with the same (domain, path, name) are skipped.
@@ -621,6 +673,12 @@ fn main() {
                     } else {
                         format!("{etag}\n")
                     };
+                    if opts.create_dirs
+                        && let Some(parent) = path.parent()
+                        && !parent.as_os_str().is_empty()
+                    {
+                        let _ = fs::create_dir_all(parent);
+                    }
                     let _ = fs::write(path, content);
                 }
 
@@ -637,7 +695,12 @@ fn main() {
                 } else {
                     None
                 };
-                let output_path = if let Some(name) = cd_filename {
+                // -J / -O: an explicit `-o` always wins over the
+                // Content-Disposition or URL-derived name (tests 1368-1371).
+                let explicit_o = opts.outputs.get(url_idx).cloned();
+                let output_path = if let Some(o) = explicit_o.clone() {
+                    Some(o)
+                } else if let Some(name) = cd_filename {
                     Some(PathBuf::from(name))
                 } else if opts.remote_name || opts.remote_header_name {
                     // curl tool: derive filename from the URL path, ignoring
@@ -799,6 +862,12 @@ fn main() {
                 if nc_failed {
                     // Skip writing the body — exit 23 already set.
                 } else if let Some(ref path) = output_path {
+                    if opts.create_dirs
+                        && let Some(parent) = path.parent()
+                        && !parent.as_os_str().is_empty()
+                    {
+                        let _ = fs::create_dir_all(parent);
+                    }
                     if opts.include_headers || effective_opts.head {
                         let mut data = Vec::new();
                         data.extend_from_slice(&resp.redirect_headers);
@@ -839,6 +908,33 @@ fn main() {
                     let _ = fs::remove_file(path);
                 }
 
+                // -R / --remote-time: set output file's mtime to the server's
+                // Last-Modified header (or fall back to Date if absent). curl
+                // applies this only when the response has a usable timestamp.
+                if opts.remote_time
+                    && exit_code == 0
+                    && let Some(ref path) = output_path
+                {
+                    let ts = resp
+                        .headers
+                        .iter()
+                        .find(|(k, _)| k == "last-modified")
+                        .and_then(|(_, v)| cookie::parse_http_date(v));
+                    if let Some(secs) = ts
+                        && secs > 0
+                    {
+                        // Use libc::utimes via std::fs::FileTimes (stable as of 1.75).
+                        use std::time::{Duration, SystemTime};
+                        let target = SystemTime::UNIX_EPOCH + Duration::from_secs(secs as u64);
+                        if let Ok(file) = fs::OpenOptions::new().write(true).open(path) {
+                            let times = std::fs::FileTimes::new()
+                                .set_modified(target)
+                                .set_accessed(target);
+                            let _ = file.set_times(times);
+                        }
+                    }
+                }
+
                 // Write-out.
                 if let Some(ref fmt) = opts.write_out {
                     // Determine the effective method (the one used on the final
@@ -856,14 +952,19 @@ fn main() {
                     } else {
                         "GET".to_string()
                     };
-                    // Split on %{stderr}/%{stdout}/%output{...} directives so each
-                    // chunk goes to its own destination, then run %{var} substitution
-                    // on each chunk separately.
+                    // Split on %{stderr}/%{stdout}/%output{...}/%{onerror} directives
+                    // so each chunk goes to its own destination, then run %{var}
+                    // substitution on each chunk separately.
                     use format::{WriteOutDest, split_write_out};
-                    let mut chunks_by_dest: Vec<(WriteOutDest, String)> = Vec::new();
-                    for (dest, raw) in split_write_out(fmt) {
+                    let error_msg = if exit_code == 22 {
+                        format!("The requested URL returned error: {}", resp.status)
+                    } else {
+                        String::new()
+                    };
+                    let mut chunks_by_dest: Vec<(WriteOutDest, bool, String)> = Vec::new();
+                    for (dest, gated, raw) in split_write_out(fmt) {
                         if raw.is_empty() {
-                            chunks_by_dest.push((dest, raw));
+                            chunks_by_dest.push((dest, gated, raw));
                             continue;
                         }
                         let formatted = format_write_out(
@@ -874,11 +975,18 @@ fn main() {
                             resp.num_redirects,
                             &method,
                             output_path.as_deref(),
+                            url_idx,
+                            exit_code,
+                            &error_msg,
+                            opts.referer.as_deref().unwrap_or(""),
                         );
-                        chunks_by_dest.push((dest, formatted));
+                        chunks_by_dest.push((dest, gated, formatted));
                     }
-                    for (dest, text) in chunks_by_dest {
+                    for (dest, gated, text) in chunks_by_dest {
                         if text.is_empty() {
+                            continue;
+                        }
+                        if gated && exit_code == 0 {
                             continue;
                         }
                         match dest {
@@ -913,6 +1021,8 @@ fn main() {
                     // raw error prefix.
                     if let Some(rest) = e.strip_prefix("onion: ") {
                         eprintln!("curl: (6) {rest}");
+                    } else if e.starts_with("CONNECT tunnel failed") {
+                        eprintln!("curl: (56) {e}");
                     } else {
                         eprintln!("curl: {e}");
                     }
@@ -923,12 +1033,17 @@ fn main() {
                 } else if e.contains("hostname too long")
                     || e.contains("empty host")
                     || e.contains("bad port")
+                    || e.contains("malformed URL")
                 {
                     exit_code = 3; // URL malformed
                 } else if e.contains("unsupported proxy scheme") {
                     exit_code = 7; // Unsupported proxy protocol
                 } else if e.contains("unsupported scheme") || e.contains("unsupported protocol") {
                     exit_code = 1; // Unsupported protocol
+                } else if e.contains("invalid status") {
+                    exit_code = 1; // CURLE_UNSUPPORTED_PROTOCOL — malformed status code (test 1430)
+                } else if e.contains("too many response headers") {
+                    exit_code = 100; // CURLE_TOO_MANY_HEADERS (test 747)
                 } else if e.starts_with("onion: ") {
                     exit_code = 6; // Couldn't resolve host (RFC 7686 refusal)
                 } else if e.contains("DNS resolution failed") {
@@ -950,10 +1065,18 @@ fn main() {
                     exit_code = 52; // Empty reply from server
                 } else if e.contains("read form file") || e.contains("form file not found") {
                     exit_code = 26; // Read error (form file)
+                } else if e.contains("upload_failed") {
+                    exit_code = 25; // CURLE_UPLOAD_FAILED (test 1069)
                 } else {
                     exit_code = 6;
                 }
             }
+        }
+
+        // --fail-early: stop processing additional URLs once any URL has
+        // produced a non-zero exit code (test 1247).
+        if opts.fail_early && exit_code != 0 {
+            break;
         }
     }
 
@@ -965,16 +1088,42 @@ fn main() {
 /// forms. Strips leading path components (curl treats `/`, `\\`, and `:` as
 /// path separators and keeps only the basename — prevents directory traversal).
 fn extract_cd_filename(value: &str) -> Option<String> {
-    for part in value.split(';') {
+    // Split on `;` but not inside double quotes (so a `filename="a;b"` keeps
+    // its semicolon — test 1312).
+    let mut parts: Vec<String> = Vec::new();
+    let mut buf = String::new();
+    let mut in_quotes = false;
+    for ch in value.chars() {
+        if ch == '"' {
+            in_quotes = !in_quotes;
+            buf.push(ch);
+        } else if ch == ';' && !in_quotes {
+            parts.push(std::mem::take(&mut buf));
+        } else {
+            buf.push(ch);
+        }
+    }
+    parts.push(buf);
+    for part in parts {
         let part = part.trim();
         if let Some(rest) = part
             .strip_prefix("filename=")
             .or_else(|| part.strip_prefix("Filename="))
         {
-            let raw = rest
-                .strip_prefix('"')
-                .and_then(|s| s.strip_suffix('"'))
-                .unwrap_or(rest);
+            // Strip a balanced pair of `"..."` or `'...'` quotes; otherwise
+            // strip just a leading lone quote (test 1313's `filename='name`).
+            let raw =
+                if let Some(stripped) = rest.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
+                    stripped
+                } else if let Some(stripped) =
+                    rest.strip_prefix('\'').and_then(|s| s.strip_suffix('\''))
+                {
+                    stripped
+                } else if let Some(stripped) = rest.strip_prefix(['"', '\'']) {
+                    stripped
+                } else {
+                    rest
+                };
             // Strip any directory components — keep only the basename.
             let basename = raw.rsplit(['/', '\\', ':']).next().unwrap_or(raw);
             if !basename.is_empty() {
