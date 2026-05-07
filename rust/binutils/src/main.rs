@@ -14235,8 +14235,150 @@ fn readelf_debug_line_raw<'data, Elf: FileHeader>(
                     }
                 }
             } else {
-                // DWARF 5: skip directory and file format tables for now.
-                p.pos = prologue_end.min(p.buf.len());
+                // DWARF 5 directory/file tables — paired (content_code, form)
+                // describing each column, followed by ULEB128 count + entries.
+                let debug_str_data = obj
+                    .section_by_name(".debug_str")
+                    .and_then(|s| s.uncompressed_data().ok())
+                    .map(|c| c.into_owned())
+                    .unwrap_or_default();
+                let debug_line_str_data = obj
+                    .section_by_name(".debug_line_str")
+                    .and_then(|s| s.uncompressed_data().ok())
+                    .map(|c| c.into_owned())
+                    .unwrap_or_default();
+                let read_str_for_form = |form: u64, p: &mut DwarfReader<'_>| -> String {
+                    match form {
+                        0x08 /* string */ => {
+                            let mut s = Vec::new();
+                            while let Some(b) = p.read_u8() {
+                                if b == 0 { break; }
+                                s.push(b);
+                            }
+                            String::from_utf8_lossy(&s).into_owned()
+                        }
+                        0x0e /* strp */ => {
+                            let off = if is_64 {
+                                p.read_u64().unwrap_or(0)
+                            } else {
+                                p.read_u32().unwrap_or(0) as u64
+                            };
+                            let s = read_cstr_at(&debug_str_data, off as usize);
+                            format!("(indirect string, offset: 0x{:x}): {}", off, s)
+                        }
+                        0x1f /* line_strp */ => {
+                            let off = if is_64 {
+                                p.read_u64().unwrap_or(0)
+                            } else {
+                                p.read_u32().unwrap_or(0) as u64
+                            };
+                            let s = read_cstr_at(&debug_line_str_data, off as usize);
+                            format!("(indirect line string, offset: 0x{:x}): {}", off, s)
+                        }
+                        _ => String::new(),
+                    }
+                };
+                let read_data_for_form = |form: u64, p: &mut DwarfReader<'_>| -> u64 {
+                    match form {
+                        0x0b /* data1 */ => p.read_u8().unwrap_or(0) as u64,
+                        0x05 /* data2 */ => p.read_u16().unwrap_or(0) as u64,
+                        0x06 /* data4 */ => p.read_u32().unwrap_or(0) as u64,
+                        0x07 /* data8 */ => p.read_u64().unwrap_or(0),
+                        0x0f /* udata */ => p.read_uleb128().unwrap_or(0),
+                        _ => 0,
+                    }
+                };
+                // Directory table. GNU readelf reports the offset of the
+                // entries (after the format spec), not the format spec itself.
+                let dir_fmt_count = p.read_u8().unwrap_or(0) as usize;
+                let mut dir_fmts: Vec<(u64, u64)> = Vec::with_capacity(dir_fmt_count);
+                for _ in 0..dir_fmt_count {
+                    let ct = p.read_uleb128().unwrap_or(0);
+                    let fm = p.read_uleb128().unwrap_or(0);
+                    dir_fmts.push((ct, fm));
+                }
+                let dirs_count = p.read_uleb128().unwrap_or(0) as usize;
+                let dir_start = p.pos;
+                let mut dirs: Vec<String> = Vec::with_capacity(dirs_count);
+                for _ in 0..dirs_count {
+                    let mut path = String::new();
+                    for &(ct, fm) in &dir_fmts {
+                        if ct == 1 /* DW_LNCT_path */ {
+                            path = read_str_for_form(fm, &mut p);
+                        } else {
+                            // Skip data field.
+                            let _ = read_data_for_form(fm, &mut p);
+                        }
+                    }
+                    dirs.push(path);
+                }
+                println!();
+                if dirs.is_empty() {
+                    println!(" The Directory Table is empty.");
+                } else {
+                    println!(
+                        " The Directory Table (offset 0x{:x}, lines {}, columns {}):",
+                        dir_start,
+                        dirs.len(),
+                        dir_fmts.len()
+                    );
+                    println!("  Entry\tName");
+                    for (i, d) in dirs.iter().enumerate() {
+                        println!("  {}\t{}", i, d);
+                    }
+                }
+                // File table.
+                let file_fmt_count = p.read_u8().unwrap_or(0) as usize;
+                let mut file_fmts: Vec<(u64, u64)> = Vec::with_capacity(file_fmt_count);
+                for _ in 0..file_fmt_count {
+                    let ct = p.read_uleb128().unwrap_or(0);
+                    let fm = p.read_uleb128().unwrap_or(0);
+                    file_fmts.push((ct, fm));
+                }
+                let files_count = p.read_uleb128().unwrap_or(0) as usize;
+                let file_start = p.pos;
+                #[derive(Default)]
+                struct FileEnt {
+                    path: String,
+                    dir: u64,
+                }
+                let mut files: Vec<FileEnt> = Vec::with_capacity(files_count);
+                for _ in 0..files_count {
+                    let mut ent = FileEnt::default();
+                    for &(ct, fm) in &file_fmts {
+                        match ct {
+                            1 /* DW_LNCT_path */ => {
+                                ent.path = read_str_for_form(fm, &mut p);
+                            }
+                            2 /* DW_LNCT_directory_index */ => {
+                                ent.dir = read_data_for_form(fm, &mut p);
+                            }
+                            _ => {
+                                let _ = read_data_for_form(fm, &mut p);
+                            }
+                        }
+                    }
+                    files.push(ent);
+                }
+                println!();
+                if files.is_empty() {
+                    println!(" The File Name Table is empty.");
+                } else {
+                    println!(
+                        " The File Name Table (offset 0x{:x}, lines {}, columns {}):",
+                        file_start,
+                        files.len(),
+                        file_fmts.len()
+                    );
+                    println!("  Entry\tDir\tName");
+                    for (i, f) in files.iter().enumerate() {
+                        println!("  {}\t{}\t{}", i, f.dir, f.path);
+                    }
+                }
+                // Skip any padding to the end of prologue.
+                if p.pos < prologue_end {
+                    p.pos = prologue_end;
+                }
             }
             // Line Number Statements
             println!();
@@ -14934,23 +15076,15 @@ fn read_and_format_attr(
         }
         0x17 /* sec_offset */ => {
             let v = if is_64 { p.read_u64().unwrap_or(0) } else { p.read_u32().unwrap_or(0) as u64 };
-            // GNU readelf annotates sec_offset attributes by section type:
-            // DW_AT_location/DW_AT_string_length/etc. -> "(location list)",
-            // DW_AT_ranges/DW_AT_start_scope                -> "(range list)".
+            // GNU readelf annotates DW_AT_location with sec_offset form
+            // as a "(location list)" reference. Other sec_offset attributes
+            // (DW_AT_ranges, DW_AT_stmt_list, etc.) print without annotation.
             let suffix = match attr_name {
                 0x02 /* DW_AT_location */
                 | 0x19 /* DW_AT_string_length */
                 | 0x46 /* DW_AT_frame_base */
-                | 0x4d /* DW_AT_GNU_locviews */
                 | 0x49 /* DW_AT_data_location */
-                | 0x6b /* DW_AT_GNU_call_site_value */
-                | 0x6c /* DW_AT_GNU_call_site_data_value */
-                | 0x6d /* DW_AT_GNU_call_site_target */
-                | 0x6e /* DW_AT_GNU_call_site_target_clobbered */
                 => " (location list)",
-                0x55 /* DW_AT_ranges */
-                | 0x2c /* DW_AT_start_scope */
-                => " (range list)",
                 _ => "",
             };
             format!("0x{:x}{}", v, suffix)
