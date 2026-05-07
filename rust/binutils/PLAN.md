@@ -66,20 +66,20 @@ Key design decisions:
 | `objdump-relocs` | objdump | ✅ PASS |
 | `addr2line-basic` | addr2line | ✅ PASS |
 
-### Upstream DejaGnu tests (210/229 passing)
+### Upstream DejaGnu tests (217/229 passing, 95%)
 
 | Test file | Pass | Fail | Total | Threshold |
 |-----------|------|------|-------|-----------|
 | cxxfilt.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
 | size.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
 | nm.exp | **15** | 0 | 15 | minPass=15, maxFail=0 |
-| ar.exp | **13** | 1 | 14 | minPass=13, maxFail=1 |
-| readelf.exp | **31** | 7 | 38 | minPass=31, maxFail=7 |
-| objdump.exp | **28** | 4 | 33 | minPass=28, maxFail=4 |
-| objcopy.exp | **113** | 7 | 122 | minPass=113, maxFail=7 |
+| ar.exp | **14** | 0 | 14 | minPass=14, maxFail=0 |
+| readelf.exp | **34** | 4 | 38 | minPass=34, maxFail=4 |
+| objdump.exp | **30** | 2 | 33 | minPass=30, maxFail=2 |
+| objcopy.exp | **114** | 6 | 122 | minPass=114, maxFail=6 |
 | strings.exp | **1** | 0 | 1 | minPass=1, maxFail=0 |
 | addr2line.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
-| **Total** | **210** | **19** | **229** | |
+| **Total** | **217** | **12** | **229** | |
 
 ## Fixes applied
 
