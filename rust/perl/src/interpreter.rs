@@ -5841,7 +5841,7 @@ impl Interpreter {
                             "Use of uninitialized value in join or string at {file} line {line}.\n"
                         ));
                     }
-                    parts.push(v.to_str());
+                    parts.push(self.stringify_value(&v));
                 }
                 if parts.len() <= 1 {
                     return Value::Str(parts.join(""));
