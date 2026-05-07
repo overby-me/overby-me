@@ -2781,7 +2781,7 @@ impl Interpreter {
                                     "Use of uninitialized value in print at {warn_file} line {warn_line}.\n"
                                 ));
                             }
-                            values.push(v.to_str());
+                            values.push(self.stringify_value(v));
                         }
                     }
                     _ => {
@@ -2791,7 +2791,7 @@ impl Interpreter {
                                 "Use of uninitialized value{arg_label} in print at {warn_file} line {warn_line}.\n"
                             ));
                         }
-                        values.push(v.to_str());
+                        values.push(self.stringify_value(&v));
                     }
                 }
             }
@@ -3342,7 +3342,8 @@ impl Interpreter {
             }
 
             Expr::RegexMatch(expr, pat, flags) => {
-                let text = self.eval_expr(expr).to_str();
+                let v = self.eval_expr(expr);
+                let text = self.stringify_value(&v);
                 // For `/g` matches against a named scalar, track `pos`.
                 let var_name: Option<String> = match expr.as_ref() {
                     Expr::ScalarVar(n) => Some(n.clone()),
@@ -4286,12 +4287,14 @@ impl Interpreter {
                     match part {
                         InterpPart::Lit(s) => result.push_str(s),
                         InterpPart::ScalarVar(name) => {
-                            result.push_str(&self.get_var(name).to_str());
+                            let v = self.get_var(name);
+                            result.push_str(&self.stringify_value(&v));
                         }
                         InterpPart::ArrayVar(name) => {
                             let arr = self.get_array(name);
                             let sep = self.get_var(" ").to_str(); // $" default is space
-                            let s: Vec<String> = arr.iter().map(|v| v.to_str()).collect();
+                            let s: Vec<String> =
+                                arr.iter().map(|v| self.stringify_value(v)).collect();
                             result.push_str(&s.join(if sep.is_empty() { " " } else { &sep }));
                         }
                         InterpPart::ArrayElement(name, idx) => {
@@ -7514,6 +7517,27 @@ impl Interpreter {
             return cls.clone();
         }
         v.ref_type().to_string()
+    }
+
+    /// Stringify a value, prepending the blessed class for refs.
+    /// `bless \$x, "Foo"` stringifies as `Foo=SCALAR(0x...)` (matching
+    /// reference perl); plain refs and non-ref values fall back to the
+    /// default `Value::to_str`.
+    fn stringify_value(&self, v: &Value) -> String {
+        let p = Self::ref_ptr(v);
+        if p != 0
+            && let Some(cls) = self.blessed_refs.get(&p)
+        {
+            // Only the three concrete ref kinds get a class prefix;
+            // CodeRef / Glob / etc. retain their own format.
+            if matches!(
+                v,
+                Value::ArrayRef(_) | Value::HashRef(_) | Value::ScalarRef(_)
+            ) {
+                return format!("{cls}={}", v.to_str());
+            }
+        }
+        v.to_str()
     }
 
     /// If `name` is a sub from a `require`d file (per `sub_origin`) and
