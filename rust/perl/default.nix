@@ -594,6 +594,18 @@
         category = "op";
         name = "substr_left";
       }
+      {
+        category = "op";
+        name = "goto_xs";
+      }
+      {
+        category = "op";
+        name = "hash-clear-placeholders";
+      }
+      {
+        category = "op";
+        name = "hash-rt85026";
+      }
 
       # --- t/comp/ (selected) ---
       {
@@ -789,6 +801,42 @@
       {
         category = "run";
         name = "switches";
+      }
+      {
+        category = "run";
+        name = "dtrace";
+      }
+      {
+        category = "run";
+        name = "locale";
+      }
+      {
+        category = "run";
+        name = "runenv_hashseed";
+      }
+      {
+        category = "run";
+        name = "runenv_randseed";
+      }
+      {
+        category = "run";
+        name = "runenv";
+      }
+      {
+        category = "run";
+        name = "switchDx";
+      }
+      {
+        category = "run";
+        name = "switch-I-and-M";
+      }
+      {
+        category = "run";
+        name = "switchM";
+      }
+      {
+        category = "run";
+        name = "todo";
       }
     ];
   in
