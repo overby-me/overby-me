@@ -2949,6 +2949,10 @@ impl Parser {
                             | Token::Until
                             | Token::For
                             | Token::Foreach
+                            // `->` is a postfix on the call result, not
+                            // the start of an argument: `shift->[0]` is
+                            // `(shift())->[0]`.
+                            | Token::Arrow
                     )
                 {
                     vec![self.parse_unary()]
