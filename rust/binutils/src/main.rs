@@ -4925,6 +4925,7 @@ fn tool_objdump(args: &[String]) -> i32 {
     let mut source_comment: Option<String> = None;
     let mut show_line_numbers = false;
     let mut show_debug_ranges = false;
+    let mut show_debug_str = false;
     let mut wide = false;
     let mut input_target: Option<String> = None;
     let mut show_info = false;
@@ -5049,7 +5050,19 @@ fn tool_objdump(args: &[String]) -> i32 {
                     }
                 }
                 _ if arg.starts_with("--dwarf=") || arg.starts_with("--debug-dump=") => {
-                    // Accept but ignore DWARF dump options
+                    let v = arg.split_once('=').unwrap().1;
+                    match v {
+                        "info" | "Info" | "i" | "I" => {
+                            emit_wi_placeholder = true;
+                        }
+                        "Ranges" | "ranges" | "R" | "r" => {
+                            show_debug_ranges = true;
+                        }
+                        "str" | "Str" | "s" => {
+                            show_debug_str = true;
+                        }
+                        _ => {}
+                    }
                 }
                 _ if arg.starts_with('-') && !arg.starts_with("--") && arg != "-" => {
                     let chars: Vec<char> = arg[1..].chars().collect();
@@ -5119,42 +5132,79 @@ fn tool_objdump(args: &[String]) -> i32 {
 
     let mut errors = 0;
     for file in &files {
-        if emit_wi_placeholder || show_debug_ranges {
+        if emit_wi_placeholder || show_debug_ranges || show_debug_str {
             // Delegate DWARF section dumping to readelf implementations.
-            let data_bytes = match fs::read(file) {
-                Ok(d) => d,
-                Err(e) => {
-                    eprintln!("objdump: '{file}': {e}");
-                    errors += 1;
-                    continue;
-                }
-            };
-            println!();
-            println!("{file}:     file format elf64-x86-64");
-            println!();
-            if let Ok(elf) =
-                ElfFile::<object::elf::FileHeader64<object::Endianness>>::parse(&*data_bytes)
+            // Build the list of files to process: with --process-links, linked files come first.
+            let mut to_process: Vec<String> = Vec::new();
+            if process_links
+                && let Ok(main_data) = fs::read(file)
+                && let Ok(main_obj) = object::File::parse(&*main_data)
             {
-                let endian = elf.endian();
-                if emit_wi_placeholder {
-                    readelf_debug_info(&elf, &data_bytes, endian);
+                let extra_files = objdump_collect_debug_links(&main_obj);
+                let parent = std::path::Path::new(file)
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_default();
+                for ext in extra_files {
+                    let candidates = [
+                        parent.join(&ext).to_string_lossy().into_owned(),
+                        ext.clone(),
+                    ];
+                    for c in &candidates {
+                        if std::path::Path::new(c).exists() {
+                            to_process.push(c.clone());
+                            break;
+                        }
+                    }
                 }
-                if show_debug_ranges {
-                    readelf_debug_ranges(&elf, &data_bytes, endian);
-                }
-            } else if let Ok(elf) =
-                ElfFile::<object::elf::FileHeader32<object::Endianness>>::parse(&*data_bytes)
-            {
-                let endian = elf.endian();
-                if emit_wi_placeholder {
-                    readelf_debug_info(&elf, &data_bytes, endian);
-                }
-                if show_debug_ranges {
-                    readelf_debug_ranges(&elf, &data_bytes, endian);
+            }
+            to_process.push(file.clone());
+            for current_file in &to_process {
+                let data_bytes = match fs::read(current_file) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        eprintln!("objdump: '{current_file}': {e}");
+                        errors += 1;
+                        continue;
+                    }
+                };
+                println!();
+                println!("{current_file}:     file format elf64-x86-64");
+                println!();
+                let loaded_from = if process_links {
+                    Some(current_file.as_str())
+                } else {
+                    None
+                };
+                if let Ok(elf) = ElfFile::<object::elf::FileHeader64<object::Endianness>>::parse(
+                    &*data_bytes,
+                ) {
+                    let endian = elf.endian();
+                    if show_debug_str {
+                        readelf_debug_str_loaded(&elf, &data_bytes, endian, loaded_from);
+                    }
+                    if emit_wi_placeholder {
+                        readelf_debug_info_loaded(&elf, &data_bytes, endian, loaded_from);
+                    }
+                    if show_debug_ranges {
+                        readelf_debug_ranges(&elf, &data_bytes, endian);
+                    }
+                } else if let Ok(elf) = ElfFile::<object::elf::FileHeader32<object::Endianness>>::parse(&*data_bytes) {
+                    let endian = elf.endian();
+                    if show_debug_str {
+                        readelf_debug_str_loaded(&elf, &data_bytes, endian, loaded_from);
+                    }
+                    if emit_wi_placeholder {
+                        readelf_debug_info_loaded(&elf, &data_bytes, endian, loaded_from);
+                    }
+                    if show_debug_ranges {
+                        readelf_debug_ranges(&elf, &data_bytes, endian);
+                    }
                 }
             }
             continue;
         }
+
 
         let data = match fs::read(file) {
             Ok(d) => d,
@@ -11450,9 +11500,18 @@ fn readelf_collect_dwo_links(obj: &object::File) -> Vec<(String, String, Option<
 }
 
 fn readelf_debug_str<'data, Elf: FileHeader>(
+    elf: &ElfFile<'data, Elf>,
+    data: &'data [u8],
+    endian: Elf::Endian,
+) {
+    readelf_debug_str_loaded(elf, data, endian, None);
+}
+
+fn readelf_debug_str_loaded<'data, Elf: FileHeader>(
     _elf: &ElfFile<'data, Elf>,
     data: &'data [u8],
     _endian: Elf::Endian,
+    loaded_from: Option<&str>,
 ) {
     let Ok(obj) = object::File::parse(data) else {
         return;
@@ -11473,10 +11532,15 @@ fn readelf_debug_str<'data, Elf: FileHeader>(
         }
     }
 
+    let header_suffix = match loaded_from {
+        Some(path) => format!(" (loaded from {})", path),
+        None => String::new(),
+    };
+
     // Hex dump each .debug_str section
     let hex_dump_str = |name: &str, bytes: &[u8]| {
         println!();
-        println!("Contents of the {} section:", name);
+        println!("Contents of the {} section{}:", name, header_suffix);
         println!();
         let mut offset = 0usize;
         while offset < bytes.len() {
@@ -11539,7 +11603,7 @@ fn readelf_debug_str<'data, Elf: FileHeader>(
         let strings = str_data.get(str_name).cloned().unwrap_or_default();
 
         println!();
-        println!("Contents of the {} section:", name);
+        println!("Contents of the {} section{}:", name, header_suffix);
         println!();
         if is_dwo {
             // DWARF 4 dwo: no header, raw 4-byte offsets
@@ -11934,9 +11998,18 @@ fn readelf_debug_loc<'data, Elf: FileHeader>(
 // tolerates them.
 
 fn readelf_debug_info<'data, Elf: FileHeader>(
+    elf: &ElfFile<'data, Elf>,
+    data: &'data [u8],
+    endian: Elf::Endian,
+) {
+    readelf_debug_info_loaded(elf, data, endian, None);
+}
+
+fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
     _elf: &ElfFile<'data, Elf>,
     data: &'data [u8],
     _endian: Elf::Endian,
+    loaded_from: Option<&str>,
 ) {
     let Ok(obj) = object::File::parse(data) else {
         return;
@@ -12014,7 +12087,11 @@ fn readelf_debug_info<'data, Elf: FileHeader>(
         .map(read_sect)
         .unwrap_or_default();
 
-    println!("Contents of the .debug_info section:");
+    let header_suffix = match loaded_from {
+        Some(path) => format!(" (loaded from {})", path),
+        None => String::new(),
+    };
+    println!("Contents of the .debug_info section{}:", header_suffix);
     println!();
 
     let mut p = DwarfReader {
