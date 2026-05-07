@@ -2585,7 +2585,39 @@ impl Lexer {
 
     fn read_qr(&mut self) -> (String, String) {
         let start_line = self.current_line;
-        let (_, _, pat, terminated) = self.read_delimited_string_term();
+        let (open, _, raw_pat, terminated) = self.read_delimited_string_term();
+        // Single-quote delimiters disable interpolation (`m'$b'` is
+        // literal `$b`, not the value of `$b`). Escape `$` and `@` in
+        // the pattern so the runtime interpolator leaves them as
+        // literals; non-interpolating regexes are otherwise handled
+        // identically downstream.
+        let pat = if open == '\'' {
+            // Only neutralise `$VAR` and `@VAR` interpolation; bare
+            // `$` / `@` (regex anchor / array context) and backslash
+            // escapes (`\d`, `\w`, …) remain meaningful as Perl expects.
+            let chars: Vec<char> = raw_pat.chars().collect();
+            let mut out = String::with_capacity(raw_pat.len());
+            let mut i = 0;
+            while i < chars.len() {
+                let c = chars[i];
+                if (c == '$' || c == '@')
+                    && i + 1 < chars.len()
+                    && (chars[i + 1] == '_'
+                        || chars[i + 1] == '{'
+                        || chars[i + 1].is_ascii_alphabetic())
+                {
+                    out.push('\\');
+                    out.push(c);
+                    i += 1;
+                    continue;
+                }
+                out.push(c);
+                i += 1;
+            }
+            out
+        } else {
+            raw_pat
+        };
         // `read_delimited_string` exits silently on EOF — but for `m//`
         // and `qr//` the right diagnostic is "Search pattern not
         // terminated". Tag the lexer error if we fell off the end
