@@ -14384,17 +14384,46 @@ fn readelf_debug_line_raw<'data, Elf: FileHeader>(
             println!();
             println!(" Line Number Statements:");
             // Address size: DWARF 5 carries it in the line-program header.
-            // For older versions, fall back to ELF class (8 for ELF64, 4 for
-            // ELF32). Per-relocation sizes are unreliable because non-address
-            // entries (e.g. line-strp offsets) use 4-byte relocs even on 64-bit.
-            let addr_size = dwarf5_addr_size.map(|s| s as usize).unwrap_or_else(|| {
-                if data.len() >= 5 && data[4] == 2 {
+            // For older versions, derive from the CU header's pointer size
+            // by parsing the first .debug_info CU. Fall back to relocation
+            // size, then to ELF class.
+            let addr_size = dwarf5_addr_size.map(|s| s as usize).or_else(|| {
+                // Try to read pointer size from the first .debug_info CU.
+                let info = obj.section_by_name(".debug_info")
+                    .or_else(|| obj.section_by_name(".zdebug_info"))?;
+                let info_data = info.uncompressed_data().ok()?;
+                let b = info_data.as_ref();
+                if b.len() < 12 { return None; }
+                let initial = if le {
+                    u32::from_le_bytes([b[0],b[1],b[2],b[3]])
+                } else {
+                    u32::from_be_bytes([b[0],b[1],b[2],b[3]])
+                };
+                let hdr_off = if initial == 0xffffffff { 12 } else { 4 };
+                if b.len() < hdr_off + 2 { return None; }
+                let version = if le {
+                    u16::from_le_bytes([b[hdr_off], b[hdr_off+1]])
+                } else {
+                    u16::from_be_bytes([b[hdr_off], b[hdr_off+1]])
+                };
+                let abbrev_size = if initial == 0xffffffff { 8 } else { 4 };
+                let asz_off = if version <= 4 {
+                    hdr_off + 2 + abbrev_size
+                } else {
+                    hdr_off + 2 + 1
+                };
+                if b.len() <= asz_off { return None; }
+                let asz = b[asz_off];
+                if asz == 4 || asz == 8 { Some(asz as usize) } else { None }
+            }).unwrap_or_else(|| {
+                if let Some(s) = reloc_addr_size {
+                    s as usize
+                } else if data.len() >= 5 && data[4] == 2 {
                     8
                 } else {
                     4
                 }
             });
-            let _ = reloc_addr_size;
             let mut address: u64 = 0;
             let mut line: i64 = 1;
             let mut view: u64 = 0;
@@ -14711,10 +14740,24 @@ fn readelf_debug_line_decoded<'data, Elf: FileHeader>(
                 println!();
                 continue;
             }
-            // File change? GNU only emits a `<file>:` header when switching
-            // *into* a new file mid-program — the CU's primary file already
-            // appears at the top of the section dump.
-            let file_changed = current_file.is_some() && current_file != Some(*file_idx);
+            // File change? GNU emits a `<file>:` header when switching into a
+            // new file. The CU's own header was already printed at the top,
+            // so suppress only when the first row's file path matches `cu_name`.
+            let suppress_first = if current_file.is_none() {
+                if let Some(file) = header.file(*file_idx) {
+                    if let Ok(name) = dwarf.attr_string(&unit, file.path_name()) {
+                        let s = name.to_string_lossy().into_owned();
+                        s == cu_name
+                    } else { false }
+                } else { false }
+            } else { false };
+            let file_changed = if suppress_first {
+                false
+            } else if current_file.is_none() {
+                true
+            } else {
+                current_file != Some(*file_idx)
+            };
             if file_changed {
                 let file = match header.file(*file_idx) {
                     Some(f) => f,
