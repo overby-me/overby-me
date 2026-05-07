@@ -3843,12 +3843,17 @@ impl Interpreter {
                                 )));
                             }
                         }
-                        if let Some(rc) = self.aliased_hashes.get(name) {
+                        let qname = self.qualify_global(name);
+                        if let Some(rc) = self.aliased_hashes.get(qname.as_str()) {
                             return Value::HashRef(rc.clone());
                         }
-                        let h = self.globals.hashes.remove(name).unwrap_or_default();
+                        let h = self
+                            .globals
+                            .hashes
+                            .remove(qname.as_str())
+                            .unwrap_or_default();
                         let rc = std::rc::Rc::new(std::cell::RefCell::new(h));
-                        self.aliased_hashes.insert(name.to_string(), rc.clone());
+                        self.aliased_hashes.insert(qname, rc.clone());
                         Value::HashRef(rc)
                     }
                     Expr::ScalarVar(name) => {
@@ -3864,13 +3869,18 @@ impl Interpreter {
                                 ));
                             }
                         }
-                        let key = canon_var(name).to_string();
-                        if let Some(rc) = self.aliased_vars.get(&key) {
+                        let key = canon_var(name);
+                        let qkey = self.qualify_global(key);
+                        if let Some(rc) = self.aliased_vars.get(qkey.as_str()) {
                             return Value::ScalarRef(rc.clone());
                         }
-                        let v = self.globals.vars.remove(&key).unwrap_or(Value::Undef);
+                        let v = self
+                            .globals
+                            .vars
+                            .remove(qkey.as_str())
+                            .unwrap_or(Value::Undef);
                         let rc = std::rc::Rc::new(std::cell::RefCell::new(v));
-                        self.aliased_vars.insert(key, rc.clone());
+                        self.aliased_vars.insert(qkey, rc.clone());
                         Value::ScalarRef(rc)
                     }
                     // `\$_[i]` — if @_[i] is a `Value::Alias`, return a
