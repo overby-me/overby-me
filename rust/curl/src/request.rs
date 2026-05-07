@@ -377,12 +377,13 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         }
         // When --tr-encoding is set, the first user-supplied Connection header
         // gets ", TE" appended to its value so we don't emit a duplicate
-        // Connection: TE header (test 1125).
-        if opts.tr_encoding
-            && !conn_te_appended
-            && key.eq_ignore_ascii_case("connection")
-            && val != "\x00"
-        {
+        // Connection: TE header (test 1125). A blanked-out user Connection
+        // (`-H "Connection;"`, val == "\x00") is dropped entirely — the auto
+        // `Connection: TE` already covers it (test 1171).
+        if opts.tr_encoding && !conn_te_appended && key.eq_ignore_ascii_case("connection") {
+            if val == "\x00" {
+                continue;
+            }
             req.push_str(&format!("{key}: {val}, TE\r\n"));
             conn_te_appended = true;
             continue;
