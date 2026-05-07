@@ -154,7 +154,15 @@ fn run_interpreter() -> i32 {
                     program_text = String::from_utf8_lossy(&bytes).into_owned();
                 }
                 Err(e) => {
-                    eprintln!("Can't open perl script \"{}\": {}", script_file, e);
+                    // Reference perl prints just the OS error message
+                    // text, with no `(os error N)` suffix that Rust's
+                    // `io::Error` display tacks on.
+                    let msg = match e.kind() {
+                        std::io::ErrorKind::NotFound => "No such file or directory".to_string(),
+                        std::io::ErrorKind::PermissionDenied => "Permission denied".to_string(),
+                        _ => e.to_string(),
+                    };
+                    eprintln!("Can't open perl script \"{}\": {}", script_file, msg);
                     std::process::exit(2);
                 }
             }
