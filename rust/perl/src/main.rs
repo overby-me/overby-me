@@ -102,6 +102,12 @@ fn run_interpreter() -> i32 {
                 if before_e.contains('l') {
                     auto_newline = true;
                 }
+                if before_e.contains('w') || before_e.contains('W') {
+                    warnings_flag = true;
+                }
+                if before_e.contains('T') {
+                    taint_mode_arg = true;
+                }
             }
             "-I" => {
                 i += 1;

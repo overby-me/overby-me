@@ -9589,7 +9589,33 @@ impl Interpreter {
                         // Magic `\$#name` ref: assignment resizes the
                         // bound array's backing storage.
                         let p = std::rc::Rc::as_ptr(&r) as usize;
+                        // Check freed before cloning the Rc — cloning
+                        // would bump the strong count and hide the
+                        // "only our arylen_refs entry holds it" case.
+                        let freed = self
+                            .arylen_refs
+                            .get(&p)
+                            .map(|rc| std::rc::Rc::strong_count(rc) <= 1)
+                            .unwrap_or(false);
                         if let Some(arr_rc) = self.arylen_refs.get(&p).cloned() {
+                            if freed {
+                                let warnings_on =
+                                    self.warnings_on || self.get_var("^W").to_num() != 0.0;
+                                if warnings_on {
+                                    let file = if self.current_file.is_empty() {
+                                        "-e".to_string()
+                                    } else {
+                                        self.current_file.clone()
+                                    };
+                                    let line = self.current_line;
+                                    self.emit_warning(&format!(
+                                        "Attempt to set length of freed array at {file} line {line}.\n"
+                                    ));
+                                }
+                                // freed array — assignment is silently
+                                // ignored regardless of warnings state
+                                return;
+                            }
                             let target_idx = val.to_num() as i64;
                             let new_len = if target_idx < 0 {
                                 0
