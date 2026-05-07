@@ -657,6 +657,14 @@ impl Lexer {
             }
             file = Some(self.input[fs..j].iter().collect());
             j += 1;
+        } else if j < self.pos && self.input[j] != ' ' && self.input[j] != '\t' {
+            // Bare-word filename form: `#line 3 warn.t`. Reference perl
+            // accepts an unquoted word up to end-of-line.
+            let fs = j;
+            while j < self.pos && self.input[j] != ' ' && self.input[j] != '\t' {
+                j += 1;
+            }
+            file = Some(self.input[fs..j].iter().collect());
         }
         while j < self.pos && (self.input[j] == ' ' || self.input[j] == '\t') {
             j += 1;

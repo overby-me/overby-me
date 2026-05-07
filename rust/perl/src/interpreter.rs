@@ -12177,10 +12177,14 @@ fn compile_time_use_check_in_inner(
         "version",
         "builtin",
     ];
+    let mut effective_path: String = _file_path.to_string();
     for stmt in stmts {
+        let _file_path = effective_path.as_str();
         match stmt {
             Stmt::LineMark(n) => *line = *n,
-            Stmt::FileMark(_) => {}
+            Stmt::FileMark(f) => {
+                effective_path = f.clone();
+            }
             Stmt::Use(module, _args) => {
                 if PRAGMAS.contains(&module.as_str()) {
                     continue;
