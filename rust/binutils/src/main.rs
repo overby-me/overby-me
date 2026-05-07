@@ -3674,16 +3674,6 @@ fn readelf_display<'data, Elf: FileHeader>(
         readelf_display_section(elf, data, endian, sect);
     }
 
-    if opts.show_debug_ranges {
-        readelf_debug_ranges(elf, data, endian);
-        readelf_debug_rnglists(elf, data, endian);
-    }
-
-    if opts.show_debug_loc {
-        readelf_debug_loc(elf, data, endian);
-        readelf_debug_loclists(elf, data, endian);
-    }
-
     // -K dumps the link section CONTENTS by default; with -P we follow
     // the link instead and the link sections are not printed.
     if opts.show_debug_links && !opts.process_links {
@@ -3705,6 +3695,16 @@ fn readelf_display<'data, Elf: FileHeader>(
 
     if opts.show_debug_abbrev {
         readelf_debug_abbrev(elf, data, endian);
+    }
+
+    if opts.show_debug_loc {
+        readelf_debug_loc(elf, data, endian);
+        readelf_debug_loclists(elf, data, endian);
+    }
+
+    if opts.show_debug_ranges {
+        readelf_debug_ranges(elf, data, endian);
+        readelf_debug_rnglists(elf, data, endian);
     }
 
     if opts.show_debug_line_raw {
@@ -10927,13 +10927,7 @@ fn readelf_debug_rnglists<'data, Elf: FileHeader>(
                     p += addr_size;
                     let b = read_addr(&bytes[p..p + addr_size]);
                     p += addr_size;
-                    println!(
-                        "    {:08x} {:0w$x} {:0w$x} ",
-                        entry_off,
-                        a,
-                        b,
-                        w = w
-                    );
+                    println!("    {:08x} {:0w$x} {:0w$x} ", entry_off, a, b, w = w);
                 }
                 7 => {
                     // DW_RLE_start_length: addr, ULEB128 length
@@ -10944,13 +10938,7 @@ fn readelf_debug_rnglists<'data, Elf: FileHeader>(
                     p += addr_size;
                     let len = read_uleb(&bytes, &mut p);
                     let b = a.wrapping_add(len);
-                    println!(
-                        "    {:08x} {:0w$x} {:0w$x} ",
-                        entry_off,
-                        a,
-                        b,
-                        w = w
-                    );
+                    println!("    {:08x} {:0w$x} {:0w$x} ", entry_off, a, b, w = w);
                 }
                 _ => {
                     // Unsupported entry type: stop processing this section.
@@ -11123,12 +11111,7 @@ fn readelf_debug_loclists<'data, Elf: FileHeader>(
                     }
                     let a = read_addr(&bytes[p..p + addr_size]);
                     p += addr_size;
-                    println!(
-                        "    {:08x} {:0w$x} (base address)",
-                        entry_off,
-                        a,
-                        w = w
-                    );
+                    println!("    {:08x} {:0w$x} (base address)", entry_off, a, w = w);
                     base_addr = a;
                 }
                 7 => {
@@ -11621,12 +11604,12 @@ fn objcopy_merge_build_attribute_notes(data: &[u8]) -> Option<Vec<u8>> {
             break;
         }
     }
-    let ba_off = build_off;
-    let ba_size = build_size;
-    if ba_size == 0 || ba_off + ba_size > data.len() {
+    let build_attrs_off = build_off;
+    let build_attrs_size = build_size;
+    if build_attrs_size == 0 || build_attrs_off + build_attrs_size > data.len() {
         return None;
     }
-    let bytes = &data[ba_off..ba_off + ba_size];
+    let bytes = &data[build_attrs_off..build_attrs_off + build_attrs_size];
     // Parse notes
     #[derive(Clone)]
     struct Note {
@@ -11821,7 +11804,7 @@ fn objcopy_merge_build_attribute_notes(data: &[u8]) -> Option<Vec<u8>> {
         }
         prev_range = Some((g.start, g.end));
     }
-    if out_bytes.len() > ba_size {
+    if out_bytes.len() > build_attrs_size {
         // Merged section is larger than original — would require shifting
         // file offsets, which we don't support here.
         return None;
@@ -11830,11 +11813,11 @@ fn objcopy_merge_build_attribute_notes(data: &[u8]) -> Option<Vec<u8>> {
     // Pad with zeros to keep file layout intact (don't shift later
     // sections), then patch the section header's sh_size to the merged
     // size so readelf stops at the actual data.
-    while out_bytes.len() < ba_size {
+    while out_bytes.len() < build_attrs_size {
         out_bytes.push(0);
     }
     let mut out_data = data.to_vec();
-    out_data[ba_off..ba_off + ba_size].copy_from_slice(&out_bytes[..ba_size]);
+    out_data[build_attrs_off..build_attrs_off + build_attrs_size].copy_from_slice(&out_bytes[..build_attrs_size]);
     // Update sh_size in the .gnu.build.attributes section header.
     if let Some(idx) = build_idx {
         let h = shoff + idx * shentsize;
@@ -13495,7 +13478,9 @@ fn readelf_debug_loc<'data, Elf: FileHeader>(
             println!("Contents of the .debug_loc section:");
             println!();
             if has_relocs {
-                println!(" Warning: This section has relocations - addresses seen here may not be accurate.");
+                println!(
+                    " Warning: This section has relocations - addresses seen here may not be accurate."
+                );
                 println!();
             }
             println!("    Offset   Begin            End              Expression");
@@ -13554,19 +13539,12 @@ fn readelf_debug_loc<'data, Elf: FileHeader>(
             if expr_off + expr_len > bytes.len() {
                 break;
             }
-            let expr_str = decode_dwop_expression(
-                &bytes[expr_off..expr_off + expr_len],
-                addr_size as u8,
-                le,
-            );
+            let expr_str =
+                decode_dwop_expression(&bytes[expr_off..expr_off + expr_len], addr_size as u8, le);
             // Detect "(start == end)" suffix matching GNU readelf when both
             // begin and end addresses are equal (after relocation, in
             // practice always 0 in relocatable objects).
-            let suffix = if begin == end {
-                " (start == end)"
-            } else {
-                ""
-            };
+            let suffix = if begin == end { " (start == end)" } else { "" };
             println!(
                 "    {:08x} {:0aw$x} {:0aw$x} {}{}",
                 p,
@@ -14134,12 +14112,12 @@ fn readelf_debug_line_raw<'data, Elf: FileHeader>(
             };
             // DWARF 5 has an extra address_size + segment_selector_size before
             // header_length.
-            let dwarf5_addr_size: Option<u8> = if version == 5 {
+            let (dwarf5_addr_size, dwarf5_seg_size): (Option<u8>, Option<u8>) = if version == 5 {
                 let asz = p.read_u8();
-                let _seg_size = p.read_u8();
-                asz
+                let ssz = p.read_u8();
+                (asz, ssz)
             } else {
-                None
+                (None, None)
             };
             let header_length = if is_64 {
                 p.read_u64().unwrap_or(0)
@@ -14165,6 +14143,16 @@ fn readelf_debug_line_raw<'data, Elf: FileHeader>(
             println!("  Offset:                      {}", unit_start);
             println!("  Length:                      {}", length);
             println!("  DWARF Version:               {}", version);
+            if version == 5 {
+                println!(
+                    "  Address size (bytes):        {}",
+                    dwarf5_addr_size.unwrap_or(0)
+                );
+                println!(
+                    "  Segment selector (bytes):    {}",
+                    dwarf5_seg_size.unwrap_or(0)
+                );
+            }
             println!("  Prologue Length:             {}", header_length);
             println!("  Minimum Instruction Length:  {}", min_instr_len);
             if version >= 4 {
@@ -14565,13 +14553,13 @@ fn readelf_debug_line_decoded<'data, Elf: FileHeader>(
                     && let Ok(name) = dwarf.attr_string(&unit, file.path_name())
                 {
                     let file_name = name.to_string_lossy().into_owned();
+                    // GNU readelf trims the trailing View/Stmt columns when
+                    // they're empty.
                     println!(
-                        "{:<33} {:>11}  {:>18}  {:>6}  {:>6}",
+                        "{:<33} {:>11}  {:>18}",
                         file_name,
                         "-",
-                        format!("0x{:x}", addr),
-                        "",
-                        ""
+                        format!("0x{:x}", addr)
                     );
                 }
                 // Reset state so the next sequence starts fresh; emit blank
@@ -14638,14 +14626,34 @@ fn readelf_debug_line_decoded<'data, Elf: FileHeader>(
                 "-".to_string()
             };
             let stmt = if *is_stmt { "x" } else { "" };
-            println!(
-                "{:<33} {:>11}  {:>18}  {:>6}  {:>6}",
-                file_name,
-                line_disp,
-                format!("0x{:x}", addr),
-                view_str,
-                stmt
-            );
+            // Match GNU readelf: trim trailing whitespace in the row by
+            // omitting empty View / Stmt fields when they're both blank.
+            let line = if view_str.is_empty() && stmt.is_empty() {
+                format!(
+                    "{:<33} {:>11}  {:>18}",
+                    file_name,
+                    line_disp,
+                    format!("0x{:x}", addr)
+                )
+            } else if stmt.is_empty() {
+                format!(
+                    "{:<33} {:>11}  {:>18}  {:>6}",
+                    file_name,
+                    line_disp,
+                    format!("0x{:x}", addr),
+                    view_str
+                )
+            } else {
+                format!(
+                    "{:<33} {:>11}  {:>18}  {:>6}  {:>6}",
+                    file_name,
+                    line_disp,
+                    format!("0x{:x}", addr),
+                    view_str,
+                    stmt
+                )
+            };
+            println!("{}", line.trim_end());
         }
     }
 }
@@ -14926,7 +14934,26 @@ fn read_and_format_attr(
         }
         0x17 /* sec_offset */ => {
             let v = if is_64 { p.read_u64().unwrap_or(0) } else { p.read_u32().unwrap_or(0) as u64 };
-            format!("0x{:x}", v)
+            // GNU readelf annotates sec_offset attributes by section type:
+            // DW_AT_location/DW_AT_string_length/etc. -> "(location list)",
+            // DW_AT_ranges/DW_AT_start_scope                -> "(range list)".
+            let suffix = match attr_name {
+                0x02 /* DW_AT_location */
+                | 0x19 /* DW_AT_string_length */
+                | 0x46 /* DW_AT_frame_base */
+                | 0x4d /* DW_AT_GNU_locviews */
+                | 0x49 /* DW_AT_data_location */
+                | 0x6b /* DW_AT_GNU_call_site_value */
+                | 0x6c /* DW_AT_GNU_call_site_data_value */
+                | 0x6d /* DW_AT_GNU_call_site_target */
+                | 0x6e /* DW_AT_GNU_call_site_target_clobbered */
+                => " (location list)",
+                0x55 /* DW_AT_ranges */
+                | 0x2c /* DW_AT_start_scope */
+                => " (range list)",
+                _ => "",
+            };
+            format!("0x{:x}{}", v, suffix)
         }
         0x18 /* exprloc */ => {
             let n = p.read_uleb128().unwrap_or(0) as usize;
