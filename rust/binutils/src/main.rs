@@ -13635,16 +13635,21 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
     };
     use object::{Object as _, ObjectSection as _, ObjectSymbol as _};
 
-    let info_sect = obj
-        .section_by_name(".debug_info")
-        .or_else(|| obj.section_by_name(".zdebug_info"));
-    let info_sect = match info_sect {
-        Some(s) => s,
-        None => return,
+    // DWP files use `.debug_info.dwo` / `.debug_abbrev.dwo`. Fall back to
+    // those when the standard sections aren't present.
+    let (info_sect, info_sect_name) = if let Some(s) = obj.section_by_name(".debug_info") {
+        (s, ".debug_info")
+    } else if let Some(s) = obj.section_by_name(".zdebug_info") {
+        (s, ".debug_info")
+    } else if let Some(s) = obj.section_by_name(".debug_info.dwo") {
+        (s, ".debug_info.dwo")
+    } else {
+        return;
     };
     let abbrev_sect = obj
         .section_by_name(".debug_abbrev")
-        .or_else(|| obj.section_by_name(".zdebug_abbrev"));
+        .or_else(|| obj.section_by_name(".zdebug_abbrev"))
+        .or_else(|| obj.section_by_name(".debug_abbrev.dwo"));
 
     let is_le = obj.is_little_endian();
 
@@ -13731,7 +13736,7 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
         Some(path) => format!(" (loaded from {})", path),
         None => String::new(),
     };
-    println!("Contents of the .debug_info section{}:", header_suffix);
+    println!("Contents of the {} section{}:", info_sect_name, header_suffix);
     println!();
 
     let mut p = DwarfReader {
