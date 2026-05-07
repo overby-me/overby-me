@@ -2404,8 +2404,13 @@ impl Lexer {
         let mut depth = 1;
         let mut terminated = false;
 
+        // When the delimiter is `\` itself (e.g. `qr\…\`), there's no
+        // backslash-escape because every `\` is either the delimiter
+        // or a literal whose meaning is decided by the regex/string
+        // parser downstream — there's no `\\` escape to differentiate.
+        let delim_is_backslash = open == '\\';
         while self.pos < self.input.len() {
-            if self.ch() == '\\' && self.pos + 1 < self.input.len() {
+            if self.ch() == '\\' && self.pos + 1 < self.input.len() && !delim_is_backslash {
                 let next = self.input[self.pos + 1];
                 if is_paired {
                     // In paired delimiters (q{}, q<>, etc.), \open and \close
