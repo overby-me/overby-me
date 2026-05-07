@@ -8,7 +8,14 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 **67/79 Nix tests passing** (85%) — selected tests from the upstream Perl test suite.
 
-This iteration's improvements (op/eval diff: 146 → 79):
+This iteration's improvements (op/eval diff: 146 → 72):
+
+- **Lexical-scope termination at sub boundaries**: top-level NAMED subs (no closure_envs, not anonymous) now stash dynamic frames between scopes[0] and the sub's own scope-start when running `eval STRING`. So `sub terminal { eval '$r' }` called from `do { my $r = "bad" }` no longer sees the do-block's `$r` — falls through to `$main::r` instead. Test 40 (`lexical search terminates correctly at subroutine boundary`) now passes.
+- New `current_sub_scope_start` parallel stack (pushed/popped with `current_sub_stack`) records `self.scopes.len()` at each NAMED sub call so eval STRING knows the sub's own frame index. Pop-on-return wired up in all four exit paths (was missing in the two normal-completion paths, causing state leaks).
+
+Earlier this iteration:
+
+Earlier this iteration:
 
 - **Closure capture for `my` lexicals** is now LIVE-VIEW: `Stmt::Sub` promotes each captured slot to a shared `Rc<RefCell<Value>>` alias and shares the same Rc with the cloned scope chain. Mutations to `$x` through `set_var` propagate to the captured chain. Reads pass through `Value::resolve()` in `get_var` so pattern matches like `if let Value::Str(s) = …` still see the underlying value. op/eval tests 30-34 (closure of `$x` across eval-string boundaries) now pass.
 - **Closure capture extends to subs nested in blocks** (`scopes.len() > 1`), not just `eval STRING`. Block-scoped subs like `{ my $x=2; sub db1 { eval '$x' } }` now capture `$x`. op/eval tests 92-93 (lexical-search-at-sub-boundary) now pass.
