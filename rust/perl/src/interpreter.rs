@@ -9533,6 +9533,7 @@ impl Interpreter {
         let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_atomic_groups(&pattern);
         let pattern = fix_inverted_quantifiers(&pattern);
+        let pattern = neutralise_false_ranges(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -9711,6 +9712,7 @@ impl Interpreter {
         let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_atomic_groups(&pattern);
         let pattern = fix_inverted_quantifiers(&pattern);
+        let pattern = neutralise_false_ranges(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -12753,6 +12755,90 @@ fn strip_unsupported_regex_flags(pattern: &str) -> String {
                     continue;
                 }
             }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Escape `-` inside `[…]` character classes when one side of the
+/// apparent range is a backslash escape (`\d`, `\s`, …) or an
+/// embedded POSIX class. Reference perl treats `[a-\d]` as `a`, `-`,
+/// `\d` (a literal dash), but Rust's regex and fancy-regex both
+/// reject the form. Rewriting to `[a\-\d]` is semantically identical
+/// and accepted by both backends. Skips `[-abc]` / `[abc-]` (dash at
+/// the boundary is already literal).
+fn neutralise_false_ranges(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if !in_class && c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class
+            && c == '-'
+            && i + 1 < chars.len()
+            && (chars[i + 1] == '\\' || chars[i + 1] == '[')
+            && i > 0
+        {
+            let prev = chars[i - 1];
+            if prev != '[' && prev != '\\' {
+                out.push('\\');
+                out.push('-');
+                i += 1;
+                continue;
+            }
+        }
+        // `[\d-z]` — dash *after* an escape: also a literal dash.
+        // The `i > 1` guard ensures `chars[i-2]` is in range; only
+        // recognise the escape pair `\X` where `X` is a class
+        // shorthand letter (D, d, S, s, W, w, etc.).
+        if in_class
+            && c == '-'
+            && i > 1
+            && chars[i - 2] == '\\'
+            && matches!(
+                chars[i - 1],
+                'd' | 'D' | 's' | 'S' | 'w' | 'W' | 'h' | 'H' | 'v' | 'V' | 'p' | 'P' | 'N' | 'R'
+            )
+        {
+            out.push('\\');
+            out.push('-');
+            i += 1;
+            continue;
+        }
+        if in_class
+            && c == '-'
+            && i > 0
+            && i + 1 < chars.len()
+            && chars[i - 1] == ']'
+            && chars[i - 2] == ':'
+        {
+            // `[[:digit:]-…]` — the prior `]` closed an inner POSIX
+            // class, so this dash is between two non-char endpoints.
+            out.push('\\');
+            out.push('-');
+            i += 1;
+            continue;
         }
         out.push(c);
         i += 1;
