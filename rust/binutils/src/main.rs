@@ -4001,15 +4001,12 @@ fn apply_note_relocs<'data, Elf: FileHeader>(
         return out;
     };
     let target_idx_u64: u64 = {
-        // Compute target index by scanning (no direct API).
-        let mut idx = 0u64;
         let mut found = u64::MAX;
-        for s in sections.iter() {
+        for (idx, s) in sections.iter().enumerate() {
             if std::ptr::eq(s as *const _, target_section as *const _) {
-                found = idx;
+                found = idx as u64;
                 break;
             }
-            idx += 1;
         }
         found
     };
@@ -7235,6 +7232,15 @@ fn tool_objcopy(args: &[String]) -> i32 {
     let mut weaken_all = false;
     let mut preserve_dates = false;
     let mut wildcard = false;
+    // --compress-debug-sections{=zlib-gnu,zlib-gabi,zlib} / --decompress-debug-sections
+    #[derive(Clone, Copy, PartialEq)]
+    enum CompressMode {
+        None,
+        ZlibGnu,
+        ZlibGabi,
+    }
+    let mut compress_debug: CompressMode = CompressMode::None;
+    let mut decompress_debug: bool = false;
     let mut localize_hidden = false;
     let mut strip_section_headers = false;
     let mut add_sections: Vec<(String, String)> = Vec::new();
@@ -7370,6 +7376,24 @@ fn tool_objcopy(args: &[String]) -> i32 {
             }
             "-w" | "--wildcard" => {
                 wildcard = true;
+            }
+            "--compress-debug-sections" => {
+                compress_debug = CompressMode::ZlibGabi;
+            }
+            "--decompress-debug-sections" => {
+                decompress_debug = true;
+            }
+            _ if arg.starts_with("--compress-debug-sections=") => {
+                let v = &arg["--compress-debug-sections=".len()..];
+                compress_debug = match v {
+                    "none" => CompressMode::None,
+                    "zlib" | "zlib-gabi" => CompressMode::ZlibGabi,
+                    "zlib-gnu" => CompressMode::ZlibGnu,
+                    _ => CompressMode::ZlibGabi,
+                };
+            }
+            "--nocompress-debug-sections" => {
+                compress_debug = CompressMode::None;
             }
             "--weaken" => {
                 weaken_all = true;
@@ -8474,6 +8498,16 @@ fn tool_objcopy(args: &[String]) -> i32 {
     if let Err(e) = builder.emit(&mut out_buf) {
         eprintln!("objcopy: failed to write output: {e}");
         return 1;
+    }
+
+    // --compress-debug-sections / --decompress-debug-sections post-processing.
+    if decompress_debug {
+        elf_decompress_debug_sections(&mut out_buf);
+    }
+    match compress_debug {
+        CompressMode::ZlibGnu => elf_compress_debug_sections(&mut out_buf, 1),
+        CompressMode::ZlibGabi => elf_compress_debug_sections(&mut out_buf, 2),
+        CompressMode::None => {}
     }
 
     if let Err(e) = fs::write(output, &out_buf) {
@@ -11172,6 +11206,486 @@ fn readelf_debug_loclists<'data, Elf: FileHeader>(
     }
 }
 
+/// Apply `objcopy --compress-debug-sections` to an ELF file in-place.
+///
+/// `mode` selects the wire format:
+///   - `1` = zlib-gnu: rename sections from `.debug_X` to `.zdebug_X`,
+///     prefix data with `"ZLIB"` + 8-byte big-endian uncompressed size.
+///   - `2` = zlib-gabi: prefix data with `Elf*_Chdr` + set SHF_COMPRESSED.
+///
+/// Implements only enough of the format for round-trip equivalence with
+/// upstream `as --compress-debug-sections=zlib-{gnu,gabi}`.
+fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
+    use flate2::Compression;
+    use flate2::write::ZlibEncoder;
+    use std::io::Write as _;
+    if data.len() < 0x40 || &data[..4] != b"\x7fELF" {
+        return;
+    }
+    let class = data[4];
+    let le = data[5] == 1;
+    let r16 = |d: &[u8], o: usize| -> u16 {
+        let b = [d[o], d[o + 1]];
+        if le {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        }
+    };
+    let r32 = |d: &[u8], o: usize| -> u32 {
+        let b = [d[o], d[o + 1], d[o + 2], d[o + 3]];
+        if le {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        }
+    };
+    let r64 = |d: &[u8], o: usize| -> u64 {
+        let b = [
+            d[o],
+            d[o + 1],
+            d[o + 2],
+            d[o + 3],
+            d[o + 4],
+            d[o + 5],
+            d[o + 6],
+            d[o + 7],
+        ];
+        if le {
+            u64::from_le_bytes(b)
+        } else {
+            u64::from_be_bytes(b)
+        }
+    };
+    let w32 = |d: &mut [u8], o: usize, v: u32| {
+        let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        d[o..o + 4].copy_from_slice(&b);
+    };
+    let w64 = |d: &mut [u8], o: usize, v: u64| {
+        let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        d[o..o + 8].copy_from_slice(&b);
+    };
+    let (shoff, shentsize, shnum, shstrndx): (u64, usize, usize, usize) = if class == 2 {
+        (
+            r64(data, 0x28),
+            r16(data, 0x3a) as usize,
+            r16(data, 0x3c) as usize,
+            r16(data, 0x3e) as usize,
+        )
+    } else {
+        (
+            r32(data, 0x20) as u64,
+            r16(data, 0x2e) as usize,
+            r16(data, 0x30) as usize,
+            r16(data, 0x32) as usize,
+        )
+    };
+    if shnum == 0 || shstrndx >= shnum {
+        return;
+    }
+    // Read shstrtab section header to get its file offset.
+    let shstr_hdr = shoff as usize + shstrndx * shentsize;
+    let (shstr_off, shstr_size): (usize, usize) = if class == 2 {
+        (
+            r64(data, shstr_hdr + 24) as usize,
+            r64(data, shstr_hdr + 32) as usize,
+        )
+    } else {
+        (
+            r32(data, shstr_hdr + 16) as usize,
+            r32(data, shstr_hdr + 20) as usize,
+        )
+    };
+    let read_name = |strtab: &[u8], idx: usize| -> Vec<u8> {
+        if idx >= strtab.len() {
+            return Vec::new();
+        }
+        let end = strtab[idx..]
+            .iter()
+            .position(|&b| b == 0)
+            .map(|p| idx + p)
+            .unwrap_or(strtab.len());
+        strtab[idx..end].to_vec()
+    };
+    // Read existing shstrtab to track names; we may need to append new ones.
+    let mut shstr_data: Vec<u8> = data[shstr_off..shstr_off + shstr_size].to_vec();
+    // Collect debug section indexes and their data slices.
+    struct CompressTarget {
+        idx: usize,
+        old_name_idx: u32,
+        old_name: Vec<u8>,
+        offset: usize,
+        size: usize,
+        flags: u64,
+    }
+    let mut targets: Vec<CompressTarget> = Vec::new();
+    for i in 0..shnum {
+        let h = shoff as usize + i * shentsize;
+        let name_idx = r32(data, h);
+        let name = read_name(&shstr_data, name_idx as usize);
+        if !name.starts_with(b".debug_") {
+            continue;
+        }
+        let (sh_off, sh_size, sh_flags): (usize, usize, u64) = if class == 2 {
+            (
+                r64(data, h + 24) as usize,
+                r64(data, h + 32) as usize,
+                r64(data, h + 8),
+            )
+        } else {
+            (
+                r32(data, h + 16) as usize,
+                r32(data, h + 20) as usize,
+                r32(data, h + 8) as u64,
+            )
+        };
+        // Skip if already compressed (SHF_COMPRESSED = 0x800).
+        if sh_flags & 0x800 != 0 {
+            continue;
+        }
+        targets.push(CompressTarget {
+            idx: i,
+            old_name_idx: name_idx,
+            old_name: name,
+            offset: sh_off,
+            size: sh_size,
+            flags: sh_flags,
+        });
+    }
+    if targets.is_empty() {
+        return;
+    }
+    // Compress each target's data.
+    struct CompressedSection {
+        idx: usize,
+        new_name_idx: u32,
+        new_data: Vec<u8>,
+        new_flags: u64,
+    }
+    let mut compressed: Vec<CompressedSection> = Vec::new();
+    for t in &targets {
+        if t.offset + t.size > data.len() {
+            continue;
+        }
+        let raw = data[t.offset..t.offset + t.size].to_vec();
+        // Compress with zlib (default level).
+        let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
+        let _ = enc.write_all(&raw);
+        let zlib_data = enc.finish().unwrap_or_default();
+        let (new_data, new_flags, new_name_idx) = match mode {
+            1 => {
+                // zlib-gnu: "ZLIB" + 8-byte BE uncompressed size + zlib stream.
+                let mut out = Vec::with_capacity(12 + zlib_data.len());
+                out.extend_from_slice(b"ZLIB");
+                out.extend_from_slice(&(t.size as u64).to_be_bytes());
+                out.extend_from_slice(&zlib_data);
+                // Need a `.zdebug_X` name (replace leading ".d" with ".zd").
+                let new_name: Vec<u8> = {
+                    let mut v = Vec::with_capacity(t.old_name.len() + 1);
+                    v.extend_from_slice(b".z");
+                    v.extend_from_slice(&t.old_name[1..]);
+                    v
+                };
+                // Find or append new name in shstr.
+                let idx = if let Some(p) = find_subbytes(&shstr_data, &new_name) {
+                    if shstr_data.get(p + new_name.len()) == Some(&0) {
+                        p as u32
+                    } else {
+                        u32::MAX
+                    }
+                } else {
+                    u32::MAX
+                };
+                let final_idx = if idx != u32::MAX {
+                    idx
+                } else {
+                    let off = shstr_data.len() as u32;
+                    shstr_data.extend_from_slice(&new_name);
+                    shstr_data.push(0);
+                    off
+                };
+                (out, t.flags, final_idx)
+            }
+            2 => {
+                // zlib-gabi: Elf*_Chdr + zlib stream; set SHF_COMPRESSED.
+                let mut out: Vec<u8>;
+                if class == 2 {
+                    // Elf64_Chdr: u32 ch_type + u32 ch_reserved + u64 ch_size + u64 ch_addralign
+                    out = Vec::with_capacity(24 + zlib_data.len());
+                    out.extend_from_slice(&[0u8; 24]);
+                    let chdr = &mut out[..24];
+                    if le {
+                        chdr[0..4].copy_from_slice(&1u32.to_le_bytes()); // ELFCOMPRESS_ZLIB
+                        chdr[8..16].copy_from_slice(&(t.size as u64).to_le_bytes());
+                        chdr[16..24].copy_from_slice(&1u64.to_le_bytes()); // ch_addralign
+                    } else {
+                        chdr[0..4].copy_from_slice(&1u32.to_be_bytes());
+                        chdr[8..16].copy_from_slice(&(t.size as u64).to_be_bytes());
+                        chdr[16..24].copy_from_slice(&1u64.to_be_bytes());
+                    }
+                    out.extend_from_slice(&zlib_data);
+                } else {
+                    // Elf32_Chdr: u32 ch_type + u32 ch_size + u32 ch_addralign
+                    out = Vec::with_capacity(12 + zlib_data.len());
+                    out.extend_from_slice(&[0u8; 12]);
+                    let chdr = &mut out[..12];
+                    if le {
+                        chdr[0..4].copy_from_slice(&1u32.to_le_bytes());
+                        chdr[4..8].copy_from_slice(&(t.size as u32).to_le_bytes());
+                        chdr[8..12].copy_from_slice(&1u32.to_le_bytes());
+                    } else {
+                        chdr[0..4].copy_from_slice(&1u32.to_be_bytes());
+                        chdr[4..8].copy_from_slice(&(t.size as u32).to_be_bytes());
+                        chdr[8..12].copy_from_slice(&1u32.to_be_bytes());
+                    }
+                    out.extend_from_slice(&zlib_data);
+                }
+                (out, t.flags | 0x800, t.old_name_idx)
+            }
+            _ => continue,
+        };
+        compressed.push(CompressedSection {
+            idx: t.idx,
+            new_name_idx,
+            new_data,
+            new_flags,
+        });
+    }
+    // Rebuild the file: walk all sections and replace target sections' data.
+    // Simplest approach: append new compressed data to end of file, update
+    // section header offsets/sizes/names. Old data becomes dead space.
+    for cs in &compressed {
+        let h = shoff as usize + cs.idx * shentsize;
+        let new_off = data.len() as u64;
+        data.extend_from_slice(&cs.new_data);
+        // Update section header.
+        w32(data, h, cs.new_name_idx);
+        if class == 2 {
+            w64(data, h + 8, cs.new_flags);
+            w64(data, h + 24, new_off);
+            w64(data, h + 32, cs.new_data.len() as u64);
+        } else {
+            w32(data, h + 8, cs.new_flags as u32);
+            w32(data, h + 16, new_off as u32);
+            w32(data, h + 20, cs.new_data.len() as u32);
+        }
+    }
+    // Rewrite shstrtab if it grew.
+    if shstr_data.len() > shstr_size {
+        // Append new shstrtab to end and update header.
+        let new_shstr_off = data.len() as u64;
+        data.extend_from_slice(&shstr_data);
+        if class == 2 {
+            w64(data, shstr_hdr + 24, new_shstr_off);
+            w64(data, shstr_hdr + 32, shstr_data.len() as u64);
+        } else {
+            w32(data, shstr_hdr + 16, new_shstr_off as u32);
+            w32(data, shstr_hdr + 20, shstr_data.len() as u32);
+        }
+    }
+}
+
+/// Inverse of `elf_compress_debug_sections`: decompress `.zdebug_*` and
+/// SHF_COMPRESSED sections back to plain `.debug_*` content.
+fn elf_decompress_debug_sections(data: &mut Vec<u8>) {
+    use std::io::Read as _;
+    if data.len() < 0x40 || &data[..4] != b"\x7fELF" {
+        return;
+    }
+    let class = data[4];
+    let le = data[5] == 1;
+    let r16 = |d: &[u8], o: usize| -> u16 {
+        let b = [d[o], d[o + 1]];
+        if le {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        }
+    };
+    let r32 = |d: &[u8], o: usize| -> u32 {
+        let b = [d[o], d[o + 1], d[o + 2], d[o + 3]];
+        if le {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        }
+    };
+    let r64 = |d: &[u8], o: usize| -> u64 {
+        let b = [
+            d[o],
+            d[o + 1],
+            d[o + 2],
+            d[o + 3],
+            d[o + 4],
+            d[o + 5],
+            d[o + 6],
+            d[o + 7],
+        ];
+        if le {
+            u64::from_le_bytes(b)
+        } else {
+            u64::from_be_bytes(b)
+        }
+    };
+    let w32 = |d: &mut [u8], o: usize, v: u32| {
+        let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        d[o..o + 4].copy_from_slice(&b);
+    };
+    let w64 = |d: &mut [u8], o: usize, v: u64| {
+        let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        d[o..o + 8].copy_from_slice(&b);
+    };
+    let (shoff, shentsize, shnum, shstrndx): (u64, usize, usize, usize) = if class == 2 {
+        (
+            r64(data, 0x28),
+            r16(data, 0x3a) as usize,
+            r16(data, 0x3c) as usize,
+            r16(data, 0x3e) as usize,
+        )
+    } else {
+        (
+            r32(data, 0x20) as u64,
+            r16(data, 0x2e) as usize,
+            r16(data, 0x30) as usize,
+            r16(data, 0x32) as usize,
+        )
+    };
+    if shnum == 0 || shstrndx >= shnum {
+        return;
+    }
+    let shstr_hdr = shoff as usize + shstrndx * shentsize;
+    let (shstr_off, shstr_size): (usize, usize) = if class == 2 {
+        (
+            r64(data, shstr_hdr + 24) as usize,
+            r64(data, shstr_hdr + 32) as usize,
+        )
+    } else {
+        (
+            r32(data, shstr_hdr + 16) as usize,
+            r32(data, shstr_hdr + 20) as usize,
+        )
+    };
+    let mut shstr_data: Vec<u8> = data[shstr_off..shstr_off + shstr_size].to_vec();
+    let read_name = |strtab: &[u8], idx: usize| -> Vec<u8> {
+        if idx >= strtab.len() {
+            return Vec::new();
+        }
+        let end = strtab[idx..]
+            .iter()
+            .position(|&b| b == 0)
+            .map(|p| idx + p)
+            .unwrap_or(strtab.len());
+        strtab[idx..end].to_vec()
+    };
+    struct DecompressTarget {
+        idx: usize,
+        new_name_idx: u32,
+        new_data: Vec<u8>,
+        new_flags: u64,
+    }
+    let mut targets: Vec<DecompressTarget> = Vec::new();
+    for i in 0..shnum {
+        let h = shoff as usize + i * shentsize;
+        let name_idx = r32(data, h);
+        let name = read_name(&shstr_data, name_idx as usize);
+        let (sh_off, sh_size, sh_flags): (usize, usize, u64) = if class == 2 {
+            (
+                r64(data, h + 24) as usize,
+                r64(data, h + 32) as usize,
+                r64(data, h + 8),
+            )
+        } else {
+            (
+                r32(data, h + 16) as usize,
+                r32(data, h + 20) as usize,
+                r32(data, h + 8) as u64,
+            )
+        };
+        if sh_off + sh_size > data.len() {
+            continue;
+        }
+        let raw = &data[sh_off..sh_off + sh_size];
+        let (uncompressed, new_name, new_flags) =
+            if name.starts_with(b".zdebug_") && raw.len() >= 12 && &raw[..4] == b"ZLIB" {
+                // zlib-gnu format.
+                let mut out = Vec::new();
+                let _ = flate2::read::ZlibDecoder::new(&raw[12..]).read_to_end(&mut out);
+                // Rename `.zdebug_X` → `.debug_X`.
+                let mut nn = Vec::with_capacity(name.len() - 1);
+                nn.push(b'.');
+                nn.extend_from_slice(&name[2..]);
+                (out, Some(nn), sh_flags)
+            } else if sh_flags & 0x800 != 0 {
+                // SHF_COMPRESSED (zlib-gabi) — strip Elf*_Chdr header.
+                let header_size = if class == 2 { 24 } else { 12 };
+                if raw.len() <= header_size {
+                    continue;
+                }
+                let mut out = Vec::new();
+                let _ = flate2::read::ZlibDecoder::new(&raw[header_size..]).read_to_end(&mut out);
+                (out, None, sh_flags & !0x800)
+            } else {
+                continue;
+            };
+        let new_name_idx = if let Some(nn) = new_name {
+            if let Some(p) = find_subbytes(&shstr_data, &nn)
+                && shstr_data.get(p + nn.len()) == Some(&0)
+            {
+                p as u32
+            } else {
+                let off = shstr_data.len() as u32;
+                shstr_data.extend_from_slice(&nn);
+                shstr_data.push(0);
+                off
+            }
+        } else {
+            name_idx
+        };
+        targets.push(DecompressTarget {
+            idx: i,
+            new_name_idx,
+            new_data: uncompressed,
+            new_flags,
+        });
+    }
+    if targets.is_empty() {
+        return;
+    }
+    for t in &targets {
+        let h = shoff as usize + t.idx * shentsize;
+        let new_off = data.len() as u64;
+        data.extend_from_slice(&t.new_data);
+        w32(data, h, t.new_name_idx);
+        if class == 2 {
+            w64(data, h + 8, t.new_flags);
+            w64(data, h + 24, new_off);
+            w64(data, h + 32, t.new_data.len() as u64);
+        } else {
+            w32(data, h + 8, t.new_flags as u32);
+            w32(data, h + 16, new_off as u32);
+            w32(data, h + 20, t.new_data.len() as u32);
+        }
+    }
+    if shstr_data.len() > shstr_size {
+        let new_shstr_off = data.len() as u64;
+        data.extend_from_slice(&shstr_data);
+        if class == 2 {
+            w64(data, shstr_hdr + 24, new_shstr_off);
+            w64(data, shstr_hdr + 32, shstr_data.len() as u64);
+        } else {
+            w32(data, shstr_hdr + 16, new_shstr_off as u32);
+            w32(data, shstr_hdr + 20, shstr_data.len() as u32);
+        }
+    }
+}
+
+fn find_subbytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
 fn elf_only_keep_debug(data: &mut Vec<u8>) {
     if data.len() < 0x40 || &data[..4] != b"\x7fELF" {
         return;
@@ -11817,7 +12331,8 @@ fn objcopy_merge_build_attribute_notes(data: &[u8]) -> Option<Vec<u8>> {
         out_bytes.push(0);
     }
     let mut out_data = data.to_vec();
-    out_data[build_attrs_off..build_attrs_off + build_attrs_size].copy_from_slice(&out_bytes[..build_attrs_size]);
+    out_data[build_attrs_off..build_attrs_off + build_attrs_size]
+        .copy_from_slice(&out_bytes[..build_attrs_size]);
     // Update sh_size in the .gnu.build.attributes section header.
     if let Some(idx) = build_idx {
         let h = shoff + idx * shentsize;
@@ -13736,7 +14251,10 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
         Some(path) => format!(" (loaded from {})", path),
         None => String::new(),
     };
-    println!("Contents of the {} section{}:", info_sect_name, header_suffix);
+    println!(
+        "Contents of the {} section{}:",
+        info_sect_name, header_suffix
+    );
     println!();
 
     let mut p = DwarfReader {
@@ -14308,7 +14826,9 @@ fn readelf_debug_line_raw<'data, Elf: FileHeader>(
                 for _ in 0..dirs_count {
                     let mut path = String::new();
                     for &(ct, fm) in &dir_fmts {
-                        if ct == 1 /* DW_LNCT_path */ {
+                        if ct == 1
+                        /* DW_LNCT_path */
+                        {
                             path = read_str_for_form(fm, &mut p);
                         } else {
                             // Skip data field.
@@ -14392,43 +14912,57 @@ fn readelf_debug_line_raw<'data, Elf: FileHeader>(
             // For older versions, derive from the CU header's pointer size
             // by parsing the first .debug_info CU. Fall back to relocation
             // size, then to ELF class.
-            let addr_size = dwarf5_addr_size.map(|s| s as usize).or_else(|| {
-                // Try to read pointer size from the first .debug_info CU.
-                let info = obj.section_by_name(".debug_info")
-                    .or_else(|| obj.section_by_name(".zdebug_info"))?;
-                let info_data = info.uncompressed_data().ok()?;
-                let b = info_data.as_ref();
-                if b.len() < 12 { return None; }
-                let initial = if le {
-                    u32::from_le_bytes([b[0],b[1],b[2],b[3]])
-                } else {
-                    u32::from_be_bytes([b[0],b[1],b[2],b[3]])
-                };
-                let hdr_off = if initial == 0xffffffff { 12 } else { 4 };
-                if b.len() < hdr_off + 2 { return None; }
-                let version = if le {
-                    u16::from_le_bytes([b[hdr_off], b[hdr_off+1]])
-                } else {
-                    u16::from_be_bytes([b[hdr_off], b[hdr_off+1]])
-                };
-                let abbrev_size = if initial == 0xffffffff { 8 } else { 4 };
-                let asz_off = if version <= 4 {
-                    hdr_off + 2 + abbrev_size
-                } else {
-                    hdr_off + 2 + 1
-                };
-                if b.len() <= asz_off { return None; }
-                let asz = b[asz_off];
-                if asz == 4 || asz == 8 { Some(asz as usize) } else { None }
-            }).unwrap_or_else(|| {
-                if let Some(s) = reloc_addr_size {
-                    s as usize
-                } else if data.len() >= 5 && data[4] == 2 {
-                    8
-                } else {
-                    4
-                }
-            });
+            let addr_size = dwarf5_addr_size
+                .map(|s| s as usize)
+                .or_else(|| {
+                    // Try to read pointer size from the first .debug_info CU.
+                    let info = obj
+                        .section_by_name(".debug_info")
+                        .or_else(|| obj.section_by_name(".zdebug_info"))?;
+                    let info_data = info.uncompressed_data().ok()?;
+                    let b = info_data.as_ref();
+                    if b.len() < 12 {
+                        return None;
+                    }
+                    let initial = if le {
+                        u32::from_le_bytes([b[0], b[1], b[2], b[3]])
+                    } else {
+                        u32::from_be_bytes([b[0], b[1], b[2], b[3]])
+                    };
+                    let hdr_off = if initial == 0xffffffff { 12 } else { 4 };
+                    if b.len() < hdr_off + 2 {
+                        return None;
+                    }
+                    let version = if le {
+                        u16::from_le_bytes([b[hdr_off], b[hdr_off + 1]])
+                    } else {
+                        u16::from_be_bytes([b[hdr_off], b[hdr_off + 1]])
+                    };
+                    let abbrev_size = if initial == 0xffffffff { 8 } else { 4 };
+                    let asz_off = if version <= 4 {
+                        hdr_off + 2 + abbrev_size
+                    } else {
+                        hdr_off + 2 + 1
+                    };
+                    if b.len() <= asz_off {
+                        return None;
+                    }
+                    let asz = b[asz_off];
+                    if asz == 4 || asz == 8 {
+                        Some(asz as usize)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| {
+                    if let Some(s) = reloc_addr_size {
+                        s as usize
+                    } else if data.len() >= 5 && data[4] == 2 {
+                        8
+                    } else {
+                        4
+                    }
+                });
             let mut address: u64 = 0;
             let mut line: i64 = 1;
             let mut view: u64 = 0;
@@ -14684,8 +15218,9 @@ fn readelf_debug_line_decoded<'data, Elf: FileHeader>(
         let mut prev_addr: u64 = u64::MAX;
         let mut view: u64 = 0;
         let mut rows = line_program.rows();
-        // Buffer fields: (file_idx, line, line_opt, addr, is_stmt, end_seq, discriminator)
-        let mut rows_buf: Vec<(u64, u64, Option<u64>, u64, bool, bool, u64)> = Vec::new();
+        // Fields: (file_idx, line, line_opt, addr, is_stmt, end_seq, discriminator)
+        type LineRow = (u64, u64, Option<u64>, u64, bool, bool, u64);
+        let mut rows_buf: Vec<LineRow> = Vec::new();
         // Gimli skips the end_sequence row that follows a set_address rewind
         // with no intervening Copy. Synthesise an end_sequence when we
         // detect a sequence boundary via an address regression.
@@ -14753,9 +15288,15 @@ fn readelf_debug_line_decoded<'data, Elf: FileHeader>(
                     if let Ok(name) = dwarf.attr_string(&unit, file.path_name()) {
                         let s = name.to_string_lossy().into_owned();
                         s == cu_name
-                    } else { false }
-                } else { false }
-            } else { false };
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
             let file_changed = if suppress_first {
                 false
             } else if current_file.is_none() {
@@ -14971,11 +15512,7 @@ fn parse_abbrev_table(
         pos: offset,
         le: true,
     };
-    loop {
-        let code = match p.read_uleb128() {
-            Some(v) => v,
-            None => break,
-        };
+    while let Some(code) = p.read_uleb128() {
         if code == 0 {
             break;
         }

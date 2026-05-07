@@ -217,6 +217,11 @@
         minPass = 120;
         maxFail = 0;
       }
+      {
+        exp = "compress.exp";
+        minPass = 18;
+        maxFail = 27;
+      }
     ];
 
     customChecks = builtins.listToAttrs (map (t: {
