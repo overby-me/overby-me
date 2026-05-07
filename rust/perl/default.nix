@@ -606,6 +606,10 @@
         category = "op";
         name = "hash-rt85026";
       }
+      {
+        category = "op";
+        name = "magic";
+      }
 
       # --- t/comp/ (selected) ---
       {

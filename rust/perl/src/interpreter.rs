@@ -690,6 +690,11 @@ impl Interpreter {
         if let Some(err) = chosen_err {
             eprint!("{err}");
             self.exit_code = 2;
+            // Reference perl runs END blocks even when compilation
+            // aborts. test.pls END is responsible for the
+            // "Looks like you planned X tests but ran Y." footer; if
+            // we skip it the trailing diagnostic goes missing.
+            self.run_end_blocks_for_compile_error();
             return;
         }
 
@@ -757,29 +762,7 @@ impl Interpreter {
         self.run_lexical_destructors();
         self.pop_scope();
 
-        // END blocks see ${^GLOBAL_PHASE} = "END".
-        self.set_global_var("^GLOBAL_PHASE", Value::Str("END".to_string()));
-        // Execute END blocks in reverse order. Push the block's origin file
-        // scope (if any) first so the block can see the file's `my` vars —
-        // mirrors what `call_sub_named` does for sub calls into a required
-        // file. Without this, test.pl's END (which reads `$test` / `$planned`)
-        // would only see undef and skip its "Looks like you planned ... but ran ..." line.
-        let end_blocks: Vec<(Vec<Stmt>, Option<String>)> =
-            self.end_blocks.clone().into_iter().rev().collect();
-        for (body, origin) in &end_blocks {
-            let pushed_origin = if let Some(o) = origin {
-                let scope = self.file_scopes.remove(o).unwrap_or_else(Scope::new);
-                self.scopes.push(scope);
-                Some(o.clone())
-            } else {
-                None
-            };
-            let _flow = self.exec_stmts(body);
-            if let Some(o) = pushed_origin {
-                let updated = self.scopes.pop().unwrap_or_else(Scope::new);
-                self.file_scopes.insert(o, updated);
-            }
-        }
+        self.run_end_blocks_for_compile_error();
 
         // DESTRUCT: phase flips, then we destroy globals that are blessed.
         self.set_global_var("^GLOBAL_PHASE", Value::Str("DESTRUCT".to_string()));
@@ -796,6 +779,31 @@ impl Interpreter {
                 if self.exit_code == 0 {
                     self.exit_code = n & 0xff;
                 }
+            }
+        }
+    }
+
+    /// Run all registered END blocks in reverse order with
+    /// `${^GLOBAL_PHASE} = "END"`. Used both by the normal end-of-run
+    /// path and by the early-abort path (compile-time use/glob check
+    /// failure) so test.pls END runs and emits its
+    /// "Looks like you planned X tests but ran Y." footer.
+    fn run_end_blocks_for_compile_error(&mut self) {
+        self.set_global_var("^GLOBAL_PHASE", Value::Str("END".to_string()));
+        let end_blocks: Vec<(Vec<Stmt>, Option<String>)> =
+            self.end_blocks.clone().into_iter().rev().collect();
+        for (body, origin) in &end_blocks {
+            let pushed_origin = if let Some(o) = origin {
+                let scope = self.file_scopes.remove(o).unwrap_or_else(Scope::new);
+                self.scopes.push(scope);
+                Some(o.clone())
+            } else {
+                None
+            };
+            let _flow = self.exec_stmts(body);
+            if let Some(o) = pushed_origin {
+                let updated = self.scopes.pop().unwrap_or_else(Scope::new);
+                self.file_scopes.insert(o, updated);
             }
         }
     }
