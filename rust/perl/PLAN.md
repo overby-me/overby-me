@@ -8,6 +8,13 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 **67/79 Nix tests passing** (85%) — selected tests from the upstream Perl test suite.
 
+This iteration's improvements (op/eval diff: 146 → 79):
+
+- **Closure capture for `my` lexicals** is now LIVE-VIEW: `Stmt::Sub` promotes each captured slot to a shared `Rc<RefCell<Value>>` alias and shares the same Rc with the cloned scope chain. Mutations to `$x` through `set_var` propagate to the captured chain. Reads pass through `Value::resolve()` in `get_var` so pattern matches like `if let Value::Str(s) = …` still see the underlying value. op/eval tests 30-34 (closure of `$x` across eval-string boundaries) now pass.
+- **Closure capture extends to subs nested in blocks** (`scopes.len() > 1`), not just `eval STRING`. Block-scoped subs like `{ my $x=2; sub db1 { eval '$x' } }` now capture `$x`. op/eval tests 92-93 (lexical-search-at-sub-boundary) now pass.
+- **DB-package eval-string magic**: when `eval STRING` runs inside a sub *defined in* package `DB` (Perl debugger convention), reference perl resolves identifiers against the *caller*'s lexical chain. New `sub_def_package` map distinguishes "defined in DB" from "named DB::name but defined in main". On entry into a DB-defined sub's `eval STRING`, the previously-stashed dynamic frames get spliced back into `self.scopes` for the eval's duration. op/eval tests 94, 95, 96 now pass.
+- **`builtin` pragma + `ceil`/`floor`/`trim`/`true`/`false`/`is_bool`/`blessed`/`refaddr`/`reftype`** as core functions so `use builtin qw(ceil)` works and tests using those don't trip on missing-module errors.
+
 Recent re/regexp.t and other improvements (cumulative this session):
 
 - `\Q…\E` quotemeta regions in regex patterns: every literal char and every interpolated `$x` / `@x` value gets regex-escaped so `m!^\Q$expect!` matches `$expect`s bytes literally. Cuts re/regexp.t diff substantially.
