@@ -494,6 +494,27 @@ impl Interpreter {
             .insert("DATA".to_string(), (cell, 0));
     }
 
+    /// Qualify a bare global name with the current package — except
+    /// for Perl's special globals (`$_`, `$0`, `%ENV`, `@ARGV`, etc.)
+    /// which always live in `main::`. Returns the storage key the
+    /// rest of the interpreter uses for `globals` lookups.
+    ///
+    /// Key invariants:
+    ///   - `$x` in package main stores under `"x"` (legacy slot)
+    ///   - `$main::x` in any package also resolves to `"x"` (so the
+    ///     two write to the same slot, matching reference perl)
+    ///   - `$x` in package `foo` stores under `"foo::x"`
+    ///   - `$foo::x` in any package stores under `"foo::x"`
+    fn qualify_global(&self, name: &str) -> String {
+        if let Some(rest) = name.strip_prefix("main::") {
+            return rest.to_string();
+        }
+        if name.contains("::") || self.package == "main" || is_main_special_var(name) {
+            return name.to_string();
+        }
+        format!("{}::{}", self.package, name)
+    }
+
     /// Resolve a filehandle name through the typeglob alias table.
     /// `local(*F) = *G` adds an F -> G alias; the IO ops consult this so
     /// the alias stays transparent to the rest of the interpreter.
@@ -8142,27 +8163,25 @@ impl Interpreter {
                 return val.resolve();
             }
         }
-        // Check live-aliased globals (where `\$name` was taken).
-        if let Some(rc) = self.aliased_vars.get(key) {
+        // Check live-aliased globals (where `\$name` was taken). Look
+        // under both the package-qualified and bare slots.
+        let qkey = self.qualify_global(key);
+        if let Some(rc) = self.aliased_vars.get(qkey.as_str()) {
             return rc.borrow().clone();
         }
-        // Check globals — try the bare name first, then package-
-        // qualify if not found. Reference perl's `$X` in package Foo
-        // accesses `$Foo::X`. Our usual setup leaves the alias slot
-        // bare for main, but a direct assignment like
-        // `$main::r = "good"` (no `our`) writes to globals["main::r"]
-        // and a later bare `$r` read should still find it.
-        if let Some(v) = self.globals.vars.get(key) {
+        if qkey != key
+            && let Some(rc) = self.aliased_vars.get(key)
+        {
+            return rc.borrow().clone();
+        }
+        // Check globals — package-qualified first, then bare. The bare
+        // fallback covers code that wrote globals unqualified (e.g.
+        // `$main::r = "good"` straight into `globals["main::r"]`).
+        if let Some(v) = self.globals.vars.get(qkey.as_str()) {
             return v.clone();
         }
-        if !key.contains("::") {
-            let qualified = format!("{}::{}", self.package, key);
-            if let Some(rc) = self.aliased_vars.get(&qualified) {
-                return rc.borrow().clone();
-            }
-            if let Some(v) = self.globals.vars.get(&qualified) {
-                return v.clone();
-            }
+        if let Some(v) = self.globals.vars.get(key) {
+            return v.clone();
         }
         Value::Undef
     }
@@ -8255,12 +8274,15 @@ impl Interpreter {
         }
         // Package-qualified names always bind globally — never shadow them
         // with a lexical scope entry that happens to share the bare name.
+        // Route through `qualify_global` so `$main::x` and a bare `$x` in
+        // package main resolve to the same slot.
         if key.contains("::") || name.starts_with("::") {
-            if let Some(rc) = self.aliased_vars.get(&key) {
+            let qkey = self.qualify_global(&key);
+            if let Some(rc) = self.aliased_vars.get(qkey.as_str()) {
                 *rc.borrow_mut() = val;
                 return;
             }
-            self.globals.vars.insert(key, val);
+            self.globals.vars.insert(qkey, val);
             return;
         }
         // Set in the innermost scope that has this variable, or create in global scope.
@@ -8302,13 +8324,24 @@ impl Interpreter {
                 return;
             }
         }
-        // Live-aliased global? Mutate through the shared Rc.
+        // Live-aliased global? Mutate through the shared Rc — try
+        // both the bare and package-qualified slot since user code may
+        // have taken a ref under either form.
+        let qkey = self.qualify_global(&key);
         if let Some(rc) = self.aliased_vars.get(&key) {
             *rc.borrow_mut() = val;
             return;
         }
-        // Variable not found in any lexical scope — set in globals (package variable)
-        self.globals.vars.insert(key, val);
+        if qkey != key
+            && let Some(rc) = self.aliased_vars.get(&qkey)
+        {
+            *rc.borrow_mut() = val;
+            return;
+        }
+        // Variable not found in any lexical scope — set in globals
+        // under the package-qualified name. Reference perl: `$x = 5`
+        // inside `package foo { … }` writes to `$foo::x`.
+        self.globals.vars.insert(qkey, val);
     }
 
     /// Return `Some(err)` if `val` is not a valid `$/` setting.
@@ -8434,15 +8467,29 @@ impl Interpreter {
     }
 
     fn get_array(&self, name: &str) -> Vec<Value> {
-        // Lexical arrays shadow live-aliased globals.
+        // Lexical arrays shadow live-aliased globals — but only for the
+        // bare (unqualified) name. We still look up by the bare name here
+        // so a `my @x` lexical isn't accidentally shadowed by a `pkg::x`
+        // global lookup.
         for scope in self.scopes.iter().rev() {
             if let Some(arr) = scope.arrays.get(name) {
                 return arr.clone();
             }
         }
-        if let Some(rc) = self.aliased_arrays.get(name) {
+        let qname = self.qualify_global(name);
+        if let Some(rc) = self.aliased_arrays.get(qname.as_str()) {
             return rc.borrow().clone();
         }
+        if qname != name
+            && let Some(rc) = self.aliased_arrays.get(name)
+        {
+            return rc.borrow().clone();
+        }
+        if let Some(arr) = self.globals.arrays.get(qname.as_str()) {
+            return arr.clone();
+        }
+        // Fall back to the bare-name slot so existing code that stores
+        // globals unqualified keeps working until callers migrate.
         self.globals.arrays.get(name).cloned().unwrap_or_default()
     }
 
@@ -8478,14 +8525,25 @@ impl Interpreter {
                 return;
             }
         }
-        // If aliased, mutate the shared backing store so existing refs see it.
-        if let Some(rc) = self.aliased_arrays.get(name) {
+        let qname = self.qualify_global(name);
+        // If aliased (under either the qualified or bare name), mutate
+        // the shared backing store so existing refs see it.
+        if let Some(rc) = self.aliased_arrays.get(qname.as_str()) {
             *rc.borrow_mut() = arr;
             self.deleted_slots.remove(name);
             return;
         }
-        // Not found in lexical scopes — set in globals
-        self.globals.arrays.insert(name.to_string(), arr);
+        if qname != name
+            && let Some(rc) = self.aliased_arrays.get(name)
+        {
+            *rc.borrow_mut() = arr;
+            self.deleted_slots.remove(name);
+            return;
+        }
+        // Not found in lexical scopes — set in globals under the
+        // package-qualified slot (matches reference perl: `@ISA =
+        // (...)` inside `package peen` writes to `@peen::ISA`).
+        self.globals.arrays.insert(qname, arr);
         self.deleted_slots.remove(name);
     }
 
@@ -13144,13 +13202,47 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
 }
 
 fn canon_var(name: &str) -> &str {
+    // `$::name` is short for `$main::name` — strip the leading `::`
+    // and let `qualify_global` map it to the bare main slot. We do
+    // NOT strip `main::` here: leaving the qualifier intact lets
+    // qualify_global tell `$main::x` apart from a bare `$x` inside
+    // a non-main package (which would otherwise collide).
     if let Some(rest) = name.strip_prefix("::") {
         return rest;
     }
-    if let Some(rest) = name.strip_prefix("main::") {
-        return rest;
-    }
     name
+}
+
+/// Names that always resolve to `main::` regardless of `self.package`.
+/// Per perlvar: single-character names that aren't ASCII letters
+/// (`$_`, `$0`, `$@`, `$!`, `$/`, `$\`, `$"`, `$,`, `$.`, `$+`,
+/// `$&`, `$'`, `$``, `$$`, `$1`-`$9`, `$;`, `$|`, etc.) plus the
+/// named special globals (`%ENV`, `@INC`, `%SIG`, `@ARGV`, ...).
+/// Single ASCII-letter names (`$a`, `$b`, ...) ARE package-specific
+/// and must be qualified.
+fn is_main_special_var(name: &str) -> bool {
+    if let Some(c) = name.chars().next()
+        && name.chars().count() == 1
+        && !c.is_ascii_alphabetic()
+        && c != '_'
+    {
+        return true;
+    }
+    matches!(
+        name,
+        "ENV"
+            | "INC"
+            | "SIG"
+            | "ARGV"
+            | "ARGVOUT"
+            | "STDIN"
+            | "STDOUT"
+            | "STDERR"
+            | "_"
+            | "ARGC"
+            | "0"
+            | "DATA"
+    )
 }
 
 /// Perl's `oct()` — interpret a string as octal by default, or as the base
