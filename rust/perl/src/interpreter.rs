@@ -9435,6 +9435,51 @@ impl Interpreter {
             let synthetic = Expr::Call(s.clone(), Vec::new());
             return self.assign_to(&synthetic, val);
         }
+        // `RECV->METHOD = val` — lvalue method call. Only intercept
+        // when the resolved method is in lvalue_subs; otherwise we fall
+        // through (matching reference perl, which compile-errors on
+        // non-lvalue method assignment but our parser doesn't detect
+        // that yet — a no-op is closer to the original behaviour than
+        // accidentally evaluating a non-StringLit receiver here for
+        // side effects).
+        if let Expr::MethodCall(recv, method, _args) = target {
+            // Quick filter: only proceed if some lvalue method by this
+            // name might exist. Avoids evaluating `recv` for side
+            // effects when the target obviously isn't lvalue.
+            let any_lvalue = self
+                .lvalue_subs
+                .iter()
+                .any(|name| name.ends_with(&format!("::{method}")));
+            if any_lvalue {
+                let class = match recv.as_ref() {
+                    Expr::StringLit(s) => s.clone(),
+                    _ => {
+                        let v = self.eval_expr(recv);
+                        let cls = self.ref_class(&v);
+                        if !cls.is_empty() { cls } else { v.to_str() }
+                    }
+                };
+                let qmethod = if self.subs.contains_key(&format!("{class}::{method}")) {
+                    format!("{class}::{method}")
+                } else if let Some(found) = resolve_method_via_isa(self, &class, method) {
+                    found
+                } else {
+                    format!("{class}::{method}")
+                };
+                if self.lvalue_subs.contains(&qmethod)
+                    && let Some((_params, body)) = self.subs.get(&qmethod).cloned()
+                    && !body.is_empty()
+                {
+                    for stmt in &body[..body.len() - 1] {
+                        self.exec_stmt(stmt);
+                    }
+                    if let Stmt::Expr(lvalue_expr) = &body[body.len() - 1] {
+                        return self.assign_to(lvalue_expr, val);
+                    }
+                    return;
+                }
+            }
+        }
         if let Expr::Call(name, args) = target {
             if self.lvalue_subs.contains(name)
                 && let Some((_params, body)) = self.subs.get(name).cloned()
