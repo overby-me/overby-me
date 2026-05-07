@@ -195,15 +195,23 @@ fn main() {
     if let Some(ref dump_path) = opts.dump_header
         && dump_path.to_str() != Some("-")
         && dump_path.to_str() != Some("%")
-        && fs::OpenOptions::new()
+    {
+        if opts.create_dirs
+            && let Some(parent) = dump_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            let _ = fs::create_dir_all(parent);
+        }
+        if fs::OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .open(dump_path)
             .is_err()
-    {
-        eprintln!("curl: (23) Failed to open/create {}", dump_path.display());
-        process::exit(23);
+        {
+            eprintln!("curl: (23) Failed to open/create {}", dump_path.display());
+            process::exit(23);
+        }
     }
 
     // -G / --get: append -d/--data-* content as a query string, and clear the
@@ -567,6 +575,13 @@ fn main() {
                         _ => {
                             let mut dump_data = resp.header_bytes.clone();
                             dump_data.extend_from_slice(&resp.trailer_bytes);
+                            // --create-dirs also applies to -D (test 3031).
+                            if opts.create_dirs
+                                && let Some(parent) = dump_path.parent()
+                                && !parent.as_os_str().is_empty()
+                            {
+                                let _ = fs::create_dir_all(parent);
+                            }
                             // Truncate on the first URL of each --next
                             // group, append on subsequent ones in the same
                             // group — curl writes all transfers within a
