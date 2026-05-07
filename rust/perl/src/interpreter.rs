@@ -3509,8 +3509,17 @@ impl Interpreter {
                     return Value::Num(if self.subs.contains_key(&q) { 1.0 } else { 0.0 });
                 }
                 // Otherwise dispatch — synthesize a Call to Class::method,
-                // with the class name prepended as the invocant.
-                let qualified = format!("{class}::{method}");
+                // with the class name prepended as the invocant. If
+                // Class::method itself isnt defined, walk @Class::ISA
+                // (depth-first, default mro) to find an inherited
+                // implementation.
+                let qualified = if self.subs.contains_key(&format!("{class}::{method}")) {
+                    format!("{class}::{method}")
+                } else if let Some(found) = resolve_method_via_isa(self, &class, method) {
+                    found
+                } else {
+                    format!("{class}::{method}")
+                };
                 let mut all_args: Vec<Expr> = Vec::with_capacity(args.len() + 1);
                 all_args.push(Expr::StringLit(class));
                 all_args.extend(args.iter().cloned());
@@ -11517,6 +11526,45 @@ impl Interpreter {
 /// are pragmas we silently accept).
 /// Walk the @ISA chain of `class` looking for `target` (depth-first, matches
 /// Perl's default mro). Trivially true when class == target.
+/// Look up `Class::method` along the MRO chain (depth-first @ISA, plus
+/// `UNIVERSAL` as a final fallback). Returns the qualified name where
+/// the method was found, or None if no class along the chain has a sub
+/// of that name.
+fn resolve_method_via_isa(interp: &Interpreter, class: &str, method: &str) -> Option<String> {
+    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+    fn walk(
+        interp: &Interpreter,
+        class: &str,
+        method: &str,
+        visited: &mut std::collections::HashSet<String>,
+    ) -> Option<String> {
+        if !visited.insert(class.to_string()) {
+            return None;
+        }
+        let q = format!("{class}::{method}");
+        if interp.subs.contains_key(&q) {
+            return Some(q);
+        }
+        let isa = interp.get_array(&format!("{class}::ISA"));
+        for parent in &isa {
+            let p = parent.to_str();
+            if let Some(found) = walk(interp, &p, method, visited) {
+                return Some(found);
+            }
+        }
+        None
+    }
+    walk(interp, class, method, &mut visited).or_else(|| {
+        // UNIVERSAL fallback (e.g. `isa`, `can`, `DOES`).
+        let q = format!("UNIVERSAL::{method}");
+        if interp.subs.contains_key(&q) {
+            Some(q)
+        } else {
+            None
+        }
+    })
+}
+
 fn isa_walk(interp: &Interpreter, class: &str, target: &str) -> bool {
     if class == target || class == "UNIVERSAL" {
         return true;
