@@ -9531,6 +9531,7 @@ impl Interpreter {
         let pattern = perl_backslash_n(&pattern);
         let pattern = strip_regex_comments(&pattern);
         let pattern = translate_atomic_groups(&pattern);
+        let pattern = fix_inverted_quantifiers(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -9620,6 +9621,7 @@ impl Interpreter {
         let pattern = perl_backslash_n(&pattern);
         let pattern = strip_regex_comments(&pattern);
         let pattern = translate_atomic_groups(&pattern);
+        let pattern = fix_inverted_quantifiers(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -12558,6 +12560,74 @@ fn perl_hex(s: &str) -> i64 {
 /// Perl's `$` (in non-/m mode) matches end-of-string OR just before a
 /// final newline; Rust's `$` only matches end-of-string. Rewrite each
 /// unescaped, non-class-character `$` that appears at end-of-pattern,
+/// Reduce `{N,M}` quantifiers where N > M to `{0}` — reference perl
+/// treats this as a never-matching repetition (effectively skipping
+/// the quantified atom), while Rust's `regex` crate rejects it as an
+/// "invalid range" compile error.
+fn fix_inverted_quantifiers(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class && c == '{' {
+            // Try to parse `{N,M}`.
+            let mut k = i + 1;
+            let n_start = k;
+            while k < chars.len() && chars[k].is_ascii_digit() {
+                k += 1;
+            }
+            if k > n_start && k < chars.len() && chars[k] == ',' {
+                let n_end = k;
+                k += 1;
+                let m_start = k;
+                while k < chars.len() && chars[k].is_ascii_digit() {
+                    k += 1;
+                }
+                if k > m_start && k < chars.len() && chars[k] == '}' {
+                    let n: usize = chars[n_start..n_end]
+                        .iter()
+                        .collect::<String>()
+                        .parse()
+                        .unwrap_or(0);
+                    let m: usize = chars[m_start..k]
+                        .iter()
+                        .collect::<String>()
+                        .parse()
+                        .unwrap_or(0);
+                    if n > m {
+                        out.push_str("{0}");
+                        i = k + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 /// Translate Perl atomic groups `(?>…)` into non-capturing groups
 /// `(?:…)`. Atomic semantics (no backtracking) aren't preserved, but
 /// for the tests that don't deliberately exercise backtracking the
