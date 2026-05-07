@@ -13913,6 +13913,11 @@ fn read_cstr_at(buf: &[u8], off: usize) -> String {
 }
 
 fn format_data_attr(attr_name: u64, v: u64) -> String {
+    // DW_AT_high_pc with a data form is typically displayed as hex.
+    // 0x12 = DW_AT_high_pc
+    if attr_name == 0x12 {
+        return format!("0x{:x}", v);
+    }
     // DW_AT_language = 0x13
     if attr_name == 0x13 {
         let lang = match v {
