@@ -2629,6 +2629,7 @@ struct ReadelfOpts {
     show_debug_info: bool,
     show_debug_str: bool,
     show_debug_macro: bool,
+    show_debug_abbrev: bool,
     process_links: bool,
     show_header: bool,
     show_sections: bool,
@@ -2763,6 +2764,9 @@ fn tool_readelf(args: &[String]) -> i32 {
             "-wm" | "--debug-dump=macro" | "--dwarf=macro" => {
                 opts.show_debug_macro = true;
             }
+            "-wa" | "--debug-dump=abbrev" | "--dwarf=abbrev" => {
+                opts.show_debug_abbrev = true;
+            }
             "-w" | "--debug-dump" | "--dwarf" => {
                 opts.show_debug_ranges = true;
                 opts.show_debug_loc = true;
@@ -2770,6 +2774,7 @@ fn tool_readelf(args: &[String]) -> i32 {
                 opts.show_debug_info = true;
                 opts.show_debug_str = true;
                 opts.show_debug_macro = true;
+                opts.show_debug_abbrev = true;
             }
             s if s.starts_with("--debug-dump=") || s.starts_with("--dwarf=") => {
                 let v = s.split_once("=").unwrap().1;
@@ -2796,6 +2801,9 @@ fn tool_readelf(args: &[String]) -> i32 {
                 if v.eq_ignore_ascii_case("macro") || v == "m" {
                     opts.show_debug_macro = true;
                 }
+                if v.eq_ignore_ascii_case("abbrev") || v == "a" {
+                    opts.show_debug_abbrev = true;
+                }
             }
             s if s.starts_with("-w") && s.len() > 2 => {
                 if s.contains('R') {
@@ -2812,6 +2820,9 @@ fn tool_readelf(args: &[String]) -> i32 {
                 }
                 if s.contains('s') {
                     opts.show_debug_str = true;
+                }
+                if s.contains('a') {
+                    opts.show_debug_abbrev = true;
                 }
                 if s.contains('m') {
                     opts.show_debug_macro = true;
@@ -2858,6 +2869,7 @@ fn tool_readelf(args: &[String]) -> i32 {
                                 opts.show_debug_info = true;
                                 opts.show_debug_str = true;
                                 opts.show_debug_macro = true;
+                                opts.show_debug_abbrev = true;
                             } else {
                                 if rest.contains('R') {
                                     opts.show_debug_ranges = true;
@@ -2873,6 +2885,9 @@ fn tool_readelf(args: &[String]) -> i32 {
                                 }
                                 if rest.contains('s') {
                                     opts.show_debug_str = true;
+                                }
+                                if rest.contains('a') {
+                                    opts.show_debug_abbrev = true;
                                 }
                                 if rest.contains('m') {
                                     opts.show_debug_macro = true;
@@ -3650,6 +3665,10 @@ fn readelf_display<'data, Elf: FileHeader>(
 
     if opts.show_debug_macro {
         readelf_debug_macro(elf, data, endian);
+    }
+
+    if opts.show_debug_abbrev {
+        readelf_debug_abbrev(elf, data, endian);
     }
 }
 
@@ -12557,6 +12576,115 @@ struct AbbrevEntry {
 }
 
 #[allow(clippy::while_let_loop)]
+/// Decompress potentially-concatenated zlib streams (legacy GNU
+/// `.zdebug_*` format).
+fn decompress_legacy_zlib(input: &[u8]) -> Vec<u8> {
+    use std::io::Read;
+    let mut out = Vec::new();
+    let mut p = input;
+    while !p.is_empty() {
+        let mut dec = flate2::read::ZlibDecoder::new(p);
+        let prev_total_in = dec.total_in();
+        let _ = dec.read_to_end(&mut out);
+        let consumed = (dec.total_in() - prev_total_in) as usize;
+        if consumed == 0 {
+            break;
+        }
+        p = &p[consumed..];
+    }
+    out
+}
+
+fn readelf_debug_abbrev<'data, Elf: FileHeader>(
+    _elf: &ElfFile<'data, Elf>,
+    data: &'data [u8],
+    _endian: Elf::Endian,
+) {
+    let Ok(obj) = object::File::parse(data) else {
+        return;
+    };
+    use object::ObjectSection;
+    let mut section_iter = obj.sections().filter(|s| {
+        let n = s.name().unwrap_or("");
+        n == ".debug_abbrev" || n == ".zdebug_abbrev"
+    });
+    let Some(sect) = section_iter.next() else {
+        return;
+    };
+    let name = sect.name().unwrap_or(".debug_abbrev");
+    let bytes: Vec<u8> = match sect.uncompressed_data() {
+        Ok(d) => d.into_owned(),
+        Err(_) => match sect.data() {
+            Ok(raw) if raw.len() >= 12 && &raw[..4] == b"ZLIB" => {
+                decompress_legacy_zlib(&raw[12..])
+            }
+            _ => return,
+        },
+    };
+    println!("Contents of the {} section:", name);
+    println!();
+    let mut p = DwarfReader {
+        buf: &bytes,
+        pos: 0,
+        le: true,
+    };
+    let mut starting_new_table = true;
+    while p.pos < p.buf.len() {
+        let table_offset = p.pos;
+        let code = match p.read_uleb128() {
+            Some(v) => v,
+            None => break,
+        };
+        if code == 0 {
+            // End of this abbrev table. Next code (if any) starts a new one.
+            starting_new_table = true;
+            continue;
+        }
+        if starting_new_table {
+            println!("  Number TAG ({})", table_offset);
+            starting_new_table = false;
+        }
+        let tag = p.read_uleb128().unwrap_or(0);
+        let has_children = p.read_u8().unwrap_or(0) == 1;
+        println!(
+            "   {}      {}    [{}]",
+            code,
+            dwarf_tag_name(tag),
+            if has_children {
+                "has children"
+            } else {
+                "no children"
+            }
+        );
+        loop {
+            let name = p.read_uleb128().unwrap_or(0);
+            let form = p.read_uleb128().unwrap_or(0);
+            if name == 0 && form == 0 {
+                println!("    DW_AT value: 0     DW_FORM value: 0");
+                break;
+            }
+            let attr_name = dwarf_attr_name(name);
+            let form_name = dwarf_form_name(form);
+            if form == 0x21 {
+                // DW_FORM_implicit_const has a sleb128 value.
+                let v = p.read_sleb128().unwrap_or(0);
+                println!("    {:<18} {}: {}", attr_name, form_name, v);
+            } else {
+                println!("    {:<18} {}", attr_name, form_name);
+            }
+        }
+    }
+    println!();
+}
+
+fn dwarf_form_name(form: u64) -> String {
+    use gimli::DwForm;
+    if let Some(s) = DwForm(form as u16).static_string() {
+        return s.to_string();
+    }
+    format!("DW_FORM_<unknown 0x{:x}>", form)
+}
+
 fn parse_abbrev_table(
     section: &[u8],
     offset: usize,
