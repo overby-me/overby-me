@@ -8032,6 +8032,159 @@ fn objcopy_binary_to_elf(
     0
 }
 
+/// Parse Tektronix Extended Hex format. Returns Some(bytes) on success.
+///
+/// Format: each line starts with '%', followed by 2-hex-char block length,
+/// 1-hex-char type ('6'=data, '3'=symbol, '8'=terminator), 2-hex-char checksum,
+/// then payload. Type 6 data records contain a variable-length address (encoded
+/// as one nibble of length + that many nibbles of value, where length=0 means
+/// 16) followed by hex-encoded byte pairs. Type 3 symbol records may include
+/// section-range entries ('1' followed by start, end values) which determine
+/// the output size for that section.
+fn parse_tekhex(data: &[u8]) -> Option<Vec<u8>> {
+    let s = std::str::from_utf8(data).ok()?;
+    if !s.starts_with('%') {
+        return None;
+    }
+    fn getvalue(body: &str, p: &mut usize) -> Option<u64> {
+        if *p >= body.len() {
+            return None;
+        }
+        let count_char = body.as_bytes()[*p] as char;
+        *p += 1;
+        let mut count = count_char.to_digit(16)? as usize;
+        if count == 0 {
+            count = 16;
+        }
+        if *p + count > body.len() {
+            return None;
+        }
+        let v = u64::from_str_radix(&body[*p..*p + count], 16).ok()?;
+        *p += count;
+        Some(v)
+    }
+    fn getsym(body: &str, p: &mut usize) -> Option<String> {
+        if *p >= body.len() {
+            return None;
+        }
+        let count_char = body.as_bytes()[*p] as char;
+        *p += 1;
+        let mut count = count_char.to_digit(16)? as usize;
+        if count == 0 {
+            count = 16;
+        }
+        if *p + count > body.len() {
+            return None;
+        }
+        let s = body[*p..*p + count].to_string();
+        *p += count;
+        Some(s)
+    }
+    let mut bytes: std::collections::BTreeMap<u64, u8> = std::collections::BTreeMap::new();
+    // Section ranges: section_name -> (start, end) — used to clip output size.
+    let mut section_ranges: std::collections::HashMap<String, (u64, u64)> =
+        std::collections::HashMap::new();
+    let mut min_addr: Option<u64> = None;
+    let mut max_addr: Option<u64> = None;
+    for raw in s.lines() {
+        let line = raw.trim_end_matches(['\r', '\n']);
+        if line.is_empty() {
+            continue;
+        }
+        if !line.starts_with('%') {
+            return None;
+        }
+        let body = &line[1..];
+        if body.len() < 5 {
+            return None;
+        }
+        let _length = u32::from_str_radix(&body[0..2], 16).ok()?;
+        let rtype = body.chars().nth(2)?;
+        let _checksum = u32::from_str_radix(&body[3..5], 16).ok()?;
+        let mut p = 5;
+        match rtype {
+            '6' => {
+                let addr = getvalue(body, &mut p)?;
+                let mut a = addr;
+                let mut emitted = false;
+                while p + 2 <= body.len() {
+                    let byte = u8::from_str_radix(&body[p..p + 2], 16).ok()?;
+                    bytes.insert(a, byte);
+                    emitted = true;
+                    a += 1;
+                    p += 2;
+                }
+                if emitted {
+                    min_addr = Some(min_addr.map_or(addr, |m| m.min(addr)));
+                    max_addr = Some(max_addr.map_or(a - 1, |m| m.max(a - 1)));
+                }
+            }
+            '3' => {
+                let section_name = getsym(body, &mut p)?;
+                while p < body.len() {
+                    let tag = body.as_bytes()[p] as char;
+                    p += 1;
+                    match tag {
+                        '1' => {
+                            // Section range: start, end
+                            let start = getvalue(body, &mut p)?;
+                            let end = getvalue(body, &mut p)?;
+                            section_ranges.insert(section_name.clone(), (start, end));
+                        }
+                        '0' | '2' | '3' | '4' | '6' | '7' | '8' => {
+                            // Symbol entry: skip name (and continue scanning)
+                            let _ = getsym(body, &mut p);
+                            let _ = getvalue(body, &mut p);
+                        }
+                        _ => break,
+                    }
+                }
+            }
+            '8' => {
+                // Terminator
+            }
+            _ => return None,
+        }
+    }
+    // Determine output extent. If we have section ranges, use them; otherwise
+    // fall back to the actual byte extent.
+    let (lo, hi) = if !section_ranges.is_empty() {
+        // Use the union of all non-absolute section ranges.
+        let mut lo: Option<u64> = None;
+        let mut hi: Option<u64> = None;
+        for (name, &(s, e)) in &section_ranges {
+            if name == "*ABS*" {
+                continue;
+            }
+            lo = Some(lo.map_or(s, |v| v.min(s)));
+            hi = Some(hi.map_or(e, |v| v.max(e)));
+        }
+        match (lo, hi) {
+            (Some(l), Some(h)) => (l, h),
+            _ => match (min_addr, max_addr) {
+                (Some(l), Some(h)) => (l, h + 1),
+                _ => return Some(Vec::new()),
+            },
+        }
+    } else {
+        match (min_addr, max_addr) {
+            (Some(l), Some(h)) => (l, h + 1),
+            _ => return Some(Vec::new()),
+        }
+    };
+    if hi <= lo {
+        return Some(Vec::new());
+    }
+    let len = (hi - lo) as usize;
+    let mut buf = vec![0u8; len];
+    for (a, b) in bytes {
+        if a >= lo && a < hi {
+            buf[(a - lo) as usize] = b;
+        }
+    }
+    Some(buf)
+}
+
 fn objcopy_to_binary_full(
     input: &str,
     output: &str,
@@ -8061,6 +8214,23 @@ fn objcopy_to_binary_full(
                 return 1;
             }
         };
+        // Detect Tektronix Extended Hex format on input (used by some legacy tools).
+        if data.starts_with(b"%")
+            && let Some(parsed) = parse_tekhex(&data)
+        {
+            // Skip the slow path; we already have raw bytes.
+            let mut out = parsed;
+            if let Some(target) = pad_to
+                && (out.len() as u64) < target
+            {
+                out.resize(target as usize, gap_fill);
+            }
+            if let Err(e) = fs::write(output, &out) {
+                eprintln!("objcopy: '{output}': {e}");
+                return 1;
+            }
+            return 0;
+        }
         let obj = match object::File::parse(&*data) {
             Ok(o) => o,
             Err(e) => {
