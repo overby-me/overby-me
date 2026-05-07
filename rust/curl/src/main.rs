@@ -419,7 +419,7 @@ fn main() {
         };
 
         match result {
-            Ok(resp) => {
+            Ok(mut resp) => {
                 // After redirects, the "effective" URL is the last URL we fetched;
                 // parse_url(url_str) returns the initial one. Reconstruct the last
                 // URL from the ParsedUrl we have on resp (via final-url tracking).
@@ -468,6 +468,13 @@ fn main() {
                         opts.max_redirs
                     );
                     exit_code = 47;
+                }
+                if resp.redirect_url_malformed {
+                    eprintln!(
+                        "curl: (3) Failed to parse URL after redirect: {}",
+                        resp.final_url.as_deref().unwrap_or("")
+                    );
+                    exit_code = 3;
                 }
                 if resp.proto_redir_blocked {
                     if let Some(ref redirect_url) = resp.redirect_url {
@@ -803,12 +810,21 @@ fn main() {
                 let skip_body = (opts.resume_from.is_some() && resp.status == 416)
                     || resp.max_redirects_reached
                     || resp.proto_redir_blocked
+                    || resp.redirect_url_malformed
                     || resp.weird_server_reply
                     || (fail_http_error && !opts.fail_with_body)
                     || resume_range_refused
                     || resume_fully_covered
                     || time_cond_not_met
                     || (resp.status == 304 && opts.etag_compare.is_some());
+
+                // When `-z` decided the file isn't modified, surface a 304 to
+                // %{response_code} (test 1239). The on-the-wire status line
+                // we already wrote to header_bytes still says "200 OK", so
+                // -i output is unchanged.
+                if time_cond_not_met {
+                    resp.status = 304;
+                }
 
                 // Write output.
                 let write_body = !effective_opts.head && !skip_body;

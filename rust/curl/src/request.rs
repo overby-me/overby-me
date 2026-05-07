@@ -1713,6 +1713,27 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                 // resolution during redirects.
                 current_url = normalize_url_path(&current_url);
 
+                // If the redirect target itself is malformed (e.g. four
+                // slashes after the scheme like `http:////host`), bail out
+                // with the original 3xx response and let main.rs map this to
+                // CURLE_URL_MALFORMAT (exit 3, test 1142).
+                if parse_url(&current_url).is_err() {
+                    // Drop the current response's headers from the
+                    // accumulated redirect_headers (we add them back via
+                    // final_resp.header_bytes below) so the 3xx response is
+                    // not emitted twice.
+                    redirect_headers.truncate(prev_redirect_headers_len);
+                    let mut final_resp = resp;
+                    final_resp.redirect_headers = redirect_headers;
+                    final_resp.num_connects = connects;
+                    final_resp.num_redirects = redirects - 1;
+                    final_resp.redirect_url_malformed = true;
+                    final_resp.final_url = Some(current_url.clone());
+                    final_resp.final_referer = opts.referer.clone();
+                    final_resp.redirect_url = Some(current_url);
+                    return Ok(final_resp);
+                }
+
                 // --proto-redir: check whether the redirect target's scheme is allowed.
                 if let Some(spec) = &opts.proto_redir {
                     let new_scheme = current_url
