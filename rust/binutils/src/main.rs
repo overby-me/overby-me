@@ -2631,6 +2631,7 @@ struct ReadelfOpts {
     show_debug_macro: bool,
     show_debug_abbrev: bool,
     show_debug_line_raw: bool,
+    show_debug_line_decoded: bool,
     process_links: bool,
     show_header: bool,
     show_sections: bool,
@@ -2771,6 +2772,9 @@ fn tool_readelf(args: &[String]) -> i32 {
             "-wl" | "--debug-dump=rawline" | "--dwarf=rawline" => {
                 opts.show_debug_line_raw = true;
             }
+            "-wL" | "--debug-dump=decodedline" | "--dwarf=decodedline" => {
+                opts.show_debug_line_decoded = true;
+            }
             "-w" | "--debug-dump" | "--dwarf" => {
                 opts.show_debug_ranges = true;
                 opts.show_debug_loc = true;
@@ -2812,6 +2816,9 @@ fn tool_readelf(args: &[String]) -> i32 {
                 if v.eq_ignore_ascii_case("rawline") || v == "l" {
                     opts.show_debug_line_raw = true;
                 }
+                if v.eq_ignore_ascii_case("decodedline") || v == "L" {
+                    opts.show_debug_line_decoded = true;
+                }
             }
             s if s.starts_with("-w") && s.len() > 2 => {
                 if s.contains('R') {
@@ -2834,6 +2841,9 @@ fn tool_readelf(args: &[String]) -> i32 {
                 }
                 if s.contains('l') {
                     opts.show_debug_line_raw = true;
+                }
+                if s.contains('L') {
+                    opts.show_debug_line_decoded = true;
                 }
                 if s.contains('m') {
                     opts.show_debug_macro = true;
@@ -2903,6 +2913,9 @@ fn tool_readelf(args: &[String]) -> i32 {
                                 }
                                 if rest.contains('l') {
                                     opts.show_debug_line_raw = true;
+                                }
+                                if rest.contains('L') {
+                                    opts.show_debug_line_decoded = true;
                                 }
                                 if rest.contains('m') {
                                     opts.show_debug_macro = true;
@@ -3688,6 +3701,10 @@ fn readelf_display<'data, Elf: FileHeader>(
 
     if opts.show_debug_line_raw {
         readelf_debug_line_raw(elf, data, endian);
+    }
+
+    if opts.show_debug_line_decoded {
+        readelf_debug_line_decoded(elf, data, endian);
     }
 }
 
@@ -5035,6 +5052,7 @@ fn tool_objdump(args: &[String]) -> i32 {
     let mut show_debug_str = false;
     let mut show_debug_abbrev = false;
     let mut show_debug_line_raw = false;
+    let mut show_debug_line_decoded = false;
     let mut wide = false;
     let mut input_target: Option<String> = None;
     let mut show_info = false;
@@ -5171,6 +5189,9 @@ fn tool_objdump(args: &[String]) -> i32 {
                     if arg.contains('l') {
                         show_debug_line_raw = true;
                     }
+                    if arg.contains('L') {
+                        show_debug_line_decoded = true;
+                    }
                 }
                 _ if arg.starts_with("--dwarf=") || arg.starts_with("--debug-dump=") => {
                     let v = arg.split_once('=').unwrap().1;
@@ -5189,6 +5210,9 @@ fn tool_objdump(args: &[String]) -> i32 {
                         }
                         "rawline" | "l" => {
                             show_debug_line_raw = true;
+                        }
+                        "decodedline" | "L" => {
+                            show_debug_line_decoded = true;
                         }
                         _ => {}
                     }
@@ -5266,6 +5290,7 @@ fn tool_objdump(args: &[String]) -> i32 {
             || show_debug_str
             || show_debug_abbrev
             || show_debug_line_raw
+            || show_debug_line_decoded
         {
             // Delegate DWARF section dumping to readelf implementations.
             // Build the list of files to process: with --process-links, linked files come first.
@@ -5323,6 +5348,9 @@ fn tool_objdump(args: &[String]) -> i32 {
                     if show_debug_line_raw {
                         readelf_debug_line_raw(&elf, &data_bytes, endian);
                     }
+                    if show_debug_line_decoded {
+                        readelf_debug_line_decoded(&elf, &data_bytes, endian);
+                    }
                     if show_debug_ranges {
                         readelf_debug_ranges(&elf, &data_bytes, endian);
                     }
@@ -5341,6 +5369,9 @@ fn tool_objdump(args: &[String]) -> i32 {
                     }
                     if show_debug_line_raw {
                         readelf_debug_line_raw(&elf, &data_bytes, endian);
+                    }
+                    if show_debug_line_decoded {
+                        readelf_debug_line_decoded(&elf, &data_bytes, endian);
                     }
                     if show_debug_ranges {
                         readelf_debug_ranges(&elf, &data_bytes, endian);
@@ -13025,6 +13056,189 @@ fn readelf_debug_line_raw<'data, Elf: FileHeader>(
                 }
             }
             p.pos = unit_end;
+        }
+    }
+}
+
+/// Decoded line-number dump per GNU `readelf --debug-dump=decodedline`.
+/// Walks every CU's line program via gimli and prints rows grouped by
+/// (file, sequence) with View tracking for repeated rows at the same
+/// address.
+fn readelf_debug_line_decoded<'data, Elf: FileHeader>(
+    _elf: &ElfFile<'data, Elf>,
+    data: &'data [u8],
+    _endian: Elf::Endian,
+) {
+    let Ok(obj) = object::File::parse(data) else {
+        return;
+    };
+    let endian = if obj.is_little_endian() {
+        gimli::RunTimeEndian::Little
+    } else {
+        gimli::RunTimeEndian::Big
+    };
+    let load_section = |id: gimli::SectionId| -> Result<gimli::EndianSlice<'_, gimli::RunTimeEndian>, gimli::Error> {
+        let data = obj
+            .section_by_name(id.name())
+            .and_then(|s| s.uncompressed_data().ok())
+            .map(|c| c.into_owned())
+            .unwrap_or_default();
+        Ok(gimli::EndianSlice::new(Box::leak(data.into_boxed_slice()), endian))
+    };
+    let dwarf = match gimli::Dwarf::load(load_section) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+
+    println!();
+    println!("Contents of the .debug_line section:");
+    println!();
+
+    let mut units = dwarf.units();
+    while let Ok(Some(header)) = units.next() {
+        let unit = match dwarf.unit(header) {
+            Ok(u) => u,
+            Err(_) => continue,
+        };
+        let cu_name = unit
+            .name
+            .as_ref()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let Some(line_program) = unit.line_program.clone() else {
+            continue;
+        };
+        // Print CU file header
+        println!("{}:", cu_name);
+        println!(
+            "File name                        Line number    Starting address    View    Stmt"
+        );
+        println!();
+
+        let header = line_program.header().clone();
+        // Walk rows and group by file with view tracking.
+        let mut current_file: Option<u64> = None;
+        let mut prev_addr: u64 = u64::MAX;
+        let mut view: u64 = 0;
+        let mut rows = line_program.rows();
+        let mut rows_buf: Vec<(u64, u64, Option<u64>, u64, bool, bool)> = Vec::new();
+        while let Ok(Some((_h, row))) = rows.next_row() {
+            if row.end_sequence() {
+                rows_buf.push((row.file_index(), 0, None, row.address(), false, true));
+                continue;
+            }
+            rows_buf.push((
+                row.file_index(),
+                row.line().map(|l| l.get()).unwrap_or(0),
+                row.line().map(|l| l.get()),
+                row.address(),
+                row.is_stmt(),
+                false,
+            ));
+        }
+        // Print each row, with file change indicators.
+        for (file_idx, line, line_opt, addr, is_stmt, end_seq) in &rows_buf {
+            if *end_seq {
+                // GNU emits an end-of-sequence row with line "-" and the
+                // section-end address. Reuse current_file (the last live
+                // file) for the file-name column.
+                if let Some(fi) = current_file
+                    && let Some(file) = header.file(fi)
+                    && let Ok(name) = dwarf.attr_string(&unit, file.path_name())
+                {
+                    let file_name = name.to_string_lossy().into_owned();
+                    println!(
+                        "{:<33} {:>11}  {:>18}  {:>6}  {:>6}",
+                        file_name,
+                        "-",
+                        format!("0x{:x}", addr),
+                        "",
+                        ""
+                    );
+                }
+                continue;
+            }
+            // File change?
+            let file_changed = current_file != Some(*file_idx);
+            if file_changed {
+                let file = match header.file(*file_idx) {
+                    Some(f) => f,
+                    None => continue,
+                };
+                let mut path = String::new();
+                let mut has_dir_prefix = false;
+                if let Some(dir) = file.directory(&header) {
+                    if let Ok(d) = dwarf.attr_string(&unit, dir) {
+                        let s = d.to_string_lossy().into_owned();
+                        // DWARF 2/3/4 directory index 0 is implicit (CU dir);
+                        // gimli returns the comp_dir entry, but GNU readelf
+                        // doesn't print that for the file table. We only
+                        // prefix with the dir when it actually came from the
+                        // include_directories table.
+                        if !s.is_empty() && file.directory_index() != 0 {
+                            path.push_str(&s);
+                            if !s.ends_with('/') {
+                                path.push('/');
+                            }
+                            has_dir_prefix = true;
+                        }
+                    }
+                }
+                if let Ok(name) = dwarf.attr_string(&unit, file.path_name()) {
+                    path.push_str(&name.to_string_lossy());
+                }
+                // CU file (no directory prefix in include_directories) shown
+                // with leading "./" + "[++]" suffix on re-entry.
+                let suffix = if !has_dir_prefix && current_file.is_some() {
+                    "[++]"
+                } else {
+                    ""
+                };
+                let prefix = if !has_dir_prefix && current_file.is_some() {
+                    "./"
+                } else {
+                    ""
+                };
+                println!("{}{}:{}", prefix, path, suffix);
+                current_file = Some(*file_idx);
+                prev_addr = u64::MAX;
+                view = 0;
+            }
+            // Compute view: increment if same address as previous row.
+            if *addr == prev_addr {
+                view += 1;
+            } else {
+                view = 0;
+            }
+            prev_addr = *addr;
+            // Print row entry: file_basename line addr view stmt
+            let file = match header.file(*file_idx) {
+                Some(f) => f,
+                None => continue,
+            };
+            let file_name = match dwarf.attr_string(&unit, file.path_name()) {
+                Ok(n) => n.to_string_lossy().into_owned(),
+                Err(_) => String::new(),
+            };
+            let view_str = if view == 0 {
+                String::new()
+            } else {
+                view.to_string()
+            };
+            let line_disp = if line_opt.is_some() {
+                line.to_string()
+            } else {
+                "-".to_string()
+            };
+            let stmt = if *is_stmt { "x" } else { "" };
+            println!(
+                "{:<33} {:>11}  {:>18}  {:>6}  {:>6}",
+                file_name,
+                line_disp,
+                format!("0x{:x}", addr),
+                view_str,
+                stmt
+            );
         }
     }
 }
