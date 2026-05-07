@@ -634,6 +634,18 @@
         category = "lib";
         name = "warnings";
       }
+      {
+        category = "lib";
+        name = "commonsense";
+      }
+      {
+        category = "lib";
+        name = "croak";
+      }
+      {
+        category = "lib";
+        name = "cygwin";
+      }
 
       # --- t/mro/ (selected) ---
       {
