@@ -9424,12 +9424,37 @@ impl Interpreter {
         // `name() = val` for lvalue subs — find the body's last
         // expression (a simple ScalarVar / ArrayElement / HashElement)
         // and assign through that. Run preceding stmts for side effects.
+        // `lv0 = …` parsed as `StringLit("lv0") = …` because the
+        // parser inside eval STRING didn't know `lv0` is a sub. If
+        // the bareword names an existing sub, route through the
+        // sub-call assignment path so lvalue / non-lvalue dispatch
+        // and the "Can't modify non-lvalue …" diagnostic fire.
+        if let Expr::StringLit(s) = target
+            && self.subs.contains_key(s)
+        {
+            let synthetic = Expr::Call(s.clone(), Vec::new());
+            return self.assign_to(&synthetic, val);
+        }
         if let Expr::Call(name, args) = target {
             if self.lvalue_subs.contains(name)
                 && let Some((_params, body)) = self.subs.get(name).cloned()
-                && !body.is_empty()
             {
                 let _ = args; // arg evaluation deferred — args unused for simple cases
+                if body.is_empty() || matches!(body.last(), Some(Stmt::Return(_))) {
+                    // `sub lv0 : lvalue { }` and `sub rlv0 : lvalue { return }`
+                    // — empty / no-value return. Reference perl emits
+                    // "Can't return undef from lvalue subroutine".
+                    let file = if self.current_file.is_empty() {
+                        "-e".to_string()
+                    } else {
+                        self.current_file.clone()
+                    };
+                    let line = self.current_line;
+                    self.pending_flow = Some(Flow::Die(format!(
+                        "Can't return undef from lvalue subroutine at {file} line {line}.\n"
+                    )));
+                    return;
+                }
                 for stmt in &body[..body.len() - 1] {
                     self.exec_stmt(stmt);
                 }
