@@ -10,6 +10,8 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 This iteration's improvements:
 
+- **`*Bar = "Foo"` typeglob alias from string RHS**: `Expr::GlobVar` set-arm now accepts `Value::Str` and treats it as a glob name (strips optional `*`, package-qualifies bare names). Promotes the source's scalar slot into `aliased_vars` so `$Foo` and `$Bar` share an `Rc<RefCell<Value>>` cell — mutations through either name propagate. opbasic/concat test 238 now passes.
+- **`Class->method` walks @ISA depth-first with UNIVERSAL fallback**: new `resolve_method_via_isa` helper visits `@Class::ISA`, `@parent::ISA`, etc. with a cycle-protection visited set, before falling back to `UNIVERSAL::method`. `Expr::MethodCall` now consults this when `Class::method` isn't directly defined. Method dispatch via @ISA now works for explicit `@peen::ISA = (Sphare::)` setups; package-block bare `@ISA = …` still writes to the unqualified slot, so op/array test 126 still fails on a different code path.
 - **`(?<X)` invalid named-capture group name detection**: when scanning `(?<X` inside `validate_regex_pattern`, X must be `=` (lookbehind), `!` (neg lookbehind), `_`, or an ASCII letter. Otherwise reference perl emits "Group name must start with a non-digit word character" — we now match.
 - **`(?…` incomplete sequence detection**: when paren depth > 0 at end of pattern AND the last unmatched `(` is followed by `?`, emit "Sequence (? incomplete" instead of generic "Unmatched (".
 - **`<<TAG` heredocs inside `${…}` islands of plain double-quoted strings**: `read_dq_str_interp_at` mirrors `read_qq_string_at` so `"${\<<TAG}"` inside `s///e` REPL gets the heredoc registered with InterpMarker.
