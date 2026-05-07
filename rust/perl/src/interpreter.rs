@@ -9530,6 +9530,7 @@ impl Interpreter {
         let (pattern, flags) = unwrap_qr(&pattern, flags);
         let pattern = perl_backslash_n(&pattern);
         let pattern = strip_regex_comments(&pattern);
+        let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_atomic_groups(&pattern);
         let pattern = fix_inverted_quantifiers(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
@@ -9620,6 +9621,7 @@ impl Interpreter {
         let (pattern, flags) = unwrap_qr(&pattern, flags);
         let pattern = perl_backslash_n(&pattern);
         let pattern = strip_regex_comments(&pattern);
+        let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_atomic_groups(&pattern);
         let pattern = fix_inverted_quantifiers(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
@@ -12567,6 +12569,90 @@ fn perl_hex(s: &str) -> i64 {
 /// Perl's `$` (in non-/m mode) matches end-of-string OR just before a
 /// final newline; Rust's `$` only matches end-of-string. Rewrite each
 /// unescaped, non-class-character `$` that appears at end-of-pattern,
+/// Strip Perl's ASCII-only flag groups `(?a)`/`(?aa)` and any other
+/// flag that Rust's `regex` crate doesn't understand. The pattern is
+/// scanned for `(?<flags>)` (no body) and any `(?<flags>:<body>)`
+/// where the leading flags include unrecognised ones; the offending
+/// flag chars are removed. Rust accepts `i`/`m`/`s`/`x`/`U`/`R`/`u`,
+/// so any other letter (`a`, `d`, `l`, `p`) is dropped.
+fn strip_unsupported_regex_flags(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class && c == '(' && i + 1 < chars.len() && chars[i + 1] == '?' {
+            // Look ahead through `[a-zA-Z-]*` until `)` or `:`. If any
+            // unrecognised flag char is present, rebuild the group with
+            // those flags stripped.
+            let mut k = i + 2;
+            let mut neg = false;
+            let mut flags = String::new();
+            while k < chars.len()
+                && (chars[k].is_ascii_alphabetic() || chars[k] == '-' || chars[k] == '^')
+            {
+                if chars[k] == '-' || chars[k] == '^' {
+                    neg = true;
+                    flags.push(chars[k]);
+                } else {
+                    flags.push(chars[k]);
+                }
+                k += 1;
+            }
+            if k < chars.len() && (chars[k] == ')' || chars[k] == ':') {
+                let kept: String = flags
+                    .chars()
+                    .filter(|c| matches!(c, 'i' | 'm' | 's' | 'x' | 'U' | 'R' | 'u' | '-' | '^'))
+                    .collect();
+                if kept != flags {
+                    let is_empty_group = chars[k] == ')';
+                    let only_marker = kept == "-" || kept == "^";
+                    if is_empty_group && (kept.is_empty() || only_marker) {
+                        // `(?a)` standalone (no body) becomes a no-op
+                        // group when all flags are stripped — emit
+                        // nothing rather than the invalid `(?)`.
+                        i = k + 1;
+                        let _ = neg;
+                        continue;
+                    }
+                    out.push_str("(?");
+                    out.push_str(&kept);
+                    if is_empty_group {
+                        out.push(')');
+                    } else {
+                        out.push(':');
+                    }
+                    i = k + 1;
+                    let _ = neg;
+                    continue;
+                }
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 /// Reduce `{N,M}` quantifiers where N > M to `{0}` — reference perl
 /// treats this as a never-matching repetition (effectively skipping
 /// the quantified atom), while Rust's `regex` crate rejects it as an
