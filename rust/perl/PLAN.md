@@ -10,6 +10,10 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 This iteration's improvements:
 
+- **Comma after `=~`/`!~` is a regex delimiter** — `$x =~ m,foo,` previously fell into the bareword `m` + arg-separator branch and produced "Search pattern not terminated". Now the lexer checks the preceding token. op/avhv.t now passes exact-diff.
+- **Backslash as a regex/string delimiter** — `qr\…\` etc. previously got misparsed as `\<X>` escape pairs, eating up the close. Skip the escape-handling branch when the delimiter itself is a backslash.
+- **Strip "(os error N)" from script-not-found error** — match reference perl's text by inspecting `io::ErrorKind` rather than relying on Rust's default Display.
+- **Don't print "BEGIN failed" banner on a clean `exit(0)` from BEGIN** — `skip_all` (test.pl idiom) calls `exit(0)` from BEGIN and reference perl exits cleanly. op/dbm.t now passes exact-diff.
 - **Strip the `^` flag from `(?^…)` groups** — Perls reset-flags prefix isnt understood by Rust regex. The kept-flag set drops `^`, and `(?^:body)` is rewritten to `(?:body)`. Semantically correct fix even though regexp.t pass count didn't bump (the affected tests rely on other unsupported features too).
 - **Escape false-range dashes (`[a-\d]`, `[\d-z]`, `[a-[:digit:]]`)** before handing the pattern to the regex backend: reference perl treats these dashes as literal, both Rust regex and fancy-regex reject them as invalid ranges. `neutralise_false_ranges` walks the class body and inserts a backslash. re/regexp.t: 1926 → 1921.
 - **Stop misreporting named regex verbs as Unknown verb**: `validate_regex_pattern` was rejecting any `(*X)` form; now only the empty `(*)` triggers the diagnostic. Named verbs (ACCEPT/FAIL/COMMIT/long-form labels) fall through to the regex backend. re/regexp.t: 1945 → 1926.
