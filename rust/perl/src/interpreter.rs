@@ -326,6 +326,13 @@ pub struct Interpreter {
     /// to those subs from within the same load skip the file-scope push to
     /// avoid double-stacking the same scope.
     loading_files: Vec<String>,
+    /// PRNG state for `rand` / `srand`. `None` means rand has never been
+    /// called; the first invocation auto-seeds (matching Perl's lazy
+    /// auto-seed). `srand(N)` installs the explicit seed and stores the
+    /// numeric seed in `rand_seed` so subsequent `srand($same)` returns
+    /// the prior seed (Perl's documented contract).
+    rand_state: u64,
+    rand_seed: Option<u64>,
 }
 
 impl Interpreter {
@@ -454,6 +461,8 @@ impl Interpreter {
             current_sub_stack: Vec::new(),
             current_sub_scope_start: Vec::new(),
             loading_files: Vec::new(),
+            rand_state: 0,
+            rand_seed: None,
             check_blocks: Vec::new(),
             init_blocks: Vec::new(),
             in_die_handler: 0,
@@ -5224,6 +5233,63 @@ impl Interpreter {
                 };
                 std::thread::sleep(std::time::Duration::from_secs(secs));
                 Value::Num(secs as f64)
+            }
+            "rand" => {
+                // `rand [EXPR]` — pseudo-random number in `[0, EXPR)`.
+                // Auto-seeds on first call (Perl semantics).
+                if self.rand_seed.is_none() {
+                    self.auto_seed_rand();
+                }
+                let limit = if args.is_empty() {
+                    1.0
+                } else {
+                    let v = self.eval_expr(&args[0]).to_num();
+                    if v == 0.0 { 1.0 } else { v.abs() }
+                };
+                let r = self.next_rand_unit();
+                Value::Num(r * limit)
+            }
+            "srand" => {
+                // `srand [SEED]` — seed the PRNG. Perl returns the
+                // *new* seed (not the old one, despite older docs).
+                // For `srand(0)` the return value is the dual-valued
+                // `"0 but true"` so it's true in boolean but 0 numeric.
+                let user_seed = if args.is_empty() {
+                    None
+                } else {
+                    Some(self.eval_expr(&args[0]).to_num())
+                };
+                if let Some(n) = user_seed
+                    && (n.abs() > (u32::MAX as f64) * 2.0 || !n.is_finite())
+                {
+                    let line = self.current_line;
+                    let file = if self.current_file.is_empty() {
+                        "-".to_string()
+                    } else {
+                        self.current_file.clone()
+                    };
+                    self.emit_warning(&format!(
+                        "Integer overflow in srand at {} line {}.\n",
+                        file, line
+                    ));
+                }
+                let new_seed: u64 = match user_seed {
+                    Some(n) => n as i64 as u64,
+                    None => {
+                        let secs = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_nanos() as u64)
+                            .unwrap_or(0);
+                        let pid = std::process::id() as u64;
+                        secs ^ (pid.wrapping_mul(0x9E3779B97F4A7C15))
+                    }
+                };
+                self.rand_seed = Some(new_seed);
+                self.rand_state = if new_seed == 0 { 1 } else { new_seed };
+                if matches!(user_seed, Some(n) if n == 0.0) {
+                    return Value::Str("0 but true".to_string());
+                }
+                Value::Num(new_seed as i64 as f64)
             }
             "time" => {
                 // `time` — Unix epoch seconds.
@@ -11675,6 +11741,37 @@ impl Interpreter {
         self.current_file = saved_file;
         self.current_line = saved_line;
         result
+    }
+
+    // --- rand / srand helpers ---
+
+    /// Seed the PRNG from the environment (PERL_RAND_SEED) or system time.
+    fn auto_seed_rand(&mut self) {
+        let seed: u64 = if let Ok(s) = std::env::var("PERL_RAND_SEED")
+            && let Ok(n) = s.parse::<i64>()
+        {
+            n as u64
+        } else {
+            let secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0);
+            let pid = std::process::id() as u64;
+            secs ^ (pid.wrapping_mul(0x9E3779B97F4A7C15))
+        };
+        self.rand_seed = Some(seed);
+        self.rand_state = if seed == 0 { 1 } else { seed };
+    }
+
+    /// Yield the next double in `[0, 1)` using a SplitMix64-style mixer.
+    fn next_rand_unit(&mut self) -> f64 {
+        self.rand_state = self.rand_state.wrapping_add(0x9E3779B97F4A7C15);
+        let mut z = self.rand_state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+        z ^= z >> 31;
+        // Use top 53 bits for IEEE-754 fraction so we get a uniform `[0,1)`.
+        ((z >> 11) as f64) * (1.0 / ((1u64 << 53) as f64))
     }
 
     // --- sprintf ---

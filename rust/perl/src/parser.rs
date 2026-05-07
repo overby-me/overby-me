@@ -3271,6 +3271,51 @@ impl Parser {
                 {
                     return Expr::Call(name, Vec::new());
                 }
+                // `rand` / `srand` — nullary if next token isn't an
+                // operand-starter, otherwise consume one optional arg
+                // (parses `rand 10` and `srand $s` as `rand(10)`).
+                if matches!(name.as_str(), "rand" | "srand") && !self.at(&Token::LParen) {
+                    let starts_arg = !self.at(&Token::Semi)
+                        && !self.at(&Token::Comma)
+                        && !self.at(&Token::RParen)
+                        && !self.at(&Token::RBrace)
+                        && !self.at(&Token::RBracket)
+                        && !matches!(
+                            self.tok(),
+                            Token::Question
+                                | Token::Colon
+                                | Token::LogAnd
+                                | Token::LogOr
+                                | Token::And
+                                | Token::Or
+                                | Token::NumEq
+                                | Token::NumNe
+                                | Token::NumLt
+                                | Token::NumGt
+                                | Token::NumLe
+                                | Token::NumGe
+                                | Token::Eq
+                                | Token::Ne
+                                | Token::If
+                                | Token::Unless
+                                | Token::While
+                                | Token::Until
+                                | Token::For
+                                | Token::Foreach
+                                | Token::Plus
+                                | Token::Minus
+                                | Token::Star
+                                | Token::Slash
+                                | Token::Percent
+                                | Token::Dot
+                        );
+                    let args = if starts_arg {
+                        vec![self.parse_unary()]
+                    } else {
+                        Vec::new()
+                    };
+                    return Expr::Call(name, args);
+                }
 
                 // Check for backtick execution: Ident("backtick") followed by StringLit
                 if name == "backtick" {

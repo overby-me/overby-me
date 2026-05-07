@@ -616,6 +616,10 @@
       }
       {
         category = "op";
+        name = "srand";
+      }
+      {
+        category = "op";
         name = "threads-dirh";
       }
       {

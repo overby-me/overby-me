@@ -6,10 +6,11 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**264/276 Nix tests passing** (96%) — selected tests from the upstream Perl test suite.
+**265/277 Nix tests passing** (96%) — selected tests from the upstream Perl test suite.
 
 This iteration's improvements:
 
+- **`rand` / `srand` builtins** — previously absent (`rand` parsed as bareword, `srand` returned undef). Added `rand_state` / `rand_seed` fields and `next_rand_unit` (SplitMix64-style mixer) for a deterministic, seedable PRNG. `srand(N)` returns the new seed (Perl returns *new*, not prior, despite older docs); `srand(0)` returns the dual-valued `"0 but true"` so it's true in boolean and 0 numeric. `srand(2**100)` warns "Integer overflow in srand". Parser now accepts `rand` / `srand` as nullary or one-arg builtins. op/srand.t now passes exact-diff.
 - **Detect `-T` (taint mode) on the shebang and abort if not on the command line** — reference perl reads the shebang for `-T` and dies with the standard message. New `has_shebang_flag` helper plus a `taint_mode_arg` command-line track. op/utftaint.t and op/taint.t pass exact-diff.
 - **Top-level `require Module` in a `.pm` file aborts compilation when the module is missing** — added a `Stmt::Require` arm to `compile_time_use_check_in_inner`, gated by `_file_path.ends_with(".pm")` and a new `in_sub` flag (set to `true` when descending into `Stmt::Sub`) so the check only fires for true file-scope requires inside loaded modules. op/tiehandle.t now passes exact-diff.
 - **Populate `sub_def_loc` for subs hoisted from required files** so errors raised inside such a sub (e.g. `_have_dynamic_extension` in test.pl running `require Config`) carry the .pl/.pm file path rather than the calling scripts. op/coresubs.t now passes exact-diff.
