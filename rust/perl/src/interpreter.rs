@@ -3782,14 +3782,19 @@ impl Interpreter {
                                 break;
                             }
                         }
+                        let qname = self.qualify_global(name);
                         let arr_rc = if let Some(arr) = found_lexical {
                             std::rc::Rc::new(std::cell::RefCell::new(arr))
-                        } else if let Some(rc) = self.aliased_arrays.get(name) {
+                        } else if let Some(rc) = self.aliased_arrays.get(qname.as_str()) {
                             rc.clone()
                         } else {
-                            let arr = self.globals.arrays.remove(name).unwrap_or_default();
+                            let arr = self
+                                .globals
+                                .arrays
+                                .remove(qname.as_str())
+                                .unwrap_or_default();
                             let rc = std::rc::Rc::new(std::cell::RefCell::new(arr));
-                            self.aliased_arrays.insert(name.to_string(), rc.clone());
+                            self.aliased_arrays.insert(qname, rc.clone());
                             rc
                         };
                         let len_now = (arr_rc.borrow().len() as i64) - 1;
@@ -3805,7 +3810,11 @@ impl Interpreter {
                         // Perl's `my` ref aliasing isn't supported yet).
                         // Otherwise migrate the global into a shared
                         // `Rc<RefCell<Vec>>` so `\@arr` and `@arr` share
-                        // storage.
+                        // storage. Use the package-qualified slot name so
+                        // `\@ISA` in `package foo` doesn't collide with
+                        // `\@ISA` in another package — bug surfaced by
+                        // op/array test 126 (different packages each take
+                        // refs to "their" `@ISA`).
                         for scope in self.scopes.iter().rev() {
                             if let Some(arr) = scope.arrays.get(name) {
                                 return Value::ArrayRef(std::rc::Rc::new(std::cell::RefCell::new(
@@ -3813,12 +3822,17 @@ impl Interpreter {
                                 )));
                             }
                         }
-                        if let Some(rc) = self.aliased_arrays.get(name) {
+                        let qname = self.qualify_global(name);
+                        if let Some(rc) = self.aliased_arrays.get(qname.as_str()) {
                             return Value::ArrayRef(rc.clone());
                         }
-                        let arr = self.globals.arrays.remove(name).unwrap_or_default();
+                        let arr = self
+                            .globals
+                            .arrays
+                            .remove(qname.as_str())
+                            .unwrap_or_default();
                         let rc = std::rc::Rc::new(std::cell::RefCell::new(arr));
-                        self.aliased_arrays.insert(name.to_string(), rc.clone());
+                        self.aliased_arrays.insert(qname, rc.clone());
                         Value::ArrayRef(rc)
                     }
                     Expr::HashVar(name) => {
@@ -7181,6 +7195,27 @@ impl Interpreter {
                     format!("{}::{}", self.package, name),
                     name.strip_prefix("main::").unwrap_or(name).to_string(),
                 ];
+                let any_known = candidates.iter().any(|c| self.subs.contains_key(c));
+                // Indirect-method syntax fallback: `pling peen` parses as
+                // `Call("pling", [bareword "peen"])`. When no `pling` sub
+                // exists but `peen` (or any class in its `@ISA` chain)
+                // defines `pling`, dispatch as `peen->pling()`. Mirrors
+                // reference perl's pre-`no feature 'indirect'` behaviour.
+                if !any_known
+                    && args.len() == 1
+                    && let Expr::StringLit(class_name) = &args[0]
+                {
+                    let qmethod = format!("{class_name}::{name}");
+                    if self.subs.contains_key(&qmethod)
+                        || resolve_method_via_isa(self, class_name, name).is_some()
+                    {
+                        return self.eval_expr(&Expr::MethodCall(
+                            Box::new(Expr::StringLit(class_name.clone())),
+                            name.to_string(),
+                            Vec::new(),
+                        ));
+                    }
+                }
                 for candidate in &candidates {
                     if let Some((params, body)) = self.subs.get(candidate).cloned() {
                         let arg_vals = self.eval_args_with_proto(args, &params);
