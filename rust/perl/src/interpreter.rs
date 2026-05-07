@@ -9089,6 +9089,37 @@ impl Interpreter {
                             self.subs.insert(local_name, body);
                         }
                     }
+                    Value::Str(s) => {
+                        // `*foo = "Bar"` — same as `*foo = *Bar`. Strip an
+                        // optional leading `*` and qualify with the current
+                        // package if the name is bare. Then alias the scalar
+                        // (via aliased_vars Rc-share) and the sub slot.
+                        let s = s.trim_start_matches('*');
+                        let qualified = if s.contains("::") {
+                            s.to_string()
+                        } else {
+                            format!("{}::{s}", self.package)
+                        };
+                        let qualified = qualified
+                            .strip_prefix("main::")
+                            .map(|s| s.to_string())
+                            .unwrap_or(qualified);
+                        let rc = if let Some(existing) = self.aliased_vars.get(&qualified).cloned()
+                        {
+                            existing
+                        } else {
+                            let v = self.globals.vars.remove(&qualified).unwrap_or(Value::Undef);
+                            let rc = std::rc::Rc::new(std::cell::RefCell::new(v));
+                            self.aliased_vars.insert(qualified.clone(), rc.clone());
+                            rc
+                        };
+                        self.aliased_vars.insert(local_name.clone(), rc);
+                        self.fh_aliases
+                            .insert(local_name.clone(), qualified.clone());
+                        if let Some(body) = self.subs.get(&qualified).cloned() {
+                            self.subs.insert(local_name, body);
+                        }
+                    }
                     _ => {}
                 }
             }
