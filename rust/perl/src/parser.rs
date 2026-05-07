@@ -3200,11 +3200,13 @@ impl Parser {
                     // interpreter can handle the trap semantics.
                     Expr::Call("eval".to_string(), vec![Expr::DoBlock(body)])
                 } else {
-                    // `eval EXPR` takes a unary-precedence argument so
-                    // `eval $arr[$i]` reads the array element, not just
-                    // `eval $arr`. `or`/`and` etc. (lower precedence
-                    // than unary) are NOT consumed.
-                    let expr = self.parse_unary();
+                    // `eval EXPR` is a named-unary op: its arg includes
+                    // `.` (concat) and arithmetic operators but NOT
+                    // relational comparisons or `or`/`and`/`= …`. Use
+                    // parse_additive so `eval "my " . $code` parses as
+                    // `eval(("my ") . $code)` and `eval $arr[$i]` reads
+                    // the element.
+                    let expr = self.parse_additive();
                     Expr::Call("eval".to_string(), vec![expr])
                 }
             }
