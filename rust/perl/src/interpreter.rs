@@ -541,14 +541,21 @@ impl Interpreter {
                     // using the line of the BEGIN block's closing `}`.
                     match self.exec_stmts(body) {
                         Flow::Exit(code) => {
-                            let file = if self.current_file.is_empty() {
-                                "-e".to_string()
-                            } else {
-                                self.current_file.clone()
-                            };
-                            eprintln!(
-                                "BEGIN failed--compilation aborted at {file} line {end_line}."
-                            );
+                            // A clean `exit(0)` inside BEGIN is the
+                            // normal idiom for `skip_all` etc. — only
+                            // emit the BEGIN failed banner on
+                            // non-zero exit (signals an abort, not a
+                            // controlled skip).
+                            if code != 0 {
+                                let file = if self.current_file.is_empty() {
+                                    "-e".to_string()
+                                } else {
+                                    self.current_file.clone()
+                                };
+                                eprintln!(
+                                    "BEGIN failed--compilation aborted at {file} line {end_line}."
+                                );
+                            }
                             self.exit_code = code;
                             return;
                         }
