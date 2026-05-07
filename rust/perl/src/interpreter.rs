@@ -12728,17 +12728,29 @@ fn strip_unsupported_regex_flags(pattern: &str) -> String {
                 k += 1;
             }
             if k < chars.len() && (chars[k] == ')' || chars[k] == ':') {
+                // Rust regex understands i/m/s/x/U/R/u and `-`. The
+                // `^` flag (Perls "reset all flags to default" prefix
+                // on `(?^…)`) isn't supported; strip it and keep the
+                // remaining recognised flags.
                 let kept: String = flags
                     .chars()
-                    .filter(|c| matches!(c, 'i' | 'm' | 's' | 'x' | 'U' | 'R' | 'u' | '-' | '^'))
+                    .filter(|c| matches!(c, 'i' | 'm' | 's' | 'x' | 'U' | 'R' | 'u' | '-'))
                     .collect();
                 if kept != flags {
                     let is_empty_group = chars[k] == ')';
-                    let only_marker = kept == "-" || kept == "^";
+                    let only_marker = kept == "-";
                     if is_empty_group && (kept.is_empty() || only_marker) {
-                        // `(?a)` standalone (no body) becomes a no-op
-                        // group when all flags are stripped — emit
-                        // nothing rather than the invalid `(?)`.
+                        // `(?a)` / `(?^)` standalone (no body) becomes
+                        // a no-op group when all flags are stripped.
+                        i = k + 1;
+                        let _ = neg;
+                        continue;
+                    }
+                    if !is_empty_group && kept.is_empty() {
+                        // `(?^:…)` with all flags stripped — emit
+                        // `(?:` (non-capturing group) and let the
+                        // body be processed normally.
+                        out.push_str("(?:");
                         i = k + 1;
                         let _ = neg;
                         continue;
