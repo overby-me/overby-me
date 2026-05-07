@@ -318,6 +318,9 @@ pub struct Interpreter {
     /// Stack of currently-executing sub names (top = innermost call).
     /// Used to look up sub_def_package for DB-magic in `eval STRING`.
     current_sub_stack: Vec<String>,
+    /// Stack of `self.scopes.len()` at each named-sub call entry.
+    /// Top is the position the current sub's own frames start at.
+    current_sub_scope_start: Vec<usize>,
     /// Stack of files currently being loaded via require. Top is innermost.
     /// Subs hoisted while this is non-empty get their `sub_origin` set; calls
     /// to those subs from within the same load skip the file-scope push to
@@ -449,6 +452,7 @@ impl Interpreter {
             sub_def_loc: HashMap::new(),
             sub_def_package: HashMap::new(),
             current_sub_stack: Vec::new(),
+            current_sub_scope_start: Vec::new(),
             loading_files: Vec::new(),
             check_blocks: Vec::new(),
             init_blocks: Vec::new(),
@@ -7393,6 +7397,8 @@ impl Interpreter {
         self.push_scope();
         let pushed_sub_name = if let Some(n) = name {
             self.current_sub_stack.push(n.to_string());
+            self.current_sub_scope_start
+                .push(self.scopes.len().saturating_sub(1));
             true
         } else {
             false
@@ -7498,6 +7504,7 @@ impl Interpreter {
                     self.exit_closure_env(closure_guard);
                     if pushed_sub_name {
                         self.current_sub_stack.pop();
+                        self.current_sub_scope_start.pop();
                     }
                     if let Some((pkg, file, line)) = self.call_stack.pop() {
                         self.current_line = line;
@@ -7569,6 +7576,8 @@ impl Interpreter {
         self.push_scope();
         let pushed_sub_name = if let Some(n) = name {
             self.current_sub_stack.push(n.to_string());
+            self.current_sub_scope_start
+                .push(self.scopes.len().saturating_sub(1));
             true
         } else {
             false
@@ -7646,6 +7655,7 @@ impl Interpreter {
                     self.exit_closure_env(closure_guard);
                     if pushed_sub_name {
                         self.current_sub_stack.pop();
+                        self.current_sub_scope_start.pop();
                     }
                     if let Some((pkg, file, line)) = self.call_stack.pop() {
                         self.current_line = line;
@@ -11151,7 +11161,38 @@ impl Interpreter {
             } else {
                 0
             };
+
+        // Lexical-scope termination at sub boundaries: when `eval
+        // STRING` runs inside a top-level NAMED sub (no closure
+        // captured, not anon), Perls "lexical search terminates at
+        // sub boundary" rule means the eval shouldnt see the
+        // dynamic callers `my` lexicals — only the sub's own
+        // (sub_scope onward — index recorded by current_sub_scope
+        // _start at call entry) and the file scope. Stash the
+        // dynamic frames between scopes[0] and that index for the
+        // eval duration.
+        let lex_term_stash: Option<(usize, Vec<Scope>)> = if !in_db_sub
+            && self
+                .current_sub_stack
+                .last()
+                .map(|n| !n.starts_with("__anon_") && !self.closure_envs.contains_key(n))
+                .unwrap_or(false)
+            && let Some(&start) = self.current_sub_scope_start.last()
+            && start > 1
+            && start < self.scopes.len()
+        {
+            let stashed: Vec<Scope> = self.scopes.drain(1..start).collect();
+            Some((1, stashed))
+        } else {
+            None
+        };
+
         let result = self.eval_string_inner(code);
+        if let Some((idx, stashed)) = lex_term_stash {
+            for (i, frame) in stashed.into_iter().enumerate() {
+                self.scopes.insert(idx + i, frame);
+            }
+        }
         if db_added > 0 {
             for _ in 0..db_added {
                 self.scopes.pop();
