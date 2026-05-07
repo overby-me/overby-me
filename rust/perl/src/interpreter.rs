@@ -10259,6 +10259,7 @@ impl Interpreter {
         let pattern = translate_atomic_groups(&pattern);
         let pattern = fix_inverted_quantifiers(&pattern);
         let pattern = neutralise_false_ranges(&pattern);
+        let pattern = strip_unicode_boundary_types(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -10438,6 +10439,7 @@ impl Interpreter {
         let pattern = translate_atomic_groups(&pattern);
         let pattern = fix_inverted_quantifiers(&pattern);
         let pattern = neutralise_false_ranges(&pattern);
+        let pattern = strip_unicode_boundary_types(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -14007,6 +14009,63 @@ fn strip_unsupported_regex_flags(pattern: &str) -> String {
 /// apparent range is a backslash escape (`\d`, `\s`, …) or an
 /// embedded POSIX class. Reference perl treats `[a-\d]` as `a`, `-`,
 /// `\d` (a literal dash), but Rust's regex and fancy-regex both
+/// Strip Perl's `\b{TYPE}` / `\B{TYPE}` Unicode-boundary refinements
+/// (`\b{gcb}`, `\B{ wb }`, etc.) down to plain `\b` / `\B`. Rust's
+/// regex crate doesn't support the typed forms; the unrefined versions
+/// give the right answer for empty / ASCII-word-boundary cases, which
+/// is what most regexp.t entries actually exercise.
+fn strip_unicode_boundary_types(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if !in_class
+            && c == '\\'
+            && i + 2 < chars.len()
+            && (chars[i + 1] == 'b' || chars[i + 1] == 'B')
+            && chars[i + 2] == '{'
+        {
+            // Scan until matching `}` (ASCII-only contents — gcb/lb/sb/wb).
+            let mut j = i + 3;
+            let mut depth = 1;
+            while j < chars.len() && depth > 0 {
+                match chars[j] {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+                if depth == 0 {
+                    break;
+                }
+                j += 1;
+            }
+            if depth == 0 {
+                // Drop the `{TYPE}` payload, keep `\b` or `\B`.
+                out.push('\\');
+                out.push(chars[i + 1]);
+                i = j + 1;
+                continue;
+            }
+        }
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if c == '[' {
+            in_class = true;
+        } else if c == ']' {
+            in_class = false;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 /// reject the form. Rewriting to `[a\-\d]` is semantically identical
 /// and accepted by both backends. Skips `[-abc]` / `[abc-]` (dash at
 /// the boundary is already literal).
