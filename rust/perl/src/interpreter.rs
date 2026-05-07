@@ -75,6 +75,13 @@ pub struct Interpreter {
     /// `ref()` / method dispatch consults this so `$obj->isa('Foo')`
     /// walks `@Foo::ISA` instead of falling back to the literal ref type.
     blessed_refs: HashMap<usize, String>,
+    /// Per-package overload handlers: `overload_handlers[pkg][op]` is
+    /// the CodeRef name for that operator (e.g. `""`, `0+`, `bool`,
+    /// `.`). Populated by `use overload OP => sub {...}, …`. When
+    /// stringifying / numifying / boolifying a blessed ref whose class
+    /// has the matching handler, the handler is dispatched instead of
+    /// the default `Class=TYPE(0xADDR)` form.
+    overload_handlers: HashMap<String, HashMap<String, String>>,
     /// Non-string die payload — Perl's `die $ref` stores the REF in `$@`,
     /// not its stringification. `Flow::Die` still carries a String for the
     /// stderr message / `$@` string fallback, but this slot lets us
@@ -501,6 +508,7 @@ impl Interpreter {
             local_hash_elem_saves: Vec::new(),
             local_array_len_saves: Vec::new(),
             blessed_refs: HashMap::new(),
+            overload_handlers: HashMap::new(),
             pending_die_value: None,
         }
     }
@@ -2303,6 +2311,7 @@ impl Interpreter {
                     "sort",
                     "version",
                     "builtin",
+                    "overload",
                 ];
                 if PRAGMAS.contains(&module.as_str()) {
                     if module == "bytes" {
@@ -2320,6 +2329,25 @@ impl Interpreter {
                         // / substr then emit "Use of uninitialized value"
                         // through the warning handler.
                         self.warnings_on = true;
+                    } else if module == "overload" {
+                        // `use overload OP => CODEREF, …` — register
+                        // operator handlers for the current package so
+                        // stringification / numification / boolify of
+                        // blessed refs of that class dispatches the
+                        // user code instead of the default form.
+                        let pkg = self.package.clone();
+                        let mut i = 0;
+                        while i + 1 < _args.len() {
+                            let key = self.eval_expr(&_args[i]).to_str();
+                            let handler = self.eval_expr(&_args[i + 1]);
+                            if let Value::CodeRef(name) = handler {
+                                self.overload_handlers
+                                    .entry(pkg.clone())
+                                    .or_default()
+                                    .insert(key, name);
+                            }
+                            i += 2;
+                        }
                     }
                     return Flow::None;
                 }
@@ -5243,7 +5271,7 @@ impl Interpreter {
                 } else {
                     self.eval_expr(&args[0])
                 };
-                let num = val.to_num();
+                let num = self.numify_value(&val);
                 // Perl's chr: negatives / non-integer out-of-range inputs
                 // yield U+FFFD (Unicode replacement character).
                 // Under `use bytes`, negatives wrap modulo 256.
@@ -5823,7 +5851,10 @@ impl Interpreter {
                 } else {
                     self.eval_expr(&args[0])
                 };
-                let sep = sep_val.to_str();
+                // Dispatch overload `""` for blessed separators —
+                // op/join test 27 (`join $overloaded, LIST` calls the
+                // stringifier once on the separator, not per-element).
+                let sep = self.stringify_value(&sep_val);
                 Value::Str(parts.join(&sep))
             }
             "split" => {
@@ -7853,15 +7884,55 @@ impl Interpreter {
         v.ref_type().to_string()
     }
 
+    /// Numify a value, dispatching `use overload q|0+| => sub {...}`
+    /// when the class has registered a numification handler. Falls
+    /// back to `Value::to_num`. Used by builtins like `chr` so
+    /// `chr(bless ..., 'C')` invokes the user's numifier.
+    fn numify_value(&mut self, v: &Value) -> f64 {
+        let p = Self::ref_ptr(v);
+        if p != 0
+            && let Some(cls) = self.blessed_refs.get(&p).cloned()
+            && let Some(handler_name) = self
+                .overload_handlers
+                .get(&cls)
+                .and_then(|m| m.get("0+"))
+                .cloned()
+            && let Some((_params, body)) = self.subs.get(&handler_name).cloned()
+        {
+            let ret = self.call_sub_named(
+                &body,
+                &[v.clone(), Value::Undef, Value::Str(String::new())],
+                Some(&handler_name),
+            );
+            return ret.to_num();
+        }
+        v.to_num()
+    }
+
     /// Stringify a value, prepending the blessed class for refs.
     /// `bless \$x, "Foo"` stringifies as `Foo=SCALAR(0x...)` (matching
     /// reference perl); plain refs and non-ref values fall back to the
-    /// default `Value::to_str`.
-    fn stringify_value(&self, v: &Value) -> String {
+    /// default `Value::to_str`. Dispatches `use overload q|""| => sub
+    /// {...}` when the class has registered a stringification handler.
+    fn stringify_value(&mut self, v: &Value) -> String {
         let p = Self::ref_ptr(v);
         if p != 0
-            && let Some(cls) = self.blessed_refs.get(&p)
+            && let Some(cls) = self.blessed_refs.get(&p).cloned()
         {
+            if let Some(handler_name) = self
+                .overload_handlers
+                .get(&cls)
+                .and_then(|m| m.get("\"\"").or_else(|| m.get("")))
+                .cloned()
+                && let Some((_params, body)) = self.subs.get(&handler_name).cloned()
+            {
+                let ret = self.call_sub_named(
+                    &body,
+                    &[v.clone(), Value::Undef, Value::Str(String::new())],
+                    Some(&handler_name),
+                );
+                return ret.to_str();
+            }
             // Only the three concrete ref kinds get a class prefix;
             // CodeRef / Glob / etc. retain their own format.
             if matches!(
@@ -13016,6 +13087,7 @@ fn compile_time_use_check_in_inner(
         "sort",
         "version",
         "builtin",
+        "overload",
     ];
     let mut effective_path: String = _file_path.to_string();
     for stmt in stmts {
