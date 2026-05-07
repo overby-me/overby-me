@@ -2594,6 +2594,32 @@ impl Lexer {
                     break;
                 }
                 repl.push(self.advance());
+            } else if self.ch() == '\n' {
+                // Drain any heredoc directives queued earlier in this
+                // REPL: their bodies live on the source lines following
+                // the directive, BEFORE the rest of the REPL resumes.
+                // After draining, the marker we stashed in `repl` gets
+                // replaced with the heredoc body wrapped as a literal
+                // (so the `/e` re-parse sees a quoted-string fragment).
+                repl.push(self.advance());
+                if !self.pending_heredocs.is_empty() {
+                    let pending = std::mem::take(&mut self.pending_heredocs);
+                    for ph in pending {
+                        let body = self.read_heredoc_body(&ph);
+                        if let HeredocTarget::SubstReplMarker { marker, .. } = &ph.target {
+                            let lit = heredoc_body_as_perl_literal(&body, ph.interpolate);
+                            repl = repl.replace(marker, &lit);
+                        } else if let HeredocTarget::SubstPatMarker { marker, .. } = &ph.target {
+                            // Pattern-side markers — not expected
+                            // here, but be safe by removing them.
+                            let lit = heredoc_body_as_perl_literal(&body, ph.interpolate);
+                            repl = repl.replace(marker, &lit);
+                        } else if let HeredocTarget::InterpMarker { marker, .. } = &ph.target {
+                            let lit = heredoc_body_as_perl_literal(&body, ph.interpolate);
+                            repl = repl.replace(marker, &lit);
+                        }
+                    }
+                }
             } else if self.ch() == '\\' {
                 // Push `\` only; do NOT pre-consume the following
                 // char as a single escape pair. Doing so would hide
