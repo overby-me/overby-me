@@ -821,6 +821,34 @@ impl Lexer {
                         let pending = std::mem::take(&mut self.pending_heredocs);
                         for ph in pending {
                             let body = self.read_heredoc_body(&ph);
+                            // Reference perl rejects an interpolated
+                            // heredoc body that ends with a naked `$`
+                            // followed only by whitespace ("Final $
+                            // should be \$ or $name"). Detect that
+                            // shape and surface the same fatal so
+                            // op/heredoc test 41 matches byte-for-byte.
+                            if ph.interpolate && self.error.is_none() {
+                                let trimmed = body.trim_end_matches([' ', '\t', '\r', '\n']);
+                                if trimmed.ends_with('$')
+                                    && (trimmed.len() == 1
+                                        || !trimmed[..trimmed.len() - 1].ends_with(['\\', '$']))
+                                {
+                                    let near = body.trim_end_matches(['\r', '\n']);
+                                    let near_quoted: String = near
+                                        .chars()
+                                        .map(|c| match c {
+                                            '\n' => "\\n".to_string(),
+                                            '\t' => "\\t".to_string(),
+                                            c => c.to_string(),
+                                        })
+                                        .collect();
+                                    self.error = Some(format!(
+                                        "Final $ should be \\$ or $name at {{FILE}} line {}, near \"{near_quoted}\n\"\nsyntax error at {{FILE}} line {}, near \"\"\nExecution of {{FILE}} aborted due to compilation errors.\n",
+                                        ph.start_line,
+                                        ph.start_line.saturating_sub(1).max(1),
+                                    ));
+                                }
+                            }
                             match &ph.target {
                                 HeredocTarget::Token(idx) => match tokens.get_mut(*idx) {
                                     Some(Token::StringLit(s)) | Some(Token::InterpString(s)) => {
