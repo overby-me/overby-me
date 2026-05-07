@@ -214,8 +214,8 @@
       }
       {
         exp = "objcopy.exp";
-        minPass = 114;
-        maxFail = 6;
+        minPass = 115;
+        maxFail = 5;
       }
     ];
 

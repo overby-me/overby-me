@@ -3739,8 +3739,12 @@ fn readelf_notes<'data, Elf: FileHeader>(
         println!("Displaying notes found in: {}", sec_name);
         println!("  Owner                Data size 	Description");
         // For GNU build attributes, track previous addresses to inherit.
-        let mut prev_start: u64 = 0;
-        let mut prev_end: u64 = 0;
+        // Track separately per ntype so a func note in between OPEN notes
+        // doesn't pollute the OPEN inheritance chain.
+        let mut prev_open_start: u64 = 0;
+        let mut prev_open_end: u64 = 0;
+        let mut prev_func_start: u64 = 0;
+        let mut prev_func_end: u64 = 0;
         let mut p = 0usize;
         while p + 12 <= bytes.len() {
             let read_u32 = |b: &[u8]| -> u32 {
@@ -3890,8 +3894,11 @@ fn readelf_notes<'data, Elf: FileHeader>(
                     _ => "?",
                 };
                 // Description: addresses (start, end) for OPEN/func.
-                let mut start = prev_start;
-                let mut end = prev_end;
+                let (mut start, mut end) = if ntype == 0x101 {
+                    (prev_func_start, prev_func_end)
+                } else {
+                    (prev_open_start, prev_open_end)
+                };
                 let addr_size = if is_64 { 8 } else { 4 };
                 if descsz >= addr_size * 2 {
                     if is_64 {
@@ -3901,14 +3908,23 @@ fn readelf_notes<'data, Elf: FileHeader>(
                         start = read_u32(&desc[0..4]) as u64;
                         end = read_u32(&desc[4..8]) as u64;
                     }
-                    prev_start = start;
-                    prev_end = end;
+                    if ntype == 0x101 {
+                        prev_func_start = start;
+                        prev_func_end = end;
+                    } else {
+                        prev_open_start = start;
+                        prev_open_end = end;
+                    }
                 }
                 let mut region = format!("Applies to region from {:#x} to {:#x}", start, end);
-                // For func notes, optionally append the function name from the
-                // first symbol that covers this region.
-                if ntype == 0x101 {
-                    if let Some(sym_name) = lookup_symbol_at(elf, data, endian, start) {
+                // Annotate with a symbol name when this note carries an
+                // explicit description (descsz > 0). Func notes prefer
+                // FUNC-type symbols; OPEN notes prefer non-FUNC symbols.
+                if descsz > 0 {
+                    let prefer_func = ntype == 0x101;
+                    if let Some(sym_name) =
+                        lookup_symbol_at_typed(data, start, prefer_func)
+                    {
                         region.push_str(&format!(" ({})", sym_name));
                     }
                 }
@@ -3930,18 +3946,41 @@ fn lookup_symbol_at<'data, Elf: FileHeader>(
     _endian: Elf::Endian,
     addr: u64,
 ) -> Option<String> {
+    lookup_symbol_at_typed(data, addr, false)
+}
+
+/// Look up a symbol at the given address. When `prefer_func` is true,
+/// prefer a STT_FUNC symbol; otherwise prefer a non-FUNC symbol.
+fn lookup_symbol_at_typed(data: &[u8], addr: u64, prefer_func: bool) -> Option<String> {
     use object::{Object as _, ObjectSymbol as _};
     let obj = object::File::parse(data).ok()?;
+    let mut best: Option<String> = None;
+    let mut best_is_func = false;
     for sym in obj.symbols() {
-        if sym.address() == addr {
-            if let Ok(name) = sym.name() {
-                if !name.is_empty() {
-                    return Some(name.to_string());
-                }
-            }
+        if sym.address() != addr {
+            continue;
+        }
+        let Ok(name) = sym.name() else { continue };
+        if name.is_empty() {
+            continue;
+        }
+        let is_func = matches!(sym.kind(), object::SymbolKind::Text);
+        // First match.
+        if best.is_none() {
+            best = Some(name.to_string());
+            best_is_func = is_func;
+            continue;
+        }
+        // Replace if current is the preferred kind and existing isn't.
+        if prefer_func && is_func && !best_is_func {
+            best = Some(name.to_string());
+            best_is_func = is_func;
+        } else if !prefer_func && !is_func && best_is_func {
+            best = Some(name.to_string());
+            best_is_func = is_func;
         }
     }
-    None
+    best
 }
 
 fn elf_note_type_name(owner: &str, ntype: u32) -> String {
@@ -10892,8 +10931,13 @@ fn objcopy_merge_build_attribute_notes(data: &[u8]) -> Option<Vec<u8>> {
     let mut notes: Vec<Note> = Vec::new();
     let addr_size = if class == 2 { 8 } else { 4 };
     let mut p = 0usize;
-    let mut prev_start: u64 = 0;
-    let mut prev_end: u64 = 0;
+    // Track inherited address ranges separately for OPEN and func notes,
+    // matching GNU readelf's behavior where descsz=0 OPEN notes inherit
+    // from the previous OPEN note (skipping any intervening func notes).
+    let mut prev_open_start: u64 = 0;
+    let mut prev_open_end: u64 = 0;
+    let mut prev_func_start: u64 = 0;
+    let mut prev_func_end: u64 = 0;
     while p + 12 <= bytes.len() {
         let mut a4 = [0u8; 4];
         a4.copy_from_slice(&bytes[p..p + 4]);
@@ -10927,8 +10971,11 @@ fn objcopy_merge_build_attribute_notes(data: &[u8]) -> Option<Vec<u8>> {
         let desc = &bytes[p..p + descsz];
         p += descsz;
         p = (p + 3) & !3;
-        let mut start = prev_start;
-        let mut end = prev_end;
+        let (mut start, mut end) = if ntype == 0x101 {
+            (prev_func_start, prev_func_end)
+        } else {
+            (prev_open_start, prev_open_end)
+        };
         if descsz >= addr_size * 2 {
             if class == 2 {
                 let mut b8 = [0u8; 8];
@@ -10959,8 +11006,13 @@ fn objcopy_merge_build_attribute_notes(data: &[u8]) -> Option<Vec<u8>> {
                     u32::from_be_bytes(b4) as u64
                 };
             }
-            prev_start = start;
-            prev_end = end;
+            if ntype == 0x101 {
+                prev_func_start = start;
+                prev_func_end = end;
+            } else {
+                prev_open_start = start;
+                prev_open_end = end;
+            }
         }
         notes.push(Note {
             name: name_bytes,
@@ -10973,27 +11025,50 @@ fn objcopy_merge_build_attribute_notes(data: &[u8]) -> Option<Vec<u8>> {
     if notes.is_empty() {
         return None;
     }
-    // Group by (name, ntype) and merge ranges, keeping first occurrence's
-    // position. Only merge type=OPEN (0x100); leave func notes (0x101)
-    // alone.
-    let mut order: Vec<(Vec<u8>, u32)> = Vec::new();
-    let mut merged: std::collections::HashMap<(Vec<u8>, u32), (u64, u64)> =
+    // Group by (name, ntype) and merge ranges. Each note remains with its
+    // original input position (first occurrence wins). Both OPEN (0x100)
+    // and func (0x101) notes go through merging, keyed by (name, type).
+    #[derive(Clone)]
+    struct Merged {
+        name: Vec<u8>,
+        ntype: u32,
+        start: u64,
+        end: u64,
+        first_idx: usize,
+    }
+    let mut groups: Vec<Merged> = Vec::new();
+    let mut group_idx_by_key: std::collections::HashMap<(Vec<u8>, u32), usize> =
         std::collections::HashMap::new();
-    for n in &notes {
-        if n.ntype != 0x100 {
-            continue;
-        }
+    for (i, n) in notes.iter().enumerate() {
         let key = (n.name.clone(), n.ntype);
-        if let Some(entry) = merged.get_mut(&key) {
-            entry.0 = entry.0.min(n.start);
-            entry.1 = entry.1.max(n.end);
+        if let Some(&gi) = group_idx_by_key.get(&key) {
+            let g = &mut groups[gi];
+            g.start = g.start.min(n.start);
+            g.end = g.end.max(n.end);
         } else {
-            order.push(key.clone());
-            merged.insert(key, (n.start, n.end));
+            group_idx_by_key.insert(key, groups.len());
+            groups.push(Merged {
+                name: n.name.clone(),
+                ntype: n.ntype,
+                start: n.start,
+                end: n.end,
+                first_idx: i,
+            });
         }
     }
-    // Build new section data: one merged OPEN note per (name,type), then
-    // all func notes verbatim.
+    // Sort: OPEN (0x100) before func (0x101); within same type, by
+    // (start ASC, end DESC). Within same (start, end), preserve first
+    // occurrence input order.
+    groups.sort_by(|a, b| {
+        a.ntype
+            .cmp(&b.ntype)
+            .then_with(|| a.start.cmp(&b.start))
+            .then_with(|| b.end.cmp(&a.end))
+            .then_with(|| a.first_idx.cmp(&b.first_idx))
+    });
+    // Build new section data. For each group, emit a note with full desc
+    // when the (start, end) differs from the previous group, otherwise
+    // emit descsz=0 so readelf inherits the previous addresses.
     let mut out_bytes: Vec<u8> = Vec::new();
     let put_u32 = |out: &mut Vec<u8>, v: u32| {
         if le {
@@ -11009,64 +11084,68 @@ fn objcopy_merge_build_attribute_notes(data: &[u8]) -> Option<Vec<u8>> {
             out.extend_from_slice(&v.to_be_bytes());
         }
     };
-    for key in &order {
-        let (start, end) = merged[key];
-        let (name, ntype) = key;
-        let descsz = addr_size * 2;
-        put_u32(&mut out_bytes, name.len() as u32);
+    let mut prev_range: Option<(u64, u64)> = None;
+    for g in &groups {
+        let same_range = prev_range == Some((g.start, g.end));
+        let descsz = if same_range { 0 } else { addr_size * 2 };
+        put_u32(&mut out_bytes, g.name.len() as u32);
         put_u32(&mut out_bytes, descsz as u32);
-        put_u32(&mut out_bytes, *ntype);
-        out_bytes.extend_from_slice(name);
+        put_u32(&mut out_bytes, g.ntype);
+        out_bytes.extend_from_slice(&g.name);
         while out_bytes.len() % 4 != 0 {
             out_bytes.push(0);
         }
-        if class == 2 {
-            put_u64(&mut out_bytes, start);
-            put_u64(&mut out_bytes, end);
-        } else {
-            put_u32(&mut out_bytes, start as u32);
-            put_u32(&mut out_bytes, end as u32);
-        }
-        while out_bytes.len() % 4 != 0 {
-            out_bytes.push(0);
-        }
-    }
-    // Append func notes verbatim (re-encode from notes vector).
-    for n in &notes {
-        if n.ntype == 0x100 {
-            continue;
-        }
-        put_u32(&mut out_bytes, n.name.len() as u32);
-        put_u32(&mut out_bytes, n.descsz as u32);
-        put_u32(&mut out_bytes, n.ntype);
-        out_bytes.extend_from_slice(&n.name);
-        while out_bytes.len() % 4 != 0 {
-            out_bytes.push(0);
-        }
-        if n.descsz >= addr_size * 2 {
+        if !same_range {
             if class == 2 {
-                put_u64(&mut out_bytes, n.start);
-                put_u64(&mut out_bytes, n.end);
+                put_u64(&mut out_bytes, g.start);
+                put_u64(&mut out_bytes, g.end);
             } else {
-                put_u32(&mut out_bytes, n.start as u32);
-                put_u32(&mut out_bytes, n.end as u32);
+                put_u32(&mut out_bytes, g.start as u32);
+                put_u32(&mut out_bytes, g.end as u32);
+            }
+            while out_bytes.len() % 4 != 0 {
+                out_bytes.push(0);
             }
         }
-        while out_bytes.len() % 4 != 0 {
-            out_bytes.push(0);
-        }
+        prev_range = Some((g.start, g.end));
     }
     if out_bytes.len() > ba_size {
         // Merged section is larger than original — would require shifting
         // file offsets, which we don't support here.
         return None;
     }
-    // Pad with zeros to keep file layout intact.
+    let new_size = out_bytes.len();
+    // Pad with zeros to keep file layout intact (don't shift later
+    // sections), then patch the section header's sh_size to the merged
+    // size so readelf stops at the actual data.
     while out_bytes.len() < ba_size {
         out_bytes.push(0);
     }
     let mut out_data = data.to_vec();
     out_data[ba_off..ba_off + ba_size].copy_from_slice(&out_bytes[..ba_size]);
+    // Update sh_size in the .gnu.build.attributes section header.
+    if let Some(idx) = ba_idx {
+        let h = shoff + idx * shentsize;
+        if class == 2 {
+            // sh_size at offset 32 in ELF64 section header
+            let sz_off = h + 32;
+            let v = if le {
+                (new_size as u64).to_le_bytes()
+            } else {
+                (new_size as u64).to_be_bytes()
+            };
+            out_data[sz_off..sz_off + 8].copy_from_slice(&v);
+        } else {
+            // sh_size at offset 20 in ELF32 section header
+            let sz_off = h + 20;
+            let v = if le {
+                (new_size as u32).to_le_bytes()
+            } else {
+                (new_size as u32).to_be_bytes()
+            };
+            out_data[sz_off..sz_off + 4].copy_from_slice(&v);
+        }
+    }
     Some(out_data)
 }
 
