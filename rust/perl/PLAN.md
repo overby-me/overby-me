@@ -6,10 +6,12 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**266/278 Nix tests passing** (96%) — selected tests from the upstream Perl test suite.
+**269/281 Nix tests passing** (96%) — selected tests from the upstream Perl test suite.
 
 This iteration's improvements:
 
+- **`use Foo qw(...);` spanning multiple lines blames the terminating line on missing-module abort** — `Stmt::Use` now carries an `end_line` field set by the parser to `current_line()` after the args list parses (i.e., the line of the `;`). Both the runtime `Stmt::Use` arm and the compile-time walker use this so the error reports the same line reference perl does. perf/optree.t now passes exact-diff (was 6 lines diff).
+- **Comparison operators return empty string for false (Perl semantics)** — `==`, `!=`, `<`, `>`, `<=`, `>=`, `eq`, `ne`, `lt`, `gt`, `le`, `ge` now return `""` for false (matching Perl's PL_sv_no stringification) and `1` for true via a new `bool_value` helper. Previously returned `0`, which stringified differently. op/bool.t now passes exact-diff.
 - **Bare-word `#line N FILE` directive** — previously only the quoted form (`#line N "FILE"`) was honoured; the unquoted form (op/warn.t's `#line 3 warn.t`) fell through. `try_handle_line_directive` now accepts a non-whitespace word as the file label. Compile-time use-check also tracks `Stmt::FileMark` while walking — the diagnostic for a missing module `use`d at line N now blames the post-`#line` filename rather than the script invocation path. op/warn.t now passes exact-diff.
 - **`xor` low-precedence logical XOR** — keyword previously unrecognised; `($a eq 'a' xor $x)` parsed `xor` as a bareword. New `Token::Xor` (parsed at the `or` precedence level) and `BinOp::Xor` (non-short-circuiting; returns `1` for one-true / empty-string for both-true / both-false). comp/cmdopt.t now passes exact-diff.
 - **`__DATA__` / `DATA` filehandle** — lexer now captures the data section and exposes it via a new `set_data_section` interpreter hook, which registers it as a string-fh under the `DATA` name. `<DATA>` and `readline DATA` work as expected. (`*ARGV = *DATA` typeglob aliasing for `<>`-on-DATA still pending, so run/noswitch.t still fails.)
