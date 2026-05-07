@@ -2549,10 +2549,11 @@ impl Lexer {
                 }
                 pat.push(self.advance());
             } else if self.ch() == '\\' {
+                // Same rationale as the REPL branch below — dont
+                // pre-consume the next char so a `<<TAG` heredoc
+                // directive sitting at `\<<TAG` boundary isnt
+                // hidden by the escape pair.
                 pat.push(self.advance());
-                if self.pos < self.input.len() {
-                    pat.push(self.advance());
-                }
             } else if self.ch() == '<' && self.peek(1) == '<' {
                 if let Some(marker) =
                     self.try_register_heredoc_in_subst(subst_token_idx, /*in_repl=*/ false)
