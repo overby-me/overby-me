@@ -12355,7 +12355,14 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                     j += 2;
                     continue;
                 }
-                if j + 2 < class_body.len() && class_body[j + 1] == '-' && class_body[j + 2] != ']'
+                if j + 2 < class_body.len()
+                    && class_body[j + 1] == '-'
+                    && class_body[j + 2] != ']'
+                    // Don't compare a literal-vs-escape pair as a range:
+                    // `[a-\d]` has `\d` as an escape, not a range endpoint.
+                    // Reference perl warns ("False [] range") at runtime
+                    // but doesn't refuse to compile, so we let it through.
+                    && class_body[j + 2] != '\\'
                 {
                     let lo = class_body[j];
                     let hi = class_body[j + 2];
