@@ -66,20 +66,20 @@ Key design decisions:
 | `objdump-relocs` | objdump | ✅ PASS |
 | `addr2line-basic` | addr2line | ✅ PASS |
 
-### Upstream DejaGnu tests (195/220 passing)
+### Upstream DejaGnu tests (210/229 passing)
 
 | Test file | Pass | Fail | Total | Threshold |
 |-----------|------|------|-------|-----------|
 | cxxfilt.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
 | size.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
-| nm.exp | **13** | 0 | 13 | minPass=13, maxFail=0 |
+| nm.exp | **15** | 0 | 15 | minPass=15, maxFail=0 |
 | ar.exp | **13** | 1 | 14 | minPass=13, maxFail=1 |
-| readelf.exp | **28** | 11 | 39 | minPass=28, maxFail=11 |
-| objdump.exp | **22** | 10 | 33 | minPass=22, maxFail=10 |
-| objcopy.exp | **109** | 6 | 116 | minPass=109, maxFail=6 |
+| readelf.exp | **31** | 7 | 38 | minPass=31, maxFail=7 |
+| objdump.exp | **28** | 4 | 33 | minPass=28, maxFail=4 |
+| objcopy.exp | **113** | 7 | 122 | minPass=113, maxFail=7 |
 | strings.exp | **1** | 0 | 1 | minPass=1, maxFail=0 |
 | addr2line.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
-| **Total** | **195** | **25** | **220** | |
+| **Total** | **210** | **19** | **229** | |
 
 ## Fixes applied
 
@@ -211,20 +211,27 @@ Two layers of testing:
 - [x] Fix more objdump.exp failures (17→19/33): `-Wk`/`--dwarf=links` for `.gnu_debuglink`/`.gnu_debugaltlink` parsing; `-s -j .zdebug_*` compressed-section notice; `--start-address`/`--stop-address` for `-s` and `-d`; DWARF flag parsing fixes
 - [x] Fix more objcopy.exp failures (44→71/116): glob-pattern section selectors, `--add-section`, `--add-symbol`, `--strip-section-headers`, SREC start/VMA handling
 - [x] Fix objcopy.exp failures (12/116 → 44/116): byte-copy fast path, `-O verilog`/`srec`/`ihex` output, `--set-section-alignment`, `--set-section-flags`, `--rename-section`, `--strip-symbol` reloc check, `--keep-global-symbol` vs `--globalize-symbol` conflict, archive support in `strip`, `STT_NOTYPE` symbol handling, `-I/-N/-G/-p` flag parsing
-
 - [x] Fix objdump.exp failures (19→22/33): in-place ELF `sh_addr`/`e_entry` patching for `--change-section-address`, `--adjust-vma`, `--set-start`, `--adjust-start` (preserves all other ELF structure exactly)
-
 - [x] Fix readelf.exp failure (25→26/39): `-j`/`--display-section` on REL/RELA sections now emits a relocation table instead of a hex dump (GNU-compatible format; refactored `readelf_relocs` to share per-section printing via new `readelf_dump_reloc_section`)
-
 - [x] Fix strip on executables (104→106 objcopy.exp passes): in-place ELF section-table edit for ET_EXEC/ET_DYN preserves `sh_addr`, program-header layout, and PROGBITS/NOBITS distinction (slow `object::write::Object` path was producing unrunnable binaries by zeroing addresses); `-K` rewrites `.symtab`/`.strtab` instead of dropping them. Fixes `run stripped executable` and `run stripped executable with saving a symbol`.
-
 - [x] Fix objcopy SHT_GROUP preservation (106→109 objcopy.exp passes): in-place ELF rewriter for `--remove-section` on files with COMDAT groups; preserves GROUP section type, drops orphan `.rela.X`/`.rel.X` when target removed, rebuilds `SHT_GROUP` contents with renumbered surviving indices, renumbers `sh_link`/`sh_info` everywhere. Fixes `copy removing group member`, `copy removing reloc group member`, `copy removing non-reloc group member` (and `group-7c` for free).
-
 - [x] Fix ar.exp `replacing non-deterministic member` (12→13/14): unset SOURCE_DATE_EPOCH at dejagnu test entry (Nix build env sets it; the test explicitly requires it absent to distinguish deterministic vs non-deterministic archives). Only the ar foreign-object Tektronix-format test remains.
-
 - [x] Add basic `readelf -wi` / `--debug-dump=info` / `--dwarf=info` DWARF `.debug_info` dumper (26→28 readelf.exp passes; unlocks 3 objdump -Wi tests to run): custom DWARF reader handles CU headers, DIE traversal with depth, abbrev tables, and the core DW_FORM_* value formatting. Custom tolerant sLEB128 decoder detects over-long encodings and emits GNU-readelf-compatible warnings (required by pr26548 test). Fixes `binutils-all/pr26548` and `readelf -Wwi pr26548e`. Complex attribute enum mappings (DW_OP_* decoding, language codes, section contributions) still required for pr26160, dw5-op, dwarf-attributes.
+- [x] Add DW_OP expression decoder (28→29 readelf.exp; 22→23 objdump.exp): emits the `(DW_OP_addr: <hex>)` / `(DW_OP_addrx <idx>)` annotation appended to `N byte block: ...` for `DW_FORM_exprloc`/`block*`. Handles all standard DWARF 5 ops plus GNU extensions (`DW_OP_GNU_addr_index`, `DW_OP_GNU_entry_value`, etc.). Suppresses byte-block prefix when first op is `DW_OP_addrx` to match GNU's special case. Unlocks `readelf -wi` testprog and `objdump -Wi for DW_OP_*`.
+- [x] Fix objcopy unknown section flag warning (109→110 then →111 objcopy.exp): scans input ELF for unrecognized `sh_flags` bits and emits `objcopy: <input>:<section>: warning: retaining unknown section flag(s) 0x<hex>` to stderr; readelf `-t` `elf_section_flags_detail` now prints `UNKNOWN (xxxxxxxx)` for any non-OS, non-PROC unknown bits. Fixes `copy with unknown section flag`.
+- [x] Add objcopy `-I binary -O elf*` binary→ELF conversion (111→113 objcopy.exp): synthesizes an ELF object with `.data` section containing raw bytes plus three symbols `_binary_<path>_start` (D), `_binary_<path>_end` (D), `_binary_<path>_size` (A); replaces non-alphanumeric chars in input path with `_`. Honors `--binary-symbol-prefix` and `-B/--binary-architecture`. Adds `objcopy --info` output mimicking GNU's BFD listing so dejagnu's `binutils_run $OBJCOPY --info` discovers the default target/arch. Fixes `binary symbol (implicit)` and `binary symbol (explicit)`. Also fixed nm symbol type classification: absolute symbols always get 'A'/'a' regardless of their object kind.
+- [x] Add objdump `-S`/`--source`/`--source-comment` source interleaving (23→25 objdump.exp): walks `.debug_line` via gimli, caches source files, emits source lines (optionally prefixed with `--source-comment=PREFIX`) before the disassembly when (file, line) changes. Fixes `objdump -S` and `objdump --source-comment`.
+- [x] Add objdump `-l`/`--line-numbers` annotation + build-id-debuglink lookup (25→27 objdump.exp): when main file lacks `.debug_info`, parse `.note.gnu.build-id`, derive `.build-id/<XX>/<rest>.debug` path, and load the alt file's DWARF context; print `<file>:<line>` annotations when (file, line) changes. Fixes `build-id-debuglink (none)` and `build-id-debuglink (zlib)`.
+- [x] Add objdump `--dwarf=Ranges` support (27→28 objdump.exp): wires `objdump -WR/--dwarf=Ranges` to `readelf_debug_ranges`; fixed `.debug_ranges` printer to handle "base address selection entry" (begin == max_addr → `(base address)`) and apply the running base to subsequent begin/end values. Fixes `objdump -W for debug_ranges`.
+- [x] Decode dwarf-attribute enum values (29→30 readelf.exp): `format_data_attr` now decodes DW_AT_ordering, DW_AT_visibility, DW_AT_inline, DW_AT_accessibility, DW_AT_calling_convention, DW_AT_identifier_case, DW_AT_virtuality, DW_AT_decimal_sign, DW_AT_endianity, DW_AT_defaulted, plus more values for DW_AT_language and DW_AT_encoding (UTF/UCS/ASCII/HP_*); user TAG values now print as `User TAG value: 0x<hex>` instead of `<unknown>`. New `format_block_with_attr` decodes `DW_AT_discr_list` blocks as `(range L..H, label N, …)(unsigned)`. Fixes `readelf -wi dwarf-attributes`.
+- [x] Add readelf `-ws`/`-wm`/`--debug-dump=str`/`macro` support (30→31 readelf.exp): `-ws` hex-dumps every `.debug_str*` section and decodes `.debug_str_offsets.dwo` entries as `Index Offset [String]`; `-wm` walks `.debug_macro*` (DWARF 5 header + flags + DW_MACRO_* opcodes) including DW_MACRO_define_strx with str-offset lookup. Fixes `readelf -wsm readelf-debug-str-offsets-dw4`.
 
 ## Next steps
 
 - [ ] Add `gas/testsuite/` and `ld/testsuite/` DejaGnu integration for `as`/`ld`
 - [ ] Add compressed section support for `compress.exp` tests
+- [ ] Implement `readelf -wK -P` follow-links (with `(loaded from <file>)` annotations + `DW_FORM_GNU_strp_alt` resolution + abbrevs from linked file) for `readelf -wKis -P debuglink`
+- [ ] Add `-WL`/`--dwarf=decodedline` line program decoder for `objdump -WL`
+- [ ] Add GNU build attribute notes parsing in readelf for the merge-notes/v2/v3 build note tests
+- [ ] Add Tektronix Hex format input parser for `objcopy tek2bin` and `ar.exp` foreign-object test
+- [ ] Add `.debug_loc` location-views decoder for `readelf --debug-dump=loc locview-1/-2`

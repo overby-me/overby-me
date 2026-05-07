@@ -189,7 +189,7 @@
       }
       {
         exp = "nm.exp";
-        minPass = 13;
+        minPass = 15;
         maxFail = 0;
       }
       {
@@ -204,18 +204,18 @@
       }
       {
         exp = "readelf.exp";
-        minPass = 28;
-        maxFail = 11;
+        minPass = 31;
+        maxFail = 7;
       }
       {
         exp = "objdump.exp";
-        minPass = 22;
-        maxFail = 10;
+        minPass = 28;
+        maxFail = 4;
       }
       {
         exp = "objcopy.exp";
-        minPass = 109;
-        maxFail = 6;
+        minPass = 113;
+        maxFail = 7;
       }
     ];
 

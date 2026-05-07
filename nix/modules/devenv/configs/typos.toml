@@ -29,6 +29,8 @@ Siz = "Siz"
 gir = "gir"
 # restat = ninja build system keyword (re-stat output files)
 restat = "restat"
+# DWARF attribute name DW_AT_endianity (DWARF 3 spec, dwarf.h:DW_AT_endianity = 0x65)
+endianity = "endianity"
 
 
 [default]
