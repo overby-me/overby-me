@@ -3766,6 +3766,25 @@ fn parse_interp_string(s: &str) -> Expr {
                             Box::new(Expr::ScalarVar(v.to_string()))
                         };
                         parts.push(InterpPart::ArrayElement(c.to_string(), idx_expr));
+                    } else if (c == '-' || c == '+') && i < chars.len() && chars[i] == '{' {
+                        // `$-{name}` / `$+{name}` — named-capture hashes
+                        // %- (multi-value) and %+. Single subscript only;
+                        // arrow chains land in the next branch.
+                        i += 1;
+                        let mut key_str = String::new();
+                        while i < chars.len() && chars[i] != '}' {
+                            key_str.push(chars[i]);
+                            i += 1;
+                        }
+                        if i < chars.len() && chars[i] == '}' {
+                            i += 1;
+                        }
+                        let key_expr = if let Some(varname) = key_str.strip_prefix('$') {
+                            Expr::ScalarVar(varname.to_string())
+                        } else {
+                            Expr::StringLit(key_str)
+                        };
+                        parts.push(InterpPart::HashElement(c.to_string(), Box::new(key_expr)));
                     } else if i + 1 < chars.len()
                         && chars[i] == '-'
                         && chars[i + 1] == '>'

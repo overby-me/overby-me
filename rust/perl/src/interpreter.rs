@@ -9520,6 +9520,18 @@ impl Interpreter {
                             self.set_global_var(&i.to_string(), Value::Undef);
                         }
                     }
+                    // Populate %+ from named captures so `$+{name}` reads
+                    // the right value. `re.capture_names()` yields one
+                    // entry per group (None for unnamed); skip the first
+                    // (the whole match has no name).
+                    let mut named_hash: std::collections::HashMap<String, Value> =
+                        std::collections::HashMap::new();
+                    for n in re.capture_names().flatten() {
+                        if let Some(m) = caps.name(n) {
+                            named_hash.insert(n.to_string(), Value::Str(m.as_str().to_string()));
+                        }
+                    }
+                    self.globals.hashes.insert("+".to_string(), named_hash);
                     let m0 = caps.get(0).unwrap();
                     let end = start + m0.end();
                     // Store match special variables
