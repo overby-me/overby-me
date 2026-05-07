@@ -190,6 +190,8 @@ fn snapshot_per_url(opts: &Options) -> PerUrlOptions {
         no_basic: opts.no_basic,
         user: opts.user.clone(),
         dump_header: opts.dump_header.clone(),
+        proxy: opts.proxy.clone(),
+        proxy_user: opts.proxy_user.clone(),
         first_in_group: false,
     }
 }
@@ -931,6 +933,8 @@ pub(crate) fn parse_args() -> Options {
                 opts.no_basic = false;
                 opts.user = None;
                 opts.dump_header = None;
+                opts.proxy = None;
+                opts.proxy_user = None;
                 expecting_url_after_next = true;
                 i += 1;
                 continue;

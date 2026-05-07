@@ -356,6 +356,8 @@ fn main() {
             o.no_basic = puo.no_basic;
             o.user = puo.user.clone();
             o.dump_header = puo.dump_header.clone();
+            o.proxy = puo.proxy.clone();
+            o.proxy_user = puo.proxy_user.clone();
             o
         } else {
             opts.clone()

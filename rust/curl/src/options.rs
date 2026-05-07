@@ -25,6 +25,8 @@ pub(crate) struct PerUrlOptions {
     pub(crate) no_basic: bool,
     pub(crate) user: Option<String>,
     pub(crate) dump_header: Option<PathBuf>,
+    pub(crate) proxy: Option<String>,
+    pub(crate) proxy_user: Option<String>,
     /// True when this URL is the first transfer of its operation group
     /// (i.e. URL index 0, or the first URL after a --next). Used by `-D`
     /// to decide whether to truncate or append the dump-header file
