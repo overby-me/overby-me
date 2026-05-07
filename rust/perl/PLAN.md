@@ -6,10 +6,12 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**287/301 Nix tests passing** (95%) — selected tests from the upstream Perl test suite.
+**288/302 Nix tests passing** (95%) — selected tests from the upstream Perl test suite.
 
 This iteration's improvements:
 
+- **Stringify blessed refs as `Class=TYPE(0xADDR)`** — `bless \$x, "Foo"` now stringifies as `"Foo=SCALAR(0x...)"` in interpolation, `print`, and `=~` regex matching, matching reference perl. New `Interpreter::stringify_value(&Value)` helper consults `blessed_refs` for the class prefix; `Value::to_str` continues to produce the unblessed form for places that intentionally bypass class info. Unblocks op/sub_lval test 2 (`grep /main/, a(b())`); op/sub_lval.t diff: 341 → 334.
+- **Add `re/pat_rt_report` to nix testsuite** — was already passing byte-for-byte but not yet wired in.
 - **Package-qualify global var/array/hash names per perlvar** — previously bare `$x` / `@x` / `%x` inside `package foo { … }` wrote to the same slot as `$main::x`. Now `qualify_global` maps each bare global through the current package (skipping for `$_`, `$0`, `%ENV`, `@ARGV`, etc., which are documented as living in `main::`); `$main::x` strips the `main::` so it shares the legacy bare slot. `set_var`'s "package-qualified names always bind globally" branch also routes through `qualify_global` so `$main::x++` from inside `package foo` correctly advances the same slot reference perl uses. Targets op/array test 126 (still gated on indirect-method dispatch) and various `package PKG { @ISA = ... }` patterns.
 - **`local ($SCALAR, $HASH{KEY}) = (...)` form** — the parser-level `parse_var_list` now recognises `$NAME{LITERAL_KEY}` inside the `local (...)` group, encoding the key into the var name with a NUL separator. `Stmt::Local` runtime then routes that entry through the hash-element localisation path. op/join.t diff shrank 76 → 64 (tests 9–10 now fire warnings on undef during join, since `local $SIG{__WARN__} = sub { … }` actually sets the handler now).
 - **Bare `exit` parses as a builtin call** — previously `exit;` (no parens, no arg) parsed as the bareword string `"exit"` since `exit` wasn't in the nullary-builtin recognition list, so `exit;` inside a loop body did nothing. Now `exit` (and `exit EXPR`) parses with the same parens-or-arg shape as `rand`/`srand`. re/subst_wamp.t now passes exact-diff. (Plus 19 mro/class/op/test_pl tests that already passed byte-for-byte but weren't yet wired into the nix testsuite list.)
