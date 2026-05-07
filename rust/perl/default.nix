@@ -440,6 +440,14 @@
       }
       {
         category = "op";
+        name = "filehandle";
+      }
+      {
+        category = "op";
+        name = "filetest";
+      }
+      {
+        category = "op";
         name = "fork";
       }
       {
@@ -569,6 +577,10 @@
       {
         category = "op";
         name = "isa";
+      }
+      {
+        category = "op";
+        name = "kill0";
       }
       {
         category = "op";
@@ -752,6 +764,10 @@
       }
       {
         category = "test_pl";
+        name = "_num_to_alpha";
+      }
+      {
+        category = "test_pl";
         name = "plan_skip_all";
       }
 
@@ -920,6 +936,10 @@
         category = "class";
         name = "threads";
       }
+      {
+        category = "class";
+        name = "utf8";
+      }
 
       # --- t/japh/ (selected) ---
       {
@@ -943,6 +963,62 @@
       {
         category = "mro";
         name = "inconsistent_MRO";
+      }
+      {
+        category = "mro";
+        name = "inconsistent_c3";
+      }
+      {
+        category = "mro";
+        name = "inconsistent_c3_utf8";
+      }
+      {
+        category = "mro";
+        name = "isa_c3";
+      }
+      {
+        category = "mro";
+        name = "isa_c3_utf8";
+      }
+      {
+        category = "mro";
+        name = "isa_dfs";
+      }
+      {
+        category = "mro";
+        name = "isa_dfs_utf8";
+      }
+      {
+        category = "mro";
+        name = "isarev";
+      }
+      {
+        category = "mro";
+        name = "isarev_utf8";
+      }
+      {
+        category = "mro";
+        name = "next_edgecases";
+      }
+      {
+        category = "mro";
+        name = "next_edgecases_utf8";
+      }
+      {
+        category = "mro";
+        name = "overload_c3";
+      }
+      {
+        category = "mro";
+        name = "overload_c3_utf8";
+      }
+      {
+        category = "mro";
+        name = "overload_dfs";
+      }
+      {
+        category = "mro";
+        name = "recursion_c3_utf8";
       }
       {
         category = "mro";
@@ -1083,6 +1159,10 @@
       {
         category = "re";
         name = "subst";
+      }
+      {
+        category = "re";
+        name = "subst_wamp";
       }
       {
         category = "re";
