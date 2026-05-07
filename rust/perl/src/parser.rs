@@ -125,7 +125,26 @@ impl Parser {
                 last_line = line;
             }
             if let Some(stmt) = self.parse_stmt() {
-                stmts.push(stmt);
+                // Flatten Stmt::BareBlock that's just a hoist wrapper
+                // (`[Stmt::Begin(...), inner]`) so the BEGIN ends up at
+                // the program's top level where `run()` /
+                // `eval_string_inner` will pick it up for compile-time
+                // execution. Used by `package NAME VERSION { … }` to
+                // assign `$NAME::VERSION` before any later read of it
+                // inside the same eval.
+                if let Stmt::BareBlock(inner) = &stmt
+                    && inner.len() == 2
+                    && matches!(inner[0], Stmt::Begin(_, _))
+                {
+                    let Stmt::BareBlock(inner) = stmt else {
+                        unreachable!()
+                    };
+                    let mut iter = inner.into_iter();
+                    stmts.push(iter.next().unwrap());
+                    stmts.push(iter.next().unwrap());
+                } else {
+                    stmts.push(stmt);
+                }
             }
         }
         stmts
@@ -267,20 +286,56 @@ impl Parser {
                 } else {
                     "main".to_string()
                 };
+                // `package NAME VERSION` — assign $NAME::VERSION = VERSION
+                // before the block (or as a side-effect of the bare form).
+                let version: Option<Expr> =
+                    if matches!(self.tok(), Token::Float(_) | Token::Integer(_)) {
+                        Some(self.parse_unary())
+                    } else {
+                        None
+                    };
                 // `package NAME { BLOCK }` — scoped package: switch to
                 // NAME inside the block, revert on exit. Implement by
                 // wrapping the block's statements with a Package(NAME) at
                 // the front and a Package(<previous>) at the end. The
                 // interpreter's `Stmt::Block` already reverts the package
                 // on exit (see `Stmt::Block` handling).
+                // `package NAME VERSION;` and `package NAME VERSION { … }`
+                // — Perl evaluates the version at compile time. We mirror
+                // that by wrapping the assignment in an implicit BEGIN
+                // block so it runs before the surrounding statements (and
+                // before any later `$NAME::VERSION` reads in the same
+                // eval).
+                let version_begin = version.map(|ver| {
+                    Stmt::Begin(
+                        vec![Stmt::Expr(Expr::Assign(
+                            Box::new(Expr::ScalarVar(format!("{name}::VERSION"))),
+                            Box::new(ver),
+                        ))],
+                        0,
+                    )
+                });
                 if self.at(&Token::LBrace) {
                     let body = self.parse_brace_block();
-                    let mut stmts = Vec::with_capacity(body.len() + 1);
-                    stmts.push(Stmt::Package(name));
-                    stmts.extend(body);
-                    return Some(Stmt::Block(stmts));
+                    let mut block_stmts = Vec::with_capacity(body.len() + 1);
+                    block_stmts.push(Stmt::Package(name.clone()));
+                    block_stmts.extend(body);
+                    let block = Stmt::Block(block_stmts);
+                    // Hoist the implicit `BEGIN { $NAME::VERSION = … }`
+                    // OUT of the surrounding Block so it gets recognised
+                    // by `run()` / `eval_string_inner`'s BEGIN pass and
+                    // runs at compile-time. Inside-the-block placement
+                    // would defer it to runtime, which is too late for
+                    // earlier `$Foo::VERSION` reads in the same eval.
+                    if let Some(begin) = version_begin {
+                        return Some(Stmt::BareBlock(vec![begin, block]));
+                    }
+                    return Some(block);
                 }
                 self.eat(&Token::Semi);
+                if let Some(begin) = version_begin {
+                    return Some(Stmt::BareBlock(vec![begin, Stmt::Package(name)]));
+                }
                 return Some(Stmt::Package(name));
             }
             Token::Use => {

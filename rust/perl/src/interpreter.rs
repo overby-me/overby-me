@@ -11819,6 +11819,33 @@ impl Interpreter {
         self.set_global_var("@", Value::Str(String::new()));
         self.push_scope();
 
+        // First pass: run BEGIN blocks at compile time, like `run()`.
+        // Reference perl's BEGIN-inside-`eval STRING` semantics: BEGINs
+        // execute as the eval-string compiles, before any main statements
+        // of the same eval. Required for `package NAME VERSION { … }`
+        // (we hoist VERSION assignment into a BEGIN so a later
+        // `$NAME::VERSION` read inside the same eval sees it).
+        for stmt in &stmts {
+            if let Stmt::Begin(body, _) = stmt {
+                match self.exec_stmts(body) {
+                    Flow::Die(msg) => {
+                        self.set_global_var("@", Value::Str(msg));
+                        self.pop_scope();
+                        self.current_file = saved_file;
+                        self.current_line = saved_line;
+                        return Value::Undef;
+                    }
+                    Flow::Exit(_) => {
+                        self.pop_scope();
+                        self.current_file = saved_file;
+                        self.current_line = saved_line;
+                        return Value::Undef;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         // Find the last runtime-meaningful statement index so we can
         // propagate the eval's calling context to it (tail-context),
         // letting `wantarray` inside the last expression see list/scalar
@@ -11843,6 +11870,10 @@ impl Interpreter {
         };
 
         for (idx, stmt) in stmts.iter().enumerate() {
+            // BEGIN blocks were already executed in the first pass.
+            if matches!(stmt, Stmt::Begin(_, _)) {
+                continue;
+            }
             // Tail-position: propagate the eval's caller context so
             // `wantarray` inside the last expression sees list/scalar.
             if idx == last_idx {
