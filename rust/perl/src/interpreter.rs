@@ -2872,7 +2872,7 @@ impl Interpreter {
         match expr {
             Expr::IntLit(n) => Value::Num(*n as f64),
             Expr::FloatLit(n) => Value::Num(*n),
-            Expr::StringLit(s) => Value::Str(s.clone()),
+            Expr::StringLit(s) => Value::Str(apply_case_modifiers(s)),
             Expr::Undef => Value::Undef,
             Expr::RegexLit(pat, flags) => {
                 // Perl's qr// returns a compiled-regex scalar that `ref()`
@@ -4385,7 +4385,7 @@ impl Interpreter {
                         }
                     }
                 }
-                Value::Str(result)
+                Value::Str(apply_case_modifiers(&result))
             }
 
             _ => Value::Undef,
@@ -12321,6 +12321,63 @@ fn bool_value(b: bool) -> Value {
     } else {
         Value::Str(String::new())
     }
+}
+
+/// Apply Perl's case-modifier escapes to an interpolated string. The
+/// lexer encodes each escape as a sentinel ASCII control byte:
+///   `\x10` = `\u` (uppercase next char)
+///   `\x11` = `\l` (lowercase next char)
+///   `\x12` = `\U` (uppercase all subsequent chars until `\E`)
+///   `\x13` = `\L` (lowercase all subsequent chars until `\E`)
+///   `\x14` = `\E` (end most-recent `\U` / `\L` / `\Q` block)
+///   `\x15` = `\Q` (quotemeta all subsequent chars until `\E`)
+fn apply_case_modifiers(s: &str) -> String {
+    if !s.chars().any(|c| matches!(c, '\u{10}'..='\u{15}')) {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut block_mode: Option<char> = None; // 'U', 'L', 'Q'
+    let mut single_mode: Option<char> = None; // 'u', 'l'
+    for c in s.chars() {
+        match c {
+            '\u{10}' => single_mode = Some('u'),
+            '\u{11}' => single_mode = Some('l'),
+            '\u{12}' => block_mode = Some('U'),
+            '\u{13}' => block_mode = Some('L'),
+            '\u{14}' => block_mode = None,
+            '\u{15}' => block_mode = Some('Q'),
+            _ => {
+                // Apply block-mode FIRST, then single-mode on top —
+                // matching Perl's `\u\L$x` order: $x is lowercased
+                // (block \L), then the first char is uppercased (\u).
+                let mut transformed = match block_mode {
+                    Some('U') => c.to_string().to_uppercase(),
+                    Some('L') => c.to_string().to_lowercase(),
+                    Some('Q') => {
+                        if c.is_ascii_alphanumeric() || c == '_' {
+                            c.to_string()
+                        } else {
+                            format!("\\{c}")
+                        }
+                    }
+                    _ => c.to_string(),
+                };
+                if let Some(m) = single_mode {
+                    let first = transformed.chars().next().unwrap_or(c);
+                    let rest: String = transformed.chars().skip(1).collect();
+                    let head = match m {
+                        'u' => first.to_uppercase().next().unwrap_or(first).to_string(),
+                        'l' => first.to_lowercase().next().unwrap_or(first).to_string(),
+                        _ => first.to_string(),
+                    };
+                    transformed = format!("{head}{rest}");
+                    single_mode = None;
+                }
+                out.push_str(&transformed);
+            }
+        }
+    }
+    out
 }
 
 fn compile_time_use_check(

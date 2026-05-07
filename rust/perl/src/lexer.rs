@@ -2362,6 +2362,35 @@ impl Lexer {
                         s.push('\x1B');
                         self.pos += 1;
                     }
+                    // Case-modifier escapes — emit sentinel bytes that
+                    // the interpreter detects at interpolation time and
+                    // applies to subsequent characters until `\E`.
+                    // U+0010-U+0015 are control chars unlikely to appear
+                    // in literal strings.
+                    'u' => {
+                        s.push('\x10'); // ucfirst next char
+                        self.pos += 1;
+                    }
+                    'l' => {
+                        s.push('\x11'); // lcfirst next char
+                        self.pos += 1;
+                    }
+                    'U' => {
+                        s.push('\x12'); // uc all chars until \E
+                        self.pos += 1;
+                    }
+                    'L' => {
+                        s.push('\x13'); // lc all chars until \E
+                        self.pos += 1;
+                    }
+                    'E' => {
+                        s.push('\x14'); // end \U/\L/\Q
+                        self.pos += 1;
+                    }
+                    'Q' => {
+                        s.push('\x15'); // quotemeta all chars until \E
+                        self.pos += 1;
+                    }
                     'c' => {
                         // \cX — control character: XOR next char with 0x40
                         self.pos += 1;
