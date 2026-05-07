@@ -8791,8 +8791,17 @@ impl Interpreter {
                 return hash.clone();
             }
         }
-        if let Some(rc) = self.aliased_hashes.get(name) {
+        let qname = self.qualify_global(name);
+        if let Some(rc) = self.aliased_hashes.get(qname.as_str()) {
             return rc.borrow().clone();
+        }
+        if qname != name
+            && let Some(rc) = self.aliased_hashes.get(name)
+        {
+            return rc.borrow().clone();
+        }
+        if let Some(h) = self.globals.hashes.get(qname.as_str()) {
+            return h.clone();
         }
         self.globals.hashes.get(name).cloned().unwrap_or_default()
     }
@@ -8971,14 +8980,22 @@ impl Interpreter {
                 return;
             }
         }
-        if let Some(rc) = self.aliased_hashes.get(name) {
+        let qname = self.qualify_global(name);
+        if let Some(rc) = self.aliased_hashes.get(qname.as_str()) {
             rc.borrow_mut().insert(key.to_string(), val);
             return;
         }
-        // Not found in lexical scopes — set in globals
+        if qname != name
+            && let Some(rc) = self.aliased_hashes.get(name)
+        {
+            rc.borrow_mut().insert(key.to_string(), val);
+            return;
+        }
+        // Not found in lexical scopes — set in globals under the
+        // package-qualified name.
         self.globals
             .hashes
-            .entry(name.to_string())
+            .entry(qname)
             .or_default()
             .insert(key.to_string(), val);
     }
