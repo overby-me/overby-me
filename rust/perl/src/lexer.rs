@@ -1168,6 +1168,38 @@ impl Lexer {
                             let name = self.read_ident();
                             tokens.push(Token::HashVar(name));
                         } else if is_hash && self.ch() == '{' {
+                            // Detect `%{^NAME}` (and `%{ ^NAME }`) — caret
+                            // special-variable hash. Emit a direct HashVar
+                            // so reads/writes hit globals[^NAME] instead of
+                            // routing through HashBlockDerefOpen, which
+                            // would treat `^NAME` as a unary-XOR expression.
+                            let mut probe = self.pos + 1;
+                            while probe < self.input.len() && self.input[probe] == ' ' {
+                                probe += 1;
+                            }
+                            if probe < self.input.len() && self.input[probe] == '^' {
+                                let mut name_end = probe + 1;
+                                while name_end < self.input.len()
+                                    && (self.input[name_end].is_ascii_alphanumeric()
+                                        || self.input[name_end] == '_')
+                                {
+                                    name_end += 1;
+                                }
+                                let mut after = name_end;
+                                while after < self.input.len() && self.input[after] == ' ' {
+                                    after += 1;
+                                }
+                                if name_end > probe + 1
+                                    && after < self.input.len()
+                                    && self.input[after] == '}'
+                                {
+                                    let name: String =
+                                        self.input[probe + 1..name_end].iter().collect();
+                                    self.pos = after + 1;
+                                    tokens.push(Token::HashVar(format!("^{name}")));
+                                    continue;
+                                }
+                            }
                             // `%{ EXPR }` — block-form hash deref. The inner
                             // expression is arbitrary; the parser handles
                             // the `{`..`}` as an expression whose result is
