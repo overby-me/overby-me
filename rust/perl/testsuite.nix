@@ -30,7 +30,12 @@ pkgs.runCommand "rust-perl-test-${category}-${name}" {
 
   # Run with rust-perl (release build — debug is too slow for tests like
   # op/cond.t whose 20 000-deep ternary doesn't finish in 60 s unoptimised).
-  timeout 120 ${pkgs.rust-perl}/bin/perl -I../lib ${category}/${name}.t > "$TMPDIR/actual" 2>&1 || true
+  # Set PERL5LIB to reference perl's @INC so rust-perl can find core
+  # modules (Carp, Exporter, …) the same way vanilla does — vanilla
+  # has them compiled in; we don't, so without this rust-perl fails on
+  # `use Carp;` while vanilla passes (e.g. benchmark/gh7094).
+  REF_INC=$(${pkgs.perl}/bin/perl -e 'print join ":", @INC')
+  PERL5LIB="$REF_INC" timeout 120 ${pkgs.rust-perl}/bin/perl -I../lib ${category}/${name}.t > "$TMPDIR/actual" 2>&1 || true
 
   # Normalize binary paths so /nix/store/... differences don't cause false failures
   REF_PERL="${pkgs.perl}/bin/perl"

@@ -245,8 +245,21 @@ fn run_interpreter() -> i32 {
     if let Some(data) = data_section {
         interp.set_data_section(data);
     }
-    // Populate @INC from -I flags (prepended in order).
-    interp.set_inc(&include_dirs);
+    // Populate @INC: -I flags (prepended in order), then PERL5LIB
+    // entries (also prepended; matches reference perl). Without this,
+    // tests that rely on the perl install's stdlib (Carp, Exporter,
+    // etc.) fail to find core modules — vanilla picks them up via its
+    // compiled-in @INC, while our impl has none. PERL5LIB is the
+    // standard escape hatch for adding paths without rebuilding perl.
+    let mut all_dirs = include_dirs.clone();
+    if let Ok(perl5lib) = env::var("PERL5LIB") {
+        for p in perl5lib.split(':') {
+            if !p.is_empty() {
+                all_dirs.push(p.to_string());
+            }
+        }
+    }
+    interp.set_inc(&all_dirs);
     interp.run(&program);
 
     interp.exit_code
