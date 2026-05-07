@@ -6,10 +6,12 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**288/302 Nix tests passing** (95%) — selected tests from the upstream Perl test suite.
+**289/302 Nix tests passing** (95%) — selected tests from the upstream Perl test suite.
 
 This iteration's improvements:
 
+- **Tail-iterate `eval_list` for deeply nested ArrayLit nodes** — op/list test 73 (`SEGV in Perl_list`) generates a 100k-deep nested `(1, (1, (1, …)))` and previously stack-overflowed our recursive eval_list. Now when the LAST item of an ArrayLit is itself an ArrayLit we descend iteratively (loop+slice instead of recursion), keeping the head items' eval recursive (correct order preserved). 100k depth: 60s+ → 20s. op/list.t now passes exact-diff.
+- **Basic `sub : lvalue` support for simple bodies** — `sub get_st : lvalue { $blah }` plus `get_st = 7` now updates `$blah`. Parser captures the `:lvalue` attribute into a new `is_lvalue` field on `Stmt::Sub`; runtime tracks lvalue subs in `Interpreter::lvalue_subs`. `assign_to(Call(name, …), val)` runs the body's pre-last stmts for side effects then recurses with the body's last expression as the lvalue target. Nested lvalue calls (`id(get_st) = 10`) still pending — needs alias-passing semantics. op/sub_lval.t diff: 341 → 311.
 - **Package-qualify `aliased_arrays` / `aliased_hashes` / `aliased_vars` slots when taking refs** — taking `\@ISA` in `package glelp` previously inserted the shared `Rc` under bare `"ISA"`, which then pretended to be every package's `@ISA`. Subsequent `$#ISA = -1; @ISA = qw(Foo)` in `package peen` would mutate `@glelp::ISA` instead. Now ref-taking goes through `qualify_global` so each package's @ISA / %hash / $scalar gets its own slot. op/array.t test 126 ('arylen_p magic does not stop isa magic from being copied') now passes; op/array.t diff: 156 → 149.
 - **`package NAME VERSION { … }` sets `$NAME::VERSION` at compile time** — wraps the version-assignment in an implicit BEGIN. The parser hoists `[BEGIN, Block]` BareBlock at top level so the BEGIN reaches `run()` / `eval_string_inner`'s compile-time pass. `eval_string_inner` got a first-pass loop that runs BEGIN blocks before main statements, mirroring `run()` (without it, BEGIN inside `eval q{ … }` ran inline at its position rather than ahead of earlier statements). comp/package_block.t diff: 14 → 10.
 - **Indirect-method-syntax fallback in `eval_call`** — when `Call(name, [bareword class])` has no matching sub but `class::name` (or via `@ISA`) does, dispatch as `class->name()`. Mirrors reference perl's pre-`no feature 'indirect'` behaviour. Unblocks op/array test 126's `pling peen` form.
