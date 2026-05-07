@@ -881,6 +881,10 @@ fn main() {
                     f.write_all(data)
                 };
 
+                // -o `-` is treated as stdout (test 756): replace `Some("-")`
+                // with `None` so the stdout branch below kicks in.
+                let output_path = output_path.filter(|p| p.to_str() != Some("-"));
+
                 if nc_failed || j_refuse_overwrite {
                     // Skip writing the body — exit 23 already set.
                 } else if let Some(ref path) = output_path {

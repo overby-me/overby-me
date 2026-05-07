@@ -308,6 +308,12 @@ pub(crate) fn parse_args() -> Options {
                 i += 1;
                 opts.outputs.push(PathBuf::from(next_arg(&args, i, "-o")));
             }
+            "--out-null" => {
+                // Like `-o /dev/null` — discards the body for this URL slot
+                // (test 756). The platform-portable path "/dev/null" is OS X /
+                // Linux / BSD only, but our tests run on Linux only.
+                opts.outputs.push(PathBuf::from("/dev/null"));
+            }
             "-O" | "--remote-name" => {
                 opts.remote_name = true;
             }
@@ -810,6 +816,10 @@ pub(crate) fn parse_args() -> Options {
                 // Disables Basic auth for this URL group; -u credentials are
                 // still parsed but not sent as Authorization (test 2040).
                 opts.no_basic = true;
+            }
+            "--oauth2-bearer" => {
+                i += 1;
+                opts.oauth2_bearer = Some(next_arg(&args, i, "--oauth2-bearer"));
             }
             "-z" | "--time-cond" => {
                 i += 1;

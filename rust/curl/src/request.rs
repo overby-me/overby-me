@@ -157,7 +157,13 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
     // (e.g. http://user:pass@host.example/path). Skip entirely when --anyauth/--digest/
     // --ntlm is set (curl waits for server challenge).
     let auth_user = opts.user.as_deref().or(url.userinfo.as_deref());
-    if let Some(user) = auth_user
+    if let Some(token) = opts.oauth2_bearer.as_deref() {
+        // --oauth2-bearer takes precedence over -u/userinfo Basic auth and
+        // adds an `Authorization: Bearer <token>` header. On cross-host
+        // redirects the bearer is dropped along with regular Authorization
+        // (test 778).
+        req.push_str(&format!("Authorization: Bearer {token}\r\n"));
+    } else if let Some(user) = auth_user
         && !opts.defer_auth
         && !opts.no_basic
     {
@@ -1810,6 +1816,7 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                         opts.headers
                             .retain(|(k, _)| !k.eq_ignore_ascii_case("authorization"));
                         opts.user = None;
+                        opts.oauth2_bearer = None;
                     } else if opts.user.is_none()
                         && new_url.userinfo.is_none()
                         && let Some(ui) = url.userinfo.clone()

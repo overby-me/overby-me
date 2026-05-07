@@ -89,6 +89,7 @@ pub struct Options {
     /// "HOST1:PORT1:HOST2:PORT2" entries for --connect-to.
     pub(crate) connect_tos: Vec<String>,
     pub(crate) no_basic: bool,
+    pub(crate) oauth2_bearer: Option<String>,
     pub(crate) cacert: Option<PathBuf>,
     pub(crate) cert: Option<PathBuf>,
     pub(crate) cert_key: Option<PathBuf>,
@@ -190,6 +191,7 @@ impl Default for Options {
             resolves: Vec::new(),
             connect_tos: Vec::new(),
             no_basic: false,
+            oauth2_bearer: None,
             cacert: None,
             cert: None,
             cert_key: None,
