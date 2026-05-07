@@ -4334,7 +4334,9 @@ impl Interpreter {
                     match part {
                         InterpPart::Lit(s) => result.push_str(s),
                         InterpPart::ScalarVar(name) => {
-                            let v = self.get_var(name);
+                            // Route through eval_expr so tied scalars
+                            // get FETCH'd at interpolation time.
+                            let v = self.eval_expr(&Expr::ScalarVar(name.clone()));
                             result.push_str(&self.stringify_value(&v));
                         }
                         InterpPart::ArrayVar(name) => {
