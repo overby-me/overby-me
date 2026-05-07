@@ -1166,6 +1166,10 @@
       }
       {
         category = "re";
+        name = "pat_rt_report";
+      }
+      {
+        category = "re";
         name = "anyof";
       }
       {
