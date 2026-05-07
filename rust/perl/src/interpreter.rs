@@ -9424,23 +9424,41 @@ impl Interpreter {
         // `name() = val` for lvalue subs — find the body's last
         // expression (a simple ScalarVar / ArrayElement / HashElement)
         // and assign through that. Run preceding stmts for side effects.
-        if let Expr::Call(name, args) = target
-            && self.lvalue_subs.contains(name)
-            && let Some((_params, body)) = self.subs.get(name).cloned()
-            && !body.is_empty()
-        {
-            // Run all stmts except the last for side effects.
-            let _ = args; // arg evaluation deferred — args are unused for the simple cases we cover
-            for stmt in &body[..body.len() - 1] {
-                self.exec_stmt(stmt);
+        if let Expr::Call(name, args) = target {
+            if self.lvalue_subs.contains(name)
+                && let Some((_params, body)) = self.subs.get(name).cloned()
+                && !body.is_empty()
+            {
+                let _ = args; // arg evaluation deferred — args unused for simple cases
+                for stmt in &body[..body.len() - 1] {
+                    self.exec_stmt(stmt);
+                }
+                if let Stmt::Expr(lvalue_expr) = &body[body.len() - 1] {
+                    return self.assign_to(lvalue_expr, val);
+                }
+                return;
             }
-            // The last stmt must be `Stmt::Expr(LVALUE)`. Recurse into
-            // assign_to with that lvalue. Anything else falls through
-            // to the normal path (no-op assignment).
-            if let Stmt::Expr(lvalue_expr) = &body[body.len() - 1] {
-                return self.assign_to(lvalue_expr, val);
+            // `nolv = …` where `nolv` is a known non-lvalue sub —
+            // reference perl emits a compile-time "Can't modify
+            // non-lvalue subroutine call" error. We emit it at
+            // assignment-time so `eval { nolv = … }` captures `$@`.
+            if self.subs.contains_key(name) {
+                let qualified = if name.contains("::") {
+                    name.clone()
+                } else {
+                    format!("main::{name}")
+                };
+                let file = if self.current_file.is_empty() {
+                    "-e".to_string()
+                } else {
+                    self.current_file.clone()
+                };
+                let line = self.current_line;
+                self.pending_flow = Some(Flow::Die(format!(
+                    "Can't modify non-lvalue subroutine call of &{qualified} in scalar assignment at {file} line {line}.\n"
+                )));
+                return;
             }
-            return;
         }
         match target {
             Expr::ScalarVar(name) => self.set_var(name, val),
