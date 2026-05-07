@@ -1113,8 +1113,40 @@ impl Parser {
             loop {
                 match self.tok() {
                     Token::ScalarVar(name) => {
-                        names.push(format!("${}", name));
+                        let n = name.clone();
                         self.pos += 1;
+                        // `local (..., $NAME{KEY}, ...)` — hash element
+                        // form. Encode the literal key into the name string
+                        // with a NUL separator so Stmt::Local can recognise
+                        // it and route to a single-element localisation.
+                        if matches!(self.tok(), Token::LBrace) {
+                            let save = self.pos;
+                            self.pos += 1;
+                            let key_str = match self.tok() {
+                                Token::Ident(k) | Token::StringLit(k) => {
+                                    let k = k.clone();
+                                    self.pos += 1;
+                                    if matches!(self.tok(), Token::RBrace) {
+                                        self.pos += 1;
+                                        Some(k)
+                                    } else {
+                                        self.pos = save;
+                                        None
+                                    }
+                                }
+                                _ => {
+                                    self.pos = save;
+                                    None
+                                }
+                            };
+                            if let Some(k) = key_str {
+                                names.push(format!("${n}\u{0}{k}"));
+                            } else {
+                                names.push(format!("${n}"));
+                            }
+                        } else {
+                            names.push(format!("${n}"));
+                        }
                     }
                     Token::ArrayVar(name) => {
                         names.push(format!("@{}", name));

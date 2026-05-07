@@ -1698,6 +1698,22 @@ impl Interpreter {
                         if name == "$_undef_placeholder" {
                             continue;
                         }
+                        // `local ($SIG{__WARN__}, ...)` — the parser encodes
+                        // the literal key with a NUL separator. Localise the
+                        // single hash element to items[i].
+                        if let Some((scalar, key)) =
+                            name.strip_prefix('$').and_then(|s| s.split_once('\u{0}'))
+                        {
+                            let hash_name = canon_var(scalar).to_string();
+                            let key_s = key.to_string();
+                            let prior = self.get_hash(&hash_name).get(&key_s).cloned();
+                            if let Some(saves) = self.local_hash_elem_saves.last_mut() {
+                                saves.push((hash_name.clone(), key_s.clone(), prior));
+                            }
+                            let val = items.get(i).cloned().unwrap_or(Value::Undef);
+                            self.set_hash_element(&hash_name, &key_s, val);
+                            continue;
+                        }
                         // Strip the single leading sigil only — `$@` keeps
                         // its `@` as the variable name, not as another sigil.
                         let raw = name.strip_prefix(['$', '@', '%']).unwrap_or(name);
