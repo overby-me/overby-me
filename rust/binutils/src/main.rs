@@ -6936,6 +6936,7 @@ fn tool_objcopy(args: &[String]) -> i32 {
     let mut binary_symbol_prefix: Option<String> = None;
     let mut binary_architecture: Option<String> = None;
     let mut show_info = false;
+    let mut merge_notes = false;
     let mut pad_to: Option<u64> = None;
     let mut gap_fill: u8 = 0;
     let mut reverse_bytes: Option<usize> = None;
@@ -7282,7 +7283,11 @@ fn tool_objcopy(args: &[String]) -> i32 {
             _ if arg.starts_with("--byte=") => {
                 interleave_byte = arg.split_once('=').unwrap().1.parse::<usize>().unwrap_or(0);
             }
-            "--merge-notes" | "-M" | "--no-merge-notes" => {}
+            "--merge-notes" | "-M" => {
+                merge_notes = true;
+                other_modifications = true;
+            }
+            "--no-merge-notes" => {}
             "--info" => {
                 show_info = true;
             }
@@ -7560,6 +7565,67 @@ fn tool_objcopy(args: &[String]) -> i32 {
             {
                 let _ = set_file_times(Path::new(output), mtime);
             }
+        }
+        return 0;
+    }
+
+    // --merge-notes: merge consecutive GNU build attribute notes that share
+    // the same name into a single note covering the union of their address
+    // ranges. Implemented as an in-place section-data rewrite when no other
+    // transformations are requested.
+    if merge_notes
+        && !strip_debug
+        && !strip_all
+        && !strip_unneeded
+        && remove_sections.is_empty()
+        && keep_sections.is_empty()
+        && strip_symbols.is_empty()
+        && globalize_syms.is_empty()
+        && keep_global_syms.is_empty()
+        && set_section_alignment.is_empty()
+        && set_section_flags.is_empty()
+        && rename_sections.is_empty()
+        && localize_syms.is_empty()
+        && weaken_syms.is_empty()
+        && !weaken_all
+        && !localize_hidden
+        && add_sections.is_empty()
+        && add_symbols.is_empty()
+        && remove_relocations.is_empty()
+        && keep_symbols.is_empty()
+        && elf_stt_common.is_none()
+        && reverse_bytes.is_none()
+        && set_start.is_none()
+        && adjust_start == 0
+        && adjust_vma == 0
+        && adjust_section_vma.is_empty()
+    {
+        let in_data = match fs::read(input) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("objcopy: '{input}': {e}");
+                return 1;
+            }
+        };
+        if let Some(out_bytes) = objcopy_merge_build_attribute_notes(&in_data) {
+            if let Err(e) = fs::write(output, &out_bytes) {
+                eprintln!("objcopy: '{output}': {e}");
+                return 1;
+            }
+            if preserve_dates
+                && let Ok(meta) = fs::metadata(input)
+                && let Ok(mtime) = meta.modified()
+            {
+                let _ = set_file_times(Path::new(output), mtime);
+            }
+            return 0;
+        }
+        // Fall back to byte copy if merge failed.
+        if input != output
+            && let Err(e) = fs::copy(input, output)
+        {
+            eprintln!("objcopy: '{output}': {e}");
+            return 1;
         }
         return 0;
     }
@@ -10687,6 +10753,321 @@ struct StripInplaceOpts<'a> {
 struct ObjcopyInplaceOpts<'a> {
     remove_sections: &'a [String],
     keep_section_patterns: &'a [String],
+}
+
+/// In-place merge of `.gnu.build.attributes` notes (`objcopy --merge-notes`).
+///
+/// Groups notes by (name, ntype) and replaces them with a single note per
+/// group whose description spans the union of all input ranges. The output
+/// section is at most as large as the input; we pad the unused tail with
+/// zeros so other sections keep the same offsets.
+fn objcopy_merge_build_attribute_notes(data: &[u8]) -> Option<Vec<u8>> {
+    if data.len() < 0x40 || &data[..4] != b"\x7fELF" {
+        return None;
+    }
+    let class = data[4];
+    let endian = data[5];
+    if class != 1 && class != 2 {
+        return None;
+    }
+    let le = endian == 1;
+    let r16 = |o: usize| -> Option<u16> {
+        if o + 2 > data.len() {
+            return None;
+        }
+        let mut b = [0u8; 2];
+        b.copy_from_slice(&data[o..o + 2]);
+        Some(if le {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        })
+    };
+    let r32 = |o: usize| -> Option<u32> {
+        if o + 4 > data.len() {
+            return None;
+        }
+        let mut b = [0u8; 4];
+        b.copy_from_slice(&data[o..o + 4]);
+        Some(if le {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        })
+    };
+    let r64 = |o: usize| -> Option<u64> {
+        if o + 8 > data.len() {
+            return None;
+        }
+        let mut b = [0u8; 8];
+        b.copy_from_slice(&data[o..o + 8]);
+        Some(if le {
+            u64::from_le_bytes(b)
+        } else {
+            u64::from_be_bytes(b)
+        })
+    };
+    // ELF header: shoff, shentsize, shnum, shstrndx
+    let (shoff, shentsize, shnum, shstrndx) = if class == 2 {
+        (
+            r64(0x28)? as usize,
+            r16(0x3a)? as usize,
+            r16(0x3c)? as usize,
+            r16(0x3e)? as usize,
+        )
+    } else {
+        (
+            r32(0x20)? as usize,
+            r16(0x2e)? as usize,
+            r16(0x30)? as usize,
+            r16(0x32)? as usize,
+        )
+    };
+    if shoff == 0 || shnum == 0 || shstrndx >= shnum {
+        return None;
+    }
+    let expected = if class == 2 { 64 } else { 40 };
+    if shentsize != expected {
+        return None;
+    }
+    if shoff + shnum.checked_mul(shentsize)? > data.len() {
+        return None;
+    }
+    // Read section name string table
+    let sn_h = shoff + shstrndx * shentsize;
+    let (sn_off, sn_size) = if class == 2 {
+        (r64(sn_h + 24)? as usize, r64(sn_h + 32)? as usize)
+    } else {
+        (r32(sn_h + 16)? as usize, r32(sn_h + 20)? as usize)
+    };
+    if sn_off + sn_size > data.len() {
+        return None;
+    }
+    let strtab = &data[sn_off..sn_off + sn_size];
+    let read_name = |idx: u32| -> &[u8] {
+        let i = idx as usize;
+        if i >= strtab.len() {
+            return b"";
+        }
+        let end = strtab[i..]
+            .iter()
+            .position(|&b| b == 0)
+            .map(|p| i + p)
+            .unwrap_or(strtab.len());
+        &strtab[i..end]
+    };
+    // Find the .gnu.build.attributes section
+    let mut ba_idx: Option<usize> = None;
+    let mut ba_off: usize = 0;
+    let mut ba_size: usize = 0;
+    for i in 0..shnum {
+        let h = shoff + i * shentsize;
+        let name_idx = r32(h)?;
+        if read_name(name_idx) == b".gnu.build.attributes" {
+            ba_idx = Some(i);
+            if class == 2 {
+                ba_off = r64(h + 24)? as usize;
+                ba_size = r64(h + 32)? as usize;
+            } else {
+                ba_off = r32(h + 16)? as usize;
+                ba_size = r32(h + 20)? as usize;
+            }
+            break;
+        }
+    }
+    let _ = ba_idx;
+    if ba_size == 0 || ba_off + ba_size > data.len() {
+        return None;
+    }
+    let bytes = &data[ba_off..ba_off + ba_size];
+    // Parse notes
+    #[derive(Clone)]
+    struct Note {
+        name: Vec<u8>,
+        ntype: u32,
+        descsz: usize,
+        start: u64,
+        end: u64,
+    }
+    let mut notes: Vec<Note> = Vec::new();
+    let addr_size = if class == 2 { 8 } else { 4 };
+    let mut p = 0usize;
+    let mut prev_start: u64 = 0;
+    let mut prev_end: u64 = 0;
+    while p + 12 <= bytes.len() {
+        let mut a4 = [0u8; 4];
+        a4.copy_from_slice(&bytes[p..p + 4]);
+        let namesz = (if le {
+            u32::from_le_bytes(a4)
+        } else {
+            u32::from_be_bytes(a4)
+        }) as usize;
+        a4.copy_from_slice(&bytes[p + 4..p + 8]);
+        let descsz = (if le {
+            u32::from_le_bytes(a4)
+        } else {
+            u32::from_be_bytes(a4)
+        }) as usize;
+        a4.copy_from_slice(&bytes[p + 8..p + 12]);
+        let ntype = if le {
+            u32::from_le_bytes(a4)
+        } else {
+            u32::from_be_bytes(a4)
+        };
+        p += 12;
+        if p + namesz > bytes.len() {
+            return None;
+        }
+        let name_bytes = bytes[p..p + namesz].to_vec();
+        p += namesz;
+        p = (p + 3) & !3;
+        if p + descsz > bytes.len() {
+            return None;
+        }
+        let desc = &bytes[p..p + descsz];
+        p += descsz;
+        p = (p + 3) & !3;
+        let mut start = prev_start;
+        let mut end = prev_end;
+        if descsz >= addr_size * 2 {
+            if class == 2 {
+                let mut b8 = [0u8; 8];
+                b8.copy_from_slice(&desc[0..8]);
+                start = if le {
+                    u64::from_le_bytes(b8)
+                } else {
+                    u64::from_be_bytes(b8)
+                };
+                b8.copy_from_slice(&desc[8..16]);
+                end = if le {
+                    u64::from_le_bytes(b8)
+                } else {
+                    u64::from_be_bytes(b8)
+                };
+            } else {
+                let mut b4 = [0u8; 4];
+                b4.copy_from_slice(&desc[0..4]);
+                start = if le {
+                    u32::from_le_bytes(b4) as u64
+                } else {
+                    u32::from_be_bytes(b4) as u64
+                };
+                b4.copy_from_slice(&desc[4..8]);
+                end = if le {
+                    u32::from_le_bytes(b4) as u64
+                } else {
+                    u32::from_be_bytes(b4) as u64
+                };
+            }
+            prev_start = start;
+            prev_end = end;
+        }
+        notes.push(Note {
+            name: name_bytes,
+            ntype,
+            descsz,
+            start,
+            end,
+        });
+    }
+    if notes.is_empty() {
+        return None;
+    }
+    // Group by (name, ntype) and merge ranges, keeping first occurrence's
+    // position. Only merge type=OPEN (0x100); leave func notes (0x101)
+    // alone.
+    let mut order: Vec<(Vec<u8>, u32)> = Vec::new();
+    let mut merged: std::collections::HashMap<(Vec<u8>, u32), (u64, u64)> =
+        std::collections::HashMap::new();
+    for n in &notes {
+        if n.ntype != 0x100 {
+            continue;
+        }
+        let key = (n.name.clone(), n.ntype);
+        if let Some(entry) = merged.get_mut(&key) {
+            entry.0 = entry.0.min(n.start);
+            entry.1 = entry.1.max(n.end);
+        } else {
+            order.push(key.clone());
+            merged.insert(key, (n.start, n.end));
+        }
+    }
+    // Build new section data: one merged OPEN note per (name,type), then
+    // all func notes verbatim.
+    let mut out_bytes: Vec<u8> = Vec::new();
+    let put_u32 = |out: &mut Vec<u8>, v: u32| {
+        if le {
+            out.extend_from_slice(&v.to_le_bytes());
+        } else {
+            out.extend_from_slice(&v.to_be_bytes());
+        }
+    };
+    let put_u64 = |out: &mut Vec<u8>, v: u64| {
+        if le {
+            out.extend_from_slice(&v.to_le_bytes());
+        } else {
+            out.extend_from_slice(&v.to_be_bytes());
+        }
+    };
+    for key in &order {
+        let (start, end) = merged[key];
+        let (name, ntype) = key;
+        let descsz = addr_size * 2;
+        put_u32(&mut out_bytes, name.len() as u32);
+        put_u32(&mut out_bytes, descsz as u32);
+        put_u32(&mut out_bytes, *ntype);
+        out_bytes.extend_from_slice(name);
+        while out_bytes.len() % 4 != 0 {
+            out_bytes.push(0);
+        }
+        if class == 2 {
+            put_u64(&mut out_bytes, start);
+            put_u64(&mut out_bytes, end);
+        } else {
+            put_u32(&mut out_bytes, start as u32);
+            put_u32(&mut out_bytes, end as u32);
+        }
+        while out_bytes.len() % 4 != 0 {
+            out_bytes.push(0);
+        }
+    }
+    // Append func notes verbatim (re-encode from notes vector).
+    for n in &notes {
+        if n.ntype == 0x100 {
+            continue;
+        }
+        put_u32(&mut out_bytes, n.name.len() as u32);
+        put_u32(&mut out_bytes, n.descsz as u32);
+        put_u32(&mut out_bytes, n.ntype);
+        out_bytes.extend_from_slice(&n.name);
+        while out_bytes.len() % 4 != 0 {
+            out_bytes.push(0);
+        }
+        if n.descsz >= addr_size * 2 {
+            if class == 2 {
+                put_u64(&mut out_bytes, n.start);
+                put_u64(&mut out_bytes, n.end);
+            } else {
+                put_u32(&mut out_bytes, n.start as u32);
+                put_u32(&mut out_bytes, n.end as u32);
+            }
+        }
+        while out_bytes.len() % 4 != 0 {
+            out_bytes.push(0);
+        }
+    }
+    if out_bytes.len() > ba_size {
+        // Merged section is larger than original — would require shifting
+        // file offsets, which we don't support here.
+        return None;
+    }
+    // Pad with zeros to keep file layout intact.
+    while out_bytes.len() < ba_size {
+        out_bytes.push(0);
+    }
+    let mut out_data = data.to_vec();
+    out_data[ba_off..ba_off + ba_size].copy_from_slice(&out_bytes[..ba_size]);
+    Some(out_data)
 }
 
 /// In-place ELF objcopy fast path that ONLY handles `--remove-section`.
