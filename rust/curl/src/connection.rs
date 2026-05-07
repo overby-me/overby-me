@@ -265,7 +265,16 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
         let target = format!("{}:{}", url.host, url.port);
 
         let mut req = format!("CONNECT {target} {http_ver}\r\n");
-        req.push_str(&format!("Host: {target}\r\n"));
+        // If the user already supplied a Host through --proxy-header,
+        // skip the auto one — they expect their value to be the only Host
+        // sent on the CONNECT (test 1802).
+        let proxy_host = opts
+            .proxy_headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("host"));
+        if !proxy_host {
+            req.push_str(&format!("Host: {target}\r\n"));
+        }
 
         // Proxy-Authorization
         if let Some(ref proxy_user) = opts.proxy_user {
