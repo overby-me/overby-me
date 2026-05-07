@@ -3046,7 +3046,10 @@ fn readelf_find_alt_link(file_path: &str, data: &[u8]) -> Option<(Vec<u8>, Strin
     let alt_name = obj
         .section_by_name(".gnu_debugaltlink")
         .and_then(|s| s.data().ok())?;
-    let nul = alt_name.iter().position(|&b| b == 0).unwrap_or(alt_name.len());
+    let nul = alt_name
+        .iter()
+        .position(|&b| b == 0)
+        .unwrap_or(alt_name.len());
     let path = std::str::from_utf8(&alt_name[..nul]).ok()?.to_string();
     if path.is_empty() {
         return None;
@@ -3055,7 +3058,10 @@ fn readelf_find_alt_link(file_path: &str, data: &[u8]) -> Option<(Vec<u8>, Strin
         .parent()
         .map(|p| p.to_path_buf())
         .unwrap_or_default();
-    let candidates = [parent.join(&path).to_string_lossy().into_owned(), path.clone()];
+    let candidates = [
+        parent.join(&path).to_string_lossy().into_owned(),
+        path.clone(),
+    ];
     for c in &candidates {
         if std::path::Path::new(c).exists()
             && let Ok(d) = fs::read(c)
@@ -3733,8 +3739,17 @@ fn readelf_notes<'data, Elf: FileHeader>(
         if off as usize + size as usize > data.len() {
             continue;
         }
-        let bytes = &data[off as usize..(off + size) as usize];
+        let raw_bytes = &data[off as usize..(off + size) as usize];
         let is_build_attrs = sec_name == ".gnu.build.attributes";
+        // For build-attribute notes in relocatable objects, descriptor
+        // addresses (start/end) are filled by relocations against `.text`.
+        // Apply them here so we display the resolved values.
+        let bytes_owned: Vec<u8> = if is_build_attrs {
+            apply_note_relocs(elf, data, endian, section, raw_bytes)
+        } else {
+            raw_bytes.to_vec()
+        };
+        let bytes = bytes_owned.as_slice();
         println!();
         println!("Displaying notes found in: {}", sec_name);
         println!("  Owner                Data size 	Description");
@@ -3756,13 +3771,9 @@ fn readelf_notes<'data, Elf: FileHeader>(
             };
             let read_u64 = |b: &[u8]| -> u64 {
                 if is_le {
-                    u64::from_le_bytes([
-                        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-                    ])
+                    u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
                 } else {
-                    u64::from_be_bytes([
-                        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-                    ])
+                    u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
                 }
             };
             let namesz = read_u32(&bytes[p..p + 4]) as usize;
@@ -3830,9 +3841,7 @@ fn readelf_notes<'data, Elf: FileHeader>(
                 //   <name>\0<value bytes ...>
                 let (custom_name, custom_val) = if attr_name.is_empty() {
                     let nul = value.iter().position(|&b| b == 0).unwrap_or(value.len());
-                    let n = std::str::from_utf8(&value[..nul])
-                        .unwrap_or("")
-                        .to_string();
+                    let n = std::str::from_utf8(&value[..nul]).unwrap_or("").to_string();
                     let v_bytes = if nul + 1 <= value.len() {
                         &value[nul + 1..]
                     } else {
@@ -3880,7 +3889,9 @@ fn readelf_notes<'data, Elf: FileHeader>(
                         },
                         _ => None,
                     };
-                    decoded.map(|s| s.to_string()).unwrap_or_else(|| format!("0x{:x}", v))
+                    decoded
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| format!("0x{:x}", v))
                 } else if type_marker == '+' {
                     "true".to_string()
                 } else if type_marker == '!' {
@@ -3928,7 +3939,20 @@ fn readelf_notes<'data, Elf: FileHeader>(
                         prev_open_end = end;
                     }
                 }
-                let mut region = format!("Applies to region from {:#x} to {:#x}", start, end);
+                // GNU readelf uses C-style "%#lx" which prints `0` (no 0x prefix)
+                // for zero, and `0xN` otherwise. Mimic that here.
+                let fmt_addr = |v: u64| -> String {
+                    if v == 0 {
+                        "0".to_string()
+                    } else {
+                        format!("{:#x}", v)
+                    }
+                };
+                let mut region = format!(
+                    "Applies to region from {} to {}",
+                    fmt_addr(start),
+                    fmt_addr(end)
+                );
                 // Annotate with a symbol name when this note carries an
                 // explicit description (descsz > 0). For func notes prefer
                 // STT_FUNC symbols; for OPEN notes prefer non-FUNC symbols.
@@ -3936,14 +3960,13 @@ fn readelf_notes<'data, Elf: FileHeader>(
                 // symbol within [start, end) for OPEN notes.
                 if descsz > 0 {
                     let prefer_func = ntype == 0x101;
-                    let sym = lookup_symbol_at_typed(data, start, prefer_func)
-                        .or_else(|| {
-                            if !prefer_func {
-                                lookup_symbol_in_range(data, start, end)
-                            } else {
-                                None
-                            }
-                        });
+                    let sym = lookup_symbol_at_typed(data, start, prefer_func).or_else(|| {
+                        if !prefer_func {
+                            lookup_symbol_in_range(data, start, end)
+                        } else {
+                            None
+                        }
+                    });
                     if let Some(sym_name) = sym {
                         region.push_str(&format!(" ({})", sym_name));
                     }
@@ -3958,6 +3981,201 @@ fn readelf_notes<'data, Elf: FileHeader>(
             }
         }
     }
+}
+
+/// Apply relocations targeting a SHT_NOTE section. Returns a copy of
+/// `raw_bytes` with R_*_64/R_*_32 entries resolved (symbol_value + addend).
+/// Used for `.gnu.build.attributes` in relocatable objects where the
+/// descriptor start/end addresses are emitted as zeros + relocations.
+fn apply_note_relocs<'data, Elf: FileHeader>(
+    elf: &ElfFile<'data, Elf>,
+    data: &'data [u8],
+    endian: Elf::Endian,
+    target_section: &'data Elf::SectionHeader,
+    raw_bytes: &[u8],
+) -> Vec<u8> {
+    let mut out = raw_bytes.to_vec();
+    let Ok(sections) = elf.elf_header().sections(endian, data) else {
+        return out;
+    };
+    let target_idx_u64: u64 = {
+        // Compute target index by scanning (no direct API).
+        let mut idx = 0u64;
+        let mut found = u64::MAX;
+        for s in sections.iter() {
+            if std::ptr::eq(s as *const _, target_section as *const _) {
+                found = idx;
+                break;
+            }
+            idx += 1;
+        }
+        found
+    };
+    if target_idx_u64 == u64::MAX {
+        return out;
+    }
+    let is_64 = elf.elf_header().is_class_64();
+    let is_le = elf.elf_header().e_ident().data == 1;
+    for sec in sections.iter() {
+        let sh_type = sec.sh_type(endian);
+        // SHT_RELA = 4, SHT_REL = 9.
+        if sh_type != 4 && sh_type != 9 {
+            continue;
+        }
+        let info: u64 = sec.sh_info(endian).into();
+        if info != target_idx_u64 {
+            continue;
+        }
+        let link: u64 = sec.sh_link(endian).into();
+        let r_off: u64 = sec.sh_offset(endian).into();
+        let r_size: u64 = sec.sh_size(endian).into();
+        let entsize: u64 = sec.sh_entsize(endian).into();
+        if entsize == 0 {
+            continue;
+        }
+        let count = (r_size / entsize) as usize;
+        let r_data_end = r_off as usize + r_size as usize;
+        if r_data_end > data.len() {
+            continue;
+        }
+        let r_data = &data[r_off as usize..r_data_end];
+        // Symbol table for this rel section.
+        let Some(symtab_section) = sections.iter().nth(link as usize) else {
+            continue;
+        };
+        let st_off: u64 = symtab_section.sh_offset(endian).into();
+        let st_size: u64 = symtab_section.sh_size(endian).into();
+        let st_entsize: u64 = symtab_section.sh_entsize(endian).into();
+        if st_entsize == 0 {
+            continue;
+        }
+        let st_end = st_off as usize + st_size as usize;
+        if st_end > data.len() {
+            continue;
+        }
+        let st_data = &data[st_off as usize..st_end];
+        let read_u32_le = |b: &[u8]| u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+        let read_u32_be = |b: &[u8]| u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
+        let read_u64_le =
+            |b: &[u8]| u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]);
+        let read_u64_be =
+            |b: &[u8]| u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]);
+        let read_i32 = |b: &[u8]| -> i32 {
+            if is_le {
+                read_u32_le(b) as i32
+            } else {
+                read_u32_be(b) as i32
+            }
+        };
+        let read_i64 = |b: &[u8]| -> i64 {
+            if is_le {
+                read_u64_le(b) as i64
+            } else {
+                read_u64_be(b) as i64
+            }
+        };
+        let read_u = |b: &[u8]| -> u64 {
+            if is_64 {
+                if is_le {
+                    read_u64_le(b)
+                } else {
+                    read_u64_be(b)
+                }
+            } else {
+                let v = if is_le {
+                    read_u32_le(b)
+                } else {
+                    read_u32_be(b)
+                };
+                v as u64
+            }
+        };
+        let sym_size = if is_64 { 24 } else { 16 };
+        let lookup_sym_value = |sym_idx: u32| -> Option<u64> {
+            let off = sym_idx as usize * sym_size;
+            if off + sym_size > st_data.len() {
+                return None;
+            }
+            let s = &st_data[off..off + sym_size];
+            // st_value at offset 8 (32-bit) or 8 (64-bit ELF: name=4,info=1,other=1,shndx=2,value=8)
+            // Actually for 64-bit Elf64_Sym: name(4) info(1) other(1) shndx(2) value(8) size(8) = 24
+            // For 32-bit Elf32_Sym: name(4) value(4) size(4) info(1) other(1) shndx(2) = 16
+            if is_64 {
+                Some(read_u(&s[8..16]))
+            } else {
+                let v = if is_le {
+                    read_u32_le(&s[4..8])
+                } else {
+                    read_u32_be(&s[4..8])
+                };
+                Some(v as u64)
+            }
+        };
+        for i in 0..count {
+            let off = i * entsize as usize;
+            if off + entsize as usize > r_data.len() {
+                break;
+            }
+            let r_offset = read_u(&r_data[off..]);
+            let r_info = if is_64 {
+                read_u(&r_data[off + 8..])
+            } else {
+                read_u(&r_data[off + 4..])
+            };
+            let (sym_idx, r_type) = if is_64 {
+                ((r_info >> 32) as u32, (r_info & 0xffff_ffff) as u32)
+            } else {
+                ((r_info >> 8) as u32, (r_info & 0xff) as u32)
+            };
+            let addend: i64 = if sh_type == 4 {
+                if is_64 {
+                    read_i64(&r_data[off + 16..])
+                } else {
+                    read_i32(&r_data[off + 8..]) as i64
+                }
+            } else {
+                0
+            };
+            let Some(sym_val) = lookup_sym_value(sym_idx) else {
+                continue;
+            };
+            let value = sym_val.wrapping_add(addend as u64);
+            let r_offset_u = r_offset as usize;
+            // Relocation type-specific size: simple direct types only.
+            // R_X86_64_64=1, R_X86_64_32=10, R_X86_64_32S=11.
+            // Generic: choose 8 bytes for 64-bit object/64-bit reloc, else 4.
+            let width = match r_type {
+                10 | 11 => 4,
+                _ => {
+                    if is_64 {
+                        8
+                    } else {
+                        4
+                    }
+                }
+            };
+            if r_offset_u + width > out.len() {
+                continue;
+            }
+            if width == 8 {
+                let bytes = if is_le {
+                    value.to_le_bytes()
+                } else {
+                    value.to_be_bytes()
+                };
+                out[r_offset_u..r_offset_u + 8].copy_from_slice(&bytes);
+            } else {
+                let v32 = value as u32;
+                let bytes = if is_le {
+                    v32.to_le_bytes()
+                } else {
+                    v32.to_be_bytes()
+                };
+                out[r_offset_u..r_offset_u + 4].copy_from_slice(&bytes);
+            }
+        }
+    }
+    out
 }
 
 fn lookup_symbol_at<'data, Elf: FileHeader>(
@@ -10950,25 +11168,26 @@ fn objcopy_merge_build_attribute_notes(data: &[u8]) -> Option<Vec<u8>> {
         &strtab[i..end]
     };
     // Find the .gnu.build.attributes section
-    let mut ba_idx: Option<usize> = None;
-    let mut ba_off: usize = 0;
-    let mut ba_size: usize = 0;
+    let mut build_idx: Option<usize> = None;
+    let mut build_off: usize = 0;
+    let mut build_size: usize = 0;
     for i in 0..shnum {
         let h = shoff + i * shentsize;
         let name_idx = r32(h)?;
         if read_name(name_idx) == b".gnu.build.attributes" {
-            ba_idx = Some(i);
+            build_idx = Some(i);
             if class == 2 {
-                ba_off = r64(h + 24)? as usize;
-                ba_size = r64(h + 32)? as usize;
+                build_off = r64(h + 24)? as usize;
+                build_size = r64(h + 32)? as usize;
             } else {
-                ba_off = r32(h + 16)? as usize;
-                ba_size = r32(h + 20)? as usize;
+                build_off = r32(h + 16)? as usize;
+                build_size = r32(h + 20)? as usize;
             }
             break;
         }
     }
-    let _ = ba_idx;
+    let ba_off = build_off;
+    let ba_size = build_size;
     if ba_size == 0 || ba_off + ba_size > data.len() {
         return None;
     }
@@ -11182,7 +11401,7 @@ fn objcopy_merge_build_attribute_notes(data: &[u8]) -> Option<Vec<u8>> {
     let mut out_data = data.to_vec();
     out_data[ba_off..ba_off + ba_size].copy_from_slice(&out_bytes[..ba_size]);
     // Update sh_size in the .gnu.build.attributes section header.
-    if let Some(idx) = ba_idx {
+    if let Some(idx) = build_idx {
         let h = shoff + idx * shentsize;
         if class == 2 {
             // sh_size at offset 32 in ELF64 section header
@@ -12546,7 +12765,11 @@ fn readelf_debug_macro<'data, Elf: FileHeader>(
                             buf[off..off + 4].copy_from_slice(&v);
                         }
                         8 => {
-                            let v = if le { value.to_le_bytes() } else { value.to_be_bytes() };
+                            let v = if le {
+                                value.to_le_bytes()
+                            } else {
+                                value.to_be_bytes()
+                            };
                             buf[off..off + 8].copy_from_slice(&v);
                         }
                         _ => {}
@@ -13575,7 +13798,11 @@ fn readelf_debug_line_raw<'data, Elf: FileHeader>(
             // Address size: prefer relocation size on .debug_line entries.
             // For DWARF <5, fall back to 8 for 64-bit ELF, 4 otherwise.
             let addr_size = reloc_addr_size.map(|s| s as usize).unwrap_or_else(|| {
-                if data.len() >= 5 && data[4] == 2 { 8 } else { 4 }
+                if data.len() >= 5 && data[4] == 2 {
+                    8
+                } else {
+                    4
+                }
             });
             let mut address: u64 = 0;
             let mut line: i64 = 1;
@@ -13592,10 +13819,7 @@ fn readelf_debug_line_raw<'data, Elf: FileHeader>(
                     let ext = p.read_u8().unwrap_or(0);
                     match ext {
                         1 => {
-                            println!(
-                                "  [0x{:08x}]  Extended opcode 1: End of Sequence",
-                                stmt_off
-                            );
+                            println!("  [0x{:08x}]  Extended opcode 1: End of Sequence", stmt_off);
                             address = 0;
                             line = 1;
                             view = 0;
@@ -13635,10 +13859,7 @@ fn readelf_debug_line_raw<'data, Elf: FileHeader>(
                             );
                         }
                         _ => {
-                            println!(
-                                "  [0x{:08x}]  Extended opcode {}",
-                                stmt_off, ext
-                            );
+                            println!("  [0x{:08x}]  Extended opcode {}", stmt_off, ext);
                         }
                     }
                 } else if opcode < opcode_base {
@@ -13649,10 +13870,7 @@ fn readelf_debug_line_raw<'data, Elf: FileHeader>(
                             if view == 0 {
                                 println!("  [0x{:08x}]  Copy", stmt_off);
                             } else {
-                                println!(
-                                    "  [0x{:08x}]  Copy (view {})",
-                                    stmt_off, view
-                                );
+                                println!("  [0x{:08x}]  Copy (view {})", stmt_off, view);
                             }
                             view += 1;
                         }
@@ -13677,7 +13895,10 @@ fn readelf_debug_line_raw<'data, Elf: FileHeader>(
                         }
                         4 => {
                             let f = p.read_uleb128().unwrap_or(0);
-                            println!("  [0x{:08x}]  Set File Name to entry {} in the File Name Table", stmt_off, f);
+                            println!(
+                                "  [0x{:08x}]  Set File Name to entry {} in the File Name Table",
+                                stmt_off, f
+                            );
                         }
                         5 => {
                             let c = p.read_uleb128().unwrap_or(0);
@@ -13686,7 +13907,8 @@ fn readelf_debug_line_raw<'data, Elf: FileHeader>(
                         6 => {
                             println!(
                                 "  [0x{:08x}]  Set is_stmt to {}",
-                                stmt_off, default_is_stmt ^ 1
+                                stmt_off,
+                                default_is_stmt ^ 1
                             );
                         }
                         7 => {
@@ -13714,14 +13936,14 @@ fn readelf_debug_line_raw<'data, Elf: FileHeader>(
                         }
                         _ => {
                             // skip args based on opcode_lengths
-                            let n = opcode_lengths.get((opcode - 1) as usize).copied().unwrap_or(0);
+                            let n = opcode_lengths
+                                .get((opcode - 1) as usize)
+                                .copied()
+                                .unwrap_or(0);
                             for _ in 0..n {
                                 let _ = p.read_uleb128();
                             }
-                            println!(
-                                "  [0x{:08x}]  Standard opcode {}",
-                                stmt_off, opcode
-                            );
+                            println!("  [0x{:08x}]  Standard opcode {}", stmt_off, opcode);
                         }
                     }
                 } else {
