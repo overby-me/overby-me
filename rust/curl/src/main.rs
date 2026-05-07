@@ -341,6 +341,7 @@ fn main() {
             o.get = puo.get;
             o.connect_tos = puo.connect_tos.clone();
             o.no_basic = puo.no_basic;
+            o.user = puo.user.clone();
             o
         } else {
             opts.clone()

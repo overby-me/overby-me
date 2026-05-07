@@ -23,6 +23,7 @@ pub(crate) struct PerUrlOptions {
     pub(crate) get: bool,
     pub(crate) connect_tos: Vec<String>,
     pub(crate) no_basic: bool,
+    pub(crate) user: Option<String>,
 }
 
 #[derive(Clone, Debug)]

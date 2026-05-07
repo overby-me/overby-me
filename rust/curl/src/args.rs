@@ -188,6 +188,7 @@ fn snapshot_per_url(opts: &Options) -> PerUrlOptions {
         get: opts.get,
         connect_tos: opts.connect_tos.clone(),
         no_basic: opts.no_basic,
+        user: opts.user.clone(),
     }
 }
 
@@ -901,6 +902,7 @@ pub(crate) fn parse_args() -> Options {
                 opts.get = false;
                 opts.connect_tos.clear();
                 opts.no_basic = false;
+                opts.user = None;
                 expecting_url_after_next = true;
                 i += 1;
                 continue;

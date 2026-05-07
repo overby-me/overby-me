@@ -1716,8 +1716,10 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                 // If the redirect target itself is malformed (e.g. four
                 // slashes after the scheme like `http:////host`), bail out
                 // with the original 3xx response and let main.rs map this to
-                // CURLE_URL_MALFORMAT (exit 3, test 1142).
-                if parse_url(&current_url).is_err() {
+                // CURLE_URL_MALFORMAT (exit 3, test 1142). Unsupported schemes
+                // (e.g. `gopher://`) keep flowing so test 1563 still gets the
+                // proper "unsupported protocol" exit 1.
+                if matches!(parse_url(&current_url), Err(ref e) if e.starts_with("malformed URL")) {
                     // Drop the current response's headers from the
                     // accumulated redirect_headers (we add them back via
                     // final_resp.header_bytes below) so the 3xx response is
