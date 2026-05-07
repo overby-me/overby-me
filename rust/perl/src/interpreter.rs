@@ -12348,16 +12348,31 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                 false
             };
             if no_atom {
-                // `(*)` / `(*VERB)` is reference perls "verb" group
-                // syntax — report "Unknown verb" instead of
-                // "Quantifier follows nothing" when the matched
-                // form looks like an empty `(*)` or unknown verb.
+                // `(*VERB)` is reference perls regex verb syntax. Some
+                // are well-known names (ACCEPT, FAIL, COMMIT, PRUNE,
+                // SKIP, THEN, MARK) and others are alphanumeric label
+                // forms (`(*positive_lookahead:…)` etc.). Report
+                // "Unknown verb" only for the empty form `(*)` — for
+                // anything else, let the regex backend handle it
+                // (Rusts crate refuses, fancy-regex tries, but at
+                // least we dont misreport a known verb as unknown).
                 if c == '*' && i >= 1 && chars[i - 1] == '(' {
-                    let prefix: String = chars[..=i].iter().collect();
-                    let suffix: String = chars[i + 1..].iter().collect();
-                    return Some(format!(
-                        "Unknown verb in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
-                    ));
+                    let after_star_start = i + 1;
+                    let mut k = after_star_start;
+                    while k < chars.len() && (chars[k].is_ascii_alphanumeric() || chars[k] == '_') {
+                        k += 1;
+                    }
+                    let has_name = k > after_star_start;
+                    if !has_name {
+                        let prefix: String = chars[..=i].iter().collect();
+                        let suffix: String = chars[i + 1..].iter().collect();
+                        return Some(format!(
+                            "Unknown verb in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                        ));
+                    }
+                    // Verb has a name — let the regex backend decide.
+                    i += 1;
+                    continue;
                 }
                 let prefix: String = chars[..=i].iter().collect();
                 let suffix: String = chars[i + 1..].iter().collect();
