@@ -11348,6 +11348,25 @@ impl Interpreter {
                     self.subs
                         .insert(name.clone(), (params.clone(), body.clone()));
                     self.sub_origin.insert(name.clone(), origin.clone());
+                    // sub_def_loc is what the call site uses to swap
+                    // `current_file` when entering the sub. Required-file
+                    // subs need this too — without it, errors raised by
+                    // their bodies (e.g. test.pls `_have_dynamic_extension`
+                    // doing `require Config`) report the caller's file
+                    // instead of the .pm/.pl that defined the sub. Locate
+                    // the sub's first line by scanning body for a
+                    // Stmt::LineMark; default to 0 if absent.
+                    let mut line: usize = 0;
+                    for s in body {
+                        if let Stmt::LineMark(n) = s {
+                            line = *n;
+                            break;
+                        }
+                    }
+                    self.sub_def_loc
+                        .insert(name.clone(), (origin.clone(), line));
+                    self.sub_def_package
+                        .insert(name.clone(), self.package.clone());
                 }
                 Stmt::Begin(body, _end_line) => {
                     let _flow = self.exec_stmts(body);
