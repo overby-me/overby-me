@@ -150,6 +150,11 @@ pub struct Interpreter {
     /// pointing at the original storage and post-`local` refs at the
     /// new one.
     arylen_refs: HashMap<usize, std::rc::Rc<std::cell::RefCell<Vec<Value>>>>,
+    /// Canonical ScalarRef cell for `\undef`. Reference perl returns
+    /// the same SV (`&PL_sv_undef`) for every `\undef`, so two `\undef`
+    /// refs stringify as the same `SCALAR(0xADDR)` and compare equal.
+    /// Lazily initialised on first ref-to-undef.
+    shared_undef: Option<std::rc::Rc<std::cell::RefCell<Value>>>,
     /// Anonymous-array storage backing `\$#{[…]}` magic refs. Pinning
     /// these keeps the literal alive so reads through `$$ref` return
     /// the original length rather than triggering the orphaned check —
@@ -432,6 +437,7 @@ impl Interpreter {
             tied_scalars: HashMap::new(),
             in_tie_handler: 0,
             arylen_refs: HashMap::new(),
+            shared_undef: None,
             kept_alive_arrays: Vec::new(),
             local_aliased_array_saves: Vec::new(),
             deleted_slots: HashMap::new(),
@@ -491,6 +497,13 @@ impl Interpreter {
 
     pub fn set_current_file(&mut self, file: &str) {
         self.current_file = file.to_string();
+    }
+
+    fn shared_undef_ref(&mut self) -> std::rc::Rc<std::cell::RefCell<Value>> {
+        if self.shared_undef.is_none() {
+            self.shared_undef = Some(std::rc::Rc::new(std::cell::RefCell::new(Value::Undef)));
+        }
+        self.shared_undef.as_ref().unwrap().clone()
     }
 
     pub fn set_inc(&mut self, dirs: &[String]) {
@@ -3981,9 +3994,7 @@ impl Interpreter {
                         let real = if idx < 0 {
                             let from_end = arr.len() as i64 + idx;
                             if from_end < 0 {
-                                return Value::ScalarRef(std::rc::Rc::new(
-                                    std::cell::RefCell::new(Value::Undef),
-                                ));
+                                return Value::ScalarRef(self.shared_undef_ref());
                             }
                             from_end as usize
                         } else {
@@ -3993,6 +4004,9 @@ impl Interpreter {
                             return Value::ScalarRef(rc.clone());
                         }
                         let v = arr.get(real).cloned().unwrap_or(Value::Undef);
+                        if v.is_undef() {
+                            return Value::ScalarRef(self.shared_undef_ref());
+                        }
                         Value::ScalarRef(std::rc::Rc::new(std::cell::RefCell::new(v)))
                     }
                     // `\&name` — our BitAnd parser emits `Call(name, [])` for
@@ -4008,6 +4022,12 @@ impl Interpreter {
                         let n = self.eval_expr(target).to_str();
                         Value::CodeRef(n)
                     }
+                    // `\undef` — reference perl returns a ref to the
+                    // shared &PL_sv_undef SV, so `\undef == \undef`
+                    // and `\$_[0] == \undef` when `$_[0]` was passed
+                    // an undef. We mimic this by handing back a
+                    // single canonical Rc for every `\undef`.
+                    Expr::Undef => Value::ScalarRef(self.shared_undef_ref()),
                     _ => {
                         let v = self.eval_expr(expr);
                         Value::ScalarRef(std::rc::Rc::new(std::cell::RefCell::new(v)))
