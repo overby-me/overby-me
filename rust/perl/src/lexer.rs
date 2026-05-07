@@ -1321,10 +1321,19 @@ impl Lexer {
                             && self.ch() != '_'
                             && self.ch() != '='
                             && self.ch() != ';'
-                            && self.ch() != ','
                             && self.ch() != ')'
                             && self.ch() != '}'
-                            && self.ch() != ']' =>
+                            && self.ch() != ']'
+                            // Comma after `m` could be regex delimiter
+                            // (`$x =~ m,…,`) or arg separator (`f(m,
+                            // n)`). Treat it as regex only when the
+                            // preceding context unambiguously expects a
+                            // term — i.e. just after `=~`/`!~`.
+                            && (self.ch() != ','
+                                || matches!(
+                                    tokens.last(),
+                                    Some(Token::Match | Token::NotMatch)
+                                )) =>
                         {
                             // `m/pat/flags` — explicit match regex. Emit as
                             // RegexLit so `$x =~ m/…/` (and the bare regex
