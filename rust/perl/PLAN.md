@@ -10,6 +10,7 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 This iteration's improvements:
 
+- **`m`/`s`/`tr`/`y` followed by `}`/`]` is no longer a regex prefix**: a bare `m` inside `$h{m}` (last token before the close-brace) was tokenised as `m` + regex starting with `}` delim, falling off EOF as "Search pattern not terminated". Add `}` and `]` (plus stray `;`/`,`/`)` for the `s`/`tr`/`y` arms) to the exclusion list. Lets op/pos.t run all 33 tests instead of bailing at 13.
 - **`\Z` end-of-string anchor**: Rusts `regex` crate has no `\Z`, so a pattern containing `\Z` had it taken literally. Translate `\Z` → `(?:\n?\z)` (matches end-of-string OR before a final newline) inside `perl_dollar_anchor`. This single fix unlocks ~70 tests in re/regexp.t (2784 → 2642).
 - **`(?#…)` regex comments**: Rust regex doesn't recognise this; strip them with `strip_regex_comments` (skips inside `[…]` and respects `\(`/`\)` escapes) before the flag prefix is prepended. re/regexp.t: 2642 → 2632.
 - **POSIX class `[:NAME:]` validation inside regex character classes**: `validate_regex_pattern` now (a) skips embedded `[:…:]` atomically when scanning for the outer `]`, and (b) rejects names not in the canonical 14-class set with `POSIX class [:NAME:] unknown` — eagerly so the diagnostic fires even when the surrounding `[…]` is itself unclosed (test 662).
