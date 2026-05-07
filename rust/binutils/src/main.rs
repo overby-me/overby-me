@@ -12141,17 +12141,10 @@ fn readelf_debug_loc<'data, Elf: FileHeader>(
         let bytes: Vec<u8> = raw.into_owned();
         let reloc_offsets: std::collections::BTreeSet<u64> =
             section.relocations().map(|(o, _)| o).collect();
-        let has_relocs = !reloc_offsets.is_empty();
         if !found {
             println!();
             println!("Contents of the .debug_loc section:");
             println!();
-            if has_relocs {
-                println!(
-                    " Warning: This section has relocations - addresses seen here may not be accurate."
-                );
-                println!();
-            }
             println!("    Offset   Begin            End              Expression");
         }
         found = true;
