@@ -449,17 +449,18 @@ impl Parser {
                 let stmt = Stmt::Warn(args);
                 return Some(self.maybe_postfix(stmt));
             }
-            Token::Eval => {
+            Token::Eval if matches!(self.peek(1), Token::LBrace) => {
                 self.pos += 1;
-                let stmt = if self.at(&Token::LBrace) {
-                    let body = self.parse_brace_block();
-                    Stmt::Eval(Box::new(EvalArg::Block(body)))
-                } else {
-                    let expr = self.parse_expr();
-                    Stmt::Eval(Box::new(EvalArg::Expr(expr)))
-                };
+                let body = self.parse_brace_block();
+                let stmt = Stmt::Eval(Box::new(EvalArg::Block(body)));
                 return Some(self.maybe_postfix(stmt));
             }
+            // `eval EXPR or … ` and similar — fall through to parse_expr
+            // so the `eval` is parsed as a primary-level expression and
+            // the `or`/`and` on its right gets the correct precedence.
+            // `eval { BLOCK }` keeps the dedicated Stmt::Eval path above
+            // so its die-trapping / `$@` semantics aren't routed through
+            // an extra Stmt::Expr layer.
             // `DESTROY { ... }` / `AUTOLOAD { ... }` at statement position
             // parse as `sub NAME { ... }` (Perl's parser hardcodes these two
             // special subs so the `sub` keyword is optional). Other barewords
@@ -3199,7 +3200,11 @@ impl Parser {
                     // interpreter can handle the trap semantics.
                     Expr::Call("eval".to_string(), vec![Expr::DoBlock(body)])
                 } else {
-                    let expr = self.parse_primary();
+                    // `eval EXPR` takes a unary-precedence argument so
+                    // `eval $arr[$i]` reads the array element, not just
+                    // `eval $arr`. `or`/`and` etc. (lower precedence
+                    // than unary) are NOT consumed.
+                    let expr = self.parse_unary();
                     Expr::Call("eval".to_string(), vec![expr])
                 }
             }
