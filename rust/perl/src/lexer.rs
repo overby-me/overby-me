@@ -1277,22 +1277,22 @@ impl Lexer {
                     // mirror that by advancing self.pos to EOF so the
                     // outer loop terminates cleanly.
                     if ident == "__END__" || ident == "__DATA__" {
-                        if ident == "__DATA__" {
-                            // Capture everything after the directive line for
-                            // exposure as the `DATA` filehandle. Skip the
-                            // remainder of the directive line (up to and
-                            // including the next newline) so the data starts
-                            // at the *next* line.
-                            let mut data_start = self.pos;
-                            while data_start < self.input.len() && self.input[data_start] != '\n' {
-                                data_start += 1;
-                            }
-                            if data_start < self.input.len() {
-                                data_start += 1; // skip the newline
-                            }
-                            let data: String = self.input[data_start..].iter().collect();
-                            self.data_section = Some(data);
+                        // Both `__END__` and `__DATA__` end source-code
+                        // parsing AND expose the trailing bytes via the
+                        // `DATA` filehandle (perldata: "__END__ … may be
+                        // used in the main package to indicate the
+                        // logical end of the script before the actual
+                        // end of file. Any following text is ignored,
+                        // but may be read via the DATA filehandle").
+                        let mut data_start = self.pos;
+                        while data_start < self.input.len() && self.input[data_start] != '\n' {
+                            data_start += 1;
                         }
+                        if data_start < self.input.len() {
+                            data_start += 1; // skip the newline
+                        }
+                        let data: String = self.input[data_start..].iter().collect();
+                        self.data_section = Some(data);
                         self.pos = self.input.len();
                         break;
                     }
