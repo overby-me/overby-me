@@ -3676,10 +3676,12 @@ fn readelf_display<'data, Elf: FileHeader>(
 
     if opts.show_debug_ranges {
         readelf_debug_ranges(elf, data, endian);
+        readelf_debug_rnglists(elf, data, endian);
     }
 
     if opts.show_debug_loc {
         readelf_debug_loc(elf, data, endian);
+        readelf_debug_loclists(elf, data, endian);
     }
 
     // -K dumps the link section CONTENTS by default; with -P we follow
@@ -5836,6 +5838,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                     }
                     if show_debug_ranges {
                         readelf_debug_ranges(&elf, &data_bytes, endian);
+                        readelf_debug_rnglists(&elf, &data_bytes, endian);
                     }
                     if show_debug_abbrev {
                         readelf_debug_abbrev(&elf, &data_bytes, endian);
@@ -5858,6 +5861,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                     }
                     if show_debug_ranges {
                         readelf_debug_ranges(&elf, &data_bytes, endian);
+                        readelf_debug_rnglists(&elf, &data_bytes, endian);
                     }
                     if show_debug_abbrev {
                         readelf_debug_abbrev(&elf, &data_bytes, endian);
@@ -10754,6 +10758,437 @@ fn readelf_debug_ranges<'data, Elf: FileHeader>(
     }
 }
 
+/// DWARF 5 `.debug_rnglists` section dumper. Format per DWARF 5 §7.28:
+/// 12-byte header (32-bit DWARF) followed by location-relative range list
+/// entries terminated by DW_RLE_end_of_list (0).
+fn readelf_debug_rnglists<'data, Elf: FileHeader>(
+    _elf: &ElfFile<'data, Elf>,
+    data: &'data [u8],
+    _endian: Elf::Endian,
+) {
+    let Ok(obj) = object::File::parse(data) else {
+        return;
+    };
+    let le = data.len() >= 6 && data[5] == 1;
+    let mut found = false;
+    for section in obj.sections() {
+        let name = section.name().unwrap_or("");
+        if name != ".debug_rnglists" && name != ".zdebug_rnglists" {
+            continue;
+        }
+        let Ok(raw) = section.uncompressed_data() else {
+            continue;
+        };
+        let mut bytes: Vec<u8> = raw.into_owned();
+        // Apply relocations.
+        for (off, reloc) in section.relocations() {
+            let off = off as usize;
+            let target_addr = match reloc.target() {
+                object::RelocationTarget::Symbol(idx) => {
+                    obj.symbol_by_index(idx).map(|s| s.address()).unwrap_or(0)
+                }
+                _ => 0,
+            };
+            let value = target_addr.wrapping_add(reloc.addend() as u64);
+            let sz = (reloc.size() as usize) / 8;
+            if off + sz <= bytes.len() {
+                if sz == 8 {
+                    let b = if le {
+                        value.to_le_bytes()
+                    } else {
+                        value.to_be_bytes()
+                    };
+                    bytes[off..off + 8].copy_from_slice(&b);
+                } else if sz == 4 {
+                    let v = value as u32;
+                    let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+                    bytes[off..off + 4].copy_from_slice(&b);
+                }
+            }
+        }
+        if bytes.len() < 12 {
+            continue;
+        }
+        let read_u16 = |b: &[u8]| -> u16 {
+            let mut a = [0u8; 2];
+            a.copy_from_slice(&b[..2]);
+            if le {
+                u16::from_le_bytes(a)
+            } else {
+                u16::from_be_bytes(a)
+            }
+        };
+        let read_u32 = |b: &[u8]| -> u32 {
+            let mut a = [0u8; 4];
+            a.copy_from_slice(&b[..4]);
+            if le {
+                u32::from_le_bytes(a)
+            } else {
+                u32::from_be_bytes(a)
+            }
+        };
+        let read_u64 = |b: &[u8]| -> u64 {
+            let mut a = [0u8; 8];
+            a.copy_from_slice(&b[..8]);
+            if le {
+                u64::from_le_bytes(a)
+            } else {
+                u64::from_be_bytes(a)
+            }
+        };
+        let initial_length = read_u32(&bytes[0..4]) as u64;
+        let (unit_len_size, is_64bit) = if initial_length == 0xffffffff {
+            (12usize, true)
+        } else {
+            (4usize, false)
+        };
+        // After unit_length: version(2) + addr_size(1) + seg_sel(1) + offset_entry_count(4) = 8 bytes.
+        if bytes.len() < unit_len_size + 8 {
+            continue;
+        }
+        let version = read_u16(&bytes[unit_len_size..unit_len_size + 2]);
+        let addr_size = bytes[unit_len_size + 2] as usize;
+        let _segment_selector_size = bytes[unit_len_size + 3];
+        let offset_entry_count = read_u32(&bytes[unit_len_size + 4..unit_len_size + 8]) as usize;
+        let total_header = unit_len_size + 8 + offset_entry_count * if is_64bit { 8 } else { 4 };
+        if bytes.len() < total_header || (version != 5 && version != 0) {
+            continue;
+        }
+        if !found {
+            println!("Contents of the .debug_rnglists section:");
+            println!();
+            println!();
+            println!("    Offset   Begin    End");
+        }
+        found = true;
+        let read_addr = |b: &[u8]| -> u64 {
+            if addr_size == 8 {
+                read_u64(b)
+            } else {
+                read_u32(b) as u64
+            }
+        };
+        let read_uleb = |buf: &[u8], pos: &mut usize| -> u64 {
+            let mut result: u64 = 0;
+            let mut shift: u32 = 0;
+            while *pos < buf.len() {
+                let b = buf[*pos];
+                *pos += 1;
+                result |= ((b & 0x7f) as u64) << shift;
+                if b & 0x80 == 0 {
+                    break;
+                }
+                shift += 7;
+            }
+            result
+        };
+        let mut p = total_header;
+        let mut base_addr: u64 = 0;
+        let w = addr_size * 2;
+        while p < bytes.len() {
+            let kind = bytes[p];
+            let entry_off = p;
+            p += 1;
+            match kind {
+                0 => {
+                    println!("    {:08x} <End of list>", entry_off);
+                    base_addr = 0;
+                }
+                4 => {
+                    // DW_RLE_offset_pair: ULEB128 begin, ULEB128 end (offsets relative to base).
+                    let begin_off = read_uleb(&bytes, &mut p);
+                    let end_off = read_uleb(&bytes, &mut p);
+                    let abs_begin = base_addr.wrapping_add(begin_off);
+                    let abs_end = base_addr.wrapping_add(end_off);
+                    println!(
+                        "    {:08x} {:0w$x} {:0w$x} ",
+                        entry_off,
+                        abs_begin,
+                        abs_end,
+                        w = w
+                    );
+                }
+                5 => {
+                    // DW_RLE_base_address: addr
+                    if p + addr_size > bytes.len() {
+                        break;
+                    }
+                    let a = read_addr(&bytes[p..p + addr_size]);
+                    p += addr_size;
+                    println!("    {:08x} {:0w$x} (base address)", entry_off, a, w = w);
+                    base_addr = a;
+                }
+                6 => {
+                    // DW_RLE_start_end: addr, addr
+                    if p + addr_size * 2 > bytes.len() {
+                        break;
+                    }
+                    let a = read_addr(&bytes[p..p + addr_size]);
+                    p += addr_size;
+                    let b = read_addr(&bytes[p..p + addr_size]);
+                    p += addr_size;
+                    println!(
+                        "    {:08x} {:0w$x} {:0w$x} ",
+                        entry_off,
+                        a,
+                        b,
+                        w = w
+                    );
+                }
+                7 => {
+                    // DW_RLE_start_length: addr, ULEB128 length
+                    if p + addr_size > bytes.len() {
+                        break;
+                    }
+                    let a = read_addr(&bytes[p..p + addr_size]);
+                    p += addr_size;
+                    let len = read_uleb(&bytes, &mut p);
+                    let b = a.wrapping_add(len);
+                    println!(
+                        "    {:08x} {:0w$x} {:0w$x} ",
+                        entry_off,
+                        a,
+                        b,
+                        w = w
+                    );
+                }
+                _ => {
+                    // Unsupported entry type: stop processing this section.
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// DWARF 5 `.debug_loclists` section dumper. Format per DWARF 5 §7.29.
+fn readelf_debug_loclists<'data, Elf: FileHeader>(
+    _elf: &ElfFile<'data, Elf>,
+    data: &'data [u8],
+    _endian: Elf::Endian,
+) {
+    let Ok(obj) = object::File::parse(data) else {
+        return;
+    };
+    let le = data.len() >= 6 && data[5] == 1;
+    let mut found = false;
+    for section in obj.sections() {
+        let name = section.name().unwrap_or("");
+        if name != ".debug_loclists" && name != ".zdebug_loclists" {
+            continue;
+        }
+        let Ok(raw) = section.uncompressed_data() else {
+            continue;
+        };
+        let mut bytes: Vec<u8> = raw.into_owned();
+        for (off, reloc) in section.relocations() {
+            let off = off as usize;
+            let target_addr = match reloc.target() {
+                object::RelocationTarget::Symbol(idx) => {
+                    obj.symbol_by_index(idx).map(|s| s.address()).unwrap_or(0)
+                }
+                _ => 0,
+            };
+            let value = target_addr.wrapping_add(reloc.addend() as u64);
+            let sz = (reloc.size() as usize) / 8;
+            if off + sz <= bytes.len() {
+                if sz == 8 {
+                    let b = if le {
+                        value.to_le_bytes()
+                    } else {
+                        value.to_be_bytes()
+                    };
+                    bytes[off..off + 8].copy_from_slice(&b);
+                } else if sz == 4 {
+                    let v = value as u32;
+                    let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+                    bytes[off..off + 4].copy_from_slice(&b);
+                }
+            }
+        }
+        if bytes.len() < 12 {
+            continue;
+        }
+        let read_u16 = |b: &[u8]| -> u16 {
+            let mut a = [0u8; 2];
+            a.copy_from_slice(&b[..2]);
+            if le {
+                u16::from_le_bytes(a)
+            } else {
+                u16::from_be_bytes(a)
+            }
+        };
+        let read_u32 = |b: &[u8]| -> u32 {
+            let mut a = [0u8; 4];
+            a.copy_from_slice(&b[..4]);
+            if le {
+                u32::from_le_bytes(a)
+            } else {
+                u32::from_be_bytes(a)
+            }
+        };
+        let read_u64 = |b: &[u8]| -> u64 {
+            let mut a = [0u8; 8];
+            a.copy_from_slice(&b[..8]);
+            if le {
+                u64::from_le_bytes(a)
+            } else {
+                u64::from_be_bytes(a)
+            }
+        };
+        let initial_length = read_u32(&bytes[0..4]) as u64;
+        let (unit_len_size, is_64bit) = if initial_length == 0xffffffff {
+            (12usize, true)
+        } else {
+            (4usize, false)
+        };
+        if bytes.len() < unit_len_size + 8 {
+            continue;
+        }
+        let version = read_u16(&bytes[unit_len_size..unit_len_size + 2]);
+        let addr_size = bytes[unit_len_size + 2] as usize;
+        let offset_entry_count = read_u32(&bytes[unit_len_size + 4..unit_len_size + 8]) as usize;
+        let total_header = unit_len_size + 8 + offset_entry_count * if is_64bit { 8 } else { 4 };
+        if bytes.len() < total_header || (version != 5 && version != 0) {
+            continue;
+        }
+        if !found {
+            println!();
+            println!("Contents of the .debug_loclists section:");
+            println!();
+            println!("    Offset   Begin            End              Expression");
+        }
+        found = true;
+        let read_addr = |b: &[u8]| -> u64 {
+            if addr_size == 8 {
+                read_u64(b)
+            } else {
+                read_u32(b) as u64
+            }
+        };
+        let read_uleb = |buf: &[u8], pos: &mut usize| -> u64 {
+            let mut result: u64 = 0;
+            let mut shift: u32 = 0;
+            while *pos < buf.len() {
+                let b = buf[*pos];
+                *pos += 1;
+                result |= ((b & 0x7f) as u64) << shift;
+                if b & 0x80 == 0 {
+                    break;
+                }
+                shift += 7;
+            }
+            result
+        };
+        let mut p = total_header;
+        let mut base_addr: u64 = 0;
+        let w = addr_size * 2;
+        while p < bytes.len() {
+            let kind = bytes[p];
+            let entry_off = p;
+            p += 1;
+            match kind {
+                0 => {
+                    // DW_LLE_end_of_list
+                    println!("    {:08x} <End of list>", entry_off);
+                    base_addr = 0;
+                }
+                4 => {
+                    // DW_LLE_offset_pair: ULEB128 begin, ULEB128 end, counted_loc_desc
+                    let begin_off = read_uleb(&bytes, &mut p);
+                    let end_off = read_uleb(&bytes, &mut p);
+                    let len = read_uleb(&bytes, &mut p) as usize;
+                    let expr_end = p + len;
+                    let expr_str = if expr_end <= bytes.len() {
+                        decode_dwop_expression(&bytes[p..expr_end], addr_size as u8, le)
+                    } else {
+                        String::new()
+                    };
+                    p = expr_end.min(bytes.len());
+                    let abs_begin = base_addr.wrapping_add(begin_off);
+                    let abs_end = base_addr.wrapping_add(end_off);
+                    println!(
+                        "    {:08x} {:0w$x} {:0w$x} {}",
+                        entry_off,
+                        abs_begin,
+                        abs_end,
+                        expr_str,
+                        w = w
+                    );
+                }
+                6 => {
+                    // DW_LLE_base_address: addr
+                    if p + addr_size > bytes.len() {
+                        break;
+                    }
+                    let a = read_addr(&bytes[p..p + addr_size]);
+                    p += addr_size;
+                    println!(
+                        "    {:08x} {:0w$x} (base address)",
+                        entry_off,
+                        a,
+                        w = w
+                    );
+                    base_addr = a;
+                }
+                7 => {
+                    // DW_LLE_start_end: addr, addr, counted_loc_desc
+                    if p + addr_size * 2 > bytes.len() {
+                        break;
+                    }
+                    let a = read_addr(&bytes[p..p + addr_size]);
+                    p += addr_size;
+                    let b = read_addr(&bytes[p..p + addr_size]);
+                    p += addr_size;
+                    let len = read_uleb(&bytes, &mut p) as usize;
+                    let expr_end = p + len;
+                    let expr_str = if expr_end <= bytes.len() {
+                        decode_dwop_expression(&bytes[p..expr_end], addr_size as u8, le)
+                    } else {
+                        String::new()
+                    };
+                    p = expr_end.min(bytes.len());
+                    println!(
+                        "    {:08x} {:0w$x} {:0w$x} {}",
+                        entry_off,
+                        a,
+                        b,
+                        expr_str,
+                        w = w
+                    );
+                }
+                8 => {
+                    // DW_LLE_start_length: addr, ULEB128, counted_loc_desc
+                    if p + addr_size > bytes.len() {
+                        break;
+                    }
+                    let a = read_addr(&bytes[p..p + addr_size]);
+                    p += addr_size;
+                    let len_addr = read_uleb(&bytes, &mut p);
+                    let b = a.wrapping_add(len_addr);
+                    let len = read_uleb(&bytes, &mut p) as usize;
+                    let expr_end = p + len;
+                    let expr_str = if expr_end <= bytes.len() {
+                        decode_dwop_expression(&bytes[p..expr_end], addr_size as u8, le)
+                    } else {
+                        String::new()
+                    };
+                    p = expr_end.min(bytes.len());
+                    println!(
+                        "    {:08x} {:0w$x} {:0w$x} {}",
+                        entry_off,
+                        a,
+                        b,
+                        expr_str,
+                        w = w
+                    );
+                }
+                _ => break,
+            }
+        }
+    }
+}
+
 fn elf_only_keep_debug(data: &mut Vec<u8>) {
     if data.len() < 0x40 || &data[..4] != b"\x7fELF" {
         return;
@@ -13054,10 +13489,15 @@ fn readelf_debug_loc<'data, Elf: FileHeader>(
         let bytes: Vec<u8> = raw.into_owned();
         let reloc_offsets: std::collections::BTreeSet<u64> =
             section.relocations().map(|(o, _)| o).collect();
+        let has_relocs = !reloc_offsets.is_empty();
         if !found {
             println!();
             println!("Contents of the .debug_loc section:");
             println!();
+            if has_relocs {
+                println!(" Warning: This section has relocations - addresses seen here may not be accurate.");
+                println!();
+            }
             println!("    Offset   Begin            End              Expression");
         }
         found = true;
@@ -13114,11 +13554,26 @@ fn readelf_debug_loc<'data, Elf: FileHeader>(
             if expr_off + expr_len > bytes.len() {
                 break;
             }
+            let expr_str = decode_dwop_expression(
+                &bytes[expr_off..expr_off + expr_len],
+                addr_size as u8,
+                le,
+            );
+            // Detect "(start == end)" suffix matching GNU readelf when both
+            // begin and end addresses are equal (after relocation, in
+            // practice always 0 in relocatable objects).
+            let suffix = if begin == end {
+                " (start == end)"
+            } else {
+                ""
+            };
             println!(
-                "    {:08x} {:0aw$x} {:0aw$x} (DW_OP)",
+                "    {:08x} {:0aw$x} {:0aw$x} {}{}",
                 p,
                 begin,
                 end,
+                expr_str,
+                suffix,
                 aw = aw
             );
             p = expr_off + expr_len;
@@ -13678,11 +14133,14 @@ fn readelf_debug_line_raw<'data, Elf: FileHeader>(
                 None => break,
             };
             // DWARF 5 has an extra address_size + segment_selector_size before
-            // header_length; we don't fully support DWARF 5 here.
-            if version == 5 {
-                let _addr_size = p.read_u8();
+            // header_length.
+            let dwarf5_addr_size: Option<u8> = if version == 5 {
+                let asz = p.read_u8();
                 let _seg_size = p.read_u8();
-            }
+                asz
+            } else {
+                None
+            };
             let header_length = if is_64 {
                 p.read_u64().unwrap_or(0)
             } else {
@@ -13795,15 +14253,18 @@ fn readelf_debug_line_raw<'data, Elf: FileHeader>(
             // Line Number Statements
             println!();
             println!(" Line Number Statements:");
-            // Address size: prefer relocation size on .debug_line entries.
-            // For DWARF <5, fall back to 8 for 64-bit ELF, 4 otherwise.
-            let addr_size = reloc_addr_size.map(|s| s as usize).unwrap_or_else(|| {
+            // Address size: DWARF 5 carries it in the line-program header.
+            // For older versions, fall back to ELF class (8 for ELF64, 4 for
+            // ELF32). Per-relocation sizes are unreliable because non-address
+            // entries (e.g. line-strp offsets) use 4-byte relocs even on 64-bit.
+            let addr_size = dwarf5_addr_size.map(|s| s as usize).unwrap_or_else(|| {
                 if data.len() >= 5 && data[4] == 2 {
                     8
                 } else {
                     4
                 }
             });
+            let _ = reloc_addr_size;
             let mut address: u64 = 0;
             let mut line: i64 = 1;
             let mut view: u64 = 0;
@@ -13983,11 +14444,44 @@ fn readelf_debug_line_decoded<'data, Elf: FileHeader>(
         gimli::RunTimeEndian::Big
     };
     let load_section = |id: gimli::SectionId| -> Result<gimli::EndianSlice<'_, gimli::RunTimeEndian>, gimli::Error> {
-        let data = obj
-            .section_by_name(id.name())
-            .and_then(|s| s.uncompressed_data().ok())
+        let Some(section) = obj.section_by_name(id.name()) else {
+            return Ok(gimli::EndianSlice::new(&[], endian));
+        };
+        let mut data = section
+            .uncompressed_data()
+            .ok()
             .map(|c| c.into_owned())
             .unwrap_or_default();
+        let le = endian == gimli::RunTimeEndian::Little;
+        // Apply relocations so cross-section references (e.g. DW_FORM_strp,
+        // DW_FORM_line_strp, DW_FORM_sec_offset) resolve in relocatable
+        // objects.
+        for (off, reloc) in section.relocations() {
+            let off = off as usize;
+            let target_addr = match reloc.target() {
+                object::RelocationTarget::Symbol(idx) => obj
+                    .symbol_by_index(idx)
+                    .map(|s| s.address())
+                    .unwrap_or(0),
+                _ => 0,
+            };
+            let value = target_addr.wrapping_add(reloc.addend() as u64);
+            let sz = (reloc.size() as usize) / 8;
+            if off + sz <= data.len() {
+                if sz == 8 {
+                    let b = if le {
+                        value.to_le_bytes()
+                    } else {
+                        value.to_be_bytes()
+                    };
+                    data[off..off + 8].copy_from_slice(&b);
+                } else if sz == 4 {
+                    let v = value as u32;
+                    let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+                    data[off..off + 4].copy_from_slice(&b);
+                }
+            }
+        }
         Ok(gimli::EndianSlice::new(Box::leak(data.into_boxed_slice()), endian))
     };
     let dwarf = match gimli::Dwarf::load(load_section) {
@@ -14026,23 +14520,42 @@ fn readelf_debug_line_decoded<'data, Elf: FileHeader>(
         let mut prev_addr: u64 = u64::MAX;
         let mut view: u64 = 0;
         let mut rows = line_program.rows();
-        let mut rows_buf: Vec<(u64, u64, Option<u64>, u64, bool, bool)> = Vec::new();
+        // Buffer fields: (file_idx, line, line_opt, addr, is_stmt, end_seq, discriminator)
+        let mut rows_buf: Vec<(u64, u64, Option<u64>, u64, bool, bool, u64)> = Vec::new();
+        // Gimli skips the end_sequence row that follows a set_address rewind
+        // with no intervening Copy. Synthesise an end_sequence when we
+        // detect a sequence boundary via an address regression.
+        let mut last_addr_in_seq: Option<u64> = None;
+        let mut last_file: u64 = 0;
         while let Ok(Some((_h, row))) = rows.next_row() {
-            if row.end_sequence() {
-                rows_buf.push((row.file_index(), 0, None, row.address(), false, true));
+            let addr = row.address();
+            let end_seq = row.end_sequence();
+            if let Some(prev) = last_addr_in_seq
+                && !end_seq
+                && addr < prev
+            {
+                rows_buf.push((last_file, 0, None, addr, false, true, 0));
+                last_addr_in_seq = None;
+            }
+            if end_seq {
+                rows_buf.push((row.file_index(), 0, None, addr, false, true, 0));
+                last_addr_in_seq = None;
                 continue;
             }
             rows_buf.push((
                 row.file_index(),
                 row.line().map(|l| l.get()).unwrap_or(0),
                 row.line().map(|l| l.get()),
-                row.address(),
+                addr,
                 row.is_stmt(),
                 false,
+                row.discriminator(),
             ));
+            last_addr_in_seq = Some(addr);
+            last_file = row.file_index();
         }
         // Print each row, with file change indicators.
-        for (file_idx, line, line_opt, addr, is_stmt, end_seq) in &rows_buf {
+        for (file_idx, line, line_opt, addr, is_stmt, end_seq, discr) in &rows_buf {
             if *end_seq {
                 // GNU emits an end-of-sequence row with line "-" and the
                 // section-end address. Reuse current_file (the last live
@@ -14061,10 +14574,17 @@ fn readelf_debug_line_decoded<'data, Elf: FileHeader>(
                         ""
                     );
                 }
+                // Reset state so the next sequence starts fresh; emit blank
+                // separator line that GNU prints between sequences.
+                prev_addr = u64::MAX;
+                view = 0;
+                println!();
                 continue;
             }
-            // File change?
-            let file_changed = current_file != Some(*file_idx);
+            // File change? GNU only emits a `<file>:` header when switching
+            // *into* a new file mid-program — the CU's primary file already
+            // appears at the top of the section dump.
+            let file_changed = current_file.is_some() && current_file != Some(*file_idx);
             if file_changed {
                 let file = match header.file(*file_idx) {
                     Some(f) => f,
@@ -14075,11 +14595,6 @@ fn readelf_debug_line_decoded<'data, Elf: FileHeader>(
                 if let Some(dir) = file.directory(&header) {
                     if let Ok(d) = dwarf.attr_string(&unit, dir) {
                         let s = d.to_string_lossy().into_owned();
-                        // DWARF 2/3/4 directory index 0 is implicit (CU dir);
-                        // gimli returns the comp_dir entry, but GNU readelf
-                        // doesn't print that for the file table. We only
-                        // prefix with the dir when it actually came from the
-                        // include_directories table.
                         if !s.is_empty() && file.directory_index() != 0 {
                             path.push_str(&s);
                             if !s.ends_with('/') {
@@ -14092,29 +14607,16 @@ fn readelf_debug_line_decoded<'data, Elf: FileHeader>(
                 if let Ok(name) = dwarf.attr_string(&unit, file.path_name()) {
                     path.push_str(&name.to_string_lossy());
                 }
-                // CU file (no directory prefix in include_directories) shown
-                // with leading "./" + "[++]" suffix on re-entry.
-                let suffix = if !has_dir_prefix && current_file.is_some() {
-                    "[++]"
-                } else {
-                    ""
-                };
-                let prefix = if !has_dir_prefix && current_file.is_some() {
-                    "./"
-                } else {
-                    ""
-                };
+                let suffix = if !has_dir_prefix { "[++]" } else { "" };
+                let prefix = if !has_dir_prefix { "./" } else { "" };
                 println!("{}{}:{}", prefix, path, suffix);
-                current_file = Some(*file_idx);
                 prev_addr = u64::MAX;
                 view = 0;
             }
-            // Compute view: increment if same address as previous row.
-            if *addr == prev_addr {
-                view += 1;
-            } else {
-                view = 0;
-            }
+            current_file = Some(*file_idx);
+            // GNU readelf "View" column shows the discriminator when set —
+            // not a synthetic increment for consecutive same-address rows.
+            view = *discr;
             prev_addr = *addr;
             // Print row entry: file_basename line addr view stmt
             let file = match header.file(*file_idx) {
@@ -14717,8 +15219,10 @@ fn decode_dwop_operation(op: u8, p: &mut DwarfReader<'_>, addr_size: u8) -> Stri
         0xa3 /* DW_OP_entry_value */ => {
             let n = p.read_uleb128().unwrap_or(0) as usize;
             let bytes = p.read_bytes(n).unwrap_or(&[]);
-            let hex: Vec<String> = bytes.iter().map(|b| format!("{:x}", b)).collect();
-            format!("DW_OP_entry_value: {} byte block: {}", n, hex.join(" "))
+            let inner = decode_dwop_expression(bytes, addr_size, p.le);
+            // GNU readelf format: "DW_OP_entry_value: (inner)"
+            // decode_dwop_expression already wraps in parens, so use it as-is.
+            format!("DW_OP_entry_value: {}", inner)
         }
         0xa4 /* DW_OP_const_type */ => {
             let t = p.read_uleb128().unwrap_or(0);
@@ -14748,8 +15252,8 @@ fn decode_dwop_operation(op: u8, p: &mut DwarfReader<'_>, addr_size: u8) -> Stri
         0xf3 /* DW_OP_GNU_entry_value */ => {
             let n = p.read_uleb128().unwrap_or(0) as usize;
             let bytes = p.read_bytes(n).unwrap_or(&[]);
-            let hex: Vec<String> = bytes.iter().map(|b| format!("{:x}", b)).collect();
-            format!("DW_OP_GNU_entry_value: {} byte block: {}", n, hex.join(" "))
+            let inner = decode_dwop_expression(bytes, addr_size, p.le);
+            format!("DW_OP_GNU_entry_value: {}", inner)
         }
         0xf4 /* DW_OP_GNU_const_type */ => {
             let t = p.read_uleb128().unwrap_or(0);
