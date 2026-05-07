@@ -2158,8 +2158,16 @@ impl Interpreter {
                     self.current_file.clone()
                 };
                 let line = self.current_line;
+                // Reference perl omits the "you may need to install"
+                // hint for single-letter module names (`use B;` etc.),
+                // empirically confirmed across 5.42 Perl. Match that.
+                let install_hint = if module.len() <= 1 {
+                    String::new()
+                } else {
+                    format!(" (you may need to install the {module} module)")
+                };
                 let msg = format!(
-                    "Can't locate {filename} in @INC (you may need to install the {module} module) (@INC entries checked: {inc_str}) at {file} line {line}.\nBEGIN failed--compilation aborted at {file} line {line}.\n"
+                    "Can't locate {filename} in @INC{install_hint} (@INC entries checked: {inc_str}) at {file} line {line}.\nBEGIN failed--compilation aborted at {file} line {line}.\n"
                 );
                 if self.eval_depth > 0 {
                     // Inside eval — return as a die so $@ is set and
@@ -2215,8 +2223,13 @@ impl Interpreter {
                         self.current_file.clone()
                     };
                     let line = self.current_line;
+                    let install_hint = if module.len() <= 1 {
+                        String::new()
+                    } else {
+                        format!(" (you may need to install the {module} module)")
+                    };
                     let msg = format!(
-                        "Can't locate {filename} in @INC (you may need to install the {module} module) (@INC entries checked: {inc_str}) at {file} line {line}.\n"
+                        "Can't locate {filename} in @INC{install_hint} (@INC entries checked: {inc_str}) at {file} line {line}.\n"
                     );
                     if self.eval_depth > 0 {
                         return Flow::Die(msg);
@@ -11952,8 +11965,13 @@ fn compile_time_use_check_in_inner(
                     continue;
                 }
                 let inc_str = inc.iter().map(|v| v.to_str()).collect::<Vec<_>>().join(" ");
+                let install_hint = if module.len() <= 1 {
+                    String::new()
+                } else {
+                    format!(" (you may need to install the {module} module)")
+                };
                 return Some(format!(
-                    "Can't locate {filename} in @INC (you may need to install the {module} module) (@INC entries checked: {inc_str}) at {_file_path} line {line}.\nBEGIN failed--compilation aborted at {_file_path} line {line}.\n"
+                    "Can't locate {filename} in @INC{install_hint} (@INC entries checked: {inc_str}) at {_file_path} line {line}.\nBEGIN failed--compilation aborted at {_file_path} line {line}.\n"
                 ));
             }
             Stmt::Block(body)
