@@ -5225,6 +5225,14 @@ impl Interpreter {
                 std::thread::sleep(std::time::Duration::from_secs(secs));
                 Value::Num(secs as f64)
             }
+            "time" => {
+                // `time` — Unix epoch seconds.
+                let secs = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as f64)
+                    .unwrap_or(0.0);
+                Value::Num(secs)
+            }
             "pos" => {
                 // `pos($var)` / `pos(*glob)` — current `/g` match offset
                 // (character count), or undef if no match. `*NAME` maps to

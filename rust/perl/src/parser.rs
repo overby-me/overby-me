@@ -3259,6 +3259,18 @@ impl Parser {
                 if name == "__FILE__" || name == "__LINE__" || name == "__PACKAGE__" {
                     return Expr::Call(name, Vec::new());
                 }
+                // Perl nullary builtins. Recognise them before the
+                // "function call without parens" branch so `time - $t`
+                // parses as `time() - $t` rather than `time(-$t)`.
+                // `time()` (with parens) is handled by the LParen branch
+                // above.
+                if matches!(
+                    name.as_str(),
+                    "time" | "times" | "wait" | "fork" | "getppid" | "getpid"
+                ) && !self.at(&Token::LParen)
+                {
+                    return Expr::Call(name, Vec::new());
+                }
 
                 // Check for backtick execution: Ident("backtick") followed by StringLit
                 if name == "backtick" {

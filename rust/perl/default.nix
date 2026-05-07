@@ -610,6 +610,10 @@
         category = "op";
         name = "magic";
       }
+      {
+        category = "op";
+        name = "sleep";
+      }
 
       # --- t/comp/ (selected) ---
       {
