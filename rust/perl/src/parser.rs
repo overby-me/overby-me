@@ -898,9 +898,14 @@ impl Parser {
             }
         }
 
-        // Skip attributes
+        // Parse attributes — record `:lvalue` so the sub can be called
+        // as an assignment target. Skip the rest.
+        let mut is_lvalue = false;
         while self.eat(&Token::Colon) {
-            if let Token::Ident(_) = self.tok() {
+            if let Token::Ident(name) = self.tok() {
+                if name == "lvalue" {
+                    is_lvalue = true;
+                }
                 self.pos += 1;
             }
         }
@@ -921,6 +926,7 @@ impl Parser {
             name,
             params: proto,
             body,
+            is_lvalue,
         }
     }
 

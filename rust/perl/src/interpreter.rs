@@ -53,6 +53,12 @@ pub struct Interpreter {
     globals: Scope,
     // Subroutines
     subs: HashMap<String, (Vec<String>, Vec<Stmt>)>,
+    /// Names of subs declared with `: lvalue`. When such a sub is the
+    /// target of an assignment (`get_st = 7`), we look up the body's
+    /// last expression and assign to it instead — supports the simple
+    /// case where the body returns a single ScalarVar / ArrayElement /
+    /// HashElement / etc.
+    lvalue_subs: std::collections::HashSet<String>,
     // BEGIN blocks (already executed)
     // END blocks (deferred). Each entry is (body, origin_file). Origin lets us
     // push the file's persistent scope before running so test.pl's END block
@@ -458,6 +464,7 @@ impl Interpreter {
             sub_origin: HashMap::new(),
             sub_def_loc: HashMap::new(),
             sub_def_package: HashMap::new(),
+            lvalue_subs: std::collections::HashSet::new(),
             current_sub_stack: Vec::new(),
             current_sub_scope_start: Vec::new(),
             loading_files: Vec::new(),
@@ -561,9 +568,17 @@ impl Interpreter {
         let last_begin_idx = program.iter().rposition(|s| matches!(s, Stmt::Begin(_, _)));
         for (idx, stmt) in program.iter().enumerate() {
             match stmt {
-                Stmt::Sub { name, params, body } if !name.is_empty() => {
+                Stmt::Sub {
+                    name,
+                    params,
+                    body,
+                    is_lvalue,
+                } if !name.is_empty() => {
                     self.subs
                         .insert(name.clone(), (params.clone(), body.clone()));
+                    if *is_lvalue {
+                        self.lvalue_subs.insert(name.clone());
+                    }
                     // Record top-level subs definition file so caller()
                     // sees op/foo.t even when dispatched through an
                     // eval-string trampoline.
@@ -1532,7 +1547,12 @@ impl Interpreter {
                 }
             }
 
-            Stmt::Sub { name, params, body } => {
+            Stmt::Sub {
+                name,
+                params,
+                body,
+                is_lvalue,
+            } => {
                 if !name.is_empty() {
                     // Qualify unqualified names with the current package
                     // so `package FOO { sub bar { … } }` registers as
@@ -1546,6 +1566,9 @@ impl Interpreter {
                     };
                     self.subs
                         .insert(qualified.clone(), (params.clone(), body.clone()));
+                    if *is_lvalue {
+                        self.lvalue_subs.insert(qualified.clone());
+                    }
                     // Named subs declared inside an `eval STRING` (or any
                     // dynamic body — `eval_depth > 0`) close over the
                     // surrounding lexical scope, just like anonymous subs.
@@ -8436,7 +8459,12 @@ impl Interpreter {
                     // initially; the inner Stmt::Package will switch it.
                     Self::hoist_subs_in_blocks(body, subs, &current_pkg);
                 }
-                Stmt::Sub { name, params, body } if !name.is_empty() => {
+                Stmt::Sub {
+                    name,
+                    params,
+                    body,
+                    is_lvalue: _,
+                } if !name.is_empty() => {
                     let qualified = if name.contains("::") || current_pkg == "main" {
                         name.clone()
                     } else {
@@ -9393,6 +9421,27 @@ impl Interpreter {
     // --- Assignment ---
 
     fn assign_to(&mut self, target: &Expr, val: Value) {
+        // `name() = val` for lvalue subs — find the body's last
+        // expression (a simple ScalarVar / ArrayElement / HashElement)
+        // and assign through that. Run preceding stmts for side effects.
+        if let Expr::Call(name, args) = target
+            && self.lvalue_subs.contains(name)
+            && let Some((_params, body)) = self.subs.get(name).cloned()
+            && !body.is_empty()
+        {
+            // Run all stmts except the last for side effects.
+            let _ = args; // arg evaluation deferred — args are unused for the simple cases we cover
+            for stmt in &body[..body.len() - 1] {
+                self.exec_stmt(stmt);
+            }
+            // The last stmt must be `Stmt::Expr(LVALUE)`. Recurse into
+            // assign_to with that lvalue. Anything else falls through
+            // to the normal path (no-op assignment).
+            if let Stmt::Expr(lvalue_expr) = &body[body.len() - 1] {
+                return self.assign_to(lvalue_expr, val);
+            }
+            return;
+        }
         match target {
             Expr::ScalarVar(name) => self.set_var(name, val),
             Expr::ScalarDerefVar(name) => {
@@ -11613,7 +11662,15 @@ impl Interpreter {
         let mut main_stmts = Vec::new();
         for stmt in &stmts {
             match stmt {
-                Stmt::Sub { name, params, body } if !name.is_empty() => {
+                Stmt::Sub {
+                    name,
+                    params,
+                    body,
+                    is_lvalue,
+                } if !name.is_empty() => {
+                    if *is_lvalue {
+                        self.lvalue_subs.insert(name.clone());
+                    }
                     self.subs
                         .insert(name.clone(), (params.clone(), body.clone()));
                     self.sub_origin.insert(name.clone(), origin.clone());
@@ -12709,7 +12766,9 @@ fn compile_time_use_check_in_inner(
 fn collect_named_subs(stmts: &[Stmt], out: &mut Vec<(String, Vec<String>, Vec<Stmt>)>) {
     for stmt in stmts {
         match stmt {
-            Stmt::Sub { name, params, body } if !name.is_empty() => {
+            Stmt::Sub {
+                name, params, body, ..
+            } if !name.is_empty() => {
                 out.push((name.clone(), params.clone(), body.clone()));
                 collect_named_subs(body, out);
             }

@@ -264,6 +264,13 @@ pub enum Stmt {
         name: String,
         params: Vec<String>,
         body: Vec<Stmt>,
+        /// True if the sub had `: lvalue` in its attribute list.
+        /// `sub get_lex : lvalue { $in }` returns a settable reference
+        /// when called as an assignment target — `get_lex = 7` updates
+        /// `$in`. We only support the trivial case where the body's
+        /// last expression is a simple lvalue (ScalarVar, ArrayElement,
+        /// HashElement, etc.).
+        is_lvalue: bool,
     },
     My(Vec<(String, Option<Expr>)>, bool), // my ($a, $b) = ...; bool = is list-context destructure (parens used)
     Local(Vec<(String, Option<Expr>)>, bool),
