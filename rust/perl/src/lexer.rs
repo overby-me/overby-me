@@ -2356,6 +2356,15 @@ impl Lexer {
     }
 
     fn read_delimited_string(&mut self) -> (char, char, String) {
+        let (open, close, s, _) = self.read_delimited_string_term();
+        (open, close, s)
+    }
+
+    /// Same as `read_delimited_string` but also reports whether the
+    /// closing delimiter was actually found (true) or we ran off the
+    /// end of input (false). Callers that produce position-specific
+    /// diagnostics (`m//`, `s///`) need this distinction.
+    fn read_delimited_string_term(&mut self) -> (char, char, String, bool) {
         // Skip plain whitespace before the delimiter — but NOT comments.
         // `#` is a perfectly valid delimiter (`q#foo#`), and treating it
         // as a comment would consume the q's body. We do allow newlines
@@ -2374,6 +2383,7 @@ impl Lexer {
         let is_paired = open != close;
         let mut s = String::new();
         let mut depth = 1;
+        let mut terminated = false;
 
         while self.pos < self.input.len() {
             if self.ch() == '\\' && self.pos + 1 < self.input.len() {
@@ -2409,6 +2419,7 @@ impl Lexer {
                 depth -= 1;
                 if depth == 0 {
                     self.pos += 1;
+                    terminated = true;
                     break;
                 }
                 s.push(self.advance());
@@ -2416,7 +2427,7 @@ impl Lexer {
                 s.push(self.advance());
             }
         }
-        (open, close, s)
+        (open, close, s, terminated)
     }
 
     fn read_q_string(&mut self) -> String {
@@ -2555,15 +2566,12 @@ impl Lexer {
 
     fn read_qr(&mut self) -> (String, String) {
         let start_line = self.current_line;
-        let (_, _, pat) = self.read_delimited_string();
+        let (_, _, pat, terminated) = self.read_delimited_string_term();
         // `read_delimited_string` exits silently on EOF — but for `m//`
         // and `qr//` the right diagnostic is "Search pattern not
         // terminated". Tag the lexer error if we fell off the end
-        // before seeing a closing delimiter (we always advance past
-        // the close on success, so reaching EOF with the open still
-        // unmatched means we never closed). The position is now at
-        // input.len(); record it once.
-        if self.pos >= self.input.len() && self.error.is_none() {
+        // before seeing a closing delimiter.
+        if !terminated && self.error.is_none() {
             self.error = Some(format!(
                 "Search pattern not terminated at {{FILE}} line {start_line}.\n",
             ));
