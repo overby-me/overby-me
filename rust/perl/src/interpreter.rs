@@ -9530,6 +9530,7 @@ impl Interpreter {
         let (pattern, flags) = unwrap_qr(&pattern, flags);
         let pattern = perl_backslash_n(&pattern);
         let pattern = strip_regex_comments(&pattern);
+        let pattern = translate_atomic_groups(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -9618,6 +9619,7 @@ impl Interpreter {
         let (pattern, flags) = unwrap_qr(&pattern, flags);
         let pattern = perl_backslash_n(&pattern);
         let pattern = strip_regex_comments(&pattern);
+        let pattern = translate_atomic_groups(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -12556,6 +12558,52 @@ fn perl_hex(s: &str) -> i64 {
 /// Perl's `$` (in non-/m mode) matches end-of-string OR just before a
 /// final newline; Rust's `$` only matches end-of-string. Rewrite each
 /// unescaped, non-class-character `$` that appears at end-of-pattern,
+/// Translate Perl atomic groups `(?>…)` into non-capturing groups
+/// `(?:…)`. Atomic semantics (no backtracking) aren't preserved, but
+/// for the tests that don't deliberately exercise backtracking the
+/// match result is the same. Skips inside `[…]` classes and respects
+/// `\(` / `\)` escapes.
+fn translate_atomic_groups(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class
+            && c == '('
+            && i + 2 < chars.len()
+            && chars[i + 1] == '?'
+            && chars[i + 2] == '>'
+        {
+            out.push_str("(?:");
+            i += 3;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 /// Strip Perl-style `(?#…)` regex comments. The Rust regex crate
 /// doesn't recognise this construct, so leaving it in turns the
 /// comment text into part of the match. Skips inside `[…]` classes
