@@ -2554,7 +2554,20 @@ impl Lexer {
     }
 
     fn read_qr(&mut self) -> (String, String) {
+        let start_line = self.current_line;
         let (_, _, pat) = self.read_delimited_string();
+        // `read_delimited_string` exits silently on EOF — but for `m//`
+        // and `qr//` the right diagnostic is "Search pattern not
+        // terminated". Tag the lexer error if we fell off the end
+        // before seeing a closing delimiter (we always advance past
+        // the close on success, so reaching EOF with the open still
+        // unmatched means we never closed). The position is now at
+        // input.len(); record it once.
+        if self.pos >= self.input.len() && self.error.is_none() {
+            self.error = Some(format!(
+                "Search pattern not terminated at {{FILE}} line {start_line}.\n",
+            ));
+        }
         let flags = self.read_regex_flags();
         (pat, flags)
     }
@@ -2562,12 +2575,14 @@ impl Lexer {
     fn read_substitution(&mut self, subst_token_idx: usize) -> (String, String, String) {
         // s/pattern/replacement/flags
         // The delimiter can be any non-alphanumeric character
+        let start_line = self.current_line;
         let open = self.advance();
         let close = Self::find_matching_delim(open);
         let is_paired = open != close;
 
         // Read pattern
         let mut pat = String::new();
+        let mut pat_terminated = false;
         let mut depth = 1;
         while self.pos < self.input.len() {
             if is_paired && self.ch() == open {
@@ -2577,6 +2592,7 @@ impl Lexer {
                 depth -= 1;
                 if depth == 0 {
                     self.pos += 1; // skip closing delimiter
+                    pat_terminated = true;
                     break;
                 }
                 pat.push(self.advance());
@@ -2599,6 +2615,15 @@ impl Lexer {
             }
         }
 
+        // EOF before pattern's closing delimiter — emit Perl's exact
+        // diagnostic for unterminated `s///`.
+        if !pat_terminated && self.error.is_none() {
+            self.error = Some(format!(
+                "Substitution pattern not terminated at {{FILE}} line {start_line}.\n",
+            ));
+            return (pat, String::new(), String::new());
+        }
+
         // For paired delimiters like s{pat}{repl}, skip whitespace before second part
         if is_paired {
             self.skip_whitespace_and_comments();
@@ -2614,6 +2639,7 @@ impl Lexer {
         let repl_is_paired = repl_open != repl_close;
 
         let mut repl = String::new();
+        let mut repl_terminated = false;
         let mut depth = 1;
         while self.pos < self.input.len() {
             if repl_is_paired && self.ch() == repl_open {
@@ -2623,6 +2649,7 @@ impl Lexer {
                 depth -= 1;
                 if depth == 0 {
                     self.pos += 1;
+                    repl_terminated = true;
                     break;
                 }
                 repl.push(self.advance());
@@ -2674,6 +2701,13 @@ impl Lexer {
             } else {
                 repl.push(self.advance());
             }
+        }
+
+        if !repl_terminated && self.error.is_none() {
+            self.error = Some(format!(
+                "Substitution replacement not terminated at {{FILE}} line {start_line}.\n",
+            ));
+            return (pat, repl, String::new());
         }
 
         let flags = self.read_regex_flags();
