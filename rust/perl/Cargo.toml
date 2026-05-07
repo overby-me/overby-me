@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 regex = "1"
 libc = "0.2"
+fancy-regex = "0.18.0"
 
 [profile.release]
 lto = true

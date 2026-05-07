@@ -9557,82 +9557,148 @@ impl Interpreter {
         } else {
             ""
         };
-        match regex::Regex::new(&pat) {
-            Ok(re) => {
-                if let Some(caps) = re.captures(slice) {
-                    for i in 1..caps.len() {
-                        if let Some(m) = caps.get(i) {
-                            self.set_global_var(&i.to_string(), Value::Str(m.as_str().to_string()));
-                        } else {
-                            self.set_global_var(&i.to_string(), Value::Undef);
-                        }
-                    }
-                    // Populate %+ from named captures so `$+{name}` reads
-                    // the right value. `re.capture_names()` yields one
-                    // entry per group (None for unnamed); skip the first
-                    // (the whole match has no name).
-                    let mut named_hash: std::collections::HashMap<String, Value> =
-                        std::collections::HashMap::new();
-                    for n in re.capture_names().flatten() {
-                        if let Some(m) = caps.name(n) {
-                            named_hash.insert(n.to_string(), Value::Str(m.as_str().to_string()));
-                        }
-                    }
-                    self.globals.hashes.insert("+".to_string(), named_hash);
-                    let m0 = caps.get(0).unwrap();
-                    let end = start + m0.end();
-                    // Store match special variables
-                    self.set_global_var("&", Value::Str(m0.as_str().to_string()));
-                    self.set_global_var("`", Value::Str(text[..start + m0.start()].to_string()));
-                    self.set_global_var("'", Value::Str(text[start + m0.end()..].to_string()));
-
-                    // `$+` is the last successfully captured group's
-                    // value (highest-numbered group that matched);
-                    // `$^N` mirrors the most recently *closed* one,
-                    // which for a flat (non-nested) pattern is the
-                    // same. Walk caps in reverse to find the highest
-                    // matched index.
-                    let mut last_cap: Option<String> = None;
-                    for i in (1..caps.len()).rev() {
-                        if let Some(m) = caps.get(i) {
-                            last_cap = Some(m.as_str().to_string());
-                            break;
-                        }
-                    }
-                    if let Some(s) = last_cap {
-                        self.set_global_var("+", Value::Str(s.clone()));
-                        self.set_global_var("^N", Value::Str(s));
+        // Try Rust's `regex` crate first (fast, DFA-based). When it
+        // refuses the pattern (typical for `\1`/`\10` backrefs,
+        // lookaround, conditional groups), fall back to fancy-regex
+        // which supports them at the cost of NFA-style runtime.
+        if let Ok(re) = regex::Regex::new(&pat) {
+            if let Some(caps) = re.captures(slice) {
+                let m0 = caps.get(0).unwrap();
+                let mut group_starts: Vec<Option<usize>> = vec![Some(m0.start())];
+                let mut group_ends: Vec<Option<usize>> = vec![Some(m0.end())];
+                let mut group_strs: Vec<Option<String>> = vec![Some(m0.as_str().to_string())];
+                for i in 1..caps.len() {
+                    if let Some(m) = caps.get(i) {
+                        group_starts.push(Some(m.start()));
+                        group_ends.push(Some(m.end()));
+                        group_strs.push(Some(m.as_str().to_string()));
                     } else {
-                        self.set_global_var("+", Value::Undef);
-                        self.set_global_var("^N", Value::Undef);
+                        group_starts.push(None);
+                        group_ends.push(None);
+                        group_strs.push(None);
                     }
-
-                    // Store @- and @+ (match start/end offsets) using
-                    // char counts, not byte offsets — reference perl
-                    // reports characters in @-, @+, $-[N], $+[N] when
-                    // the string holds UTF-8 wide chars.
-                    let byte_to_char =
-                        |off: usize| -> usize { text[..start + off].chars().count() };
-                    let mut minus_arr = vec![Value::Num(byte_to_char(m0.start()) as f64)];
-                    let mut plus_arr = vec![Value::Num(byte_to_char(m0.end()) as f64)];
+                }
+                let named: Vec<(String, Option<String>)> = re
+                    .capture_names()
+                    .flatten()
+                    .map(|n| (n.to_string(), caps.name(n).map(|m| m.as_str().to_string())))
+                    .collect();
+                self.populate_match_vars(
+                    text,
+                    start,
+                    &group_starts,
+                    &group_ends,
+                    &group_strs,
+                    &named,
+                );
+                let end = start + group_ends[0].unwrap();
+                return (true, end);
+            }
+            return (false, start);
+        }
+        match fancy_regex::Regex::new(&pat) {
+            Ok(re) => match re.captures(slice) {
+                Ok(Some(caps)) => {
+                    let m0 = caps.get(0).unwrap();
+                    let mut group_starts: Vec<Option<usize>> = vec![Some(m0.start())];
+                    let mut group_ends: Vec<Option<usize>> = vec![Some(m0.end())];
+                    let mut group_strs: Vec<Option<String>> = vec![Some(m0.as_str().to_string())];
                     for i in 1..caps.len() {
                         if let Some(m) = caps.get(i) {
-                            minus_arr.push(Value::Num(byte_to_char(m.start()) as f64));
-                            plus_arr.push(Value::Num(byte_to_char(m.end()) as f64));
+                            group_starts.push(Some(m.start()));
+                            group_ends.push(Some(m.end()));
+                            group_strs.push(Some(m.as_str().to_string()));
                         } else {
-                            minus_arr.push(Value::Undef);
-                            plus_arr.push(Value::Undef);
+                            group_starts.push(None);
+                            group_ends.push(None);
+                            group_strs.push(None);
                         }
                     }
-                    self.set_array("-", minus_arr);
-                    self.set_array("+", plus_arr);
+                    let named: Vec<(String, Option<String>)> = re
+                        .capture_names()
+                        .flatten()
+                        .map(|n| (n.to_string(), caps.name(n).map(|m| m.as_str().to_string())))
+                        .collect();
+                    self.populate_match_vars(
+                        text,
+                        start,
+                        &group_starts,
+                        &group_ends,
+                        &group_strs,
+                        &named,
+                    );
+                    let end = start + group_ends[0].unwrap();
                     (true, end)
-                } else {
-                    (false, start)
                 }
-            }
+                _ => (false, start),
+            },
             Err(_) => (false, start),
         }
+    }
+
+    /// Shared bookkeeping for `$1..$N`, `%+`, `$&`, `` $` ``, `$'`,
+    /// `$+`, `$^N`, `@-`, `@+` — populated identically regardless of
+    /// which regex backend produced the match.
+    fn populate_match_vars(
+        &mut self,
+        text: &str,
+        start: usize,
+        group_starts: &[Option<usize>],
+        group_ends: &[Option<usize>],
+        group_strs: &[Option<String>],
+        named: &[(String, Option<String>)],
+    ) {
+        for i in 1..group_strs.len() {
+            if let Some(s) = &group_strs[i] {
+                self.set_global_var(&i.to_string(), Value::Str(s.clone()));
+            } else {
+                self.set_global_var(&i.to_string(), Value::Undef);
+            }
+        }
+        let mut named_hash: std::collections::HashMap<String, Value> =
+            std::collections::HashMap::new();
+        for (n, v) in named {
+            if let Some(s) = v {
+                named_hash.insert(n.clone(), Value::Str(s.clone()));
+            }
+        }
+        self.globals.hashes.insert("+".to_string(), named_hash);
+        let m0_start = group_starts[0].unwrap();
+        let m0_end = group_ends[0].unwrap();
+        let m0_str = group_strs[0].clone().unwrap();
+        self.set_global_var("&", Value::Str(m0_str));
+        self.set_global_var("`", Value::Str(text[..start + m0_start].to_string()));
+        self.set_global_var("'", Value::Str(text[start + m0_end..].to_string()));
+
+        let mut last_cap: Option<String> = None;
+        for i in (1..group_strs.len()).rev() {
+            if let Some(s) = &group_strs[i] {
+                last_cap = Some(s.clone());
+                break;
+            }
+        }
+        if let Some(s) = last_cap {
+            self.set_global_var("+", Value::Str(s.clone()));
+            self.set_global_var("^N", Value::Str(s));
+        } else {
+            self.set_global_var("+", Value::Undef);
+            self.set_global_var("^N", Value::Undef);
+        }
+
+        let byte_to_char = |off: usize| -> usize { text[..start + off].chars().count() };
+        let mut minus_arr = vec![Value::Num(byte_to_char(m0_start) as f64)];
+        let mut plus_arr = vec![Value::Num(byte_to_char(m0_end) as f64)];
+        for i in 1..group_starts.len() {
+            if let (Some(s), Some(e)) = (group_starts[i], group_ends[i]) {
+                minus_arr.push(Value::Num(byte_to_char(s) as f64));
+                plus_arr.push(Value::Num(byte_to_char(e) as f64));
+            } else {
+                minus_arr.push(Value::Undef);
+                plus_arr.push(Value::Undef);
+            }
+        }
+        self.set_array("-", minus_arr);
+        self.set_array("+", plus_arr);
     }
 
     fn regex_match(&mut self, text: &str, pattern: &str, flags: &str) -> bool {
