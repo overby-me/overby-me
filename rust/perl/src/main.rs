@@ -60,6 +60,7 @@ fn run_interpreter() -> i32 {
     let mut include_dirs: Vec<String> = Vec::new();
     let mut auto_newline = false; // -l flag
     let mut warnings_flag = false; // -w flag
+    let mut taint_mode_arg = false; // -T flag
 
     let mut i = 1;
     while i < args.len() {
@@ -116,6 +117,9 @@ fn run_interpreter() -> i32 {
             }
             "-l" => {
                 auto_newline = true;
+            }
+            "-T" => {
+                taint_mode_arg = true;
             }
             s if s.starts_with("-")
                 && s.len() > 1
@@ -176,8 +180,23 @@ fn run_interpreter() -> i32 {
 
     // Blank out the shebang line so it's ignored but keeps line numbers
     // accurate. Lexer treats the resulting empty line as whitespace.
+    // Before blanking, check for `-T` (taint mode) on the shebang —
+    // reference perl aborts when the shebang requests `-T` but the
+    // command-line invocation didn't include it.
     if program_text.starts_with("#!") {
         if let Some(newline) = program_text.find('\n') {
+            let shebang = &program_text[..newline];
+            if has_shebang_flag(shebang, 'T') && !taint_mode_arg {
+                let file_label = if script_file.is_empty() {
+                    "-e"
+                } else {
+                    script_file.as_str()
+                };
+                eprintln!(
+                    "\"-T\" is on the #! line, it must also be used on the command line at {file_label} line 1."
+                );
+                std::process::exit(255);
+            }
             let rest = program_text[newline + 1..].to_string();
             program_text = format!("\n{rest}");
         }
@@ -221,4 +240,19 @@ fn run_interpreter() -> i32 {
     interp.run(&program);
 
     interp.exit_code
+}
+
+/// Check whether a Perl shebang line (e.g. `#!/usr/bin/perl -wT`)
+/// requests a single-letter flag. The shebang format is loose:
+/// after the path comes any number of `-flag` groups separated by
+/// whitespace; we look for `flag` inside any of those groups.
+fn has_shebang_flag(shebang: &str, flag: char) -> bool {
+    for token in shebang.split_whitespace().skip(1) {
+        if let Some(rest) = token.strip_prefix('-')
+            && rest.contains(flag)
+        {
+            return true;
+        }
+    }
+    false
 }
