@@ -386,6 +386,196 @@
         category = "op";
         name = "mydef";
       }
+      {
+        category = "op";
+        name = "append";
+      }
+      {
+        category = "op";
+        name = "aassign";
+      }
+      {
+        category = "op";
+        name = "attrhand";
+      }
+      {
+        category = "op";
+        name = "chained";
+      }
+      {
+        category = "op";
+        name = "chdir";
+      }
+      {
+        category = "op";
+        name = "concat";
+      }
+      {
+        category = "op";
+        name = "eq";
+      }
+      {
+        category = "op";
+        name = "exists";
+      }
+      {
+        category = "op";
+        name = "exp";
+      }
+      {
+        category = "op";
+        name = "feature_class";
+      }
+      {
+        category = "op";
+        name = "fork";
+      }
+      {
+        category = "op";
+        name = "getpid";
+      }
+      {
+        category = "op";
+        name = "glob";
+      }
+      {
+        category = "op";
+        name = "goto";
+      }
+      {
+        category = "op";
+        name = "inccode";
+      }
+      {
+        category = "op";
+        name = "incfilter";
+      }
+      {
+        category = "op";
+        name = "lc_mg";
+      }
+      {
+        category = "op";
+        name = "let";
+      }
+      {
+        category = "op";
+        name = "lexsub";
+      }
+      {
+        category = "op";
+        name = "lfs";
+      }
+      {
+        category = "op";
+        name = "mul";
+      }
+      {
+        category = "op";
+        name = "multideref";
+      }
+      {
+        category = "op";
+        name = "my_stash";
+      }
+      {
+        category = "op";
+        name = "myinit";
+      }
+      {
+        category = "op";
+        name = "overload_int";
+      }
+      {
+        category = "op";
+        name = "pat_rt_report";
+      }
+      {
+        category = "op";
+        name = "sprintf2";
+      }
+      {
+        category = "op";
+        name = "stash";
+      }
+      {
+        category = "op";
+        name = "stat";
+      }
+      {
+        category = "op";
+        name = "streaming";
+      }
+      {
+        category = "op";
+        name = "study";
+      }
+      {
+        category = "op";
+        name = "svleak";
+      }
+      {
+        category = "op";
+        name = "turkish";
+      }
+      {
+        category = "op";
+        name = "utf8cache";
+      }
+      {
+        category = "op";
+        name = "wantarray_thr";
+      }
+
+      # --- t/comp/ (selected) ---
+      {
+        category = "comp";
+        name = "ourwarn";
+      }
+      {
+        category = "comp";
+        name = "uxxxxx";
+      }
+
+      # --- t/lib/ (selected) ---
+      {
+        category = "lib";
+        name = "POSIX";
+      }
+      {
+        category = "lib";
+        name = "locale";
+      }
+      {
+        category = "lib";
+        name = "strict";
+      }
+      {
+        category = "lib";
+        name = "warnings";
+      }
+
+      # --- t/mro/ (selected) ---
+      {
+        category = "mro";
+        name = "basic";
+      }
+      {
+        category = "mro";
+        name = "c3";
+      }
+      {
+        category = "mro";
+        name = "dbic";
+      }
+      {
+        category = "mro";
+        name = "inconsistent_MRO";
+      }
+      {
+        category = "mro";
+        name = "next";
+      }
 
       # --- t/io/ (selected) ---
       {

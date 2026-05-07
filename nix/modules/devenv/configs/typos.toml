@@ -1,6 +1,10 @@
 # Run `touch .envrc && direnv export json` to apply changes to the repository.
 
 [default.extend-words]
+# Perl 5 test-suite filename (op/aassign.t — array assign)
+aassign = "aassign"
+# Perl 5 test-suite filename (op/wantarray_thr.t — threaded variant)
+thr = "thr"
 # Upstream API name from openssh-sftp-client crate
 clonable = "clonable"
 # GraphQL NOT IN operator
