@@ -150,6 +150,14 @@ pub struct Interpreter {
     /// pointing at the original storage and post-`local` refs at the
     /// new one.
     arylen_refs: HashMap<usize, std::rc::Rc<std::cell::RefCell<Vec<Value>>>>,
+    /// Anonymous-array storage backing `\$#{[…]}` magic refs. Pinning
+    /// these keeps the literal alive so reads through `$$ref` return
+    /// the original length rather than triggering the orphaned check —
+    /// matching reference perl's RC-build behaviour where `\$#{[]}`
+    /// keeps the temp `[]` alive while named-lexical refs (e.g.
+    /// `do { my @a; \$#a }`) still go through the orphaned-on-scope-
+    /// exit path.
+    kept_alive_arrays: Vec<std::rc::Rc<std::cell::RefCell<Vec<Value>>>>,
     /// Saved (name, Rc) pairs so `pop_scope` / `restore_locals` can put
     /// the original aliased-array Rc back when a `local @name` block
     /// exits. Stack of frames matching local_array_saves.
@@ -424,6 +432,7 @@ impl Interpreter {
             tied_scalars: HashMap::new(),
             in_tie_handler: 0,
             arylen_refs: HashMap::new(),
+            kept_alive_arrays: Vec::new(),
             local_aliased_array_saves: Vec::new(),
             deleted_slots: HashMap::new(),
             pos_offsets: HashMap::new(),
@@ -3829,6 +3838,53 @@ impl Interpreter {
                             self.aliased_arrays.insert(qname, rc.clone());
                             rc
                         };
+                        let len_now = (arr_rc.borrow().len() as i64) - 1;
+                        let cell =
+                            std::rc::Rc::new(std::cell::RefCell::new(Value::Num(len_now as f64)));
+                        let p = std::rc::Rc::as_ptr(&cell) as usize;
+                        self.arylen_refs.insert(p, arr_rc);
+                        return Value::ScalarRef(cell);
+                    }
+                    // `\$#{ EXPR }` — block-form ref-take. Anonymous
+                    // literal sources (`\$#{[…]}`) get pinned via
+                    // `kept_alive_arrays` so reads through `$$ref` see
+                    // the original length, matching reference perl's
+                    // RC-build "magic ref keeps [] alive" behaviour.
+                    // Block-form refs to existing variables fall back
+                    // to the named path; non-ref / non-string values
+                    // produce an empty backing storage.
+                    Expr::Call(n, inner_args) if n == "_arylen_block_deref" => {
+                        let inner_expr = inner_args.first();
+                        let is_anon_literal = matches!(
+                            inner_expr,
+                            Some(Expr::ArrayLit(_)) | Some(Expr::ArrayRef(_))
+                        );
+                        let inner_val = inner_expr
+                            .map(|a| self.eval_expr(a))
+                            .unwrap_or(Value::Undef);
+                        let arr_rc = match inner_val {
+                            Value::ArrayRef(r) => r,
+                            Value::Str(_) | Value::Num(_) => {
+                                let name = inner_val.to_str();
+                                let qname = self.qualify_global(&name);
+                                if let Some(rc) = self.aliased_arrays.get(qname.as_str()) {
+                                    rc.clone()
+                                } else {
+                                    let arr = self
+                                        .globals
+                                        .arrays
+                                        .remove(qname.as_str())
+                                        .unwrap_or_default();
+                                    let rc = std::rc::Rc::new(std::cell::RefCell::new(arr));
+                                    self.aliased_arrays.insert(qname, rc.clone());
+                                    rc
+                                }
+                            }
+                            _ => std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+                        };
+                        if is_anon_literal {
+                            self.kept_alive_arrays.push(arr_rc.clone());
+                        }
                         let len_now = (arr_rc.borrow().len() as i64) - 1;
                         let cell =
                             std::rc::Rc::new(std::cell::RefCell::new(Value::Num(len_now as f64)));
