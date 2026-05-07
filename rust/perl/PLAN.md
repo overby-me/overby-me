@@ -8,7 +8,15 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 **67/79 Nix tests passing** (85%) — selected tests from the upstream Perl test suite.
 
-This iteration's improvements (op/eval diff: 146 → 72):
+This iteration's improvements:
+
+- **`(?<X)` invalid named-capture group name detection**: when scanning `(?<X` inside `validate_regex_pattern`, X must be `=` (lookbehind), `!` (neg lookbehind), `_`, or an ASCII letter. Otherwise reference perl emits "Group name must start with a non-digit word character" — we now match.
+- **`(?…` incomplete sequence detection**: when paren depth > 0 at end of pattern AND the last unmatched `(` is followed by `?`, emit "Sequence (? incomplete" instead of generic "Unmatched (".
+- **`<<TAG` heredocs inside `${…}` islands of plain double-quoted strings**: `read_dq_str_interp_at` mirrors `read_qq_string_at` so `"${\<<TAG}"` inside `s///e` REPL gets the heredoc registered with InterpMarker.
+- **Don't pre-consume the next char on `\\X` in s/// PAT/REPL capture**: was hiding `<<TAG` directives at `\<<TAG` boundaries (Perl take-ref + heredoc inside `${\<<TAG}` islands).
+- **Drain pending heredocs at newlines during s/// REPL capture**: reference perl interleaves heredoc-body reading with REPL parsing for multi-line REPLs. After a `<<TAG` directive, the body lives on the source lines following the directive, not at the next top-level newline.
+
+Earlier this iteration (op/eval diff: 146 → 72):
 
 - **Lexical-scope termination at sub boundaries**: top-level NAMED subs (no closure_envs, not anonymous) now stash dynamic frames between scopes[0] and the sub's own scope-start when running `eval STRING`. So `sub terminal { eval '$r' }` called from `do { my $r = "bad" }` no longer sees the do-block's `$r` — falls through to `$main::r` instead. Test 40 (`lexical search terminates correctly at subroutine boundary`) now passes.
 - New `current_sub_scope_start` parallel stack (pushed/popped with `current_sub_stack`) records `self.scopes.len()` at each NAMED sub call so eval STRING knows the sub's own frame index. Pop-on-return wired up in all four exit paths (was missing in the two normal-completion paths, causing state leaks).
