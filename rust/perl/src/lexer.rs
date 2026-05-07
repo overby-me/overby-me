@@ -1189,7 +1189,11 @@ impl Lexer {
 
                 '"' => {
                     self.pos += 1;
-                    let (s, has_interp) = self.read_dq_str_interp('"');
+                    // Reserve the slot index up front so any heredoc
+                    // tracked from inside `${\<<TAG}` etc. can target
+                    // the string we're about to emit.
+                    let slot_idx = tokens.len();
+                    let (s, has_interp) = self.read_dq_str_interp_at('"', Some(slot_idx));
                     if has_interp {
                         tokens.push(Token::InterpString(s));
                     } else {
@@ -2061,12 +2065,19 @@ impl Lexer {
     /// the original source contained an *unescaped* `$` or `@` — only
     /// unescaped sigils trigger string interpolation.
     fn read_dq_str_interp(&mut self, delim: char) -> (String, bool) {
+        self.read_dq_str_interp_at(delim, None)
+    }
+
+    fn read_dq_str_interp_at(&mut self, delim: char, target_idx: Option<usize>) -> (String, bool) {
         let mut s = String::new();
         let mut has_interp = false;
         while self.pos < self.input.len() && self.ch() != delim {
             // `${ EXPR }` / `@{ EXPR }` — copy the inner expression
             // verbatim so backslash escapes (`\7`) inside it aren't
-            // mistaken for string-literal escapes (octal 7).
+            // mistaken for string-literal escapes (octal 7). Also
+            // detect `<<TAG` directives nested inside the island and
+            // queue them as pending heredocs that target this string
+            // (matches qq// behaviour for `${\<<TAG}` constructs).
             if (self.ch() == '$' || self.ch() == '@') && self.peek(1) == '{' {
                 has_interp = true;
                 s.push(self.advance()); // $ or @
@@ -2076,11 +2087,44 @@ impl Lexer {
                     let c = self.ch();
                     if c == '{' {
                         depth += 1;
-                    } else if c == '}' {
+                        s.push(self.advance());
+                        continue;
+                    }
+                    if c == '}' {
                         depth -= 1;
+                        s.push(self.advance());
                         if depth == 0 {
-                            s.push(self.advance());
                             break;
+                        }
+                        continue;
+                    }
+                    if let Some(idx) = target_idx
+                        && c == '<'
+                        && self.peek(1) == '<'
+                    {
+                        // Try to parse a `<<TAG` heredoc header from
+                        // the current position. On success, insert a
+                        // marker into the captured string and queue
+                        // the body to be spliced in at drain time.
+                        let chars_so_far: Vec<char> = self.input[self.pos..].to_vec();
+                        if let Some((consumed, tag, indent, interpolate)) =
+                            try_parse_heredoc_header(&chars_so_far, 0)
+                        {
+                            self.subst_marker_counter += 1;
+                            let marker = format!("\x01HD{}\x01", self.subst_marker_counter);
+                            s.push_str(&marker);
+                            self.pending_heredocs.push(PendingHeredoc {
+                                tag,
+                                indent,
+                                interpolate,
+                                target: HeredocTarget::InterpMarker {
+                                    token_idx: idx,
+                                    marker,
+                                },
+                                start_line: self.current_line,
+                            });
+                            self.pos += consumed;
+                            continue;
                         }
                     }
                     s.push(self.advance());
