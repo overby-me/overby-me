@@ -12285,11 +12285,13 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
             }
             // Scan until we find the closing `]` (escaped `]` doesn't
             // count, escaped anything skips a char). Embedded `[:…:]`
-            // POSIX classes inside the outer class are skipped
-            // atomically so the inner closing `]` doesn't terminate
-            // the outer class. Empty `[]` (i.e. `[]` immediately after
-            // the bracket — no chars) becomes `Unmatched [` because
-            // reference perl can't compile a truly-empty class.
+            // POSIX classes are validated eagerly so an unknown name
+            // raises the right diagnostic even when the outer class
+            // has no closing bracket (test 662).
+            const POSIX_CLASSES: &[&str] = &[
+                "alpha", "alnum", "ascii", "blank", "cntrl", "digit", "graph", "lower", "print",
+                "punct", "space", "upper", "word", "xdigit",
+            ];
             let body_start = i;
             let mut depth_ok = false;
             while i < chars.len() {
@@ -12299,14 +12301,28 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                     continue;
                 }
                 // `[:` opens an embedded POSIX class — skip to its
-                // closing `:]` so we don't mistake the inner `]` for
-                // the outer one.
+                // closing `:]` and reject unknown names eagerly.
                 if cc == '[' && i + 1 < chars.len() && chars[i + 1] == ':' {
-                    let mut k = i + 2;
+                    let name_start = i + 2;
+                    let name_after_caret = if name_start < chars.len() && chars[name_start] == '^' {
+                        name_start + 1
+                    } else {
+                        name_start
+                    };
+                    let mut k = name_after_caret;
                     while k + 1 < chars.len() && !(chars[k] == ':' && chars[k + 1] == ']') {
                         k += 1;
                     }
                     if k + 1 < chars.len() {
+                        let raw_name: String = chars[name_after_caret..k].iter().collect();
+                        let display_name: String = chars[name_start..k].iter().collect();
+                        if !POSIX_CLASSES.iter().any(|n| *n == raw_name) {
+                            let prefix: String = chars[..k + 2].iter().collect();
+                            let suffix: String = chars[k + 2..].iter().collect();
+                            return Some(format!(
+                                "POSIX class [:{display_name}:] unknown in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                            ));
+                        }
                         i = k + 2; // past the `:]`
                         continue;
                     }
@@ -12324,56 +12340,9 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                 ));
             }
             // Now `i` is the closing `]`. Validate ranges in
-            // chars[body_start..i] of the form `A-B` where A > B,
-            // and reject unknown POSIX classes `[:NAME:]`.
+            // chars[body_start..i] of the form `A-B` where A > B.
+            // (POSIX class validation already happened above.)
             let class_body: Vec<char> = chars[body_start..i].to_vec();
-            // POSIX class validation: scan for `[:…:]` (and `[:^…:]`)
-            // and reject any name not in the canonical set. Reference
-            // perl emits "POSIX class [:NAME:] unknown" pointing at
-            // the `]` that closes the class.
-            const POSIX_CLASSES: &[&str] = &[
-                "alpha", "alnum", "ascii", "blank", "cntrl", "digit", "graph", "lower", "print",
-                "punct", "space", "upper", "word", "xdigit",
-            ];
-            let mut k = 0;
-            while k + 1 < class_body.len() {
-                if class_body[k] == '[' && class_body[k + 1] == ':' {
-                    let name_start = k + 2;
-                    let name_after_caret =
-                        if name_start < class_body.len() && class_body[name_start] == '^' {
-                            name_start + 1
-                        } else {
-                            name_start
-                        };
-                    let mut end = name_after_caret;
-                    while end + 1 < class_body.len()
-                        && !(class_body[end] == ':' && class_body[end + 1] == ']')
-                    {
-                        end += 1;
-                    }
-                    if end + 1 < class_body.len()
-                        && class_body[end] == ':'
-                        && class_body[end + 1] == ']'
-                    {
-                        let raw_name: String = class_body[name_after_caret..end].iter().collect();
-                        let display_name: String = class_body[name_start..end].iter().collect();
-                        if !POSIX_CLASSES.iter().any(|n| *n == raw_name) {
-                            // Print the name as it appeared in the
-                            // source (with leading `^` if negated). The
-                            // marker points at the closing `]` of the
-                            // outer class.
-                            let prefix: String = chars[..=i - 1].iter().collect();
-                            let suffix: String = chars[i..].iter().collect();
-                            return Some(format!(
-                                "POSIX class [:{display_name}:] unknown in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
-                            ));
-                        }
-                        k = end + 2;
-                        continue;
-                    }
-                }
-                k += 1;
-            }
             let mut j = 0;
             while j < class_body.len() {
                 if class_body[j] == '\\' {
@@ -12589,10 +12558,6 @@ fn perl_hex(s: &str) -> i64 {
 /// inner subexpressions only minimally — it's a heuristic, not a full
 /// regex parser.
 fn perl_dollar_anchor(pattern: &str, multiline: bool) -> String {
-    if multiline {
-        // In /m mode `$` already means "end of any line". Leave alone.
-        return pattern.to_string();
-    }
     let chars: Vec<char> = pattern.chars().collect();
     let mut out = String::new();
     let mut i = 0;
@@ -12600,9 +12565,26 @@ fn perl_dollar_anchor(pattern: &str, multiline: bool) -> String {
     while i < chars.len() {
         let c = chars[i];
         if c == '\\' && i + 1 < chars.len() {
+            // `\Z` — Perl's "end of string, or before final newline".
+            // Rust's `regex` crate has no `\Z`; expand to the explicit
+            // `(?:\n?\z)` form. `\z` (absolute end) and other escapes
+            // pass through untouched. Skip inside character classes,
+            // since `\Z` there is a literal `Z`.
+            if !in_class && chars[i + 1] == 'Z' {
+                out.push_str("(?:\\n?\\z)");
+                i += 2;
+                continue;
+            }
             out.push(c);
             out.push(chars[i + 1]);
             i += 2;
+            continue;
+        }
+        if multiline {
+            // In /m mode `$` already means "end of any line"; leave it
+            // alone but still iterate so `\Z` translation above runs.
+            out.push(c);
+            i += 1;
             continue;
         }
         if !in_class && c == '[' {
