@@ -11718,20 +11718,70 @@ fn readelf_debug_macro<'data, Elf: FileHeader>(
     };
     let le = data.len() >= 6 && data[5] == 1;
 
-    // Look up .debug_str.dwo or .debug_str (for DW_MACRO_define_strx etc.)
+    // Look up .debug_str.dwo / .debug_str (for DW_MACRO_define_strx etc.).
+    // Apply relocations on .debug_str_offsets (some files have relocs that
+    // resolve to actual offsets).
+    use object::{Object as _, ObjectSection as _, ObjectSymbol as _};
     let mut str_dwo: Vec<u8> = Vec::new();
     let mut str_offsets_dwo: Vec<u8> = Vec::new();
+    let mut str_offsets_header_skip: usize = 0;
+    let read_sect_with_relocs = |sect: &object::Section<'_, '_>| -> Vec<u8> {
+        let raw = sect.uncompressed_data().ok();
+        let raw_bytes: &[u8] = raw.as_ref().map(|c| c.as_ref()).unwrap_or(&[]);
+        let mut buf = raw_bytes.to_vec();
+        for (offset, reloc) in sect.relocations() {
+            if let object::RelocationTarget::Symbol(sym_idx) = reloc.target()
+                && let Ok(sym) = obj.symbol_by_index(sym_idx)
+            {
+                let sym_addr = sym.address();
+                let value = sym_addr.wrapping_add(reloc.addend() as u64);
+                let off = offset as usize;
+                let size = reloc.size() as usize / 8;
+                if off + size <= buf.len() {
+                    match size {
+                        4 => {
+                            let v = if le {
+                                (value as u32).to_le_bytes()
+                            } else {
+                                (value as u32).to_be_bytes()
+                            };
+                            buf[off..off + 4].copy_from_slice(&v);
+                        }
+                        8 => {
+                            let v = if le { value.to_le_bytes() } else { value.to_be_bytes() };
+                            buf[off..off + 8].copy_from_slice(&v);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        buf
+    };
     for section in obj.sections() {
         let name = section.name().unwrap_or("");
-        if (name == ".debug_str.dwo" || name == ".zdebug_str.dwo")
-            && let Ok(d) = section.uncompressed_data()
-        {
-            str_dwo = d.into_owned();
+        if name == ".debug_str.dwo" || name == ".zdebug_str.dwo" || name == ".debug_str" {
+            if let Ok(d) = section.uncompressed_data() {
+                str_dwo = d.into_owned();
+            }
         }
-        if (name == ".debug_str_offsets.dwo" || name == ".zdebug_str_offsets.dwo")
-            && let Ok(d) = section.uncompressed_data()
-        {
-            str_offsets_dwo = d.into_owned();
+        if name == ".debug_str_offsets.dwo" || name == ".zdebug_str_offsets.dwo" {
+            str_offsets_dwo = read_sect_with_relocs(&section);
+        } else if name == ".debug_str_offsets" {
+            str_offsets_dwo = read_sect_with_relocs(&section);
+            // DWARF 5 .debug_str_offsets has an 8-byte header (32-bit) or
+            // 16-byte (64-bit) before the offsets array.
+            // unit_length(4)+version(2)+padding(2) = 8 bytes for 32-bit DWARF
+            if str_offsets_dwo.len() >= 4 {
+                let mut len_bytes = [0u8; 4];
+                len_bytes.copy_from_slice(&str_offsets_dwo[0..4]);
+                let initial = if le {
+                    u32::from_le_bytes(len_bytes)
+                } else {
+                    u32::from_be_bytes(len_bytes)
+                };
+                str_offsets_header_skip = if initial == 0xffff_ffff { 16 } else { 8 };
+            }
         }
     }
 
@@ -11747,6 +11797,10 @@ fn readelf_debug_macro<'data, Elf: FileHeader>(
             u32::from_be_bytes(x)
         })
     };
+    // GNU readelf doesn't skip the .debug_str_offsets header for macro
+    // strx lookups: it uses idx * offset_size directly. For typical
+    // compilers, idx values are >= 2 to skip past the header bytes.
+    let _ = str_offsets_header_skip;
     let lookup_strx = |idx: u64| -> String {
         let off = (idx as usize) * 4;
         if let Some(o) = read_u32(&str_offsets_dwo, off) {
@@ -11817,7 +11871,7 @@ fn readelf_debug_macro<'data, Elf: FileHeader>(
         println!("  Version:                     {}", version);
         println!("  Offset size:                 {}", offset_size);
         if let Some(off) = debug_line_offset {
-            println!("  Offset into .debug_line:     0x{:x}", off);
+            println!("  Offset into .debug_line:     {}", off);
         }
         println!();
 
@@ -11857,7 +11911,7 @@ fn readelf_debug_macro<'data, Elf: FileHeader>(
                 0x03 /* DW_MACRO_start_file */ => {
                     let line = p.read_uleb128().unwrap_or(0);
                     let file = p.read_uleb128().unwrap_or(0);
-                    println!(" DW_MACRO_start_file lineno : {} filenum : {}", line, file);
+                    println!(" DW_MACRO_start_file - lineno: {} filenum: {}", line, file);
                 }
                 0x04 /* DW_MACRO_end_file */ => {
                     println!(" DW_MACRO_end_file");
