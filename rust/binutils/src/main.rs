@@ -2630,6 +2630,7 @@ struct ReadelfOpts {
     show_debug_str: bool,
     show_debug_macro: bool,
     show_debug_abbrev: bool,
+    show_debug_line_raw: bool,
     process_links: bool,
     show_header: bool,
     show_sections: bool,
@@ -2767,6 +2768,9 @@ fn tool_readelf(args: &[String]) -> i32 {
             "-wa" | "--debug-dump=abbrev" | "--dwarf=abbrev" => {
                 opts.show_debug_abbrev = true;
             }
+            "-wl" | "--debug-dump=rawline" | "--dwarf=rawline" => {
+                opts.show_debug_line_raw = true;
+            }
             "-w" | "--debug-dump" | "--dwarf" => {
                 opts.show_debug_ranges = true;
                 opts.show_debug_loc = true;
@@ -2775,6 +2779,7 @@ fn tool_readelf(args: &[String]) -> i32 {
                 opts.show_debug_str = true;
                 opts.show_debug_macro = true;
                 opts.show_debug_abbrev = true;
+                opts.show_debug_line_raw = true;
             }
             s if s.starts_with("--debug-dump=") || s.starts_with("--dwarf=") => {
                 let v = s.split_once("=").unwrap().1;
@@ -2804,6 +2809,9 @@ fn tool_readelf(args: &[String]) -> i32 {
                 if v.eq_ignore_ascii_case("abbrev") || v == "a" {
                     opts.show_debug_abbrev = true;
                 }
+                if v.eq_ignore_ascii_case("rawline") || v == "l" {
+                    opts.show_debug_line_raw = true;
+                }
             }
             s if s.starts_with("-w") && s.len() > 2 => {
                 if s.contains('R') {
@@ -2823,6 +2831,9 @@ fn tool_readelf(args: &[String]) -> i32 {
                 }
                 if s.contains('a') {
                     opts.show_debug_abbrev = true;
+                }
+                if s.contains('l') {
+                    opts.show_debug_line_raw = true;
                 }
                 if s.contains('m') {
                     opts.show_debug_macro = true;
@@ -2870,6 +2881,7 @@ fn tool_readelf(args: &[String]) -> i32 {
                                 opts.show_debug_str = true;
                                 opts.show_debug_macro = true;
                                 opts.show_debug_abbrev = true;
+                                opts.show_debug_line_raw = true;
                             } else {
                                 if rest.contains('R') {
                                     opts.show_debug_ranges = true;
@@ -2888,6 +2900,9 @@ fn tool_readelf(args: &[String]) -> i32 {
                                 }
                                 if rest.contains('a') {
                                     opts.show_debug_abbrev = true;
+                                }
+                                if rest.contains('l') {
+                                    opts.show_debug_line_raw = true;
                                 }
                                 if rest.contains('m') {
                                     opts.show_debug_macro = true;
@@ -3669,6 +3684,10 @@ fn readelf_display<'data, Elf: FileHeader>(
 
     if opts.show_debug_abbrev {
         readelf_debug_abbrev(elf, data, endian);
+    }
+
+    if opts.show_debug_line_raw {
+        readelf_debug_line_raw(elf, data, endian);
     }
 }
 
@@ -5015,6 +5034,7 @@ fn tool_objdump(args: &[String]) -> i32 {
     let mut show_debug_ranges = false;
     let mut show_debug_str = false;
     let mut show_debug_abbrev = false;
+    let mut show_debug_line_raw = false;
     let mut wide = false;
     let mut input_target: Option<String> = None;
     let mut show_info = false;
@@ -5111,6 +5131,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                     show_debug_ranges = true;
                     show_debug_str = true;
                     show_debug_abbrev = true;
+                    show_debug_line_raw = true;
                 }
                 "-Z" | "--decompress" => {
                     decompress = true;
@@ -5147,6 +5168,9 @@ fn tool_objdump(args: &[String]) -> i32 {
                     if arg.contains('s') {
                         show_debug_str = true;
                     }
+                    if arg.contains('l') {
+                        show_debug_line_raw = true;
+                    }
                 }
                 _ if arg.starts_with("--dwarf=") || arg.starts_with("--debug-dump=") => {
                     let v = arg.split_once('=').unwrap().1;
@@ -5162,6 +5186,9 @@ fn tool_objdump(args: &[String]) -> i32 {
                         }
                         "abbrev" | "a" => {
                             show_debug_abbrev = true;
+                        }
+                        "rawline" | "l" => {
+                            show_debug_line_raw = true;
                         }
                         _ => {}
                     }
@@ -5234,7 +5261,12 @@ fn tool_objdump(args: &[String]) -> i32 {
 
     let mut errors = 0;
     for file in &files {
-        if emit_wi_placeholder || show_debug_ranges || show_debug_str || show_debug_abbrev {
+        if emit_wi_placeholder
+            || show_debug_ranges
+            || show_debug_str
+            || show_debug_abbrev
+            || show_debug_line_raw
+        {
             // Delegate DWARF section dumping to readelf implementations.
             // Build the list of files to process: with --process-links, linked files come first.
             let mut to_process: Vec<String> = Vec::new();
@@ -5288,6 +5320,9 @@ fn tool_objdump(args: &[String]) -> i32 {
                     if emit_wi_placeholder {
                         readelf_debug_info_loaded(&elf, &data_bytes, endian, loaded_from);
                     }
+                    if show_debug_line_raw {
+                        readelf_debug_line_raw(&elf, &data_bytes, endian);
+                    }
                     if show_debug_ranges {
                         readelf_debug_ranges(&elf, &data_bytes, endian);
                     }
@@ -5303,6 +5338,9 @@ fn tool_objdump(args: &[String]) -> i32 {
                     }
                     if emit_wi_placeholder {
                         readelf_debug_info_loaded(&elf, &data_bytes, endian, loaded_from);
+                    }
+                    if show_debug_line_raw {
+                        readelf_debug_line_raw(&elf, &data_bytes, endian);
                     }
                     if show_debug_ranges {
                         readelf_debug_ranges(&elf, &data_bytes, endian);
@@ -12411,7 +12449,12 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
                 None => break,
             };
             if code == 0 {
-                if depth > 0 {
+                // Emit a "depth><offset>: Abbrev Number: 0" marker for the
+                // sibling chain terminator (GNU prints the depth BEFORE
+                // decrementing, so children of a compile-unit show as
+                // <1><N>: Abbrev Number: 0).
+                if depth >= 1 {
+                    println!(" <{}><{:x}>: Abbrev Number: 0", depth, die_off);
                     depth -= 1;
                 }
                 continue;
@@ -12606,6 +12649,386 @@ struct AbbrevEntry {
 }
 
 #[allow(clippy::while_let_loop)]
+/// Raw dump of `.debug_line` / `.zdebug_line` line-program section in the
+/// format produced by `readelf --debug-dump=rawline` / `objdump -wl`.
+/// Implements DWARF 2/3/4 header layout; DWARF 5 uses a different format
+/// (file/dir tables encoded with format descriptors) — it falls back to a
+/// short header and skipping rest.
+fn readelf_debug_line_raw<'data, Elf: FileHeader>(
+    _elf: &ElfFile<'data, Elf>,
+    data: &'data [u8],
+    _endian: Elf::Endian,
+) {
+    let Ok(obj) = object::File::parse(data) else {
+        return;
+    };
+    use object::ObjectSection;
+    for sect in obj.sections() {
+        let name = sect.name().unwrap_or("");
+        if name != ".debug_line" && name != ".zdebug_line" {
+            continue;
+        }
+        let raw_bytes: Vec<u8> = match sect.uncompressed_data() {
+            Ok(d) => d.into_owned(),
+            Err(_) => match sect.data() {
+                Ok(raw) if raw.len() >= 12 && &raw[..4] == b"ZLIB" => {
+                    decompress_legacy_zlib(&raw[12..])
+                }
+                Ok(raw) => raw.to_vec(),
+                Err(_) => continue,
+            },
+        };
+        if raw_bytes.is_empty() {
+            continue;
+        }
+        let le = data.len() >= 6 && data[5] == 1;
+        // Apply relocations into a writable buffer so DW_LNE_set_address etc.
+        // resolve to the actual symbol target instead of zeros.
+        let mut bytes = raw_bytes;
+        let mut reloc_addr_size: Option<u8> = None;
+        for (off, reloc) in sect.relocations() {
+            if let object::RelocationTarget::Symbol(sym_idx) = reloc.target() {
+                if let Ok(sym) = obj.symbol_by_index(sym_idx) {
+                    let value = sym.address().wrapping_add(reloc.addend() as u64);
+                    let off = off as usize;
+                    let size = reloc.size() as usize / 8;
+                    if size == 4 || size == 8 {
+                        reloc_addr_size = Some(size as u8);
+                    }
+                    if off + size <= bytes.len() {
+                        match size {
+                            4 => {
+                                let v = if le {
+                                    (value as u32).to_le_bytes()
+                                } else {
+                                    (value as u32).to_be_bytes()
+                                };
+                                bytes[off..off + 4].copy_from_slice(&v);
+                            }
+                            8 => {
+                                let v = if le {
+                                    value.to_le_bytes()
+                                } else {
+                                    value.to_be_bytes()
+                                };
+                                bytes[off..off + 8].copy_from_slice(&v);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        let mut p = DwarfReader {
+            buf: &bytes,
+            pos: 0,
+            le,
+        };
+        println!();
+        println!("Raw dump of debug contents of section {}:", name);
+        while p.pos < p.buf.len() {
+            let unit_start = p.pos;
+            let (length, is_64) = match p.read_initial_length() {
+                Some(v) => v,
+                None => break,
+            };
+            let unit_end = p.pos + length as usize;
+            if unit_end > p.buf.len() {
+                break;
+            }
+            let version = match p.read_u16() {
+                Some(v) => v,
+                None => break,
+            };
+            // DWARF 5 has an extra address_size + segment_selector_size before
+            // header_length; we don't fully support DWARF 5 here.
+            if version == 5 {
+                let _addr_size = p.read_u8();
+                let _seg_size = p.read_u8();
+            }
+            let header_length = if is_64 {
+                p.read_u64().unwrap_or(0)
+            } else {
+                p.read_u32().unwrap_or(0) as u64
+            };
+            let prologue_end = p.pos + header_length as usize;
+            let min_instr_len = p.read_u8().unwrap_or(0);
+            let max_ops_per_instr = if version >= 4 {
+                p.read_u8().unwrap_or(1)
+            } else {
+                1
+            };
+            let default_is_stmt = p.read_u8().unwrap_or(0);
+            let line_base = p.read_u8().unwrap_or(0) as i8;
+            let line_range = p.read_u8().unwrap_or(1);
+            let opcode_base = p.read_u8().unwrap_or(1);
+            let mut opcode_lengths: Vec<u8> = Vec::new();
+            for _ in 1..opcode_base {
+                opcode_lengths.push(p.read_u8().unwrap_or(0));
+            }
+            println!();
+            println!("  Offset:                      {}", unit_start);
+            println!("  Length:                      {}", length);
+            println!("  DWARF Version:               {}", version);
+            println!("  Prologue Length:             {}", header_length);
+            println!("  Minimum Instruction Length:  {}", min_instr_len);
+            if version >= 4 {
+                println!("  Maximum Ops per Instruction: {}", max_ops_per_instr);
+            }
+            println!("  Initial value of 'is_stmt':  {}", default_is_stmt);
+            println!("  Line Base:                   {}", line_base);
+            println!("  Line Range:                  {}", line_range);
+            println!("  Opcode Base:                 {}", opcode_base);
+            println!();
+            println!(" Opcodes:");
+            for (i, &len) in opcode_lengths.iter().enumerate() {
+                let n = i + 1;
+                let arg_word = if len == 1 { "arg" } else { "args" };
+                println!("  Opcode {} has {} {}", n, len, arg_word);
+            }
+            // Directory table (DWARF 2/3/4 layout)
+            if version <= 4 {
+                let dir_start = p.pos;
+                let mut dirs: Vec<String> = Vec::new();
+                loop {
+                    if p.pos >= p.buf.len() {
+                        break;
+                    }
+                    let mut s = Vec::new();
+                    while let Some(b) = p.read_u8() {
+                        if b == 0 {
+                            break;
+                        }
+                        s.push(b);
+                    }
+                    if s.is_empty() {
+                        break;
+                    }
+                    dirs.push(String::from_utf8_lossy(&s).into_owned());
+                }
+                println!();
+                if dirs.is_empty() {
+                    println!(" The Directory Table is empty.");
+                } else {
+                    println!(" The Directory Table (offset 0x{:x}):", dir_start);
+                    for (i, d) in dirs.iter().enumerate() {
+                        println!("  {}\t{}", i + 1, d);
+                    }
+                }
+                let file_start = p.pos;
+                let mut files: Vec<(String, u64, u64, u64)> = Vec::new();
+                loop {
+                    if p.pos >= p.buf.len() {
+                        break;
+                    }
+                    let mut s = Vec::new();
+                    while let Some(b) = p.read_u8() {
+                        if b == 0 {
+                            break;
+                        }
+                        s.push(b);
+                    }
+                    if s.is_empty() {
+                        break;
+                    }
+                    let dir_idx = p.read_uleb128().unwrap_or(0);
+                    let mtime = p.read_uleb128().unwrap_or(0);
+                    let size = p.read_uleb128().unwrap_or(0);
+                    files.push((
+                        String::from_utf8_lossy(&s).into_owned(),
+                        dir_idx,
+                        mtime,
+                        size,
+                    ));
+                }
+                println!();
+                if files.is_empty() {
+                    println!(" The File Name Table is empty.");
+                } else {
+                    println!(" The File Name Table (offset 0x{:x}):", file_start);
+                    println!("  Entry\tDir\tTime\tSize\tName");
+                    for (i, (name, dir, time, size)) in files.iter().enumerate() {
+                        println!("  {}\t{}\t{}\t{}\t{}", i + 1, dir, time, size, name);
+                    }
+                }
+            } else {
+                // DWARF 5: skip directory and file format tables for now.
+                p.pos = prologue_end.min(p.buf.len());
+            }
+            // Line Number Statements
+            println!();
+            println!(" Line Number Statements:");
+            // Address size: prefer relocation size on .debug_line entries.
+            // For DWARF <5, fall back to 8 for 64-bit ELF, 4 otherwise.
+            let addr_size = reloc_addr_size.map(|s| s as usize).unwrap_or_else(|| {
+                if data.len() >= 5 && data[4] == 2 { 8 } else { 4 }
+            });
+            let mut address: u64 = 0;
+            let mut line: i64 = 1;
+            let mut view: u64 = 0;
+            while p.pos < unit_end {
+                let stmt_off = p.pos;
+                let opcode = match p.read_u8() {
+                    Some(v) => v,
+                    None => break,
+                };
+                if opcode == 0 {
+                    // Extended opcode
+                    let _len = p.read_uleb128().unwrap_or(0);
+                    let ext = p.read_u8().unwrap_or(0);
+                    match ext {
+                        1 => {
+                            println!(
+                                "  [0x{:08x}]  Extended opcode 1: End of Sequence",
+                                stmt_off
+                            );
+                            address = 0;
+                            line = 1;
+                            view = 0;
+                            // optional newline after sequence
+                            println!();
+                        }
+                        2 => {
+                            // set_address
+                            let addr = if addr_size == 8 {
+                                p.read_u64().unwrap_or(0)
+                            } else {
+                                p.read_u32().unwrap_or(0) as u64
+                            };
+                            println!(
+                                "  [0x{:08x}]  Extended opcode 2: set Address to 0x{:x}",
+                                stmt_off, addr
+                            );
+                            address = addr;
+                            view = 0;
+                        }
+                        3 => {
+                            // define_file
+                            let mut s = Vec::new();
+                            while let Some(b) = p.read_u8() {
+                                if b == 0 {
+                                    break;
+                                }
+                                s.push(b);
+                            }
+                            let _dir = p.read_uleb128().unwrap_or(0);
+                            let _time = p.read_uleb128().unwrap_or(0);
+                            let _size = p.read_uleb128().unwrap_or(0);
+                            println!(
+                                "  [0x{:08x}]  Extended opcode 3: define new File Table entry: {}",
+                                stmt_off,
+                                String::from_utf8_lossy(&s)
+                            );
+                        }
+                        _ => {
+                            println!(
+                                "  [0x{:08x}]  Extended opcode {}",
+                                stmt_off, ext
+                            );
+                        }
+                    }
+                } else if opcode < opcode_base {
+                    // Standard opcode
+                    match opcode {
+                        1 => {
+                            // DW_LNS_copy
+                            if view == 0 {
+                                println!("  [0x{:08x}]  Copy", stmt_off);
+                            } else {
+                                println!(
+                                    "  [0x{:08x}]  Copy (view {})",
+                                    stmt_off, view
+                                );
+                            }
+                            view += 1;
+                        }
+                        2 => {
+                            // DW_LNS_advance_pc
+                            let adv = p.read_uleb128().unwrap_or(0);
+                            address = address.wrapping_add(adv * min_instr_len as u64);
+                            println!(
+                                "  [0x{:08x}]  Advance PC by {} to 0x{:x}",
+                                stmt_off, adv, address
+                            );
+                            view = 0;
+                        }
+                        3 => {
+                            // DW_LNS_advance_line
+                            let adv = p.read_sleb128().unwrap_or(0);
+                            line += adv;
+                            println!(
+                                "  [0x{:08x}]  Advance Line by {} to {}",
+                                stmt_off, adv, line
+                            );
+                        }
+                        4 => {
+                            let f = p.read_uleb128().unwrap_or(0);
+                            println!("  [0x{:08x}]  Set File Name to entry {} in the File Name Table", stmt_off, f);
+                        }
+                        5 => {
+                            let c = p.read_uleb128().unwrap_or(0);
+                            println!("  [0x{:08x}]  Set column to {}", stmt_off, c);
+                        }
+                        6 => {
+                            println!(
+                                "  [0x{:08x}]  Set is_stmt to {}",
+                                stmt_off, default_is_stmt ^ 1
+                            );
+                        }
+                        7 => {
+                            println!("  [0x{:08x}]  Set basic block", stmt_off);
+                        }
+                        8 => {
+                            // const_add_pc
+                            let adj = 255u64 - opcode_base as u64;
+                            let advance = (adj / line_range as u64) * min_instr_len as u64;
+                            address = address.wrapping_add(advance);
+                            println!(
+                                "  [0x{:08x}]  Advance PC by constant {} to 0x{:x}",
+                                stmt_off, advance, address
+                            );
+                            view = 0;
+                        }
+                        9 => {
+                            let adv = p.read_u16().unwrap_or(0);
+                            address = address.wrapping_add(adv as u64);
+                            println!(
+                                "  [0x{:08x}]  Advance PC by fixed size amount {} to 0x{:x}",
+                                stmt_off, adv, address
+                            );
+                            view = 0;
+                        }
+                        _ => {
+                            // skip args based on opcode_lengths
+                            let n = opcode_lengths.get((opcode - 1) as usize).copied().unwrap_or(0);
+                            for _ in 0..n {
+                                let _ = p.read_uleb128();
+                            }
+                            println!(
+                                "  [0x{:08x}]  Standard opcode {}",
+                                stmt_off, opcode
+                            );
+                        }
+                    }
+                } else {
+                    // Special opcode
+                    let adjusted = opcode - opcode_base;
+                    let line_advance = line_base as i64 + (adjusted % line_range) as i64;
+                    let pc_advance = (adjusted / line_range) as u64 * min_instr_len as u64;
+                    line += line_advance;
+                    address = address.wrapping_add(pc_advance);
+                    println!(
+                        "  [0x{:08x}]  Special opcode {}: advance Address by {} to 0x{:x} and Line by {} to {}",
+                        stmt_off, adjusted, pc_advance, address, line_advance, line
+                    );
+                    view = 0;
+                }
+            }
+            p.pos = unit_end;
+        }
+    }
+}
+
 /// Decompress potentially-concatenated zlib streams (legacy GNU
 /// `.zdebug_*` format).
 fn decompress_legacy_zlib(input: &[u8]) -> Vec<u8> {
