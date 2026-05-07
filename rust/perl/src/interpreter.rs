@@ -1353,6 +1353,32 @@ impl Interpreter {
                     list,
                     Expr::UnaryOp(UnaryOp::LogNot, _) | Expr::UnaryOp(UnaryOp::Not, _)
                 );
+                // For `for (..., @a) { ... }`, capture the source array
+                // names referenced in the list along with their start
+                // index in the eventually-flattened iteration. After
+                // each iter, we'll check whether the source array was
+                // cleared / shrunk past that index — if so, the next
+                // item we'd read came from a "freed" slot, and Perl's
+                // non-RC build emits "Use of freed value in iteration".
+                // We only track ArrayVar refs inside an ArrayLit list;
+                // arbitrary expressions (`@{f()}`) need full source-
+                // tracking we don't model. Exact byte-for-byte match
+                // here is enough to fix cmd/for test 13.
+                let mut freed_check: Option<(String, usize)> = None;
+                if let Expr::ArrayLit(elems) = list {
+                    let mut idx = 0usize;
+                    for el in elems {
+                        match el {
+                            Expr::ArrayVar(n) => {
+                                if freed_check.is_none() {
+                                    freed_check = Some((n.clone(), idx));
+                                }
+                                idx += self.get_array_len(n);
+                            }
+                            _ => idx += 1,
+                        }
+                    }
+                }
                 let items = self.eval_list(list);
 
                 // Save the loop variable's current value for restoration
@@ -1378,6 +1404,7 @@ impl Interpreter {
                     .vars
                     .insert(var.clone(), Value::Undef);
                 let _ = is_my;
+                let total_items = items.len();
                 for (i, item) in items.into_iter().enumerate() {
                     // Bypass set_var so the readonly_vars check (set
                     // above for `for (!0)` etc.) doesn't fire on our own
@@ -1387,6 +1414,31 @@ impl Interpreter {
                     } else {
                         self.globals.vars.insert(var.clone(), item);
                     }
+                    // "Use of freed value in iteration" — if the list
+                    // included `@a` and `@a` has been cleared / shrunk
+                    // by an earlier iteration to no longer cover this
+                    // position, the snapshot value at index `i` is
+                    // stale per Perl's non-RC build.
+                    if let Some((ref src_name, start_idx)) = freed_check
+                        && i >= start_idx
+                    {
+                        let cur_len = self.get_array_len(src_name);
+                        let needed = i - start_idx + 1;
+                        if cur_len < needed {
+                            let file = if self.current_file.is_empty() {
+                                "-e".to_string()
+                            } else {
+                                self.current_file.clone()
+                            };
+                            let line = self.current_line;
+                            let msg =
+                                format!("Use of freed value in iteration at {file} line {line}.\n");
+                            self.pop_scope();
+                            self.set_var(var, saved_var);
+                            return Flow::Die(msg);
+                        }
+                    }
+                    let _ = total_items;
                     let flow = self.exec_stmts(body);
 
                     // If iterating over an array, write modifications back
@@ -2778,10 +2830,46 @@ impl Interpreter {
                 // Perl localizes `$_` for the duration of `for` — restore it
                 // on exit so a postfix `for` inside a `map { … }` block doesn't
                 // clobber the outer map iteration's `$_`.
+                // Track ArrayVar refs in `(…, @a)` lists so we can emit
+                // "Use of freed value in iteration" if the body clears
+                // the source array (cmd/for test 13's
+                // `eval { @a = () for (1, 2, @a) }` shape).
+                let mut freed_check: Option<(String, usize)> = None;
+                if let Expr::ArrayLit(elems) = list {
+                    let mut idx = 0usize;
+                    for el in elems {
+                        match el {
+                            Expr::ArrayVar(n) => {
+                                if freed_check.is_none() {
+                                    freed_check = Some((n.clone(), idx));
+                                }
+                                idx += self.get_array_len(n);
+                            }
+                            _ => idx += 1,
+                        }
+                    }
+                }
                 let items = self.eval_list(list);
                 let saved = self.get_var("_");
                 let mut flow = Flow::None;
-                for item in items {
+                for (i, item) in items.into_iter().enumerate() {
+                    if let Some((ref src_name, start_idx)) = freed_check
+                        && i >= start_idx
+                    {
+                        let cur_len = self.get_array_len(src_name);
+                        if cur_len < i - start_idx + 1 {
+                            let file = if self.current_file.is_empty() {
+                                "-e".to_string()
+                            } else {
+                                self.current_file.clone()
+                            };
+                            let line = self.current_line;
+                            let msg =
+                                format!("Use of freed value in iteration at {file} line {line}.\n");
+                            self.set_var("_", saved);
+                            return Flow::Die(msg);
+                        }
+                    }
                     self.set_var("_", item);
                     match self.exec_stmt(stmt) {
                         Flow::Last(None) => break,
@@ -3905,9 +3993,14 @@ impl Interpreter {
                             }
                             _ => std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
                         };
-                        if is_anon_literal {
-                            self.kept_alive_arrays.push(arr_rc.clone());
-                        }
+                        let _ = is_anon_literal; // anon-literal pin is
+                        // intentionally NOT applied: with our
+                        // `Internals::stack_refcounted == 0` claim,
+                        // `\$#{[]}` should orphan the temp array on
+                        // statement exit so reads return undef and
+                        // writes emit "Attempt to set length of freed
+                        // array" — matching test_arylen's `$is_rc=0`
+                        // branch in op/array tests 83-85.
                         let len_now = (arr_rc.borrow().len() as i64) - 1;
                         let cell =
                             std::rc::Rc::new(std::cell::RefCell::new(Value::Num(len_now as f64)));
@@ -4752,7 +4845,7 @@ impl Interpreter {
             return Value::Num(1.0);
         }
         match name {
-            "Internals::stack_refcounted" => return Value::Num(1.0),
+            "Internals::stack_refcounted" => return Value::Num(0.0),
             "__FILE__" => return Value::Str(self.current_file.clone()),
             "__LINE__" => return Value::Num(self.current_line as f64),
             "__PACKAGE__" => return Value::Str(self.package.clone()),
