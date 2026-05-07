@@ -230,8 +230,7 @@ Two layers of testing:
 
 - [ ] Add `gas/testsuite/` and `ld/testsuite/` DejaGnu integration for `as`/`ld`
 - [ ] Add compressed section support for `compress.exp` tests
-- [ ] Implement `readelf -wK -P` follow-links (with `(loaded from <file>)` annotations + `DW_FORM_GNU_strp_alt` resolution + abbrevs from linked file) for `readelf -wKis -P debuglink`
-- [ ] Add `-WL`/`--dwarf=decodedline` line program decoder for `objdump -WL`
-- [ ] Add GNU build attribute notes parsing in readelf for the merge-notes/v2/v3 build note tests
-- [ ] Add Tektronix Hex format input parser for `objcopy tek2bin` and `ar.exp` foreign-object test
+- [ ] Add objcopy `--merge-notes` to actually merge consecutive GNU build attribute notes for the merge-notes/v2/v3 build note tests
 - [ ] Add `.debug_loc` location-views decoder for `readelf --debug-dump=loc locview-1/-2`
+- [ ] Add DWP (DWARF package file) support for `readelf -wi pr26160`
+- [ ] Improve `readelf -wiaoRlL dw5` (DWARF 5 features: loclists/rnglists, location views, decoded line) for full coverage
