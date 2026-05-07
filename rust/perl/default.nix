@@ -1170,6 +1170,10 @@
       }
       {
         category = "re";
+        name = "pat_special_cc";
+      }
+      {
+        category = "re";
         name = "anyof";
       }
       {
