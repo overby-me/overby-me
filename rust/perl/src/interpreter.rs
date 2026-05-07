@@ -2111,6 +2111,13 @@ impl Interpreter {
                 }
                 // Turn `Foo::Bar` into `Foo/Bar.pm`.
                 let filename = format!("{}.pm", module.replace("::", "/"));
+                // Honour an existing `$INC{filename}` entry — user
+                // code (typically a BEGIN block) may have declared
+                // the module pre-loaded to skip the actual disk
+                // lookup. Reference perl does the same.
+                if !matches!(self.get_hash_element("INC", &filename), Value::Undef) {
+                    return Flow::None;
+                }
                 let inc = self.get_array("INC");
                 let mut found = false;
                 for dir in &inc {
@@ -11178,8 +11185,15 @@ impl Interpreter {
     // --- Require ---
 
     fn do_require(&mut self, filename: &str) -> Value {
-        // Check if already loaded
+        // Check if already loaded — either via our internal cache or
+        // via `$INC{filename}` (which user code can set to bypass an
+        // actual load).
         if self.required_files.contains(filename) {
+            return Value::Num(1.0);
+        }
+        let inc_entry = self.get_hash_element("INC", filename);
+        if !matches!(inc_entry, Value::Undef) {
+            self.required_files.insert(filename.to_string());
             return Value::Num(1.0);
         }
 
@@ -11782,11 +11796,60 @@ fn compile_time_use_check(
     compile_time_use_check_in(stmts, line, interp, &file)
 }
 
+/// Pre-scan a statement tree for `$INC{filename} = …;` assignments
+/// inside `BEGIN` blocks. Reference perl's idiomatic pre-load
+/// declaration: a BEGIN sets `$INC{Foo.pm}` so the upcoming
+/// `use Foo` skips the disk lookup. We collect the filenames so
+/// `compile_time_use_check_in` can skip them.
+fn collect_preloaded_inc_keys(stmts: &[Stmt], out: &mut std::collections::HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Begin(body, _) => {
+                collect_preloaded_inc_keys_in_body(body, out);
+            }
+            Stmt::Block(body) | Stmt::BareBlock(body) => {
+                collect_preloaded_inc_keys(body, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Walk a BEGIN body looking for `$INC{filename} = …;`. Both the
+/// expression-statement form (`Stmt::Expr`) and a bare assignment at
+/// statement scope land here.
+fn collect_preloaded_inc_keys_in_body(stmts: &[Stmt], out: &mut std::collections::HashSet<String>) {
+    for stmt in stmts {
+        if let Stmt::Expr(Expr::Assign(lhs, _)) = stmt
+            && let Expr::HashElement(name, key_expr) = lhs.as_ref()
+            && name == "INC"
+            && let Expr::StringLit(key) = key_expr.as_ref()
+        {
+            out.insert(key.clone());
+        }
+        if let Stmt::Block(body) | Stmt::BareBlock(body) = stmt {
+            collect_preloaded_inc_keys_in_body(body, out);
+        }
+    }
+}
+
 fn compile_time_use_check_in(
     stmts: &[Stmt],
     line: &mut usize,
     interp: &Interpreter,
     _file_path: &str,
+) -> Option<String> {
+    let mut preloaded: std::collections::HashSet<String> = std::collections::HashSet::new();
+    collect_preloaded_inc_keys(stmts, &mut preloaded);
+    compile_time_use_check_in_inner(stmts, line, interp, _file_path, &preloaded)
+}
+
+fn compile_time_use_check_in_inner(
+    stmts: &[Stmt],
+    line: &mut usize,
+    interp: &Interpreter,
+    _file_path: &str,
+    preloaded: &std::collections::HashSet<String>,
 ) -> Option<String> {
     const PRAGMAS: &[&str] = &[
         "strict",
@@ -11813,6 +11876,17 @@ fn compile_time_use_check_in(
                     continue;
                 }
                 let filename = format!("{}.pm", module.replace("::", "/"));
+                // Honour `$INC{filename}` set by an earlier `BEGIN`
+                // block — the standard idiom for declaring a module
+                // pre-loaded without requiring an actual .pm file on
+                // disk. Pre-scan picked these up before this loop;
+                // also check the live `%INC` for cases where the use
+                // is in a nested file already running.
+                if preloaded.contains(&filename)
+                    || !matches!(interp.get_hash_element("INC", &filename), Value::Undef)
+                {
+                    continue;
+                }
                 let inc = interp.get_array("INC");
                 let mut found = false;
                 for dir in &inc {
@@ -11887,7 +11961,9 @@ fn compile_time_use_check_in(
             | Stmt::NamedBlock(_, body)
             | Stmt::Begin(body, _)
             | Stmt::End(body) => {
-                if let Some(e) = compile_time_use_check_in(body, line, interp, _file_path) {
+                if let Some(e) =
+                    compile_time_use_check_in_inner(body, line, interp, _file_path, preloaded)
+                {
                     return Some(e);
                 }
             }
@@ -11897,16 +11973,22 @@ fn compile_time_use_check_in(
                 else_block,
                 ..
             } => {
-                if let Some(e) = compile_time_use_check_in(then, line, interp, _file_path) {
+                if let Some(e) =
+                    compile_time_use_check_in_inner(then, line, interp, _file_path, preloaded)
+                {
                     return Some(e);
                 }
                 for (_, body) in elsifs {
-                    if let Some(e) = compile_time_use_check_in(body, line, interp, _file_path) {
+                    if let Some(e) =
+                        compile_time_use_check_in_inner(body, line, interp, _file_path, preloaded)
+                    {
                         return Some(e);
                     }
                 }
                 if let Some(body) = else_block {
-                    if let Some(e) = compile_time_use_check_in(body, line, interp, _file_path) {
+                    if let Some(e) =
+                        compile_time_use_check_in_inner(body, line, interp, _file_path, preloaded)
+                    {
                         return Some(e);
                     }
                 }
@@ -11914,11 +11996,15 @@ fn compile_time_use_check_in(
             Stmt::Unless {
                 then, else_block, ..
             } => {
-                if let Some(e) = compile_time_use_check_in(then, line, interp, _file_path) {
+                if let Some(e) =
+                    compile_time_use_check_in_inner(then, line, interp, _file_path, preloaded)
+                {
                     return Some(e);
                 }
                 if let Some(body) = else_block {
-                    if let Some(e) = compile_time_use_check_in(body, line, interp, _file_path) {
+                    if let Some(e) =
+                        compile_time_use_check_in_inner(body, line, interp, _file_path, preloaded)
+                    {
                         return Some(e);
                     }
                 }
@@ -11938,22 +12024,30 @@ fn compile_time_use_check_in(
                 continue_body,
                 ..
             } => {
-                if let Some(e) = compile_time_use_check_in(body, line, interp, _file_path) {
+                if let Some(e) =
+                    compile_time_use_check_in_inner(body, line, interp, _file_path, preloaded)
+                {
                     return Some(e);
                 }
                 if let Some(cont) = continue_body {
-                    if let Some(e) = compile_time_use_check_in(cont, line, interp, _file_path) {
+                    if let Some(e) =
+                        compile_time_use_check_in_inner(cont, line, interp, _file_path, preloaded)
+                    {
                         return Some(e);
                     }
                 }
             }
             Stmt::DoWhile { body, .. } | Stmt::Loop { body, .. } => {
-                if let Some(e) = compile_time_use_check_in(body, line, interp, _file_path) {
+                if let Some(e) =
+                    compile_time_use_check_in_inner(body, line, interp, _file_path, preloaded)
+                {
                     return Some(e);
                 }
             }
             Stmt::For { body, .. } => {
-                if let Some(e) = compile_time_use_check_in(body, line, interp, _file_path) {
+                if let Some(e) =
+                    compile_time_use_check_in_inner(body, line, interp, _file_path, preloaded)
+                {
                     return Some(e);
                 }
             }
@@ -11962,16 +12056,25 @@ fn compile_time_use_check_in(
                 continue_body,
                 ..
             } => {
-                if let Some(e) = compile_time_use_check_in(body, line, interp, _file_path) {
+                if let Some(e) =
+                    compile_time_use_check_in_inner(body, line, interp, _file_path, preloaded)
+                {
                     return Some(e);
                 }
-                if let Some(e) = compile_time_use_check_in(continue_body, line, interp, _file_path)
-                {
+                if let Some(e) = compile_time_use_check_in_inner(
+                    continue_body,
+                    line,
+                    interp,
+                    _file_path,
+                    preloaded,
+                ) {
                     return Some(e);
                 }
             }
             Stmt::Sub { body, .. } => {
-                if let Some(e) = compile_time_use_check_in(body, line, interp, _file_path) {
+                if let Some(e) =
+                    compile_time_use_check_in_inner(body, line, interp, _file_path, preloaded)
+                {
                     return Some(e);
                 }
             }
@@ -11980,11 +12083,12 @@ fn compile_time_use_check_in(
             | Stmt::PostfixWhile(inner, _)
             | Stmt::PostfixUntil(inner, _)
             | Stmt::PostfixFor(inner, _) => {
-                if let Some(e) = compile_time_use_check_in(
+                if let Some(e) = compile_time_use_check_in_inner(
                     std::slice::from_ref(inner.as_ref()),
                     line,
                     interp,
                     _file_path,
+                    preloaded,
                 ) {
                     return Some(e);
                 }
