@@ -66,14 +66,28 @@ fn parse_config_line(line: &str) -> Option<(String, Option<String>)> {
         dashes += 1;
     }
 
-    // Option name: letters, digits, dashes, underscores.
+    // Option name. For short options (single leading dash) the remainder of
+    // the token up to whitespace or `=` is the cluster, since a short cluster
+    // can carry an inline value containing punctuation (e.g. `-Lfuhej:you`
+    // means `-L -f -u hej:you`, test 699). For long options (two dashes or
+    // none), only alphanumerics/dashes/underscores form the name.
     let mut opt = String::new();
-    while let Some(&c) = chars.peek() {
-        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+    if dashes == 1 {
+        while let Some(&c) = chars.peek() {
+            if c == ' ' || c == '\t' || c == '=' {
+                break;
+            }
             opt.push(c);
             chars.next();
-        } else {
-            break;
+        }
+    } else {
+        while let Some(&c) = chars.peek() {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                opt.push(c);
+                chars.next();
+            } else {
+                break;
+            }
         }
     }
     if opt.is_empty() {
