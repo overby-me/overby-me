@@ -3930,13 +3930,21 @@ fn readelf_notes<'data, Elf: FileHeader>(
                 }
                 let mut region = format!("Applies to region from {:#x} to {:#x}", start, end);
                 // Annotate with a symbol name when this note carries an
-                // explicit description (descsz > 0). Func notes prefer
-                // FUNC-type symbols; OPEN notes prefer non-FUNC symbols.
+                // explicit description (descsz > 0). For func notes prefer
+                // STT_FUNC symbols; for OPEN notes prefer non-FUNC symbols.
+                // Look up first by exact start address, falling back to any
+                // symbol within [start, end) for OPEN notes.
                 if descsz > 0 {
                     let prefer_func = ntype == 0x101;
-                    if let Some(sym_name) =
-                        lookup_symbol_at_typed(data, start, prefer_func)
-                    {
+                    let sym = lookup_symbol_at_typed(data, start, prefer_func)
+                        .or_else(|| {
+                            if !prefer_func {
+                                lookup_symbol_in_range(data, start, end)
+                            } else {
+                                None
+                            }
+                        });
+                    if let Some(sym_name) = sym {
                         region.push_str(&format!(" ({})", sym_name));
                     }
                 }
@@ -3959,6 +3967,29 @@ fn lookup_symbol_at<'data, Elf: FileHeader>(
     addr: u64,
 ) -> Option<String> {
     lookup_symbol_at_typed(data, addr, false)
+}
+
+/// Look up the first non-FUNC symbol whose value falls within [start, end).
+/// Used to annotate OPEN-type GNU build attribute notes with the source
+/// symbol that the region covers.
+fn lookup_symbol_in_range(data: &[u8], start: u64, end: u64) -> Option<String> {
+    use object::{Object as _, ObjectSymbol as _};
+    let obj = object::File::parse(data).ok()?;
+    for sym in obj.symbols() {
+        let v = sym.address();
+        if v < start || v >= end {
+            continue;
+        }
+        if matches!(sym.kind(), object::SymbolKind::Text) {
+            continue;
+        }
+        if let Ok(name) = sym.name() {
+            if !name.is_empty() {
+                return Some(name.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Look up a symbol at the given address. When `prefer_func` is true,
