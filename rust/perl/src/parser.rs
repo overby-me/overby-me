@@ -2712,7 +2712,18 @@ impl Parser {
             }
             Token::ArrayLen(name) => {
                 self.pos += 1;
-                Expr::ArrayLen(name)
+                if name == "{" {
+                    // `$#{ EXPR }` — block-form last-index. Consume
+                    // the `{`, parse the inner expression, consume
+                    // `}`. Emit as a special call so the interpreter
+                    // handles symbolic-ref / array-ref dispatch.
+                    self.expect(&Token::LBrace);
+                    let inner = self.parse_expr();
+                    self.expect(&Token::RBrace);
+                    Expr::Call("_arylen_block_deref".to_string(), vec![inner])
+                } else {
+                    Expr::ArrayLen(name)
+                }
             }
 
             Token::Diamond(name) => {
@@ -4259,7 +4270,7 @@ fn parse_interp_string(s: &str) -> Expr {
             }
         } else if chars[i] == '@'
             && i + 1 < chars.len()
-            && (chars[i + 1].is_ascii_alphabetic()
+            && (chars[i + 1].is_ascii_alphanumeric()
                 || chars[i + 1] == '_'
                 || chars[i + 1] == '{'
                 || chars[i + 1] == '$'

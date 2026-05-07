@@ -894,6 +894,11 @@ impl Lexer {
                             self.pos += 1;
                             let name = self.read_ident();
                             tokens.push(Token::ArrayLen(format!("${name}")));
+                        } else if self.ch() == '{' {
+                            // `$#{ EXPR }` — block-form last-index. Mark
+                            // with a leading `{` sentinel; the parser
+                            // sees this and reads the inner expression.
+                            tokens.push(Token::ArrayLen("{".to_string()));
                         } else {
                             let name = self.read_ident();
                             tokens.push(Token::ArrayLen(name));
@@ -1081,7 +1086,16 @@ impl Lexer {
 
                 '@' => {
                     self.pos += 1;
-                    if self.ch() == '_'
+                    if self.ch().is_ascii_digit() {
+                        // `@4`, `@123` — digit-named array (Perl
+                        // treats this as a symbolic ref to a global
+                        // array with the given numeric name).
+                        let mut name = String::new();
+                        while self.pos < self.input.len() && self.ch().is_ascii_digit() {
+                            name.push(self.advance());
+                        }
+                        tokens.push(Token::ArrayVar(name));
+                    } else if self.ch() == '_'
                         || self.ch().is_ascii_alphabetic()
                         || (!self.ch().is_ascii() && self.ch().is_alphabetic())
                     {

@@ -3240,15 +3240,24 @@ impl Interpreter {
                                 .first()
                                 .map(|e| self.eval_expr(e))
                                 .unwrap_or(Value::Undef);
-                            if let Value::ArrayRef(r) = v {
-                                r
-                            } else {
-                                let r = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-                                // Autoviv: install into the inner LHS.
-                                if let Some(inner_expr) = inner_args.first() {
-                                    self.assign_to(inner_expr, Value::ArrayRef(r.clone()));
+                            match v {
+                                Value::ArrayRef(r) => r,
+                                Value::Str(_) | Value::Num(_) => {
+                                    // Symbolic ref: `@{$name} = LIST`,
+                                    // `@{4} = LIST`. Stringify and assign
+                                    // the global array slot directly.
+                                    let name = v.to_str();
+                                    self.set_array(&name, items.clone());
+                                    return Value::Num(len as f64);
                                 }
-                                r
+                                _ => {
+                                    let r = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+                                    // Autoviv: install into the inner LHS.
+                                    if let Some(inner_expr) = inner_args.first() {
+                                        self.assign_to(inner_expr, Value::ArrayRef(r.clone()));
+                                    }
+                                    r
+                                }
                             }
                         }
                         _ => unreachable!(),
@@ -5758,13 +5767,26 @@ impl Interpreter {
                         .flat_map(|a| self.eval_list(a))
                         .last()
                         .unwrap_or(Value::Undef);
-                    if let Value::ArrayRef(r) = last {
-                        for arg in &args[1..] {
-                            r.borrow_mut().extend(self.eval_list(arg));
+                    match last {
+                        Value::ArrayRef(r) => {
+                            for arg in &args[1..] {
+                                r.borrow_mut().extend(self.eval_list(arg));
+                            }
+                            Value::Num(r.borrow().len() as f64)
                         }
-                        Value::Num(r.borrow().len() as f64)
-                    } else {
-                        Value::Undef
+                        Value::Str(_) | Value::Num(_) => {
+                            // Symbolic ref: `push @{4}, ...` — resolve to
+                            // global @4 and push there.
+                            let name = last.to_str();
+                            let mut arr = self.get_array(&name);
+                            for arg in &args[1..] {
+                                arr.extend(self.eval_list(arg));
+                            }
+                            let len = arr.len();
+                            self.set_array(&name, arr);
+                            Value::Num(len as f64)
+                        }
+                        _ => Value::Undef,
                     }
                 } else {
                     // `push` onto anything that isn't an array / array ref is
@@ -6376,6 +6398,26 @@ impl Interpreter {
                 };
                 Value::Str(self.ref_class(&val))
             }
+            // `$#{ EXPR }` — block-form last-index. EXPR is taken in
+            // scalar context (last value of a list). If it's an array
+            // ref, return its last index. Otherwise stringify it and
+            // treat as a symbolic ref to a global array (matches Perl
+            // under `no strict 'refs'`).
+            "_arylen_block_deref" => {
+                let v = args
+                    .first()
+                    .map(|a| self.eval_expr(a))
+                    .unwrap_or(Value::Undef);
+                match v {
+                    Value::ArrayRef(r) => Value::Num((r.borrow().len() as i64 - 1) as f64),
+                    Value::Str(_) | Value::Num(_) => {
+                        let name = v.to_str();
+                        let arr = self.get_array(&name);
+                        Value::Num((arr.len() as i64 - 1) as f64)
+                    }
+                    _ => Value::Num(-1.0),
+                }
+            }
             // `${ EXPR }` — block scalar deref. EXPR should yield a scalar
             // ref; deref to the scalar value. If EXPR is itself a scalar,
             // pass through (matches Perl's `${ \$x }` idiom).
@@ -6418,11 +6460,14 @@ impl Interpreter {
                     } else {
                         v.into_iter().last().unwrap_or(Value::Undef)
                     }
-                } else if let Value::Str(s) = &last {
-                    // Symbolic ref: `@{'name'}` / `@{$name}` where the
-                    // string names a global array. Matches Perl under
-                    // `no strict 'refs'`.
-                    let arr = self.get_array(s);
+                } else if matches!(last, Value::Str(_) | Value::Num(_)) {
+                    // Symbolic ref: `@{'name'}` / `@{$name}` / `@{4}`
+                    // where the value names a global array. Matches
+                    // Perl under `no strict 'refs'` — numeric and
+                    // string scalars both stringify into the symbol
+                    // name (e.g. `@{4}` resolves to `@4`).
+                    let s = last.to_str();
+                    let arr = self.get_array(&s);
                     self.last_list_val = Some(arr.clone());
                     if want_scalar {
                         Value::Num(arr.len() as f64)
@@ -9846,6 +9891,55 @@ impl Interpreter {
                     Value::Str(s) if !s.is_empty() => {
                         let vname = normalize_ctrl_var_name(&s);
                         self.set_var(&vname, val);
+                    }
+                    _ => {}
+                }
+            }
+            Expr::Call(name, inner_args) if name == "_arylen_block_deref" => {
+                // `$#{EXPR} = val` — block-form last-index assignment.
+                // If EXPR is an array ref, resize the backing array.
+                // If EXPR is a string/number, treat as a symbolic ref
+                // to a global array and resize that.
+                let v = inner_args
+                    .first()
+                    .map(|a| self.eval_expr(a))
+                    .unwrap_or(Value::Undef);
+                let target_idx = val.to_num() as i64;
+                let new_len = if target_idx < 0 {
+                    0
+                } else {
+                    (target_idx + 1) as usize
+                };
+                let resize = |arr: &mut Vec<Value>, new_len: usize| {
+                    if arr.len() > new_len {
+                        arr.truncate(new_len);
+                    } else {
+                        while arr.len() < new_len {
+                            arr.push(Value::Undef);
+                        }
+                    }
+                };
+                match v {
+                    Value::ArrayRef(r) => {
+                        resize(&mut r.borrow_mut(), new_len);
+                    }
+                    Value::Str(_) | Value::Num(_) => {
+                        let name = v.to_str();
+                        let mut arr = self.get_array(&name);
+                        resize(&mut arr, new_len);
+                        self.set_array(&name, arr);
+                    }
+                    Value::Undef => {
+                        // `$#{ $undef } = N` — autoviv to fresh array
+                        // ref, then resize. Mirrors `${ $undef } = ...`
+                        // pattern where the inner expr is set as an
+                        // ArrayRef pointing to a Vec sized to N+1.
+                        if let Some(inner_expr) = inner_args.first() {
+                            let mut arr = Vec::new();
+                            resize(&mut arr, new_len);
+                            let r = std::rc::Rc::new(std::cell::RefCell::new(arr));
+                            self.assign_to(inner_expr, Value::ArrayRef(r));
+                        }
                     }
                     _ => {}
                 }
