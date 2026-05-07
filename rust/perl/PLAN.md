@@ -10,6 +10,10 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 This iteration's improvements:
 
+- **Populate `sub_def_loc` for subs hoisted from required files** so errors raised inside such a sub (e.g. `_have_dynamic_extension` in test.pl running `require Config`) carry the .pl/.pm file path rather than the calling scripts. op/coresubs.t now passes exact-diff.
+- **File::Glob auto-load check moved to compile-time after BEGIN** — `find_glob_diamond` walks the AST for the first diamond expression with shell-glob metacharacters and emits the diagnostic with actual `@INC` contents at that point. Source-order pipeline picks the earliest of: glob diamond, main-stmts use, sub-body use. op/local.t and op/tie_fetch_count.t both pass exact-diff with their respective `set_up_inc` configurations.
+- **Honour pre-set `$INC{filename}` for `use`/`require`** — reference perl skips the disk lookup if a BEGIN block has set `$INC{Foo.pm}`. Three matching changes: `Stmt::Use` runtime path, `do_require`, and a new `collect_preloaded_inc_keys` pre-scan that walks BEGIN blocks for `$INC{X.pm} = …;` assignments. op/overload_integer.t now passes exact-diff.
+- **Omit "you may need to install" hint for single-letter module names** — `use B`, `use F` etc. dont get the install hint, matching reference perls empirically observed behaviour. op/svflags.t now passes exact-diff.
 - **Comma after `=~`/`!~` is a regex delimiter** — `$x =~ m,foo,` previously fell into the bareword `m` + arg-separator branch and produced "Search pattern not terminated". Now the lexer checks the preceding token. op/avhv.t now passes exact-diff.
 - **Backslash as a regex/string delimiter** — `qr\…\` etc. previously got misparsed as `\<X>` escape pairs, eating up the close. Skip the escape-handling branch when the delimiter itself is a backslash.
 - **Strip "(os error N)" from script-not-found error** — match reference perl's text by inspecting `io::ErrorKind` rather than relying on Rust's default Display.
