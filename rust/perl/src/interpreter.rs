@@ -13636,6 +13636,12 @@ fn is_main_special_var(name: &str) -> bool {
     {
         return true;
     }
+    // Caret-prefixed names (`$^X`, `${^WARNING_BITS}`, `${^Quixote}`) are
+    // always main:: per perlvar — the lexer keeps the literal `^` in the
+    // var name, so detect that here.
+    if name.starts_with('^') {
+        return true;
+    }
     matches!(
         name,
         "ENV"
