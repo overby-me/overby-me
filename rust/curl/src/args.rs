@@ -189,6 +189,8 @@ fn snapshot_per_url(opts: &Options) -> PerUrlOptions {
         connect_tos: opts.connect_tos.clone(),
         no_basic: opts.no_basic,
         user: opts.user.clone(),
+        dump_header: opts.dump_header.clone(),
+        first_in_group: false,
     }
 }
 
@@ -755,11 +757,32 @@ pub(crate) fn parse_args() -> Options {
             "--resolve" => {
                 i += 1;
                 let val = next_arg(&args, i, "--resolve");
+                // Format: `[+]HOST:PORT:ADDR[,ADDR…]` or `-HOST:PORT`. Reject
+                // anything where the second segment isn't a numeric port —
+                // curl exits 49 (CURLE_BAD_FUNCTION_ARGUMENT, test 3019).
+                let body = val
+                    .strip_prefix('+')
+                    .or_else(|| val.strip_prefix('-'))
+                    .unwrap_or(&val);
+                let parts: Vec<&str> = body.splitn(3, ':').collect();
+                let port_ok = parts.len() >= 2 && parts[1].parse::<u16>().is_ok();
+                if !port_ok {
+                    eprintln!("curl: (49) Invalid syntax for --resolve: '{val}'");
+                    process::exit(49);
+                }
                 opts.resolves.push(val);
             }
             "--connect-to" => {
                 i += 1;
                 let val = next_arg(&args, i, "--connect-to");
+                // Format: `HOST1:PORT1:HOST2:PORT2`. Empty PORT1/PORT2 are
+                // wildcards but if non-empty must be numeric (test 3020).
+                let parts: Vec<&str> = val.splitn(4, ':').collect();
+                let bad_port = |s: &str| !s.is_empty() && s.parse::<u16>().is_err();
+                if parts.len() != 4 || bad_port(parts[1]) || bad_port(parts[3]) {
+                    eprintln!("curl: (49) Invalid syntax for --connect-to: '{val}'");
+                    process::exit(49);
+                }
                 opts.connect_tos.push(val);
             }
             "-K" | "--config" => {
@@ -885,9 +908,13 @@ pub(crate) fn parse_args() -> Options {
                     process::exit(2);
                 }
                 // Snapshot per-URL fields for all URLs in the current group.
+                // Mark the very first URL in the group so the -D dump file
+                // truncates on entry to a new --next group (test 3029).
                 let snap = snapshot_per_url(&opts);
-                for _ in group_start_idx..opts.urls.len() {
-                    opts.per_url_opts.push(snap.clone());
+                for k in group_start_idx..opts.urls.len() {
+                    let mut s = snap.clone();
+                    s.first_in_group = k == group_start_idx;
+                    opts.per_url_opts.push(s);
                 }
                 group_start_idx = opts.urls.len();
                 // Reset per-URL options to defaults
@@ -903,6 +930,7 @@ pub(crate) fn parse_args() -> Options {
                 opts.connect_tos.clear();
                 opts.no_basic = false;
                 opts.user = None;
+                opts.dump_header = None;
                 expecting_url_after_next = true;
                 i += 1;
                 continue;
@@ -1033,8 +1061,10 @@ pub(crate) fn parse_args() -> Options {
                                 }
                                 // Snapshot per-URL fields for all URLs in the current group.
                                 let snap = snapshot_per_url(&opts);
-                                for _ in group_start_idx..opts.urls.len() {
-                                    opts.per_url_opts.push(snap.clone());
+                                for k in group_start_idx..opts.urls.len() {
+                                    let mut s = snap.clone();
+                                    s.first_in_group = k == group_start_idx;
+                                    opts.per_url_opts.push(s);
                                 }
                                 group_start_idx = opts.urls.len();
                                 opts.data = None;
@@ -1085,8 +1115,10 @@ pub(crate) fn parse_args() -> Options {
     // when --next was never used).
     {
         let snap = snapshot_per_url(&opts);
-        for _ in group_start_idx..opts.urls.len() {
-            opts.per_url_opts.push(snap.clone());
+        for k in group_start_idx..opts.urls.len() {
+            let mut s = snap.clone();
+            s.first_in_group = k == group_start_idx;
+            opts.per_url_opts.push(s);
         }
     }
 

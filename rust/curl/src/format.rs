@@ -65,6 +65,7 @@ pub(crate) fn format_write_out(
     result = result.replace("%{num_connects}", &num_connects.to_string());
     result = result.replace("%{num_redirects}", &num_redirects.to_string());
     result = result.replace("%{num_retries}", "0");
+    result = result.replace("%{num_headers}", &resp.headers.len().to_string());
     result = result.replace("%{method}", method);
     result = result.replace(
         "%{filename_effective}",

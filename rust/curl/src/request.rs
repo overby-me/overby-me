@@ -529,13 +529,17 @@ fn build_body(opts: &Options, boundary: Option<&str>) -> Option<Vec<u8>> {
                     body.extend_from_slice(&data);
                 }
             } else {
-                body.extend_from_slice(
+                // `-F=value` (empty name) emits just `Content-Disposition:
+                // form-data` with no `name=` attribute (test 1293).
+                let cd = if field.name.is_empty() {
+                    String::from("Content-Disposition: form-data\r\n")
+                } else {
                     format!(
                         "Content-Disposition: form-data; name=\"{}\"\r\n",
                         field.name
                     )
-                    .as_bytes(),
-                );
+                };
+                body.extend_from_slice(cd.as_bytes());
                 if let Some(ref ct) = field.content_type {
                     body.extend_from_slice(format!("Content-Type: {ct}\r\n").as_bytes());
                 }

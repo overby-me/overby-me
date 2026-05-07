@@ -242,6 +242,11 @@ fn main() {
     }
 
     for (url_idx, url_str) in opts.urls.iter().enumerate() {
+        // Reset exit_code per URL — curl reports the LAST URL's status as
+        // the process exit code, so a failed URL1 followed by a successful
+        // URL2 should still exit 0 (test 1293). --fail-early breaks the
+        // loop earlier, so this reset doesn't change that path.
+        exit_code = 0;
         // --disallow-username-in-url: any URL carrying user[:pass]@ is rejected
         // before connecting, exiting CURLE_LOGIN_DENIED (67) (test 2075).
         if opts.disallow_userinfo {
@@ -342,6 +347,7 @@ fn main() {
             o.connect_tos = puo.connect_tos.clone();
             o.no_basic = puo.no_basic;
             o.user = puo.user.clone();
+            o.dump_header = puo.dump_header.clone();
             o
         } else {
             opts.clone()
@@ -548,7 +554,7 @@ fn main() {
                 }
 
                 // Dump headers. Special destinations: "-" → stdout, "%" → stderr.
-                if let Some(ref dump_path) = opts.dump_header {
+                if let Some(ref dump_path) = effective_opts.dump_header {
                     match dump_path.to_str() {
                         Some("-") => {
                             let _ = io::stdout().write_all(&resp.header_bytes);
@@ -561,7 +567,27 @@ fn main() {
                         _ => {
                             let mut dump_data = resp.header_bytes.clone();
                             dump_data.extend_from_slice(&resp.trailer_bytes);
-                            if fs::write(dump_path, &dump_data).is_err() {
+                            // Truncate on the first URL of each --next
+                            // group, append on subsequent ones in the same
+                            // group — curl writes all transfers within a
+                            // group to a shared -D file (test 3030, 3029).
+                            let truncate = opts
+                                .per_url_opts
+                                .get(url_idx)
+                                .map(|p| p.first_in_group)
+                                .unwrap_or(url_idx == 0);
+                            let mut open = fs::OpenOptions::new();
+                            open.write(true).create(true);
+                            if truncate {
+                                open.truncate(true);
+                            } else {
+                                open.append(true);
+                            }
+                            let result = open.open(dump_path).and_then(|mut f| {
+                                use std::io::Write as _;
+                                f.write_all(&dump_data)
+                            });
+                            if result.is_err() {
                                 eprintln!(
                                     "curl: (23) Failure writing output to destination, passed {} bytes",
                                     resp.header_bytes.len()

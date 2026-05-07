@@ -24,6 +24,12 @@ pub(crate) struct PerUrlOptions {
     pub(crate) connect_tos: Vec<String>,
     pub(crate) no_basic: bool,
     pub(crate) user: Option<String>,
+    pub(crate) dump_header: Option<PathBuf>,
+    /// True when this URL is the first transfer of its operation group
+    /// (i.e. URL index 0, or the first URL after a --next). Used by `-D`
+    /// to decide whether to truncate or append the dump-header file
+    /// (test 3030 for append-within-group, test 3029 for truncate-on-next).
+    pub(crate) first_in_group: bool,
 }
 
 #[derive(Clone, Debug)]
