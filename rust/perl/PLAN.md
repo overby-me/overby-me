@@ -6,10 +6,14 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**265/277 Nix tests passing** (96%) — selected tests from the upstream Perl test suite.
+**266/278 Nix tests passing** (96%) — selected tests from the upstream Perl test suite.
 
 This iteration's improvements:
 
+- **Bare-word `#line N FILE` directive** — previously only the quoted form (`#line N "FILE"`) was honoured; the unquoted form (op/warn.t's `#line 3 warn.t`) fell through. `try_handle_line_directive` now accepts a non-whitespace word as the file label. Compile-time use-check also tracks `Stmt::FileMark` while walking — the diagnostic for a missing module `use`d at line N now blames the post-`#line` filename rather than the script invocation path. op/warn.t now passes exact-diff.
+- **`xor` low-precedence logical XOR** — keyword previously unrecognised; `($a eq 'a' xor $x)` parsed `xor` as a bareword. New `Token::Xor` (parsed at the `or` precedence level) and `BinOp::Xor` (non-short-circuiting; returns `1` for one-true / empty-string for both-true / both-false). comp/cmdopt.t now passes exact-diff.
+- **`__DATA__` / `DATA` filehandle** — lexer now captures the data section and exposes it via a new `set_data_section` interpreter hook, which registers it as a string-fh under the `DATA` name. `<DATA>` and `readline DATA` work as expected. (`*ARGV = *DATA` typeglob aliasing for `<>`-on-DATA still pending, so run/noswitch.t still fails.)
+- **`scalar <DATA>` parses correctly** — `Token::Diamond` is now a valid first-arg starter for the function-call-without-parens branch, so `scalar <DATA>` parses as `scalar(<DATA>)` rather than the bareword `"scalar"` followed by an unrelated diamond.
 - **`rand` / `srand` builtins** — previously absent (`rand` parsed as bareword, `srand` returned undef). Added `rand_state` / `rand_seed` fields and `next_rand_unit` (SplitMix64-style mixer) for a deterministic, seedable PRNG. `srand(N)` returns the new seed (Perl returns *new*, not prior, despite older docs); `srand(0)` returns the dual-valued `"0 but true"` so it's true in boolean and 0 numeric. `srand(2**100)` warns "Integer overflow in srand". Parser now accepts `rand` / `srand` as nullary or one-arg builtins. op/srand.t now passes exact-diff.
 - **Detect `-T` (taint mode) on the shebang and abort if not on the command line** — reference perl reads the shebang for `-T` and dies with the standard message. New `has_shebang_flag` helper plus a `taint_mode_arg` command-line track. op/utftaint.t and op/taint.t pass exact-diff.
 - **Top-level `require Module` in a `.pm` file aborts compilation when the module is missing** — added a `Stmt::Require` arm to `compile_time_use_check_in_inner`, gated by `_file_path.ends_with(".pm")` and a new `in_sub` flag (set to `true` when descending into `Stmt::Sub`) so the check only fires for true file-scope requires inside loaded modules. op/tiehandle.t now passes exact-diff.
