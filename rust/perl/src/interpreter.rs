@@ -10448,7 +10448,30 @@ impl Interpreter {
                 }
                 Vec::new()
             }
-            Expr::ArrayLit(items) => items.iter().flat_map(|item| self.eval_list(item)).collect(),
+            Expr::ArrayLit(items) => {
+                // Tail-iterate when the LAST item is itself an ArrayLit
+                // — op/list test 73 generates 100k-deep `(1, (1, (1, …)))`
+                // which would otherwise stack-overflow eval_list. Other
+                // ArrayLit children (non-tail) recurse normally.
+                let mut out: Vec<Value> = Vec::new();
+                let mut current: &[Expr] = items.as_slice();
+                loop {
+                    if current.is_empty() {
+                        break;
+                    }
+                    let (last, head) = current.split_last().unwrap();
+                    for item in head {
+                        out.extend(self.eval_list(item));
+                    }
+                    if let Expr::ArrayLit(inner) = last {
+                        current = inner.as_slice();
+                    } else {
+                        out.extend(self.eval_list(last));
+                        break;
+                    }
+                }
+                out
+            }
             Expr::ArrayVar(name) => self.get_array(name),
             Expr::ArrayDerefVar(name) => {
                 let v = self.get_var(name);
