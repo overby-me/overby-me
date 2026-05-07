@@ -146,6 +146,7 @@ pub enum BinOp {
     DefOr,
     And,
     Or,
+    Xor,
 
     // Bitwise
     BitAnd,

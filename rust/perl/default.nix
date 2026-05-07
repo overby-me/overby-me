@@ -348,6 +348,10 @@
       }
       {
         category = "op";
+        name = "warn";
+      }
+      {
+        category = "op";
         name = "avhv";
       }
       {

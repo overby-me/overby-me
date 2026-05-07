@@ -207,6 +207,7 @@ fn run_interpreter() -> i32 {
     let tokens = lexer.tokenize();
     let token_lines = std::mem::take(&mut lexer.token_lines);
     let file_overrides = std::mem::take(&mut lexer.file_overrides);
+    let data_section = std::mem::take(&mut lexer.data_section);
 
     if let Some(err) = lexer.error.take() {
         let file_label = if script_file.is_empty() {
@@ -234,6 +235,9 @@ fn run_interpreter() -> i32 {
     }
     if !script_file.is_empty() {
         interp.set_current_file(&script_file);
+    }
+    if let Some(data) = data_section {
+        interp.set_data_section(data);
     }
     // Populate @INC from -I flags (prepended in order).
     interp.set_inc(&include_dirs);

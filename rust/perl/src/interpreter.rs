@@ -485,6 +485,15 @@ impl Interpreter {
         self.globals.arrays.insert("INC".to_string(), items);
     }
 
+    /// Register the source's `__DATA__` section as the `DATA` filehandle.
+    /// Backed by a scalar-string read handle so `<DATA>` / `readline DATA`
+    /// reads one record at a time.
+    pub fn set_data_section(&mut self, data: String) {
+        let cell = std::rc::Rc::new(std::cell::RefCell::new(Value::Str(data)));
+        self.string_read_handles
+            .insert("DATA".to_string(), (cell, 0));
+    }
+
     /// Resolve a filehandle name through the typeglob alias table.
     /// `local(*F) = *G` adds an F -> G alias; the IO ops consult this so
     /// the alias stays transparent to the rest of the interpreter.
@@ -4328,6 +4337,18 @@ impl Interpreter {
                     return l;
                 }
                 return self.eval_expr(right);
+            }
+            BinOp::Xor => {
+                // `xor` is non-short-circuiting low-precedence logical XOR.
+                // Returns 1 if exactly one operand is true, else "" (empty
+                // string false). Both operands are always evaluated.
+                let l = self.eval_expr(left).to_bool();
+                let r = self.eval_expr(right).to_bool();
+                return if l ^ r {
+                    Value::Num(1.0)
+                } else {
+                    Value::Str(String::new())
+                };
             }
             _ => {}
         }

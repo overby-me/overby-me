@@ -1490,6 +1490,9 @@ impl Parser {
             if self.eat(&Token::Or) {
                 let right = self.parse_and();
                 left = Expr::BinOp(BinOp::Or, Box::new(left), Box::new(right));
+            } else if self.eat(&Token::Xor) {
+                let right = self.parse_and();
+                left = Expr::BinOp(BinOp::Xor, Box::new(left), Box::new(right));
             } else {
                 break;
             }
@@ -3414,6 +3417,7 @@ impl Parser {
                         | Token::Delete
                         | Token::Exists
                         | Token::Glob(_)
+                        | Token::Diamond(_)
                 ) {
                     // Function call without parentheses: func arg, ...
                     // Perl prototype-`$` builtins only take a single scalar arg.

@@ -59,6 +59,7 @@ pub enum Token {
     Not,
     And,
     Or,
+    Xor,
     Chomp,
     Chop,
     Push,
@@ -279,6 +280,7 @@ impl Token {
                 | Token::Not
                 | Token::And
                 | Token::Or
+                | Token::Xor
                 | Token::Chomp
                 | Token::Chop
                 | Token::Push
@@ -348,6 +350,10 @@ pub struct Lexer {
     /// Records `# line N "FILE"` directives. Each entry is
     /// (token_idx, file). Drained by parser to emit Stmt::FileMark.
     pub file_overrides: Vec<(usize, String)>,
+    /// Captured contents after a `__DATA__` token, ready to be exposed as
+    /// the `DATA` filehandle. `None` if the source had no `__DATA__` (or
+    /// only had `__END__`, which discards the trailing data).
+    pub data_section: Option<String>,
     /// Updated by `tokenize()` before each `skip_whitespace_and_comments`
     /// call so `try_handle_line_directive` knows the index of the next token.
     cur_token_count: usize,
@@ -507,6 +513,7 @@ impl Lexer {
             pending_heredocs: Vec::new(),
             error: None,
             file_overrides: Vec::new(),
+            data_section: None,
             cur_token_count: 0,
             line_offset: 0,
             subst_marker_counter: 0,
@@ -1270,6 +1277,22 @@ impl Lexer {
                     // mirror that by advancing self.pos to EOF so the
                     // outer loop terminates cleanly.
                     if ident == "__END__" || ident == "__DATA__" {
+                        if ident == "__DATA__" {
+                            // Capture everything after the directive line for
+                            // exposure as the `DATA` filehandle. Skip the
+                            // remainder of the directive line (up to and
+                            // including the next newline) so the data starts
+                            // at the *next* line.
+                            let mut data_start = self.pos;
+                            while data_start < self.input.len() && self.input[data_start] != '\n' {
+                                data_start += 1;
+                            }
+                            if data_start < self.input.len() {
+                                data_start += 1; // skip the newline
+                            }
+                            let data: String = self.input[data_start..].iter().collect();
+                            self.data_section = Some(data);
+                        }
                         self.pos = self.input.len();
                         break;
                     }
@@ -1433,6 +1456,7 @@ impl Lexer {
                         "not" => Token::Not,
                         "and" => Token::And,
                         "or" => Token::Or,
+                        "xor" => Token::Xor,
                         "eq" => Token::Eq,
                         "ne" => Token::Ne,
                         "lt" => Token::Lt,
