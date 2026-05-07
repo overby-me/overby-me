@@ -66,7 +66,7 @@ Key design decisions:
 | `objdump-relocs` | objdump | ✅ PASS |
 | `addr2line-basic` | addr2line | ✅ PASS |
 
-### Upstream DejaGnu tests (219/229 passing, 96%)
+### Upstream DejaGnu tests (226/229 passing, 99%)
 
 | Test file | Pass | Fail | Total | Threshold |
 |-----------|------|------|-------|-----------|
@@ -74,12 +74,16 @@ Key design decisions:
 | size.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
 | nm.exp | **15** | 0 | 15 | minPass=15, maxFail=0 |
 | ar.exp | **14** | 0 | 14 | minPass=14, maxFail=0 |
-| readelf.exp | **34** | 4 | 38 | minPass=34, maxFail=4 |
+| readelf.exp | **35** | 3 | 38 | minPass=35, maxFail=3 |
 | objdump.exp | **32** | 0 | 33 | minPass=32, maxFail=0 |
-| objcopy.exp | **114** | 6 | 122 | minPass=114, maxFail=6 |
+| objcopy.exp | **120** | 0 | 120 | minPass=120, maxFail=0 |
 | strings.exp | **1** | 0 | 1 | minPass=1, maxFail=0 |
 | addr2line.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
-| **Total** | **219** | **10** | **229** | |
+| **Total** | **226** | **3** | **229** | |
+
+Remaining failures:
+- `readelf --debug-dump=loc locview-1` and `locview-2`: GNU location view pair extension (complex)
+- `readelf -wi pr26160`: DWP (DWARF Package) file support
 
 ## Fixes applied
 
