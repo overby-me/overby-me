@@ -1947,14 +1947,57 @@ impl Interpreter {
                             } else {
                                 Vec::new()
                             };
-                            self.globals.arrays.insert(qualified, items);
+                            // For non-main packages, also alias the bare
+                            // name to the qualified slot so subsequent
+                            // bare reads/writes (`@ISA = …` later) hit
+                            // the right global. Done by installing a
+                            // shared `Rc<RefCell<Vec>>` under both keys.
+                            if qualified != *var_name {
+                                let rc = if let Some(existing) =
+                                    self.aliased_arrays.get(&qualified).cloned()
+                                {
+                                    *existing.borrow_mut() = items;
+                                    existing
+                                } else {
+                                    let rc = std::rc::Rc::new(std::cell::RefCell::new(items));
+                                    self.aliased_arrays.insert(qualified.clone(), rc.clone());
+                                    self.globals.arrays.remove(&qualified);
+                                    rc
+                                };
+                                self.aliased_arrays.insert(var_name.to_string(), rc);
+                            } else {
+                                self.globals.arrays.insert(qualified, items);
+                            }
                         } else if name.starts_with('%') {
                             let items = if init.is_some() {
                                 self.eval_list(init.as_ref().unwrap())
                             } else {
                                 Vec::new()
                             };
-                            self.set_hash_from_list(&qualified, items);
+                            if qualified != *var_name {
+                                // Build the hash from the kv list.
+                                let mut h: std::collections::HashMap<String, Value> =
+                                    std::collections::HashMap::new();
+                                let mut it = items.into_iter();
+                                while let Some(k) = it.next() {
+                                    let v = it.next().unwrap_or(Value::Undef);
+                                    h.insert(k.to_str(), v);
+                                }
+                                let rc = if let Some(existing) =
+                                    self.aliased_hashes.get(&qualified).cloned()
+                                {
+                                    *existing.borrow_mut() = h;
+                                    existing
+                                } else {
+                                    let rc = std::rc::Rc::new(std::cell::RefCell::new(h));
+                                    self.aliased_hashes.insert(qualified.clone(), rc.clone());
+                                    self.globals.hashes.remove(&qualified);
+                                    rc
+                                };
+                                self.aliased_hashes.insert(var_name.to_string(), rc);
+                            } else {
+                                self.set_hash_from_list(&qualified, items);
+                            }
                         } else {
                             // Detect `our $X++` / `our $X--` (the
                             // parser stashes the post-op as a self-
