@@ -1047,12 +1047,17 @@ fn main() {
                         .iter()
                         .find(|(k, _)| k == "last-modified")
                         .and_then(|(_, v)| cookie::parse_http_date(v));
-                    if let Some(secs) = ts
-                        && secs > 0
-                    {
+                    if let Some(secs) = ts {
                         // Use libc::utimes via std::fs::FileTimes (stable as of 1.75).
+                        // Pre-epoch timestamps (e.g. Last-Modified: 1940) are
+                        // valid mtimes — produce a SystemTime by going below
+                        // UNIX_EPOCH (test 762).
                         use std::time::{Duration, SystemTime};
-                        let target = SystemTime::UNIX_EPOCH + Duration::from_secs(secs as u64);
+                        let target = if secs >= 0 {
+                            SystemTime::UNIX_EPOCH + Duration::from_secs(secs as u64)
+                        } else {
+                            SystemTime::UNIX_EPOCH - Duration::from_secs((-secs) as u64)
+                        };
                         if let Ok(file) = fs::OpenOptions::new().write(true).open(path) {
                             let times = std::fs::FileTimes::new()
                                 .set_modified(target)

@@ -527,6 +527,10 @@ pub(crate) fn parse_http_date(s: &str) -> Option<i64> {
     let mut hour: Option<u32> = None;
     let mut minute: Option<u32> = None;
     let mut second: Option<u32> = None;
+    // Offset from UTC in seconds (`+0100` → 3600). Parsed but only applied
+    // to the final timestamp — needed for pre-epoch dates with explicit
+    // time zones (test 762's `Wed, 09 Oct 1940 16:45:49 +0100`).
+    let mut tz_offset_secs: i64 = 0;
 
     // Tokenize on whitespace, comma, dash.
     for token in s.split(|c: char| c.is_ascii_whitespace() || c == ',' || c == '-') {
@@ -537,6 +541,24 @@ pub(crate) fn parse_http_date(s: &str) -> Option<i64> {
 
         // Skip day names.
         if is_day_name(token) {
+            continue;
+        }
+
+        // Numeric timezone (`+0100`, `-0500`, `+05:30`).
+        if (token.starts_with('+') || token.starts_with('-'))
+            && token[1..].chars().all(|c| c.is_ascii_digit() || c == ':')
+            && token.len() >= 3
+        {
+            let sign: i64 = if token.starts_with('+') { 1 } else { -1 };
+            let digits: String = token[1..].chars().filter(|c| c.is_ascii_digit()).collect();
+            if let Ok(n) = digits.parse::<i64>() {
+                let hh = n / 100;
+                let mm = n % 100;
+                tz_offset_secs = sign * (hh * 3600 + mm * 60);
+                continue;
+            }
+        }
+        if matches!(token.to_ascii_uppercase().as_str(), "GMT" | "UTC" | "Z") {
             continue;
         }
 
@@ -591,7 +613,7 @@ pub(crate) fn parse_http_date(s: &str) -> Option<i64> {
     let min = minute.unwrap_or(0);
     let sec = second.unwrap_or(0);
 
-    date_to_timestamp(y, m, d, h, min, sec)
+    date_to_timestamp(y, m, d, h, min, sec).map(|t| t - tz_offset_secs)
 }
 
 fn is_day_name(token: &str) -> bool {
@@ -655,19 +677,22 @@ fn date_to_timestamp(
     if hour > 23 || minute > 59 || second > 59 {
         return None;
     }
-    if year < 1970 {
-        return None;
-    }
-
     // Days in each month (non-leap).
     let days_in_month = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
-    // Compute days from epoch.
+    // Compute days from epoch. For year < 1970 we count backwards (negative
+    // total_days), so curl-compatible Last-Modified dates from 1940 in test
+    // 762 produce a valid pre-epoch mtime.
     let mut total_days: i64 = 0;
 
-    // Add days for full years from 1970 to year-1.
-    for y in 1970..year {
-        total_days += if is_leap_year(y) { 366 } else { 365 };
+    if year >= 1970 {
+        for y in 1970..year {
+            total_days += if is_leap_year(y) { 366 } else { 365 };
+        }
+    } else {
+        for y in year..1970 {
+            total_days -= if is_leap_year(y) { 366 } else { 365 };
+        }
     }
 
     // Add days for full months in the current year.
