@@ -1724,12 +1724,23 @@ fn nm_print_symbols<'data>(
                 // GNU prints size only when non-zero; for common (C) symbols
                 // GNU treats st_value as the alignment (non-zero). For
                 // undefined symbols both columns are blank.
+                let fmt_radix = |v: u64| -> String {
+                    match opts.radix {
+                        NmRadix::Hex => format!("{:x}", v),
+                        NmRadix::Dec => format!("{}", v),
+                        NmRadix::Oct => format!("{:o}", v),
+                    }
+                };
                 if is_undef {
                     println!("{prefix}{name} {ty} ");
                 } else if *size == 0 && *ty != 'C' && *ty != 'c' {
-                    println!("{prefix}{name} {ty} {:x} ", addr);
+                    println!("{prefix}{name} {ty} {} ", fmt_radix(*addr));
                 } else {
-                    println!("{prefix}{name} {ty} {:x} {:x}", addr, size);
+                    println!(
+                        "{prefix}{name} {ty} {} {}",
+                        fmt_radix(*addr),
+                        fmt_radix(*size)
+                    );
                 }
             }
             NmFormat::Sysv => {
@@ -11738,6 +11749,7 @@ fn tool_cxxfilt(args: &[String]) -> i32 {
     // Collect any positional arguments (mangled names). Skip values that
     // belong to value-taking flags so they aren't interpreted as input.
     let mut names: Vec<String> = Vec::new();
+    let mut no_params = false;
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
@@ -11746,11 +11758,37 @@ fn tool_cxxfilt(args: &[String]) -> i32 {
             i += 2;
             continue;
         }
-        if !arg.starts_with('-') {
+        if arg == "-p" || arg == "--no-params" {
+            no_params = true;
+        } else if !arg.starts_with('-') {
             names.push(arg.clone());
         }
         i += 1;
     }
+    let strip_params = |s: String| -> String {
+        if !no_params {
+            return s;
+        }
+        // Drop the trailing "(...)" parameter list (if balanced) without
+        // touching parens that might be inside template arguments.
+        let bytes = s.as_bytes();
+        let mut depth_angle: i32 = 0;
+        let mut last_open: Option<usize> = None;
+        for (i, &b) in bytes.iter().enumerate() {
+            match b {
+                b'<' => depth_angle += 1,
+                b'>' => depth_angle -= 1,
+                b'(' if depth_angle == 0 => {
+                    last_open = Some(i);
+                }
+                _ => {}
+            }
+        }
+        match last_open {
+            Some(o) => s[..o].trim_end().to_string(),
+            None => s,
+        }
+    };
 
     let stdout = io::stdout();
     let mut out = stdout.lock();
@@ -11759,12 +11797,12 @@ fn tool_cxxfilt(args: &[String]) -> i32 {
         // Read from stdin line by line
         let stdin = io::stdin();
         for line in stdin.lock().lines().map_while(Result::ok) {
-            let demangled = demangle_line(&line);
+            let demangled = strip_params(demangle_line(&line));
             let _ = writeln!(out, "{demangled}");
         }
     } else {
         for name in &names {
-            let demangled = demangle_symbol(name);
+            let demangled = strip_params(demangle_symbol(name));
             let _ = writeln!(out, "{demangled}");
         }
     }

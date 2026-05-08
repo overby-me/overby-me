@@ -396,6 +396,30 @@
         name = "dynamic-arch";
       }
       {
+        tool = "readelf";
+        name = "groups-wide";
+      }
+      {
+        tool = "readelf";
+        name = "notes-symbols";
+      }
+      {
+        tool = "readelf";
+        name = "sections-arch-wide";
+      }
+      {
+        tool = "nm";
+        name = "no-weak";
+      }
+      {
+        tool = "nm";
+        name = "posix-decimal";
+      }
+      {
+        tool = "nm";
+        name = "posix-octal";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }

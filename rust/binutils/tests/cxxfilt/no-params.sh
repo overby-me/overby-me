@@ -1,5 +1,5 @@
-# Test c++filt -i — don't add a leading underscore
-echo "_Z1av" > "$TMPDIR/in"
-$REF -i < "$TMPDIR/in" > "$TMPDIR/expected" 2>&1 || true
-$RUST -i < "$TMPDIR/in" > "$TMPDIR/actual" 2>&1 || true
-compare "c++filt -i"
+# Test c++filt -p / --no-params — drop the function-arguments part
+echo "_Z3fooPi" > "$TMPDIR/in"
+$REF -p < "$TMPDIR/in" > "$TMPDIR/expected" 2>&1 || true
+$RUST -p < "$TMPDIR/in" > "$TMPDIR/actual" 2>&1 || true
+compare "c++filt -p"

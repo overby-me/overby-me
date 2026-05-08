@@ -3,7 +3,16 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
-## Custom-test expansion (89/89 ✅)
+## Custom-test expansion (96/96 ✅)
+
+- c++filt `-p`/`--no-params` strips the trailing `(...)` parameter
+  list (template-aware: doesn't touch parens inside `<...>`); nm
+  POSIX format honors `-t d/o/x` (was always hex). Replaced an old
+  `cxxfilt-no-params` test that incorrectly invoked `-i` with the
+  correct `-p` test. +7 custom tests (89→96): `cxxfilt-no-params`
+  (corrected), `nm-no-weak`, `nm-posix-decimal`, `nm-posix-octal`,
+  `readelf-groups-wide`, `readelf-notes-symbols`,
+  `readelf-sections-arch-wide`.
 
 - readelf `-V` no longer means `--version` (it's `--version-info`):
   with no SHT_GNU_VERDEF/SHT_GNU_VERNEED present, emits "No version
