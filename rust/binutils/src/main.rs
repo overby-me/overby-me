@@ -7939,6 +7939,50 @@ fn tool_objcopy(args: &[String]) -> i32 {
                 return 1;
             }
         };
+        // Archive handling: apply compress/decompress to each member.
+        if data.len() >= 8 && &data[..8] == b"!<arch>\n" {
+            if let Ok(members) = ar_parse(&data) {
+                let mut new_members: Vec<ArMember> = Vec::with_capacity(members.len());
+                for m in members {
+                    let mut member_data = m.data.clone();
+                    // Skip non-ELF members (e.g. symbol index "/", "//").
+                    if member_data.len() >= 4 && &member_data[..4] == b"\x7fELF" {
+                        if decompress_debug {
+                            elf_decompress_debug_sections(&mut member_data);
+                        }
+                        match compress_debug {
+                            CompressMode::ZlibGnu => {
+                                elf_compress_debug_sections(&mut member_data, 1)
+                            }
+                            CompressMode::ZlibGabi => {
+                                elf_compress_debug_sections(&mut member_data, 2)
+                            }
+                            CompressMode::None => {}
+                        }
+                    }
+                    new_members.push(ArMember {
+                        name: m.name,
+                        mtime: m.mtime,
+                        uid: m.uid,
+                        gid: m.gid,
+                        mode: m.mode,
+                        data: member_data,
+                    });
+                }
+                let out_archive = ar_write(&new_members, true);
+                if let Err(e) = fs::write(output, &out_archive) {
+                    eprintln!("objcopy: '{output}': {e}");
+                    return 1;
+                }
+                if preserve_dates
+                    && let Ok(meta) = fs::metadata(input)
+                    && let Ok(mtime) = meta.modified()
+                {
+                    let _ = set_file_times(Path::new(output), mtime);
+                }
+                return 0;
+            }
+        }
         if decompress_debug {
             elf_decompress_debug_sections(&mut data);
         }
@@ -11723,7 +11767,13 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
         new_sizes[i] = body.len() as u64;
         new_data.extend_from_slice(&body);
     }
-    // Place section header table at end.
+    // Place section header table at end, aligned to the natural pointer
+    // size (8 for ELF64, 4 for ELF32). GNU `as` pads the file with zeros to
+    // align the section header table.
+    let shoff_align: u64 = if class == 2 { 8 } else { 4 };
+    let off_now = new_data.len() as u64;
+    let pad = (shoff_align - (off_now % shoff_align)) % shoff_align;
+    new_data.resize(new_data.len() + pad as usize, 0);
     let new_shoff = new_data.len() as u64;
     // Append section headers — copy originals and rewrite mutated fields.
     for i in 0..shnum {
