@@ -6605,6 +6605,7 @@ fn tool_objdump(args: &[String]) -> i32 {
 
     let mut disassemble = false;
     let mut disassemble_all = false;
+    let mut show_raw_insn = true;
     let mut disassemble_syms: Vec<String> = Vec::new();
     let mut show_headers = false;
     let mut show_symbols = false;
@@ -6716,6 +6717,8 @@ fn tool_objdump(args: &[String]) -> i32 {
                     show_private = true;
                 }
                 "-i" | "--info" => show_info = true,
+                "--no-show-raw-insn" => show_raw_insn = false,
+                "--show-raw-insn" => show_raw_insn = true,
                 "-s" | "--full-contents" => show_full_contents = true,
                 "--show-all-symbols" => show_all_symbols = true,
                 "--disassemble-zeroes" => disassemble_zeroes = true,
@@ -7275,6 +7278,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                     source_comment.as_deref(),
                     show_line_numbers,
                     wide,
+                    show_raw_insn,
                 );
             }
         } else if let Some(info) = parse_srec(&data) {
@@ -7342,6 +7346,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                         source_comment.as_deref(),
                         show_line_numbers,
                         wide,
+                        show_raw_insn,
                     );
                 }
             }
@@ -7370,6 +7375,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                 source_comment.as_deref(),
                 show_line_numbers,
                 wide,
+                show_raw_insn,
             );
         }
     }
@@ -7487,6 +7493,7 @@ fn objdump_process_object(
     source_comment: Option<&str>,
     show_line_numbers: bool,
     wide: bool,
+    show_raw_insn: bool,
 ) {
     use object::ObjectSymbol as _;
 
@@ -7626,6 +7633,10 @@ fn objdump_process_object(
         }
         for (i, section) in alloc_sections.iter().enumerate() {
             let name = section.name().unwrap_or("");
+            // -j SECTION filters which sections appear in the listing.
+            if !section_filter.is_empty() && !section_filter.iter().any(|f| f == name) {
+                continue;
+            }
             let size = section.size();
             let addr = section.address();
             let file_off = raw_offsets
@@ -7708,6 +7719,10 @@ fn objdump_process_object(
                     _ => "*UND*",
                 }
             };
+            // -j SECTION filters symbols to those in the named section.
+            if !section_filter.is_empty() && !section_filter.iter().any(|f| f == section_name) {
+                continue;
+            }
             // objdump symbol flags: 7 chars
             // [scope][weak][ctor][warn][indir][debug/dyn][func/file/obj]
             let scope_ch = if sym.is_weak() || sym.is_undefined() || is_common {
@@ -8082,6 +8097,7 @@ fn objdump_process_object(
                                     source_comment,
                                     show_source,
                                     show_line_numbers,
+                                    show_raw_insn,
                                 );
                             }
                         }
@@ -8114,6 +8130,7 @@ fn objdump_process_object(
                             source_comment,
                             show_source,
                             show_line_numbers,
+                            show_raw_insn,
                         );
                     }
                 }
@@ -8211,6 +8228,7 @@ fn objdump_disassemble_section(
     source_comment: Option<&str>,
     show_source: bool,
     show_line_numbers: bool,
+    show_raw_insn: bool,
 ) {
     // First pass: decode all instructions
     let mut decoder = Decoder::with_ip(bitness, data, base, DecoderOptions::NONE);
@@ -8309,30 +8327,34 @@ fn objdump_disassemble_section(
 
         // Always print the current instruction first
         print!("{ip:>4x}:\t");
-        let show = instr_len.min(7);
-        for byte in instr_bytes.iter().take(show) {
-            print!("{byte:02x} ");
+        if show_raw_insn {
+            let show = instr_len.min(7);
+            for byte in instr_bytes.iter().take(show) {
+                print!("{byte:02x} ");
+            }
+            for _ in show..7 {
+                print!("   ");
+            }
+            print!("\t");
         }
-        for _ in show..7 {
-            print!("   ");
-        }
-        print!("\t");
 
         output.clear();
         formatter.format(instr, &mut output);
         println!("{output}");
 
-        // Continuation lines for long instructions
-        let mut extra_off = 7;
-        while extra_off < instr_len {
-            let end = (extra_off + 7).min(instr_len);
-            let cont_addr = ip + extra_off as u64;
-            print!("{cont_addr:>4x}:\t");
-            for byte in &instr_bytes[extra_off..end] {
-                print!("{byte:02x} ");
+        // Continuation lines for long instructions (only when showing bytes)
+        if show_raw_insn {
+            let mut extra_off = 7;
+            while extra_off < instr_len {
+                let end = (extra_off + 7).min(instr_len);
+                let cont_addr = ip + extra_off as u64;
+                print!("{cont_addr:>4x}:\t");
+                for byte in &instr_bytes[extra_off..end] {
+                    print!("{byte:02x} ");
+                }
+                println!();
+                extra_off += 7;
             }
-            println!();
-            extra_off += 7;
         }
 
         // After printing, check if the NEXT instruction starts an all-zero

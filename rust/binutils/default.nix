@@ -524,6 +524,18 @@
         name = "size-sort";
       }
       {
+        tool = "objdump";
+        name = "headers-section-filter";
+      }
+      {
+        tool = "objdump";
+        name = "syms-section-filter";
+      }
+      {
+        tool = "objdump";
+        name = "no-show-raw-insn";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }

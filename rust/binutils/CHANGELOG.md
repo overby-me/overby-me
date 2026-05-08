@@ -3,6 +3,15 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
+## Custom-test expansion (125/125 ✅)
+
+- objdump `--no-show-raw-insn`/`--show-raw-insn` toggle the bytes column
+  in disassembly. The section filter (`-j NAME`) also gates which
+  sections appear in the section-headers (`-h`) and symbol-table (`-t`)
+  output, not just disassembly. +3 custom tests (122→125):
+  `objdump-headers-section-filter`, `objdump-no-show-raw-insn`,
+  `objdump-syms-section-filter`.
+
 ## Custom-test expansion (122/122 ✅)
 
 - objdump now distinguishes `-d` (text only) from `-D`/`--disassemble-all`
