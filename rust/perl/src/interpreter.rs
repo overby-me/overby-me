@@ -4506,6 +4506,15 @@ impl Interpreter {
                             self.set_global_var("@", Value::Str(msg));
                             return Value::Undef;
                         }
+                        // Goto / Last / Next inside a `do { … }` (or
+                        // map/grep BLOCK) bubble up via `pending_flow` so
+                        // the enclosing loop can react. Stash and stop
+                        // executing further statements in this block.
+                        flow @ (Flow::Goto(_) | Flow::Last(_) | Flow::Next(_)) => {
+                            self.pop_scope();
+                            self.pending_flow = Some(flow);
+                            return Value::Undef;
+                        }
                         _ => {}
                     }
                     if self.pending_return.is_some() {
@@ -7399,14 +7408,56 @@ impl Interpreter {
                     return Value::Undef;
                 }
                 let block = &args[0];
-                // Aliased path: single `@arr` source → mutate through `$_`.
-                let alias_target: Option<Expr> = if args.len() == 2
-                    && matches!(args[1], Expr::ArrayVar(_) | Expr::ArrayDerefVar(_))
+                // Single `@arr` source — alias `$_` to each slot via
+                // `Value::Alias`. `goto LABEL` / `last` / `next` inside
+                // the block bubbles out via `pending_flow`. (op/array
+                // tests 189-190.)
+                let void_ctx = self.next_call_ctx == Some(0);
+                self.next_call_ctx = None;
+                if args.len() == 2
+                    && let Expr::ArrayVar(name) = &args[1]
                 {
-                    Some(args[1].clone())
-                } else {
-                    None
-                };
+                    let len = self.get_array_len(name);
+                    let mut results = Vec::new();
+                    self.call_context.push(2);
+                    let saved_us = self.get_var("_");
+                    let mut i = 0;
+                    while i < len {
+                        let rc = self.promote_slot_to_alias(name, i);
+                        if let Some(scope) = self.scopes.last_mut() {
+                            scope.vars.insert("_".to_string(), Value::Alias(rc));
+                        } else {
+                            self.globals.vars.insert("_".to_string(), Value::Alias(rc));
+                        }
+                        let block_results = self.eval_list(block);
+                        if !void_ctx {
+                            results.extend(block_results);
+                        }
+                        if self.pending_flow.is_some() {
+                            break;
+                        }
+                        i += 1;
+                    }
+                    if let Some(scope) = self.scopes.last_mut() {
+                        scope.vars.insert("_".to_string(), saved_us);
+                    } else {
+                        self.globals.vars.insert("_".to_string(), saved_us);
+                    }
+                    self.call_context.pop();
+                    return if void_ctx {
+                        Value::Undef
+                    } else {
+                        Value::Num(results.len() as f64)
+                    };
+                }
+                // Multi-arg or non-ArrayVar: copy semantics with
+                // optional positional writeback for ArrayDerefVar.
+                let alias_target: Option<Expr> =
+                    if args.len() == 2 && matches!(args[1], Expr::ArrayDerefVar(_)) {
+                        Some(args[1].clone())
+                    } else {
+                        None
+                    };
                 let items: Vec<Value> = args[1..]
                     .iter()
                     .flat_map(|a| match a {
@@ -7416,12 +7467,6 @@ impl Interpreter {
                     .collect();
                 let mut results = Vec::new();
                 let mut mutated = items.clone();
-                // Detect void context (Stmt::Expr set next_call_ctx = Some(0)
-                // just before calling us). In void, we don't collect the
-                // per-iteration results — they die at end-of-iteration and
-                // can trigger DESTROY before the next iteration starts.
-                let void_ctx = self.next_call_ctx == Some(0);
-                self.next_call_ctx = None;
                 self.call_context.push(2);
                 let saved_us = self.get_var("_");
                 for (i, item) in items.iter().enumerate() {
@@ -11542,7 +11587,15 @@ impl Interpreter {
             }
             Stmt::Block(body) | Stmt::BareBlock(body) => self.exec_block_list(body),
             _ => {
-                self.exec_stmt(last);
+                let flow = self.exec_stmt(last);
+                // Stash abrupt-flow (goto/last/next/die/exit) so the
+                // surrounding map/grep/eval-list caller can react.
+                // op/array test 189: `goto LABEL` inside `map BLOCK @a`
+                // must exit the map.
+                match flow {
+                    Flow::None | Flow::Return(_) => {}
+                    other => self.pending_flow = Some(other),
+                }
                 self.last_list_val
                     .take()
                     .unwrap_or_else(|| vec![self.last_expr_val.clone()])
