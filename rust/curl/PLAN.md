@@ -6,7 +6,7 @@ Use the upstream [curl test suite](https://github.com/curl/curl/tree/master/test
 
 ## Current Status
 
-**654 tests passing** across the curl 8.19.0 test suite (verified with strict
+**655 tests passing** across the curl 8.19.0 test suite (verified with strict
 runner checks — the derivation fails when a test number doesn't exist or the
 suite reports anything other than 100% OK).
 

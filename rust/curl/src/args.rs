@@ -1050,6 +1050,11 @@ pub(crate) fn parse_args() -> Options {
                 for k in group_start_idx..opts.urls.len() {
                     let mut s = snap.clone();
                     s.first_in_group = k == group_start_idx;
+                    // -T consumes by the first URL only; later URLs in the
+                    // same group fall back to GET (test 1065).
+                    if !s.first_in_group {
+                        s.upload_file = None;
+                    }
                     opts.per_url_opts.push(s);
                 }
                 group_start_idx = opts.urls.len();
@@ -1207,6 +1212,9 @@ pub(crate) fn parse_args() -> Options {
                                 for k in group_start_idx..opts.urls.len() {
                                     let mut s = snap.clone();
                                     s.first_in_group = k == group_start_idx;
+                                    if !s.first_in_group {
+                                        s.upload_file = None;
+                                    }
                                     opts.per_url_opts.push(s);
                                 }
                                 group_start_idx = opts.urls.len();
@@ -1264,6 +1272,9 @@ pub(crate) fn parse_args() -> Options {
         for k in group_start_idx..opts.urls.len() {
             let mut s = snap.clone();
             s.first_in_group = k == group_start_idx;
+            if !s.first_in_group {
+                s.upload_file = None;
+            }
             opts.per_url_opts.push(s);
         }
     }
