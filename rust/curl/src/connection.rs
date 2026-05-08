@@ -15,6 +15,23 @@ thread_local! {
     /// Local socket (ip, port) of the last successful connect — used for
     /// `%{local_ip}` and `%{local_port}` (test 435).
     pub(crate) static LOCAL_ADDR: RefCell<Option<(String, u16)>> = const { RefCell::new(None) };
+    /// Single-slot HTTP/1.1 keep-alive pool. Holds the previous request's
+    /// connection plus its `(scheme, host, port)` key. The key carries the
+    /// origin (or proxy) we connected to; `is_proxy` distinguishes a
+    /// CONNECT-tunneled stream (which can only be reused for the same
+    /// origin) from a plain proxy stream (reusable for any HTTP origin
+    /// going through the same proxy host:port). Tests 48, 1134, 1078.
+    pub(crate) static CONN_POOL: RefCell<Option<PooledConn>> = const { RefCell::new(None) };
+}
+
+pub(crate) struct PooledConn {
+    pub scheme: String,
+    pub host: String,
+    pub port: u16,
+    /// `true` when this is the direct stream to the proxy (no CONNECT tunnel
+    /// up). `false` for plain origin connections OR after a CONNECT tunnel.
+    pub is_proxy: bool,
+    pub conn: Connection,
 }
 
 /// Match --connect-to entries ("HOST1:PORT1:HOST2:PORT2") against the
@@ -180,6 +197,29 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
 
     // Determine whether we need a CONNECT tunnel through the proxy.
     let use_tunnel = opts.proxy.is_some() && (opts.proxy_tunnel || url.scheme == "https");
+
+    // HTTP/1.1 keep-alive pool reuse — only for plain HTTP without a
+    // tunnel (the simplest, safest case). Try to reuse a matching pooled
+    // connection; the request layer drops the pool entry on `Connection:
+    // close`, so a hit here is presumed live (test 48 / 1134).
+    if !use_tunnel
+        && url.scheme == "http"
+        && opts.proxy.is_none()
+        && let Some(reused) = CONN_POOL.with(|r| {
+            let mut slot = r.borrow_mut();
+            if let Some(p) = slot.as_ref()
+                && p.scheme == url.scheme
+                && p.host == url.host
+                && p.port == url.port
+                && !p.is_proxy
+            {
+                return slot.take().map(|p| p.conn);
+            }
+            None
+        })
+    {
+        return Ok((reused, Vec::new()));
+    }
 
     // When a proxy is configured, always connect to the proxy.
     // The decision about plain proxy vs CONNECT tunnel is handled separately.

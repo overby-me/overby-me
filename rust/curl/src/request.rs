@@ -1381,6 +1381,39 @@ fn execute_request(
         resp.header_bytes = combined;
     }
 
+    // HTTP/1.1 keep-alive pool: save the connection back unless the server
+    // (or our own request) signaled `Connection: close`, the response was
+    // chunked-and-we-bailed-early, or we used a CONNECT tunnel / TLS.
+    let conn_close = resp
+        .headers
+        .iter()
+        .any(|(k, v)| k.eq_ignore_ascii_case("connection") && v.eq_ignore_ascii_case("close"));
+    let user_close = opts
+        .headers
+        .iter()
+        .any(|(k, v)| k.eq_ignore_ascii_case("connection") && v.eq_ignore_ascii_case("close"));
+    let http10 = resp.header_bytes.starts_with(b"HTTP/1.0");
+    let plain_origin = url.scheme == "http" && opts.proxy.is_none();
+    let pool_ok = !conn_close
+        && !user_close
+        && !http10
+        && plain_origin
+        && !resp.recv_error
+        && !resp.partial_file
+        && !resp.timed_out
+        && resp.status > 0;
+    if pool_ok {
+        crate::connection::CONN_POOL.with(|r| {
+            *r.borrow_mut() = Some(crate::connection::PooledConn {
+                scheme: url.scheme.clone(),
+                host: url.host.clone(),
+                port: url.port,
+                is_proxy: false,
+                conn,
+            });
+        });
+    }
+
     Ok(resp)
 }
 
