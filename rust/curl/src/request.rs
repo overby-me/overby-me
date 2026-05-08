@@ -1393,22 +1393,32 @@ fn execute_request(
         .iter()
         .any(|(k, v)| k.eq_ignore_ascii_case("connection") && v.eq_ignore_ascii_case("close"));
     let http10 = resp.header_bytes.starts_with(b"HTTP/1.0");
-    let plain_origin = url.scheme == "http" && opts.proxy.is_none();
+    let use_tunnel_save = opts.proxy.is_some() && (opts.proxy_tunnel || url.scheme == "https");
     let pool_ok = !conn_close
         && !user_close
         && !http10
-        && plain_origin
+        && url.scheme == "http"
+        && !use_tunnel_save
         && !resp.recv_error
         && !resp.partial_file
         && !resp.timed_out
         && resp.status > 0;
     if pool_ok {
+        // Pool keyed on the actual connect target: proxy host:port when
+        // proxying without a CONNECT tunnel, otherwise origin host:port.
+        let (khost, kport, is_proxy_key) = if let Some(ref proxy) = opts.proxy {
+            match crate::connection::parse_proxy(proxy) {
+                Ok((h, p)) => (h, p, true),
+                Err(_) => return Ok(resp),
+            }
+        } else {
+            (url.host.clone(), url.port, false)
+        };
         crate::connection::CONN_POOL.with(|r| {
             *r.borrow_mut() = Some(crate::connection::PooledConn {
-                scheme: url.scheme.clone(),
-                host: url.host.clone(),
-                port: url.port,
-                is_proxy: false,
+                host: khost,
+                port: kport,
+                is_proxy: is_proxy_key,
                 conn,
             });
         });

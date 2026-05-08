@@ -25,7 +25,6 @@ thread_local! {
 }
 
 pub(crate) struct PooledConn {
-    pub scheme: String,
     pub host: String,
     pub port: u16,
     /// `true` when this is the direct stream to the proxy (no CONNECT tunnel
@@ -202,23 +201,30 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
     // tunnel (the simplest, safest case). Try to reuse a matching pooled
     // connection; the request layer drops the pool entry on `Connection:
     // close`, so a hit here is presumed live (test 48 / 1134).
-    if !use_tunnel
-        && url.scheme == "http"
-        && opts.proxy.is_none()
-        && let Some(reused) = CONN_POOL.with(|r| {
-            let mut slot = r.borrow_mut();
-            if let Some(p) = slot.as_ref()
-                && p.scheme == url.scheme
-                && p.host == url.host
-                && p.port == url.port
-                && !p.is_proxy
-            {
-                return slot.take().map(|p| p.conn);
-            }
-            None
-        })
-    {
-        return Ok((reused, Vec::new()));
+    if !use_tunnel && url.scheme == "http" {
+        // Compute the connect target up front so we can compare against the
+        // pool entry. For a proxy without tunnel this is the proxy host:port;
+        // for a direct connection it's the URL host:port.
+        let key_host_port: Option<(String, u16, bool)> = if let Some(ref proxy) = opts.proxy {
+            parse_proxy(proxy).ok().map(|(h, p)| (h, p, true))
+        } else {
+            Some((url.host.clone(), url.port, false))
+        };
+        if let Some((khost, kport, is_proxy_key)) = key_host_port
+            && let Some(reused) = CONN_POOL.with(|r| {
+                let mut slot = r.borrow_mut();
+                if let Some(p) = slot.as_ref()
+                    && p.host == khost
+                    && p.port == kport
+                    && p.is_proxy == is_proxy_key
+                {
+                    return slot.take().map(|p| p.conn);
+                }
+                None
+            })
+        {
+            return Ok((reused, Vec::new()));
+        }
     }
 
     // When a proxy is configured, always connect to the proxy.
