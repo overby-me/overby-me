@@ -1372,6 +1372,44 @@ impl Interpreter {
                     Expr::ArrayVar(name) => Some(name.clone()),
                     _ => None,
                 };
+                // For `foreach my $re ((), @r) { $re = 5 }` and similar
+                // ArrayLit-shaped lists: track each iteration's source
+                // slot so writeback `$re = X` propagates back to `@r[i]`.
+                // Lists of mixed shape (literals, scalar vars, slurp
+                // arrays) are kept positional — only ArrayVar entries
+                // contribute lvalue-shaped sources; non-array items
+                // become non-lvalue placeholder `Expr::Undef` slots so
+                // writeback skips them. (op/array test 179.)
+                let source_per_iter: Option<Vec<Expr>> = if let Expr::ArrayLit(elems) = list {
+                    fn collect_sources(
+                        this: &mut Interpreter,
+                        elems: &[Expr],
+                        sources: &mut Vec<Expr>,
+                    ) {
+                        for el in elems {
+                            match el {
+                                Expr::ArrayLit(inner) => {
+                                    collect_sources(this, inner, sources);
+                                }
+                                Expr::ArrayVar(name) => {
+                                    let len = this.get_array_len(name);
+                                    for i in 0..len {
+                                        sources.push(Expr::ArrayElement(
+                                            name.clone(),
+                                            Box::new(Expr::IntLit(i as i64)),
+                                        ));
+                                    }
+                                }
+                                _ => sources.push(Expr::Undef),
+                            }
+                        }
+                    }
+                    let mut sources: Vec<Expr> = Vec::new();
+                    collect_sources(self, elems, &mut sources);
+                    Some(sources)
+                } else {
+                    None
+                };
                 // Detect `for (!0)` / `for (!1)` / `for (not 0)` — the
                 // resulting list of one bool aliases Perl's read-only
                 // PL_sv_yes / PL_sv_no constants, so writes to the loop
@@ -1476,6 +1514,16 @@ impl Interpreter {
                             arr[i] = modified_val;
                             self.set_array(arr_name, arr);
                         }
+                    } else if let Some(ref sources) = source_per_iter
+                        && let Some(src) = sources.get(i)
+                        && is_lvalue_shape(src)
+                    {
+                        // Source was an array element from an ArrayLit
+                        // list. Write modified `$var` back through the
+                        // captured lvalue (op/array test 179's
+                        // `foreach my $re ((), @r) { $re = 5 }`).
+                        let modified_val = self.get_var(var);
+                        self.assign_to(src, modified_val);
                     }
 
                     let ran_continue = match flow {
@@ -3476,6 +3524,44 @@ impl Interpreter {
                     }
                     *r.borrow_mut() = h;
                     return Value::Num(0.0);
+                }
+                // `@arr[i, j, ...] = LIST` / `@h{k1, k2, ...} = LIST` —
+                // slice assignment in list context. Distribute LIST
+                // values across the resolved indices/keys (extras drop;
+                // shortfalls become undef). The scalar-RHS path in
+                // `assign_to` only sees `vec![val]`, so list-context
+                // multi-element assigns need this branch.
+                if let Expr::ArraySlice(name, idxs) = unwrapped_target {
+                    let items = self.eval_list(value);
+                    let idxs_v: Vec<i64> = idxs
+                        .iter()
+                        .flat_map(|e| self.eval_list(e))
+                        .map(|v| v.to_num() as i64)
+                        .collect();
+                    for (i, &idx) in idxs_v.iter().enumerate() {
+                        let v = items.get(i).cloned().unwrap_or(Value::Undef);
+                        self.assign_to(
+                            &Expr::ArrayElement(name.clone(), Box::new(Expr::IntLit(idx))),
+                            v,
+                        );
+                    }
+                    return Value::Num(items.len() as f64);
+                }
+                if let Expr::HashSlice(name, keys) = unwrapped_target {
+                    let items = self.eval_list(value);
+                    let keys_v: Vec<String> = keys
+                        .iter()
+                        .flat_map(|e| self.eval_list(e))
+                        .map(|v| v.to_str())
+                        .collect();
+                    for (i, k) in keys_v.iter().enumerate() {
+                        let v = items.get(i).cloned().unwrap_or(Value::Undef);
+                        self.assign_to(
+                            &Expr::HashElement(name.clone(), Box::new(Expr::StringLit(k.clone()))),
+                            v,
+                        );
+                    }
+                    return Value::Num(items.len() as f64);
                 }
                 let val = self.eval_expr(value);
                 self.assign_to(target, val.clone());
@@ -10285,6 +10371,36 @@ impl Interpreter {
             }
             Expr::LocalVar(name) => {
                 self.globals.vars.insert(name.clone(), val);
+            }
+            Expr::ArraySlice(name, idxs) => {
+                // `@arr[i, j, ...] = LIST` — slice assignment. Each
+                // resolved index gets the corresponding RHS element
+                // (or undef if the list is shorter). Single-index
+                // `@arr[i] = X` (op/array test 175 setup) is a degenerate
+                // slice with one slot. RHS comes in as a single Value
+                // for scalar callers; for list callers, our list-assign
+                // path higher up doesn't recognise slice targets yet,
+                // so this arm only fires for the scalar-RHS shape.
+                let idxs_v: Vec<i64> = idxs
+                    .iter()
+                    .flat_map(|e| self.eval_list(e))
+                    .map(|v| v.to_num() as i64)
+                    .collect();
+                let vals: Vec<Value> = if idxs_v.len() <= 1 {
+                    vec![val]
+                } else {
+                    // Treat val as a list (in case caller wrapped a list
+                    // into a single Value::ArrayRef etc.). Future work:
+                    // surface list context up to here.
+                    vec![val]
+                };
+                for (i, &idx) in idxs_v.iter().enumerate() {
+                    let v = vals.get(i).cloned().unwrap_or(Value::Undef);
+                    self.assign_to(
+                        &Expr::ArrayElement(name.clone(), Box::new(Expr::IntLit(idx))),
+                        v,
+                    );
+                }
             }
             Expr::ArrayElement(name, index) => {
                 let raw = self.eval_expr(index).to_num() as i64;
