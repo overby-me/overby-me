@@ -5871,17 +5871,11 @@ fn tool_objdump(args: &[String]) -> i32 {
                                 use object::ObjectSection as _;
                                 for s in obj.sections() {
                                     let name = s.name().unwrap_or("");
-                                    let kind = if name == ".debug_info"
-                                        || name == ".zdebug_info"
-                                    {
+                                    let kind = if name == ".debug_info" || name == ".zdebug_info" {
                                         "info"
-                                    } else if name == ".debug_abbrev"
-                                        || name == ".zdebug_abbrev"
-                                    {
+                                    } else if name == ".debug_abbrev" || name == ".zdebug_abbrev" {
                                         "abbrev"
-                                    } else if name == ".debug_line"
-                                        || name == ".zdebug_line"
-                                    {
+                                    } else if name == ".debug_line" || name == ".zdebug_line" {
                                         "line"
                                     } else if name == ".debug_ranges"
                                         || name == ".zdebug_ranges"
@@ -5924,9 +5918,9 @@ fn tool_objdump(args: &[String]) -> i32 {
                                             abbrev_fn();
                                             abbrev_done = true;
                                         }
-                                        "line" if (show_debug_line_raw
-                                            || show_debug_line_decoded)
-                                            && !line_done =>
+                                        "line"
+                                            if (show_debug_line_raw || show_debug_line_decoded)
+                                                && !line_done =>
                                         {
                                             line_fn();
                                             line_done = true;
@@ -11991,6 +11985,96 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
     // GNU `as --compress-debug-sections=…` byte-for-byte.
     let compressed_map: std::collections::HashMap<usize, &CompressedSection> =
         compressed.iter().map(|c| (c.idx, c)).collect();
+
+    // Rebuild shstrtab from final section names so orphaned entries (e.g.
+    // `.debug_X` after rename to `.zdebug_X`) don't bloat the output.
+    let rela_rename_map: std::collections::HashMap<usize, u32> =
+        rela_renames.iter().copied().collect();
+    let mut final_names: Vec<Vec<u8>> = Vec::with_capacity(shnum);
+    for i in 0..shnum {
+        let h = shoff as usize + i * shentsize;
+        let orig_name_idx = r32(data, h);
+        let new_idx = if let Some(cs) = compressed_map.get(&i) {
+            cs.new_name_idx
+        } else if let Some(&idx) = rela_rename_map.get(&i) {
+            idx
+        } else {
+            orig_name_idx
+        };
+        final_names.push(read_name(&shstr_data, new_idx as usize));
+    }
+    // Build a fresh shstrtab in section header order, with suffix sharing —
+    // if string A ends with string B (followed by NUL), B can be referenced
+    // as a suffix of A. GNU's shstrtab uses this so e.g. `.zdebug_info` is
+    // found inside `.rela.zdebug_info` rather than stored separately.
+    let mut new_shstr: Vec<u8> = vec![0];
+    let mut name_to_off: std::collections::HashMap<Vec<u8>, u32> =
+        std::collections::HashMap::new();
+    name_to_off.insert(Vec::new(), 0);
+    let try_place = |s: &[u8],
+                     out: &mut Vec<u8>,
+                     map: &mut std::collections::HashMap<Vec<u8>, u32>|
+     -> u32 {
+        if let Some(&v) = map.get(s) {
+            return v;
+        }
+        let needle = {
+            let mut v = s.to_vec();
+            v.push(0);
+            v
+        };
+        for w in 0..out.len() {
+            if w + needle.len() > out.len() {
+                break;
+            }
+            if out[w..w + needle.len()] == needle[..] {
+                map.insert(s.to_vec(), w as u32);
+                return w as u32;
+            }
+        }
+        let off = out.len() as u32;
+        out.extend_from_slice(s);
+        out.push(0);
+        map.insert(s.to_vec(), off);
+        off
+    };
+    // First pass: place all final names in section order. To maximize suffix
+    // sharing, place LONGER variants (e.g. `.rela.zdebug_info`) before their
+    // shorter suffixes (e.g. `.zdebug_info`) by deferring known short ones.
+    let is_short_with_long_alias = |s: &[u8]| -> bool {
+        // True if some other final_name strictly contains s as a non-prefix
+        // (i.e. s is the suffix after at least one extra char) plus a NUL
+        // terminator at the end.
+        for other in &final_names {
+            if other.len() <= s.len() || !other.ends_with(s) {
+                continue;
+            }
+            // Must NOT be a prefix match — i.e. the byte at len-s.len() is the
+            // start of s, fine; we just need other != s.
+            if other != s {
+                return true;
+            }
+        }
+        false
+    };
+    // Place "long" names first (in section order).
+    for n in &final_names {
+        if !is_short_with_long_alias(n) {
+            try_place(n, &mut new_shstr, &mut name_to_off);
+        }
+    }
+    // Then place short ones (which should now find suffix matches).
+    for n in &final_names {
+        if is_short_with_long_alias(n) {
+            try_place(n, &mut new_shstr, &mut name_to_off);
+        }
+    }
+    // Override shstr_data with the compacted version.
+    shstr_data = new_shstr;
+    let final_name_offsets: Vec<u32> = final_names
+        .iter()
+        .map(|n| *name_to_off.get(n).unwrap_or(&0))
+        .collect();
     // Read original section header bytes so we can preserve fields we don't modify.
     let header_size = if class == 2 { 64 } else { 52 };
     let mut new_data: Vec<u8> = data[..header_size].to_vec();
@@ -12079,24 +12163,17 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
     for i in 0..shnum {
         let h = shoff as usize + i * shentsize;
         let mut hdr = data[h..h + shentsize].to_vec();
-        // Apply `.rela.debug_*` -> `.rela.zdebug_*` rename for zlib-gnu.
-        if let Some(&new_idx) = rela_rename_map.get(&i) {
-            let v = if le {
-                new_idx.to_le_bytes()
-            } else {
-                new_idx.to_be_bytes()
-            };
-            hdr[0..4].copy_from_slice(&v);
-        }
-        // Update name index if the section was renamed.
+        // Always rewrite the name index against the compacted shstrtab.
+        let final_idx = final_name_offsets[i];
+        let v = if le {
+            final_idx.to_le_bytes()
+        } else {
+            final_idx.to_be_bytes()
+        };
+        hdr[0..4].copy_from_slice(&v);
+        // Update flags / addralign for compressed sections.
         if let Some(cs) = compressed_map.get(&i) {
-            let v = if le {
-                cs.new_name_idx.to_le_bytes()
-            } else {
-                cs.new_name_idx.to_be_bytes()
-            };
-            hdr[0..4].copy_from_slice(&v);
-            new_name_idxs[i] = cs.new_name_idx;
+            new_name_idxs[i] = final_idx;
             new_flags_arr[i] = cs.new_flags;
             // Update flags.
             if class == 2 {
@@ -12450,7 +12527,11 @@ fn elf_decompress_debug_sections(data: &mut Vec<u8>) {
             };
             hdr[0..4].copy_from_slice(&v);
             if class == 2 {
-                let v = if le { t.new_flags.to_le_bytes() } else { t.new_flags.to_be_bytes() };
+                let v = if le {
+                    t.new_flags.to_le_bytes()
+                } else {
+                    t.new_flags.to_be_bytes()
+                };
                 hdr[8..16].copy_from_slice(&v);
                 let v = if le {
                     t.new_addralign.to_le_bytes()
@@ -12503,7 +12584,11 @@ fn elf_decompress_debug_sections(data: &mut Vec<u8>) {
         new_data.extend_from_slice(&hdr);
     }
     if class == 2 {
-        let v = if le { new_shoff.to_le_bytes() } else { new_shoff.to_be_bytes() };
+        let v = if le {
+            new_shoff.to_le_bytes()
+        } else {
+            new_shoff.to_be_bytes()
+        };
         new_data[0x28..0x30].copy_from_slice(&v);
     } else {
         let v = if le {
