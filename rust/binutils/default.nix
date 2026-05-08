@@ -252,6 +252,22 @@
         name = "demangle";
       }
       {
+        tool = "nm";
+        name = "debug-syms";
+      }
+      {
+        tool = "readelf";
+        name = "string-dump";
+      }
+      {
+        tool = "readelf";
+        name = "hex-dump";
+      }
+      {
+        tool = "readelf";
+        name = "headers-combined";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }

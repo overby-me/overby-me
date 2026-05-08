@@ -1354,6 +1354,7 @@ fn tool_nm(args: &[String]) -> i32 {
             "-u" | "--undefined-only" => opts.undefined_only = true,
             "-U" | "--defined-only" => opts.defined_only = true,
             "-D" | "--dynamic" => opts.dynamic = true,
+            "-a" | "--debug-syms" => {} // we don't filter debug syms by default
             "-p" | "--no-sort" => opts.no_sort = true,
             "-n" | "-v" | "--numeric-sort" => opts.numeric_sort = true,
             "-r" | "--reverse-sort" => opts.reverse_sort = true,
@@ -4972,6 +4973,8 @@ fn readelf_string_dump<'data, Elf: FileHeader>(
         if !had_string {
             println!("  No strings found in this section.");
         }
+        // GNU readelf emits a trailing blank line after the strings.
+        println!();
     }
     if !found {
         println!(

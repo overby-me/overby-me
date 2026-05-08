@@ -3,7 +3,13 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
-## Custom-test expansion (53/53 ✅)
+## Custom-test expansion (57/57 ✅)
+
+- nm `-a`/`--debug-syms` flag accepted (no-op for files without debug
+  syms); readelf `-p NAME` / `--string-dump=NAME` emits the trailing
+  blank line GNU does after the strings list. +4 custom tests
+  (53→57): `nm-debug-syms`, `readelf-string-dump`, `readelf-hex-dump`,
+  `readelf-headers-combined`.
 
 - readelf `-p NAME` missing-section warning format + 4 more custom
   tests (+4 custom tests, 49→53): the "Section 'X' was not dumped
