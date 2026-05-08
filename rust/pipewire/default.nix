@@ -93,6 +93,54 @@
         tool = "spa-json-dump";
         name = "help";
       }
+      {
+        tool = "spa-json-dump";
+        name = "basic";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "spa-format";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "indent-4";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "simplified";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "comments";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "numbers";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "strings";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "nested";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "conf-minimal";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "conf-client";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "conf-jack";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "conf-aes67";
+      }
     ];
   in
     builtins.listToAttrs (map (t: {

@@ -1,36 +1,117 @@
 // spa-json-dump: parse SPA-relaxed JSON and emit pretty-printed JSON.
-// Phase 0: only --help. Real parser comes in Phase 1.
+//
+// Aims for byte-compatibility with `spa/tools/spa-json-dump.c`.
+
+use std::fs::File;
+use std::io::{self, Read};
+
+use crate::spa::utils::json::{DumpOptions, dump, parse};
+
+const DEFAULT_INDENT: usize = 2;
 
 pub fn main(args: &[String]) -> i32 {
     let argv0 = args.first().map(String::as_str).unwrap_or("spa-json-dump");
 
-    match args.get(1).map(String::as_str) {
-        Some("--version") => {
-            let v = crate::pipewire_lib::version::PIPEWIRE_API_VERSION;
-            println!("{argv0}");
-            println!("Compiled with libpipewire {v}");
-            println!("Linked with libpipewire {v}");
-            0
+    let mut indent = DEFAULT_INDENT;
+    let mut simple = false;
+    let mut filename: String = "-".into();
+
+    let mut i = 1;
+    while i < args.len() {
+        let a = args[i].as_str();
+        match a {
+            "-h" | "--help" => {
+                print_help(argv0);
+                return 0;
+            }
+            "--version" => {
+                let v = crate::pipewire_lib::version::PIPEWIRE_API_VERSION;
+                println!("{argv0}");
+                println!("Compiled with libpipewire {v}");
+                println!("Linked with libpipewire {v}");
+                return 0;
+            }
+            "-s" | "--spa" => simple = true,
+            "-i" | "--indent" => {
+                i += 1;
+                let arg = match args.get(i) {
+                    Some(a) => a,
+                    None => {
+                        print_help_to(argv0, true);
+                        return u8::MAX as i32; // C tool returns -1 → 255
+                    }
+                };
+                indent = arg.parse::<usize>().unwrap_or(DEFAULT_INDENT);
+            }
+            // Accept `-i<N>` joined form to mirror getopt_long behavior.
+            s if s.starts_with("-i") && s.len() > 2 => {
+                indent = s[2..].parse::<usize>().unwrap_or(DEFAULT_INDENT);
+            }
+            s if s.starts_with("--indent=") => {
+                indent = s[9..].parse::<usize>().unwrap_or(DEFAULT_INDENT);
+            }
+            s if !s.starts_with('-') => {
+                filename = s.to_string();
+                // Anything after the filename is currently ignored.
+                break;
+            }
+            _ => {
+                print_help_to(argv0, true);
+                return u8::MAX as i32;
+            }
         }
-        Some("-h") | Some("--help") | None => {
-            print_help(argv0);
-            0
+        i += 1;
+    }
+
+    let input = match read_input(&filename) {
+        Ok(s) => s,
+        Err(e) => {
+            // Match the C tool's error wording closely so test fixtures work.
+            eprintln!("error opening file '{filename}': {e}");
+            return 1;
         }
-        // Real flag parsing (-i/-s) and file handling come in Phase 1.
-        Some(_) => {
-            eprintln!("{argv0}: not yet implemented in rust-pipewire");
-            1
+    };
+
+    let opts = DumpOptions { indent, simple };
+
+    let value = match parse(&input) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!(
+                "syntax error in file '{filename}' (line {}, col {}): {}",
+                e.line, e.column, e.message
+            );
+            return 1;
         }
+    };
+
+    println!("{}", dump(&value, &opts));
+    0
+}
+
+fn read_input(filename: &str) -> io::Result<String> {
+    if filename == "-" {
+        let mut buf = String::new();
+        io::stdin().read_to_string(&mut buf)?;
+        Ok(buf)
+    } else {
+        let mut f = File::open(filename)?;
+        let mut buf = String::new();
+        f.read_to_string(&mut buf)?;
+        Ok(buf)
     }
 }
 
 fn print_help(argv0: &str) {
-    // Matches `src/tools/spa-json-dump.c::show_help` byte-for-byte
-    // (after store-path normalization).
+    print_help_to(argv0, false);
+}
+
+fn print_help_to(argv0: &str, _is_error: bool) {
+    // Matches `src/tools/spa-json-dump.c::show_usage` byte-for-byte.
     println!("{argv0} [options] [spa-json-file]");
     println!("  -h, --help                            Show this help");
     println!();
-    println!("  -i  --indent                          set indent (default 2)");
+    println!("  -i  --indent                          set indent (default {DEFAULT_INDENT})");
     println!("  -s  --spa                             use simplified SPA JSON");
     println!();
 }

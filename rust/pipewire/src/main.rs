@@ -8,6 +8,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 mod pipewire_lib;
+mod spa;
 mod spa_tools;
 mod tools;
 
