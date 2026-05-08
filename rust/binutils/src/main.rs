@@ -207,6 +207,14 @@ fn check_version_help(tool: &str, args: &[String]) -> bool {
         }
         if a == "--help" || a == "-h" {
             println!("{}", version_string(tool));
+            // For strip / objcopy / nm / readelf, emit a "supported targets:"
+            // line so test infrastructure (e.g. dejagnu's pr33230) can probe
+            // for architecture support via --help output.
+            if matches!(tool, "strip" | "objcopy" | "nm" | "readelf") {
+                println!(
+                    "{tool}: supported targets: elf64-x86-64 elf32-i386 elf64-little elf64-big elf32-little elf32-big elf64-littleaarch64 elf32-littlearm elf64-littleriscv elf64-powerpc srec symbolsrec verilog ihex binary"
+                );
+            }
             return true;
         }
     }
@@ -3447,7 +3455,86 @@ fn readelf_display<'data, Elf: FileHeader>(
     }
 
     if show_program_headers && let Ok(segments) = elf.elf_header().program_headers(endian, data) {
-        println!("\nProgram Headers:");
+        // Detect PIE: ET_DYN with DT_FLAGS_1 & DF_1_PIE.
+        let e_type = elf.elf_header().e_type(endian);
+        let mut is_pie = false;
+        if e_type == 3 {
+            for segment in segments {
+                if segment.p_type(endian) == 2 {
+                    let off: u64 = segment.p_offset(endian).into();
+                    let sz: u64 = segment.p_filesz(endian).into();
+                    if off as usize + sz as usize > data.len() {
+                        break;
+                    }
+                    let dyn_bytes = &data[off as usize..(off + sz) as usize];
+                    let is_64 = elf.elf_header().is_class_64();
+                    let is_le = elf.elf_header().e_ident().data == 1;
+                    let entry_size = if is_64 { 16 } else { 8 };
+                    let mut p = 0;
+                    while p + entry_size <= dyn_bytes.len() {
+                        let (tag, val) = if is_64 {
+                            let mut t = [0u8; 8];
+                            t.copy_from_slice(&dyn_bytes[p..p + 8]);
+                            let mut v = [0u8; 8];
+                            v.copy_from_slice(&dyn_bytes[p + 8..p + 16]);
+                            if is_le {
+                                (i64::from_le_bytes(t) as u64, u64::from_le_bytes(v))
+                            } else {
+                                (i64::from_be_bytes(t) as u64, u64::from_be_bytes(v))
+                            }
+                        } else {
+                            let mut t = [0u8; 4];
+                            t.copy_from_slice(&dyn_bytes[p..p + 4]);
+                            let mut v = [0u8; 4];
+                            v.copy_from_slice(&dyn_bytes[p + 4..p + 8]);
+                            if is_le {
+                                (u32::from_le_bytes(t) as u64, u32::from_le_bytes(v) as u64)
+                            } else {
+                                (u32::from_be_bytes(t) as u64, u32::from_be_bytes(v) as u64)
+                            }
+                        };
+                        // DT_FLAGS_1 = 0x6ffffffb, DF_1_PIE = 0x08000000
+                        if tag == 0x6ffffffb && (val & 0x08000000) != 0 {
+                            is_pie = true;
+                        }
+                        if tag == 0 {
+                            break;
+                        }
+                        p += entry_size;
+                    }
+                }
+            }
+        }
+        let type_str = match e_type {
+            0 => "NONE (No file type)".to_string(),
+            1 => "REL (Relocatable file)".to_string(),
+            2 => "EXEC (Executable file)".to_string(),
+            3 => {
+                if is_pie {
+                    "DYN (Position-Independent Executable file)".to_string()
+                } else {
+                    "DYN (Shared object file)".to_string()
+                }
+            }
+            4 => "CORE (Core file)".to_string(),
+            _ => format!("UNKNOWN ({})", e_type),
+        };
+        let phoff: u64 = elf.elf_header().e_phoff(endian).into();
+        let phnum = elf.elf_header().e_phnum(endian);
+        let entry: u64 = elf.elf_header().e_entry(endian).into();
+        println!();
+        println!("Elf file type is {}", type_str);
+        println!("Entry point 0x{:x}", entry);
+        if phnum == 1 {
+            println!("There is 1 program header, starting at offset {}", phoff);
+        } else {
+            println!(
+                "There are {} program headers, starting at offset {}",
+                phnum, phoff
+            );
+        }
+        println!();
+        println!("Program Headers:");
         println!(
             "  Type           Offset   VirtAddr           PhysAddr           FileSiz  MemSiz   Flg Align"
         );
@@ -3472,6 +3559,17 @@ fn readelf_display<'data, Elf: FileHeader>(
                 "  {:<14} 0x{offset:06x} 0x{vaddr:016x} 0x{paddr:016x} 0x{filesz:06x} 0x{memsz:06x} {flag_str} 0x{align:x}",
                 elf_segment_type_name(p_type)
             );
+            // INTERP segment: print the requested interpreter path.
+            if p_type == 3 && (offset as usize + filesz as usize) <= data.len() {
+                let interp = &data[offset as usize..(offset + filesz) as usize];
+                let s = match interp.iter().position(|&b| b == 0) {
+                    Some(n) => &interp[..n],
+                    None => interp,
+                };
+                if let Ok(s) = std::str::from_utf8(s) {
+                    println!("      [Requesting program interpreter: {}]", s);
+                }
+            }
         }
         println!();
     }
@@ -4086,22 +4184,23 @@ fn format_gnu_property(pr_type: u32, pr_data: &[u8], is_le: bool) -> String {
         if val == 0 {
             return default_empty.to_string();
         }
-        let mut out: Vec<&str> = Vec::new();
+        let mut out: Vec<String> = Vec::new();
         let mut remaining = val;
         for (bit, name) in names {
             if val & bit != 0 {
-                out.push(name);
+                out.push((*name).to_string());
                 remaining &= !*bit;
             }
         }
-        let mut s = out.join(sep);
-        if remaining != 0 {
-            if !s.is_empty() {
-                s.push_str(sep);
+        // Each unknown bit is printed as `<unknown: HEX>` individually.
+        let mut bit = 1u32;
+        while bit != 0 {
+            if remaining & bit != 0 {
+                out.push(format!("<unknown: {:x}>", bit));
             }
-            s.push_str(&format!("unknown(0x{:x})", remaining));
+            bit = bit.wrapping_shl(1);
         }
-        s
+        out.join(sep)
     };
     match pr_type {
         // GNU_PROPERTY_STACK_SIZE
@@ -4116,8 +4215,8 @@ fn format_gnu_property(pr_type: u32, pr_data: &[u8], is_le: bool) -> String {
             };
             format!("stack size: 0x{:x}", v)
         }
-        // GNU_PROPERTY_NO_COPY_ON_PROTECTED
-        2 => "no copy on protected".to_string(),
+        // GNU_PROPERTY_NO_COPY_ON_PROTECTED — GNU appends a trailing space.
+        2 => "no copy on protected ".to_string(),
         // GNU_PROPERTY_X86_FEATURE_1_AND
         0xc0000002 => {
             let v = read_u32(pr_data);
@@ -5678,8 +5777,12 @@ fn elf_section_flags(flags: u64) -> String {
     if flags & 0x0ff00000 & !0x200000 != 0 {
         s.push('o');
     }
-    // Processor-specific flags (excluding SHF_EXCLUDE)
-    if flags & 0xf0000000 & !0x80000000 != 0 {
+    // SHF_X86_64_LARGE (processor-specific, but has its own letter)
+    if flags & 0x10000000 != 0 {
+        s.push('l');
+    }
+    // Other processor-specific flags (excluding SHF_EXCLUDE and SHF_X86_64_LARGE)
+    if flags & 0xf0000000 & !0x80000000 & !0x10000000 != 0 {
         s.push('p');
     }
     s
@@ -10099,6 +10202,7 @@ fn apply_section_flags(section: &mut object::write::Section, flags: &[String]) {
             "merge" => sh_flags |= object::elf::SHF_MERGE as u64,
             "strings" => sh_flags |= object::elf::SHF_STRINGS as u64,
             "exclude" => sh_flags |= object::elf::SHF_EXCLUDE as u64,
+            "large" => sh_flags |= 0x10000000, // SHF_X86_64_LARGE
             "debug" => {
                 is_debug = true;
             }

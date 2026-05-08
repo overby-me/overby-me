@@ -82,8 +82,8 @@ Key design decisions:
 | addr2line.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
 | update-section.exp | **6** | 0 | 6 | minPass=6, maxFail=0 |
 | elfedit.exp | **6** | 0 | 6 | minPass=6, maxFail=0 |
-| x86-64/x86-64.exp | **12** | 23 | 35 | (informational; only the binutils-all-x86-64 subset is enabled) |
-| **Total** | **298** | **23** | **321** | |
+| x86-64/x86-64.exp | **19** | 16 | 35 | (informational; only the binutils-all-x86-64 subset is enabled) |
+| **Total** | **305** | **16** | **321** | |
 
 All upstream DejaGnu tests pass.
 
@@ -235,6 +235,11 @@ Two layers of testing:
 - [x] Add objcopy `--dump-section`, `--update-section`, and `--update-section + --remove-section` conflict detection (+6 update-section.exp, 274→280 total): in-place ELF rewriter `objcopy_inplace_update_sections` reflows section file offsets respecting per-section sh_addralign so that `update-N.o` (with .foo of any size) becomes byte-equal to `update-1.o` after section content replacement; `--rename-section` is applied via a same-length shstrtab rewrite. Enables previously-skipped `update-section.exp`.
 - [x] Add `elfedit` tool with `--output-mach`/`--output-type`/`--output-osabi`/`--output-abiversion` (+6 elfedit.exp, 280→286 total): minimal in-place ELF header field patcher (modifies e_type, e_machine, EI_OSABI, EI_ABIVERSION); readelf prints "Intel L1OM" / "Intel K1OM" / "Intel MCU" / "FenixOS". `dejagnu-testsuite.nix` now sets `tempfile`/`copyfile` globally so `run_dump_test` works for the binutils-all tests that don't set them per-platform.
 - [x] Decode `.note.gnu.property` (NT_GNU_PROPERTY_TYPE_0) entries in `readelf -n` output (+12 dejagnu, 286→298 total): walks the descriptor's pr_type/pr_datasz/pr_data sequence (8-byte aligned for ELF64); decodes GNU_PROPERTY_X86_FEATURE_1_AND (IBT/SHSTK/LAM_U48/LAM_U57), GNU_PROPERTY_X86_FEATURE_USED, GNU_PROPERTY_X86_ISA_USED/NEEDED, GNU_PROPERTY_STACK_SIZE, GNU_PROPERTY_NO_COPY_ON_PROTECTED. First property emits " Properties: " prefix; subsequent ones tab-indented. Wired in `binutils-all/x86-64/x86-64.exp` to the runtest invocation (separate runtest call due to subdir path resolution) — empty/ibt/shstk/lam-u48/lam-u57 all pass.
+- [x] x86-64.exp polish (+7 dejagnu, 298→305 total):
+  - Property formatting: trailing space after "no copy on protected"; per-bit `<unknown: HEX>` entries instead of merged hex (fixes pr21231a/b).
+  - SHF_X86_64_LARGE (0x10000000): `large` keyword in objcopy `--set-section-flags`; readelf `-S` shows `l` without falling through to the generic `p` flag (fixes large-sections, large-sections-2, large-sections-2-x32).
+  - readelf `-l` prefix: `Elf file type is …`, `Entry point 0x…`, `There are N program headers, starting at offset M`. Auto-detect PIE via DT_FLAGS_1 & DF_1_PIE so ET_DYN PIE shows "(Position-Independent Executable file)". INTERP segment annotated with `[Requesting program interpreter: <path>]`.
+  - Strip/objcopy/nm/readelf `--help` now emits a `supported targets:` line listing common ELF formats including elf64-littleaarch64 (fixes pr33230 — test branches on whether help advertises the target).
 
 ## Next steps
 
