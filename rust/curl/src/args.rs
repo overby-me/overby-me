@@ -798,6 +798,13 @@ pub(crate) fn parse_args() -> Options {
             "--connect-to" => {
                 i += 1;
                 let val = next_arg(&args, i, "--connect-to");
+                // Bracketed IPv6 host (e.g. `[::1]`) is unsupported in this
+                // build — exit 4 (CURLE_NOT_BUILT_IN) before parsing further
+                // (test 1454).
+                if val.contains('[') {
+                    eprintln!("curl: (4) IPv6 not supported");
+                    process::exit(4);
+                }
                 // Format: `HOST1:PORT1:HOST2:PORT2`. Empty PORT1/PORT2 are
                 // wildcards but if non-empty must be numeric (test 3020).
                 let parts: Vec<&str> = val.splitn(4, ':').collect();

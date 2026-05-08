@@ -123,6 +123,14 @@ pub(crate) fn read_response(
             if saw_interim {
                 return Err("weird_server_reply: bogus follow-up after interim".to_string());
             }
+            // HTTP/0.9 body-only responses are only acceptable on the very
+            // first request over a fresh connection. On a reused pool
+            // connection it's a weird server reply (test 1479).
+            if crate::connection::POOL_REUSED.with(|h| *h.borrow()) {
+                return Err(
+                    "weird_server_reply: HTTP/0.9 over reused connection".to_string(),
+                );
+            }
             if !http09 {
                 return Err("unsupported protocol: HTTP/0.9 disabled".to_string());
             }

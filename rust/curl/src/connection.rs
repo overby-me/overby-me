@@ -26,6 +26,10 @@ thread_local! {
     /// response was reused — the request layer downgrades the next request to
     /// HTTP/1.0 (test 1074).
     pub(crate) static POOL_REUSED_HTTP10: RefCell<bool> = const { RefCell::new(false) };
+    /// Set when a pooled connection was reused. The response reader rejects
+    /// HTTP/0.9 (body-only, no status line) on a reused connection as a weird
+    /// server reply (test 1479).
+    pub(crate) static POOL_REUSED: RefCell<bool> = const { RefCell::new(false) };
 }
 
 
@@ -89,7 +93,8 @@ fn resolve_override(host: &str, port: u16, resolves: &[String]) -> Option<String
         let entry_port = parts.next()?;
         let entry_addrs = parts.next()?;
         let entry_host_norm = entry_host.trim_end_matches('.').to_ascii_lowercase();
-        if entry_host_norm != host_norm {
+        // Wildcard host "*" matches any hostname (test 1458).
+        if entry_host_norm != "*" && entry_host_norm != host_norm {
             continue;
         }
         if entry_port.parse::<u16>().ok() != Some(port) {
@@ -198,6 +203,7 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
     // resets this so a stale value from a previous request never leaks into
     // the request-line builder.
     POOL_REUSED_HTTP10.with(|h| *h.borrow_mut() = false);
+    POOL_REUSED.with(|h| *h.borrow_mut() = false);
     // RFC 7686: curl refuses to resolve `.onion` TLDs (preventing accidental
     // DNS leakage for Tor hidden services). --resolve overrides still work.
     let host_norm = url.host.trim_end_matches('.').to_ascii_lowercase();
@@ -234,6 +240,7 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
                     let was_http10 = p.http10;
                     let taken = slot.take().map(|p| p.conn);
                     POOL_REUSED_HTTP10.with(|h| *h.borrow_mut() = was_http10);
+                    POOL_REUSED.with(|h| *h.borrow_mut() = true);
                     return taken;
                 }
                 POOL_REUSED_HTTP10.with(|h| *h.borrow_mut() = false);
