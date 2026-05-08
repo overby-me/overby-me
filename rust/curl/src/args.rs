@@ -667,6 +667,12 @@ pub(crate) fn parse_args() -> Options {
             "--no-progress-meter" => {
                 // We don't have a progress meter anyway
             }
+            "--progress-bar" => {
+                opts.progress_bar = true;
+            }
+            "--no-progress-bar" => {
+                opts.progress_bar = false;
+            }
             "--trace-config" => {
                 i += 1;
                 let _val = next_arg(&args, i, "--trace-config");
@@ -1108,6 +1114,7 @@ pub(crate) fn parse_args() -> Options {
                             'g' => opts.globoff = true,
                             'j' => opts.junk_session_cookies = true,
                             'G' => opts.get = true,
+                            '#' => opts.progress_bar = true,
                             ':' => {
                                 if !has_url {
                                     eprintln!("curl: missing URL before --next");

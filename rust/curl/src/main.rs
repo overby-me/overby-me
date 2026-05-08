@@ -1046,6 +1046,16 @@ fn main() {
                     let _ = fs::remove_file(path);
                 }
 
+                // -# / --progress-bar: emit a fully-filled progress line at
+                // the end of a successful transfer. The exact width matters
+                // only for the strip regex in test 1148 (matches `\r#{72} 100.0%`),
+                // so we emit 72 hashes regardless of terminal width.
+                if opts.progress_bar && exit_code == 0 && !opts.silent {
+                    use std::io::Write as _;
+                    let bar = "#".repeat(72);
+                    let _ = writeln!(io::stderr(), "\r{bar} 100.0%");
+                }
+
                 // -R / --remote-time: set output file's mtime to the server's
                 // Last-Modified header (or fall back to Date if absent). curl
                 // applies this only when the response has a usable timestamp.

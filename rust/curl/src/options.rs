@@ -124,6 +124,7 @@ pub struct Options {
     pub(crate) cookie_engine: bool, // true when -b is used (enables cookie accumulation)
     pub(crate) memory_cookies: Vec<String>, // Netscape-format cookie lines accumulated from responses
     pub(crate) deleted_cookies: Vec<(String, String, String)>, // (domain, path, name) tuples of cookies deleted via Max-Age=0
+    pub(crate) progress_bar: bool, // -# / --progress-bar — emit a final fill-bar line on stderr
     pub(crate) skip_existing: bool, // --skip-existing — skip transfer when output file exists
     pub(crate) no_clobber: bool,    // --no-clobber — write to file.N suffix when output exists
     pub(crate) raw: bool,           // --raw — disable content decoding
@@ -227,6 +228,7 @@ impl Default for Options {
             cookie_engine: false,
             memory_cookies: Vec::new(),
             deleted_cookies: Vec::new(),
+            progress_bar: false,
             skip_existing: false,
             no_clobber: false,
             raw: false,
