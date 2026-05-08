@@ -1362,8 +1362,14 @@ fn tool_nm(args: &[String]) -> i32 {
             "-a" | "--debug-syms" => {} // we don't filter debug syms by default
             "--no-recurse-limit" | "--recurse-limit" => {} // demangler-only knob; no-op here
             "--special-syms" | "--no-special-syms" => {} // no synthetic syms produced; no-op
-            "-p" | "--no-sort" => opts.no_sort = true,
-            "-n" | "-v" | "--numeric-sort" => opts.numeric_sort = true,
+            "-p" | "--no-sort" => {
+                opts.no_sort = true;
+                opts.numeric_sort = false;
+            }
+            "-n" | "-v" | "--numeric-sort" => {
+                opts.numeric_sort = true;
+                opts.no_sort = false;
+            }
             "-r" | "--reverse-sort" => opts.reverse_sort = true,
             "-j" | "--just-symbols" | "--format=just-symbols" => {
                 opts.just_names = true;
@@ -1443,14 +1449,25 @@ fn tool_nm(args: &[String]) -> i32 {
                     match chars[j] {
                         'g' => opts.extern_only = true,
                         'u' => opts.undefined_only = true,
+                        'U' => opts.defined_only = true,
                         'D' => opts.dynamic = true,
-                        'p' => opts.no_sort = true,
+                        'n' | 'v' => {
+                            opts.numeric_sort = true;
+                            opts.no_sort = false; // last-wins among -n / -p
+                        }
+                        'r' => opts.reverse_sort = true,
+                        'p' => {
+                            opts.no_sort = true;
+                            opts.numeric_sort = false; // last-wins among -n / -p
+                        }
                         'P' => opts.format = NmFormat::Posix,
                         'A' | 'o' => opts.show_filename = true,
                         'l' => opts.line_numbers = true,
                         'W' => opts.no_weak = true,
                         'S' => opts.print_size = true,
                         's' => opts.print_armap = true,
+                        'a' => {} // --debug-syms (no-op)
+                        'j' => opts.just_names = true,
                         't' => {
                             // next char is the radix
                             j += 1;
@@ -2878,6 +2895,7 @@ struct ReadelfOpts {
     show_debug_frame: bool,
     show_unwind: bool,
     show_archive_index: bool,
+    use_dynamic: bool,
 }
 
 fn tool_readelf(args: &[String]) -> i32 {
@@ -2928,6 +2946,7 @@ fn tool_readelf(args: &[String]) -> i32 {
             "-W" | "--wide" => opts.wide = true,
             "-u" | "--unwind" => opts.show_unwind = true,
             "-c" | "--archive-index" => opts.show_archive_index = true,
+            "-D" | "--use-dynamic" => opts.use_dynamic = true,
             "-V" | "--version-info" => {
                 // We don't yet parse SHT_GNU_VERDEF/SHT_GNU_VERNEED;
                 // produce GNU's "no version info" message.
@@ -3202,6 +3221,7 @@ fn tool_readelf(args: &[String]) -> i32 {
                             break;
                         }
                         'C' => opts.demangle = true,
+                        'D' => opts.use_dynamic = true,
                         'p' => {
                             // -pNAME or -p NAME
                             let rest: String = chars[j + 1..].iter().collect();
@@ -3957,11 +3977,29 @@ fn readelf_display<'data, Elf: FileHeader>(
     }
 
     if show_symbols {
+        if opts.use_dynamic {
+            // --use-dynamic: only show dynamic symbol info; if there's no
+            // dynamic section, GNU readelf prints this exact message.
+            let has_dynamic = elf
+                .elf_header()
+                .sections(endian, data)
+                .ok()
+                .map(|s| s.iter().any(|sec| sec.sh_type(endian) == 11)) // SHT_DYNSYM
+                .unwrap_or(false);
+            if !has_dynamic {
+                println!();
+                println!("Dynamic symbol information is not available for displaying symbols.");
+            }
+        }
         if let Ok(sections) = elf.elf_header().sections(endian, data) {
             for section in sections.iter() {
                 let sh_type = section.sh_type(endian);
                 if sh_type != 2 && sh_type != 11 {
                     // 2 = SHT_SYMTAB, 11 = SHT_DYNSYM
+                    continue;
+                }
+                if opts.use_dynamic && sh_type != 11 {
+                    // --use-dynamic suppresses .symtab, only shows dynsym.
                     continue;
                 }
                 let sec_name = sections
@@ -6650,6 +6688,14 @@ fn tool_objdump(args: &[String]) -> i32 {
                 "-r" | "--reloc" => show_relocs = true,
                 "-p" | "--private-headers" => show_private = true,
                 "-f" | "--file-headers" => show_file_headers = true,
+                "-x" | "--all-headers" => {
+                    // GNU: equivalent to -a -f -p -h -r -t
+                    show_file_headers = true;
+                    show_headers = true;
+                    show_symbols = true;
+                    show_relocs = true;
+                    show_private = true;
+                }
                 "-i" | "--info" => show_info = true,
                 "-s" | "--full-contents" => show_full_contents = true,
                 "--show-all-symbols" => show_all_symbols = true,
@@ -6750,6 +6796,13 @@ fn tool_objdump(args: &[String]) -> i32 {
                             'l' => show_line_numbers = true,
                             'w' => wide = true,
                             'h' => show_headers = true,
+                            'x' => {
+                                show_file_headers = true;
+                                show_headers = true;
+                                show_symbols = true;
+                                show_relocs = true;
+                                show_private = true;
+                            }
                             't' => show_symbols = true,
                             'r' => show_relocs = true,
                             'p' => show_private = true,
@@ -7685,6 +7738,7 @@ fn objdump_process_object(
             .collect();
 
         println!();
+        let mut printed_any = false;
         for section in obj.sections() {
             let name = section.name().unwrap_or("");
             let relocs: Vec<_> = section.relocations().collect();
@@ -7707,7 +7761,12 @@ fn objdump_process_object(
                     println!("{offset:016x} {reloc_type:<17} {value}");
                 }
                 println!();
+                printed_any = true;
             }
+        }
+        // GNU emits a second trailing blank when relocations are printed.
+        if printed_any {
+            println!();
         }
     }
 

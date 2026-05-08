@@ -496,6 +496,18 @@
         name = "strip-underscore";
       }
       {
+        tool = "nm";
+        name = "numeric-extern";
+      }
+      {
+        tool = "nm";
+        name = "last-wins-sort";
+      }
+      {
+        tool = "readelf";
+        name = "use-dynamic";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }

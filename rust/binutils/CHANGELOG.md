@@ -3,6 +3,23 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
+## Custom-test expansion (118/118 ✅)
+
+- nm bundled-short-options gained the previously-missing one-char
+  flags `n` (numeric sort), `r` (reverse), `U` (defined-only), `j`
+  (just-symbols), `a` (debug-syms no-op). Combined forms like `-ng`,
+  `-nU`, `-nrg`, `-ngS`, `-jA` now parse correctly. nm `-n`/`-p`
+  semantics are now last-wins to match GNU: bundled `-np` keeps
+  `-p` (no sort), the reversed bundling keeps `-n` (numeric); same
+  for the spaced variants.
+  readelf `-D`/`--use-dynamic` flag: when no dynamic section exists,
+  prints "Dynamic symbol information is not available for displaying
+  symbols." matching GNU; otherwise filters `--syms` to dynsym only.
+  objdump `-x`/`--all-headers` (equivalent to `-a -f -p -h -r -t`)
+  is now wired, and `-r` reloc output emits the second trailing
+  blank line GNU does. +3 custom tests (115→118): `nm-numeric-extern`,
+  `nm-last-wins-sort`, `readelf-use-dynamic`.
+
 ## Custom-test expansion (115/115 ✅)
 
 - objdump and nm now match GNU's archive-listing format. objdump
