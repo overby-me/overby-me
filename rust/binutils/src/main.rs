@@ -7888,7 +7888,9 @@ fn tool_objcopy(args: &[String]) -> i32 {
         && set_start.is_none()
         && adjust_start == 0
         && adjust_vma == 0
-        && adjust_section_vma.is_empty();
+        && adjust_section_vma.is_empty()
+        && compress_debug == CompressMode::None
+        && !decompress_debug;
 
     // Fast path: no transformations -> byte copy
     if no_transformations {
@@ -11605,24 +11607,33 @@ fn elf_decompress_debug_sections(data: &mut Vec<u8>) {
             continue;
         }
         let raw = &data[sh_off..sh_off + sh_size];
+        // Detect compression by content too — some upstream writers strip
+        // SHF_COMPRESSED while still emitting the compressed bytes.
+        let header_size_gabi = if class == 2 { 24 } else { 12 };
+        let chdr_zlib = raw.len() >= header_size_gabi && {
+            let ct = if le {
+                u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]])
+            } else {
+                u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]])
+            };
+            ct == 1
+        };
         let (uncompressed, new_name, new_flags) =
             if name.starts_with(b".zdebug_") && raw.len() >= 12 && &raw[..4] == b"ZLIB" {
-                // zlib-gnu format.
                 let mut out = Vec::new();
                 let _ = flate2::read::ZlibDecoder::new(&raw[12..]).read_to_end(&mut out);
-                // Rename `.zdebug_X` → `.debug_X`.
                 let mut nn = Vec::with_capacity(name.len() - 1);
                 nn.push(b'.');
                 nn.extend_from_slice(&name[2..]);
                 (out, Some(nn), sh_flags)
-            } else if sh_flags & 0x800 != 0 {
-                // SHF_COMPRESSED (zlib-gabi) — strip Elf*_Chdr header.
-                let header_size = if class == 2 { 24 } else { 12 };
-                if raw.len() <= header_size {
+            } else if name.starts_with(b".debug_")
+                && (sh_flags & 0x800 != 0 || chdr_zlib)
+            {
+                if raw.len() <= header_size_gabi {
                     continue;
                 }
                 let mut out = Vec::new();
-                let _ = flate2::read::ZlibDecoder::new(&raw[header_size..]).read_to_end(&mut out);
+                let _ = flate2::read::ZlibDecoder::new(&raw[header_size_gabi..]).read_to_end(&mut out);
                 (out, None, sh_flags & !0x800)
             } else {
                 continue;
