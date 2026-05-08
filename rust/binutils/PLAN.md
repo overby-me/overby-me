@@ -37,7 +37,7 @@ Key design decisions:
 
 ## Test results
 
-### Custom comparison tests (38/38 passing)
+### Custom comparison tests (41/41 passing)
 
 | Check name | Tool | Status |
 |---|---|---|
@@ -79,6 +79,9 @@ Key design decisions:
 | `addr2line-basic` | addr2line | ✅ PASS |
 | `addr2line-pretty` | addr2line | ✅ PASS |
 | `readelf-headers-all` | readelf | ✅ PASS |
+| `readelf-notes` | readelf | ✅ PASS |
+| `readelf-relocs` | readelf | ✅ PASS |
+| `nm-just-symbols` | nm | ✅ PASS |
 
 ### Upstream DejaGnu tests (286/286 binutils-all + 12/35 x86-64 = 298 passing)
 
@@ -269,6 +272,7 @@ Two layers of testing:
 - [x] size `-d`/`-o`/`-x` radix flags + new `nm`/`size` custom tests (+5 custom tests, 27→32): individual columns formatted in chosen radix (decimal plain / octal with leading 0 / hex with `0x`); total columns are always "dec hex" (or "oct hex" with `-o`); total octal value is *not* zero-padded (matches GNU). Plus `nm -t d`, `nm -A`, `size -d`, `size -o`, `size -x` custom tests.
 - [x] nm POSIX format size-when-zero handling + 5 more custom tests (+5 custom tests, 32→37): `-P`/`--portability` now prints a blank size column for symbols with `st_size == 0` (except common where st_value is the alignment) — matches GNU's POSIX format. New tests: `nm-radix-octal`, `nm-radix-hex`, `nm-posix`, `ar-print`, `addr2line-pretty`.
 - [x] readelf `-e`/`--headers` (file + section + program headers) + format polish (+1 custom test, 37→38): wires the multi-section `-e` flag; suppresses the redundant "There are N section headers" line when `-h` is also requested (info already in file header); makes the "R (retain)" Key-to-Flags entry conditional on the file having any SHF_GNU_RETAIN section; emits "There are no program headers in this file." for relocatable files instead of an empty Program Headers table. New test: `readelf-headers-all`.
+- [x] nm `-j`/`--just-symbols` flag and 3 more custom tests (+3 custom tests, 38→41): print only symbol names (no address, type, size). New tests: `nm-just-symbols`, `readelf-notes`, `readelf-relocs`.
 
 ## Next steps
 

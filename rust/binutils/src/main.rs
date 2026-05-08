@@ -1311,6 +1311,7 @@ struct NmOpts {
     defined_only: bool,
     numeric_sort: bool,
     reverse_sort: bool,
+    just_names: bool,
 }
 
 impl Default for NmOpts {
@@ -1332,6 +1333,7 @@ impl Default for NmOpts {
             defined_only: false,
             numeric_sort: false,
             reverse_sort: false,
+            just_names: false,
         }
     }
 }
@@ -1355,6 +1357,9 @@ fn tool_nm(args: &[String]) -> i32 {
             "-p" | "--no-sort" => opts.no_sort = true,
             "-n" | "-v" | "--numeric-sort" => opts.numeric_sort = true,
             "-r" | "--reverse-sort" => opts.reverse_sort = true,
+            "-j" | "--just-symbols" | "--format=just-symbols" => {
+                opts.just_names = true;
+            }
             "-P" | "--portability" => opts.format = NmFormat::Posix,
             "-A" | "-o" | "--print-file-name" => opts.show_filename = true,
             "--size-sort" => opts.size_sort = true,
@@ -1674,6 +1679,12 @@ fn nm_print_symbols<'data>(
         };
 
         let is_undef = *ty == 'U' || *ty == 'w';
+
+        // -j/--just-symbols: only print the name.
+        if opts.just_names {
+            println!("{prefix}{name}");
+            continue;
+        }
 
         match opts.format {
             NmFormat::Bsd => {

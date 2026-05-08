@@ -192,6 +192,18 @@
         name = "headers-all";
       }
       {
+        tool = "readelf";
+        name = "notes";
+      }
+      {
+        tool = "readelf";
+        name = "relocs";
+      }
+      {
+        tool = "nm";
+        name = "just-symbols";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }
