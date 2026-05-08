@@ -123,11 +123,14 @@ in
             esac
             EXP_FILES="$EXP_FILES $base"
           done
-          # Run x86-64 subdir tests separately afterwards (different srcdir
-          # path resolution).
+          # Run subdir tests separately afterwards (different srcdir path
+          # resolution).
           EXTRA_EXP=""
           if [ -f "$TESTSUITE/binutils-all/x86-64/x86-64.exp" ]; then
-            EXTRA_EXP="binutils-all/x86-64/x86-64.exp"
+            EXTRA_EXP="$EXTRA_EXP binutils-all/x86-64/x86-64.exp"
+          fi
+          if [ -f "$TESTSUITE/binutils-all/i386/i386.exp" ]; then
+            EXTRA_EXP="$EXTRA_EXP binutils-all/i386/i386.exp"
           fi
         else
           EXP_FILES="${expFile}"
