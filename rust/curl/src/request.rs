@@ -1423,20 +1423,31 @@ fn execute_request(
     let keep_alive = resp.headers.iter().any(|(k, v)| {
         k.eq_ignore_ascii_case("connection") && v.eq_ignore_ascii_case("keep-alive")
     });
-    let use_tunnel_save = opts.proxy.is_some() && (opts.proxy_tunnel || url.scheme == "https");
+    // HTTPS via TLS-on-tunnel still can't be pooled (rustls owns the stream).
+    let block_tls_save = opts.proxy.is_some() && url.scheme == "https";
+    // After a successful CONNECT tunnel for HTTP, the underlying TCP stream
+    // is a direct pipe to the origin and CAN be pooled — the next request
+    // to the same origin reuses it WITHOUT another CONNECT (test 275).
+    let use_tunnel = opts.proxy.is_some() && (opts.proxy_tunnel || url.scheme == "https");
     let pool_ok = !conn_close
         && !user_close
         && (!resp_http10 || keep_alive)
         && url.scheme == "http"
-        && !use_tunnel_save
+        && !block_tls_save
         && !resp.recv_error
         && !resp.partial_file
         && !resp.timed_out
         && resp.status > 0;
     if pool_ok {
-        // Pool keyed on the actual connect target: proxy host:port when
-        // proxying without a CONNECT tunnel, otherwise origin host:port.
-        let (khost, kport, is_proxy_key) = if let Some(ref proxy) = opts.proxy {
+        // Pool key:
+        //   - With CONNECT tunnel established: the stream goes to the origin,
+        //     so key on origin host:port (is_proxy=false).
+        //   - With plain proxy (HTTP, no tunnel): key on proxy host:port
+        //     (is_proxy=true).
+        //   - No proxy: key on origin (is_proxy=false).
+        let (khost, kport, is_proxy_key) = if use_tunnel {
+            (url.host.clone(), url.port, false)
+        } else if let Some(ref proxy) = opts.proxy {
             match crate::connection::parse_proxy(proxy) {
                 Ok((h, p)) => (h, p, true),
                 Err(_) => return Ok(resp),

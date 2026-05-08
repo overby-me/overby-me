@@ -216,15 +216,18 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
     // Determine whether we need a CONNECT tunnel through the proxy.
     let use_tunnel = opts.proxy.is_some() && (opts.proxy_tunnel || url.scheme == "https");
 
-    // HTTP/1.1 keep-alive pool reuse — only for plain HTTP without a
-    // tunnel (the simplest, safest case). Try to reuse a matching pooled
-    // connection; the request layer drops the pool entry on `Connection:
-    // close`, so a hit here is presumed live (test 48 / 1134).
-    if !use_tunnel && url.scheme == "http" {
+    // HTTP/1.1 keep-alive pool reuse — supported for plain HTTP and for
+    // HTTP through an established CONNECT tunnel (test 275). HTTPS and
+    // unproxied tunnels still skip the pool (rustls owns the stream).
+    if url.scheme == "http" {
         // Compute the connect target up front so we can compare against the
-        // pool entry. For a proxy without tunnel this is the proxy host:port;
-        // for a direct connection it's the URL host:port.
-        let key_host_port: Option<(String, u16, bool)> = if let Some(ref proxy) = opts.proxy {
+        // pool entry.
+        //   - With CONNECT tunnel: key on origin (the tunnel endpoint).
+        //   - With plain proxy: key on proxy host:port.
+        //   - No proxy: key on origin.
+        let key_host_port: Option<(String, u16, bool)> = if use_tunnel {
+            Some((url.host.clone(), url.port, false))
+        } else if let Some(ref proxy) = opts.proxy {
             parse_proxy(proxy).ok().map(|(h, p)| (h, p, true))
         } else {
             Some((url.host.clone(), url.port, false))
