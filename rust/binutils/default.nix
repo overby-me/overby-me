@@ -21,7 +21,7 @@
 
         postInstall = ''
           # Create symlinks for all binutils tools (multicall binary)
-          for tool in ar ranlib nm objdump readelf objcopy strings size addr2line c++filt strip as ld; do
+          for tool in ar ranlib nm objdump readelf objcopy strings size addr2line c++filt strip as ld elfedit; do
             ln -s $out/bin/rust-binutils $out/bin/$tool
           done
         '';
@@ -56,7 +56,7 @@
 
         postInstall = ''
           # Create symlinks for all binutils tools (multicall binary)
-          for tool in ar ranlib nm objdump readelf objcopy strings size addr2line c++filt strip as ld; do
+          for tool in ar ranlib nm objdump readelf objcopy strings size addr2line c++filt strip as ld elfedit; do
             ln -s $out/bin/rust-binutils $out/bin/$tool
           done
         '';
@@ -224,6 +224,11 @@
       }
       {
         exp = "update-section.exp";
+        minPass = 6;
+        maxFail = 0;
+      }
+      {
+        exp = "elfedit.exp";
         minPass = 6;
         maxFail = 0;
       }

@@ -37,4 +37,25 @@ disabled_rules = [
 
   # parse_srec/parse_ihex iterate text input line-by-line; .lines() is the natural API.
   "rust_lines_allocate_per_line",
+
+  # apply_note_relocs uses raw pointer arithmetic to apply relocations to a
+  # mutable byte slice — required for ELF reloc semantics.
+  "rust_unsafe_raw_pointer_cast",
+
+  # Tool helper names like objcopy_warn_unknown_section_flags mirror objcopy's
+  # CLI flags / behaviors; the long names document intent and aid grep-ability.
+  "overlong_name",
+
+  # `info_fn`/`abbrev_fn`/`line_fn`/`ranges_fn` calls inside readelf's
+  # closure-based DWARF dispatcher are intentional inner-closure calls; they
+  # don't match any top-level fn in deslop's local symbol index.
+  "hallucinated_local_call",
+
+  # objdump_disassemble_section reads DWARF-referenced source files for `-S`
+  # interleaving; sources are user-trusted local files.
+  "rust_unbounded_read_to_string",
+
+  # `getvalue` is the local closure name for value-extraction inside .d/.r
+  # parsers, not exposed externally.
+  "generic_name",
 ]

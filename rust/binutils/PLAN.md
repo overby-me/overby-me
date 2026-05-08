@@ -66,7 +66,7 @@ Key design decisions:
 | `objdump-relocs` | objdump | ✅ PASS |
 | `addr2line-basic` | addr2line | ✅ PASS |
 
-### Upstream DejaGnu tests (280/280 passing, 100% 🎉)
+### Upstream DejaGnu tests (286/286 passing, 100% 🎉)
 
 | Test file | Pass | Fail | Total | Threshold |
 |-----------|------|------|-------|-----------|
@@ -81,7 +81,8 @@ Key design decisions:
 | strings.exp | **1** | 0 | 1 | minPass=1, maxFail=0 |
 | addr2line.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
 | update-section.exp | **6** | 0 | 6 | minPass=6, maxFail=0 |
-| **Total** | **280** | **0** | **280** | |
+| elfedit.exp | **6** | 0 | 6 | minPass=6, maxFail=0 |
+| **Total** | **286** | **0** | **286** | |
 
 All upstream DejaGnu tests pass.
 
@@ -231,6 +232,7 @@ Two layers of testing:
 - [x] Add readelf `-ws`/`-wm`/`--debug-dump=str`/`macro` support (30→31 readelf.exp): `-ws` hex-dumps every `.debug_str*` section and decodes `.debug_str_offsets.dwo` entries as `Index Offset [String]`; `-wm` walks `.debug_macro*` (DWARF 5 header + flags + DW_MACRO_* opcodes) including DW_MACRO_define_strx with str-offset lookup. Fixes `readelf -wsm readelf-debug-str-offsets-dw4`.
 - [x] Implement GNU location view pair extension for DWARF 5 `.debug_loclists` (37→38 readelf.exp = 100%): `DW_LLE_GNU_view_pair` (kind=9) inline annotations alongside per-list view list iteration; "views at OFF for:" and "views for:" prefix lines emitted at the right offsets. Fixes `readelf locview-2`.
 - [x] Add objcopy `--dump-section`, `--update-section`, and `--update-section + --remove-section` conflict detection (+6 update-section.exp, 274→280 total): in-place ELF rewriter `objcopy_inplace_update_sections` reflows section file offsets respecting per-section sh_addralign so that `update-N.o` (with .foo of any size) becomes byte-equal to `update-1.o` after section content replacement; `--rename-section` is applied via a same-length shstrtab rewrite. Enables previously-skipped `update-section.exp`.
+- [x] Add `elfedit` tool with `--output-mach`/`--output-type`/`--output-osabi`/`--output-abiversion` (+6 elfedit.exp, 280→286 total): minimal in-place ELF header field patcher (modifies e_type, e_machine, EI_OSABI, EI_ABIVERSION); readelf prints "Intel L1OM" / "Intel K1OM" / "Intel MCU" / "FenixOS". `dejagnu-testsuite.nix` now sets `tempfile`/`copyfile` globally so `run_dump_test` works for the binutils-all tests that don't set them per-platform.
 
 ## Next steps
 

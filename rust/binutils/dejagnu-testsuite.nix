@@ -93,6 +93,10 @@ in
     set ADDR2LINEFLAGS ""
     set CXXFILT "$RUST_BIN/c++filt"
     set CXXFILTFLAGS ""
+    set ELFEDIT "$RUST_BIN/elfedit"
+    set ELFEDITFLAGS ""
+    set tempfile "tmpdir/temp"
+    set copyfile "tmpdir/copy"
 
     set AS "${pkgs.binutils-unwrapped}/bin/as"
     set ASFLAGS ""
@@ -114,7 +118,7 @@ in
             base=$(basename "$f")
             # Skip tests for tools we don't implement or that need special setup
             case "$base" in
-              dlltool.exp|elfedit.exp|debuginfod.exp)
+              dlltool.exp|debuginfod.exp)
                 continue ;;
             esac
             EXP_FILES="$EXP_FILES $base"

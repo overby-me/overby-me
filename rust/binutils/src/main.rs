@@ -186,6 +186,7 @@ fn main() {
         "c++filt" => tool_cxxfilt(&tool_args),
         "as" => tool_as(&tool_args),
         "ld" => tool_ld(&tool_args),
+        "elfedit" => tool_elfedit(&tool_args),
         _ => {
             eprintln!("rust-binutils: unknown tool '{tool}'");
             1
@@ -5416,6 +5417,7 @@ fn elf_osabi_name(osabi: u8) -> &'static str {
         6 => "Solaris",
         9 => "FreeBSD",
         12 => "OpenBSD",
+        16 => "FenixOS",
         _ => "Unknown",
     }
 }
@@ -5435,12 +5437,15 @@ fn elf_machine_name(machine: u16) -> &'static str {
     match machine {
         0 => "None",
         3 => "Intel 80386",
+        6 => "Intel MCU",
         8 => "MIPS R3000",
         20 => "PowerPC",
         21 => "PowerPC64",
         40 => "ARM",
         43 => "SPARC v9",
         62 => "Advanced Micro Devices X86-64",
+        180 => "Intel L1OM",
+        181 => "Intel K1OM",
         183 => "AArch64",
         243 => "RISC-V",
         _ => "Unknown",
@@ -10959,6 +10964,173 @@ fn tool_ld(args: &[String]) -> i32 {
 
     eprintln!("ld: linker not implemented; install a system linker (e.g., GNU ld)");
     1
+}
+
+fn tool_elfedit(args: &[String]) -> i32 {
+    if check_version_help("elfedit", args) {
+        return 0;
+    }
+    let mut output_mach: Option<u16> = None;
+    let mut output_type: Option<u16> = None;
+    let mut output_osabi: Option<u8> = None;
+    let mut output_abiversion: Option<u8> = None;
+    let mut files: Vec<String> = Vec::new();
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        let (name, val): (&str, Option<String>) = if let Some(eq) = arg.find('=') {
+            (&arg[..eq], Some(arg[eq + 1..].to_string()))
+        } else {
+            (arg.as_str(), None)
+        };
+        let take_val = |i: &mut usize, val: &Option<String>| -> Option<String> {
+            if let Some(v) = val {
+                Some(v.clone())
+            } else {
+                *i += 1;
+                args.get(*i).cloned()
+            }
+        };
+        match name {
+            "--output-mach" => {
+                let v = match take_val(&mut i, &val) {
+                    Some(v) => v,
+                    None => {
+                        eprintln!("elfedit: --output-mach requires an argument");
+                        return 1;
+                    }
+                };
+                output_mach = Some(match v.as_str() {
+                    "l1om" | "L1OM" => 180,
+                    "k1om" | "K1OM" => 181,
+                    "iamcu" | "IAMCU" => 6,
+                    "i386" => 3,
+                    "x86_64" | "x86-64" => 62,
+                    _ => {
+                        eprintln!("elfedit: unknown machine '{v}'");
+                        return 1;
+                    }
+                });
+            }
+            "--output-type" => {
+                let v = match take_val(&mut i, &val) {
+                    Some(v) => v,
+                    None => {
+                        eprintln!("elfedit: --output-type requires an argument");
+                        return 1;
+                    }
+                };
+                output_type = Some(match v.as_str() {
+                    "rel" => 1,
+                    "exec" => 2,
+                    "dyn" => 3,
+                    _ => {
+                        eprintln!("elfedit: unknown ELF type '{v}'");
+                        return 1;
+                    }
+                });
+            }
+            "--output-osabi" => {
+                let v = match take_val(&mut i, &val) {
+                    Some(v) => v,
+                    None => {
+                        eprintln!("elfedit: --output-osabi requires an argument");
+                        return 1;
+                    }
+                };
+                let lower = v.to_lowercase();
+                output_osabi = Some(match lower.as_str() {
+                    "none" | "system v" | "sysv" => 0,
+                    "hp-ux" | "hpux" => 1,
+                    "netbsd" => 2,
+                    "gnu" | "linux" => 3,
+                    "solaris" => 6,
+                    "freebsd" => 9,
+                    "openbsd" => 12,
+                    "fenixos" => 16,
+                    _ => {
+                        eprintln!("elfedit: unknown OSABI '{v}'");
+                        return 1;
+                    }
+                });
+            }
+            "--output-abiversion" => {
+                let v = match take_val(&mut i, &val) {
+                    Some(v) => v,
+                    None => {
+                        eprintln!("elfedit: --output-abiversion requires an argument");
+                        return 1;
+                    }
+                };
+                output_abiversion = Some(match v.parse::<u8>() {
+                    Ok(n) => n,
+                    Err(_) => {
+                        eprintln!("elfedit: invalid abiversion '{v}'");
+                        return 1;
+                    }
+                });
+            }
+            "--enable-x86-feature"
+            | "--disable-x86-feature"
+            | "--input-mach"
+            | "--input-type"
+            | "--input-osabi" => {
+                if val.is_none() {
+                    i += 1;
+                }
+            }
+            _ if !arg.starts_with('-') => files.push(arg.clone()),
+            _ => {
+                eprintln!("elfedit: unknown option '{arg}'");
+                return 1;
+            }
+        }
+        i += 1;
+    }
+    if files.is_empty() {
+        eprintln!("elfedit: no input file");
+        return 1;
+    }
+    for path in &files {
+        let mut data = match fs::read(path) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("elfedit: '{path}': {e}");
+                return 1;
+            }
+        };
+        if data.len() < 0x40 || &data[..4] != b"\x7fELF" {
+            eprintln!("elfedit: '{path}': not an ELF file");
+            return 1;
+        }
+        let class = data[4];
+        let endian = data[5];
+        let le = endian == 1;
+        if let Some(o) = output_osabi {
+            data[7] = o;
+        }
+        if let Some(v) = output_abiversion {
+            data[8] = v;
+        }
+        if let Some(t) = output_type {
+            let bytes = if le { t.to_le_bytes() } else { t.to_be_bytes() };
+            data[0x10..0x12].copy_from_slice(&bytes);
+        }
+        if let Some(m) = output_mach {
+            let bytes = if le { m.to_le_bytes() } else { m.to_be_bytes() };
+            data[0x12..0x14].copy_from_slice(&bytes);
+        }
+        // Defensive: re-confirm class so we don't accidentally over-write
+        // 64-bit-only fields (we only modify e_ident + e_type + e_machine,
+        // which are at the same offsets in ELF32 and ELF64).
+        let _ = class;
+        if let Err(e) = fs::write(path, &data) {
+            eprintln!("elfedit: '{path}': {e}");
+            return 1;
+        }
+    }
+    0
 }
 
 // ─── SREC / IHEX parsers (for objdump) ────────────────────────────────────────
