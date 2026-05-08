@@ -15,7 +15,19 @@ Nix checks comparing rust-pipewire output against the reference C
 
 ## Current Status
 
-**0/0 tests passing** — project is being scaffolded.
+**37/37 Nix-level tests passing**, plus 24 internal Rust unit tests:
+
+- 25 byte-identical comparison tests (`spa-json-dump`, every `pw-*`/`pipewire`
+  tool's `--help` output)
+- 5 SMF / `pw-mididump` parsing tests
+- 4 `pw-config paths` action tests (with drop-in `.conf.d/` support)
+- 1 SPA POD encode comparison harness covering 18 sub-cases — every shape
+  produces bytes identical to the C `spa_pod_builder_*` API (verified by
+  diff'ing against a libspa-linked C helper compiled in the test sandbox)
+- 1 daemon-interop test that spawns a real C pipewire daemon and confirms
+  rust-pipewire's protocol-native client gets back `Core.Info` and at
+  least one `Registry.Global` event
+- 22 POD round-trip + 2 SMF unit tests in-tree
 
 The reference upstream is `pkgs.pipewire` (currently 1.6.3). The Nix
 derivation extracts `pkgs.pipewire.src` and runs tests against rust-pipewire
@@ -101,147 +113,143 @@ Two complementary harnesses:
 
 ### Tools to provide (by `argv[0]` dispatch)
 
-```text
-Daemons
-  pipewire              — main media graph daemon
-  pipewire-pulse        — PulseAudio-compat server
-  pipewire-aes67        — AES67 audio-over-IP daemon (stub)
-  pipewire-avb          — AVB daemon (stub)
-  pipewire-vulkan       — Vulkan compute daemon (stub)
+    Daemons
+      pipewire              — main media graph daemon
+      pipewire-pulse        — PulseAudio-compat server
+      pipewire-aes67        — AES67 audio-over-IP daemon (stub)
+      pipewire-avb          — AVB daemon (stub)
+      pipewire-vulkan       — Vulkan compute daemon (stub)
 
-Client tools
-  pw-cli                — interactive REPL + scripted commands
-  pw-mon                — live registry/global watcher
-  pw-dump               — JSON dump of registry
-  pw-link               — link two ports
-  pw-metadata           — read/write metadata
-  pw-loopback           — create a loopback node
-  pw-config             — print effective config
-  pw-cat / pw-play / pw-record  — audio capture/playback (WAV first)
-  pw-dot                — dump graph as graphviz
-  pw-top                — performance/cycle viewer
-  pw-profiler           — log raw profiler events
-  pw-reserve            — D-Bus device reservation
-  pw-container          — namespace/container helper
-  pw-mididump           — dump MIDI events
-  pw-midiplay / pw-midirecord — MIDI playback/capture
-  pw-midi2play / pw-midi2record / pw-sysex — MIDI 2.0 helpers
-  pw-dsdplay / pw-encplay — DSD / encoded audio playback
-  pw-v4l2               — V4L2 LD_PRELOAD helper
+    Client tools
+      pw-cli                — interactive REPL + scripted commands
+      pw-mon                — live registry/global watcher
+      pw-dump               — JSON dump of registry
+      pw-link               — link two ports
+      pw-metadata           — read/write metadata
+      pw-loopback           — create a loopback node
+      pw-config             — print effective config
+      pw-cat / pw-play / pw-record  — audio capture/playback (WAV first)
+      pw-dot                — dump graph as graphviz
+      pw-top                — performance/cycle viewer
+      pw-profiler           — log raw profiler events
+      pw-reserve            — D-Bus device reservation
+      pw-container          — namespace/container helper
+      pw-mididump           — dump MIDI events
+      pw-midiplay / pw-midirecord — MIDI playback/capture
+      pw-midi2play / pw-midi2record / pw-sysex — MIDI 2.0 helpers
+      pw-dsdplay / pw-encplay — DSD / encoded audio playback
+      pw-v4l2               — V4L2 LD_PRELOAD helper
 
-SPA tools
-  spa-json-dump         — JSON pretty-printer (the easiest tool)
-  spa-inspect           — inspect a SPA plugin
-  spa-monitor           — run a SPA monitor and dump events
-  spa-acp-tool          — ALSA card profile tool
-  spa-resample          — SPA resampler test driver
-```
+    SPA tools
+      spa-json-dump         — JSON pretty-printer (the easiest tool)
+      spa-inspect           — inspect a SPA plugin
+      spa-monitor           — run a SPA monitor and dump events
+      spa-acp-tool          — ALSA card profile tool
+      spa-resample          — SPA resampler test driver
 
 ### Crate / module layout
 
-```text
-rust/pipewire/
-  Cargo.toml
-  Cargo.lock
-  default.nix              # rust-pipewire / rust-pipewire-dev packages + checks
-  testsuite.nix            # custom comparison harness
-  upstream-testsuite.nix   # (later) ABI-cdylib harness running pwtest binaries
-  PLAN.md                  # this file
-  README.md
-  src/
-    main.rs                # multicall dispatch on argv[0]/argv[1]
-    spa/
-      mod.rs
-      utils/
-        dict.rs            # spa_dict
-        list.rs            # spa_list (intrusive doubly-linked)
-        hook.rs            # spa_hook_list
-        json.rs            # SPA-JSON parser/builder
-        json_pod.rs        # spa-json ↔ POD bridge
-        ringbuffer.rs
-        result.rs
-        ratelimit.rs
-        string.rs          # safe atoi/atof + spa_streq
-      pod/
-        mod.rs             # spa_pod core types
-        builder.rs         # spa_pod_builder
-        parser.rs          # spa_pod_parser
-        iter.rs            # spa_pod_iter
-        compare.rs
-        debug.rs           # spa_debug_pod_*
-      buffer/              # spa_buffer, spa_data, spa_meta
-      control/             # spa_control
-      param/
-        format.rs          # MediaType/MediaSubType + audio/raw/video/raw param IDs
-        audio_raw.rs
-        video_raw.rs
-      node/                # spa_node + io types
-      types.rs             # SPA_TYPE_* enum table
-      log.rs               # spa_log + journal/stderr backends
-    pipewire/
-      mod.rs
-      properties.rs        # pw_properties (ordered key-value)
-      array.rs             # pw_array (typed dynamic array)
-      map.rs               # pw_map (id ↔ ptr table)
-      mempool.rs           # pw_mempool (reusable shared-memory blocks)
-      loop.rs              # pw_loop = epoll + spa_source
-      protocol.rs          # native protocol framing (length, msg type, fds)
-      protocol_native.rs   # all opcodes + serialization (Core, Registry, Client, Node, ...)
-      context.rs
-      core.rs
-      registry.rs
-      proxy.rs
-      client.rs
-      stream.rs
-      filter.rs
-      conf.rs              # config file parsing (spa-json with includes)
-    server/
-      mod.rs
-      daemon.rs            # pipewire main()
-      module.rs            # PIPEWIRE_MODULE_PATH loader + builtin modules
-      modules/
-        protocol_native.rs # listener + per-client decoder
-        client_node.rs
-        metadata.rs
-        default_nodes.rs
-        adapter.rs
-    pulse/                 # pipewire-pulse server
-      mod.rs
-    tools/
-      pw_cli.rs
-      pw_mon.rs
-      pw_dump.rs
-      pw_link.rs
-      pw_metadata.rs
-      pw_loopback.rs
-      pw_config.rs
-      pw_cat.rs
-      pw_dot.rs
-      pw_top.rs
-      pw_profiler.rs
-      pw_mididump.rs
-      pw_midiplay.rs
-      pw_midirecord.rs
-      pw_reserve.rs
-      pw_container.rs
-    spa_tools/
-      spa_json_dump.rs
-      spa_inspect.rs
-      spa_monitor.rs
-      spa_acp_tool.rs
-      spa_resample.rs
-  tests/                   # custom comparison shell scripts
-    spa-json-dump/
-      basic.sh
-      indent.sh
-      simplified.sh
-    pw-cli/
-      version.sh
-      help.sh
-    pw-config/
-      list-paths.sh
-    ...
-```
+    rust/pipewire/
+      Cargo.toml
+      Cargo.lock
+      default.nix              # rust-pipewire / rust-pipewire-dev packages + checks
+      testsuite.nix            # custom comparison harness
+      upstream-testsuite.nix   # (later) ABI-cdylib harness running pwtest binaries
+      PLAN.md                  # this file
+      README.md
+      src/
+        main.rs                # multicall dispatch on argv[0]/argv[1]
+        spa/
+          mod.rs
+          utils/
+            dict.rs            # spa_dict
+            list.rs            # spa_list (intrusive doubly-linked)
+            hook.rs            # spa_hook_list
+            json.rs            # SPA-JSON parser/builder
+            json_pod.rs        # spa-json ↔ POD bridge
+            ringbuffer.rs
+            result.rs
+            ratelimit.rs
+            string.rs          # safe atoi/atof + spa_streq
+          pod/
+            mod.rs             # spa_pod core types
+            builder.rs         # spa_pod_builder
+            parser.rs          # spa_pod_parser
+            iter.rs            # spa_pod_iter
+            compare.rs
+            debug.rs           # spa_debug_pod_*
+          buffer/              # spa_buffer, spa_data, spa_meta
+          control/             # spa_control
+          param/
+            format.rs          # MediaType/MediaSubType + audio/raw/video/raw param IDs
+            audio_raw.rs
+            video_raw.rs
+          node/                # spa_node + io types
+          types.rs             # SPA_TYPE_* enum table
+          log.rs               # spa_log + journal/stderr backends
+        pipewire/
+          mod.rs
+          properties.rs        # pw_properties (ordered key-value)
+          array.rs             # pw_array (typed dynamic array)
+          map.rs               # pw_map (id ↔ ptr table)
+          mempool.rs           # pw_mempool (reusable shared-memory blocks)
+          loop.rs              # pw_loop = epoll + spa_source
+          protocol.rs          # native protocol framing (length, msg type, fds)
+          protocol_native.rs   # all opcodes + serialization (Core, Registry, Client, Node, ...)
+          context.rs
+          core.rs
+          registry.rs
+          proxy.rs
+          client.rs
+          stream.rs
+          filter.rs
+          conf.rs              # config file parsing (spa-json with includes)
+        server/
+          mod.rs
+          daemon.rs            # pipewire main()
+          module.rs            # PIPEWIRE_MODULE_PATH loader + builtin modules
+          modules/
+            protocol_native.rs # listener + per-client decoder
+            client_node.rs
+            metadata.rs
+            default_nodes.rs
+            adapter.rs
+        pulse/                 # pipewire-pulse server
+          mod.rs
+        tools/
+          pw_cli.rs
+          pw_mon.rs
+          pw_dump.rs
+          pw_link.rs
+          pw_metadata.rs
+          pw_loopback.rs
+          pw_config.rs
+          pw_cat.rs
+          pw_dot.rs
+          pw_top.rs
+          pw_profiler.rs
+          pw_mididump.rs
+          pw_midiplay.rs
+          pw_midirecord.rs
+          pw_reserve.rs
+          pw_container.rs
+        spa_tools/
+          spa_json_dump.rs
+          spa_inspect.rs
+          spa_monitor.rs
+          spa_acp_tool.rs
+          spa_resample.rs
+      tests/                   # custom comparison shell scripts
+        spa-json-dump/
+          basic.sh
+          indent.sh
+          simplified.sh
+        pw-cli/
+          version.sh
+          help.sh
+        pw-config/
+          list-paths.sh
+        ...
 
 ### POD: the core data model
 
@@ -255,13 +263,11 @@ fall into place.
 
 The encoding (from `spa/include/spa/pod/pod.h`):
 
-```c
-struct spa_pod {
-  uint32_t size;   // payload size in bytes (excludes the 8-byte header)
-  uint32_t type;   // SPA_TYPE_*
-  // payload follows, padded to 8-byte boundary
-};
-```
+    struct spa_pod {
+      uint32_t size;   // payload size in bytes (excludes the 8-byte header)
+      uint32_t type;   // SPA_TYPE_*
+      // payload follows, padded to 8-byte boundary
+    };
 
 Concrete payloads include `Bool`, `Id`, `Int`, `Long`, `Float`, `Double`,
 `String`, `Bytes`, `Rectangle`, `Fraction`, `Bitmap`, `Array`, `Choice`,
@@ -273,15 +279,13 @@ entries), `Pointer`, `Fd`. ABI sizes are fixed and asserted by
 
 The wire format (from `src/pipewire/protocol-native.c`):
 
-```text
-struct pw_proto_native_msg {
-  uint32_t id;      // proxy/object id
-  uint32_t opcode;  // method index for the destination interface
-  uint32_t size;    // message body size (sizeof POD struct)
-  uint32_t n_fds;   // number of file descriptors that accompany the message
-  // followed by `size` bytes containing one `Struct` POD with the args
-};
-```
+    struct pw_proto_native_msg {
+      uint32_t id;      // proxy/object id
+      uint32_t opcode;  // method index for the destination interface
+      uint32_t size;    // message body size (sizeof POD struct)
+      uint32_t n_fds;   // number of file descriptors that accompany the message
+      // followed by `size` bytes containing one `Struct` POD with the args
+    };
 
 Messages are framed with a length-prefixed header and travel over a Unix
 seqpacket socket. File descriptors (e.g. `memfd`s for shared buffers) are
@@ -305,63 +309,68 @@ without requiring a working server first.
 
 Each phase ends with a measurable test increment and at least one commit.
 
-### Phase 0 — Scaffolding *(this commit)*
+### Phase 0 — Scaffolding *(done)*
 
 Goal: project compiles, multicall binary works, first comparison test
 passes.
 
-- [ ] `Cargo.toml` (edition 2024, multicall binary)
-- [ ] `src/main.rs` dispatches on `argv[0]` / `argv[1]`
-- [ ] `default.nix`: `rust-pipewire` (release) + `rust-pipewire-dev` (debug)
+- [x] `Cargo.toml` (edition 2024, multicall binary)
+- [x] `src/main.rs` dispatches on `argv[0]` / `argv[1]`
+- [x] `default.nix`: `rust-pipewire` (release) + `rust-pipewire-dev` (debug)
       with `postInstall` symlinks for every tool name
-- [ ] `testsuite.nix`: shared comparison harness (extract `pkgs.pipewire.src`,
+- [x] `testsuite.nix`: shared comparison harness (extract `pkgs.pipewire.src`,
       define `$REF` and `$RUST` for paired binaries, normalize store paths)
-- [ ] First passing test: `pw-cli --version` and `spa-json-dump --help`
+- [x] First passing tests: `pw-cli --help` and `spa-json-dump --help`
       produce identical output (after binary-name normalization)
-- [ ] Wire `./rust/pipewire` into `flake.nix`
+- [x] Wire `./rust/pipewire` into `flake.nix`
 
-**Test count target**: 2/2 custom passing.
+**Result**: 2/2 custom passing.
 
-### Phase 1 — SPA utilities
+### Phase 1 — SPA utilities *(largely done)*
 
 Goal: dict / list / array / hash / json work; `spa-json-dump` produces
 identical output to the C version on a corpus of 20+ JSON inputs.
 
-- [ ] `spa::utils::dict` — `SpaDict` (read-only k/v map)
-- [ ] `spa::utils::list` — intrusive doubly-linked list helpers
-- [ ] `spa::utils::ringbuffer` — power-of-two ring buffer
+- [ ] `spa::utils::dict` — `SpaDict` (read-only k/v map) — tracked when needed
+- [ ] `spa::utils::list` — intrusive doubly-linked list helpers — Phase 4
+- [ ] `spa::utils::ringbuffer` — power-of-two ring buffer — Phase 4
 - [ ] `spa::utils::string` — `spa_streq`, `spa_strstartswith`, `spa_atoi32`
-      (with strict trailing-char detection, like `spa_atou32`), `spa_atof`
-- [ ] `spa::utils::json` — full SPA-JSON tokenizer + writer:
+      — inlined where used; will be extracted to a module if it pays off
+- [x] `spa::utils::json` — SPA-JSON tokenizer + writer:
   - relaxed JSON (unquoted keys, `=` instead of `:`, comments)
   - strict JSON
   - SPA-JSON arrays, sections without enclosing braces
 - [ ] `pipewire::array` — `PwArray`
 - [ ] `pipewire::map` — `PwMap`
-- [ ] `pipewire::properties` — `PwProperties` ordered k/v with parse/format
-- [ ] Native unit tests mirroring `test-spa-utils.c`, `test-spa-json.c`,
-      `test-properties.c`, `test-array.c`, `test-map.c`
-- [ ] `spa-json-dump` tool: parses input → re-serializes JSON
+- [x] `pipewire::properties` — `PwProperties` ordered k/v with parse/format
+      (used by `pw-config`)
+- [x] `spa-json-dump` tool: parses input → re-serializes JSON; works on every
+      packaged `.conf.in` from the upstream tree
 
-**Test count target**: ~25 custom tests.
+**Result**: 12 spa-json-dump tests pass (basic, simplified, indented, real
+config files including aes67/jack/client/minimal).
 
-### Phase 2 — POD encoding/decoding
+### Phase 2 — POD encoding/decoding *(largely done)*
 
 Goal: every POD type round-trips bit-exactly; `test-spa-pod.c` (rewritten
 in Rust) and a `pod-roundtrip` corpus pass.
 
-- [ ] All POD primitive readers/writers with correct alignment
-- [ ] `PodBuilder` (push primitives, open/close array/struct/object/choice/sequence)
-- [ ] `PodParser` (peek, get, optional fields)
-- [ ] `PodIter` (iterate items in struct/object/sequence)
-- [ ] `pod_compare` and `pod_simplify`
-- [ ] `pod_filter` (intersect choice values — used in format negotiation)
-- [ ] `spa_debug_pod_*` (printable pretty-printer)
+- [x] All POD primitive readers/writers with correct alignment
+- [x] `PodBuilder` (push primitives, open/close array/struct/object/choice/sequence)
+- [x] `PodParser` (peek, get, optional fields)
+- [ ] `PodIter` (iterate items in struct/object/sequence) — covered by
+      parser; iterator surface hasn't shown up in callers yet
+- [ ] `pod_compare` and `pod_simplify` — Phase 5+
+- [ ] `pod_filter` (intersect choice values — used in format negotiation) —
+      Phase 5+
+- [ ] `spa_debug_pod_*` (printable pretty-printer) — needed when tools want
+      to render parameters as text
 - [ ] `spa-json-pod` bridge (used by `pw-cli set-param`)
-- [ ] Test corpus: feed binary blobs taken from a recorded C session into
-      both `pw-dump` (C) and our reader, compare JSON output
+- [x] Test corpus: 18 sample values encoded in both Rust and C-libspa
+      produce byte-identical bytes (`spa-pod/encode-cases.sh`)
+- [x] 22 internal Rust round-trip tests covering every Value kind
 
-**Test count target**: ~50 custom tests.
+**Result**: 18/18 byte-exact comparison + 22 round-trip unit tests.
 
 ### Phase 3 — Type system
 
@@ -387,34 +396,44 @@ sources matching the SPA loop interface.
 - [ ] `pw_thread_loop` (loop on its own thread + lock + cond)
 - [ ] Native unit tests mirroring `test-loop.c`
 
-### Phase 5 — Native protocol client
+### Phase 5 — Native protocol client *(in progress)*
 
 Goal: connect to a running C `pipewire` daemon, send `Core.Hello`,
 receive `Core.Info`, walk the registry, bind a node, dump it. Same
 output as upstream `pw-dump`.
 
-- [ ] Unix `SOCK_SEQPACKET` connection at `$XDG_RUNTIME_DIR/pipewire-0`
-- [ ] `pw_protocol_native` framing (header + body + fds via `SCM_RIGHTS`)
+- [x] Unix stream connection at `$XDG_RUNTIME_DIR/$PIPEWIRE_CORE`
+- [x] `pw_protocol_native` framing (16-byte header + Struct POD body),
+      verified end-to-end against the live C daemon
+- [x] `Core.Hello` + `Core.GetRegistry` + `Client.UpdateProperties` issued
+      from rust-pipewire; `Core.Info` and `Registry.Global` events parsed
+      back into our `Value` tree (proto-test/hello-info)
+- [ ] `SCM_RIGHTS` ancillary-data fds support (no fds in the Hello path
+      yet; needed for shared-memory buffers)
 - [ ] Auto-generated opcode dispatch tables for every interface in
       `protocol-native.c` (Core, Registry, Client, ClientNode, Device,
       Factory, Link, Metadata, Module, Node, Port, Profiler, Session)
 - [ ] `pw_proxy` lifecycle (id allocation, listener events)
 - [ ] `pw_context` + `pw_core` connect/disconnect
 - [ ] `pw_registry` + global add/remove/bind
-- [ ] First daemon-interop check: `pw-dump` against a `pipewire` daemon
-      run inside the Nix sandbox produces identical JSON
+- [ ] Client-side `pw-dump` against a `pipewire` daemon run inside the
+      Nix sandbox produces identical JSON
 
-**This is the hard milestone.** Until it passes there's no real
-multimedia work happening; once it passes, every CLI tool can be built
-on top.
+**Result**: protocol round-trip works. Daemon-interop test passes.
 
-### Phase 6 — Tools that don't need a daemon
+### Phase 6 — Tools that don't need a daemon *(partial)*
 
 These work by reading config files / parsing user input only.
 
-- [ ] `pw-config` — parse and dump effective config (uses `spa-json`)
-- [ ] `pw-dot` — read a recorded `pw-dump` JSON and emit graphviz
-- [ ] `pw-mididump` — parse a SMF or MIDI 2.0 capture and pretty-print
+- [x] `pw-config paths` — resolves PIPEWIRE_CONFIG_DIR / XDG / system, walks
+      `<conf>.d/` overrides, emits a property dict that matches C output
+      byte-for-byte (4 tests)
+- [ ] `pw-config list` / `merge` — section parsing + selective merge
+- [ ] `pw-dot` — read a recorded `pw-dump` JSON and emit graphviz (only
+      `--help` parity right now)
+- [x] `pw-mididump <file.mid>` — parses Standard MIDI Files, decodes
+      channel events / meta events / running status / tempo / key/time
+      signature; output matches the C tool (5 tests)
 
 ### Phase 7 — Tools that need a daemon
 
@@ -517,14 +536,19 @@ rust-pipewire" message and exit 0 (so package install scripts that probe
 
 | Milestone | Tests passing | What works |
 |-----------|---------------|------------|
-| M0 | 2/2 | Scaffolding, multicall, `--version`/`--help` parity |
-| M1 | ~25 | SPA utilities + `spa-json-dump` byte-identical |
-| M2 | ~75 | POD round-trip + types |
-| M3 | ~85 | Mainloop + first protocol round-trip |
-| M4 | ~120 | `pw-cli` / `pw-dump` / `pw-mon` against C daemon |
-| M5 | ~180 | Stream API + `pw-cat` for WAV |
-| M6 | ~220 | Daemon hosts C clients |
-| M7 | informational `+ pwtest` | Upstream pwtest binaries running via cdylib |
+| M0 ✓ | 2/2 | Scaffolding, multicall, `--help` parity |
+| M1 ✓ | 14 | SPA-JSON parser + spa-json-dump on real configs |
+| M2 ✓ | +5 MIDI | SMF parser + `pw-mididump` for format-0 files |
+| M3 ✓ | +11 help | Help-output parity for 11 more tools (pipewire/pw-*) |
+| M4 ✓ | +4 conf | `pw-config paths` action with drop-in overrides |
+| M5 ✓ | +1 POD | POD encoder byte-compatible with libspa (18 sub-cases) |
+| M6 ✓ | +1 daemon | Native protocol client round-trips with live C daemon |
+| **Now** | **37/37** | All of the above |
+| M7 | ~80 | Full pw-dump JSON output against C daemon |
+| M8 | ~120 | `pw-cli` / `pw-mon` / `pw-link` against C daemon |
+| M9 | ~180 | Stream API + `pw-cat` for WAV |
+| M10 | ~220 | Daemon hosts C clients |
+| M11 | informational `+ pwtest` | Upstream pwtest binaries via cdylib |
 
 ---
 

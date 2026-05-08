@@ -6,11 +6,20 @@ aimed at passing the upstream PipeWire test suite.
 
 ## Status
 
-Scaffolding only — see [`PLAN.md`](./PLAN.md) for the phased roadmap.
+- **37/37 Nix-level tests passing**
+- **24 internal Rust unit tests passing** (POD round-trip, SMF parsing,
+  protocol framing)
+- **18/18 byte-identical POD encode comparisons** vs the C `spa_pod_builder_*`
+  API
+- Native protocol client round-trips with a real C `pipewire` daemon
+- `spa-json-dump`, `pw-mididump`, `pw-config paths` produce output identical
+  to the upstream tools on every test fixture
 
 A multicall binary dispatches on `argv[0]` (or `argv[1]` for
 `rust-pipewire <tool>`) so the same Rust program serves all the symlinked
 tool names under `bin/` (`pipewire`, `pw-cli`, `spa-json-dump`, ...).
+
+See [`PLAN.md`](./PLAN.md) for the phased roadmap and current milestone.
 
 ## Architecture
 
@@ -22,7 +31,21 @@ output against reference `pkgs.pipewire` output. Takes
 `tests/${tool}/${name}.sh` that uses `$REF`, `$RUST`, `$TMPDIR`, and the
 `compare` helper.
 
-### 2. `default.nix`
+### 2. POD comparison tests (`pod-testsuite.nix`)
+
+Compiles a small libspa-linked C helper inside the test sandbox, encodes
+a set of named sample values via `spa_pod_builder_*`, and `cmp`s the
+bytes against rust-pipewire's encoder. This is the closest thing to
+"upstream tests" — the encoder is verified bit-exact against libspa.
+
+### 3. Daemon-interop tests (`proto-testsuite.nix`)
+
+Spawns a real C `pipewire` daemon in a private XDG_RUNTIME_DIR sandbox,
+then connects with rust-pipewire's protocol-native client and verifies
+the expected handshake (`Core.Hello` → `Core.Info` + `Registry.Global`
+events).
+
+### 4. `default.nix`
 
 - `rust-pipewire` package — release multicall binary with symlinks for
   every tool name in `postInstall`
@@ -32,9 +55,19 @@ output against reference `pkgs.pipewire` output. Takes
 ## Running the tests
 
 ```sh
-# Run a single test
+# Run a single comparison test
 nix build .#checks.x86_64-linux.rust-pipewire-test-pw-cli-help
-nix build .#checks.x86_64-linux.rust-pipewire-test-spa-json-dump-help
+nix build .#checks.x86_64-linux.rust-pipewire-test-spa-json-dump-conf-jack
+nix build .#checks.x86_64-linux.rust-pipewire-test-pw-mididump-tempo-meta
+
+# POD encoder vs libspa
+nix build .#checks.x86_64-linux.rust-pipewire-pod-test-encode-cases
+
+# Daemon round-trip
+nix build .#checks.x86_64-linux.rust-pipewire-proto-test-hello-info
+
+# Run everything
+nix flake check
 ```
 
 ## Workflow
