@@ -12674,12 +12674,15 @@ fn parse_dwp_cu_index(data: &[u8], le: bool) -> Vec<(u64, [(u32, u32); 9])> {
         }
         rows.push(entry);
     }
-    // For each row, the INFO column (DW_SECT_INFO=1) gives the CU's offset
-    // in .debug_info.dwo. Map (info_offset → contributions).
-    let info_idx = cols.iter().position(|&c| c == 1);
+    // For each row, the lookup column gives the unit's offset in its data
+    // section. .debug_cu_index uses INFO (1); .debug_tu_index uses TYPES (2).
+    let lookup_col = cols
+        .iter()
+        .position(|&c| c == 1)
+        .or_else(|| cols.iter().position(|&c| c == 2));
     let mut out: Vec<(u64, [(u32, u32); 9])> = Vec::new();
     for (row_idx, row) in rows.iter().enumerate() {
-        let info_off = if let Some(ci) = info_idx {
+        let info_off = if let Some(ci) = lookup_col {
             r32(offset_table_off + (row_idx * n_cols + ci) * 4) as u64
         } else {
             0
@@ -15285,213 +15288,233 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
         Some(path) => format!(" (loaded from {})", path),
         None => String::new(),
     };
-    println!(
-        "Contents of the {} section{}:",
-        info_sect_name, header_suffix
-    );
-    println!();
 
-    let mut p = DwarfReader {
-        buf: &info,
-        pos: 0,
-        le: is_le,
-    };
-
-    while p.pos < p.buf.len() {
-        let cu_start = p.pos;
-        // Initial length
-        let (len, is_64) = match p.read_initial_length() {
-            Some(v) => v,
-            None => return,
-        };
-        let cu_end = p.pos + len as usize;
-        if cu_end > p.buf.len() {
+    // Helper that dumps all units in a section. Called for both
+    // `.debug_info[.dwo]` (CUs) and `.debug_types.dwo` (TUs).
+    let mut first_section = true;
+    let mut dump_units = |sect_name: &str,
+                          sect_data: &[u8],
+                          contribs_map: &[(u64, [(u32, u32); 9])],
+                          is_types_section: bool| {
+        if sect_data.is_empty() {
             return;
         }
-        let header_len_field = if is_64 { 12 } else { 4 };
-        let format_str = if is_64 { "64-bit" } else { "32-bit" };
-
-        let version = match p.read_u16() {
-            Some(v) => v,
-            None => return,
+        // Separate sections with a blank line.
+        if !first_section {
+            println!();
+        }
+        first_section = false;
+        println!("Contents of the {} section{}:", sect_name, header_suffix);
+        println!();
+        let mut p = DwarfReader {
+            buf: sect_data,
+            pos: 0,
+            le: is_le,
         };
-
-        let mut unit_type: Option<u8> = None;
-        let abbrev_off: u64;
-        let addr_size: u8;
-        if version >= 5 {
-            unit_type = p.read_u8();
-            addr_size = p.read_u8().unwrap_or(0);
-            abbrev_off = if is_64 {
-                p.read_u64().unwrap_or(0)
-            } else {
-                p.read_u32().unwrap_or(0) as u64
-            };
-            // Skip dwo_id / type signature / type offset based on unit_type.
-            match unit_type.unwrap_or(0) {
-                4 /* skeleton */ | 5 /* split_compile */ => {
-                    let _ = p.read_u64();
-                }
-                2 /* type */ | 6 /* split_type */ => {
-                    let _ = p.read_u64();
-                    if is_64 { let _ = p.read_u64(); } else { let _ = p.read_u32(); }
-                }
-                _ => {}
-            }
-        } else {
-            abbrev_off = if is_64 {
-                p.read_u64().unwrap_or(0)
-            } else {
-                p.read_u32().unwrap_or(0) as u64
-            };
-            addr_size = p.read_u8().unwrap_or(0);
-        }
-
-        println!("  Compilation Unit @ offset 0x{:x}:", cu_start);
-        println!("   Length:        0x{:x} ({})", len, format_str);
-        println!("   Version:       {}", version);
-        if let Some(ut) = unit_type {
-            let ut_name = match ut {
-                1 => "DW_UT_compile",
-                2 => "DW_UT_type",
-                3 => "DW_UT_partial",
-                4 => "DW_UT_skeleton",
-                5 => "DW_UT_split_compile",
-                6 => "DW_UT_split_type",
-                _ => "DW_UT_<unknown>",
-            };
-            println!("   Unit Type:     {} ({})", ut_name, ut);
-        }
-        // For DWP files the CU-header `abbrev_off` is relative to the CU's
-        // own .debug_abbrev.dwo contribution. We display the CU-header value
-        // as-is (matching GNU) but parse abbrevs at contribution + abbrev_off.
-        let cu_info_off = cu_start as u64;
-        let dwp_contribs = cu_contribs.iter().find(|(o, _)| *o == cu_info_off);
-        let abbrev_contrib_off: u64 = if let Some((_, c)) = dwp_contribs {
-            c[3 /* DW_SECT_ABBREV */].0 as u64
-        } else {
-            0
-        };
-        let real_abbrev_off = abbrev_off + abbrev_contrib_off;
-        println!("   Abbrev Offset: 0x{:x}", abbrev_off);
-        println!("   Pointer Size:  {}", addr_size);
-        // DWP: print Section contributions block for this CU.
-        if let Some((_, contribs)) = dwp_contribs {
-            println!("   Section contributions:");
-            // Display fixed columns: ABBREV(3), LINE(4), LOC(5), STR_OFFSETS(6).
-            let labels = [
-                (3u32, ".debug_abbrev.dwo:       "),
-                (4u32, ".debug_line.dwo:         "),
-                (5u32, ".debug_loc.dwo:          "),
-                (6u32, ".debug_str_offsets.dwo:  "),
-            ];
-            for (sect, label) in &labels {
-                let (off, size) = if (*sect as usize) < contribs.len() {
-                    contribs[*sect as usize]
-                } else {
-                    (0, 0)
-                };
-                let off_s = if off == 0 {
-                    "0".to_string()
-                } else {
-                    format!("0x{:x}", off)
-                };
-                let size_s = if size == 0 {
-                    "0".to_string()
-                } else {
-                    format!("0x{:x}", size)
-                };
-                println!("    {}{}  {}", label, off_s, size_s);
-            }
-        }
-
-        // Parse abbrev table at the absolute abbrev offset (handles DWP).
-        let abbrevs = parse_abbrev_table(&abbrev, real_abbrev_off as usize);
-
-        let mut depth: isize = 0;
-        while p.pos < cu_end {
-            // GNU readelf prints absolute file offsets for DIEs (not CU-relative).
-            let die_off = p.pos;
-            let code = match p.read_uleb128() {
+        while p.pos < p.buf.len() {
+            let cu_start = p.pos;
+            let (len, is_64) = match p.read_initial_length() {
                 Some(v) => v,
-                None => break,
+                None => return,
             };
-            if code == 0 {
-                // Emit a "depth><offset>: Abbrev Number: 0" marker for the
-                // sibling chain terminator (GNU prints the depth BEFORE
-                // decrementing, so children of a compile-unit show as
-                // <1><N>: Abbrev Number: 0).
-                if depth >= 1 {
-                    println!(" <{}><{:x}>: Abbrev Number: 0", depth, die_off);
-                    depth -= 1;
-                }
-                continue;
+            let cu_end = p.pos + len as usize;
+            if cu_end > p.buf.len() {
+                return;
             }
-            let entry = match abbrevs.get(&code) {
-                Some(e) => e,
-                None => {
-                    // Missing abbrev table entries typically happen when abbrevs live in a
-                    // separate debug file (follow-links / debuglink / alt-link). Rather than
-                    // erroring out and truncating the rest of the dump, skip gracefully.
-                    if abbrevs.is_empty() {
+            let header_len_field = if is_64 { 12 } else { 4 };
+            let format_str = if is_64 { "64-bit" } else { "32-bit" };
+            let version = match p.read_u16() {
+                Some(v) => v,
+                None => return,
+            };
+            let mut unit_type: Option<u8> = None;
+            let abbrev_off: u64;
+            let addr_size: u8;
+            // Type unit extras (DWARF 4 .debug_types format): signature + type_offset.
+            let mut type_signature: Option<u64> = None;
+            let mut type_offset: Option<u64> = None;
+            if version >= 5 {
+                unit_type = p.read_u8();
+                addr_size = p.read_u8().unwrap_or(0);
+                abbrev_off = if is_64 {
+                    p.read_u64().unwrap_or(0)
+                } else {
+                    p.read_u32().unwrap_or(0) as u64
+                };
+                match unit_type.unwrap_or(0) {
+                    4 /* skeleton */ | 5 /* split_compile */ => {
+                        let _ = p.read_u64();
+                    }
+                    2 /* type */ | 6 /* split_type */ => {
+                        let _ = p.read_u64();
+                        if is_64 { let _ = p.read_u64(); } else { let _ = p.read_u32(); }
+                    }
+                    _ => {}
+                }
+            } else {
+                abbrev_off = if is_64 {
+                    p.read_u64().unwrap_or(0)
+                } else {
+                    p.read_u32().unwrap_or(0) as u64
+                };
+                addr_size = p.read_u8().unwrap_or(0);
+                if is_types_section {
+                    type_signature = p.read_u64();
+                    type_offset = if is_64 {
+                        p.read_u64()
+                    } else {
+                        p.read_u32().map(|v| v as u64)
+                    };
+                }
+            }
+            println!("  Compilation Unit @ offset 0x{:x}:", cu_start);
+            println!("   Length:        0x{:x} ({})", len, format_str);
+            println!("   Version:       {}", version);
+            if let Some(ut) = unit_type {
+                let ut_name = match ut {
+                    1 => "DW_UT_compile",
+                    2 => "DW_UT_type",
+                    3 => "DW_UT_partial",
+                    4 => "DW_UT_skeleton",
+                    5 => "DW_UT_split_compile",
+                    6 => "DW_UT_split_type",
+                    _ => "DW_UT_<unknown>",
+                };
+                println!("   Unit Type:     {} ({})", ut_name, ut);
+            }
+            let cu_info_off = cu_start as u64;
+            let dwp_contribs = contribs_map.iter().find(|(o, _)| *o == cu_info_off);
+            let abbrev_contrib_off: u64 = if let Some((_, c)) = dwp_contribs {
+                c[3 /* DW_SECT_ABBREV */].0 as u64
+            } else {
+                0
+            };
+            let real_abbrev_off = abbrev_off + abbrev_contrib_off;
+            println!("   Abbrev Offset: 0x{:x}", abbrev_off);
+            println!("   Pointer Size:  {}", addr_size);
+            if let Some(sig) = type_signature {
+                println!("   Signature:     0x{:x}", sig);
+            }
+            if let Some(off) = type_offset {
+                println!("   Type Offset:   0x{:x}", off);
+            }
+            if let Some((_, contribs)) = dwp_contribs {
+                println!("   Section contributions:");
+                let labels = [
+                    (3u32, ".debug_abbrev.dwo:       "),
+                    (4u32, ".debug_line.dwo:         "),
+                    (5u32, ".debug_loc.dwo:          "),
+                    (6u32, ".debug_str_offsets.dwo:  "),
+                ];
+                for (sect, label) in &labels {
+                    let (off, size) = if (*sect as usize) < contribs.len() {
+                        contribs[*sect as usize]
+                    } else {
+                        (0, 0)
+                    };
+                    let off_s = if off == 0 {
+                        "0".to_string()
+                    } else {
+                        format!("0x{:x}", off)
+                    };
+                    let size_s = if size == 0 {
+                        "0".to_string()
+                    } else {
+                        format!("0x{:x}", size)
+                    };
+                    println!("    {}{}  {}", label, off_s, size_s);
+                }
+            }
+            let abbrevs = parse_abbrev_table(&abbrev, real_abbrev_off as usize);
+            let mut depth: isize = 0;
+            while p.pos < cu_end {
+                let die_off = p.pos;
+                let code = match p.read_uleb128() {
+                    Some(v) => v,
+                    None => break,
+                };
+                if code == 0 {
+                    if depth >= 1 {
+                        println!(" <{}><{:x}>: Abbrev Number: 0", depth, die_off);
+                        depth -= 1;
+                    }
+                    continue;
+                }
+                let entry = match abbrevs.get(&code) {
+                    Some(e) => e,
+                    None => {
+                        if abbrevs.is_empty() {
+                            break;
+                        }
+                        eprintln!("readelf: bad abbrev code {code}");
                         break;
                     }
-                    eprintln!("readelf: bad abbrev code {code}");
-                    break;
-                }
-            };
-            let tag_str = dwarf_tag_name(entry.tag);
-            println!(
-                " <{}><{:x}>: Abbrev Number: {} ({})",
-                depth, die_off, code, tag_str
-            );
-
-            for (attr_name, attr_form, implicit_const) in &entry.attrs {
-                let attr_off = p.pos;
-                let value_str = read_and_format_attr(
-                    &mut p,
-                    *attr_form,
-                    *implicit_const,
-                    addr_size,
-                    is_64,
-                    version,
-                    *attr_name,
-                    &debug_str,
-                    &debug_line_str,
-                    &debug_str_offsets,
-                    cu_start,
-                    header_len_field,
-                    &alt_debug_str,
-                    dwp_contribs
-                        .map(|(_, c)| c[6 /* DW_SECT_STR_OFFSETS */].0 as usize)
-                        .unwrap_or(0),
-                    &debug_str_offsets_dwo,
-                    &debug_str_dwo,
-                );
-                let attr_name_str = dwarf_attr_name(*attr_name);
-                // GNU readelf doesn't insert a separator before tab-prefixed
-                // exprloc values nor before its own warning messages (which
-                // begin with "readelf:").
-                let sep = if value_str.starts_with('\t')
-                    || value_str.starts_with("readelf:")
-                {
-                    ""
-                } else {
-                    " "
                 };
+                let tag_str = dwarf_tag_name(entry.tag);
                 println!(
-                    "    <{:x}>   {:<18}:{}{}",
-                    attr_off, attr_name_str, sep, value_str
+                    " <{}><{:x}>: Abbrev Number: {} ({})",
+                    depth, die_off, code, tag_str
                 );
+                for (attr_name, attr_form, implicit_const) in &entry.attrs {
+                    let attr_off = p.pos;
+                    let value_str = read_and_format_attr(
+                        &mut p,
+                        *attr_form,
+                        *implicit_const,
+                        addr_size,
+                        is_64,
+                        version,
+                        *attr_name,
+                        &debug_str,
+                        &debug_line_str,
+                        &debug_str_offsets,
+                        cu_start,
+                        header_len_field,
+                        &alt_debug_str,
+                        dwp_contribs
+                            .map(|(_, c)| c[6 /* DW_SECT_STR_OFFSETS */].0 as usize)
+                            .unwrap_or(0),
+                        &debug_str_offsets_dwo,
+                        &debug_str_dwo,
+                    );
+                    let attr_name_str = dwarf_attr_name(*attr_name);
+                    let sep = if value_str.starts_with('\t')
+                        || value_str.starts_with("readelf:")
+                    {
+                        ""
+                    } else {
+                        " "
+                    };
+                    println!(
+                        "    <{:x}>   {:<18}:{}{}",
+                        attr_off, attr_name_str, sep, value_str
+                    );
+                }
+                if entry.has_children {
+                    depth += 1;
+                }
             }
-
-            if entry.has_children {
-                depth += 1;
-            }
+            p.pos = cu_end;
         }
+    };
 
-        // Position at cu_end in case parsing stopped early.
-        p.pos = cu_end;
+    dump_units(info_sect_name, &info, &cu_contribs, false);
+
+    // For DWP files, also dump `.debug_types.dwo` if present.
+    if info_sect_name == ".debug_info.dwo"
+        && let Some(types_sect) = obj.section_by_name(".debug_types.dwo")
+    {
+        let types_data = read_sect(&types_sect);
+        // Parse `.debug_tu_index` for type-unit Section contributions.
+        let tu_contribs: Vec<(u64, [(u32, u32); 9])> =
+            if let Some(idx_sect) = obj.section_by_name(".debug_tu_index")
+                && let Ok(idx_data) = idx_sect.uncompressed_data()
+            {
+                parse_dwp_cu_index(idx_data.as_ref(), obj.is_little_endian())
+            } else {
+                Vec::new()
+            };
+        dump_units(".debug_types.dwo", &types_data, &tu_contribs, true);
     }
 }
 
@@ -17198,9 +17221,10 @@ fn format_data_attr(attr_name: u64, v: u64) -> String {
     if attr_name == 0x12 {
         return format!("0x{:x}", v);
     }
-    // 0x2131 = DW_AT_GNU_dwo_id, 0x76 = DW_AT_dwo_name (DWARF5 dwo_id 0x77)
-    // GNU readelf prints the 8-byte hash as 0x.{16}.
-    if attr_name == 0x2131 || attr_name == 0x77 {
+    // 0x2131 = DW_AT_GNU_dwo_id, 0x77 = DW_AT_dwo_id (DWARF 5),
+    // 0x210f = DW_AT_GNU_odr_signature, 0x6f = DW_AT_signature.
+    // GNU readelf prints these 8-byte hashes as 0x{:016x}.
+    if attr_name == 0x2131 || attr_name == 0x77 || attr_name == 0x210f || attr_name == 0x6f {
         return format!("0x{:016x}", v);
     }
     // DW_AT_language = 0x13
