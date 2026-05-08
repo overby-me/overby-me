@@ -37,7 +37,7 @@ Key design decisions:
 
 ## Test results
 
-### Custom comparison tests (45/45 passing)
+### Custom comparison tests (48/48 passing)
 
 | Check name | Tool | Status |
 |---|---|---|
@@ -86,6 +86,9 @@ Key design decisions:
 | `readelf-arch-specific` | readelf | ✅ PASS |
 | `readelf-groups` | readelf | ✅ PASS |
 | `objdump-section-filter` | objdump | ✅ PASS |
+| `strings-radix-hex` | strings | ✅ PASS |
+| `cxxfilt-no-strip-leading` | c++filt | ✅ PASS |
+| `readelf-wide` | readelf | ✅ PASS |
 
 ### Upstream DejaGnu tests (286/286 binutils-all + 12/35 x86-64 = 298 passing)
 
@@ -278,6 +281,7 @@ Two layers of testing:
 - [x] readelf `-e`/`--headers` (file + section + program headers) + format polish (+1 custom test, 37→38): wires the multi-section `-e` flag; suppresses the redundant "There are N section headers" line when `-h` is also requested (info already in file header); makes the "R (retain)" Key-to-Flags entry conditional on the file having any SHF_GNU_RETAIN section; emits "There are no program headers in this file." for relocatable files instead of an empty Program Headers table. New test: `readelf-headers-all`.
 - [x] nm `-j`/`--just-symbols` flag and 3 more custom tests (+3 custom tests, 38→41): print only symbol names (no address, type, size). New tests: `nm-just-symbols`, `readelf-notes`, `readelf-relocs`.
 - [x] readelf `-d` empty-file message + 4 custom tests (+4 custom tests, 41→45): when there is no SHT_DYNAMIC section, print "There is no dynamic section in this file." instead of an empty "Dynamic section:" header. New tests: `readelf-dynamic`, `readelf-arch-specific`, `readelf-groups`, `objdump-section-filter`.
+- [x] 3 more custom tests for already-supported flags (+3 custom tests, 45→48): `strings-radix-hex` (`-t x` offset format), `cxxfilt-no-strip-leading` (`-n` keep underscore), `readelf-wide` (`-S -W` wide section headers).
 
 ## Next steps
 

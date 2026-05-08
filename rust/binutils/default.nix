@@ -221,6 +221,18 @@
       }
       {
         tool = "strings";
+        name = "radix-hex";
+      }
+      {
+        tool = "cxxfilt";
+        name = "no-strip-leading";
+      }
+      {
+        tool = "readelf";
+        name = "wide";
+      }
+      {
+        tool = "strings";
         name = "min-length";
       }
       {
