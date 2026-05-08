@@ -11820,20 +11820,62 @@ impl Interpreter {
                 match name.as_str() {
                     "map" if !args.is_empty() => {
                         let block = &args[0];
-                        // If the source is a single `@arr` (or `@$ref`), we
-                        // alias `$_` to each slot and write back after the
-                        // block runs — matching Perl's `$_` aliasing in
-                        // map/grep so `map { $_ *= 2 } @list` mutates @list
-                        // in place.
-                        let (items, alias_target): (Vec<Value>, Option<Expr>) = if args.len() == 2
-                            && matches!(args[1], Expr::ArrayVar(_) | Expr::ArrayDerefVar(_))
+                        // For `map BLOCK @arr` (single ArrayVar source), set
+                        // up `$_` as a `Value::Alias(rc)` of each slot so
+                        // `$_ = X` writes through to the actual slot — and
+                        // crucially, survives `unshift`/`shift`/`splice`
+                        // inside the block (op/array test 189). For other
+                        // shapes (mixed sources, multi-arg), fall back to
+                        // copy semantics with positional writeback.
+                        if args.len() == 2
+                            && let Expr::ArrayVar(name) = &args[1]
                         {
-                            (self.eval_list(&args[1]), Some(args[1].clone()))
-                        } else {
-                            let v: Vec<Value> =
-                                args[1..].iter().flat_map(|a| self.eval_list(a)).collect();
-                            (v, None)
-                        };
+                            let len = self.get_array_len(name);
+                            let mut results = Vec::new();
+                            self.call_context.push(2);
+                            let saved_us = self.get_var("_");
+                            let mut i = 0;
+                            while i < len {
+                                let rc = self.promote_slot_to_alias(name, i);
+                                // Direct slot insert (NOT set_var, which
+                                // write-throughs an existing `$_` Alias
+                                // and would link iter N+1's slot to iter
+                                // N's via the prior Alias). We want to
+                                // *replace* `$_` each iteration with the
+                                // current slot's `Alias`.
+                                if let Some(scope) = self.scopes.last_mut() {
+                                    scope.vars.insert("_".to_string(), Value::Alias(rc));
+                                } else {
+                                    self.globals.vars.insert("_".to_string(), Value::Alias(rc));
+                                }
+                                let block_results = self.eval_list(block);
+                                results.extend(block_results);
+                                // Honor abrupt-flow inside the block:
+                                // `goto`/`die`/`last`/`next`/`return`
+                                // bubble out of the surrounding map.
+                                if self.pending_flow.is_some() {
+                                    break;
+                                }
+                                i += 1;
+                            }
+                            // Restore via direct slot insert too, for the
+                            // same reason as above.
+                            if let Some(scope) = self.scopes.last_mut() {
+                                scope.vars.insert("_".to_string(), saved_us);
+                            } else {
+                                self.globals.vars.insert("_".to_string(), saved_us);
+                            }
+                            self.call_context.pop();
+                            return results;
+                        }
+                        let (items, alias_target): (Vec<Value>, Option<Expr>) =
+                            if args.len() == 2 && matches!(args[1], Expr::ArrayDerefVar(_)) {
+                                (self.eval_list(&args[1]), Some(args[1].clone()))
+                            } else {
+                                let v: Vec<Value> =
+                                    args[1..].iter().flat_map(|a| self.eval_list(a)).collect();
+                                (v, None)
+                            };
                         let mut results = Vec::new();
                         let mut mutated = items.clone();
                         self.call_context.push(2);
@@ -11848,16 +11890,10 @@ impl Interpreter {
                         }
                         self.set_var("_", saved_us);
                         self.call_context.pop();
-                        if let Some(target) = alias_target {
-                            match target {
-                                Expr::ArrayVar(name) => self.set_array(&name, mutated),
-                                Expr::ArrayDerefVar(name) => {
-                                    if let Value::ArrayRef(r) = self.get_var(&name) {
-                                        *r.borrow_mut() = mutated;
-                                    }
-                                }
-                                _ => {}
-                            }
+                        if let Some(Expr::ArrayDerefVar(name)) = alias_target
+                            && let Value::ArrayRef(r) = self.get_var(&name)
+                        {
+                            *r.borrow_mut() = mutated;
                         }
                         results
                     }
