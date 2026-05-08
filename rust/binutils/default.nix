@@ -204,6 +204,22 @@
         name = "just-symbols";
       }
       {
+        tool = "readelf";
+        name = "dynamic";
+      }
+      {
+        tool = "readelf";
+        name = "arch-specific";
+      }
+      {
+        tool = "readelf";
+        name = "groups";
+      }
+      {
+        tool = "objdump";
+        name = "section-filter";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }

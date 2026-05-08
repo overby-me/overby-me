@@ -4004,13 +4004,27 @@ fn readelf_display<'data, Elf: FileHeader>(
     }
 
     if show_dynamic {
-        println!("\nDynamic section:");
-        for sym in elf.dynamic_symbols() {
-            let name = sym.name().unwrap_or("");
-            let value = sym.address();
-            println!("  0x{value:016x} {name}");
+        // Find SHT_DYNAMIC (6) section to know if there's actually a
+        // dynamic section. For relocatable files there usually isn't, in
+        // which case GNU readelf prints a single concise message.
+        let has_dynamic = elf
+            .elf_header()
+            .sections(endian, data)
+            .ok()
+            .map(|secs| secs.iter().any(|s| s.sh_type(endian) == 6))
+            .unwrap_or(false);
+        if !has_dynamic {
+            println!();
+            println!("There is no dynamic section in this file.");
+        } else {
+            println!("\nDynamic section:");
+            for sym in elf.dynamic_symbols() {
+                let name = sym.name().unwrap_or("");
+                let value = sym.address();
+                println!("  0x{value:016x} {name}");
+            }
+            println!();
         }
-        println!();
     }
 
     if show_relocs {
