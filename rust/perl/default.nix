@@ -296,6 +296,10 @@
       }
       {
         category = "op";
+        name = "refstack";
+      }
+      {
+        category = "op";
         name = "repeat";
       }
       {
