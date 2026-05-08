@@ -3,7 +3,14 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
-## Custom-test expansion (77/77 ✅)
+## Custom-test expansion (84/84 ✅)
+
+- nm `--special-syms`/`--no-special-syms` accepted as no-ops (we don't
+  generate synthetic symbols). +7 custom tests (77→84):
+  `nm-format-bsd` (`-B`), `nm-special-syms`, `nm-extern-only-posix`
+  (`-gP`), `nm-undefined-only-posix` (`-uP`),
+  `readelf-notes-with-sections` (`--notes -S`), `readelf-header-notes`
+  (`-nh`), `addr2line-basenames`.
 
 - nm `--no-recurse-limit`/`--recurse-limit` accepted as no-ops
   (demangler-only knob), and c++filt `-s STYLE` / `--format STYLE`

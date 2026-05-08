@@ -1356,6 +1356,7 @@ fn tool_nm(args: &[String]) -> i32 {
             "-D" | "--dynamic" => opts.dynamic = true,
             "-a" | "--debug-syms" => {} // we don't filter debug syms by default
             "--no-recurse-limit" | "--recurse-limit" => {} // demangler-only knob; no-op here
+            "--special-syms" | "--no-special-syms" => {} // no synthetic syms produced; no-op
             "-p" | "--no-sort" => opts.no_sort = true,
             "-n" | "-v" | "--numeric-sort" => opts.numeric_sort = true,
             "-r" | "--reverse-sort" => opts.reverse_sort = true,

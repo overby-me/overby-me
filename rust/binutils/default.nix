@@ -348,6 +348,34 @@
         name = "no-recurse-limit";
       }
       {
+        tool = "nm";
+        name = "format-bsd";
+      }
+      {
+        tool = "nm";
+        name = "special-syms";
+      }
+      {
+        tool = "nm";
+        name = "extern-only-posix";
+      }
+      {
+        tool = "nm";
+        name = "undefined-only-posix";
+      }
+      {
+        tool = "readelf";
+        name = "notes-with-sections";
+      }
+      {
+        tool = "readelf";
+        name = "header-notes";
+      }
+      {
+        tool = "addr2line";
+        name = "basenames";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }
