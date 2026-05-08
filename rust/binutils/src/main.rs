@@ -12625,6 +12625,70 @@ fn elf_decompress_debug_sections(data: &mut Vec<u8>) {
     let _ = (w32, w64);
 }
 
+/// Parse a DWP `.debug_cu_index` section. Returns
+/// `Vec<(info_offset, [(kind, offset, size); 9])>` where `info_offset` is
+/// the CU's offset in `.debug_info.dwo` and the array (indexed by
+/// `DW_SECT_*` 0..=8) has the corresponding contributions.
+fn parse_dwp_cu_index(data: &[u8], le: bool) -> Vec<(u64, [(u32, u32); 9])> {
+    if data.len() < 16 {
+        return Vec::new();
+    }
+    let r32 = |o: usize| -> u32 {
+        let b = [data[o], data[o + 1], data[o + 2], data[o + 3]];
+        if le {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        }
+    };
+    let _version = r32(0);
+    let n_cols = r32(4) as usize;
+    let n_units = r32(8) as usize;
+    let n_slots = r32(12) as usize;
+    if n_cols == 0 || n_units == 0 || n_slots == 0 {
+        return Vec::new();
+    }
+    let hash_table_off = 16usize;
+    let index_table_off = hash_table_off + n_slots * 8;
+    let col_header_off = index_table_off + n_slots * 4;
+    let offset_table_off = col_header_off + n_cols * 4;
+    let size_table_off = offset_table_off + n_units * n_cols * 4;
+    if size_table_off + n_units * n_cols * 4 > data.len() {
+        return Vec::new();
+    }
+    // Read column header (DW_SECT_* values).
+    let mut cols: Vec<u32> = Vec::with_capacity(n_cols);
+    for i in 0..n_cols {
+        cols.push(r32(col_header_off + i * 4));
+    }
+    // Build per-row contributions: offset/size indexed by DW_SECT_*.
+    let mut rows: Vec<[(u32, u32); 9]> = Vec::with_capacity(n_units);
+    for row in 0..n_units {
+        let mut entry: [(u32, u32); 9] = [(0, 0); 9];
+        for (ci, &col) in cols.iter().enumerate() {
+            let off = r32(offset_table_off + (row * n_cols + ci) * 4);
+            let sz = r32(size_table_off + (row * n_cols + ci) * 4);
+            if (col as usize) < entry.len() {
+                entry[col as usize] = (off, sz);
+            }
+        }
+        rows.push(entry);
+    }
+    // For each row, the INFO column (DW_SECT_INFO=1) gives the CU's offset
+    // in .debug_info.dwo. Map (info_offset → contributions).
+    let info_idx = cols.iter().position(|&c| c == 1);
+    let mut out: Vec<(u64, [(u32, u32); 9])> = Vec::new();
+    for (row_idx, row) in rows.iter().enumerate() {
+        let info_off = if let Some(ci) = info_idx {
+            r32(offset_table_off + (row_idx * n_cols + ci) * 4) as u64
+        } else {
+            0
+        };
+        out.push((info_off, *row));
+    }
+    out
+}
+
 fn find_subbytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() || haystack.len() < needle.len() {
         return None;
@@ -15111,6 +15175,18 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
         .section_by_name(".debug_abbrev")
         .or_else(|| obj.section_by_name(".zdebug_abbrev"))
         .or_else(|| obj.section_by_name(".debug_abbrev.dwo"));
+    // For DWP files, parse .debug_cu_index to map each CU's offset in
+    // .debug_info.dwo to its (offset, size) contributions in the other .dwo
+    // sections. Returns Vec<(info_offset, contributions)> where contributions
+    // is `[(section_kind, offset, size); 8]` indexed by DW_SECT_*.
+    let cu_contribs: Vec<(u64, [(u32, u32); 9])> = if info_sect_name == ".debug_info.dwo"
+        && let Some(idx_sect) = obj.section_by_name(".debug_cu_index")
+        && let Ok(idx_data) = idx_sect.uncompressed_data()
+    {
+        parse_dwp_cu_index(idx_data.as_ref(), obj.is_little_endian())
+    } else {
+        Vec::new()
+    };
 
     let is_le = obj.is_little_endian();
 
@@ -15178,6 +15254,18 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
         .unwrap_or_default();
     let debug_str_offsets = obj
         .section_by_name(".debug_str_offsets")
+        .as_ref()
+        .map(read_sect)
+        .unwrap_or_default();
+    // For DWP files: .debug_str_offsets.dwo is per-CU indexed via the
+    // str_offsets contribution; .debug_str.dwo holds the raw strings.
+    let debug_str_offsets_dwo = obj
+        .section_by_name(".debug_str_offsets.dwo")
+        .as_ref()
+        .map(read_sect)
+        .unwrap_or_default();
+    let debug_str_dwo = obj
+        .section_by_name(".debug_str.dwo")
         .as_ref()
         .map(read_sect)
         .unwrap_or_default();
@@ -15274,11 +15362,51 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
             };
             println!("   Unit Type:     {} ({})", ut_name, ut);
         }
+        // For DWP files the CU-header `abbrev_off` is relative to the CU's
+        // own .debug_abbrev.dwo contribution. We display the CU-header value
+        // as-is (matching GNU) but parse abbrevs at contribution + abbrev_off.
+        let cu_info_off = cu_start as u64;
+        let dwp_contribs = cu_contribs.iter().find(|(o, _)| *o == cu_info_off);
+        let abbrev_contrib_off: u64 = if let Some((_, c)) = dwp_contribs {
+            c[3 /* DW_SECT_ABBREV */].0 as u64
+        } else {
+            0
+        };
+        let real_abbrev_off = abbrev_off + abbrev_contrib_off;
         println!("   Abbrev Offset: 0x{:x}", abbrev_off);
         println!("   Pointer Size:  {}", addr_size);
+        // DWP: print Section contributions block for this CU.
+        if let Some((_, contribs)) = dwp_contribs {
+            println!("   Section contributions:");
+            // Display fixed columns: ABBREV(3), LINE(4), LOC(5), STR_OFFSETS(6).
+            let labels = [
+                (3u32, ".debug_abbrev.dwo:       "),
+                (4u32, ".debug_line.dwo:         "),
+                (5u32, ".debug_loc.dwo:          "),
+                (6u32, ".debug_str_offsets.dwo:  "),
+            ];
+            for (sect, label) in &labels {
+                let (off, size) = if (*sect as usize) < contribs.len() {
+                    contribs[*sect as usize]
+                } else {
+                    (0, 0)
+                };
+                let off_s = if off == 0 {
+                    "0".to_string()
+                } else {
+                    format!("0x{:x}", off)
+                };
+                let size_s = if size == 0 {
+                    "0".to_string()
+                } else {
+                    format!("0x{:x}", size)
+                };
+                println!("    {}{}  {}", label, off_s, size_s);
+            }
+        }
 
-        // Parse abbrev table at abbrev_off
-        let abbrevs = parse_abbrev_table(&abbrev, abbrev_off as usize);
+        // Parse abbrev table at the absolute abbrev offset (handles DWP).
+        let abbrevs = parse_abbrev_table(&abbrev, real_abbrev_off as usize);
 
         let mut depth: isize = 0;
         while p.pos < cu_end {
@@ -15334,11 +15462,23 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
                     cu_start,
                     header_len_field,
                     &alt_debug_str,
+                    dwp_contribs
+                        .map(|(_, c)| c[6 /* DW_SECT_STR_OFFSETS */].0 as usize)
+                        .unwrap_or(0),
+                    &debug_str_offsets_dwo,
+                    &debug_str_dwo,
                 );
                 let attr_name_str = dwarf_attr_name(*attr_name);
-                // If value starts with a tab, don't add a leading space — matches GNU
-                // format for DW_FORM_exprloc with leading DW_OP_addrx.
-                let sep = if value_str.starts_with('\t') { "" } else { " " };
+                // GNU readelf doesn't insert a separator before tab-prefixed
+                // exprloc values nor before its own warning messages (which
+                // begin with "readelf:").
+                let sep = if value_str.starts_with('\t')
+                    || value_str.starts_with("readelf:")
+                {
+                    ""
+                } else {
+                    " "
+                };
                 println!(
                     "    <{:x}>   {:<18}:{}{}",
                     attr_off, attr_name_str, sep, value_str
@@ -16498,6 +16638,7 @@ fn parse_abbrev_table(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn read_and_format_attr(
     p: &mut DwarfReader<'_>,
     form: u64,
@@ -16512,6 +16653,9 @@ fn read_and_format_attr(
     _cu_start: usize,
     _hdr_len_field: usize,
     alt_debug_str: &[u8],
+    dwp_str_offsets_base: usize,
+    dwp_str_offsets: &[u8],
+    dwp_str: &[u8],
 ) -> String {
     // DW_FORM_*  values per DWARF spec
     match form {
@@ -16611,6 +16755,7 @@ fn read_and_format_attr(
                 p, f, 0, addr_size, is_64, version, attr_name,
                 debug_str, debug_line_str, _debug_str_offsets, _cu_start, _hdr_len_field,
                 alt_debug_str,
+                dwp_str_offsets_base, dwp_str_offsets, dwp_str,
             )
         }
         0x17 /* sec_offset */ => {
@@ -16699,6 +16844,32 @@ fn read_and_format_attr(
             };
             let s = read_cstr_at(alt_debug_str, off as usize);
             format!("(alt indirect string, offset: 0x{:x}) {}", off, s)
+        }
+        0x1f01 /* DW_FORM_GNU_addr_index */ => {
+            let idx = p.read_uleb128().unwrap_or(0);
+            // Match GNU readelf: emit a warning + indexed display when
+            // .debug_addr is unavailable (typical in DWP/dwo files).
+            format!(
+                "readelf: Warning: Cannot fetch indexed address: the .debug_addr section is missing\n (index: 0x{:x}): 0",
+                idx
+            )
+        }
+        0x1f02 /* DW_FORM_GNU_str_index */ => {
+            let idx = p.read_uleb128().unwrap_or(0) as usize;
+            // Resolve via DWP per-CU str_offsets contribution.
+            let table_off = dwp_str_offsets_base + idx * 4;
+            let str_off = if table_off + 4 <= dwp_str_offsets.len() {
+                let b = &dwp_str_offsets[table_off..table_off + 4];
+                u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize
+            } else {
+                0
+            };
+            let s = read_cstr_at(dwp_str, str_off);
+            if s.is_empty() {
+                format!("(indexed string: 0x{:x})", idx)
+            } else {
+                format!("(indexed string: 0x{:x}): {}", idx, s)
+            }
         }
         _ => format!("<unsupported FORM 0x{:x}>", form),
     }
