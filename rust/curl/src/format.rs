@@ -179,21 +179,87 @@ pub(crate) fn format_write_out(
         json.push_str("\n}");
         result = result.replace("%{header_json}", &json);
     }
-    // %header{NAME} — replace with the value of response header NAME
-    // (case-insensitive). Missing headers expand to the empty string.
+    // %header{NAME[:qualifier[:separator]]} — replace with value(s) of NAME.
+    // Qualifier may be a 1-based index (Nth value), "last", or "all" (joined
+    // with comma or the optional separator). Search the redirect chain plus
+    // the final response (test 764).
     while let Some(start) = result.find("%header{") {
         let after = &result[start + "%header{".len()..];
-        let Some(end_rel) = after.find('}') else {
-            break;
+        // Allow `\}` to escape a literal `}` inside the pattern (test 765).
+        let bytes = after.as_bytes();
+        let mut end_rel = None;
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                i += 2;
+                continue;
+            }
+            if bytes[i] == b'}' {
+                end_rel = Some(i);
+                break;
+            }
+            i += 1;
+        }
+        let Some(end_rel) = end_rel else { break };
+        let raw_pat = &after[..end_rel];
+        let pat: String = {
+            let mut out = String::with_capacity(raw_pat.len());
+            let b = raw_pat.as_bytes();
+            let mut j = 0;
+            while j < b.len() {
+                if b[j] == b'\\' && j + 1 < b.len() {
+                    out.push(b[j + 1] as char);
+                    j += 2;
+                } else {
+                    out.push(b[j] as char);
+                    j += 1;
+                }
+            }
+            out
         };
-        let name = &after[..end_rel].to_lowercase();
-        let value = resp
-            .headers
-            .iter()
-            .find(|(k, _)| k.eq_ignore_ascii_case(name))
-            .map(|(_, v)| v.clone())
-            .unwrap_or_default();
         let pat_end = start + "%header{".len() + end_rel + 1;
+        let mut parts = pat.splitn(3, ':');
+        let name = parts.next().unwrap_or("").to_ascii_lowercase();
+        let qualifier = parts.next().unwrap_or("");
+        let sep = parts.next().unwrap_or(",");
+        let mut all_values: Vec<String> = Vec::new();
+        for slab in [
+            resp.redirect_headers.as_slice(),
+            resp.header_bytes.as_slice(),
+        ] {
+            if let Ok(s) = std::str::from_utf8(slab) {
+                for line in s.split('\n') {
+                    let line = line.trim_end_matches('\r');
+                    if let Some((k, v)) = line.split_once(':')
+                        && k.eq_ignore_ascii_case(&name)
+                    {
+                        all_values.push(v.trim().to_string());
+                    }
+                }
+            }
+        }
+        if all_values.is_empty() {
+            for (k, v) in &resp.headers {
+                if k.eq_ignore_ascii_case(&name) {
+                    all_values.push(v.clone());
+                }
+            }
+        }
+        let value: String = if qualifier.is_empty() {
+            all_values.into_iter().next().unwrap_or_default()
+        } else if qualifier == "last" {
+            all_values.pop().unwrap_or_default()
+        } else if qualifier == "all" {
+            all_values.join(sep)
+        } else if let Ok(n) = qualifier.parse::<usize>() {
+            if n > 0 {
+                all_values.get(n - 1).cloned().unwrap_or_default()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
         result.replace_range(start..pat_end, &value);
     }
     result = result.replace("\\n", "\n");
@@ -251,6 +317,29 @@ fn urlencode_bytes_with_plus(bytes: &[u8]) -> String {
             _ => {
                 out.push_str(&format!("%{b:02X}"));
             }
+        }
+    }
+    out
+}
+
+/// Same as `urlencode_field`, but emits lowercase percent-hex — curl uses
+/// lowercase in `--url-query` output (test 1221) while `--data-urlencode`
+/// (test 1015) keeps uppercase.
+pub(crate) fn urlencode_field_lower(val: &str) -> String {
+    let upper = urlencode_field(val);
+    let mut out = String::with_capacity(upper.len());
+    let bytes = upper.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            out.push('%');
+            for &b in &bytes[i + 1..i + 3] {
+                out.push(b.to_ascii_lowercase() as char);
+            }
+            i += 3;
+        } else {
+            out.push(bytes[i] as char);
+            i += 1;
         }
     }
     out

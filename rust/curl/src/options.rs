@@ -80,6 +80,10 @@ pub struct Options {
     pub(crate) cookie_jar: Option<PathBuf>,
     pub(crate) junk_session_cookies: bool,
     pub(crate) user: Option<String>,
+    /// True when `-u`/`--user` was explicitly passed on the CLI. URL
+    /// userinfo only overrides this on cross-host redirects when the user
+    /// did NOT supply `-u` (test 979 — `-u` always wins).
+    pub(crate) user_from_cli: bool,
     pub(crate) defer_auth: bool,
     pub(crate) connect_timeout: Option<Duration>,
     pub(crate) max_time: Option<Duration>,
@@ -110,6 +114,9 @@ pub struct Options {
     pub(crate) stderr_redirect: Option<PathBuf>,
     pub(crate) proxy: Option<String>,      // -x / --proxy
     pub(crate) proxy_user: Option<String>, // --proxy-user "user:pass"
+    /// `--proxy-anyauth` / `--proxy-digest` / `--proxy-ntlm` /
+    /// `--proxy-negotiate`: defer proxy auth until a 407 challenge.
+    pub(crate) defer_proxy_auth: bool,
     /// 0 = off, 1 = --netrc (required), 2 = --netrc-optional.
     pub(crate) netrc_mode: u8,
     pub(crate) netrc_file: Option<PathBuf>,
@@ -126,10 +133,18 @@ pub struct Options {
     pub(crate) deleted_cookies: Vec<(String, String, String)>, // (domain, path, name) tuples of cookies deleted via Max-Age=0
     pub(crate) progress_bar: bool, // -# / --progress-bar — emit a final fill-bar line on stderr
     pub(crate) skip_existing: bool, // --skip-existing — skip transfer when output file exists
-    pub(crate) no_clobber: bool,    // --no-clobber — write to file.N suffix when output exists
-    pub(crate) raw: bool,           // --raw — disable content decoding
+    pub(crate) no_clobber: bool,   // --no-clobber — write to file.N suffix when output exists
+    pub(crate) raw: bool,          // --raw — disable content decoding
     pub(crate) ignore_content_length: bool, // --ignore-content-length — read until EOF
     pub(crate) max_filesize_str: Option<String>, // raw string for overflow detection
+    /// `--variable name=value` / `name@file` / `%ENV[=default]`. Stored
+    /// in declaration order so later assignments override earlier ones.
+    /// Values are bytes so binary file content survives round-tripping.
+    pub(crate) variables: Vec<(String, Vec<u8>)>,
+    /// `--url-query` items. Each is the already-encoded `name=value` (or
+    /// just `value`) string. They are joined with `&` and appended to the
+    /// URL's query string at request time (test 1221).
+    pub(crate) url_queries: Vec<String>,
     /// Per-URL option snapshots. Index corresponds to `urls` index.
     pub(crate) per_url_opts: Vec<PerUrlOptions>,
 }
@@ -188,6 +203,7 @@ impl Default for Options {
             cookie_jar: None,
             junk_session_cookies: false,
             user: None,
+            user_from_cli: false,
             defer_auth: false,
             connect_timeout: None,
             max_time: None,
@@ -215,6 +231,7 @@ impl Default for Options {
             stderr_redirect: None,
             proxy: None,
             proxy_user: None,
+            defer_proxy_auth: false,
             netrc_mode: 0,
             netrc_file: None,
             proxy_tunnel: false,
@@ -234,6 +251,8 @@ impl Default for Options {
             raw: false,
             ignore_content_length: false,
             max_filesize_str: None,
+            variables: Vec::new(),
+            url_queries: Vec::new(),
             per_url_opts: Vec::new(),
         }
     }

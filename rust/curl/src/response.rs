@@ -36,6 +36,9 @@ pub(crate) struct Response {
     pub(crate) max_redirects_reached: bool,
     /// True if --proto-redir blocked a redirect target scheme; maps to exit 1.
     pub(crate) proto_redir_blocked: bool,
+    /// True if a redirect couldn't be followed because the upload body
+    /// (e.g. stdin) is unrecoverable; maps to exit 25 (test 1073).
+    pub(crate) upload_redirect_failed: bool,
     /// True if a Location: header pointed at a URL we couldn't parse (e.g.
     /// `http:////host`); maps to exit 3 (test 1142).
     pub(crate) redirect_url_malformed: bool,
@@ -103,6 +106,7 @@ pub(crate) fn read_response(
                     num_redirects: 0,
                     max_redirects_reached: false,
                     proto_redir_blocked: false,
+                    upload_redirect_failed: false,
                     redirect_url_malformed: false,
                     weird_server_reply: false,
                     final_url: None,
@@ -132,9 +136,7 @@ pub(crate) fn read_response(
             // first request over a fresh connection. On a reused pool
             // connection it's a weird server reply (test 1479).
             if crate::connection::POOL_REUSED.with(|h| *h.borrow()) {
-                return Err(
-                    "weird_server_reply: HTTP/0.9 over reused connection".to_string(),
-                );
+                return Err("weird_server_reply: HTTP/0.9 over reused connection".to_string());
             }
             if !http09 {
                 return Err("unsupported protocol: HTTP/0.9 disabled".to_string());
@@ -159,6 +161,7 @@ pub(crate) fn read_response(
                 num_redirects: 0,
                 max_redirects_reached: false,
                 proto_redir_blocked: false,
+                upload_redirect_failed: false,
                 redirect_url_malformed: false,
                 weird_server_reply: false,
                 final_url: None,
@@ -301,6 +304,7 @@ pub(crate) fn read_response(
                 num_redirects: 0,
                 max_redirects_reached: false,
                 proto_redir_blocked: false,
+                upload_redirect_failed: false,
                 redirect_url_malformed: false,
                 weird_server_reply: true,
                 final_url: None,
@@ -392,6 +396,7 @@ pub(crate) fn read_response(
                 num_redirects: 0,
                 max_redirects_reached: false,
                 proto_redir_blocked: false,
+                upload_redirect_failed: false,
                 redirect_url_malformed: false,
                 weird_server_reply: true,
                 final_url: None,
@@ -430,6 +435,7 @@ pub(crate) fn read_response(
             num_redirects: 0,
             max_redirects_reached: false,
             proto_redir_blocked: false,
+            upload_redirect_failed: false,
             redirect_url_malformed: false,
             weird_server_reply: false,
             final_url: None,
@@ -458,6 +464,7 @@ pub(crate) fn read_response(
             num_redirects: 0,
             max_redirects_reached: false,
             proto_redir_blocked: false,
+            upload_redirect_failed: false,
             redirect_url_malformed: false,
             weird_server_reply: false,
             final_url: None,
@@ -489,6 +496,7 @@ pub(crate) fn read_response(
             num_redirects: 0,
             max_redirects_reached: false,
             proto_redir_blocked: false,
+            upload_redirect_failed: false,
             redirect_url_malformed: false,
             weird_server_reply: false,
             final_url: None,
@@ -561,6 +569,7 @@ pub(crate) fn read_response(
             num_redirects: 0,
             max_redirects_reached: false,
             proto_redir_blocked: false,
+            upload_redirect_failed: false,
             redirect_url_malformed: false,
             weird_server_reply: false,
             final_url: None,
@@ -594,6 +603,7 @@ pub(crate) fn read_response(
             num_redirects: 0,
             max_redirects_reached: false,
             proto_redir_blocked: false,
+            upload_redirect_failed: false,
             redirect_url_malformed: false,
             weird_server_reply: false,
             final_url: None,
@@ -624,6 +634,7 @@ pub(crate) fn read_response(
             num_redirects: 0,
             max_redirects_reached: false,
             proto_redir_blocked: false,
+            upload_redirect_failed: false,
             redirect_url_malformed: false,
             weird_server_reply: false,
             final_url: None,
@@ -677,6 +688,7 @@ pub(crate) fn read_response(
             num_redirects: 0,
             max_redirects_reached: false,
             proto_redir_blocked: false,
+            upload_redirect_failed: false,
             redirect_url_malformed: false,
             weird_server_reply: true,
             final_url: None,
@@ -757,6 +769,7 @@ pub(crate) fn read_response(
             num_redirects: 0,
             max_redirects_reached: false,
             proto_redir_blocked: false,
+            upload_redirect_failed: false,
             redirect_url_malformed: false,
             weird_server_reply: true,
             final_url: None,
@@ -808,6 +821,7 @@ pub(crate) fn read_response(
             num_redirects: 0,
             max_redirects_reached: false,
             proto_redir_blocked: false,
+            upload_redirect_failed: false,
             redirect_url_malformed: false,
             weird_server_reply: true,
             final_url: None,
@@ -828,11 +842,12 @@ pub(crate) fn read_response(
         cl_entry.and_then(|(_, v)| v.parse().ok())
     };
 
-    // --max-filesize: check Content-Length against the limit before reading the body.
-    // If the raw max-filesize string didn't parse as u64 (overflow), treat as exceeded.
-    // If Content-Length (as u64) exceeds the limit, also treat as exceeded.
-    // If cl_all_digits is true but it didn't parse as usize, it's a huge number — also exceeded.
-    if max_filesize.is_some() || max_filesize_overflow {
+    // --max-filesize: check Content-Length against the limit before reading
+    // the body. Doesn't apply to redirect (3xx) responses — the limit is
+    // about the eventual transferred file size, and redirect bodies are
+    // discarded (test 477).
+    let is_redirect = (300..400).contains(&status);
+    if (max_filesize.is_some() || max_filesize_overflow) && !is_redirect {
         let cl_as_u64: Option<u64> = cl_entry.and_then(|(_, v)| v.parse().ok());
         let exceeded = if max_filesize_overflow {
             // The max-filesize value itself overflowed — but if there's a Content-Length
@@ -870,6 +885,7 @@ pub(crate) fn read_response(
                 num_redirects: 0,
                 max_redirects_reached: false,
                 proto_redir_blocked: false,
+                upload_redirect_failed: false,
                 redirect_url_malformed: false,
                 weird_server_reply: false,
                 final_url: None,
@@ -1052,6 +1068,7 @@ pub(crate) fn read_response(
         num_redirects: 0,
         max_redirects_reached: false,
         proto_redir_blocked: false,
+        upload_redirect_failed: false,
         redirect_url_malformed: false,
         weird_server_reply: false,
         final_url: None,

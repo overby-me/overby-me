@@ -284,9 +284,17 @@ pub(crate) fn parse_args() -> Options {
     }
 
     let mut has_url = false;
+    // True once a -K config file has been opened. We tolerate a leading
+    // `--next` only when it came from a config file (test 430); a leading
+    // `--next` on the bare command line is an error (test 422).
+    let mut loaded_config = false;
     // Track the start index of the current --next group so we can snapshot
     // per-URL options at group boundaries rather than at URL-add time.
     let mut group_start_idx: usize = 0;
+    // Per-group list of -T values, assigned in order to URLs in the group:
+    // group_uploads[i] is used for the i-th URL in the group; remaining URLs
+    // fall through to GET (tests 1052, 1065, 1131).
+    let mut group_uploads: Vec<PathBuf> = Vec::new();
     // Set after `--next` is seen; cleared by the next URL arg. If still set
     // at end of parsing, we error out — `--next` requires a URL after it
     // (test 686).
@@ -346,7 +354,7 @@ pub(crate) fn parse_args() -> Options {
             "-V" | "--version" => {
                 println!("curl 8.0.0 (rust-curl) libcurl/8.0.0 rustls/0.23");
                 println!("Protocols: file http https");
-                println!("Features: HTTPS IPv6 SSL libz");
+                println!("Features: HTTPS IPv6 Largefile SSL libz");
                 process::exit(0);
             }
             "-X" | "--request" => {
@@ -388,6 +396,90 @@ pub(crate) fn parse_args() -> Options {
                 let val = next_arg(&args, i, "--data-urlencode");
                 let encoded = urlencode_field(&val);
                 append_data(&mut opts, &encoded, true);
+            }
+            "--url-query" => {
+                i += 1;
+                let val = next_arg(&args, i, "--url-query");
+                // `+raw` prefix uses the value verbatim (no encoding).
+                // Otherwise behave like --data-urlencode but with lowercase
+                // percent-hex (test 1221 — `--url-query` differs from
+                // `--data-urlencode` in this one detail).
+                let item = if let Some(raw) = val.strip_prefix('+') {
+                    raw.to_string()
+                } else {
+                    crate::format::urlencode_field_lower(&val)
+                };
+                opts.url_queries.push(item);
+            }
+            "--variable" => {
+                i += 1;
+                let val = next_arg(&args, i, "--variable");
+                if let Err(e) = crate::variables::parse_variable(&val, &mut opts.variables) {
+                    eprintln!("curl: --variable: {e}");
+                    process::exit(2);
+                }
+            }
+            "--expand-data" => {
+                i += 1;
+                let val = next_arg(&args, i, "--expand-data");
+                if let Err(e) = crate::variables::validate(val.as_bytes()) {
+                    eprintln!("curl: --expand-data: {e}");
+                    process::exit(2);
+                }
+                let expanded = crate::variables::expand(val.as_bytes(), &opts.variables);
+                // Null bytes in the expansion are rejected (test 453, 456).
+                if expanded.contains(&0u8) {
+                    eprintln!("curl: --expand-data: null byte in expansion");
+                    process::exit(2);
+                }
+                append_data_raw_bytes(&mut opts, &expanded);
+            }
+            "--expand-url" => {
+                i += 1;
+                let val = next_arg(&args, i, "--expand-url");
+                if let Err(e) = crate::variables::validate(val.as_bytes()) {
+                    eprintln!("curl: --expand-url: {e}");
+                    process::exit(2);
+                }
+                let expanded = crate::variables::expand(val.as_bytes(), &opts.variables);
+                let url_str = String::from_utf8_lossy(&expanded).into_owned();
+                opts.urls.push(url_str);
+                has_url = true;
+                expecting_url_after_next = false;
+            }
+            "--expand-data-urlencode" => {
+                i += 1;
+                let val = next_arg(&args, i, "--expand-data-urlencode");
+                if let Err(e) = crate::variables::validate(val.as_bytes()) {
+                    eprintln!("curl: --expand-data-urlencode: {e}");
+                    process::exit(2);
+                }
+                let expanded = crate::variables::expand(val.as_bytes(), &opts.variables);
+                let s = String::from_utf8_lossy(&expanded).into_owned();
+                let encoded = urlencode_field(&s);
+                append_data(&mut opts, &encoded, true);
+            }
+            "--expand-header" => {
+                i += 1;
+                let val = next_arg(&args, i, "--expand-header");
+                if let Err(e) = crate::variables::validate(val.as_bytes()) {
+                    eprintln!("curl: --expand-header: {e}");
+                    process::exit(2);
+                }
+                let expanded = crate::variables::expand(val.as_bytes(), &opts.variables);
+                let s = String::from_utf8_lossy(&expanded).into_owned();
+                parse_header_arg(&mut opts, &s);
+            }
+            "--expand-output" => {
+                i += 1;
+                let val = next_arg(&args, i, "--expand-output");
+                if let Err(e) = crate::variables::validate(val.as_bytes()) {
+                    eprintln!("curl: --expand-output: {e}");
+                    process::exit(2);
+                }
+                let expanded = crate::variables::expand(val.as_bytes(), &opts.variables);
+                let s = String::from_utf8_lossy(&expanded).into_owned();
+                opts.outputs.push(PathBuf::from(s));
             }
             "-F" | "--form" => {
                 i += 1;
@@ -524,6 +616,7 @@ pub(crate) fn parse_args() -> Options {
             "-u" | "--user" => {
                 i += 1;
                 opts.user = Some(next_arg(&args, i, "-u"));
+                opts.user_from_cli = true;
             }
             "--connect-timeout" => {
                 i += 1;
@@ -610,7 +703,9 @@ pub(crate) fn parse_args() -> Options {
             }
             "-T" | "--upload-file" => {
                 i += 1;
-                opts.upload_file = Some(PathBuf::from(next_arg(&args, i, "-T")));
+                let path = PathBuf::from(next_arg(&args, i, "-T"));
+                group_uploads.push(path.clone());
+                opts.upload_file = Some(path);
             }
             "--http1.0" | "-0" => {
                 opts.http_version = Some("1.0".into());
@@ -728,16 +823,29 @@ pub(crate) fn parse_args() -> Options {
                 // We don't have a progress meter anyway
             }
             "--interface" => {
-                // We can't bind to a specific interface (we use std::net
-                // sockets, no socket2). Accept and validate the argument
-                // form so harmless localhost cases pass (test 1082) and
-                // known-bad ones don't silently succeed.
                 i += 1;
                 let val = next_arg(&args, i, "--interface");
-                // For an explicit ip!HOST form, take only the bind-host part.
-                // We don't actually bind, just preserve the option for later
-                // failure detection if needed.
-                let _ = val;
+                // Accept curl's "ip!HOST", "if!NAME", "host!NAME" prefixes;
+                // validate just the bind target.
+                let target = match val.split_once('!') {
+                    Some((_, rest)) => rest.to_string(),
+                    None => val.clone(),
+                };
+                let trimmed = target.trim_start_matches('[').trim_end_matches(']');
+                let is_ip = trimmed.parse::<std::net::IpAddr>().is_ok();
+                let is_iface = !trimmed.is_empty()
+                    && !trimmed.contains('/')
+                    && std::path::Path::new(&format!("/sys/class/net/{trimmed}")).exists();
+                let resolves = !is_ip
+                    && !is_iface
+                    && std::net::ToSocketAddrs::to_socket_addrs(&(trimmed, 0u16))
+                        .ok()
+                        .and_then(|mut a| a.next())
+                        .is_some();
+                if !is_ip && !is_iface && !resolves {
+                    eprintln!("curl: (45) Couldn't bind to '{target}'");
+                    process::exit(45);
+                }
             }
             "--progress-bar" => {
                 opts.progress_bar = true;
@@ -880,24 +988,23 @@ pub(crate) fn parse_args() -> Options {
             "--connect-to" => {
                 i += 1;
                 let val = next_arg(&args, i, "--connect-to");
-                // Bracketed IPv6 host (e.g. `[::1]`) is unsupported in this
-                // build — exit 4 (CURLE_NOT_BUILT_IN) before parsing further
-                // (test 1454).
-                if val.contains('[') {
-                    eprintln!("curl: (4) IPv6 not supported");
-                    process::exit(4);
-                }
                 // Format: `HOST1:PORT1:HOST2:PORT2`. Empty PORT1/PORT2 are
                 // wildcards but if non-empty must be numeric (test 3020).
-                let parts: Vec<&str> = val.splitn(4, ':').collect();
+                // Bracketed IPv6 literals (`[::1]`) are now accepted (test
+                // 2053). The bracket-aware parser lives in connection.rs.
+                let Some(parts) = crate::connection::split_connect_to_for_validation(&val) else {
+                    eprintln!("curl: (49) Invalid syntax for --connect-to: '{val}'");
+                    process::exit(49);
+                };
                 let bad_port = |s: &str| !s.is_empty() && s.parse::<u16>().is_err();
-                if parts.len() != 4 || bad_port(parts[1]) || bad_port(parts[3]) {
+                if bad_port(&parts[1]) || bad_port(&parts[3]) {
                     eprintln!("curl: (49) Invalid syntax for --connect-to: '{val}'");
                     process::exit(49);
                 }
                 opts.connect_tos.push(val);
             }
             "-K" | "--config" => {
+                loaded_config = true;
                 i += 1;
                 let path = next_arg(&args, i, "-K");
                 // Detect direct or indirect config-file recursion. Use the
@@ -922,7 +1029,14 @@ pub(crate) fn parse_args() -> Options {
             "-x" | "--proxy" => {
                 i += 1;
                 let val = next_arg(&args, i, "-x");
-                opts.proxy = Some(val);
+                // Empty `--proxy ""` means "no proxy", overriding env vars
+                // (test 1004).
+                if val.is_empty() {
+                    opts.proxy = None;
+                    opts.noproxy = Some("*".to_string());
+                } else {
+                    opts.proxy = Some(val);
+                }
             }
             "-U" | "--proxy-user" => {
                 i += 1;
@@ -984,6 +1098,16 @@ pub(crate) fn parse_args() -> Options {
                 // curl waits for a 401 challenge before sending credentials. For
                 // servers that don't challenge, the first request has no auth.
                 opts.defer_auth = true;
+            }
+            "--proxy-anyauth" | "--proxy-digest" | "--proxy-ntlm" | "--proxy-negotiate" => {
+                // We don't implement proxy challenge/response auth. With these
+                // flags, curl waits for a 407 challenge before sending the
+                // Proxy-Authorization. We approximate by deferring proxy auth
+                // similarly (test 1331).
+                opts.defer_proxy_auth = true;
+            }
+            "--proxy-basic" => {
+                // Default is already Basic; no-op.
             }
             "--netrc-optional" => {
                 opts.netrc_mode = 2;
@@ -1050,12 +1174,21 @@ pub(crate) fn parse_args() -> Options {
             }
             "--next" | "-:" => {
                 if !has_url {
-                    // --next before any URL is silently tolerated (test 430:
-                    // -K config files that lead with `--next` get spliced in
-                    // and curl skips the boundary marker if no URL has been
-                    // collected yet). Test 686 still exits 2 because --next
-                    // at the very END (with no URL after) is caught by the
-                    // end-of-parse `expecting_url_after_next` check.
+                    // --next before any URL is tolerated only when at least
+                    // one config file has been loaded — config files that
+                    // lead with `--next` get spliced in and curl skips the
+                    // boundary marker (test 430). On the bare command line
+                    // this is a usage error (test 422). Test 686 covers the
+                    // related case of `--next` at the very end with no URL
+                    // after, caught by `expecting_url_after_next`.
+                    if !loaded_config {
+                        eprintln!("curl: missing URL before --next");
+                        eprintln!("curl: option --next: is badly used here");
+                        eprintln!(
+                            "curl: try 'curl --help' or 'curl --manual' for more information"
+                        );
+                        process::exit(2);
+                    }
                     expecting_url_after_next = true;
                     i += 1;
                     continue;
@@ -1067,14 +1200,15 @@ pub(crate) fn parse_args() -> Options {
                 for k in group_start_idx..opts.urls.len() {
                     let mut s = snap.clone();
                     s.first_in_group = k == group_start_idx;
-                    // -T consumes by the first URL only; later URLs in the
-                    // same group fall back to GET (test 1065).
-                    if !s.first_in_group {
-                        s.upload_file = None;
-                    }
+                    // -T values are paired with URLs in order. Extra URLs
+                    // beyond the -T count fall through to GET (tests 1052,
+                    // 1065, 1131).
+                    let in_group = k - group_start_idx;
+                    s.upload_file = group_uploads.get(in_group).cloned();
                     opts.per_url_opts.push(s);
                 }
                 group_start_idx = opts.urls.len();
+                group_uploads.clear();
                 // Reset per-URL options to defaults
                 opts.data = None;
                 opts.data_raw = false;
@@ -1156,7 +1290,11 @@ pub(crate) fn parse_args() -> Options {
                                 'D' => opts.dump_header = Some(PathBuf::from(val)),
                                 'w' => opts.write_out = Some(val),
                                 'r' => opts.range = Some(val),
-                                'T' => opts.upload_file = Some(PathBuf::from(val)),
+                                'T' => {
+                                    let path = PathBuf::from(val);
+                                    group_uploads.push(path.clone());
+                                    opts.upload_file = Some(path);
+                                }
                                 'm' => {
                                     let secs: f64 = val.parse().unwrap_or(0.0);
                                     opts.max_time = Some(Duration::from_secs_f64(secs));
@@ -1229,12 +1367,12 @@ pub(crate) fn parse_args() -> Options {
                                 for k in group_start_idx..opts.urls.len() {
                                     let mut s = snap.clone();
                                     s.first_in_group = k == group_start_idx;
-                                    if !s.first_in_group {
-                                        s.upload_file = None;
-                                    }
+                                    let in_group = k - group_start_idx;
+                                    s.upload_file = group_uploads.get(in_group).cloned();
                                     opts.per_url_opts.push(s);
                                 }
                                 group_start_idx = opts.urls.len();
+                                group_uploads.clear();
                                 opts.data = None;
                                 opts.data_raw = false;
                                 opts.headers.clear();
@@ -1289,9 +1427,8 @@ pub(crate) fn parse_args() -> Options {
         for k in group_start_idx..opts.urls.len() {
             let mut s = snap.clone();
             s.first_in_group = k == group_start_idx;
-            if !s.first_in_group {
-                s.upload_file = None;
-            }
+            let in_group = k - group_start_idx;
+            s.upload_file = group_uploads.get(in_group).cloned();
             opts.per_url_opts.push(s);
         }
     }
@@ -1469,6 +1606,18 @@ fn append_data(opts: &mut Options, val: &str, raw: bool) {
         }
         None => {
             opts.data = Some(data);
+        }
+    }
+}
+
+fn append_data_raw_bytes(opts: &mut Options, data: &[u8]) {
+    match opts.data {
+        Some(ref mut existing) => {
+            existing.push(b'&');
+            existing.extend_from_slice(data);
+        }
+        None => {
+            opts.data = Some(data.to_vec());
         }
     }
 }
@@ -2094,6 +2243,12 @@ fn known_long_option(name: &str) -> bool {
             | "--tls13-ciphers"
             | "--curves"
             | "--variable"
+            | "--expand-data"
+            | "--expand-url"
+            | "--expand-data-urlencode"
+            | "--expand-header"
+            | "--expand-output"
+            | "--url-query"
             | "--expect100-timeout"
             | "--ftp-pasv"
             | "--ftp-port"

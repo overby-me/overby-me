@@ -169,6 +169,20 @@ pub struct ParsedUrl {
 }
 
 pub fn parse_url(raw: &str) -> Result<ParsedUrl, String> {
+    // Reject literal spaces in the URL outside of the path component when
+    // the URL has a scheme — curl exits 3 (CURLE_URL_MALFORMAT) for these
+    // (test 1469). Schemeless URLs (no `://` and no `:/`) are still allowed
+    // through so the path-only form keeps working for downstream callers.
+    if raw.contains(' ')
+        && let Some(colon_slash) = raw.find(':')
+        && raw[colon_slash..].starts_with(":/")
+    {
+        // Spaces in the authority/scheme/query are malformed.
+        let path_start = raw.find('/').unwrap_or(raw.len());
+        if raw[..path_start].contains(' ') || raw[path_start..].contains(' ') {
+            return Err(format!("malformed URL: {raw}"));
+        }
+    }
     // Recognize a scheme prefix only at the start (not "://" embedded in a query).
     // Also accept single-slash form like "http:/host/..." (curl normalizes to "://").
     let has_scheme = raw
@@ -318,6 +332,22 @@ pub fn parse_url(raw: &str) -> Result<ParsedUrl, String> {
         raw: url,
         userinfo,
     })
+}
+
+/// Strip an IPv6 zone/scope ID from a bare host. Accepts both the raw
+/// `%scope` and percent-encoded `%25scope` forms used in URLs. Non-IPv6
+/// hosts (no `:`) are returned unchanged.
+pub(crate) fn strip_ipv6_scope(host: &str) -> String {
+    if !host.contains(':') {
+        return host.to_string();
+    }
+    if let Some(i) = host.find("%25") {
+        return host[..i].to_string();
+    }
+    if let Some(i) = host.find('%') {
+        return host[..i].to_string();
+    }
+    host.to_string()
 }
 
 pub(crate) fn percent_decode(s: &str) -> String {

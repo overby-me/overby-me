@@ -6,11 +6,12 @@ Use the upstream [curl test suite](https://github.com/curl/curl/tree/master/test
 
 ## Current Status
 
-**678 tests passing** across the curl 8.19.0 test suite (verified with strict
+**717 tests passing** across the curl 8.19.0 test suite (verified with strict
 runner checks — the derivation fails when a test number doesn't exist or the
 suite reports anything other than 100% OK).
 
-Passing: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 66, 71, 73, 74, 75, 77, 78, 80, 82, 83, 84, 85, 86, 87, 92, 93, 94, 95, 97, 98, 129, 151, 152, 156, 157, 158, 160, 163, 164, 166, 171, 172, 173, 174, 178, 179, 180, 181, 183, 184, 185, 186, 187, 188, 189, 192, 193, 194, 197, 198, 199, 207, 214, 218, 219, 220, 221, 222, 224, 230, 232, 233, 234, 249, 256, 260, 262, 264, 266, 269, 274, 276, 278, 279, 281, 282, 292, 293, 300, 301, 302, 303, 304, 305, 306, 309, 310, 317, 318, 319, 325, 326, 327, 328, 329, 330, 331, 333, 334, 339, 341, 342, 343, 344, 345, 346, 347, 349, 357, 360, 361, 364, 365, 366, 367, 368, 370, 371, 372, 373, 374, 376, 378, 379, 383, 384, 385, 386, 387, 389, 391, 392, 393, 394, 395, 398, 399, 410, 411, 415, 418, 419, 420, 421, 422, 425, 426, 434, 443, 444, 449, 452, 453, 454, 456, 460, 461, 462, 463, 467, 468, 469, 470, 473, 477, 481, 482, 484, 485, 497, 498, 499, 518, 537, 662, 663, 675, 678, 681, 686, 690, 691, 692, 693, 697, 708, 722, 723, 724, 743, 746, 747, 752, 759, 767, 768, 769, 770, 771, 772, 773, 787, 794, 796, 797, 798, 898, 899, 977, 978, 979, 990, 991, 994, 995, 996, 998, 999, 1004, 1011, 1012, 1015, 1024, 1025, 1027, 1029, 1031, 1032, 1033, 1040, 1041, 1042, 1043, 1051, 1052, 1053, 1054, 1058, 1064, 1068, 1069, 1070, 1076, 1080, 1081, 1089, 1090, 1101, 1104, 1105, 1109, 1110, 1111, 1115, 1116, 1117, 1118, 1121, 1122, 1123, 1124, 1125, 1126, 1127, 1128, 1129, 1130, 1131, 1138, 1141, 1143, 1144, 1147, 1150, 1151, 1155, 1157, 1159, 1160, 1161, 1164, 1166, 1168, 1169, 1170, 1172, 1174, 1175, 1176, 1178, 1179, 1180, 1181, 1182, 1183, 1184, 1188, 1197, 1200, 1201, 1202, 1205, 1210, 1213, 1214, 1216, 1218, 1223, 1228, 1231, 1232, 1234, 1235, 1236, 1237, 1240, 1241, 1246, 1247, 1248, 1249, 1251, 1252, 1253, 1254, 1255, 1256, 1257, 1258, 1259, 1260, 1261, 1263, 1264, 1266, 1267, 1268, 1269, 1270, 1271, 1272, 1273, 1274, 1275, 1276, 1278, 1280, 1281, 1283, 1289, 1290, 1291, 1292, 1296, 1297, 1298, 1299, 1300, 1302, 1303, 1304, 1305, 1306, 1309, 1310, 1311, 1312, 1313, 1314, 1317, 1318, 1322, 1323, 1325, 1332, 1333, 1334, 1335, 1336, 1337, 1338, 1339, 1340, 1341, 1342, 1343, 1344, 1345, 1346, 1347, 1364, 1365, 1366, 1367, 1368, 1369, 1370, 1371, 1372, 1373, 1374, 1375, 1376, 1377, 1395, 1396, 1397, 1398, 1399, 1409, 1410, 1411, 1413, 1416, 1417, 1424, 1427, 1429, 1430, 1431, 1432, 1433, 1434, 1438, 1439, 1443, 1457, 1462, 1466, 1471, 1472, 1473, 1474, 1475, 1480, 1483, 1484, 1487, 1489, 1493, 1494, 1495, 1496, 1497, 1524, 1544, 1546, 1563, 1584, 1585, 1601, 1602, 1603, 1605, 1606, 1607, 1608, 1609, 1610, 1611, 1612, 1613, 1614, 1615, 1616, 1620, 1635, 1636, 1650, 1651, 1652, 1653, 1655, 1656, 1657, 1658, 1661, 1663, 1664, 1665, 1670, 1671, 1680, 1681, 1682, 1683, 1709, 1909, 1979, 1980, 2075, 2080, 2088
+The full list is in `default.nix` under `testNums`; see the per-fix bullets
+in "Phase 7" below for what each addition unlocks.
 
 Test infrastructure is operational: `testsuite.nix` builds curl's C test servers from `pkgs.curl.src`, then runs `runtests.pl -c` against `rust-curl-dev`. The runner exits 0 for non-existent test numbers and for skipped tests, so `testsuite.nix` also greps the output for `No existing test cases were specified`, `TESTFAIL`, and `No tests were performed`, and requires `reported OK: 100%` — this prevents false positives in the curated list.
 
@@ -348,15 +349,54 @@ Current gaps:
 - [x] Redirect to any `scheme://` (e.g. `gopher://`) is treated as absolute URL (unlocked test 1563)
 - [x] `-C wrong` (non-numeric continue-at offset) exits 2 (unlocked test 1409)
 - [x] Explicit `-o` overrides `-J` Content-Disposition / `-O` URL-derived name (unlocked tests 1368, 1369, 1370, 1371)
-- [ ] Target 600+ passing by addressing remaining feature gaps
+- [x] file:// open-ended `-r N-` past EOF exits 36 (unlocked test 1063)
+- [x] file:// `--remote-time` mirrors source mtime onto the output file (unlocked test 1445)
+- [x] file:// failed open still emits `--write-out` (synthetic Response when URL parses; raw text otherwise) — unlocked tests 1440, 1441, 1442
+- [x] HTTP `-C N` with any non-206 (e.g. 404) drops the body with exit 33 — unlocked test 99
+- [x] SOCKS proxy URL parsing (`socks4://`, `socks4a://`, `socks5://`, `socks5h://`) — TCP-connect to proxy succeeds/fails before SOCKS handshake; non-listening proxy → exit 7 (unlocked tests 704, 705)
+- [x] `-T` attaches per-URL: `-T f1 URL1 -T f2 URL2` puts each URL with its own file; one `-T` with two URLs leaves the second as GET (regression-fix for 1131 alongside 1052/1065)
+- [x] Bare-cmdline leading `--next` exits 2 with "missing URL before --next" — only config-file leading `--next` is tolerated (regression-fix for test 422 alongside 430)
+- [x] HTTPS expired-cookie eviction across redirects (unlocked test 1562)
+- [x] curl `-V` includes `Largefile` feature
+- [x] Verbose log "Ignoring Content-Length/Transfer-Encoding in CONNECT 2xx response" when proxy CONNECT replies with framing headers (unlocked test 1287)
+- [x] Discovery sweep across 200-3300 ranges; standalone unit-test cases (`bufq`, `dynhds`, `http1 parser`, `curl_get_line`, `cipher suite name lookup`, `uint_bset`, `uint_spbset`, `struct size checks`, `ratelimit`) added to the passing list (unlocked tests 2601, 2602, 2603, 3200, 3205, 3211, 3212, 3213, 3214, 3216)
+- [x] HTTPS localhost cert with first-subaltname (CN mismatch) — already passing under our chain (unlocked test 3000)
+- [x] **Hit 700/700 passing milestone**
+- [x] `--variable name=value`, `name@file`, `%ENV[=default]` / `%ENV@file` declaration; `--expand-data`, `--expand-url`, `--expand-data-urlencode`, `--expand-header`, `--expand-output` placeholder substitution; `{{name:func}}` filter chain (`trim`, `json`, `url`, `b64`, `64dec`); name-length cap (<128) keeps oversized placeholders literal; unknown names expand to empty (test 448) (unlocked tests 268, 428, 429, 448, 450, 451, 455, 458, 487)
+- [x] `--variable name[N-M]@file` / `name[N-]@file` / `name[N-M]=value` byte-range slicing (unlocked tests 784, 785, 786, 788, 789, 790, 791)
+- [x] `--url-query` builds query strings (`name=val`, `name@file`, `@file`, `+rawvalue`) with lowercase-hex percent-encoding to match curl's `--url-query` output (`--data-urlencode` keeps uppercase, test 1015) (unlocked test 1221)
+- [x] Multipart custom Content-Type: defer user-supplied `Content-Type:` until after `Content-Length:`, append `; boundary=…`, canonicalize header name to `Content-Type` (unlocked test 669)
+- [x] `--proxy-anyauth` / `--proxy-digest` / `--proxy-ntlm` / `--proxy-negotiate`: skip Proxy-Authorization on first request, retry with Basic on 407 + Proxy-Authenticate: Basic; absorb Set-Cookie from the 407 response into the cookie engine BEFORE the retry so the second request carries the cookie (unlocked test 1331)
+- [x] `--connect-to` through an HTTP proxy auto-engages CONNECT tunnel mode; CONNECT target is the connect-to host; the inner request through the tunnel uses the relative path and skips Proxy-Connection (unlocked test 2050)
+- [x] `--connect-to` accepts bracketed IPv6 literals (`[fc00::1]:8082:HOST:PORT`), with a colon-aware splitter that doesn't mistake IPv6 colons for field separators (unlocked test 2053; removed test 1454 which is `!IPv6` so it's framework-skipped on our build)
+- [x] Failed CONNECT response routes to `-o` output file when one is set (test 749)
+- [x] CONNECT response with first line not `HTTP/` exits 43 ("Invalid response header") (test 750)
+- [x] `--expand-*` validates filter function names at parse time and exits 2 on unknown filter (unlocked tests 452, 454)
+- [x] **List hygiene**: re-audited the `testNums` curated list against actual build outcomes; dropped 22 entries that had been silently failing (skipped due to advertised-feature mismatch, broken on-the-wire reuse semantics, broken null-byte handling, etc.) — `testNums` now reflects only tests that actually report 100% OK on every build
+- [x] Stale-pool retry: when a reused TCP connection fails to deliver a response (server closed it between requests, e.g. the test framework's `swsclose` directive), drop the bad pool entry and retry once with a fresh connection (recovers tests 4, 160, 257, 327, 675 in the 700 baseline)
+- [x] `--max-filesize` no longer rejects intermediate redirect (3xx) responses — the limit applies to the eventual transferred file (unlocked test 477)
+- [x] `-x ""` / `--proxy ""` (empty string) means "no proxy" and overrides `http_proxy` / `HTTPS_PROXY` env vars (unlocked test 1004)
+- [x] `-C` with a 416 response is "already fully downloaded", not a range refusal — exit 0 instead of 33 (unlocked test 1040)
+- [x] Stale-pool retry now also recovers tests 1273 and 1283
+- [x] 303 redirect converts PUT (not just POST) to GET (unlocked test 1524)
+- [x] URL userinfo on redirect: `-u` from CLI always wins (`user_from_cli` flag); a redirect target's userinfo overrides only when it carries both user AND password (`first:secret` beats lifted `first` only); a user-only userinfo (`http://user1@host/`) doesn't strip a netrc-derived password (unlocked tests 899, 979; preserved 682, 2081)
+- [x] netrc parser detects unterminated quoted password and exits 26 (test 680); `--netrc-optional` silently ignores a missing file (preserved test 495)
+- [x] `--expand-data` rejects null bytes in the expanded value with exit 2 (unlocked tests 453, 456)
+- [x] `--interface` validates value as IP literal / `/sys/class/net` entry / DNS-resolvable host; bad value → exit 45 (unlocked tests 1084, 1085)
+- [x] Strip IPv6 zone/scope ID (`%scope`, `%25scope`) from Host header and connect-target (unlocked test 1056)
+- [x] Stdin upload redirect: when a `-T -` body can't be replayed across a redirect, emit the prior response and exit 25 (unlocked test 1073)
+- [x] `--retry` with `--output` file: prepend prior failed attempts (retry_prefix) so `-i` reproduces the full sequence; `--fail` drops the 4xx body from the prefix (unlocked tests 1633, 1634)
+- [x] `--write-out %header{name:all[:sep]}` and `:N` / `:last` qualifiers; values harvested from redirect chain + final response; allow `\}` to escape `}` in the pattern (unlocked tests 764, 765)
+- [ ] Target 750+ passing by addressing remaining feature gaps
 
 ---
 
 ## Test Inventory
 
-### Passing tests (617)
+### Passing tests (717)
 
-1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 66, 71, 73, 74, 75, 77, 78, 80, 82, 83, 84, 85, 86, 87, 92, 93, 94, 95, 97, 98, 129, 151, 152, 156, 157, 158, 160, 163, 164, 166, 171, 172, 173, 174, 178, 179, 180, 181, 183, 184, 185, 186, 187, 188, 189, 192, 193, 194, 197, 198, 199, 207, 214, 218, 219, 220, 221, 222, 224, 230, 232, 233, 234, 249, 256, 260, 262, 264, 266, 269, 274, 276, 278, 279, 281, 282, 292, 293, 300, 301, 302, 303, 304, 305, 306, 309, 310, 317, 318, 319, 325, 326, 327, 328, 329, 330, 331, 333, 334, 339, 341, 342, 343, 344, 345, 346, 347, 349, 357, 360, 361, 364, 365, 366, 367, 368, 370, 371, 372, 373, 374, 376, 378, 379, 383, 384, 385, 386, 387, 389, 391, 392, 393, 394, 395, 398, 399, 410, 411, 415, 418, 419, 420, 421, 422, 425, 426, 434, 443, 444, 449, 452, 453, 454, 456, 460, 461, 462, 463, 467, 468, 469, 470, 473, 477, 481, 482, 484, 485, 497, 498, 499, 518, 537, 662, 663, 675, 678, 681, 686, 690, 691, 692, 693, 697, 708, 722, 723, 724, 743, 746, 747, 752, 759, 767, 768, 769, 770, 771, 772, 773, 787, 794, 796, 797, 798, 898, 899, 977, 978, 979, 990, 991, 994, 995, 996, 998, 999, 1004, 1011, 1012, 1015, 1024, 1025, 1027, 1029, 1031, 1032, 1033, 1040, 1041, 1042, 1043, 1051, 1052, 1053, 1054, 1058, 1064, 1068, 1069, 1070, 1076, 1080, 1081, 1089, 1090, 1101, 1104, 1105, 1109, 1110, 1111, 1115, 1116, 1117, 1118, 1121, 1122, 1123, 1124, 1125, 1126, 1127, 1128, 1129, 1130, 1131, 1138, 1141, 1143, 1144, 1147, 1150, 1151, 1155, 1157, 1159, 1160, 1161, 1164, 1166, 1168, 1169, 1170, 1172, 1174, 1175, 1176, 1178, 1179, 1180, 1181, 1182, 1183, 1184, 1188, 1197, 1200, 1201, 1202, 1205, 1210, 1213, 1214, 1216, 1218, 1223, 1228, 1231, 1232, 1234, 1235, 1236, 1237, 1240, 1241, 1246, 1247, 1248, 1249, 1251, 1252, 1253, 1254, 1255, 1256, 1257, 1258, 1259, 1260, 1261, 1263, 1264, 1266, 1267, 1268, 1269, 1270, 1271, 1272, 1273, 1274, 1275, 1276, 1278, 1280, 1281, 1283, 1289, 1290, 1291, 1292, 1296, 1297, 1298, 1299, 1300, 1302, 1303, 1304, 1305, 1306, 1309, 1310, 1311, 1312, 1313, 1314, 1317, 1318, 1322, 1323, 1325, 1332, 1333, 1334, 1335, 1336, 1337, 1338, 1339, 1340, 1341, 1342, 1343, 1344, 1345, 1346, 1347, 1364, 1365, 1366, 1367, 1368, 1369, 1370, 1371, 1372, 1373, 1374, 1375, 1376, 1377, 1395, 1396, 1397, 1398, 1399, 1409, 1410, 1411, 1413, 1416, 1417, 1424, 1427, 1429, 1430, 1431, 1432, 1433, 1434, 1438, 1439, 1443, 1457, 1462, 1466, 1471, 1472, 1473, 1474, 1475, 1480, 1483, 1484, 1487, 1489, 1493, 1494, 1495, 1496, 1497, 1524, 1544, 1546, 1563, 1584, 1585, 1601, 1602, 1603, 1605, 1606, 1607, 1608, 1609, 1610, 1611, 1612, 1613, 1614, 1615, 1616, 1620, 1635, 1636, 1650, 1651, 1652, 1653, 1655, 1656, 1657, 1658, 1661, 1663, 1664, 1665, 1670, 1671, 1680, 1681, 1682, 1683, 1709, 1909, 1979, 1980, 2075, 2080, 2088
+The authoritative list is `testNums` in `default.nix`; the count is
+checked there by Nix and stays in sync with the per-test derivations.
 
 ### Major remaining failure categories
 

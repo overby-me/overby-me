@@ -15,12 +15,14 @@ use std::path::Path;
 /// machine: scan top-to-bottom; once we've seen a `machine HOST` block that
 /// matches `host` (and a `login LOGIN` line matching `specific_login` when
 /// one is given), the next `password PASS` finishes the search.
+pub(crate) type LoginPassword = (Option<String>, Option<String>);
+
 pub(crate) fn lookup(
     path: &Path,
     host: &str,
     specific_login: Option<&str>,
-) -> Option<(Option<String>, Option<String>)> {
-    let contents = std::fs::read_to_string(path).ok()?;
+) -> Result<Option<LoginPassword>, String> {
+    let contents = std::fs::read_to_string(path).map_err(|e| format!("read netrc: {e}"))?;
     let host_lc = host.to_ascii_lowercase();
 
     #[derive(PartialEq)]
@@ -30,7 +32,7 @@ pub(crate) fn lookup(
         HostValid,
     }
 
-    let tokens = tokenize(&contents);
+    let tokens = tokenize(&contents)?;
     let mut iter = tokens.into_iter();
     let mut state = State::Nothing;
     let mut login: Option<String> = None;
@@ -131,17 +133,21 @@ pub(crate) fn lookup(
         || (our_login && (login.is_some() || password.is_some()))
         || (specific_login.is_some() && password.is_some() && no_login_in_block);
     if accept {
-        return Some((specific_login.map(|s| s.to_string()).or(login), password));
+        return Ok(Some((
+            specific_login.map(|s| s.to_string()).or(login),
+            password,
+        )));
     }
     if let Some((l, p)) = default_pair {
-        return Some((specific_login.map(|s| s.to_string()).or(l), p));
+        return Ok(Some((specific_login.map(|s| s.to_string()).or(l), p)));
     }
-    None
+    Ok(None)
 }
 
 /// Split `.netrc` text into tokens. Tokens are whitespace-separated, but a
 /// `"…"` quoted run becomes a single token with `\` escapes processed.
-fn tokenize(s: &str) -> Vec<String> {
+/// An unterminated quoted run returns an error (test 680).
+fn tokenize(s: &str) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
     let mut chars = s.chars().peekable();
     while let Some(&c) = chars.peek() {
@@ -161,10 +167,14 @@ fn tokenize(s: &str) -> Vec<String> {
         if c == '"' {
             chars.next();
             let mut tok = String::new();
+            let mut closed = false;
             #[allow(clippy::while_let_on_iterator)]
             while let Some(c) = chars.next() {
                 match c {
-                    '"' => break,
+                    '"' => {
+                        closed = true;
+                        break;
+                    }
                     '\\' => {
                         if let Some(esc) = chars.next() {
                             tok.push(match esc {
@@ -177,6 +187,9 @@ fn tokenize(s: &str) -> Vec<String> {
                     }
                     other => tok.push(other),
                 }
+            }
+            if !closed {
+                return Err("unterminated quote in netrc".to_string());
             }
             out.push(tok);
         } else {
@@ -191,5 +204,5 @@ fn tokenize(s: &str) -> Vec<String> {
             out.push(tok);
         }
     }
-    out
+    Ok(out)
 }

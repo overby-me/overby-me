@@ -8,6 +8,7 @@ mod request;
 mod response;
 mod tls;
 mod url;
+mod variables;
 
 use std::fs;
 use std::io::{self, Write};
@@ -233,7 +234,25 @@ fn main() {
         }
     }
 
-    for (url_idx, url_str) in opts.urls.iter().enumerate() {
+    // --url-query: append the joined query items to each URL's query string
+    // (test 1221). `?` separator on first append, `&` thereafter.
+    let urls_with_query: Vec<String> = opts
+        .urls
+        .iter()
+        .map(|u| {
+            if opts.url_queries.is_empty() {
+                u.clone()
+            } else {
+                let joined = opts.url_queries.join("&");
+                if u.contains('?') {
+                    format!("{u}&{joined}")
+                } else {
+                    format!("{u}?{joined}")
+                }
+            }
+        })
+        .collect();
+    for (url_idx, url_str) in urls_with_query.iter().enumerate() {
         // Reset exit_code per URL — curl reports the LAST URL's status as
         // the process exit code, so a failed URL1 followed by a successful
         // URL2 should still exit 0 (test 1293). --fail-early breaks the
@@ -255,9 +274,7 @@ fn main() {
             .or_else(|| url_str.strip_prefix("File://"))
         {
             Some(rest)
-        } else if lower_url.starts_with("file:/")
-            && !lower_url.starts_with("file://")
-        {
+        } else if lower_url.starts_with("file:/") && !lower_url.starts_with("file://") {
             // `file:/path` — single-slash form (test 203). Treat as if the
             // host were empty: keep the leading `/`.
             url_str.get(5..)
@@ -338,10 +355,7 @@ fn main() {
                 .or_else(|| opts.upload_file.clone());
             if let Some(src) = upload_src {
                 if opts.skip_existing && std::path::Path::new(&fpath).exists() {
-                    eprintln!(
-                        "Note: skips transfer, \"{}\" exists locally",
-                        fpath
-                    );
+                    eprintln!("Note: skips transfer, \"{}\" exists locally", fpath);
                     continue;
                 }
                 let body = if src.to_str() == Some("-") {
@@ -388,6 +402,7 @@ fn main() {
                     let mut end = content.len();
                     // -r / --range on file://: forms `N-`, `-N`, `N-M`, `N`
                     // (tests 1019, 1020).
+                    let mut range_bad_resume = false;
                     if let Some(ref r) = opts.range {
                         if let Some(rest) = r.strip_prefix('-') {
                             // last N bytes
@@ -396,8 +411,14 @@ fn main() {
                                 end = content.len();
                             }
                         } else if let Some((s, e)) = r.split_once('-') {
-                            if let Ok(s_n) = s.parse::<usize>() {
-                                start = s_n;
+                            // For open-ended ranges (`N-`), curl exits 36 if
+                            // the requested start is past EOF (test 1063).
+                            if let Ok(s_n_u64) = s.parse::<u64>() {
+                                if e.is_empty() && s_n_u64 >= content.len() as u64 {
+                                    range_bad_resume = true;
+                                } else {
+                                    start = s_n_u64.min(usize::MAX as u64) as usize;
+                                }
                             }
                             if !e.is_empty()
                                 && let Ok(e_n) = e.parse::<usize>()
@@ -407,6 +428,16 @@ fn main() {
                         } else if let Ok(n) = r.parse::<usize>() {
                             start = n;
                         }
+                    }
+                    if range_bad_resume {
+                        if !opts.silent || opts.show_error {
+                            eprintln!("curl: (36) failed to seek in file");
+                        }
+                        exit_code = 36;
+                        if opts.fail_early {
+                            break;
+                        }
+                        continue;
                     }
                     let slice: &[u8] = if start < end && start < content.len() {
                         &content[start..end.min(content.len())]
@@ -424,11 +455,17 @@ fn main() {
                             let _ = fs::create_dir_all(parent);
                         }
                         if let Err(e) = fs::write(&out_path, slice) {
-                            eprintln!(
-                                "curl: failed to write to {}: {e}",
-                                out_path.display()
-                            );
+                            eprintln!("curl: failed to write to {}: {e}", out_path.display());
                             exit_code = 23;
+                        } else if opts.remote_time
+                            && let Ok(meta) = fs::metadata(&fpath)
+                            && let Ok(mtime) = meta.modified()
+                            && let Ok(file) = fs::OpenOptions::new().write(true).open(&out_path)
+                        {
+                            let times = std::fs::FileTimes::new()
+                                .set_modified(mtime)
+                                .set_accessed(mtime);
+                            let _ = file.set_times(times);
                         }
                     } else {
                         let _ = io::stdout().write_all(slice);
@@ -440,6 +477,89 @@ fn main() {
                         eprintln!("curl: (37) Couldn't open file {fpath}");
                     }
                     exit_code = 37;
+                }
+            }
+            // --write-out for file:// transfers: even when the file failed
+            // to open we still emit the formatted output (test 1442 covers
+            // a non-existent file:// + `--write-out=\` -> stdout `\`).
+            if let Some(ref fmt) = opts.write_out {
+                use crate::format::{WriteOutDest, split_write_out};
+                let synthetic = crate::response::Response {
+                    trailer_bytes: Vec::new(),
+                    http10_response: false,
+                    status: 0,
+                    status_text: String::new(),
+                    headers: Vec::new(),
+                    body: Vec::new(),
+                    header_bytes: Vec::new(),
+                    redirect_headers: Vec::new(),
+                    num_connects: 0,
+                    num_redirects: 0,
+                    max_redirects_reached: false,
+                    proto_redir_blocked: false,
+                    upload_redirect_failed: false,
+                    redirect_url_malformed: false,
+                    weird_server_reply: false,
+                    final_url: None,
+                    final_referer: None,
+                    redirect_url: None,
+                    timed_out: false,
+                    recv_error: false,
+                    partial_file: false,
+                    bad_content_encoding: false,
+                    bad_encoding_too_many: false,
+                    filesize_exceeded: false,
+                    header_size_error: false,
+                };
+                if let Ok(parsed_url) = crate::url::parse_url(url_str) {
+                    for (dest, _gated, raw) in split_write_out(fmt) {
+                        if raw.is_empty() {
+                            continue;
+                        }
+                        let text = crate::format::format_write_out(
+                            &raw,
+                            &synthetic,
+                            &parsed_url,
+                            0,
+                            0,
+                            "GET",
+                            None,
+                            url_idx,
+                            exit_code,
+                            "",
+                            "",
+                        );
+                        use std::io::Write as _;
+                        match dest {
+                            WriteOutDest::Stdout => {
+                                let _ = io::stdout().write_all(text.as_bytes());
+                            }
+                            WriteOutDest::Stderr => {
+                                let _ = io::stderr().write_all(text.as_bytes());
+                            }
+                            WriteOutDest::File { .. } => {}
+                        }
+                    }
+                    let _ = io::stdout().flush();
+                } else {
+                    // Malformed file:// URL — still emit literal write-out
+                    // text (no substitutions) so tests 1440/1441 see output.
+                    use std::io::Write as _;
+                    for (dest, _gated, raw) in split_write_out(fmt) {
+                        if raw.is_empty() {
+                            continue;
+                        }
+                        match dest {
+                            WriteOutDest::Stdout => {
+                                let _ = io::stdout().write_all(raw.as_bytes());
+                            }
+                            WriteOutDest::Stderr => {
+                                let _ = io::stderr().write_all(raw.as_bytes());
+                            }
+                            WriteOutDest::File { .. } => {}
+                        }
+                    }
+                    let _ = io::stdout().flush();
                 }
             }
             if opts.fail_early && exit_code != 0 {
@@ -607,17 +727,28 @@ fn main() {
                         Some(ui.to_string())
                     }
                 });
-                if let Some((login, password)) =
-                    crate::netrc::lookup(&path, &parsed.host, host_user.as_deref())
-                {
-                    // Either login or password may be omitted; emit
-                    // Authorization as long as at least one of the three
-                    // sources (URL user / netrc login / netrc password) has
-                    // a value (test 684 has password-only with empty user).
-                    if host_user.is_some() || login.is_some() || password.is_some() {
-                        let u = host_user.or(login).unwrap_or_default();
-                        let p = password.unwrap_or_default();
-                        effective_opts.user = Some(format!("{u}:{p}"));
+                match crate::netrc::lookup(&path, &parsed.host, host_user.as_deref()) {
+                    Ok(Some((login, password))) => {
+                        // Either login or password may be omitted; emit
+                        // Authorization as long as at least one source has
+                        // a value (test 684 has password-only with empty user).
+                        if host_user.is_some() || login.is_some() || password.is_some() {
+                            let u = host_user.or(login).unwrap_or_default();
+                            let p = password.unwrap_or_default();
+                            effective_opts.user = Some(format!("{u}:{p}"));
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(e) if e.contains("read netrc") => {
+                        // File-not-found: --netrc-optional silently ignores
+                        // it (test 495). Required-netrc would have errored
+                        // earlier in args.rs.
+                    }
+                    Err(_) => {
+                        // Malformed netrc (e.g. unterminated quote) — exit 26
+                        // (test 680).
+                        eprintln!("curl: netrc parse error");
+                        process::exit(26);
                     }
                 }
             }
@@ -667,7 +798,12 @@ fn main() {
                                 retry_prefix.extend_from_slice(&r.redirect_headers);
                                 retry_prefix.extend_from_slice(&r.header_bytes);
                             }
-                            retry_prefix.extend_from_slice(&r.body);
+                            // --fail drops the body of HTTP-error responses;
+                            // --fail-with-body keeps it (test 1634).
+                            let drop_body = r.status >= 400 && opts.fail && !opts.fail_with_body;
+                            if !drop_body {
+                                retry_prefix.extend_from_slice(&r.body);
+                            }
                             // Honor Retry-After header (seconds) for the delay.
                             next_delay_secs = r
                                 .headers
@@ -728,8 +864,13 @@ fn main() {
                     (resume_offset, resp_cl),
                     (Some(off), Some(cl)) if cl == off
                 );
+                // -C with any non-206 GET response means the server didn't
+                // honor the Range — drop the body (test 99 covers 404 with
+                // a huge resume offset). 416 is special: the file is
+                // already fully downloaded, NOT an error (test 1040).
                 let resume_range_refused = opts.resume_from.is_some()
-                    && resp.status == 200
+                    && resp.status != 206
+                    && resp.status != 416
                     && !has_content_range
                     && !resume_fully_covered
                     && effective_opts.upload_file.is_none();
@@ -763,6 +904,10 @@ fn main() {
                         eprintln!("curl: (1) Protocol not supported or disabled in libcurl");
                     }
                     exit_code = 1;
+                }
+                if resp.upload_redirect_failed {
+                    eprintln!("curl: (25) Failed to upload after redirect");
+                    exit_code = 25;
                 }
                 if resp.weird_server_reply {
                     eprintln!("curl: (8) weird server reply");
@@ -1216,6 +1361,7 @@ fn main() {
                     }
                     if opts.include_headers || effective_opts.head {
                         let mut data = Vec::new();
+                        data.extend_from_slice(&retry_prefix);
                         data.extend_from_slice(&resp.redirect_headers);
                         data.extend_from_slice(&resp.header_bytes);
                         if write_body {
@@ -1387,6 +1533,8 @@ fn main() {
                         eprintln!("curl: (6) {rest}");
                     } else if e.starts_with("CONNECT tunnel failed") {
                         eprintln!("curl: (56) {e}");
+                    } else if e == "invalid_connect_response" {
+                        eprintln!("curl: (43) Invalid response header");
                     } else {
                         eprintln!("curl: {e}");
                     }
@@ -1399,8 +1547,19 @@ fn main() {
                     let stashed = crate::connection::CONNECT_RESP.with(|r| r.borrow().clone());
                     if let Some((_status, ref bytes)) = stashed {
                         use std::io::Write as _;
-                        let _ = io::stdout().write_all(bytes);
-                        let _ = io::stdout().flush();
+                        // Route to -o output file when one is set, otherwise
+                        // stdout (tests 217, 287, 749).
+                        let written_to_file = if let Some(out_path) = opts.outputs.get(url_idx)
+                            && out_path.to_str() != Some("-")
+                        {
+                            fs::write(out_path, bytes).is_ok()
+                        } else {
+                            false
+                        };
+                        if !written_to_file {
+                            let _ = io::stdout().write_all(bytes);
+                            let _ = io::stdout().flush();
+                        }
                     }
                     // Run -w write-out with a synthetic zero-status response
                     // so `%{http_code} %{http_connect}` works (test 217).
@@ -1420,6 +1579,7 @@ fn main() {
                             num_redirects: 0,
                             max_redirects_reached: false,
                             proto_redir_blocked: false,
+                            upload_redirect_failed: false,
                             redirect_url_malformed: false,
                             weird_server_reply: false,
                             final_url: None,
@@ -1501,6 +1661,8 @@ fn main() {
                     exit_code = 7; // Failed to connect
                 } else if e.contains("CONNECT tunnel failed") {
                     exit_code = 56; // CONNECT proxy tunnel failure
+                } else if e == "invalid_connect_response" {
+                    exit_code = 43; // Invalid response header (test 750)
                 } else if e.contains("timed out") || e.contains("operation timed out") {
                     exit_code = 28; // Operation timeout
                 } else if e.contains("maximum redirects") {

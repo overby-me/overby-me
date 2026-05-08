@@ -32,7 +32,6 @@ thread_local! {
     pub(crate) static POOL_REUSED: RefCell<bool> = const { RefCell::new(false) };
 }
 
-
 pub(crate) struct PooledConn {
     pub host: String,
     pub port: u16,
@@ -49,24 +48,88 @@ pub(crate) struct PooledConn {
 /// Match --connect-to entries ("HOST1:PORT1:HOST2:PORT2") against the
 /// requested host/port. An empty HOST1 or PORT1 acts as a wildcard. Returns
 /// the (host, port) we should actually connect to.
-fn connect_to_override(host: &str, port: u16, entries: &[String]) -> Option<(String, u16)> {
+/// Split a `--connect-to` entry into its four fields, respecting bracketed
+/// IPv6 literals so colons inside `[...]` aren't treated as separators
+/// (test 2053 — `[fc00::1]:8082:...:...`).
+pub(crate) fn split_connect_to_for_validation(entry: &str) -> Option<[String; 4]> {
+    split_connect_to(entry)
+}
+
+fn split_connect_to(entry: &str) -> Option<[String; 4]> {
+    let mut fields: Vec<String> = Vec::with_capacity(4);
+    let mut buf = String::new();
+    let mut depth: u32 = 0;
+    for c in entry.chars() {
+        if c == '[' {
+            depth += 1;
+            buf.push(c);
+        } else if c == ']' {
+            depth = depth.saturating_sub(1);
+            buf.push(c);
+        } else if c == ':' && depth == 0 {
+            fields.push(std::mem::take(&mut buf));
+            if fields.len() == 3 {
+                // Final field collects the rest.
+                fields.push(entry[fields.iter().map(|f| f.len() + 1).sum::<usize>()..].to_string());
+                break;
+            }
+        } else {
+            buf.push(c);
+        }
+    }
+    if fields.len() < 4 {
+        fields.push(buf);
+    }
+    if fields.len() == 4 {
+        let mut it = fields.into_iter();
+        let a = it.next()?;
+        let b = it.next()?;
+        let c = it.next()?;
+        let d = it.next()?;
+        Some([a, b, c, d])
+    } else {
+        None
+    }
+}
+
+pub(crate) fn connect_to_override(
+    host: &str,
+    port: u16,
+    entries: &[String],
+) -> Option<(String, u16)> {
     let host_norm = host.trim_end_matches('.').to_ascii_lowercase();
     for entry in entries {
-        let parts: Vec<&str> = entry.splitn(4, ':').collect();
-        if parts.len() != 4 {
+        let Some(parts) = split_connect_to(entry) else {
             continue;
-        }
-        let (h1, p1, h2, p2) = (parts[0], parts[1], parts[2], parts[3]);
-        if !h1.is_empty() && h1.trim_end_matches('.').to_ascii_lowercase() != host_norm {
+        };
+        let (h1, p1, h2, p2) = (
+            parts[0].as_str(),
+            parts[1].as_str(),
+            parts[2].as_str(),
+            parts[3].as_str(),
+        );
+        // Strip [..] brackets from IPv6 host literals before matching.
+        let h1_unwrapped = h1
+            .strip_prefix('[')
+            .and_then(|s| s.strip_suffix(']'))
+            .unwrap_or(h1);
+        if !h1_unwrapped.is_empty()
+            && h1_unwrapped.trim_end_matches('.').to_ascii_lowercase() != host_norm
+        {
             continue;
         }
         if !p1.is_empty() && p1.parse::<u16>().ok() != Some(port) {
             continue;
         }
-        let new_host = if h2.is_empty() {
+        // Strip [..] brackets from IPv6 destination literal too.
+        let h2_unwrapped = h2
+            .strip_prefix('[')
+            .and_then(|s| s.strip_suffix(']'))
+            .unwrap_or(h2);
+        let new_host = if h2_unwrapped.is_empty() {
             host.to_string()
         } else {
-            h2.to_string()
+            h2_unwrapped.to_string()
         };
         let new_port = if p2.is_empty() {
             port
@@ -155,10 +218,22 @@ impl Write for Connection {
 /// Supports formats: "host:port", "http://proxy.example:port", "http://proxy.example", "host"
 /// Default port is 1080 when not specified.
 pub(crate) fn parse_proxy(proxy: &str) -> Result<(String, u16), String> {
-    // Strip scheme prefix if present; reject unsupported schemes.
+    // Strip scheme prefix if present; reject unsupported schemes. SOCKS
+    // schemes parse to host:port so we can attempt the TCP connect (and
+    // return exit 7 on connect failure, tests 704/705) — a successful
+    // SOCKS connect would still fail later because we can't do the
+    // SOCKS handshake.
     let stripped = if let Some(rest) = proxy.strip_prefix("http://") {
         rest
     } else if let Some(rest) = proxy.strip_prefix("https://") {
+        rest
+    } else if let Some(rest) = proxy.strip_prefix("socks4://") {
+        rest
+    } else if let Some(rest) = proxy.strip_prefix("socks4a://") {
+        rest
+    } else if let Some(rest) = proxy.strip_prefix("socks5://") {
+        rest
+    } else if let Some(rest) = proxy.strip_prefix("socks5h://") {
         rest
     } else if proxy.contains("://") {
         return Err(format!("unsupported proxy scheme in '{}'", proxy));
@@ -214,7 +289,12 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
     }
 
     // Determine whether we need a CONNECT tunnel through the proxy.
-    let use_tunnel = opts.proxy.is_some() && (opts.proxy_tunnel || url.scheme == "https");
+    // `--connect-to` through a proxy automatically engages tunnel mode so
+    // the connect-to host actually gets contacted (test 2050).
+    let has_connect_to_match =
+        connect_to_override(&url.host, url.port, &opts.connect_tos).is_some();
+    let use_tunnel = opts.proxy.is_some()
+        && (opts.proxy_tunnel || url.scheme == "https" || has_connect_to_match);
 
     // HTTP/1.1 keep-alive pool reuse — supported for plain HTTP and for
     // HTTP through an established CONNECT tunnel (test 275). HTTPS and
@@ -275,15 +355,17 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
     let is_localhost =
         connect_host_norm == "localhost" || connect_host_norm.ends_with(".localhost");
 
+    // Strip IPv6 zone/scope ID — the kernel handles it via sin6_scope_id, not
+    // address text. Both raw (%scope) and URL-encoded (%25scope) forms appear.
+    let connect_addr_host = crate::url::strip_ipv6_scope(&connect_host);
     let addr = if let Some(ref resolved) = resolved_addr {
         resolved.clone()
     } else if is_localhost {
         format!("127.0.0.1:{}", connect_port)
-    } else if connect_host.contains(':') {
-        // IPv6 literal — must be bracketed for `to_socket_addrs`.
-        format!("[{}]:{}", connect_host, connect_port)
+    } else if connect_addr_host.contains(':') {
+        format!("[{}]:{}", connect_addr_host, connect_port)
     } else {
-        format!("{}:{}", connect_host, connect_port)
+        format!("{}:{}", connect_addr_host, connect_port)
     };
 
     // Resolve DNS first, so DNS failures can be distinguished from connection failures.
@@ -358,10 +440,14 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
             "HTTP/1.1"
         };
         // RFC 7230: bracket IPv6 literals in CONNECT/Host targets.
-        let target = if url.host.contains(':') {
-            format!("[{}]:{}", url.host, url.port)
+        // --connect-to substitutes the CONNECT target so the proxy tunnels
+        // to a different origin than the URL host (test 2050).
+        let (tgt_host, tgt_port) = connect_to_override(&url.host, url.port, &opts.connect_tos)
+            .unwrap_or_else(|| (url.host.clone(), url.port));
+        let target = if tgt_host.contains(':') {
+            format!("[{}]:{}", tgt_host, tgt_port)
         } else {
-            format!("{}:{}", url.host, url.port)
+            format!("{}:{}", tgt_host, tgt_port)
         };
 
         let mut req = format!("CONNECT {target} {http_ver}\r\n");
@@ -420,6 +506,8 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
         let mut response_bytes = Vec::new();
         let mut status_code = 0u16;
         let mut first_line = true;
+        let mut saw_cl = false;
+        let mut saw_te = false;
         loop {
             let mut line = String::new();
             reader
@@ -431,12 +519,38 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
                 break; // end of headers
             }
             if first_line {
+                // Reject a CONNECT response that doesn't start with `HTTP/`
+                // — curl exits 43 (CURLE_BAD_FUNCTION_ARGUMENT, repurposed
+                // as "Invalid response header" in the tool) for that case
+                // (test 750).
+                if !trimmed.starts_with("HTTP/") {
+                    return Err("invalid_connect_response".into());
+                }
                 // Parse status code from "HTTP/1.x NNN ..."
                 let parts: Vec<&str> = trimmed.splitn(3, ' ').collect();
                 if parts.len() >= 2 {
                     status_code = parts[1].parse().unwrap_or(0);
                 }
                 first_line = false;
+            } else if let Some((name, _)) = trimmed.split_once(':') {
+                let n = name.trim().to_ascii_lowercase();
+                if n == "content-length" {
+                    saw_cl = true;
+                } else if n == "transfer-encoding" {
+                    saw_te = true;
+                }
+            }
+        }
+
+        // Verbose: announce that CL/TE on a CONNECT 2xx are ignored —
+        // they would otherwise frame the tunnel body, which doesn't apply
+        // (the tunnel just passes bytes through). Test 1287.
+        if (200..300).contains(&status_code) && opts.verbose {
+            if saw_cl {
+                eprintln!("* Ignoring Content-Length in CONNECT {status_code} response");
+            }
+            if saw_te {
+                eprintln!("* Ignoring Transfer-Encoding in CONNECT {status_code} response");
             }
         }
 

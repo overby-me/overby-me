@@ -47,11 +47,11 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
             Some("") => {}
             Some(h) => req.push_str(&format!("Host: {h}\r\n")),
             None => {
-                // RFC 7230: bracket IPv6 literals in the Host header.
-                let host_for_header: String = if url.host.contains(':') {
-                    format!("[{}]", url.host)
+                let bare_host = crate::url::strip_ipv6_scope(&url.host);
+                let host_for_header: String = if bare_host.contains(':') {
+                    format!("[{bare_host}]")
                 } else {
-                    url.host.clone()
+                    bare_host
                 };
                 if url.port == default_port {
                     req.push_str(&format!("Host: {host_for_header}\r\n"));
@@ -119,17 +119,25 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
     // header) so the request line stays ASCII-clean.
     let path = pct_encode_high(&path);
 
-    // When going through an HTTP proxy, use the full absolute URL in the request line.
-    let request_target = if opts.proxy.is_some() && url.scheme == "http" && !opts.proxy_tunnel {
-        let default_port: u16 = 80;
-        if url.port == default_port {
-            format!("http://{}{path}", url.host)
+    // When going through an HTTP proxy, use the full absolute URL in the
+    // request line. `--connect-to` to a different host through a proxy
+    // engages tunnel mode automatically (test 2050) — the request that
+    // travels through the tunnel uses the relative path, not the absolute URL.
+    let connect_to_tunnel = opts.proxy.is_some()
+        && !opts.connect_tos.is_empty()
+        && crate::connection::connect_to_override(&url.host, url.port, &opts.connect_tos).is_some();
+    let request_target =
+        if opts.proxy.is_some() && url.scheme == "http" && !opts.proxy_tunnel && !connect_to_tunnel
+        {
+            let default_port: u16 = 80;
+            if url.port == default_port {
+                format!("http://{}{path}", url.host)
+            } else {
+                format!("http://{}:{}{path}", url.host, url.port)
+            }
         } else {
-            format!("http://{}:{}{path}", url.host, url.port)
-        }
-    } else {
-        path.clone()
-    };
+            path.clone()
+        };
     let mut req = format!("{method} {request_target} {http_ver}\r\n");
 
     // Host header — prefer custom Host: from -H if provided.
@@ -146,11 +154,11 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         Some("") => {}
         Some(h) => req.push_str(&format!("Host: {h}\r\n")),
         None => {
-            // RFC 7230: bracket IPv6 literals in the Host header.
-            let host_for_header: String = if url.host.contains(':') {
-                format!("[{}]", url.host)
+            let bare_host = crate::url::strip_ipv6_scope(&url.host);
+            let host_for_header: String = if bare_host.contains(':') {
+                format!("[{bare_host}]")
             } else {
-                url.host.clone()
+                bare_host
             };
             if url.port == default_port {
                 req.push_str(&format!("Host: {host_for_header}\r\n"));
@@ -161,10 +169,13 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
     }
 
     // Proxy-Authorization — sent when --proxy-user is set and we're going through a proxy.
-    // curl sends Proxy-Authorization before site Authorization.
+    // curl sends Proxy-Authorization before site Authorization. With
+    // --proxy-anyauth (and friends) curl waits for a 407 challenge before
+    // sending Proxy-Authorization (test 1331).
     if let Some(ref proxy_user) = opts.proxy_user
         && opts.proxy.is_some()
         && !opts.proxy_tunnel
+        && !opts.defer_proxy_auth
     {
         let encoded = base64_encode(proxy_user.as_bytes());
         req.push_str(&format!("Proxy-Authorization: Basic {encoded}\r\n"));
@@ -246,10 +257,13 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
     }
 
     // Proxy-Connection header — curl sends this for HTTP proxy requests.
+    // Suppressed for tunneled HTTP-via-CONNECT (test 2050) since the
+    // request travels through the tunnel, not directly to the proxy.
     // A user-supplied -H "Proxy-Connection: ..." replaces ours (emitted later).
     if opts.proxy.is_some()
         && url.scheme == "http"
         && !opts.proxy_tunnel
+        && !connect_to_tunnel
         && !opts.no_keepalive
         && !has_custom("proxy-connection")
     {
@@ -330,9 +344,17 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         .as_deref()
         .map(|h| h.split(':').next().unwrap_or(h))
         .unwrap_or(&url.host);
+    // Strip query/fragment from the URL path before cookie path matching:
+    // RFC 6265 §5.1.4 says cookie paths apply to the path component only, so
+    // a request to /a?q=1 should still match a cookie set on /a (test 1258).
+    let cookie_request_path = url
+        .path
+        .split_once('?')
+        .map(|(p, _)| p)
+        .unwrap_or(&url.path);
     let cookie_header = build_cookie_header(
         cookie_match_host,
-        &url.path,
+        cookie_request_path,
         url.scheme == "https" || is_loopback_host(&url.host),
         opts,
     );
@@ -384,6 +406,10 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         [].iter()
     });
     let mut conn_te_appended = false;
+    // When -F builds a multipart body, defer any user-supplied Content-Type
+    // until after we emit Content-Length: curl orders Content-Length first
+    // and then the (boundary-appended) Content-Type (test 669).
+    let mut deferred_content_type: Option<(String, String)> = None;
     for (key, val) in user_header_iter {
         if key.eq_ignore_ascii_case("host") {
             continue;
@@ -395,7 +421,10 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
             && let Some(b) = boundary.as_ref()
             && !val.to_ascii_lowercase().contains("boundary=")
         {
-            req.push_str(&format!("{key}: {val}; boundary={b}\r\n"));
+            // Curl canonicalizes the header name when it appends boundary
+            // (test 669 — user passes `Content-type:`, output is `Content-Type:`).
+            deferred_content_type =
+                Some(("Content-Type".to_string(), format!("{val}; boundary={b}")));
             continue;
         }
         // When --tr-encoding is set, the first user-supplied Connection header
@@ -442,6 +471,10 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         // Emit Content-Length first.
         if emit_content_length {
             req.push_str(&content_len_hdr);
+        }
+        // Emit the deferred user Content-Type (with boundary appended).
+        if let Some((k, v)) = deferred_content_type.take() {
+            req.push_str(&format!("{k}: {v}\r\n"));
         }
 
         // curl sends Expect: 100-continue for upload bodies >= 1 MiB or when
@@ -1018,7 +1051,95 @@ fn multipart_boundary() -> String {
     format!("------------------------{rand_part}")
 }
 
+/// Absorb `Set-Cookie` headers from `resp` into `opts.memory_cookies` so the
+/// next request from the same `perform()` (auth retry, redirect, …) can
+/// emit them on its `Cookie:` header (test 1331). When the cookie engine is
+/// disabled this is a no-op.
+fn absorb_response_cookies(opts: &mut Options, resp: &Response, url: &ParsedUrl) {
+    if !opts.cookie_engine {
+        return;
+    }
+    let host_for_cookies = opts
+        .headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("host"))
+        .map(|(_, v)| v.split(':').next().unwrap_or(v).to_string())
+        .unwrap_or_else(|| url.host.clone());
+    for (k, v) in &resp.headers {
+        if k != "set-cookie" {
+            continue;
+        }
+        let Some(line) = crate::cookie::format_cookie_line(v, url, &host_for_cookies) else {
+            continue;
+        };
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() >= 7 {
+            let new_dom = fields[0].strip_prefix("#HttpOnly_").unwrap_or(fields[0]);
+            let np = fields[2];
+            let nn = fields[5];
+            opts.memory_cookies.retain(|existing| {
+                let ef: Vec<&str> = existing.split('\t').collect();
+                if ef.len() >= 7 {
+                    let ed = ef[0].strip_prefix("#HttpOnly_").unwrap_or(ef[0]);
+                    !(ed == new_dom && ef[2] == np && ef[5] == nn)
+                } else {
+                    true
+                }
+            });
+        }
+        if !crate::cookie::is_jar_line_expired(&line) {
+            let new_dom = line
+                .split('\t')
+                .next()
+                .map(|s| s.strip_prefix("#HttpOnly_").unwrap_or(s).to_string())
+                .unwrap_or_default();
+            let cnt = opts
+                .memory_cookies
+                .iter()
+                .filter(|c| {
+                    c.split('\t')
+                        .next()
+                        .map(|s| s.strip_prefix("#HttpOnly_").unwrap_or(s) == new_dom.as_str())
+                        .unwrap_or(false)
+                })
+                .count();
+            if cnt < 50 {
+                opts.memory_cookies.push(line);
+            }
+        }
+    }
+}
+
 fn execute_request(
+    url: &ParsedUrl,
+    opts: &Options,
+    accumulated_header_bytes: usize,
+) -> Result<Response, String> {
+    // Try once; if the connection came from the pool and the server has
+    // already closed it (e.g. test 4's `swsclose` directive shuts down the
+    // socket between requests), retry with a fresh connection.
+    match execute_request_inner(url, opts, accumulated_header_bytes) {
+        Err(e)
+            if is_stale_pool_error(&e) && crate::connection::POOL_REUSED.with(|h| *h.borrow()) =>
+        {
+            // Drop the bad pool entry and reconnect fresh.
+            crate::connection::CONN_POOL.with(|r| *r.borrow_mut() = None);
+            crate::connection::POOL_REUSED.with(|h| *h.borrow_mut() = false);
+            execute_request_inner(url, opts, accumulated_header_bytes)
+        }
+        other => other,
+    }
+}
+
+fn is_stale_pool_error(e: &str) -> bool {
+    e.contains("empty reply")
+        || e.contains("failed to read status line")
+        || e.contains("failed to send request")
+        || e.contains("Broken pipe")
+        || e.contains("Connection reset")
+}
+
+fn execute_request_inner(
     url: &ParsedUrl,
     opts: &Options,
     accumulated_header_bytes: usize,
@@ -1432,9 +1553,10 @@ fn execute_request(
     let resp_http10 = resp.http10_response;
     // HTTP/1.0 connections default to close. Only keep them in the pool when
     // the response carried `Connection: keep-alive` (test 1074).
-    let keep_alive = resp.headers.iter().any(|(k, v)| {
-        k.eq_ignore_ascii_case("connection") && v.eq_ignore_ascii_case("keep-alive")
-    });
+    let keep_alive = resp
+        .headers
+        .iter()
+        .any(|(k, v)| k.eq_ignore_ascii_case("connection") && v.eq_ignore_ascii_case("keep-alive"));
     // HTTPS via TLS-on-tunnel still can't be pooled (rustls owns the stream).
     let block_tls_save = opts.proxy.is_some() && url.scheme == "https";
     // After a successful CONNECT tunnel for HTTP, the underlying TCP stream
@@ -1647,23 +1769,42 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
         // Lift URL-embedded userinfo into opts.user so it persists across
         // relative-path redirects — those redirects build a new URL without
         // userinfo, so without this lift the Authorization header would
-        // disappear on same-host redirects (test 2081).
-        if opts.user.is_none()
-            && let Some(ref ui) = url.userinfo
+        // disappear on same-host redirects (test 2081). When a redirect
+        // target carries its OWN userinfo with BOTH user and password (a
+        // colon), that overrides what was lifted from the URL (test 899
+        // — new credentials beat the original). `-u` from the CLI always
+        // wins (test 979). A user-only userinfo (e.g.
+        // `http://user1@host/`) does NOT override an existing opts.user
+        // that already has a password (test 682 — netrc-derived password
+        // must survive URL parsing).
+        if let Some(ref ui) = url.userinfo
+            && !opts.user_from_cli
         {
-            opts.user = Some(ui.clone());
+            let new_has_password = ui.contains(':');
+            let existing_has_password = opts.user.as_deref().is_some_and(|s| s.contains(':'));
+            if opts.user.is_none() || new_has_password || !existing_has_password {
+                opts.user = Some(ui.clone());
+            }
         }
 
         let mut resp = execute_request(&url, &opts, redirect_headers.len())?;
-        connects += 1;
+        // `num_connects` counts NEW TCP connects only — reused pool entries
+        // don't bump it (test 2051's `%{num_connects}` is 0 on reuse).
+        if !crate::connection::POOL_REUSED.with(|h| *h.borrow()) {
+            connects += 1;
+        }
+
+        // Process Set-Cookie from this response BEFORE any retry-with-auth
+        // path so the retry sees the new cookies (test 1331). The cookie
+        // engine reprocesses the (final) response below; this earlier pass
+        // is a no-op when no retry happens.
+        absorb_response_cookies(&mut opts, &resp, &url);
 
         // --anyauth: when the server replies 401 with a Basic challenge,
         // retry the same request with Basic auth so credentials are sent in
         // the follow-up. We only support Basic, so skip if the WWW-Authenticate
         // header doesn't offer it (test 1204).
-        if resp.status == 401
-            && opts.defer_auth
-            && (opts.user.is_some() || url.userinfo.is_some())
+        if resp.status == 401 && opts.defer_auth && (opts.user.is_some() || url.userinfo.is_some())
         {
             let offers_basic = resp.headers.iter().any(|(k, v)| {
                 k.eq_ignore_ascii_case("www-authenticate")
@@ -1682,6 +1823,29 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                 // redirects in this same `perform()` call also send Basic
                 // (test 1087, 1088).
                 opts.defer_auth = false;
+                resp = execute_request(&url, &opts, redirect_headers.len())?;
+                connects += 1;
+            }
+        }
+
+        // Proxy 407 challenge with --proxy-anyauth/digest/ntlm/negotiate:
+        // resend with Proxy-Authorization (Basic only) and any cookies the
+        // 407 set on the proxy response (test 1331).
+        if resp.status == 407 && opts.defer_proxy_auth && opts.proxy_user.is_some() {
+            let offers_basic = resp.headers.iter().any(|(k, v)| {
+                k.eq_ignore_ascii_case("proxy-authenticate")
+                    && v.split(',').any(|tok| {
+                        tok.trim()
+                            .split_ascii_whitespace()
+                            .next()
+                            .is_some_and(|s| s.eq_ignore_ascii_case("basic"))
+                    })
+            });
+            if offers_basic {
+                redirect_headers.extend_from_slice(&resp.header_bytes);
+                opts.defer_proxy_auth = false;
+                // Apply cookies that came in via the 407 response — the
+                // cookie engine may have stored them on the matching host.
                 resp = execute_request(&url, &opts, redirect_headers.len())?;
                 connects += 1;
             }
@@ -1932,23 +2096,51 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                 // RFC 7231: on 301/302, a POST becomes a GET (and its body is
                 // dropped) unless the user opts in via --post301/--post302 to
                 // preserve the POST. PUT is preserved by default (test 1051).
-                // 303 typically changes to GET; --post303 preserves the POST
-                // (test 1332).
+                // 303 ALWAYS converts to GET (POST or PUT) unless --post303 is
+                // set on a POST (tests 1332, 1524).
                 if matches!(resp.status, 301..=303) {
                     let is_post = opts.data.is_some() || !opts.form_fields.is_empty();
+                    let is_put = opts.upload_file.is_some();
                     let preserve = match resp.status {
                         301 => opts.post301,
                         302 => opts.post302,
-                        303 => opts.post303,
+                        303 => opts.post303 && is_post,
                         _ => false,
                     };
-                    let convert = is_post && !preserve;
+                    // 303 converts both POST and PUT; 301/302 only convert POST.
+                    let convert = !preserve
+                        && match resp.status {
+                            301 | 302 => is_post,
+                            303 => is_post || is_put,
+                            _ => false,
+                        };
                     if convert {
                         opts.data = None;
                         opts.form_fields.clear();
                         opts.upload_file = None;
                         opts.method = Some("GET".to_string());
                     }
+                }
+
+                // Stdin-source uploads can't be replayed on a redirect.
+                // Return the response we already have (with -i in the test
+                // framework, its headers go to stdout) and flag the failure
+                // so main.rs can set exit 25 (test 1073).
+                let upload_from_stdin = matches!(
+                    opts.upload_file.as_deref().and_then(|p| p.to_str()),
+                    Some("-" | ".")
+                );
+                if upload_from_stdin {
+                    redirect_headers.truncate(prev_redirect_headers_len);
+                    let mut final_resp = resp;
+                    final_resp.redirect_headers = redirect_headers;
+                    final_resp.num_connects = connects;
+                    final_resp.num_redirects = redirects - 1;
+                    final_resp.upload_redirect_failed = true;
+                    final_resp.final_url = Some(url_str.to_string());
+                    final_resp.final_referer = opts.referer.clone();
+                    final_resp.redirect_url = Some(current_url.clone());
+                    return Ok(final_resp);
                 }
 
                 // If the redirect target is on a different host, drop any
@@ -1990,7 +2182,7 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                                 .map(|h| std::path::PathBuf::from(h).join(".netrc"))
                         });
                         if let Some(p) = path
-                            && let Some((login, password)) =
+                            && let Ok(Some((login, password))) =
                                 crate::netrc::lookup(&p, &new_url.host, None)
                             && let Some(u) = login
                         {
