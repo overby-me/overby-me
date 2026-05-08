@@ -308,6 +308,30 @@
         name = "radix-octal";
       }
       {
+        tool = "nm";
+        name = "multiple-files";
+      }
+      {
+        tool = "size";
+        name = "multiple-files";
+      }
+      {
+        tool = "readelf";
+        name = "multiple-files";
+      }
+      {
+        tool = "objdump";
+        name = "multiple-files";
+      }
+      {
+        tool = "strings";
+        name = "multiple-files";
+      }
+      {
+        tool = "addr2line";
+        name = "inlines";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }

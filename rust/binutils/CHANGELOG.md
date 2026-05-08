@@ -3,7 +3,12 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
-## Custom-test expansion (67/67 ✅)
+## Custom-test expansion (73/73 ✅)
+
+- 6 more custom tests for multi-file invocations and addr2line `-i`
+  (+6, 67→73): `nm-multiple-files`, `size-multiple-files`,
+  `readelf-multiple-files`, `objdump-multiple-files`,
+  `strings-multiple-files`, `addr2line-inlines`.
 
 - 3 more custom tests for already-supported flag combinations (+3,
   64→67): `nm-radix-hex-print-file-name` (`-t x -A`),

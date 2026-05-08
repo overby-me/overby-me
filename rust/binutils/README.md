@@ -6,7 +6,7 @@ at passing the upstream GNU binutils test suite.
 
 ## Status
 
-- **67/67 custom comparison tests passing (100%)**
+- **73/73 custom comparison tests passing (100%)**
 - **328/329 upstream DejaGnu tests passing (99.7%)**
 
 The single remaining failing dejagnu test is `readelf -wi
@@ -95,18 +95,18 @@ nix flake check
 
 ## Test results
 
-### Custom comparison tests (67/67 passing)
+### Custom comparison tests (73/73 passing)
 
 | Tool | Tests |
 |---|---|
 | `ar` | `create-list`, `extract`, `print` |
-| `addr2line` | `basic`, `demangle`, `multiple`, `pretty` |
+| `addr2line` | `basic`, `demangle`, `inlines`, `multiple`, `pretty` |
 | `c++filt` | `basic`, `multiple`, `nested`, `no-params`, `no-strip-leading`, `types` |
-| `nm` | `basic`, `debug-syms`, `defined-only`, `extern-only`, `just-symbols`, `just-symbols-with-prefix`, `no-sort`, `numeric-sort`, `posix`, `print-file-name`, `print-file-name-posix`, `radix-decimal`, `radix-hex`, `radix-hex-print-file-name`, `radix-octal`, `reverse-sort`, `undefined-only` |
-| `objdump` | `disassemble`, `file-headers`, `headers`, `relocs`, `section-filter`, `syms` |
-| `readelf` | `arch-specific`, `dynamic`, `file-header`, `groups`, `header-program`, `header-sections`, `headers-all`, `headers-combined`, `hex-dump`, `hex-dump-data`, `histogram`, `notes`, `program-headers`, `relocs`, `sections`, `string-dump`, `string-dump-missing`, `symbols`, `wide` |
-| `size` | `basic`, `decimal`, `hex`, `octal`, `sysv`, `totals` |
-| `strings` | `basic`, `min-length`, `object`, `radix-decimal`, `radix-hex`, `radix-octal` |
+| `nm` | `basic`, `debug-syms`, `defined-only`, `extern-only`, `just-symbols`, `just-symbols-with-prefix`, `multiple-files`, `no-sort`, `numeric-sort`, `posix`, `print-file-name`, `print-file-name-posix`, `radix-decimal`, `radix-hex`, `radix-hex-print-file-name`, `radix-octal`, `reverse-sort`, `undefined-only` |
+| `objdump` | `disassemble`, `file-headers`, `headers`, `multiple-files`, `relocs`, `section-filter`, `syms` |
+| `readelf` | `arch-specific`, `dynamic`, `file-header`, `groups`, `header-program`, `header-sections`, `headers-all`, `headers-combined`, `hex-dump`, `hex-dump-data`, `histogram`, `multiple-files`, `notes`, `program-headers`, `relocs`, `sections`, `string-dump`, `string-dump-missing`, `symbols`, `wide` |
+| `size` | `basic`, `decimal`, `hex`, `multiple-files`, `octal`, `sysv`, `totals` |
+| `strings` | `basic`, `min-length`, `multiple-files`, `object`, `radix-decimal`, `radix-hex`, `radix-octal` |
 
 ### Upstream DejaGnu tests (328/329 passing)
 
