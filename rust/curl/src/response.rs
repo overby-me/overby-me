@@ -12,6 +12,10 @@ const MAX_TOTAL_HEADER_SIZE: usize = 6 * 1024 * 1024;
 
 pub(crate) struct Response {
     pub(crate) trailer_bytes: Vec<u8>,
+    /// True when the response status line is `HTTP/1.0`. Used by the HTTP/1.1
+    /// keep-alive pool to mark the connection as 1.0 so the next reused
+    /// request downgrades (test 1074, 1078).
+    pub(crate) http10_response: bool,
     pub(crate) status: u16,
     #[expect(
         dead_code,
@@ -88,6 +92,7 @@ pub(crate) fn read_response(
                 // as "empty reply" and set exit code 52.
                 return Ok(Response {
                     trailer_bytes: Vec::new(),
+                    http10_response: false,
                     status: 0,
                     status_text: String::new(),
                     headers: Vec::new(),
@@ -143,6 +148,7 @@ pub(crate) fn read_response(
             let _ = reader.read_to_end(&mut body);
             return Ok(Response {
                 trailer_bytes: Vec::new(),
+                http10_response: false,
                 status: 200,
                 status_text: String::new(),
                 headers: Vec::new(),
@@ -219,6 +225,7 @@ pub(crate) fn read_response(
     let status: u16 = parts[1]
         .parse()
         .map_err(|_| format!("invalid status code: {}", parts[1]))?;
+    let http10_response = parts[0] == "HTTP/1.0";
     let status_text = if parts.len() > 2 {
         parts[2].to_string()
     } else {
@@ -283,6 +290,7 @@ pub(crate) fn read_response(
         if line.contains('\0') {
             return Ok(Response {
                 trailer_bytes: Vec::new(),
+                http10_response: false,
                 status,
                 status_text,
                 headers,
@@ -373,6 +381,7 @@ pub(crate) fn read_response(
         if !trimmed.contains(':') {
             return Ok(Response {
                 trailer_bytes: Vec::new(),
+                http10_response: false,
                 status,
                 status_text,
                 headers,
@@ -410,6 +419,7 @@ pub(crate) fn read_response(
     if header_bytes.len() > MAX_HEADER_SIZE {
         return Ok(Response {
             trailer_bytes: Vec::new(),
+            http10_response: false,
             status,
             status_text,
             headers,
@@ -437,6 +447,7 @@ pub(crate) fn read_response(
     if accumulated_header_bytes + header_bytes.len() > MAX_TOTAL_HEADER_SIZE {
         return Ok(Response {
             trailer_bytes: Vec::new(),
+            http10_response: false,
             status,
             status_text,
             headers,
@@ -467,6 +478,7 @@ pub(crate) fn read_response(
     if is_head || status == 204 || status == 304 {
         return Ok(Response {
             trailer_bytes: Vec::new(),
+            http10_response: false,
             status,
             status_text,
             headers,
@@ -538,6 +550,7 @@ pub(crate) fn read_response(
         }
         return Ok(Response {
             trailer_bytes: Vec::new(),
+            http10_response: false,
             status,
             status_text,
             headers,
@@ -570,6 +583,7 @@ pub(crate) fn read_response(
     if !tr_decompress && !raw && te_tokens.iter().any(|t| t != "chunked" && t != "identity") {
         return Ok(Response {
             trailer_bytes: Vec::new(),
+            http10_response: false,
             status,
             status_text,
             headers,
@@ -599,6 +613,7 @@ pub(crate) fn read_response(
     if te_layer_count > 5 {
         return Ok(Response {
             trailer_bytes: Vec::new(),
+            http10_response: false,
             status,
             status_text,
             headers,
@@ -651,6 +666,7 @@ pub(crate) fn read_response(
         }
         return Ok(Response {
             trailer_bytes: Vec::new(),
+            http10_response: false,
             status,
             status_text,
             headers,
@@ -730,6 +746,7 @@ pub(crate) fn read_response(
         }
         return Ok(Response {
             trailer_bytes: Vec::new(),
+            http10_response: false,
             status,
             status_text,
             headers,
@@ -780,6 +797,7 @@ pub(crate) fn read_response(
         // Note: keep trailing '\n' — curl output includes LF after each header line.
         return Ok(Response {
             trailer_bytes: Vec::new(),
+            http10_response: false,
             status,
             status_text,
             headers,
@@ -841,6 +859,7 @@ pub(crate) fn read_response(
         if exceeded {
             return Ok(Response {
                 trailer_bytes: Vec::new(),
+                http10_response: false,
                 status,
                 status_text,
                 headers,
@@ -1022,6 +1041,7 @@ pub(crate) fn read_response(
 
     Ok(Response {
         trailer_bytes: chunked_trailers,
+        http10_response,
         status,
         status_text,
         headers,

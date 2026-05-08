@@ -1417,7 +1417,7 @@ fn execute_request(
         .headers
         .iter()
         .any(|(k, v)| k.eq_ignore_ascii_case("connection") && v.eq_ignore_ascii_case("close"));
-    let resp_http10 = resp.header_bytes.starts_with(b"HTTP/1.0");
+    let resp_http10 = resp.http10_response;
     // HTTP/1.0 connections default to close. Only keep them in the pool when
     // the response carried `Connection: keep-alive` (test 1074).
     let keep_alive = resp.headers.iter().any(|(k, v)| {

@@ -1201,6 +1201,7 @@ fn main() {
                     {
                         let synth = crate::response::Response {
                             trailer_bytes: Vec::new(),
+                            http10_response: false,
                             status: 0,
                             status_text: String::new(),
                             headers: Vec::new(),
