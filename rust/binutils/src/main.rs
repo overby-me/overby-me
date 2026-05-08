@@ -1355,6 +1355,7 @@ fn tool_nm(args: &[String]) -> i32 {
             "-U" | "--defined-only" => opts.defined_only = true,
             "-D" | "--dynamic" => opts.dynamic = true,
             "-a" | "--debug-syms" => {} // we don't filter debug syms by default
+            "--no-recurse-limit" | "--recurse-limit" => {} // demangler-only knob; no-op here
             "-p" | "--no-sort" => opts.no_sort = true,
             "-n" | "-v" | "--numeric-sort" => opts.numeric_sort = true,
             "-r" | "--reverse-sort" => opts.reverse_sort = true,
@@ -11724,12 +11725,21 @@ fn tool_cxxfilt(args: &[String]) -> i32 {
         return 0;
     }
 
-    // Collect any positional arguments (mangled names)
+    // Collect any positional arguments (mangled names). Skip values that
+    // belong to value-taking flags so they aren't interpreted as input.
     let mut names: Vec<String> = Vec::new();
-    for arg in args {
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        // Value-taking flags consume the next arg.
+        if arg == "-s" || arg == "--format" {
+            i += 2;
+            continue;
+        }
         if !arg.starts_with('-') {
             names.push(arg.clone());
         }
+        i += 1;
     }
 
     let stdout = io::stdout();

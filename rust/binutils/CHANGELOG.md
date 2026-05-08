@@ -3,7 +3,13 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
-## Custom-test expansion (73/73 ✅)
+## Custom-test expansion (77/77 ✅)
+
+- nm `--no-recurse-limit`/`--recurse-limit` accepted as no-ops
+  (demangler-only knob), and c++filt `-s STYLE` / `--format STYLE`
+  treated as a value-taking flag (the style argument was previously
+  picked up as input). +4 custom tests (73→77): `nm-no-recurse-limit`,
+  `nm-reverse-numeric`, `cxxfilt-style`, `cxxfilt-no-recurse-limit`.
 
 - 6 more custom tests for multi-file invocations and addr2line `-i`
   (+6, 67→73): `nm-multiple-files`, `size-multiple-files`,

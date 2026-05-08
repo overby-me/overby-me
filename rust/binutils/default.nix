@@ -332,6 +332,22 @@
         name = "inlines";
       }
       {
+        tool = "nm";
+        name = "no-recurse-limit";
+      }
+      {
+        tool = "nm";
+        name = "reverse-numeric";
+      }
+      {
+        tool = "cxxfilt";
+        name = "style";
+      }
+      {
+        tool = "cxxfilt";
+        name = "no-recurse-limit";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }
