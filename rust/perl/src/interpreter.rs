@@ -4671,7 +4671,7 @@ impl Interpreter {
         self.apply_binop(op, &l, &r)
     }
 
-    fn apply_binop(&self, op: &BinOp, l: &Value, r: &Value) -> Value {
+    fn apply_binop(&mut self, op: &BinOp, l: &Value, r: &Value) -> Value {
         match op {
             BinOp::Add => Value::Num(l.to_num() + r.to_num()),
             BinOp::Sub => Value::Num(l.to_num() - r.to_num()),
@@ -4718,7 +4718,7 @@ impl Interpreter {
                 }
             }
             BinOp::Pow => Value::Num(l.to_num().powf(r.to_num())),
-            BinOp::Concat => Value::Str(format!("{}{}", l.to_str(), r.to_str())),
+            BinOp::Concat => self.concat_with_overload(l, r),
             BinOp::Repeat => {
                 let s = l.to_str();
                 let n = r.to_num() as usize;
@@ -7882,6 +7882,61 @@ impl Interpreter {
             return cls.clone();
         }
         v.ref_type().to_string()
+    }
+
+    /// `$a . $b` with overload support. If either operand is a blessed
+    /// ref whose class has `.` registered, dispatch to the handler.
+    /// The handler signature is `($self, $other, $reversed)` —
+    /// `$reversed` is true when the overloaded operand is on the
+    /// right. Returns the handler's value (which may be a non-string,
+    /// e.g. another blessed ref). Falls back to plain `to_str` concat
+    /// for non-overloaded operands.
+    fn concat_with_overload(&mut self, l: &Value, r: &Value) -> Value {
+        let lp = Self::ref_ptr(l);
+        let rp = Self::ref_ptr(r);
+        let lhs_handler = if lp != 0 {
+            self.blessed_refs.get(&lp).cloned().and_then(|cls| {
+                self.overload_handlers
+                    .get(&cls)
+                    .and_then(|m| m.get("."))
+                    .cloned()
+            })
+        } else {
+            None
+        };
+        let rhs_handler = if rp != 0 && lhs_handler.is_none() {
+            self.blessed_refs.get(&rp).cloned().and_then(|cls| {
+                self.overload_handlers
+                    .get(&cls)
+                    .and_then(|m| m.get("."))
+                    .cloned()
+            })
+        } else {
+            None
+        };
+        if let Some(name) = lhs_handler
+            && let Some((_params, body)) = self.subs.get(&name).cloned()
+        {
+            return self.call_sub_named(
+                &body,
+                &[l.clone(), r.clone(), Value::Str(String::new())],
+                Some(&name),
+            );
+        }
+        if let Some(name) = rhs_handler
+            && let Some((_params, body)) = self.subs.get(&name).cloned()
+        {
+            return self.call_sub_named(
+                &body,
+                &[r.clone(), l.clone(), Value::Num(1.0)],
+                Some(&name),
+            );
+        }
+        Value::Str(format!(
+            "{}{}",
+            self.stringify_value(l),
+            self.stringify_value(r)
+        ))
     }
 
     /// Numify a value, dispatching `use overload q|0+| => sub {...}`
