@@ -245,6 +245,10 @@ fn main() {
         // "localhost", or "127.0.0.1" — anything else is rejected with
         // exit 3 (URL malformat) per test 1145.
         let lower_url = url_str.to_ascii_lowercase();
+        // --proto-default file: a schemeless URL becomes file:// (test 1146).
+        let proto_default_file = opts.proto_default.as_deref() == Some("file")
+            && !lower_url.contains("://")
+            && !lower_url.starts_with("file:");
         let file_url_rest: Option<&str> = if let Some(rest) = url_str
             .strip_prefix("file://")
             .or_else(|| url_str.strip_prefix("FILE://"))
@@ -257,6 +261,9 @@ fn main() {
             // `file:/path` — single-slash form (test 203). Treat as if the
             // host were empty: keep the leading `/`.
             url_str.get(5..)
+        } else if proto_default_file {
+            // Treat the bare path/URL as if it had been written `file://...`.
+            Some(url_str.as_str())
         } else {
             None
         };

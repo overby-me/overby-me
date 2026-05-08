@@ -806,10 +806,10 @@ pub(crate) fn parse_args() -> Options {
             "--proto-default" => {
                 i += 1;
                 let val = next_arg(&args, i, "--proto-default");
-                // Only http/https are real schemes we recognize. Anything else
-                // is unsupported (exit 1, test 2044).
+                // We support http, https, and file as default protocols
+                // (test 1146); anything else exits 1 (test 2044).
                 let lower = val.to_ascii_lowercase();
-                if lower != "http" && lower != "https" {
+                if lower != "http" && lower != "https" && lower != "file" {
                     eprintln!("curl: (1) Unsupported protocol scheme '{val}'");
                     process::exit(1);
                 }
