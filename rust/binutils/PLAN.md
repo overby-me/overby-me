@@ -82,8 +82,8 @@ Key design decisions:
 | addr2line.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
 | update-section.exp | **6** | 0 | 6 | minPass=6, maxFail=0 |
 | elfedit.exp | **6** | 0 | 6 | minPass=6, maxFail=0 |
-| x86-64/x86-64.exp | **22** | 13 | 35 | (informational; only the binutils-all-x86-64 subset is enabled) |
-| **Total** | **308** | **13** | **321** | |
+| x86-64/x86-64.exp | **23** | 12 | 35 | (informational; only the binutils-all-x86-64 subset is enabled) |
+| **Total** | **309** | **12** | **321** | |
 
 All upstream DejaGnu tests pass.
 
@@ -242,6 +242,10 @@ Two layers of testing:
   - Strip/objcopy/nm/readelf `--help` now emits a `supported targets:` line listing common ELF formats including elf64-littleaarch64 (fixes pr33230 — test branches on whether help advertises the target).
 - [x] Compact `.shstrtab` after `strip --strip-all` removes empty `.symtab`/`.strtab` (+2 dejagnu, 305→307 total): `elf_remove_empty_symtab` now rebuilds `.shstrtab` to drop the names of removed sections, updates each surviving header's `sh_name` to the new offset, and shrinks `sh_size` accordingly. Original on-disk position is preserved (the trailing bytes inside the original size become unreferenced padding) so file offsets in other sections don't shift. Fixes `strip on uncompressed debug sections` and `strip on compressed debug sections`.
 - [x] readelf `-l` "Section to Segment mapping" + strip recomputes PT_TLS p_memsz (+1 dejagnu, 307→308 total): per-segment list of contained sections using `SHF_ALLOC`/VMA vs file-offset comparison, with TLS-NOBITS-in-PT_LOAD/PT_GNU_RELRO exclusion to match GNU readelf. `strip_inplace_elf` now scans surviving SHF_TLS sections and rewrites PT_TLS `p_memsz` to `max(sh_addr+sh_size) - min(sh_addr)` so the trailing alignment padding shrinks (e.g. 0x10 → 0x09). Fixes `strip (binutils-all/x86-64/pr27708.exe)`.
+- [x] DWARF -wi format polish + objcopy x86-64-only `large` flag check (+1 dejagnu, 308→309 total):
+  - readelf -wi prints offset 0 as "0" (not "0x0") for `Compilation Unit @ offset`, `Abbrev Offset`, sec_offset values, addrx/strx index, and DWP-resolved indexed strings — matches GNU's "(0x)?N" format pattern when N==0.
+  - Final trailing blank line emitted at end of `.debug_info` dump (matches GNU readelf's section-trailer convention).
+  - objcopy now rejects `--set-section-flags X=...,large,...` when output target is non-x86-64 ELF (e.g. `-O elf32-i386`) with "objcopy: <input>[<section>]: 'large' flag is ELF x86-64 specific" — fixes `large-sections-i386`.
 
 ## Next steps
 

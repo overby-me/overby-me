@@ -8365,6 +8365,23 @@ fn tool_objcopy(args: &[String]) -> i32 {
         }
     }
 
+    // Reject `large` section flag when output target is non-x86-64 ELF.
+    if let Some(fmt) = output_format.as_deref() {
+        let is_x86_64_elf = matches!(fmt, "elf64-x86-64" | "elf32-x86-64");
+        if !is_x86_64_elf && fmt.starts_with("elf") {
+            for (sname, flags) in &set_section_flags {
+                if flags.iter().any(|f| f.eq_ignore_ascii_case("large")) {
+                    eprintln!(
+                        "objcopy: {}[{}]: 'large' flag is ELF x86-64 specific",
+                        files.first().map(|s| s.as_str()).unwrap_or(""),
+                        sname
+                    );
+                    return 1;
+                }
+            }
+        }
+    }
+
     let input = &files[0];
     let output = if files.len() > 1 { &files[1] } else { input };
 
@@ -16902,7 +16919,13 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
                     };
                 }
             }
-            println!("  Compilation Unit @ offset 0x{:x}:", cu_start);
+            // GNU readelf prints offset 0 as "0" (no 0x prefix); non-zero
+            // gets the standard "0xN" formatting.
+            if cu_start == 0 {
+                println!("  Compilation Unit @ offset 0:");
+            } else {
+                println!("  Compilation Unit @ offset 0x{:x}:", cu_start);
+            }
             println!("   Length:        0x{:x} ({})", len, format_str);
             println!("   Version:       {}", version);
             if let Some(ut) = unit_type {
@@ -16925,7 +16948,11 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
                 0
             };
             let real_abbrev_off = abbrev_off + abbrev_contrib_off;
-            println!("   Abbrev Offset: 0x{:x}", abbrev_off);
+            if abbrev_off == 0 {
+                println!("   Abbrev Offset: 0");
+            } else {
+                println!("   Abbrev Offset: 0x{:x}", abbrev_off);
+            }
             println!("   Pointer Size:  {}", addr_size);
             if let Some(sig) = type_signature {
                 println!("   Signature:     0x{:x}", sig);
@@ -17049,6 +17076,8 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
         };
         dump_units(".debug_types.dwo", &types_data, &tu_contribs, true);
     }
+    // Final trailing blank line at the end of the dump (matches GNU readelf).
+    println!();
 }
 
 struct DwarfReader<'a> {
@@ -18498,7 +18527,12 @@ fn read_and_format_attr(
                 => " (location list)",
                 _ => "",
             };
-            format!("0x{:x}{}", v, suffix)
+            // GNU readelf prints offset 0 without 0x prefix.
+            if v == 0 {
+                format!("0{}", suffix)
+            } else {
+                format!("0x{:x}{}", v, suffix)
+            }
         }
         0x18 /* exprloc */ => {
             let n = p.read_uleb128().unwrap_or(0) as usize;
@@ -18508,11 +18542,19 @@ fn read_and_format_attr(
         0x19 /* flag_present */ => "1".to_string(),
         0x1a /* strx (DWARF5) */ => {
             let idx = p.read_uleb128().unwrap_or(0);
-            format!("(indexed string: 0x{:x})", idx)
+            if idx == 0 {
+                "(indexed string: 0)".to_string()
+            } else {
+                format!("(indexed string: 0x{:x})", idx)
+            }
         }
         0x1b /* addrx */ => {
             let idx = p.read_uleb128().unwrap_or(0);
-            format!("(addr_index: 0x{:x})", idx)
+            if idx == 0 {
+                "(addr_index: 0)".to_string()
+            } else {
+                format!("(addr_index: 0x{:x})", idx)
+            }
         }
         0x1c /* ref_sup4 */ => format!("<0x{:x}>", p.read_u32().unwrap_or(0)),
         0x1d /* strp_sup */ => {
@@ -18574,12 +18616,17 @@ fn read_and_format_attr(
         }
         0x1f01 /* DW_FORM_GNU_addr_index */ => {
             let idx = p.read_uleb128().unwrap_or(0);
-            // Match GNU readelf: emit a warning + indexed display when
-            // .debug_addr is unavailable (typical in DWP/dwo files).
-            format!(
-                "readelf: Warning: Cannot fetch indexed address: the .debug_addr section is missing\n (index: 0x{:x}): 0",
-                idx
-            )
+            // GNU readelf (legacy GNU extension path) embeds the warning
+            // text on the same logical line, then the value on the next
+            // line. Index 0 prints without the 0x prefix.
+            if idx == 0 {
+                "readelf: Warning: Cannot fetch indexed address: the .debug_addr section is missing\n (index: 0): 0".to_string()
+            } else {
+                format!(
+                    "readelf: Warning: Cannot fetch indexed address: the .debug_addr section is missing\n (index: 0x{:x}): 0",
+                    idx
+                )
+            }
         }
         0x1f02 /* DW_FORM_GNU_str_index */ => {
             let idx = p.read_uleb128().unwrap_or(0) as usize;
@@ -18592,10 +18639,15 @@ fn read_and_format_attr(
                 0
             };
             let s = read_cstr_at(dwp_str, str_off);
-            if s.is_empty() {
-                format!("(indexed string: 0x{:x})", idx)
+            let idx_str = if idx == 0 {
+                "0".to_string()
             } else {
-                format!("(indexed string: 0x{:x}): {}", idx, s)
+                format!("0x{:x}", idx)
+            };
+            if s.is_empty() {
+                format!("(indexed string: {})", idx_str)
+            } else {
+                format!("(indexed string: {}): {}", idx_str, s)
             }
         }
         _ => format!("<unsupported FORM 0x{:x}>", form),
