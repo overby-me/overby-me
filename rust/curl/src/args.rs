@@ -295,6 +295,17 @@ pub(crate) fn parse_args() -> Options {
     // a config file ends up including itself (test 774).
     let mut config_paths: std::collections::HashSet<std::path::PathBuf> =
         std::collections::HashSet::new();
+    // True when the current --next group has had `--etag-save` or
+    // `--etag-compare` specified. Combined with the group's URL count this
+    // detects multi-URL etag conflicts at the right point so the error
+    // message names the option that triggered the conflict (tests 484, 485).
+    let mut etag_in_group: bool = false;
+    let etag_conflict = |last_opt: &str| -> ! {
+        eprintln!("curl: The etag options only work on a single URL");
+        eprintln!("curl: option --{last_opt}: is badly used here");
+        eprintln!("curl: try 'curl --help' or 'curl --manual' for more information");
+        process::exit(2);
+    };
 
     let mut i = 0;
     while i < args.len() {
@@ -335,7 +346,7 @@ pub(crate) fn parse_args() -> Options {
             "-V" | "--version" => {
                 println!("curl 8.0.0 (rust-curl) libcurl/8.0.0 rustls/0.23");
                 println!("Protocols: http https");
-                println!("Features: HTTPS SSL libz");
+                println!("Features: HTTPS IPv6 SSL libz");
                 process::exit(0);
             }
             "-X" | "--request" => {
@@ -625,10 +636,18 @@ pub(crate) fn parse_args() -> Options {
             "--etag-compare" => {
                 i += 1;
                 opts.etag_compare = Some(PathBuf::from(next_arg(&args, i, "--etag-compare")));
+                if opts.urls.len() - group_start_idx > 1 {
+                    etag_conflict("etag-compare");
+                }
+                etag_in_group = true;
             }
             "--etag-save" => {
                 i += 1;
                 opts.etag_save = Some(PathBuf::from(next_arg(&args, i, "--etag-save")));
+                if opts.urls.len() - group_start_idx > 1 {
+                    etag_conflict("etag-save");
+                }
+                etag_in_group = true;
             }
             "--no-keepalive" => {
                 opts.no_keepalive = true;
@@ -668,12 +687,18 @@ pub(crate) fn parse_args() -> Options {
                     for line in contents.split('\n') {
                         let line = line.trim();
                         if !line.is_empty() {
+                            if etag_in_group && opts.urls.len() > group_start_idx {
+                                etag_conflict("url");
+                            }
                             opts.urls.push(line.to_string());
                             has_url = true;
                             expecting_url_after_next = false;
                         }
                     }
                 } else {
+                    if etag_in_group && opts.urls.len() > group_start_idx {
+                        etag_conflict("url");
+                    }
                     opts.urls.push(val);
                     has_url = true;
                     expecting_url_after_next = false;
@@ -1046,6 +1071,7 @@ pub(crate) fn parse_args() -> Options {
                 opts.proxy_user = None;
                 opts.etag_save = None;
                 opts.etag_compare = None;
+                etag_in_group = false;
                 expecting_url_after_next = true;
                 i += 1;
                 continue;
@@ -1211,6 +1237,9 @@ pub(crate) fn parse_args() -> Options {
                     eprintln!("curl: try 'curl --help' or 'curl --manual' for more information");
                     process::exit(2);
                 } else {
+                    if etag_in_group && opts.urls.len() > group_start_idx {
+                        etag_conflict("url");
+                    }
                     opts.urls.push(arg.clone());
                     has_url = true;
                     expecting_url_after_next = false;
@@ -1244,44 +1273,8 @@ pub(crate) fn parse_args() -> Options {
         process::exit(2);
     }
 
-    // --etag-save / --etag-compare reject groups (a `--next`-bounded run of
-    // URLs) that contain more than one URL. Per-group enforcement allows
-    // test 369's `URL --etag-save X --next URL` while still rejecting test
-    // 485's `URL URL --etag-save X` where both URLs would share the option.
-    {
-        let mut group_start = 0usize;
-        let mut i = 0usize;
-        while i < opts.per_url_opts.len() {
-            // Find the end of this group (next first_in_group or end-of-list).
-            let mut j = i + 1;
-            while j < opts.per_url_opts.len() && !opts.per_url_opts[j].first_in_group {
-                j += 1;
-            }
-            if j - group_start > 1 {
-                let mut name = "";
-                for k in group_start..j {
-                    if opts.per_url_opts[k].etag_save.is_some() {
-                        name = "etag-save";
-                        break;
-                    }
-                    if opts.per_url_opts[k].etag_compare.is_some() {
-                        name = "etag-compare";
-                        break;
-                    }
-                }
-                if !name.is_empty() {
-                    eprintln!("curl: The etag options only work on a single URL");
-                    eprintln!("curl: option --{name}: is badly used here");
-                    eprintln!(
-                        "curl: try 'curl --help' or 'curl --manual' for more information"
-                    );
-                    process::exit(2);
-                }
-            }
-            group_start = j;
-            i = j;
-        }
-    }
+    // (etag multi-URL conflict checked inline at the offending option's parse
+    // time so the error message names the right flag — tests 369, 484, 485.)
 
     // --continue-at is not compatible with request bodies (-d/--data* etc.).
     if opts.resume_from.is_some() && (opts.data.is_some() || !opts.form_fields.is_empty()) {

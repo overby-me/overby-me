@@ -279,6 +279,9 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
         resolved.clone()
     } else if is_localhost {
         format!("127.0.0.1:{}", connect_port)
+    } else if connect_host.contains(':') {
+        // IPv6 literal — must be bracketed for `to_socket_addrs`.
+        format!("[{}]:{}", connect_host, connect_port)
     } else {
         format!("{}:{}", connect_host, connect_port)
     };
@@ -354,7 +357,12 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
         } else {
             "HTTP/1.1"
         };
-        let target = format!("{}:{}", url.host, url.port);
+        // RFC 7230: bracket IPv6 literals in CONNECT/Host targets.
+        let target = if url.host.contains(':') {
+            format!("[{}]:{}", url.host, url.port)
+        } else {
+            format!("{}:{}", url.host, url.port)
+        };
 
         let mut req = format!("CONNECT {target} {http_ver}\r\n");
         // If the user already supplied a Host through --proxy-header,

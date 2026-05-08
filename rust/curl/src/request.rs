@@ -47,10 +47,16 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
             Some("") => {}
             Some(h) => req.push_str(&format!("Host: {h}\r\n")),
             None => {
-                if url.port == default_port {
-                    req.push_str(&format!("Host: {}\r\n", url.host));
+                // RFC 7230: bracket IPv6 literals in the Host header.
+                let host_for_header: String = if url.host.contains(':') {
+                    format!("[{}]", url.host)
                 } else {
-                    req.push_str(&format!("Host: {}:{}\r\n", url.host, url.port));
+                    url.host.clone()
+                };
+                if url.port == default_port {
+                    req.push_str(&format!("Host: {host_for_header}\r\n"));
+                } else {
+                    req.push_str(&format!("Host: {host_for_header}:{}\r\n", url.port));
                 }
             }
         }
@@ -140,10 +146,16 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         Some("") => {}
         Some(h) => req.push_str(&format!("Host: {h}\r\n")),
         None => {
-            if url.port == default_port {
-                req.push_str(&format!("Host: {}\r\n", url.host));
+            // RFC 7230: bracket IPv6 literals in the Host header.
+            let host_for_header: String = if url.host.contains(':') {
+                format!("[{}]", url.host)
             } else {
-                req.push_str(&format!("Host: {}:{}\r\n", url.host, url.port));
+                url.host.clone()
+            };
+            if url.port == default_port {
+                req.push_str(&format!("Host: {host_for_header}\r\n"));
+            } else {
+                req.push_str(&format!("Host: {host_for_header}:{}\r\n", url.port));
             }
         }
     }
