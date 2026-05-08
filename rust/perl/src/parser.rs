@@ -3846,6 +3846,21 @@ fn parse_interp_string(s: &str) -> Expr {
                     }
                     if i < chars.len() {
                         i += 1; // skip closing }
+                    } else if depth > 0 {
+                        // Reference perl rejects unbalanced `${...}` (e.g.
+                        // op/heredoc test 138's `${sub{b{]]]{}` shape) at
+                        // parse time. Emit a `_parse_error` deferred to
+                        // runtime so an enclosing `eval` can catch it via
+                        // `$@`.
+                        parts.push(InterpPart::Expr(Box::new(Expr::Call(
+                            "_parse_error".to_string(),
+                            vec![Expr::StringLit("syntax error".to_string())],
+                        ))));
+                        if !lit.is_empty() {
+                            parts
+                                .insert(parts.len() - 1, InterpPart::Lit(std::mem::take(&mut lit)));
+                        }
+                        return Expr::Interp(parts);
                     }
                     // Simple ident → scalar var. Otherwise, parse as expr
                     // and emit a block-deref Call.
