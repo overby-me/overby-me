@@ -6,7 +6,7 @@ at passing the upstream GNU binutils test suite.
 
 ## Status
 
-- **128/128 custom comparison tests passing (100%)**
+- **131/131 custom comparison tests passing (100%)**
 - **328/329 upstream DejaGnu tests passing (99.7%)**
 
 The single remaining failing dejagnu test is `readelf -wi
@@ -95,7 +95,7 @@ nix flake check
 
 ## Test results
 
-### Custom comparison tests (128/128 passing)
+### Custom comparison tests (131/131 passing)
 
 | Tool | Tests |
 |---|---|
@@ -103,7 +103,7 @@ nix flake check
 | `addr2line` | `addresses`, `addresses-functions-pretty`, `basenames`, `basic`, `demangle`, `functions`, `inlines`, `multiple`, `pretty`, `pretty-functions` |
 | `c++filt` | `basic`, `multiple`, `nested`, `no-params`, `no-recurse-limit`, `no-strip-leading`, `strip-underscore`, `style`, `types` |
 | `nm` | `all-with-prefix`, `archive`, `basic`, `debug-syms`, `defined-only`, `extern-only`, `extern-only-posix`, `format-bsd`, `just-symbols`, `just-symbols-with-prefix`, `last-wins-sort`, `line-numbers`, `multiple-files`, `no-demangle`, `no-recurse-limit`, `no-sort`, `no-weak`, `numeric-extern`, `numeric-sort`, `posix`, `posix-decimal`, `posix-octal`, `print-armap`, `print-file-name`, `print-file-name-posix`, `print-size`, `quiet`, `radix-decimal`, `radix-hex`, `radix-hex-print-file-name`, `radix-octal`, `reverse-numeric`, `reverse-sort`, `size-sort`, `special-syms`, `target-noop`, `undefined-only`, `undefined-only-posix` |
-| `objdump` | `archive`, `disassemble`, `disassemble-section`, `file-headers`, `headers`, `headers-section-filter`, `intel-syntax`, `multiple-files`, `no-show-raw-insn`, `relocs`, `section-filter`, `section-headers-wide`, `syms`, `syms-section-filter` |
+| `objdump` | `archive`, `disassemble`, `disassemble-section`, `disassemble-zeroes`, `file-headers`, `headers`, `headers-section-filter`, `intel-syntax`, `intel-syntax-bundled`, `multiple-files`, `no-show-raw-insn`, `relocs`, `section-filter`, `section-filter-bundled`, `section-headers-wide`, `syms`, `syms-section-filter` |
 | `readelf` | `arch-specific`, `archive-index-not-archive`, `dynamic`, `dynamic-arch`, `file-header`, `groups`, `groups-wide`, `header-notes`, `header-program`, `header-sections`, `headers-all`, `headers-combined`, `hex-dump`, `hex-dump-data`, `hex-dump-text`, `histogram`, `multiple-files`, `notes`, `notes-symbols`, `notes-with-sections`, `program-headers`, `program-wide`, `relocs`, `sections`, `sections-arch-wide`, `string-dump`, `string-dump-data`, `string-dump-missing`, `string-dump-text`, `symbols`, `unwind`, `use-dynamic`, `version-info`, `wide` |
 | `size` | `basic`, `common`, `decimal`, `hex`, `multiple-files`, `octal`, `sysv`, `sysv-hex`, `sysv-octal`, `totals` |
 | `strings` | `basic`, `min-length`, `multiple-files`, `object`, `print-file-name`, `radix-decimal`, `radix-hex`, `radix-octal` |

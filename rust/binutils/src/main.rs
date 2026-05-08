@@ -6757,7 +6757,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                 }
                 "-s" | "--full-contents" => show_full_contents = true,
                 "--show-all-symbols" => show_all_symbols = true,
-                "--disassemble-zeroes" => disassemble_zeroes = true,
+                "-z" | "--disassemble-zeroes" => disassemble_zeroes = true,
                 "-W" => {
                     // -W alone means "dump all DWARF sections" (== -Wa -Wi -WR -Ws ...).
                     emit_wi_placeholder = true;
@@ -6841,11 +6841,13 @@ fn tool_objdump(args: &[String]) -> i32 {
                 }
                 _ if arg.starts_with('-') && !arg.starts_with("--") && arg != "-" => {
                     let chars: Vec<char> = arg[1..].chars().collect();
-                    for ch in &chars {
-                        match ch {
+                    let mut k = 0;
+                    while k < chars.len() {
+                        match chars[k] {
                             'd' => disassemble = true,
                             'D' => {
                                 disassemble = true;
+                                disassemble_all = true;
                             }
                             'S' => {
                                 show_source = true;
@@ -6863,6 +6865,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                             }
                             't' => show_symbols = true,
                             'r' => show_relocs = true,
+                            'R' => {} // -R (dynamic-reloc) — accepted but not implemented
                             'p' => show_private = true,
                             'f' => show_file_headers = true,
                             'i' => show_info = true,
@@ -6871,8 +6874,46 @@ fn tool_objdump(args: &[String]) -> i32 {
                             'Z' => {
                                 decompress = true;
                             }
+                            'z' => disassemble_zeroes = true,
+                            'M' => {
+                                // -M takes an argument: either rest of arg or next arg
+                                let rest: String = chars[k + 1..].iter().collect();
+                                let v = if !rest.is_empty() {
+                                    k = chars.len(); // consume rest
+                                    rest
+                                } else if i + 1 < args.len() {
+                                    i += 1;
+                                    args[i].clone()
+                                } else {
+                                    String::new()
+                                };
+                                if v.contains("intel") {
+                                    intel_syntax = true;
+                                } else if v.contains("att") {
+                                    intel_syntax = false;
+                                }
+                                break;
+                            }
+                            'j' => {
+                                // -j takes an argument: rest of arg or next arg
+                                let rest: String = chars[k + 1..].iter().collect();
+                                let v = if !rest.is_empty() {
+                                    k = chars.len();
+                                    rest
+                                } else if i + 1 < args.len() {
+                                    i += 1;
+                                    args[i].clone()
+                                } else {
+                                    String::new()
+                                };
+                                if !v.is_empty() {
+                                    section_filter.push(v);
+                                }
+                                break;
+                            }
                             _ => {}
                         }
+                        k += 1;
                     }
                 }
                 _ if !arg.starts_with('-') => files.push(arg.clone()),
@@ -7522,7 +7563,7 @@ fn objdump_process_object(
     disassemble_all: bool,
     disassemble_syms: &[String],
     show_all_symbols: bool,
-    _disassemble_zeroes: bool,
+    disassemble_zeroes: bool,
     section_filter: &[String],
     show_debug_links: bool,
     start_addr: Option<u64>,
@@ -8009,6 +8050,7 @@ fn objdump_process_object(
             size: u64,
         }
 
+        let mut first_disassembly = true;
         for section in obj.sections() {
             let sec_name = section.name().unwrap_or("");
             // Decide whether to disassemble this section:
@@ -8100,7 +8142,12 @@ fn objdump_process_object(
                                 .unwrap_or(section.address() + section.size())
                         };
 
-                        println!("\n\nDisassembly of section {sec_name}:");
+                        if first_disassembly {
+                            println!("\n\nDisassembly of section {sec_name}:");
+                            first_disassembly = false;
+                        } else {
+                            println!("\nDisassembly of section {sec_name}:");
+                        }
                         if let Ok(sec_data) = section.data() {
                             let base = section.address();
                             let start_off = (sym_addr - base) as usize;
@@ -8139,6 +8186,7 @@ fn objdump_process_object(
                                     show_line_numbers,
                                     show_raw_insn,
                                     intel_syntax,
+                                    disassemble_zeroes,
                                 );
                             }
                         }
@@ -8148,7 +8196,12 @@ fn objdump_process_object(
                     continue;
                 }
             } else {
-                println!("\n\nDisassembly of section {sec_name}:");
+                if first_disassembly {
+                    println!("\n\nDisassembly of section {sec_name}:");
+                    first_disassembly = false;
+                } else {
+                    println!("\nDisassembly of section {sec_name}:");
+                }
                 if let Ok(sec_data) = section.data() {
                     let base = section.address();
                     let sec_end = base.saturating_add(sec_data.len() as u64);
@@ -8157,11 +8210,20 @@ fn objdump_process_object(
                     if s < e {
                         let so = (s - base) as usize;
                         let eo = (e - base) as usize;
+                        // GNU prints a synthetic <.section_name>: label at the
+                        // section's start when no real symbol covers it.
+                        let mut effective_sym_map = sym_map.clone();
+                        if !effective_sym_map.contains_key(&s) {
+                            effective_sym_map
+                                .entry(s)
+                                .or_default()
+                                .push(format!(".{}", sec_name.trim_start_matches('.')));
+                        }
                         objdump_disassemble_section(
                             &sec_data[so..eo],
                             s,
                             bitness,
-                            &sym_map,
+                            &effective_sym_map,
                             if show_source || show_line_numbers {
                                 Some(obj)
                             } else {
@@ -8173,6 +8235,7 @@ fn objdump_process_object(
                             show_line_numbers,
                             show_raw_insn,
                             intel_syntax,
+                            disassemble_zeroes,
                         );
                     }
                 }
@@ -8272,6 +8335,7 @@ fn objdump_disassemble_section(
     show_line_numbers: bool,
     show_raw_insn: bool,
     intel_syntax: bool,
+    disassemble_zeroes: bool,
 ) {
     // First pass: decode all instructions
     let mut decoder = Decoder::with_ip(bitness, data, base, DecoderOptions::NONE);
@@ -8426,7 +8490,7 @@ fn objdump_disassemble_section(
         // instruction at least once before collapsing).
         let next_ip = ip + instr_len as u64;
         let next_idx = (next_ip - base) as usize;
-        if next_idx < data.len() {
+        if !disassemble_zeroes && next_idx < data.len() {
             let next_sym_addr = sym_map
                 .range((std::ops::Bound::Excluded(ip), std::ops::Bound::Unbounded))
                 .next()

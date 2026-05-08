@@ -3,6 +3,22 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
+## Custom-test expansion (131/131 ✅)
+
+- objdump bundled-short-options now thread argument-taking flags
+  correctly: `-dM intel`, `-dMintel`, `-dMatt`, `-dj.text`, `-dj NAME`
+  all parse as `-d -M intel` / `-d -j NAME`. The bundled `D` short
+  flag now also sets `disassemble_all` (so `-dD` and `-D` behave the
+  same). objdump `-z`/`--disassemble-zeroes` honored: when set, the
+  `\t...` zero-run collapse is suppressed and zero bytes disassemble
+  to actual instructions. For `-D`/`--disassemble-all`, sections
+  without a real symbol now get a synthetic `<.section_name>:` label
+  to match GNU's per-section starting line. Inter-section blank lines
+  in disassembly output are now exactly one (was two), matching GNU's
+  spacing for the second-and-later sections. +3 custom tests
+  (128→131): `objdump-disassemble-zeroes`,
+  `objdump-intel-syntax-bundled`, `objdump-section-filter-bundled`.
+
 ## Custom-test expansion (128/128 ✅)
 
 - objdump `-M intel`/`-M att` (and the `-M=` / `--disassembler-options=`

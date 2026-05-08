@@ -548,6 +548,18 @@
         name = "quiet";
       }
       {
+        tool = "objdump";
+        name = "intel-syntax-bundled";
+      }
+      {
+        tool = "objdump";
+        name = "disassemble-zeroes";
+      }
+      {
+        tool = "objdump";
+        name = "section-filter-bundled";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }
