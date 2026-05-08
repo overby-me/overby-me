@@ -7,14 +7,7 @@ at passing the upstream GNU binutils test suite.
 ## Status
 
 - **135/135 custom comparison tests passing (100%)**
-- **328/329 upstream DejaGnu tests passing (99.7%)**
-
-The single remaining failing dejagnu test is `readelf -wi
-(binutils-all/x86-64/pr26808.dwp)`. It is intrinsically incompatible
-with `binutils-all/pr26160` — both tests run on the same DWP file but
-have contradictory expected outputs (one expects warning text inline
-in stdout via stderr-merging dejagnu invocation, the other expects
-clean stdout via `2>/dev/null`).
+- **329/329 upstream DejaGnu tests passing (100%)**
 
 A multicall binary dispatches on `argv[0]` (or `argv[1]` for `cargo run
 --`) so that the same Rust program serves all the symlinked tool names
@@ -108,7 +101,7 @@ nix flake check
 | `size` | `basic`, `common`, `decimal`, `hex`, `multiple-files`, `octal`, `sysv`, `sysv-hex`, `sysv-octal`, `totals` |
 | `strings` | `basic`, `min-length`, `multiple-files`, `object`, `print-file-name`, `radix-decimal`, `radix-hex`, `radix-octal` |
 
-### Upstream DejaGnu tests (328/329 passing)
+### Upstream DejaGnu tests (329/329 passing)
 
 | Test file | Pass | Fail | Total | Threshold |
 |-----------|------|------|-------|-----------|
@@ -124,9 +117,9 @@ nix flake check
 | `addr2line.exp` | 3 | 0 | 3 | minPass=3, maxFail=0 |
 | `update-section.exp` | 6 | 0 | 6 | minPass=6, maxFail=0 |
 | `elfedit.exp` | 6 | 0 | 6 | minPass=6, maxFail=0 |
-| `x86-64/x86-64.exp` | 34 | 1 | 35 | (informational; only the binutils-all-x86-64 subset) |
+| `x86-64/x86-64.exp` | 35 | 0 | 35 | (informational; only the binutils-all-x86-64 subset) |
 | `i386/i386.exp` | 8 | 0 | 8 | (informational; binutils-all-i386 subdir) |
-| **Total** | **328** | **1** | **329** | |
+| **Total** | **329** | **0** | **329** | |
 
 ## Coverage gaps
 

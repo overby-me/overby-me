@@ -20130,15 +20130,31 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
                         &debug_str_dwo,
                     );
                     let attr_name_str = dwarf_attr_name(*attr_name);
-                    let sep = if value_str.starts_with('\t') || value_str.starts_with("readelf:") {
-                        ""
+                    if let Some(rest) = value_str.strip_prefix("\x01ADDR_INDEX_WARN\x01") {
+                        // Special interleaving: stdout prefix, flush, then
+                        // stderr warning, then stdout suffix. Mirrors GNU's
+                        // dwarf.c behavior so dejagnu's pr26160 (stdout +
+                        // stderr merged) and pr26808 (stderr discarded)
+                        // both pass.
+                        use std::io::Write;
+                        print!("    <{:x}>   {:<18}:", attr_off, attr_name_str);
+                        let _ = std::io::stdout().flush();
+                        eprintln!(
+                            "readelf: Warning: Cannot fetch indexed address: the .debug_addr section is missing"
+                        );
+                        println!("{rest}");
                     } else {
-                        " "
-                    };
-                    println!(
-                        "    <{:x}>   {:<18}:{}{}",
-                        attr_off, attr_name_str, sep, value_str
-                    );
+                        let sep =
+                            if value_str.starts_with('\t') || value_str.starts_with("readelf:") {
+                                ""
+                            } else {
+                                " "
+                            };
+                        println!(
+                            "    <{:x}>   {:<18}:{}{}",
+                            attr_off, attr_name_str, sep, value_str
+                        );
+                    }
                 }
                 if entry.has_children {
                     depth += 1;
@@ -21718,16 +21734,19 @@ fn read_and_format_attr(
         }
         0x1f01 /* DW_FORM_GNU_addr_index */ => {
             let idx = p.read_uleb128().unwrap_or(0);
-            // GNU readelf (legacy GNU extension path) embeds the warning
-            // text on the same logical line, then the value on the next
-            // line. Index 0 prints without the 0x prefix.
+            // GNU readelf flushes stdout, writes a "Cannot fetch indexed
+            // address" warning to stderr, then continues stdout with
+            // " (index: N): 0\n". When the test harness merges stderr
+            // into stdout, the warning lands inline; when it discards
+            // stderr, only the indexed-address line remains. We can't
+            // emit warning + value cleanly from inside an attribute
+            // formatter, so we mark the split with a `\x01` sentinel and
+            // let the caller do the actual stdout-flush + stderr-write
+            // dance.
             if idx == 0 {
-                "readelf: Warning: Cannot fetch indexed address: the .debug_addr section is missing\n (index: 0): 0".to_string()
+                "\x01ADDR_INDEX_WARN\x01 (index: 0): 0".to_string()
             } else {
-                format!(
-                    "readelf: Warning: Cannot fetch indexed address: the .debug_addr section is missing\n (index: 0x{:x}): 0",
-                    idx
-                )
+                format!("\x01ADDR_INDEX_WARN\x01 (index: 0x{:x}): 0", idx)
             }
         }
         0x1f02 /* DW_FORM_GNU_str_index */ => {

@@ -3,6 +3,24 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
+## DejaGnu suite (328/329 → 329/329 ✅)
+
+- Fix the long-standing `pr26808.dwp` failure (readelf -wi). It and
+  `pr26160` are both `readelf -wi` on the same `.debug_addr`-less
+  DWP file but with different stderr handling: pr26808 (in
+  `x86-64.exp`) redirects stderr to `/dev/null`; pr26160 (in
+  `readelf.exp`, run via `readelf_test`) merges stderr into stdout
+  via dejagnu's local-exec. Their expected outputs differ exactly by
+  the inlined "Cannot fetch indexed address" warning. GNU emits the
+  warning to stderr mid-attribute (between the attribute name and the
+  indexed-address value), and dejagnu's 2>&1 merge causes it to
+  appear inline. Replicated this by emitting an `\x01ADDR_INDEX_WARN\x01`
+  sentinel inside the formatted attribute string and special-casing
+  the caller to flush stdout, write the warning to stderr, then
+  continue stdout. Both tests now pass: pr26808 (no stderr) sees a
+  clean indexed-address line; pr26160 (merged) sees the inline
+  warning.
+
 ## Custom-test expansion (135/135 ✅)
 
 - addr2line distinguishes "in-section, no DWARF" from "out-of-section":
