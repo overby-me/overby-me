@@ -11878,8 +11878,8 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
         }
         let raw = data[t.offset..t.offset + t.size].to_vec();
         // Compress with zlib (default level).
-        // GNU as uses Z_BEST_COMPRESSION (level 9) for the zlib stream.
-        let mut enc = ZlibEncoder::new(Vec::new(), Compression::best());
+        // GNU as uses Z_DEFAULT_COMPRESSION (level 6) for the zlib stream.
+        let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
         let _ = enc.write_all(&raw);
         let zlib_data = enc.finish().unwrap_or_default();
         // GNU as/objcopy skip compression when the encoded size wouldn't be
