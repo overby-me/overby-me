@@ -209,6 +209,24 @@
         tool = "pw-mididump";
         name = "running-status";
       }
+
+      # --- pw-config offline tests ---
+      {
+        tool = "pw-config";
+        name = "paths-single";
+      }
+      {
+        tool = "pw-config";
+        name = "paths-with-overrides";
+      }
+      {
+        tool = "pw-config";
+        name = "paths-no-newline";
+      }
+      {
+        tool = "pw-config";
+        name = "paths-custom-name";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
