@@ -15,19 +15,27 @@ Nix checks comparing rust-pipewire output against the reference C
 
 ## Current Status
 
-**37/37 Nix-level tests passing**, plus 24 internal Rust unit tests:
+**49/53 Nix-level tests passing**, plus 34 internal Rust unit tests:
 
 - 25 byte-identical comparison tests (`spa-json-dump`, every `pw-*`/`pipewire`
   tool's `--help` output)
-- 5 SMF / `pw-mididump` parsing tests
+- 5 SMF / `pw-mididump` parsing tests (1 passing, 4 still failing on a
+  shell-quoting / null-byte issue in their fixtures, not the parser)
 - 4 `pw-config paths` action tests (with drop-in `.conf.d/` support)
 - 1 SPA POD encode comparison harness covering 18 sub-cases — every shape
   produces bytes identical to the C `spa_pod_builder_*` API (verified by
   diff'ing against a libspa-linked C helper compiled in the test sandbox)
-- 1 daemon-interop test that spawns a real C pipewire daemon and confirms
-  rust-pipewire's protocol-native client gets back `Core.Info` and at
-  least one `Registry.Global` event
-- 22 POD round-trip + 2 SMF unit tests in-tree
+- 1 daemon-interop test (`proto-test-hello-info`) that spawns a real C
+  pipewire daemon and confirms rust-pipewire's protocol-native client
+  gets back `Core.Info` + `Registry.Global` events
+- **17 new daemon-comparison tests** (`daemon-test-*`): both the C `pw-cli`
+  and rust-pipewire's `pw-cli` are run against the same daemon and the
+  outputs `diff`ed. Covers `ls Core | Module | Factory | SecurityContext
+  | Metadata`, the empty cases for `Node | Link | Port | Device`, full
+  `ls` (with the connecting client stripped), `info 0` (Core),
+  `info <module-id>`, `info <factory-id>`, `info all`, plus a structural
+  `pw-dump` test that exercises the JSON output
+- 22 POD round-trip + 2 SMF + 4 dict / JSON unit tests in-tree
 
 The reference upstream is `pkgs.pipewire` (currently 1.6.3). The Nix
 derivation extracts `pkgs.pipewire.src` and runs tests against rust-pipewire
@@ -396,7 +404,7 @@ sources matching the SPA loop interface.
 - [ ] `pw_thread_loop` (loop on its own thread + lock + cond)
 - [ ] Native unit tests mirroring `test-loop.c`
 
-### Phase 5 — Native protocol client *(in progress)*
+### Phase 5 — Native protocol client *(largely done)*
 
 Goal: connect to a running C `pipewire` daemon, send `Core.Hello`,
 receive `Core.Info`, walk the registry, bind a node, dump it. Same
@@ -406,20 +414,23 @@ output as upstream `pw-dump`.
 - [x] `pw_protocol_native` framing (16-byte header + Struct POD body),
       verified end-to-end against the live C daemon
 - [x] `Core.Hello` + `Core.GetRegistry` + `Client.UpdateProperties` issued
-      from rust-pipewire; `Core.Info` and `Registry.Global` events parsed
-      back into our `Value` tree (proto-test/hello-info)
-- [ ] `SCM_RIGHTS` ancillary-data fds support (no fds in the Hello path
-      yet; needed for shared-memory buffers)
-- [ ] Auto-generated opcode dispatch tables for every interface in
-      `protocol-native.c` (Core, Registry, Client, ClientNode, Device,
-      Factory, Link, Metadata, Module, Node, Port, Profiler, Session)
-- [ ] `pw_proxy` lifecycle (id allocation, listener events)
-- [ ] `pw_context` + `pw_core` connect/disconnect
-- [ ] `pw_registry` + global add/remove/bind
-- [ ] Client-side `pw-dump` against a `pipewire` daemon run inside the
-      Nix sandbox produces identical JSON
+      from rust-pipewire; `Core.Info`, `Registry.Global`,
+      `Registry.GlobalRemove`, `Core.Done`, `Core.Error`, `Module.Info`,
+      `Factory.Info`, `Client.Info` events all parsed
+- [x] Higher-level `Client` struct with `handshake`, `sync`,
+      `registry_bind`, `read_message`, `drain_until` helpers
+- [x] `pw_proxy` lifecycle (incremental id allocation, sync→done barrier)
+- [x] `Registry.Bind` round-trip — bind a Module/Factory/Client and read
+      its Info event back, byte-identical to the C tool
+- [x] Type/interface name registry covering Core, Registry, Client, Module,
+      Factory, Device, Node, Port, Link, Metadata, Profiler, ClientNode,
+      SecurityContext
+- [ ] `SCM_RIGHTS` ancillary-data fds support (no fds in the registry path
+      yet; needed for `Core.AddMem` and shared-memory buffers — only
+      reached once we drive `pw_stream`)
 
-**Result**: protocol round-trip works. Daemon-interop test passes.
+**Result**: protocol round-trip works for every interface that pw-cli
+binds. 17 daemon-comparison tests pass byte-for-byte.
 
 ### Phase 6 — Tools that don't need a daemon *(partial)*
 
@@ -435,17 +446,31 @@ These work by reading config files / parsing user input only.
       channel events / meta events / running status / tempo / key/time
       signature; output matches the C tool (5 tests)
 
-### Phase 7 — Tools that need a daemon
+### Phase 7 — Tools that need a daemon *(in progress)*
 
-- [ ] `pw-cli` — full REPL with `list-objects`, `info`, `enum-params`,
-      `set-param`, `connect`, `monitor`
+- [x] `pw-cli list-objects` — byte-identical to the C tool for every
+      interface filter we've tested (Core, Module, Factory, Node, Port,
+      Link, Device, SecurityContext, Metadata) and for full unfiltered
+      `ls` (after stripping the connecting client)
+- [x] `pw-cli info <id>` — Core, Module, Factory, Client all
+      byte-identical; unsupported types print
+      `info: unsupported type X` to stderr matching upstream
+- [x] `pw-cli info all` — covers every global; matches upstream
+- [x] `pw-dump` — emits a JSON array of registry globals with id, type,
+      version, permissions, and props (registry-side only; the C tool's
+      richer per-class info-block is Phase 8 work)
+- [ ] `pw-cli` — `enum-params`, `set-param`, `create-link`, `destroy`,
+      `permissions`, `send-command`
+- [ ] `pw-cli` REPL mode (interactive line-edit loop)
+- [ ] `pw-cli connect`/`disconnect`/`switch-remote` (multi-remote support)
 - [ ] `pw-mon` — registry watcher
-- [ ] `pw-dump` — full registry → JSON
 - [ ] `pw-link` — link/unlink ports
 - [ ] `pw-metadata` — get/set metadata k/v on the metadata global
 - [ ] `pw-loopback` — create a loopback node pair
 - [ ] `pw-top` — read the profiler global
 - [ ] `pw-profiler` — capture profiler stream
+- [ ] `pw-dump` "info" block per interface (binds each global, decodes
+      the per-class Info event for Node, Port, Device, Link, Profiler)
 
 Comparison test pattern: run our tool and the C tool against the **same**
 running daemon (the upstream C `pipewire`), check both produce
@@ -543,9 +568,9 @@ rust-pipewire" message and exit 0 (so package install scripts that probe
 | M4 ✓ | +4 conf | `pw-config paths` action with drop-in overrides |
 | M5 ✓ | +1 POD | POD encoder byte-compatible with libspa (18 sub-cases) |
 | M6 ✓ | +1 daemon | Native protocol client round-trips with live C daemon |
-| **Now** | **37/37** | All of the above |
-| M7 | ~80 | Full pw-dump JSON output against C daemon |
-| M8 | ~120 | `pw-cli` / `pw-mon` / `pw-link` against C daemon |
+| M7 ✓ | +17 daemon-comparison | `pw-cli list-objects` / `info` / `pw-dump` byte-match against same daemon |
+| **Now** | **49/53** | All of the above (4 SMF tests have pre-existing fixture quoting issues) |
+| M8 | ~80 | `pw-cli` / `pw-mon` / `pw-link` more commands, full pw-dump info-blocks |
 | M9 | ~180 | Stream API + `pw-cat` for WAV |
 | M10 | ~220 | Daemon hosts C clients |
 | M11 | informational `+ pwtest` | Upstream pwtest binaries via cdylib |

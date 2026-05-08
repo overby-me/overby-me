@@ -240,6 +240,29 @@
     protoTests = [
       {name = "hello-info";}
     ];
+
+    # Daemon-comparison tests — spawn a real C pipewire daemon and run both
+    # the C tool and the Rust tool against it, then diff. Each entry is
+    # `tools/<tool>/<name>.sh`.
+    daemonTests = [
+      {tool = "pw-cli"; name = "ls-core";}
+      {tool = "pw-cli"; name = "ls-module";}
+      {tool = "pw-cli"; name = "ls-factory";}
+      {tool = "pw-cli"; name = "ls-securitycontext";}
+      {tool = "pw-cli"; name = "ls-metadata";}
+      {tool = "pw-cli"; name = "ls-empty-node";}
+      {tool = "pw-cli"; name = "ls-empty-link";}
+      {tool = "pw-cli"; name = "ls-empty-port";}
+      {tool = "pw-cli"; name = "ls-empty-device";}
+      {tool = "pw-cli"; name = "ls-all-normalized";}
+      {tool = "pw-cli"; name = "info-core";}
+      {tool = "pw-cli"; name = "info-module-1";}
+      {tool = "pw-cli"; name = "info-module-3";}
+      {tool = "pw-cli"; name = "info-module-5";}
+      {tool = "pw-cli"; name = "info-factory";}
+      {tool = "pw-cli"; name = "info-all";}
+      {tool = "pw-dump"; name = "structural";}
+    ];
   in
     builtins.listToAttrs (
       (map (t: {
@@ -269,5 +292,14 @@
             };
         })
         protoTests)
+      ++ (map (t: {
+          name = "rust-pipewire-daemon-test-${t.tool}-${t.name}";
+          value = pkgs:
+            import ./daemon-testsuite.nix {
+              inherit pkgs;
+              inherit (t) tool name;
+            };
+        })
+        daemonTests)
     );
 }

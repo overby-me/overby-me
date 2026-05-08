@@ -85,10 +85,11 @@ pub fn parse(bytes: &[u8]) -> Result<(FileInfo, Vec<Event>), ParseError> {
         }
         let size = be32(&bytes[p + 4..p + 8]) as usize;
         let start = p + 8;
-        let end = start + size;
-        if end > bytes.len() {
-            return err(format!("MTrk {id} runs past end of file"));
-        }
+        // Upstream `midifile.c` doesn't validate the MTrk size header — it
+        // just reads bytes until EOT (end-of-track). Some test fixtures
+        // (and a few real-world tools) get the size off by one or two.
+        // Clamp to the actual file length to match upstream tolerance.
+        let end = (start + size).min(bytes.len());
         tracks.push(Track {
             id,
             body: &bytes[start..end],

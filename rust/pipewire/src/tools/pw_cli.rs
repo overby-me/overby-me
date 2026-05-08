@@ -1,13 +1,27 @@
 // pw-cli: PipeWire command-line client.
-// Phase 0: only --version / --help / -h. Real subcommand REPL is Phase 7.
+//
+// Subcommand surface (Phase 7 in PLAN.md):
+//   --help / --version
+//   list-objects [<interface>]   — alias `ls` — list registry globals
+// More commands will be added as Phase 7 progresses; for now `ls` is enough
+// to talk to a real daemon and exercise the protocol-native client.
 
+use crate::pipewire_lib::client::{
+    Client, ClientInfo, CoreInfo, DictItem, FactoryInfo, ModuleInfo,
+    RegistryGlobal, decode_client_info, decode_core_done, decode_core_error,
+    decode_factory_info, decode_module_info, fmt_permissions,
+};
+use crate::pipewire_lib::interfaces;
 use crate::pipewire_lib::version::PIPEWIRE_API_VERSION;
 
 pub fn main(args: &[String]) -> i32 {
     let argv0 = args.first().map(String::as_str).unwrap_or("pw-cli");
-
-    for a in args.iter().skip(1) {
-        match a.as_str() {
+    let mut remote: Option<String> = None;
+    let mut positional: Vec<&str> = Vec::new();
+    let mut i = 1;
+    while i < args.len() {
+        let a = args[i].as_str();
+        match a {
             "--version" => {
                 println!("{argv0}");
                 println!("Compiled with libpipewire {PIPEWIRE_API_VERSION}");
@@ -18,22 +32,59 @@ pub fn main(args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
-            // Stop at the first non-flag — that's where commands start.
-            s if !s.starts_with('-') => break,
-            // Other flags are ignored for now; they'll be parsed in Phase 7.
-            _ => continue,
+            "-r" | "--remote" => {
+                if let Some(v) = args.get(i + 1) {
+                    remote = Some(v.clone());
+                    i += 2;
+                    continue;
+                } else {
+                    eprintln!("{argv0}: --remote requires an argument");
+                    return 2;
+                }
+            }
+            "-m" | "--monitor" | "-d" | "--daemon" => {
+                // Flags consumed by the C tool; ignored at this stage.
+            }
+            "--" => {
+                for v in args.iter().skip(i + 1) {
+                    positional.push(v.as_str());
+                }
+                break;
+            }
+            s if s.starts_with('-') => {
+                // Unrecognized; mirror the C tool's "show help, exit -1".
+                print_help(argv0);
+                return 1;
+            }
+            s => positional.push(s),
         }
+        i += 1;
     }
 
-    // No --version/--help and no implemented subcommand: behave like the C
-    // tool by printing help and exiting with code 0 when no command is given.
-    print_help(argv0);
-    0
+    if positional.is_empty() {
+        // C tool drops into a REPL here. Until we have one, mirror the help
+        // output and exit cleanly so callers don't hang.
+        print_help(argv0);
+        return 0;
+    }
+
+    let cmd = positional[0];
+    let rest = &positional[1..];
+    match cmd {
+        "help" | "h" => {
+            print_help(argv0);
+            0
+        }
+        "list-objects" | "ls" => run_list_objects(argv0, remote.as_deref(), rest),
+        "info" | "i" => run_info(argv0, remote.as_deref(), rest),
+        other => {
+            eprintln!("{argv0}: command \"{other}\" not yet implemented");
+            1
+        }
+    }
 }
 
 fn print_help(argv0: &str) {
-    // Mirror the C tool's --help layout exactly. The tests normalize the
-    // leading store-path/binary-name; everything after must be byte-identical.
     println!("{argv0} [options] [command]");
     println!("  -h, --help                            Show this help");
     println!("      --version                         Show version");
@@ -113,4 +164,369 @@ fn print_help(argv0: &str) {
     for (head, desc) in cmds {
         println!("\t{head}\t{desc}");
     }
+}
+
+fn run_info(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {
+    let target = match args.first() {
+        Some(s) => *s,
+        None => {
+            eprintln!("{argv0}: info needs <object-id> | all");
+            return 2;
+        }
+    };
+
+    let mut client = match open_client(remote, "rust-pipewire-cli") {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{argv0}: {e}");
+            return 1;
+        }
+    };
+    let snap = match drain_registry(&mut client) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{argv0}: {e}");
+            return 1;
+        }
+    };
+
+    let globals: Vec<&RegistryGlobal> = if target == "all" {
+        let mut v: Vec<&RegistryGlobal> = snap.globals.iter().collect();
+        v.sort_by_key(|g| g.id);
+        v
+    } else {
+        match target.parse::<u32>() {
+            Ok(id) => snap
+                .globals
+                .iter()
+                .filter(|g| g.id == id)
+                .collect::<Vec<_>>(),
+            Err(_) => {
+                eprintln!("{argv0}: invalid object id {target:?}");
+                return 2;
+            }
+        }
+    };
+
+    if globals.is_empty() {
+        eprintln!("{argv0}: object {target} not found");
+        return 1;
+    }
+
+    let registry_id = 2u32; // we always allocate this in handshake.
+    for g in &globals {
+        match g.interface.as_str() {
+            interfaces::TYPE_CORE => print_core_info(g, snap.core_info.as_ref()),
+            interfaces::TYPE_MODULE => {
+                if let Err(e) = bind_and_print(
+                    &mut client,
+                    registry_id,
+                    g,
+                    interfaces::VERSION_MODULE,
+                    print_module_info,
+                ) {
+                    eprintln!("{argv0}: bind {} failed: {}", g.id, e);
+                }
+            }
+            interfaces::TYPE_FACTORY => {
+                if let Err(e) = bind_and_print(
+                    &mut client,
+                    registry_id,
+                    g,
+                    interfaces::VERSION_FACTORY,
+                    print_factory_info,
+                ) {
+                    eprintln!("{argv0}: bind {} failed: {}", g.id, e);
+                }
+            }
+            interfaces::TYPE_CLIENT => {
+                if let Err(e) = bind_and_print(
+                    &mut client,
+                    registry_id,
+                    g,
+                    interfaces::VERSION_CLIENT,
+                    print_client_info,
+                ) {
+                    eprintln!("{argv0}: bind {} failed: {}", g.id, e);
+                }
+            }
+            // Match the C tool: it can't bind unknown types, so it prints
+            // `info: unsupported type X` on stderr and continues.
+            _ => eprintln!("info: unsupported type {}", g.interface),
+        }
+    }
+    0
+}
+
+/// Issue `Registry.Bind`, issue `Core.Sync`, drain until we see the matching
+/// Done. Returns the captured Info event if any.
+fn bind_and_print<F>(
+    client: &mut Client,
+    registry_id: u32,
+    g: &RegistryGlobal,
+    version: u32,
+    print_fn: F,
+) -> Result<(), String>
+where
+    F: FnOnce(&RegistryGlobal, &[crate::spa::pod::types::Value]),
+{
+    let proxy_id = client
+        .registry_bind(registry_id, g.id, &g.interface, version)
+        .map_err(|e| format!("{e}"))?;
+    let sync_seq = client
+        .sync(interfaces::ID_CORE)
+        .map_err(|e| format!("{e}"))?;
+
+    let mut info_args: Option<Vec<crate::spa::pod::types::Value>> = None;
+    loop {
+        let msg = match client.read_message().map_err(|e| format!("{e}"))? {
+            Some(m) => m,
+            None => break,
+        };
+        if msg.id == proxy_id && msg.opcode == 0 {
+            // For all the interfaces we currently bind, opcode 0 is Info.
+            info_args = Some(msg.args);
+            continue;
+        }
+        if msg.id == interfaces::ID_CORE
+            && msg.opcode == interfaces::core_event::DONE
+            && let Ok((_id, seq)) = decode_core_done(&msg.args)
+            && seq == sync_seq
+        {
+            break;
+        }
+        if msg.id == interfaces::ID_CORE
+            && msg.opcode == interfaces::core_event::ERROR
+            && let Ok((eid, seq, res, m)) = decode_core_error(&msg.args)
+        {
+            return Err(format!("core.error id={eid} seq={seq} res={res}: {m}"));
+        }
+    }
+
+    if let Some(args) = info_args {
+        print_fn(g, &args);
+    } else {
+        eprintln!("rust-pipewire pw-cli: no info event received for id {}", g.id);
+        print_global_only(g);
+    }
+    Ok(())
+}
+
+fn print_module_info(g: &RegistryGlobal, args: &[crate::spa::pod::types::Value]) {
+    let info: ModuleInfo = match decode_module_info(args) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("rust-pipewire pw-cli: decode_module_info: {e}");
+            return;
+        }
+    };
+    print_global_header(g);
+    println!("\tname: \"{}\"", info.name);
+    println!("\tfilename: \"{}\"", info.filename);
+    println!("\targs: \"{}\"", info.args);
+    let mark = if info.change_mask & 0x01 != 0 { '*' } else { ' ' };
+    print_properties(&info.props, mark, true);
+}
+
+fn print_factory_info(g: &RegistryGlobal, args: &[crate::spa::pod::types::Value]) {
+    let info: FactoryInfo = match decode_factory_info(args) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("rust-pipewire pw-cli: decode_factory_info: {e}");
+            return;
+        }
+    };
+    print_global_header(g);
+    println!("\tname: \"{}\"", info.name);
+    println!("\tobject-type: {}/{}", info.object_type, info.version);
+    let mark = if info.change_mask & 0x01 != 0 { '*' } else { ' ' };
+    print_properties(&info.props, mark, true);
+}
+
+fn print_client_info(g: &RegistryGlobal, args: &[crate::spa::pod::types::Value]) {
+    let info: ClientInfo = match decode_client_info(args) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("rust-pipewire pw-cli: decode_client_info: {e}");
+            return;
+        }
+    };
+    print_global_header(g);
+    let mark = if info.change_mask & 0x01 != 0 { '*' } else { ' ' };
+    print_properties(&info.props, mark, true);
+}
+
+fn print_core_info(g: &RegistryGlobal, info: Option<&CoreInfo>) {
+    print_global_header(g);
+    if let Some(info) = info {
+        println!("\tcookie: {}", info.cookie);
+        println!("\tuser-name: \"{}\"", info.user_name);
+        println!("\thost-name: \"{}\"", info.host_name);
+        println!("\tversion: \"{}\"", info.version);
+        println!("\tname: \"{}\"", info.name);
+        // PW_CORE_CHANGE_MASK_PROPS = bit 0. Mark with '*' on the first
+        // emission (where the change mask is set).
+        let mark = if info.change_mask & 0x01 != 0 { '*' } else { ' ' };
+        print_properties(&info.props, mark, true);
+    }
+}
+
+fn print_global_only(g: &RegistryGlobal) {
+    print_global_header(g);
+    eprintln!(
+        "rust-pipewire pw-cli: info for type {} not yet implemented; only registry-side props",
+        g.interface
+    );
+    print_properties(&g.props, ' ', true);
+}
+
+fn print_global_header(g: &RegistryGlobal) {
+    println!("\tid: {}", g.id);
+    println!("\tpermissions: {}", fmt_permissions(g.permissions));
+    println!("\ttype: {}/{}", g.interface, g.version);
+}
+
+fn print_properties(items: &[DictItem], mark: char, header: bool) {
+    if header {
+        println!("{mark}\tproperties:");
+        if items.is_empty() {
+            println!("\t\tnone");
+            return;
+        }
+    }
+    for item in items {
+        println!("{mark}\t\t{} = \"{}\"", item.key, item.value);
+    }
+}
+
+fn run_list_objects(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {
+    let filter = args.first().map(|s| {
+        let s = *s;
+        // Accept either short ("Node") or full ("PipeWire:Interface:Node").
+        if s.contains(':') {
+            s.to_string()
+        } else {
+            format!("PipeWire:Interface:{s}")
+        }
+    });
+
+    let globals = match collect_globals(remote, "rust-pipewire-cli") {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("{argv0}: {e}");
+            return 1;
+        }
+    };
+
+    let mut sorted: Vec<&RegistryGlobal> = globals
+        .iter()
+        .filter(|g| filter.as_deref().map_or(true, |f| g.interface == f))
+        .collect();
+    sorted.sort_by_key(|g| g.id);
+    for g in sorted {
+        println!(
+            "\tid {}, type {}/{}",
+            g.id, g.interface, g.version
+        );
+        for item in &g.props {
+            println!(" \t\t{} = \"{}\"", item.key, item.value);
+        }
+    }
+    0
+}
+
+/// Result of a registry walk.
+struct Snapshot {
+    globals: Vec<RegistryGlobal>,
+    core_info: Option<CoreInfo>,
+}
+
+fn open_client(remote: Option<&str>, app_name: &str) -> Result<Client, String> {
+    let mut client = match remote {
+        Some(name) if name.starts_with('/') => {
+            Client::connect_path(std::path::Path::new(name))
+        }
+        Some(name) => {
+            let runtime = std::env::var("XDG_RUNTIME_DIR").map_err(|_| {
+                "XDG_RUNTIME_DIR unset (cannot resolve remote name)".to_string()
+            })?;
+            let path = std::path::PathBuf::from(runtime).join(name);
+            Client::connect_path(&path)
+        }
+        None => Client::connect_default(),
+    }
+    .map_err(|e| format!("connect: {e}"))?;
+
+    client
+        .handshake(app_name)
+        .map_err(|e| format!("handshake: {e}"))?;
+    Ok(client)
+}
+
+/// Drain Sync→Done; capture every registry global plus the Core.Info that
+/// arrives before the registry burst.
+fn drain_registry(client: &mut Client) -> Result<Snapshot, String> {
+    let sync_seq = client
+        .sync(interfaces::ID_CORE)
+        .map_err(|e| format!("sync: {e}"))?;
+
+    let mut snap = Snapshot {
+        globals: Vec::new(),
+        core_info: None,
+    };
+    loop {
+        let msg = match client.read_message() {
+            Ok(Some(m)) => m,
+            Ok(None) => break,
+            Err(e) => return Err(format!("read: {e}")),
+        };
+        if msg.opcode == interfaces::registry_event::GLOBAL && msg.id == 2 {
+            match crate::pipewire_lib::client::decode_registry_global(&msg.args) {
+                Ok(g) => snap.globals.push(g),
+                Err(e) => eprintln!("registry global decode error: {e}"),
+            }
+            continue;
+        }
+        if msg.opcode == interfaces::registry_event::GLOBAL_REMOVE && msg.id == 2 {
+            if let Ok(rid) =
+                crate::pipewire_lib::client::decode_registry_global_remove(&msg.args)
+            {
+                snap.globals.retain(|g| g.id != rid);
+            }
+            continue;
+        }
+        if msg.id == interfaces::ID_CORE && msg.opcode == interfaces::core_event::INFO {
+            // Core.Info on the core proxy (id=0). This is sent once on Hello
+            // and again on UpdateProperties — keep the latest.
+            if let Ok(ci) = crate::pipewire_lib::client::decode_core_info(&msg.args) {
+                snap.core_info = Some(ci);
+            }
+            continue;
+        }
+        if msg.id == interfaces::ID_CORE
+            && msg.opcode == interfaces::core_event::DONE
+            && let Ok((_id, seq)) = crate::pipewire_lib::client::decode_core_done(&msg.args)
+            && seq == sync_seq
+        {
+            break;
+        }
+        if msg.id == interfaces::ID_CORE && msg.opcode == interfaces::core_event::ERROR
+            && let Ok((eid, seq, res, m)) =
+                crate::pipewire_lib::client::decode_core_error(&msg.args)
+        {
+            return Err(format!(
+                "core.error id={eid} seq={seq} res={res}: {m}"
+            ));
+        }
+    }
+    Ok(snap)
+}
+
+fn collect_globals(
+    remote: Option<&str>,
+    app_name: &str,
+) -> Result<Vec<RegistryGlobal>, String> {
+    let mut client = open_client(remote, app_name)?;
+    let snap = drain_registry(&mut client)?;
+    Ok(snap.globals)
 }
