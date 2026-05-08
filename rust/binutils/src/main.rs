@@ -12274,6 +12274,7 @@ fn elf_decompress_debug_sections(data: &mut Vec<u8>) {
         new_name_idx: u32,
         new_data: Vec<u8>,
         new_flags: u64,
+        new_addralign: u64,
     }
     let mut targets: Vec<DecompressTarget> = Vec::new();
     for i in 0..shnum {
@@ -12308,22 +12309,40 @@ fn elf_decompress_debug_sections(data: &mut Vec<u8>) {
             };
             ct == 1
         };
-        let (uncompressed, new_name, new_flags) =
+        let (uncompressed, new_name, new_flags, new_align) =
             if name.starts_with(b".zdebug_") && raw.len() >= 12 && &raw[..4] == b"ZLIB" {
                 let mut out = Vec::new();
                 let _ = flate2::read::ZlibDecoder::new(&raw[12..]).read_to_end(&mut out);
                 let mut nn = Vec::with_capacity(name.len() - 1);
                 nn.push(b'.');
                 nn.extend_from_slice(&name[2..]);
-                (out, Some(nn), sh_flags)
+                // zlib-gnu has no Chdr — restore alignment to 1 (GNU
+                // doesn't bump it for zlib-gnu compress).
+                (out, Some(nn), sh_flags, 1u64)
             } else if name.starts_with(b".debug_") && (sh_flags & 0x800 != 0 || chdr_zlib) {
                 if raw.len() <= header_size_gabi {
                     continue;
                 }
+                // Recover original ch_addralign from the Elf*_Chdr.
+                let ch_align: u64 = if class == 2 {
+                    if le {
+                        u64::from_le_bytes([
+                            raw[16], raw[17], raw[18], raw[19], raw[20], raw[21], raw[22], raw[23],
+                        ])
+                    } else {
+                        u64::from_be_bytes([
+                            raw[16], raw[17], raw[18], raw[19], raw[20], raw[21], raw[22], raw[23],
+                        ])
+                    }
+                } else if le {
+                    u32::from_le_bytes([raw[8], raw[9], raw[10], raw[11]]) as u64
+                } else {
+                    u32::from_be_bytes([raw[8], raw[9], raw[10], raw[11]]) as u64
+                };
                 let mut out = Vec::new();
                 let _ =
                     flate2::read::ZlibDecoder::new(&raw[header_size_gabi..]).read_to_end(&mut out);
-                (out, None, sh_flags & !0x800)
+                (out, None, sh_flags & !0x800, ch_align.max(1))
             } else {
                 continue;
             };
@@ -12346,37 +12365,156 @@ fn elf_decompress_debug_sections(data: &mut Vec<u8>) {
             new_name_idx,
             new_data: uncompressed,
             new_flags,
+            new_addralign: new_align,
         });
     }
     if targets.is_empty() {
         return;
     }
-    for t in &targets {
-        let h = shoff as usize + t.idx * shentsize;
-        let new_off = data.len() as u64;
-        data.extend_from_slice(&t.new_data);
-        w32(data, h, t.new_name_idx);
-        if class == 2 {
-            w64(data, h + 8, t.new_flags);
-            w64(data, h + 24, new_off);
-            w64(data, h + 32, t.new_data.len() as u64);
-        } else {
-            w32(data, h + 8, t.new_flags as u32);
-            w32(data, h + 16, new_off as u32);
-            w32(data, h + 20, t.new_data.len() as u32);
-        }
+    // Repack the file with packed section data (same approach as compress).
+    let target_map: std::collections::HashMap<usize, &DecompressTarget> =
+        targets.iter().map(|t| (t.idx, t)).collect();
+    let header_size = if class == 2 { 64 } else { 52 };
+    let mut new_data: Vec<u8> = data[..header_size].to_vec();
+    let mut new_offsets: Vec<u64> = vec![0; shnum];
+    let mut new_sizes: Vec<u64> = vec![0; shnum];
+    struct Sec {
+        offset: u64,
+        size: u64,
+        sh_type: u32,
     }
-    if shstr_data.len() > shstr_size {
-        let new_shstr_off = data.len() as u64;
-        data.extend_from_slice(&shstr_data);
-        if class == 2 {
-            w64(data, shstr_hdr + 24, new_shstr_off);
-            w64(data, shstr_hdr + 32, shstr_data.len() as u64);
+    let mut secs: Vec<Sec> = Vec::with_capacity(shnum);
+    for i in 0..shnum {
+        let h = shoff as usize + i * shentsize;
+        let sh_type = r32(data, h + 4);
+        let (off, sz) = if class == 2 {
+            (r64(data, h + 24), r64(data, h + 32))
         } else {
-            w32(data, shstr_hdr + 16, new_shstr_off as u32);
-            w32(data, shstr_hdr + 20, shstr_data.len() as u32);
-        }
+            (r32(data, h + 16) as u64, r32(data, h + 20) as u64)
+        };
+        secs.push(Sec {
+            offset: off,
+            size: sz,
+            sh_type,
+        });
     }
+    let mut order: Vec<usize> = (0..shnum).collect();
+    order.sort_by_key(|&i| (secs[i].offset, i));
+    for &i in &order {
+        let sec = &secs[i];
+        if i == 0 || sec.sh_type == 8 {
+            new_offsets[i] = sec.offset;
+            new_sizes[i] = sec.size;
+            continue;
+        }
+        let body: Vec<u8> = if let Some(t) = target_map.get(&i) {
+            t.new_data.clone()
+        } else if i == shstrndx && shstr_data.len() != shstr_size {
+            shstr_data.clone()
+        } else {
+            if sec.offset as usize + sec.size as usize > data.len() {
+                continue;
+            }
+            data[sec.offset as usize..(sec.offset + sec.size) as usize].to_vec()
+        };
+        let h = shoff as usize + i * shentsize;
+        let addralign: u64 = if let Some(t) = target_map.get(&i) {
+            t.new_addralign
+        } else if class == 2 {
+            r64(data, h + 48)
+        } else {
+            r32(data, h + 32) as u64
+        };
+        if addralign > 1 {
+            let off_now = new_data.len() as u64;
+            let pad = (addralign - (off_now % addralign)) % addralign;
+            new_data.resize(new_data.len() + pad as usize, 0);
+        }
+        new_offsets[i] = new_data.len() as u64;
+        new_sizes[i] = body.len() as u64;
+        new_data.extend_from_slice(&body);
+    }
+    let shoff_align: u64 = if class == 2 { 8 } else { 4 };
+    let off_now = new_data.len() as u64;
+    let pad = (shoff_align - (off_now % shoff_align)) % shoff_align;
+    new_data.resize(new_data.len() + pad as usize, 0);
+    let new_shoff = new_data.len() as u64;
+    for i in 0..shnum {
+        let h = shoff as usize + i * shentsize;
+        let mut hdr = data[h..h + shentsize].to_vec();
+        if let Some(t) = target_map.get(&i) {
+            let v = if le {
+                t.new_name_idx.to_le_bytes()
+            } else {
+                t.new_name_idx.to_be_bytes()
+            };
+            hdr[0..4].copy_from_slice(&v);
+            if class == 2 {
+                let v = if le { t.new_flags.to_le_bytes() } else { t.new_flags.to_be_bytes() };
+                hdr[8..16].copy_from_slice(&v);
+                let v = if le {
+                    t.new_addralign.to_le_bytes()
+                } else {
+                    t.new_addralign.to_be_bytes()
+                };
+                hdr[48..56].copy_from_slice(&v);
+            } else {
+                let v = if le {
+                    (t.new_flags as u32).to_le_bytes()
+                } else {
+                    (t.new_flags as u32).to_be_bytes()
+                };
+                hdr[8..12].copy_from_slice(&v);
+                let v = if le {
+                    (t.new_addralign as u32).to_le_bytes()
+                } else {
+                    (t.new_addralign as u32).to_be_bytes()
+                };
+                hdr[32..36].copy_from_slice(&v);
+            }
+        }
+        if class == 2 {
+            let off_v = if le {
+                new_offsets[i].to_le_bytes()
+            } else {
+                new_offsets[i].to_be_bytes()
+            };
+            hdr[24..32].copy_from_slice(&off_v);
+            let sz_v = if le {
+                new_sizes[i].to_le_bytes()
+            } else {
+                new_sizes[i].to_be_bytes()
+            };
+            hdr[32..40].copy_from_slice(&sz_v);
+        } else {
+            let off_v = if le {
+                (new_offsets[i] as u32).to_le_bytes()
+            } else {
+                (new_offsets[i] as u32).to_be_bytes()
+            };
+            hdr[16..20].copy_from_slice(&off_v);
+            let sz_v = if le {
+                (new_sizes[i] as u32).to_le_bytes()
+            } else {
+                (new_sizes[i] as u32).to_be_bytes()
+            };
+            hdr[20..24].copy_from_slice(&sz_v);
+        }
+        new_data.extend_from_slice(&hdr);
+    }
+    if class == 2 {
+        let v = if le { new_shoff.to_le_bytes() } else { new_shoff.to_be_bytes() };
+        new_data[0x28..0x30].copy_from_slice(&v);
+    } else {
+        let v = if le {
+            (new_shoff as u32).to_le_bytes()
+        } else {
+            (new_shoff as u32).to_be_bytes()
+        };
+        new_data[0x20..0x24].copy_from_slice(&v);
+    }
+    *data = new_data;
+    let _ = (w32, w64);
 }
 
 fn find_subbytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
