@@ -3572,6 +3572,86 @@ fn readelf_display<'data, Elf: FileHeader>(
             }
         }
         println!();
+
+        // Section to Segment mapping.
+        if let Ok(sections) = elf.elf_header().sections(endian, data) {
+            println!(" Section to Segment mapping:");
+            println!("  Segment Sections...");
+            for (segidx, segment) in segments.iter().enumerate() {
+                let p_type = segment.p_type(endian);
+                let p_offset: u64 = segment.p_offset(endian).into();
+                let p_filesz: u64 = segment.p_filesz(endian).into();
+                let p_vaddr: u64 = segment.p_vaddr(endian).into();
+                let p_memsz: u64 = segment.p_memsz(endian).into();
+                let mut names: Vec<String> = Vec::new();
+                for section in sections.iter() {
+                    let sh_type = section.sh_type(endian);
+                    if sh_type == 0 {
+                        continue;
+                    }
+                    let sh_flags: u64 = section.sh_flags(endian).into();
+                    let sh_offset: u64 = section.sh_offset(endian).into();
+                    let sh_size: u64 = section.sh_size(endian).into();
+                    let sh_addr: u64 = section.sh_addr(endian).into();
+                    if sh_size == 0 {
+                        continue;
+                    }
+                    let is_tls = (sh_flags & 0x400) != 0;
+                    let is_nobits = sh_type == 8;
+                    // SHF_TLS sections belong to PT_TLS / PT_GNU_RELRO / PT_LOAD.
+                    // PT_PHDR contains nothing.
+                    if p_type == 6 {
+                        continue;
+                    }
+                    if is_tls {
+                        if !matches!(p_type, 7 | 0x6474e552 | 1) {
+                            continue;
+                        }
+                        // TLS+NOBITS sections (e.g. .tbss) are NOT in PT_LOAD
+                        // or PT_GNU_RELRO; they belong only to PT_TLS.
+                        if is_nobits && (p_type == 1 || p_type == 0x6474e552) {
+                            continue;
+                        }
+                    } else if p_type == 7 {
+                        // Non-TLS sections are not part of PT_TLS.
+                        continue;
+                    }
+                    let alloc = (sh_flags & 0x2) != 0;
+                    let in_segment = if !alloc {
+                        // Non-allocated: compare by file offset.
+                        sh_offset >= p_offset
+                            && sh_offset + sh_size <= p_offset + p_filesz
+                            && !is_nobits
+                    } else {
+                        // Allocated: compare by virtual address.
+                        // For NOBITS, use sh_size = 0 in the file-bound check.
+                        let file_size = if is_nobits { 0 } else { sh_size };
+                        let file_ok = is_nobits
+                            || (sh_offset >= p_offset
+                                && sh_offset + file_size <= p_offset + p_filesz);
+                        let mem_ok = sh_addr >= p_vaddr && sh_addr + sh_size <= p_vaddr + p_memsz;
+                        file_ok && mem_ok
+                    };
+                    if !in_segment {
+                        continue;
+                    }
+                    let nm = sections
+                        .section_name(endian, section)
+                        .ok()
+                        .and_then(|n| std::str::from_utf8(n).ok())
+                        .unwrap_or("");
+                    if !nm.is_empty() {
+                        names.push(nm.to_string());
+                    }
+                }
+                let mut line = format!("   {:02}     ", segidx);
+                for n in &names {
+                    line.push_str(n);
+                    line.push(' ');
+                }
+                println!("{}", line);
+            }
+        }
     }
 
     if show_symbols {
@@ -15482,6 +15562,52 @@ fn strip_inplace_elf(data: &[u8], opts: &StripInplaceOpts<'_>) -> Option<Vec<u8>
         w32m(&mut out, 0x20, new_shoff as u32);
         w16m(&mut out, 0x30, new_count as u16);
         w16m(&mut out, 0x32, new_shstrndx as u16);
+    }
+
+    // Recompute PT_TLS p_memsz from surviving TLS sections.
+    if phoff > 0 && phnum > 0 && phoff + phnum * phentsize <= out.len() {
+        let mut tls_max: Option<u64> = None;
+        let mut tls_min: Option<u64> = None;
+        for i in 0..shnum {
+            if !keep[i] {
+                continue;
+            }
+            let sh = &headers[i];
+            if (sh.sh_flags & 0x400) == 0 {
+                continue;
+            }
+            let end = sh.sh_addr.saturating_add(sh.sh_size);
+            tls_min = Some(tls_min.map_or(sh.sh_addr, |m| m.min(sh.sh_addr)));
+            tls_max = Some(tls_max.map_or(end, |m| m.max(end)));
+        }
+        for i in 0..phnum {
+            let p = phoff + i * phentsize;
+            let p_type = if le {
+                u32::from_le_bytes(out[p..p + 4].try_into().unwrap())
+            } else {
+                u32::from_be_bytes(out[p..p + 4].try_into().unwrap())
+            };
+            if p_type != 7 {
+                continue;
+            }
+            // Update p_memsz field.
+            let p_memsz_off = if class == 2 { p + 40 } else { p + 20 };
+            if let (Some(min), Some(max)) = (tls_min, tls_max) {
+                let new_memsz = max.saturating_sub(min);
+                if class == 2 {
+                    let b = if le {
+                        new_memsz.to_le_bytes()
+                    } else {
+                        new_memsz.to_be_bytes()
+                    };
+                    out[p_memsz_off..p_memsz_off + 8].copy_from_slice(&b);
+                } else {
+                    let v = new_memsz as u32;
+                    let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+                    out[p_memsz_off..p_memsz_off + 4].copy_from_slice(&b);
+                }
+            }
+        }
     }
 
     Some(out)
