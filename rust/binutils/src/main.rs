@@ -8208,7 +8208,8 @@ fn tool_objcopy(args: &[String]) -> i32 {
                 use flate2::write::ZlibEncoder;
                 use std::io::Write as _;
                 let uncompressed_size = data_vec.len() as u64;
-                let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
+                // GNU as uses Z_BEST_COMPRESSION (level 9) for the zlib stream.
+        let mut enc = ZlibEncoder::new(Vec::new(), Compression::best());
                 let _ = enc.write_all(&data_vec);
                 let zlib_data = enc.finish().unwrap_or_default();
                 let is_64 =
@@ -11490,6 +11491,7 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
         offset: usize,
         size: usize,
         flags: u64,
+        addralign: u64,
     }
     let mut targets: Vec<CompressTarget> = Vec::new();
     for i in 0..shnum {
@@ -11499,17 +11501,19 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
         if !name.starts_with(b".debug_") {
             continue;
         }
-        let (sh_off, sh_size, sh_flags): (usize, usize, u64) = if class == 2 {
+        let (sh_off, sh_size, sh_flags, sh_addralign): (usize, usize, u64, u64) = if class == 2 {
             (
                 r64(data, h + 24) as usize,
                 r64(data, h + 32) as usize,
                 r64(data, h + 8),
+                r64(data, h + 48),
             )
         } else {
             (
                 r32(data, h + 16) as usize,
                 r32(data, h + 20) as usize,
                 r32(data, h + 8) as u64,
+                r32(data, h + 32) as u64,
             )
         };
         // Skip if already compressed (SHF_COMPRESSED = 0x800).
@@ -11523,6 +11527,7 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
             offset: sh_off,
             size: sh_size,
             flags: sh_flags,
+            addralign: sh_addralign,
         });
     }
     if targets.is_empty() {
@@ -11534,6 +11539,7 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
         new_name_idx: u32,
         new_data: Vec<u8>,
         new_flags: u64,
+        new_addralign: u64,
     }
     let mut compressed: Vec<CompressedSection> = Vec::new();
     for t in &targets {
@@ -11542,7 +11548,8 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
         }
         let raw = data[t.offset..t.offset + t.size].to_vec();
         // Compress with zlib (default level).
-        let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
+        // GNU as uses Z_BEST_COMPRESSION (level 9) for the zlib stream.
+        let mut enc = ZlibEncoder::new(Vec::new(), Compression::best());
         let _ = enc.write_all(&raw);
         let zlib_data = enc.finish().unwrap_or_default();
         // GNU as/objcopy skip compression when the encoded size wouldn't be
@@ -11591,35 +11598,35 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
             }
             2 => {
                 // zlib-gabi: Elf*_Chdr + zlib stream; set SHF_COMPRESSED.
+                // Preserve the original section's addralign in ch_addralign.
+                let chdr_align = t.addralign.max(1);
                 let mut out: Vec<u8>;
                 if class == 2 {
-                    // Elf64_Chdr: u32 ch_type + u32 ch_reserved + u64 ch_size + u64 ch_addralign
                     out = Vec::with_capacity(24 + zlib_data.len());
                     out.extend_from_slice(&[0u8; 24]);
                     let chdr = &mut out[..24];
                     if le {
-                        chdr[0..4].copy_from_slice(&1u32.to_le_bytes()); // ELFCOMPRESS_ZLIB
+                        chdr[0..4].copy_from_slice(&1u32.to_le_bytes());
                         chdr[8..16].copy_from_slice(&(t.size as u64).to_le_bytes());
-                        chdr[16..24].copy_from_slice(&1u64.to_le_bytes()); // ch_addralign
+                        chdr[16..24].copy_from_slice(&chdr_align.to_le_bytes());
                     } else {
                         chdr[0..4].copy_from_slice(&1u32.to_be_bytes());
                         chdr[8..16].copy_from_slice(&(t.size as u64).to_be_bytes());
-                        chdr[16..24].copy_from_slice(&1u64.to_be_bytes());
+                        chdr[16..24].copy_from_slice(&chdr_align.to_be_bytes());
                     }
                     out.extend_from_slice(&zlib_data);
                 } else {
-                    // Elf32_Chdr: u32 ch_type + u32 ch_size + u32 ch_addralign
                     out = Vec::with_capacity(12 + zlib_data.len());
                     out.extend_from_slice(&[0u8; 12]);
                     let chdr = &mut out[..12];
                     if le {
                         chdr[0..4].copy_from_slice(&1u32.to_le_bytes());
                         chdr[4..8].copy_from_slice(&(t.size as u32).to_le_bytes());
-                        chdr[8..12].copy_from_slice(&1u32.to_le_bytes());
+                        chdr[8..12].copy_from_slice(&(chdr_align as u32).to_le_bytes());
                     } else {
                         chdr[0..4].copy_from_slice(&1u32.to_be_bytes());
                         chdr[4..8].copy_from_slice(&(t.size as u32).to_be_bytes());
-                        chdr[8..12].copy_from_slice(&1u32.to_be_bytes());
+                        chdr[8..12].copy_from_slice(&(chdr_align as u32).to_be_bytes());
                     }
                     out.extend_from_slice(&zlib_data);
                 }
@@ -11632,40 +11639,175 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
             new_name_idx,
             new_data,
             new_flags,
+            // GNU as/objcopy bump addralign for compressed debug sections to
+            // the address size (4 or 8) for proper Elf*_Chdr alignment.
+            new_addralign: if class == 2 { 8 } else { 4 },
         });
     }
-    // Rebuild the file: walk all sections and replace target sections' data.
-    // Simplest approach: append new compressed data to end of file, update
-    // section header offsets/sizes/names. Old data becomes dead space.
-    for cs in &compressed {
-        let h = shoff as usize + cs.idx * shentsize;
-        let new_off = data.len() as u64;
-        data.extend_from_slice(&cs.new_data);
-        // Update section header.
-        w32(data, h, cs.new_name_idx);
-        if class == 2 {
-            w64(data, h + 8, cs.new_flags);
-            w64(data, h + 24, new_off);
-            w64(data, h + 32, cs.new_data.len() as u64);
-        } else {
-            w32(data, h + 8, cs.new_flags as u32);
-            w32(data, h + 16, new_off as u32);
-            w32(data, h + 20, cs.new_data.len() as u32);
-        }
+    // Repack the file: emit ELF header, all section bodies (in original
+    // order, with debug sections replaced by their compressed form, and the
+    // shstrtab replaced if grown), then the section header table at the end
+    // with updated offsets. This compacts the layout so the output matches
+    // GNU `as --compress-debug-sections=…` byte-for-byte.
+    let compressed_map: std::collections::HashMap<usize, &CompressedSection> =
+        compressed.iter().map(|c| (c.idx, c)).collect();
+    // Read original section header bytes so we can preserve fields we don't modify.
+    let header_size = if class == 2 { 64 } else { 52 };
+    let mut new_data: Vec<u8> = data[..header_size].to_vec();
+    // Per-section new offsets (parallel to shnum).
+    let mut new_offsets: Vec<u64> = vec![0; shnum];
+    let mut new_sizes: Vec<u64> = vec![0; shnum];
+    let mut new_name_idxs: Vec<u32> = vec![u32::MAX; shnum];
+    let mut new_flags_arr: Vec<u64> = vec![u64::MAX; shnum];
+    // Iterate sections by file offset to preserve layout where possible.
+    struct Sec {
+        idx: usize,
+        offset: u64,
+        size: u64,
+        sh_type: u32,
     }
-    // Rewrite shstrtab if it grew.
-    if shstr_data.len() > shstr_size {
-        // Append new shstrtab to end and update header.
-        let new_shstr_off = data.len() as u64;
-        data.extend_from_slice(&shstr_data);
-        if class == 2 {
-            w64(data, shstr_hdr + 24, new_shstr_off);
-            w64(data, shstr_hdr + 32, shstr_data.len() as u64);
+    let mut secs: Vec<Sec> = Vec::with_capacity(shnum);
+    for i in 0..shnum {
+        let h = shoff as usize + i * shentsize;
+        let sh_type = r32(&data, h + 4);
+        let (off, sz) = if class == 2 {
+            (r64(&data, h + 24), r64(&data, h + 32))
         } else {
-            w32(data, shstr_hdr + 16, new_shstr_off as u32);
-            w32(data, shstr_hdr + 20, shstr_data.len() as u32);
-        }
+            (r32(&data, h + 16) as u64, r32(&data, h + 20) as u64)
+        };
+        secs.push(Sec {
+            idx: i,
+            offset: off,
+            size: sz,
+            sh_type,
+        });
     }
+    // Sort by original offset so output preserves layout. NOBITS sections
+    // (sh_type=8) and the NULL section (idx=0) keep offset 0/no body.
+    let mut order: Vec<usize> = (0..shnum).collect();
+    order.sort_by_key(|&i| (secs[i].offset, i));
+    for &i in &order {
+        let sec = &secs[i];
+        if i == 0 || sec.sh_type == 8 /* NOBITS */ {
+            new_offsets[i] = sec.offset;
+            new_sizes[i] = sec.size;
+            continue;
+        }
+        // Choose body bytes.
+        let body: Vec<u8> = if let Some(cs) = compressed_map.get(&i) {
+            cs.new_data.clone()
+        } else if i == shstrndx && shstr_data.len() != shstr_size {
+            shstr_data.clone()
+        } else {
+            if sec.offset as usize + sec.size as usize > data.len() {
+                continue;
+            }
+            data[sec.offset as usize..(sec.offset + sec.size) as usize].to_vec()
+        };
+        // Pad to the section's natural alignment (sh_addralign).
+        let h = shoff as usize + i * shentsize;
+        let addralign: u64 = if let Some(cs) = compressed_map.get(&i) {
+            cs.new_addralign
+        } else if class == 2 {
+            r64(&data, h + 48)
+        } else {
+            r32(&data, h + 32) as u64
+        };
+        if addralign > 1 {
+            let off_now = new_data.len() as u64;
+            let pad = (addralign - (off_now % addralign)) % addralign;
+            new_data.resize(new_data.len() + pad as usize, 0);
+        }
+        let off_now = new_data.len() as u64;
+        new_offsets[i] = off_now;
+        new_sizes[i] = body.len() as u64;
+        new_data.extend_from_slice(&body);
+    }
+    // Place section header table at end.
+    let new_shoff = new_data.len() as u64;
+    // Append section headers — copy originals and rewrite mutated fields.
+    for i in 0..shnum {
+        let h = shoff as usize + i * shentsize;
+        let mut hdr = data[h..h + shentsize].to_vec();
+        // Update name index if the section was renamed.
+        if let Some(cs) = compressed_map.get(&i) {
+            let v = if le {
+                cs.new_name_idx.to_le_bytes()
+            } else {
+                cs.new_name_idx.to_be_bytes()
+            };
+            hdr[0..4].copy_from_slice(&v);
+            new_name_idxs[i] = cs.new_name_idx;
+            new_flags_arr[i] = cs.new_flags;
+            // Update flags.
+            if class == 2 {
+                let v = if le { cs.new_flags.to_le_bytes() } else { cs.new_flags.to_be_bytes() };
+                hdr[8..16].copy_from_slice(&v);
+                let v = if le {
+                    cs.new_addralign.to_le_bytes()
+                } else {
+                    cs.new_addralign.to_be_bytes()
+                };
+                hdr[48..56].copy_from_slice(&v);
+            } else {
+                let v = if le {
+                    (cs.new_flags as u32).to_le_bytes()
+                } else {
+                    (cs.new_flags as u32).to_be_bytes()
+                };
+                hdr[8..12].copy_from_slice(&v);
+                let v = if le {
+                    (cs.new_addralign as u32).to_le_bytes()
+                } else {
+                    (cs.new_addralign as u32).to_be_bytes()
+                };
+                hdr[32..36].copy_from_slice(&v);
+            }
+        }
+        // Update offset and size.
+        if class == 2 {
+            let off_v = if le {
+                new_offsets[i].to_le_bytes()
+            } else {
+                new_offsets[i].to_be_bytes()
+            };
+            hdr[24..32].copy_from_slice(&off_v);
+            let sz_v = if le {
+                new_sizes[i].to_le_bytes()
+            } else {
+                new_sizes[i].to_be_bytes()
+            };
+            hdr[32..40].copy_from_slice(&sz_v);
+        } else {
+            let off_v = if le {
+                (new_offsets[i] as u32).to_le_bytes()
+            } else {
+                (new_offsets[i] as u32).to_be_bytes()
+            };
+            hdr[16..20].copy_from_slice(&off_v);
+            let sz_v = if le {
+                (new_sizes[i] as u32).to_le_bytes()
+            } else {
+                (new_sizes[i] as u32).to_be_bytes()
+            };
+            hdr[20..24].copy_from_slice(&sz_v);
+        }
+        new_data.extend_from_slice(&hdr);
+    }
+    // Update e_shoff in the ELF header.
+    if class == 2 {
+        let v = if le { new_shoff.to_le_bytes() } else { new_shoff.to_be_bytes() };
+        new_data[0x28..0x30].copy_from_slice(&v);
+    } else {
+        let v = if le {
+            (new_shoff as u32).to_le_bytes()
+        } else {
+            (new_shoff as u32).to_be_bytes()
+        };
+        new_data[0x20..0x24].copy_from_slice(&v);
+    }
+    *data = new_data;
+    let _ = (new_name_idxs, new_flags_arr, w32, w64);
 }
 
 /// Inverse of `elf_compress_debug_sections`: decompress `.zdebug_*` and
