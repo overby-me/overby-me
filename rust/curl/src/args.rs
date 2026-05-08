@@ -40,12 +40,21 @@ fn read_config_file(path: &str) -> Vec<String> {
     };
 
     let mut out = Vec::new();
-    for raw in content.split('\n') {
+    for (lineno, raw) in content.split('\n').enumerate() {
         let line = raw.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        if let Some((opt, val)) = parse_config_line(line) {
+        if let Some((opt, val, warn_unquoted)) = parse_config_line(line) {
+            if warn_unquoted {
+                // Curl strips a leading '-' or '--' and reports the bare option
+                // name in the warning text.
+                let bare = opt.trim_start_matches('-');
+                warn_wrapped(&format!(
+                    "{path}:{n}: warning: '{bare}' uses unquoted whitespace. This may cause side-effects. Consider double quotes.",
+                    n = lineno + 1,
+                ));
+            }
             out.push(opt);
             if let Some(val) = val {
                 out.push(val);
@@ -55,8 +64,11 @@ fn read_config_file(path: &str) -> Vec<String> {
     out
 }
 
-/// Parse a single config-file line into (option, optional value).
-fn parse_config_line(line: &str) -> Option<(String, Option<String>)> {
+/// Parse a single config-file line into (option, optional value, warn_unquoted).
+/// `warn_unquoted` is true when the value was unquoted but contained extra
+/// whitespace-separated tokens — curl emits a warning and only takes the first
+/// token (test 459).
+fn parse_config_line(line: &str) -> Option<(String, Option<String>, bool)> {
     let mut chars = line.chars().peekable();
 
     // Optional leading dashes on the option name.
@@ -112,11 +124,12 @@ fn parse_config_line(line: &str) -> Option<(String, Option<String>)> {
     }
 
     if chars.peek().is_none() {
-        return Some((opt_str, None));
+        return Some((opt_str, None, false));
     }
 
     // Value: optionally double-quoted, with \\ and \" escapes.
     let mut val = String::new();
+    let mut warn_unquoted = false;
     if chars.peek() == Some(&'"') {
         chars.next();
         while let Some(c) = chars.next() {
@@ -139,13 +152,19 @@ fn parse_config_line(line: &str) -> Option<(String, Option<String>)> {
             }
         }
     } else {
+        // Unquoted value: take chars until first whitespace. Anything past that
+        // is treated as a stray suffix and triggers the unquoted-whitespace
+        // warning (test 459).
         for c in chars {
+            if c == ' ' || c == '\t' {
+                warn_unquoted = true;
+                break;
+            }
             val.push(c);
         }
-        val = val.trim().to_string();
     }
 
-    Some((opt_str, Some(val)))
+    Some((opt_str, Some(val), warn_unquoted))
 }
 
 /// Emit a warning to stderr with curl's line-wrapping: each physical line is
@@ -160,7 +179,7 @@ fn warn_wrapped(msg: &str) {
     for word in msg.split(' ') {
         if line.is_empty() {
             line.push_str(word);
-        } else if line.len() + 1 + word.len() <= content_width {
+        } else if line.len() + 1 + word.len() < content_width {
             line.push(' ');
             line.push_str(word);
         } else {
