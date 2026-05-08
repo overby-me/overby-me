@@ -10823,19 +10823,22 @@ impl Interpreter {
                 } else {
                     arr[idx] = val;
                     // Preserve `deleted_slots` for slots OTHER than the
-                    // one being set — `set_array` wipes the entire entry.
-                    // Stash, set, then re-stash without `idx`. op/array
-                    // tests 181, 184, 187 (assigning to one slot via
-                    // slice doesn't autoviv another delete'd slot).
-                    let preserved: Option<std::collections::HashSet<usize>> = self
-                        .deleted_slots
-                        .get(name)
-                        .map(|s| s.iter().copied().filter(|&j| j != idx).collect());
-                    self.set_array(name, arr);
-                    if let Some(set) = preserved
-                        && !set.is_empty()
-                    {
-                        self.deleted_slots.insert(name.to_string(), set);
+                    // one being set — `set_array` wipes the entry. Hot
+                    // path: most arrays have no deleted slots, so check
+                    // first and skip the take/restore otherwise. op/array
+                    // tests 181, 184, 187 require the preserve.
+                    let has_deletions = self.deleted_slots.get(name).is_some_and(|s| !s.is_empty());
+                    if has_deletions {
+                        let preserved = self.deleted_slots.remove(name);
+                        self.set_array(name, arr);
+                        if let Some(mut set) = preserved {
+                            set.remove(&idx);
+                            if !set.is_empty() {
+                                self.deleted_slots.insert(name.to_string(), set);
+                            }
+                        }
+                    } else {
+                        self.set_array(name, arr);
                     }
                 }
             }
