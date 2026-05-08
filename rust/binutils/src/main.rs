@@ -3358,6 +3358,46 @@ fn readelf_display<'data, Elf: FileHeader>(
                 }
                 let detail = elf_section_flags_detail(flags);
                 println!("       [{:016x}]: {}", flags, detail);
+                // For SHF_COMPRESSED sections, GNU readelf prints a follow-up
+                // line with the compression header: "ZLIB, <uncompressed
+                // size>, <addralign>".
+                if flags & 0x800 != 0 && offset + 24 <= data.len() as u64 {
+                    let off = offset as usize;
+                    let is_le = elf.elf_header().e_ident().data == 1;
+                    let read_u32 = |b: &[u8]| -> u32 {
+                        let bytes = [b[0], b[1], b[2], b[3]];
+                        if is_le {
+                            u32::from_le_bytes(bytes)
+                        } else {
+                            u32::from_be_bytes(bytes)
+                        }
+                    };
+                    let read_u64 = |b: &[u8]| -> u64 {
+                        let bytes = [b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]];
+                        if is_le {
+                            u64::from_le_bytes(bytes)
+                        } else {
+                            u64::from_be_bytes(bytes)
+                        }
+                    };
+                    let (ch_type, ch_size, ch_align) = if is_64 {
+                        let ct = read_u32(&data[off..off + 4]);
+                        let cs = read_u64(&data[off + 8..off + 16]);
+                        let ca = read_u64(&data[off + 16..off + 24]);
+                        (ct, cs, ca)
+                    } else {
+                        let ct = read_u32(&data[off..off + 4]);
+                        let cs = read_u32(&data[off + 4..off + 8]) as u64;
+                        let ca = read_u32(&data[off + 8..off + 12]) as u64;
+                        (ct, cs, ca)
+                    };
+                    let kind = match ch_type {
+                        1 => "ZLIB",
+                        2 => "ZSTD",
+                        _ => "UNKNOWN",
+                    };
+                    println!("       {}, {:016x}, {}", kind, ch_size, ch_align);
+                }
             } else if wide {
                 if is_64 {
                     println!(
@@ -7888,12 +7928,40 @@ fn tool_objcopy(args: &[String]) -> i32 {
         && set_start.is_none()
         && adjust_start == 0
         && adjust_vma == 0
-        && adjust_section_vma.is_empty()
-        && compress_debug == CompressMode::None
-        && !decompress_debug;
+        && adjust_section_vma.is_empty();
+
+    // Fast path: only compress/decompress -> byte copy + post-process
+    if no_transformations && (compress_debug != CompressMode::None || decompress_debug) {
+        let mut data = match fs::read(input) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("objcopy: '{input}': {e}");
+                return 1;
+            }
+        };
+        if decompress_debug {
+            elf_decompress_debug_sections(&mut data);
+        }
+        match compress_debug {
+            CompressMode::ZlibGnu => elf_compress_debug_sections(&mut data, 1),
+            CompressMode::ZlibGabi => elf_compress_debug_sections(&mut data, 2),
+            CompressMode::None => {}
+        }
+        if let Err(e) = fs::write(output, &data) {
+            eprintln!("objcopy: '{output}': {e}");
+            return 1;
+        }
+        if preserve_dates
+            && let Ok(meta) = fs::metadata(input)
+            && let Ok(mtime) = meta.modified()
+        {
+            let _ = set_file_times(Path::new(output), mtime);
+        }
+        return 0;
+    }
 
     // Fast path: no transformations -> byte copy
-    if no_transformations {
+    if no_transformations && compress_debug == CompressMode::None && !decompress_debug {
         if input != output
             && let Err(e) = fs::copy(input, output)
         {
@@ -8603,7 +8671,17 @@ fn tool_objcopy(args: &[String]) -> i32 {
     if decompress_debug {
         elf_decompress_debug_sections(&mut out_buf);
     }
-    // (Compression is handled inline above when copying sections.)
+    // Inline compression (above) handles the simple case of an uncompressed
+    // input. As a fallback for inputs we don't easily route through the
+    // writer (e.g. ones where SHF_COMPRESSED was already set), apply a
+    // post-process pass — this is a no-op when inline compression already
+    // ran since `elf_compress_debug_sections` skips already-compressed
+    // sections.
+    match compress_debug {
+        CompressMode::ZlibGnu => elf_compress_debug_sections(&mut out_buf, 1),
+        CompressMode::ZlibGabi => elf_compress_debug_sections(&mut out_buf, 2),
+        CompressMode::None => {}
+    }
 
     if let Err(e) = fs::write(output, &out_buf) {
         eprintln!("objcopy: {output}: {e}");
@@ -11467,6 +11545,16 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
         let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
         let _ = enc.write_all(&raw);
         let zlib_data = enc.finish().unwrap_or_default();
+        // GNU as/objcopy skip compression when the encoded size wouldn't be
+        // smaller than the input.
+        let header_bytes = match mode {
+            1 => 12usize,
+            2 => if class == 2 { 24 } else { 12 },
+            _ => 0,
+        };
+        if header_bytes + zlib_data.len() >= raw.len() {
+            continue;
+        }
         let (new_data, new_flags, new_name_idx) = match mode {
             1 => {
                 // zlib-gnu: "ZLIB" + 8-byte BE uncompressed size + zlib stream.
