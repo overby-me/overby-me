@@ -6,7 +6,7 @@ at passing the upstream GNU binutils test suite.
 
 ## Status
 
-- **84/84 custom comparison tests passing (100%)**
+- **89/89 custom comparison tests passing (100%)**
 - **328/329 upstream DejaGnu tests passing (99.7%)**
 
 The single remaining failing dejagnu test is `readelf -wi
@@ -95,16 +95,16 @@ nix flake check
 
 ## Test results
 
-### Custom comparison tests (84/84 passing)
+### Custom comparison tests (89/89 passing)
 
 | Tool | Tests |
 |---|---|
 | `ar` | `create-list`, `extract`, `print` |
 | `addr2line` | `basenames`, `basic`, `demangle`, `inlines`, `multiple`, `pretty` |
 | `c++filt` | `basic`, `multiple`, `nested`, `no-params`, `no-recurse-limit`, `no-strip-leading`, `style`, `types` |
-| `nm` | `basic`, `debug-syms`, `defined-only`, `extern-only`, `extern-only-posix`, `format-bsd`, `just-symbols`, `just-symbols-with-prefix`, `multiple-files`, `no-recurse-limit`, `no-sort`, `numeric-sort`, `posix`, `print-file-name`, `print-file-name-posix`, `radix-decimal`, `radix-hex`, `radix-hex-print-file-name`, `radix-octal`, `reverse-numeric`, `reverse-sort`, `special-syms`, `undefined-only`, `undefined-only-posix` |
+| `nm` | `all-with-prefix`, `basic`, `debug-syms`, `defined-only`, `extern-only`, `extern-only-posix`, `format-bsd`, `just-symbols`, `just-symbols-with-prefix`, `line-numbers`, `multiple-files`, `no-recurse-limit`, `no-sort`, `numeric-sort`, `posix`, `print-file-name`, `print-file-name-posix`, `radix-decimal`, `radix-hex`, `radix-hex-print-file-name`, `radix-octal`, `reverse-numeric`, `reverse-sort`, `special-syms`, `undefined-only`, `undefined-only-posix` |
 | `objdump` | `disassemble`, `file-headers`, `headers`, `multiple-files`, `relocs`, `section-filter`, `syms` |
-| `readelf` | `arch-specific`, `dynamic`, `file-header`, `groups`, `header-notes`, `header-program`, `header-sections`, `headers-all`, `headers-combined`, `hex-dump`, `hex-dump-data`, `histogram`, `multiple-files`, `notes`, `notes-with-sections`, `program-headers`, `relocs`, `sections`, `string-dump`, `string-dump-missing`, `symbols`, `wide` |
+| `readelf` | `arch-specific`, `dynamic`, `dynamic-arch`, `file-header`, `groups`, `header-notes`, `header-program`, `header-sections`, `headers-all`, `headers-combined`, `hex-dump`, `hex-dump-data`, `histogram`, `multiple-files`, `notes`, `notes-with-sections`, `program-headers`, `program-wide`, `relocs`, `sections`, `string-dump`, `string-dump-missing`, `symbols`, `version-info`, `wide` |
 | `size` | `basic`, `decimal`, `hex`, `multiple-files`, `octal`, `sysv`, `totals` |
 | `strings` | `basic`, `min-length`, `multiple-files`, `object`, `radix-decimal`, `radix-hex`, `radix-octal` |
 

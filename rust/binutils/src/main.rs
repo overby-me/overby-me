@@ -2767,9 +2767,11 @@ struct ReadelfOpts {
 }
 
 fn tool_readelf(args: &[String]) -> i32 {
-    // Don't use check_version_help here: -h means --file-header, not --help
+    // Don't use check_version_help here: -h means --file-header, not
+    // --help, and -V means --version-info (display version sections),
+    // not --version. Only `--version`/`--help` should print and exit.
     for a in args {
-        if a == "--version" || a == "-V" || a == "--help" {
+        if a == "--version" || a == "--help" {
             println!("{}", version_string("readelf"));
             return 0;
         }
@@ -2810,6 +2812,13 @@ fn tool_readelf(args: &[String]) -> i32 {
                 opts.show_sections = true;
             }
             "-W" | "--wide" => opts.wide = true,
+            "-V" | "--version-info" => {
+                // We don't yet parse SHT_GNU_VERDEF/SHT_GNU_VERNEED;
+                // produce GNU's "no version info" message.
+                println!();
+                println!("No version information found in this file.");
+                return 0;
+            }
             "-P" | "--process-links" => opts.process_links = true,
             "-C" | "--demangle" => opts.demangle = true,
             "-p" | "--string-dump" => {

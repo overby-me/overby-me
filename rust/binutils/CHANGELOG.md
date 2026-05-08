@@ -3,7 +3,13 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
-## Custom-test expansion (84/84 ✅)
+## Custom-test expansion (89/89 ✅)
+
+- readelf `-V` no longer means `--version` (it's `--version-info`):
+  with no SHT_GNU_VERDEF/SHT_GNU_VERNEED present, emits "No version
+  information found in this file." matching GNU. +5 custom tests
+  (84→89): `readelf-version-info`, `nm-line-numbers`,
+  `nm-all-with-prefix`, `readelf-program-wide`, `readelf-dynamic-arch`.
 
 - nm `--special-syms`/`--no-special-syms` accepted as no-ops (we don't
   generate synthetic symbols). +7 custom tests (77→84):

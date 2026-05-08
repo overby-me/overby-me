@@ -376,6 +376,26 @@
         name = "basenames";
       }
       {
+        tool = "readelf";
+        name = "version-info";
+      }
+      {
+        tool = "nm";
+        name = "line-numbers";
+      }
+      {
+        tool = "nm";
+        name = "all-with-prefix";
+      }
+      {
+        tool = "readelf";
+        name = "program-wide";
+      }
+      {
+        tool = "readelf";
+        name = "dynamic-arch";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }
