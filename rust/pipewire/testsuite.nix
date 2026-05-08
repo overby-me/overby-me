@@ -30,6 +30,13 @@ pkgs.runCommand "rust-pipewire-test-${tool}-${name}" {
 
   export TMPDIR="$(mktemp -d)"
 
+  # Force a stable locale so locale-dependent output (e.g. printf "%f"
+  # using a comma decimal point on de_DE) is consistent between the
+  # reference C tool and rust-pipewire.
+  export LC_ALL=C
+  export LANG=C
+  export LC_NUMERIC=C
+
   # Map pseudo-tool names to actual binary names if they differ.
   binName="${tool}"
 

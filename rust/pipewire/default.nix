@@ -187,6 +187,28 @@
         tool = "pipewire-pulse";
         name = "help";
       }
+
+      # --- pw-mididump SMF parsing tests ---
+      {
+        tool = "pw-mididump";
+        name = "basic";
+      }
+      {
+        tool = "pw-mididump";
+        name = "controllers";
+      }
+      {
+        tool = "pw-mididump";
+        name = "tempo-meta";
+      }
+      {
+        tool = "pw-mididump";
+        name = "text-meta";
+      }
+      {
+        tool = "pw-mididump";
+        name = "running-status";
+      }
     ];
   in
     builtins.listToAttrs (map (t: {
