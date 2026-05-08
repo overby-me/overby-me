@@ -345,7 +345,7 @@ pub(crate) fn parse_args() -> Options {
             }
             "-V" | "--version" => {
                 println!("curl 8.0.0 (rust-curl) libcurl/8.0.0 rustls/0.23");
-                println!("Protocols: http https");
+                println!("Protocols: file http https");
                 println!("Features: HTTPS IPv6 SSL libz");
                 process::exit(0);
             }

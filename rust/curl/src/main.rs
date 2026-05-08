@@ -239,6 +239,111 @@ fn main() {
         // URL2 should still exit 0 (test 1293). --fail-early breaks the
         // loop earlier, so this reset doesn't change that path.
         exit_code = 0;
+
+        // file:// — read the local file and write it to the chosen output
+        // (stdout if no -o). file://[host]/path: host MUST be empty,
+        // "localhost", or "127.0.0.1" — anything else is rejected with
+        // exit 3 (URL malformat) per test 1145.
+        let lower_url = url_str.to_ascii_lowercase();
+        let file_url_rest: Option<&str> = if let Some(rest) = url_str
+            .strip_prefix("file://")
+            .or_else(|| url_str.strip_prefix("FILE://"))
+            .or_else(|| url_str.strip_prefix("File://"))
+        {
+            Some(rest)
+        } else if lower_url.starts_with("file:/")
+            && !lower_url.starts_with("file://")
+        {
+            // `file:/path` — single-slash form (test 203). Treat as if the
+            // host were empty: keep the leading `/`.
+            url_str.get(5..)
+        } else {
+            None
+        };
+        if let Some(rest) = file_url_rest {
+            let (host, path) = if let Some(rest) = rest.strip_prefix('/') {
+                ("", format!("/{rest}"))
+            } else if let Some(slash) = rest.find('/') {
+                (&rest[..slash], rest[slash..].to_string())
+            } else {
+                (rest, "/".to_string())
+            };
+            // Allow only empty / localhost / 127.0.0.1.
+            if !host.is_empty() && host != "localhost" && host != "127.0.0.1" {
+                if !opts.silent || opts.show_error {
+                    eprintln!("curl: (3) URL using bad/illegal format or missing URL");
+                }
+                exit_code = 3;
+                if opts.fail_early {
+                    break;
+                }
+                continue;
+            }
+            // Strip any query string / fragment from the path.
+            let path = path
+                .split_once('?')
+                .map(|(p, _)| p.to_string())
+                .unwrap_or(path);
+            let path = path
+                .split_once('#')
+                .map(|(p, _)| p.to_string())
+                .unwrap_or(path);
+            // Decode percent-escapes (RFC 3986 §2.1).
+            let mut decoded = Vec::with_capacity(path.len());
+            let bytes = path.as_bytes();
+            let mut i = 0;
+            while i < bytes.len() {
+                if bytes[i] == b'%'
+                    && i + 2 < bytes.len()
+                    && let (Some(h), Some(l)) = (
+                        (bytes[i + 1] as char).to_digit(16),
+                        (bytes[i + 2] as char).to_digit(16),
+                    )
+                {
+                    decoded.push(((h << 4) | l) as u8);
+                    i += 3;
+                    continue;
+                }
+                decoded.push(bytes[i]);
+                i += 1;
+            }
+            let fpath = String::from_utf8_lossy(&decoded).into_owned();
+            match fs::read(&fpath) {
+                Ok(content) => {
+                    let body_path = opts.outputs.get(url_idx).cloned();
+                    if let Some(out_path) = body_path
+                        && out_path.to_str() != Some("-")
+                    {
+                        if opts.create_dirs
+                            && let Some(parent) = out_path.parent()
+                            && !parent.as_os_str().is_empty()
+                        {
+                            let _ = fs::create_dir_all(parent);
+                        }
+                        if let Err(e) = fs::write(&out_path, &content) {
+                            eprintln!(
+                                "curl: failed to write to {}: {e}",
+                                out_path.display()
+                            );
+                            exit_code = 23;
+                        }
+                    } else {
+                        let _ = io::stdout().write_all(&content);
+                        let _ = io::stdout().flush();
+                    }
+                }
+                Err(_) => {
+                    if !opts.silent || opts.show_error {
+                        eprintln!("curl: (37) Couldn't open file {fpath}");
+                    }
+                    exit_code = 37;
+                }
+            }
+            if opts.fail_early && exit_code != 0 {
+                break;
+            }
+            continue;
+        }
         // --disallow-username-in-url: any URL carrying user[:pass]@ is rejected
         // before connecting, exiting CURLE_LOGIN_DENIED (67) (test 2075).
         if opts.disallow_userinfo {
