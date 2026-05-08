@@ -10287,7 +10287,14 @@ impl Interpreter {
                         *r.borrow_mut() = val;
                     }
                     Value::Str(s) if !s.is_empty() => {
-                        let vname = normalize_ctrl_var_name(&s);
+                        // Strip a leading `*` so symbolic refs match
+                        // glob-form aliases set via `*foo = "*Bar"`,
+                        // which also strip the leading `*`. Without
+                        // this, opbasic/concat test 239 stores the
+                        // value under `*QPR::Bar*…` but reads it via
+                        // an alias keyed at `QPR::Bar*…`.
+                        let s = s.strip_prefix('*').unwrap_or(&s);
+                        let vname = normalize_ctrl_var_name(s);
                         self.set_var(&vname, val);
                     }
                     _ => {}
