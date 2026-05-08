@@ -3,6 +3,26 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
+## Custom-test expansion (115/115 ✅)
+
+- objdump and nm now match GNU's archive-listing format. objdump
+  prints a single `In archive ARCH:` banner before each member's
+  output (members use only their member-name in the per-file banner,
+  not `archive(member.o)`); nm prints just `member.o:` per member.
+  nm also filters out `STT_FILE` and `STT_SECTION` symbols by default
+  (matching GNU nm), so archives compiled from stdin (`<stdin>` file
+  symbol) no longer add stray rows. size `--common` now folds common
+  symbol sizes into the bss column (and adds a `*COM*` row in `-A`
+  format), matching GNU's totals. c++filt `-_`/`--strip-underscore`
+  and `-n`/`--no-strip-underscore` flags: when stripping, demangle
+  the un-prefixed form and only emit it on success — failures fall
+  back to the original (so `_main` stays `_main`, not `main`).
+  c++filt also rewrites cpp_demangle's literal-cast templates
+  (`(long)1`, `(unsigned int)7`, etc.) to GNU's typed-suffix form
+  (`1l`, `7u`, ...) so deeply nested template arguments line up
+  byte-for-byte. +5 custom tests (110→115): `cxxfilt-strip-underscore`,
+  `nm-archive`, `nm-print-armap`, `objdump-archive`, `size-common`.
+
 ## Custom-test expansion (110/110 ✅)
 
 - addr2line `-f`/`--functions` now falls back to the symbol table when

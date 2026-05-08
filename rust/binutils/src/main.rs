@@ -1495,15 +1495,22 @@ fn tool_nm(args: &[String]) -> i32 {
                 nm_print_archive_map(file, &data);
             }
             let members = parse_archive_members(&data);
+            // The archive map (if printed) already ends with a blank line;
+            // for subsequent members we always emit a blank-line separator.
+            let mut skip_leading_blank = opts.print_armap;
             for (name, member_data) in &members {
                 if name == "/" || name == "//" || name.is_empty() {
                     continue;
                 }
-                let display_name = format!("{file}({name})");
                 match object::File::parse(&**member_data) {
                     Ok(obj) => {
-                        println!("\n{display_name}:");
-                        nm_print_symbols(&obj, &display_name, member_data, &opts);
+                        if skip_leading_blank {
+                            skip_leading_blank = false;
+                        } else {
+                            println!();
+                        }
+                        println!("{name}:");
+                        nm_print_symbols(&obj, name, member_data, &opts);
                     }
                     Err(_) => {
                         // Foreign object: try Tektronix Hex.
@@ -1561,6 +1568,13 @@ fn nm_collect_symbols<'data, 'file>(
     for sym in symbols {
         let name = sym.name().unwrap_or("");
         if name.is_empty() && sym.kind() == object::SymbolKind::Unknown {
+            continue;
+        }
+        // GNU nm hides STT_FILE and STT_SECTION symbols by default.
+        if matches!(
+            sym.kind(),
+            object::SymbolKind::File | object::SymbolKind::Section
+        ) {
             continue;
         }
         if opts.extern_only && !sym.is_global() {
@@ -2565,6 +2579,7 @@ fn tool_size(args: &[String]) -> i32 {
     }
     let mut format = SizeFormat::Berkeley;
     let mut show_totals = false;
+    let mut show_common = false;
     let mut files: Vec<String> = Vec::new();
     // Berkeley/GNU radix: dec | oct | hex.
     #[derive(PartialEq, Eq, Clone, Copy)]
@@ -2581,6 +2596,7 @@ fn tool_size(args: &[String]) -> i32 {
             "-B" | "--format=berkeley" => format = SizeFormat::Berkeley,
             "-G" | "--format=gnu" => format = SizeFormat::Gnu,
             "-t" | "--totals" => show_totals = true,
+            "--common" => show_common = true,
             "-d" | "--radix=10" => radix = SizeRadix::Dec,
             "-o" | "--radix=8" => radix = SizeRadix::Oct,
             "-x" | "--radix=16" => radix = SizeRadix::Hex,
@@ -2635,6 +2651,17 @@ fn tool_size(args: &[String]) -> i32 {
             }
         };
 
+        // Sum common symbol sizes (only counted with --common).
+        let common_size: u64 = if show_common {
+            use object::ObjectSymbol;
+            obj.symbols()
+                .filter(|s| s.is_common())
+                .map(|s| s.size())
+                .sum()
+        } else {
+            0
+        };
+
         if format == SizeFormat::Sysv {
             println!("{file}  :");
             println!("{:<20}{:>5}{:>7}", "section", "size", "addr");
@@ -2666,6 +2693,10 @@ fn tool_size(args: &[String]) -> i32 {
                 let addr = section.address();
                 println!("{name:<20}{sz:>5}{addr:>7}");
                 total += sz;
+            }
+            if show_common && common_size > 0 {
+                println!("{:<20}{:>5}{:>7}", "*COM*", common_size, 0);
+                total += common_size;
             }
             println!("{:<20}{total:>5}", "Total");
             println!();
@@ -2743,6 +2774,8 @@ fn tool_size(args: &[String]) -> i32 {
                     text += sz;
                 }
             }
+            // --common: add common symbol sizes to the bss column.
+            bss += common_size;
             let dec = text + data_size + bss;
             // Format individual columns per radix; totals always shown as
             // "dec hex" except for -o which shows "oct hex". GNU's octal
@@ -7136,6 +7169,7 @@ fn tool_objdump(args: &[String]) -> i32 {
 
         // Check if this is an archive
         if data.len() >= 8 && &data[..8] == b"!<arch>\n" {
+            println!("In archive {file}:");
             let members = parse_archive_members(&data);
             for (member_name, member_data) in &members {
                 if member_name == "/" || member_name == "//" {
@@ -7145,11 +7179,10 @@ fn tool_objdump(args: &[String]) -> i32 {
                     Ok(o) => o,
                     Err(_) => continue,
                 };
-                let display_name = member_name;
                 objdump_process_object(
                     &obj,
                     member_data,
-                    &format!("{file}({display_name})"),
+                    member_name,
                     show_file_headers,
                     show_private,
                     show_headers,
@@ -12016,6 +12049,7 @@ fn tool_cxxfilt(args: &[String]) -> i32 {
     // belong to value-taking flags so they aren't interpreted as input.
     let mut names: Vec<String> = Vec::new();
     let mut no_params = false;
+    let mut strip_underscore = false;
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
@@ -12026,6 +12060,10 @@ fn tool_cxxfilt(args: &[String]) -> i32 {
         }
         if arg == "-p" || arg == "--no-params" {
             no_params = true;
+        } else if arg == "-_" || arg == "--strip-underscore" {
+            strip_underscore = true;
+        } else if arg == "-n" || arg == "--no-strip-underscore" {
+            strip_underscore = false;
         } else if !arg.starts_with('-') {
             names.push(arg.clone());
         }
@@ -12059,16 +12097,60 @@ fn tool_cxxfilt(args: &[String]) -> i32 {
     let stdout = io::stdout();
     let mut out = stdout.lock();
 
+    // With --strip-underscore: try demangling after stripping a leading
+    // underscore; if demangling fails (the result equals the input), fall
+    // back to the original (un-stripped) symbol so e.g. `_main` stays
+    // `_main` rather than becoming `main`.
+    let demangle_with_strip = |sym: &str| -> String {
+        if !strip_underscore {
+            return demangle_symbol(sym);
+        }
+        if let Some(rest) = sym.strip_prefix('_') {
+            let result = demangle_symbol(rest);
+            if result != rest {
+                return result;
+            }
+        }
+        sym.to_string()
+    };
+
+    let demangle_line_with_strip = |line: &str| -> String {
+        if !strip_underscore {
+            return demangle_line(line);
+        }
+        // Token-by-token: strip-and-try, fall back on failure.
+        let mut result = String::new();
+        let mut chars = line.chars().peekable();
+        while let Some(&ch) = chars.peek() {
+            if ch.is_alphanumeric() || ch == '_' || ch == '$' {
+                let mut token = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c.is_alphanumeric() || c == '_' || c == '$' || c == '.' {
+                        token.push(c);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                result.push_str(&demangle_with_strip(&token));
+            } else {
+                result.push(ch);
+                chars.next();
+            }
+        }
+        result
+    };
+
     if names.is_empty() {
         // Read from stdin line by line
         let stdin = io::stdin();
         for line in stdin.lock().lines().map_while(Result::ok) {
-            let demangled = strip_params(demangle_line(&line));
+            let demangled = strip_params(demangle_line_with_strip(&line));
             let _ = writeln!(out, "{demangled}");
         }
     } else {
         for name in &names {
-            let demangled = strip_params(demangle_symbol(name));
+            let demangled = strip_params(demangle_with_strip(name));
             let _ = writeln!(out, "{demangled}");
         }
     }
@@ -12105,9 +12187,68 @@ fn demangle_symbol(sym: &str) -> String {
     if let Ok(parsed) = CppSymbol::new(sym)
         && let Ok(demangled) = parsed.demangle(&opts)
     {
-        return demangled;
+        return cxxfilt_postprocess_literals(&demangled);
     }
     sym.to_string()
+}
+
+/// Post-process cpp_demangle output to match GNU c++filt conventions.
+/// cpp_demangle emits integer literals as `(long)42`, `(unsigned int)7u`, etc.
+/// GNU emits the typed-suffix form `42l`, `7u`. Convert the cast forms to
+/// suffix forms so template arguments line up byte-for-byte with GNU.
+fn cxxfilt_postprocess_literals(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'(' {
+            let casts: &[(&str, &str)] = &[
+                ("(unsigned long long)", "ull"),
+                ("(unsigned long)", "ul"),
+                ("(unsigned int)", "u"),
+                ("(unsigned short)", "u"),
+                ("(unsigned char)", "u"),
+                ("(long long)", "ll"),
+                ("(long)", "l"),
+                ("(short)", ""),
+                ("(char)", ""),
+                ("(bool)", ""),
+                ("(float)", "f"),
+                ("(double)", ""),
+            ];
+            let mut matched = false;
+            for (cast, suffix) in casts {
+                if s[i..].starts_with(cast) {
+                    let after = i + cast.len();
+                    // Read a (possibly signed) integer or float that follows.
+                    let mut j = after;
+                    if j < bytes.len() && bytes[j] == b'-' {
+                        j += 1;
+                    }
+                    let num_start = j;
+                    while j < bytes.len() && bytes[j].is_ascii_digit() {
+                        j += 1;
+                    }
+                    if j > num_start {
+                        // Found a number; rewrite as `<num><suffix>`.
+                        out.push_str(&s[after..j]);
+                        out.push_str(suffix);
+                        i = j;
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+            if !matched {
+                out.push('(');
+                i += 1;
+            }
+        } else {
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    out
 }
 
 // ─── AS (stub) ────────────────────────────────────────────────────────────────

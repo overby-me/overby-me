@@ -476,6 +476,26 @@
         name = "print-file-name";
       }
       {
+        tool = "nm";
+        name = "archive";
+      }
+      {
+        tool = "nm";
+        name = "print-armap";
+      }
+      {
+        tool = "objdump";
+        name = "archive";
+      }
+      {
+        tool = "size";
+        name = "common";
+      }
+      {
+        tool = "cxxfilt";
+        name = "strip-underscore";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }
