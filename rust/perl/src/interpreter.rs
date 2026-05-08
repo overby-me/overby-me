@@ -4245,6 +4245,40 @@ impl Interpreter {
                         }
                         Value::ScalarRef(std::rc::Rc::new(std::cell::RefCell::new(v)))
                     }
+                    // `\$arr[i]` — promote the slot to `Value::Alias(rc)` so
+                    // a second `\$arr[i]` returns the same Rc (and thus the
+                    // same SCALAR(0x…) address). Without this, every `\…`
+                    // creates a fresh `Rc`, breaking op/array tests 175-177
+                    // (`is $qr[i], \$q[i]` fails on address mismatch).
+                    Expr::ArrayElement(name, index) => {
+                        let idx = self.eval_expr(index).to_num() as i64;
+                        let len = self.get_array_len(name) as i64;
+                        let real_opt = if idx < 0 {
+                            let from_end = len + idx;
+                            if from_end < 0 {
+                                None
+                            } else {
+                                Some(from_end as usize)
+                            }
+                        } else {
+                            Some(idx as usize)
+                        };
+                        let real = match real_opt {
+                            Some(r) => r,
+                            None => {
+                                return Value::ScalarRef(self.shared_undef_ref());
+                            }
+                        };
+                        // Promote the slot in-place if not already an Alias.
+                        let rc = self.promote_slot_to_alias(name, real);
+                        Value::ScalarRef(rc)
+                    }
+                    // `\$h{key}` — same idea as ArrayElement above.
+                    Expr::HashElement(name, key) => {
+                        let key_val = self.eval_expr(key).to_str();
+                        let rc = self.promote_hash_slot_to_alias(name, &key_val);
+                        Value::ScalarRef(rc)
+                    }
                     // `\&name` — our BitAnd parser emits `Call(name, [])` for
                     // the `&name` half, so `Ref(Call(…, []))` shows up here.
                     // Return a CodeRef to the sub, NOT the result of calling
@@ -7789,6 +7823,113 @@ impl Interpreter {
                 Value::Undef
             }
         }
+    }
+
+    /// Promote `$arr[idx]` to a shared `Value::Alias(Rc<RefCell<Value>>)`
+    /// so subsequent `\$arr[idx]` calls return the same Rc — required
+    /// for op/array tests 175-178 where `\$q[i]` must equal a refgen of
+    /// the same slot taken via `\(@q)`. The slot is left holding the
+    /// `Alias` form; reads/writes through `assign_to`/`get_var` already
+    /// follow the Rc transparently. If the array doesn't have the slot
+    /// yet, autovivify it with `Undef` first.
+    fn promote_slot_to_alias(
+        &mut self,
+        name: &str,
+        idx: usize,
+    ) -> std::rc::Rc<std::cell::RefCell<Value>> {
+        // Try lexical scope first.
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some(arr) = scope.arrays.get_mut(name) {
+                while arr.len() <= idx {
+                    arr.push(Value::Undef);
+                }
+                if let Value::Alias(rc) = &arr[idx] {
+                    return rc.clone();
+                }
+                let v = std::mem::replace(&mut arr[idx], Value::Undef);
+                let rc = std::rc::Rc::new(std::cell::RefCell::new(v));
+                arr[idx] = Value::Alias(rc.clone());
+                return rc;
+            }
+        }
+        // Aliased global array.
+        let qname = self.qualify_global(name);
+        if let Some(rc_arr) = self.aliased_arrays.get(qname.as_str()).cloned() {
+            let mut arr = rc_arr.borrow_mut();
+            while arr.len() <= idx {
+                arr.push(Value::Undef);
+            }
+            if let Value::Alias(rc) = &arr[idx] {
+                return rc.clone();
+            }
+            let v = std::mem::replace(&mut arr[idx], Value::Undef);
+            let rc = std::rc::Rc::new(std::cell::RefCell::new(v));
+            arr[idx] = Value::Alias(rc.clone());
+            return rc;
+        }
+        // Migrate global to aliased.
+        let arr = self
+            .globals
+            .arrays
+            .remove(qname.as_str())
+            .unwrap_or_default();
+        let rc_arr = std::rc::Rc::new(std::cell::RefCell::new(arr));
+        self.aliased_arrays.insert(qname, rc_arr.clone());
+        let mut arr = rc_arr.borrow_mut();
+        while arr.len() <= idx {
+            arr.push(Value::Undef);
+        }
+        let v = std::mem::replace(&mut arr[idx], Value::Undef);
+        let rc = std::rc::Rc::new(std::cell::RefCell::new(v));
+        arr[idx] = Value::Alias(rc.clone());
+        rc
+    }
+
+    /// Promote `$h{key}` to a shared `Value::Alias(rc)` slot — symmetric
+    /// to `promote_slot_to_alias` for hashes. Autovivifies the key if
+    /// missing.
+    fn promote_hash_slot_to_alias(
+        &mut self,
+        name: &str,
+        key: &str,
+    ) -> std::rc::Rc<std::cell::RefCell<Value>> {
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some(h) = scope.hashes.get_mut(name) {
+                if let Some(Value::Alias(rc)) = h.get(key) {
+                    return rc.clone();
+                }
+                let v = h.remove(key).unwrap_or(Value::Undef);
+                let rc = std::rc::Rc::new(std::cell::RefCell::new(v));
+                h.insert(key.to_string(), Value::Alias(rc.clone()));
+                return rc;
+            }
+        }
+        let qname = self.qualify_global(name);
+        if let Some(rc_h) = self.aliased_hashes.get(qname.as_str()).cloned() {
+            let mut h = rc_h.borrow_mut();
+            if let Some(Value::Alias(rc)) = h.get(key) {
+                return rc.clone();
+            }
+            let v = h.remove(key).unwrap_or(Value::Undef);
+            let rc = std::rc::Rc::new(std::cell::RefCell::new(v));
+            h.insert(key.to_string(), Value::Alias(rc.clone()));
+            return rc;
+        }
+        let h = self
+            .globals
+            .hashes
+            .remove(qname.as_str())
+            .unwrap_or_default();
+        let rc_h = std::rc::Rc::new(std::cell::RefCell::new(h));
+        self.aliased_hashes.insert(qname, rc_h.clone());
+        let mut h = rc_h.borrow_mut();
+        if let Some(Value::Alias(rc)) = h.get(key) {
+            return rc.clone();
+        }
+        let v = h.remove(key).unwrap_or(Value::Undef);
+        let rc = std::rc::Rc::new(std::cell::RefCell::new(v));
+        h.insert(key.to_string(), Value::Alias(rc.clone()));
+        rc
     }
 
     /// `\(LIST)` distribution (op/array tests 175-178): `\@a` → list of
