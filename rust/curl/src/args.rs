@@ -192,6 +192,8 @@ fn snapshot_per_url(opts: &Options) -> PerUrlOptions {
         dump_header: opts.dump_header.clone(),
         proxy: opts.proxy.clone(),
         proxy_user: opts.proxy_user.clone(),
+        etag_save: opts.etag_save.clone(),
+        etag_compare: opts.etag_compare.clone(),
         first_in_group: false,
     }
 }
@@ -945,6 +947,8 @@ pub(crate) fn parse_args() -> Options {
                 opts.dump_header = None;
                 opts.proxy = None;
                 opts.proxy_user = None;
+                opts.etag_save = None;
+                opts.etag_compare = None;
                 expecting_url_after_next = true;
                 i += 1;
                 continue;
@@ -1175,14 +1179,8 @@ pub(crate) fn parse_args() -> Options {
         }
     }
 
-    // --etag-compare and --etag-save only make sense for a single URL; with
-    // multiple URLs curl exits 2 with an explanatory 3-line warning block.
-    if (opts.etag_compare.is_some() || opts.etag_save.is_some()) && opts.urls.len() > 1 {
-        eprintln!("curl: The etag options only work on a single URL");
-        eprintln!("curl: option --url: is badly used here");
-        eprintln!("curl: try 'curl --help' or 'curl --manual' for more information");
-        process::exit(2);
-    }
+    // --etag-compare and --etag-save now work per-URL; the global check that
+    // banned multi-URL combinations was removed in 8.19 (test 369).
 
     // Mutually-exclusive HTTP request methods. curl accepts at most one of
     // -I (HEAD), -T (PUT), and -d/-F (POST). With -G the -d data is promoted

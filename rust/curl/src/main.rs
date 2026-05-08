@@ -157,25 +157,8 @@ fn main() {
         eprintln!("Warning: Got more output options than URLs");
     }
 
-    // Pre-flight: verify --etag-save path is writable. curl exits 26 (read/write
-    // error) if the etag file can't be created, before attempting any transfer.
-    if let Some(ref etag_path) = opts.etag_save {
-        if opts.create_dirs
-            && let Some(parent) = etag_path.parent()
-            && !parent.as_os_str().is_empty()
-        {
-            let _ = fs::create_dir_all(parent);
-        }
-        if let Err(e) = fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(etag_path)
-        {
-            eprintln!("curl: (26) Failed to open {}: {}", etag_path.display(), e);
-            process::exit(26);
-        }
-    }
+    // --etag-save pre-flight is done per-URL inside the loop below so that
+    // a failed first URL doesn't abort subsequent URLs (test 369).
 
     // -C - (auto-resume):
     //   - GET: use the existing output file's size as the resume offset.
@@ -359,10 +342,38 @@ fn main() {
             o.dump_header = puo.dump_header.clone();
             o.proxy = puo.proxy.clone();
             o.proxy_user = puo.proxy_user.clone();
+            o.etag_save = puo.etag_save.clone();
+            o.etag_compare = puo.etag_compare.clone();
             o
         } else {
             opts.clone()
         };
+
+        // Pre-flight per-URL --etag-save check: open-test the file. If
+        // creation fails (bad path), report exit 26 for THIS URL and skip
+        // the transfer, but continue the loop so subsequent URLs run
+        // (test 369).
+        if let Some(ref etag_path) = effective_opts.etag_save {
+            if effective_opts.create_dirs
+                && let Some(parent) = etag_path.parent()
+                && !parent.as_os_str().is_empty()
+            {
+                let _ = fs::create_dir_all(parent);
+            }
+            if let Err(e) = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(etag_path)
+            {
+                eprintln!("curl: (26) Failed to open {}: {}", etag_path.display(), e);
+                exit_code = 26;
+                if effective_opts.fail_early {
+                    break;
+                }
+                continue;
+            }
+        }
 
         // --netrc / --netrc-optional: look up credentials for the URL host
         // and set them when the user did not pass `-u` (test 478, 2006).
