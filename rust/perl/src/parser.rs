@@ -2007,6 +2007,30 @@ impl Parser {
             }
             Token::Backslash => {
                 self.pos += 1;
+                // `\(LIST)` distributes the ref over each element — `\(1, 2,
+                // @a, %h)` returns a list of refs (per-element), not a single
+                // ref to the list. The parens themselves are the marker for
+                // list-context backslash; bare `\@a` keeps array-ref form.
+                // op/array tests 175-178 (`\(@q)` returns SCALAR refs to each
+                // element, comparable to `\$q[$i]`) require this distribution.
+                if self.at(&Token::LParen) {
+                    self.pos += 1;
+                    let mut items: Vec<Expr> = Vec::new();
+                    if !self.at(&Token::RParen) {
+                        loop {
+                            let e = self.parse_expr();
+                            items.push(e);
+                            if !self.eat(&Token::Comma) && !self.eat(&Token::FatComma) {
+                                break;
+                            }
+                            if self.at(&Token::RParen) {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(&Token::RParen);
+                    return Expr::Call("_distribute_backslash".to_string(), items);
+                }
                 let expr = self.parse_unary();
                 Expr::Ref(Box::new(expr))
             }
@@ -3513,6 +3537,7 @@ impl Parser {
                         | Token::ScalarVar(_)
                         | Token::ArrayVar(_)
                         | Token::HashVar(_)
+                        | Token::ArrayLen(_)
                         | Token::Plus
                         | Token::Minus
                         | Token::LogNot

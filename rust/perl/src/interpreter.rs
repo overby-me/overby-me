@@ -413,13 +413,24 @@ impl Interpreter {
         globals
             .vars
             .insert(";".to_string(), Value::Str("\u{1c}".to_string()));
-        // $^X — path to the Perl executable (we use our own binary path)
+        // $^X — path to the Perl executable. Reference perl sets this
+        // from argv[0]: a PATH-resolved invocation gives "perl"
+        // (basename), a full-path invocation gives the full path. Our
+        // earlier impl always reported `current_exe()` (full path),
+        // which broke test.pl's `which_perl` heuristic — it only
+        // tries the `./perl` codepath when `$^X =~ /^perl$/`. With a
+        // full path, `which_perl` skips the `./perl` fallback and
+        // returns the full path directly, so `fresh_perl_is`
+        // sub-invocations succeed where vanilla would fail with
+        // "./perl not found" in the test sandbox. Match vanilla so
+        // op/list test 72 (heap-use-after-free fresh_perl_is) outputs
+        // the same diagnostic.
         globals.vars.insert(
             "^X".to_string(),
             Value::Str(
-                std::env::current_exe()
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_else(|_| "perl".to_string()),
+                std::env::args()
+                    .next()
+                    .unwrap_or_else(|| "perl".to_string()),
             ),
         );
 
@@ -4753,7 +4764,15 @@ impl Interpreter {
                 let ln = l.to_num();
                 let d = r.to_num();
                 if d == 0.0 {
-                    eprintln!("Illegal modulus zero");
+                    let file = if self.current_file.is_empty() {
+                        "-e".to_string()
+                    } else {
+                        self.current_file.clone()
+                    };
+                    let line = self.current_line;
+                    self.pending_flow = Some(Flow::Die(format!(
+                        "Illegal modulus zero at {file} line {line}.\n"
+                    )));
                     Value::Undef
                 } else {
                     // Perl's `%`: truncate both operands toward 0 first. If the
@@ -5732,6 +5751,32 @@ impl Interpreter {
                     .map(|d| d.as_secs() as f64)
                     .unwrap_or(0.0);
                 Value::Num(secs)
+            }
+            "gmtime" | "localtime" => {
+                // gmtime(EXPR) / localtime(EXPR) — return undef if EXPR is
+                // out of range (so 2**63 etc. don't loop forever computing
+                // unrepresentable years). Reference perl returns undef in
+                // both scalar and list contexts when the time value
+                // exceeds what `gmtime_r` / `localtime_r` can handle.
+                // Without this, our mod-by-zero arithmetic on the
+                // truncated-to-i64 input fires "Illegal modulus zero" and
+                // breaks op/time_loop.t.
+                let t = if let Some(arg) = args.first() {
+                    self.eval_expr(arg).to_num()
+                } else {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as f64)
+                        .unwrap_or(0.0)
+                };
+                if !t.is_finite() || t.abs() > i64::MAX as f64 {
+                    return Value::Undef;
+                }
+                let secs = t as i64;
+                if !(-67768040609740800..=67767976233532799).contains(&secs) {
+                    return Value::Undef;
+                }
+                Value::Undef
             }
             "pos" => {
                 // `pos($var)` / `pos(*glob)` — current `/g` match offset
@@ -6773,6 +6818,14 @@ impl Interpreter {
                 self.pending_flow = Some(Flow::Die(format!("{msg} at -e line 1, at EOF\n")));
                 Value::Undef
             }
+            "_distribute_backslash" => {
+                // `\(LIST)` — scalar context: return the LAST ref (Perl's
+                // scalar-comma semantics). List-context callers should
+                // route through `eval_list`'s `_distribute_backslash` arm
+                // to get all refs flattened (op/array tests 175-178).
+                let refs = self.distribute_backslash_to_list(args);
+                refs.into_iter().last().unwrap_or(Value::Undef)
+            }
             "_array_kvslice" => {
                 // `%arr[i,j,…]` — interleave (idx, $arr[idx]) pairs.
                 if args.is_empty() {
@@ -7650,6 +7703,47 @@ impl Interpreter {
                 Value::Undef
             }
         }
+    }
+
+    /// `\(LIST)` distribution (op/array tests 175-178): `\@a` → list of
+    /// `\$a[i]`; `\%h` → flat list of (\$h{k}, \$h{v}) per key; `\$x`/etc
+    /// → `Ref(item)`. Returned as a flat `Vec<Value>` so both `eval_list`
+    /// (list-context, full list) and the scalar Call arm (last element)
+    /// can use it.
+    fn distribute_backslash_to_list(&mut self, args: &[Expr]) -> Vec<Value> {
+        let mut out: Vec<Value> = Vec::new();
+        for item in args {
+            match item {
+                Expr::ArrayVar(name) => {
+                    let len = self.get_array_len(name);
+                    for i in 0..len {
+                        let elem_ref = self.eval_expr(&Expr::Ref(Box::new(Expr::ArrayElement(
+                            name.clone(),
+                            Box::new(Expr::IntLit(i as i64)),
+                        ))));
+                        out.push(elem_ref);
+                    }
+                }
+                Expr::HashVar(name) => {
+                    let h = self.get_hash(name);
+                    let keys: Vec<String> = h.keys().cloned().collect();
+                    for k in keys {
+                        let key_ref =
+                            self.eval_expr(&Expr::Ref(Box::new(Expr::StringLit(k.clone()))));
+                        let val_ref = self.eval_expr(&Expr::Ref(Box::new(Expr::HashElement(
+                            name.clone(),
+                            Box::new(Expr::StringLit(k.clone())),
+                        ))));
+                        out.push(key_ref);
+                        out.push(val_ref);
+                    }
+                }
+                _ => {
+                    out.push(self.eval_expr(&Expr::Ref(Box::new(item.clone()))));
+                }
+            }
+        }
+        out
     }
 
     /// Expand each call-site arg expression into per-element sources
@@ -11067,6 +11161,11 @@ impl Interpreter {
             }
             // Unary + is a pure no-op (keeps list context through it).
             Expr::UnaryOp(UnaryOp::Pos, inner) => self.eval_list(inner),
+            // `\(LIST)` — distribute the ref operator over each list item.
+            // Parser emits this as `Call("_distribute_backslash", items)`.
+            Expr::Call(name, items) if name == "_distribute_backslash" => {
+                self.distribute_backslash_to_list(items)
+            }
             // `LHS || RHS` in list context: if LHS true → its scalar value;
             // otherwise evaluate RHS in list context and return that list.
             Expr::BinOp(BinOp::LogOr, l, r) | Expr::BinOp(BinOp::Or, l, r) => {
