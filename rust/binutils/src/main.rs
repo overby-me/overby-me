@@ -1700,9 +1700,14 @@ fn nm_print_symbols<'data>(
             }
             NmFormat::Posix => {
                 // POSIX format: "name type value [size]"
-                // No leading zeros in value for --format=posix
+                // No leading zeros in value for --format=posix.
+                // GNU prints size only when non-zero; for common (C) symbols
+                // GNU treats st_value as the alignment (non-zero). For
+                // undefined symbols both columns are blank.
                 if is_undef {
                     println!("{prefix}{name} {ty} ");
+                } else if *size == 0 && *ty != 'C' && *ty != 'c' {
+                    println!("{prefix}{name} {ty} {:x} ", addr);
                 } else {
                     println!("{prefix}{name} {ty} {:x} {:x}", addr, size);
                 }

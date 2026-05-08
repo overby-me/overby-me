@@ -37,7 +37,7 @@ Key design decisions:
 
 ## Test results
 
-### Custom comparison tests (32/32 passing)
+### Custom comparison tests (37/37 passing)
 
 | Check name | Tool | Status |
 |---|---|---|
@@ -46,6 +46,7 @@ Key design decisions:
 | `strings-min-length` | strings | ✅ PASS |
 | `ar-create-list` | ar | ✅ PASS |
 | `ar-extract` | ar | ✅ PASS |
+| `ar-print` | ar | ✅ PASS |
 | `nm-basic` | nm | ✅ PASS |
 | `nm-extern-only` | nm | ✅ PASS |
 | `nm-no-sort` | nm | ✅ PASS |
@@ -54,7 +55,10 @@ Key design decisions:
 | `nm-defined-only` | nm | ✅ PASS |
 | `nm-reverse-sort` | nm | ✅ PASS |
 | `nm-radix-decimal` | nm | ✅ PASS |
+| `nm-radix-octal` | nm | ✅ PASS |
+| `nm-radix-hex` | nm | ✅ PASS |
 | `nm-print-file-name` | nm | ✅ PASS |
+| `nm-posix` | nm | ✅ PASS |
 | `size-basic` | size | ✅ PASS |
 | `size-sysv` | size | ✅ PASS |
 | `size-totals` | size | ✅ PASS |
@@ -73,6 +77,7 @@ Key design decisions:
 | `objdump-syms` | objdump | ✅ PASS |
 | `objdump-relocs` | objdump | ✅ PASS |
 | `addr2line-basic` | addr2line | ✅ PASS |
+| `addr2line-pretty` | addr2line | ✅ PASS |
 
 ### Upstream DejaGnu tests (286/286 binutils-all + 12/35 x86-64 = 298 passing)
 
@@ -261,6 +266,7 @@ Two layers of testing:
 - [x] Add readelf `.debug_pubnames`/`.debug_aranges`/`.debug_frame` dumpers (`-wp`/`-wr`/`-wf`) and reorder the bare `-w` dispatch to match GNU readelf's section ordering (.debug_abbrev → .debug_info → .debug_line raw → .debug_pubnames → .debug_aranges → .debug_str → .debug_frame). Apply `.rela.debug_frame` / `.rel.debug_frame` relocations so FDE `pc=` values resolve, with implicit-addend reading for SHT_REL. CIE state (code/data alignment) saved across CIE → FDE so DW_CFA_advance_loc/_loc1/_loc2/_loc4/_def_cfa/_def_cfa_offset/_offset/_restore/_set_loc all decode correctly. i386 register-name table separate from x86-64. Line-program `(view N)` annotations in special opcodes when PC doesn't advance (track view counter; emit row with current value, then increment). Fixes both `x86-64/compressed-1a` and `i386/compressed-1a` (+2 dejagnu, 326→328 total).
 - [x] nm `-U`/`--defined-only`, `-n`/`--numeric-sort`, `-r`/`--reverse-sort` (+3 custom tests, 24→27): filter out undefined symbols, sort by address (undefined symbols first by name), and reverse the final order. Numeric sort puts U/w symbols before defined ones, then sorts defined by address.
 - [x] size `-d`/`-o`/`-x` radix flags + new `nm`/`size` custom tests (+5 custom tests, 27→32): individual columns formatted in chosen radix (decimal plain / octal with leading 0 / hex with `0x`); total columns are always "dec hex" (or "oct hex" with `-o`); total octal value is *not* zero-padded (matches GNU). Plus `nm -t d`, `nm -A`, `size -d`, `size -o`, `size -x` custom tests.
+- [x] nm POSIX format size-when-zero handling + 5 more custom tests (+5 custom tests, 32→37): `-P`/`--portability` now prints a blank size column for symbols with `st_size == 0` (except common where st_value is the alignment) — matches GNU's POSIX format. New tests: `nm-radix-octal`, `nm-radix-hex`, `nm-posix`, `ar-print`, `addr2line-pretty`.
 
 ## Next steps
 

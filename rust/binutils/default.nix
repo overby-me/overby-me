@@ -168,6 +168,26 @@
         name = "hex";
       }
       {
+        tool = "nm";
+        name = "radix-octal";
+      }
+      {
+        tool = "nm";
+        name = "radix-hex";
+      }
+      {
+        tool = "ar";
+        name = "print";
+      }
+      {
+        tool = "addr2line";
+        name = "pretty";
+      }
+      {
+        tool = "nm";
+        name = "posix";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }
