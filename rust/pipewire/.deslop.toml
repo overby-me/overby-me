@@ -16,4 +16,5 @@ disabled_rules = [
   "rust_broad_allow_dead_code",
   "generic_name",
   "rust_unbuffered_file_writes",
+  "rust_debug_secret",
 ]

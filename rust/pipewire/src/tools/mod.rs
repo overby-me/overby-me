@@ -10,3 +10,5 @@ pub mod pw_mididump;
 pub mod pw_mon;
 pub mod pw_profiler;
 pub mod pw_top;
+
+pub mod pod_test_helper;

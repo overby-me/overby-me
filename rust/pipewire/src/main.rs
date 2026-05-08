@@ -39,6 +39,9 @@ fn dispatch(name: &str, args: &[String]) -> i32 {
         // Daemons
         "pipewire" | "pipewire-pulse" => tools::pipewire_daemon::main(args),
 
+        // Internal helpers — used by the test harness, not user-facing.
+        "pod-encode" => tools::pod_test_helper::main(args),
+
         // Placeholder dispatchers for the rest. Each prints a stable
         // "not implemented" message and exits 0 on --version / --help.
         "pipewire-aes67" | "pipewire-avb" | "pipewire-vulkan" | "pw-loopback" | "pw-cat"

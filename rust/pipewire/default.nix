@@ -210,14 +210,31 @@
         name = "running-status";
       }
     ];
+
+    # POD comparison tests — built separately because they compile a
+    # libspa-linked helper instead of running an existing C tool.
+    podTests = [
+      {name = "encode-cases";}
+    ];
   in
-    builtins.listToAttrs (map (t: {
-        name = "rust-pipewire-test-${t.tool}-${t.name}";
-        value = pkgs:
-          import ./testsuite.nix {
-            inherit pkgs;
-            inherit (t) tool name;
-          };
-      })
-      testDefs);
+    builtins.listToAttrs (
+      (map (t: {
+          name = "rust-pipewire-test-${t.tool}-${t.name}";
+          value = pkgs:
+            import ./testsuite.nix {
+              inherit pkgs;
+              inherit (t) tool name;
+            };
+        })
+        testDefs)
+      ++ (map (t: {
+          name = "rust-pipewire-pod-test-${t.name}";
+          value = pkgs:
+            import ./pod-testsuite.nix {
+              inherit pkgs;
+              inherit (t) name;
+            };
+        })
+        podTests)
+    );
 }
