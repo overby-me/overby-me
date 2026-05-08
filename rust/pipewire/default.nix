@@ -141,6 +141,52 @@
         tool = "spa-json-dump";
         name = "conf-aes67";
       }
+
+      # --- per-tool --help byte-identical parity ---
+      {
+        tool = "pw-config";
+        name = "help";
+      }
+      {
+        tool = "pw-dot";
+        name = "help";
+      }
+      {
+        tool = "pw-dump";
+        name = "help";
+      }
+      {
+        tool = "pw-link";
+        name = "help";
+      }
+      {
+        tool = "pw-metadata";
+        name = "help";
+      }
+      {
+        tool = "pw-mididump";
+        name = "help";
+      }
+      {
+        tool = "pw-mon";
+        name = "help";
+      }
+      {
+        tool = "pw-profiler";
+        name = "help";
+      }
+      {
+        tool = "pw-top";
+        name = "help";
+      }
+      {
+        tool = "pipewire";
+        name = "help";
+      }
+      {
+        tool = "pipewire-pulse";
+        name = "help";
+      }
     ];
   in
     builtins.listToAttrs (map (t: {

@@ -1,1 +1,12 @@
+pub mod common;
+pub mod pipewire_daemon;
 pub mod pw_cli;
+pub mod pw_config;
+pub mod pw_dot;
+pub mod pw_dump;
+pub mod pw_link;
+pub mod pw_metadata;
+pub mod pw_mididump;
+pub mod pw_mon;
+pub mod pw_profiler;
+pub mod pw_top;

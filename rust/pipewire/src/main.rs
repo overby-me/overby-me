@@ -21,22 +21,31 @@ fn tool_name(arg: &str) -> &str {
 
 fn dispatch(name: &str, args: &[String]) -> i32 {
     match name {
+        // SPA tools
         "spa-json-dump" => spa_tools::spa_json_dump::main(args),
-        "pw-cli" => tools::pw_cli::main(args),
 
-        // Placeholder dispatchers for the remaining tools. Each prints a
-        // stable "not implemented" message and exits 0 on --version /
-        // --help so install scripts probing those don't break. Phase 0
-        // only cares about the tools listed above; the others fill in
-        // over time as later phases land.
-        "pipewire" | "pipewire-pulse" | "pipewire-aes67" | "pipewire-avb" | "pipewire-vulkan"
-        | "pw-mon" | "pw-dump" | "pw-link" | "pw-metadata" | "pw-loopback" | "pw-config"
-        | "pw-cat" | "pw-play" | "pw-record" | "pw-dot" | "pw-top" | "pw-profiler"
-        | "pw-reserve" | "pw-container" | "pw-mididump" | "pw-midiplay" | "pw-midirecord"
-        | "pw-midi2play" | "pw-midi2record" | "pw-sysex" | "pw-dsdplay" | "pw-encplay"
-        | "pw-v4l2" | "spa-inspect" | "spa-monitor" | "spa-acp-tool" | "spa-resample" => {
-            stub_main(name, args)
-        }
+        // PipeWire tools — full help-output parity, real behavior follows.
+        "pw-cli" => tools::pw_cli::main(args),
+        "pw-config" => tools::pw_config::main(args),
+        "pw-dot" => tools::pw_dot::main(args),
+        "pw-dump" => tools::pw_dump::main(args),
+        "pw-link" => tools::pw_link::main(args),
+        "pw-metadata" => tools::pw_metadata::main(args),
+        "pw-mididump" => tools::pw_mididump::main(args),
+        "pw-mon" => tools::pw_mon::main(args),
+        "pw-profiler" => tools::pw_profiler::main(args),
+        "pw-top" => tools::pw_top::main(args),
+
+        // Daemons
+        "pipewire" | "pipewire-pulse" => tools::pipewire_daemon::main(args),
+
+        // Placeholder dispatchers for the rest. Each prints a stable
+        // "not implemented" message and exits 0 on --version / --help.
+        "pipewire-aes67" | "pipewire-avb" | "pipewire-vulkan" | "pw-loopback" | "pw-cat"
+        | "pw-play" | "pw-record" | "pw-reserve" | "pw-container" | "pw-midiplay"
+        | "pw-midirecord" | "pw-midi2play" | "pw-midi2record" | "pw-sysex" | "pw-dsdplay"
+        | "pw-encplay" | "pw-v4l2" | "spa-inspect" | "spa-monitor" | "spa-acp-tool"
+        | "spa-resample" => stub_main(name, args),
 
         "rust-pipewire" => {
             eprintln!(
