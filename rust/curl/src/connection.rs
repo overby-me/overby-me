@@ -12,6 +12,9 @@ thread_local! {
     /// Last failing CONNECT response bytes — set by `connect()` and read by
     /// main.rs when emitting error output (tests 217, 287).
     pub(crate) static CONNECT_RESP: RefCell<Option<(u16, Vec<u8>)>> = const { RefCell::new(None) };
+    /// Local socket (ip, port) of the last successful connect — used for
+    /// `%{local_ip}` and `%{local_port}` (test 435).
+    pub(crate) static LOCAL_ADDR: RefCell<Option<(String, u16)>> = const { RefCell::new(None) };
 }
 
 /// Match --connect-to entries ("HOST1:PORT1:HOST2:PORT2") against the
@@ -249,6 +252,14 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
         }
         stream.ok_or(last_err)?
     };
+
+    // Capture the local socket address for `%{local_ip}` / `%{local_port}`
+    // (-w substitutions, test 435). Cheap read; ignore failure.
+    if let Ok(local) = tcp.local_addr() {
+        LOCAL_ADDR.with(|r| {
+            *r.borrow_mut() = Some((local.ip().to_string(), local.port()));
+        });
+    }
 
     // Apply --max-time when set; otherwise a 60s default read timeout prevents
     // indefinite hangs when a server keeps the connection open without sending

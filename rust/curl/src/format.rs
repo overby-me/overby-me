@@ -81,6 +81,12 @@ pub(crate) fn format_write_out(
     );
     result = result.replace("%{remote_ip}", &url.host);
     result = result.replace("%{remote_port}", &url.port.to_string());
+    // %{local_ip} / %{local_port} — set by `connect()` after a successful
+    // TCP connect (test 435).
+    let local = crate::connection::LOCAL_ADDR.with(|r| r.borrow().clone());
+    let (local_ip, local_port) = local.unwrap_or_default();
+    result = result.replace("%{local_ip}", &local_ip);
+    result = result.replace("%{local_port}", &local_port.to_string());
     result = result.replace("%{url.scheme}", &url.scheme);
     result = result.replace("%{url.host}", &url.host);
     result = result.replace("%{url.port}", &url.port.to_string());
