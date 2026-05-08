@@ -234,6 +234,12 @@
     podTests = [
       {name = "encode-cases";}
     ];
+
+    # Daemon-interop tests — spawn a real C pipewire daemon and probe it
+    # with our protocol-native client.
+    protoTests = [
+      {name = "hello-info";}
+    ];
   in
     builtins.listToAttrs (
       (map (t: {
@@ -254,5 +260,14 @@
             };
         })
         podTests)
+      ++ (map (t: {
+          name = "rust-pipewire-proto-test-${t.name}";
+          value = pkgs:
+            import ./proto-testsuite.nix {
+              inherit pkgs;
+              inherit (t) name;
+            };
+        })
+        protoTests)
     );
 }

@@ -12,3 +12,4 @@ pub mod pw_profiler;
 pub mod pw_top;
 
 pub mod pod_test_helper;
+pub mod proto_test_helper;
