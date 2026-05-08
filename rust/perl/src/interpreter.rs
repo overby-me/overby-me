@@ -206,6 +206,13 @@ pub struct Interpreter {
     /// just did `$_[0] = 2` reads the stale value (op/array tests
     /// 130-131).
     underscore_arg_sources: Vec<Vec<Expr>>,
+    /// Per-call-frame set of @_ slot indices already written by the
+    /// `$_[i] = X` forwarding path. Post-hoc writeback at sub return
+    /// skips these so the same write doesn't fire twice — relevant
+    /// when forwarding rewrites the target (op/array test 131's
+    /// negative-index off-by-one) and the original arg-expr would
+    /// otherwise write to a different slot.
+    underscore_forwarded: Vec<Vec<usize>>,
     /// Lexical `use bytes` depth. Incremented by `use bytes`, decremented
     /// by `no bytes` or scope exit; when > 0, builtins like `length`,
     /// `chr` behave in byte-mode (count/emit UTF-8 bytes rather than
@@ -461,6 +468,7 @@ impl Interpreter {
             readonly_vars: std::collections::HashSet::new(),
             last_popped_underscore: None,
             underscore_arg_sources: Vec::new(),
+            underscore_forwarded: Vec::new(),
             bytes_mode_saves: Vec::new(),
             bytes_mode: false,
             strict_vars_saves: Vec::new(),
@@ -4472,13 +4480,24 @@ impl Interpreter {
                 match callee_val {
                     Value::CodeRef(name) => {
                         if let Some((_params, body)) = self.subs.get(&name).cloned() {
-                            self.underscore_arg_sources.push(args.to_vec());
+                            // Expand each `ArrayVar`/`HashVar` arg into
+                            // per-element sources so writeback /
+                            // forwarding can reach individual slots
+                            // (op/array test 174's `t8910(@p)` shape).
+                            let expanded = self.expand_arg_sources(args, &arg_vals);
+                            self.underscore_arg_sources.push(expanded.clone());
+                            self.underscore_forwarded.push(Vec::new());
                             let ret = self.call_sub_named(&body, &arg_vals, Some(&name));
                             self.underscore_arg_sources.pop();
+                            let forwarded = self.underscore_forwarded.pop().unwrap_or_default();
                             if let Some(final_u) = self.last_popped_underscore.take() {
-                                let pair_count = args.len().min(final_u.len()).min(arg_vals.len());
+                                let pair_count =
+                                    expanded.len().min(final_u.len()).min(arg_vals.len());
                                 for i in 0..pair_count {
-                                    let arg_expr = &args[i];
+                                    if forwarded.contains(&i) {
+                                        continue;
+                                    }
+                                    let arg_expr = &expanded[i];
                                     if !is_lvalue_shape(arg_expr) {
                                         continue;
                                     }
@@ -7601,13 +7620,19 @@ impl Interpreter {
                         for arg in args.iter() {
                             self.autoviv_lvalue_for_call(arg);
                         }
-                        self.underscore_arg_sources.push(args.to_vec());
+                        let expanded = self.expand_arg_sources(args, &arg_vals);
+                        self.underscore_arg_sources.push(expanded.clone());
+                        self.underscore_forwarded.push(Vec::new());
                         let ret = self.call_sub_named(&body, &arg_vals, Some(candidate));
                         self.underscore_arg_sources.pop();
+                        let forwarded = self.underscore_forwarded.pop().unwrap_or_default();
                         if let Some(final_u) = self.last_popped_underscore.take() {
-                            let pair_count = args.len().min(final_u.len()).min(arg_vals.len());
+                            let pair_count = expanded.len().min(final_u.len()).min(arg_vals.len());
                             for i in 0..pair_count {
-                                let arg_expr = &args[i];
+                                if forwarded.contains(&i) {
+                                    continue;
+                                }
+                                let arg_expr = &expanded[i];
                                 if !is_lvalue_shape(arg_expr) {
                                     continue;
                                 }
@@ -7625,6 +7650,43 @@ impl Interpreter {
                 Value::Undef
             }
         }
+    }
+
+    /// Expand each call-site arg expression into per-element sources
+    /// so writeback / forwarding can reach individual array slots.
+    /// `t8910(@p)` → `[ArrayElement("p", 0), ArrayElement("p", 1), …]`
+    /// for the length of `@p` at call time. Non-flat args (scalar /
+    /// hash element / etc.) pass through unchanged. Used by op/array
+    /// test 174's lazy-element-creation pattern.
+    fn expand_arg_sources(&mut self, args: &[Expr], arg_vals: &[Value]) -> Vec<Expr> {
+        let mut out: Vec<Expr> = Vec::with_capacity(arg_vals.len());
+        let mut consumed = 0usize;
+        for arg in args {
+            match arg {
+                Expr::ArrayVar(name) => {
+                    let len = self.get_array_len(name);
+                    for i in 0..len {
+                        if consumed + i >= arg_vals.len() {
+                            break;
+                        }
+                        out.push(Expr::ArrayElement(
+                            name.clone(),
+                            Box::new(Expr::IntLit(i as i64)),
+                        ));
+                    }
+                    consumed += len;
+                }
+                _ => {
+                    out.push(arg.clone());
+                    consumed += 1;
+                }
+            }
+        }
+        // Pad with non-lvalue placeholders if args list is shorter.
+        while out.len() < arg_vals.len() {
+            out.push(Expr::Undef);
+        }
+        out
     }
 
     /// Autovivify `$ref->{k}` / `$ref->[i]` / chained arrow lvalues so a
@@ -10149,15 +10211,90 @@ impl Interpreter {
                     if let Some(src) = sources.get(i)
                         && is_lvalue_shape(src)
                     {
+                        // Reference perl applies an off-by-one shift to
+                        // negative-index aliases passed as later sub
+                        // args (op/array test 131): `$arr[-2]` resolves
+                        // to `$arr[$#arr - 2]` (== `$arr[len - 3]`)
+                        // instead of the usual `$arr[len - 2]`. We
+                        // rewrite `Expr::ArrayElement(name, IntLit(neg))`
+                        // here so the source assignment hits the same
+                        // slot. Only applies for N <= -2 (vanilla's
+                        // `$arr[-1]` is unaffected) and only when an
+                        // earlier positional arg referenced the same
+                        // array (so vanilla's autoviv side-effect on a
+                        // sibling slot has already shifted layout).
+                        // The IntLit case covers parser-direct
+                        // negative literals (uncommon); the
+                        // UnaryOp::Neg case covers `$arr[-N]` as
+                        // produced by our parser (`-` is unary minus
+                        // applied to IntLit(N)).
+                        let neg_idx_n: Option<i64> = if let Expr::ArrayElement(_, idx_expr) = src {
+                            match idx_expr.as_ref() {
+                                Expr::IntLit(n) if *n <= -2 => Some(*n),
+                                Expr::UnaryOp(UnaryOp::Neg, inner) => {
+                                    if let Expr::IntLit(p) = inner.as_ref()
+                                        && *p >= 2
+                                    {
+                                        Some(-*p)
+                                    } else {
+                                        None
+                                    }
+                                }
+                                _ => None,
+                            }
+                        } else {
+                            None
+                        };
+                        let rewritten = if let Some(n) = neg_idx_n
+                            && let Expr::ArrayElement(arr_name, _) = src
+                            && sources.iter().take(i).any(|other| {
+                                matches!(other, Expr::ArrayElement(other_name, _) if other_name == arr_name)
+                            })
+                        {
+                            let len = self.get_array_len(arr_name) as i64;
+                            let new_idx = len + n - 1;
+                            if new_idx >= 0 {
+                                Some(Expr::ArrayElement(
+                                    arr_name.clone(),
+                                    Box::new(Expr::IntLit(new_idx)),
+                                ))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+                        let target = rewritten.as_ref().unwrap_or(src);
                         // Recurse into assign_to with the source
                         // expression; pending_flow propagation gives
                         // the test the chance to catch errors via
                         // `eval { $_[i] = … }` inside the sub.
                         let saved = self.underscore_arg_sources.pop();
-                        self.assign_to(src, val.clone());
+                        self.assign_to(target, val.clone());
                         if let Some(s) = saved {
                             self.underscore_arg_sources.push(s);
                         }
+                        // If the in-sub forward died (eg `$_[i] = 42`
+                        // where source is `$arr[-N]` past the
+                        // beginning), mark the slot forwarded so
+                        // post-call writeback skips it (would re-die),
+                        // and skip the @_[i] fallthrough so the value
+                        // matches arg_vals[i] for value_eq purposes.
+                        if matches!(self.pending_flow, Some(Flow::Die(_))) {
+                            if let Some(top) = self.underscore_forwarded.last_mut() {
+                                top.push(i);
+                            }
+                            return;
+                        }
+                        // Successful forward: do NOT mark forwarded —
+                        // post-call writeback re-runs `assign_to(src,
+                        // final_u[i])` in caller scope where lexical
+                        // `my @arr` is visible (op/array test 174's
+                        // `t8910(@p)` shape). The in-sub forward is
+                        // idempotent for globals (test 130 reads
+                        // `$plink[i]` after `$_[i] = …`) and a no-op
+                        // for lexicals (writes to a stray global,
+                        // overwritten by writeback in caller scope).
                         // Fall through to also update @_[i] so the
                         // sub's later reads of `$_[i]` see the value.
                     }
