@@ -11456,6 +11456,76 @@ fn readelf_debug_loclists<'data, Elf: FileHeader>(
         return;
     };
     let le = data.len() >= 6 && data[5] == 1;
+    // Collect GNU location view pair info (DWARF 5 form). Same logic as for
+    // .debug_loc but offsets here index .debug_loclists instead.
+    use object::ObjectSection as _2;
+    let read_with_relocs = |sect: &object::Section<'_, '_>| -> Vec<u8> {
+        let mut buf: Vec<u8> = sect
+            .uncompressed_data()
+            .ok()
+            .map(|d| d.into_owned())
+            .unwrap_or_default();
+        for (off, reloc) in sect.relocations() {
+            if let object::RelocationTarget::Symbol(idx) = reloc.target() {
+                if let Ok(sym) = obj.symbol_by_index(idx) {
+                    let value = sym.address().wrapping_add(reloc.addend() as u64);
+                    let off = off as usize;
+                    let size = reloc.size() as usize / 8;
+                    if off + size <= buf.len() {
+                        match size {
+                            4 => {
+                                let v = if le {
+                                    (value as u32).to_le_bytes()
+                                } else {
+                                    (value as u32).to_be_bytes()
+                                };
+                                buf[off..off + 4].copy_from_slice(&v);
+                            }
+                            8 => {
+                                let v = if le {
+                                    value.to_le_bytes()
+                                } else {
+                                    value.to_be_bytes()
+                                };
+                                buf[off..off + 8].copy_from_slice(&v);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        buf
+    };
+    let info_data: Vec<u8> = obj
+        .section_by_name(".debug_info")
+        .or_else(|| obj.section_by_name(".zdebug_info"))
+        .as_ref()
+        .map(read_with_relocs)
+        .unwrap_or_default();
+    let abbrev_data: Vec<u8> = obj
+        .section_by_name(".debug_abbrev")
+        .or_else(|| obj.section_by_name(".zdebug_abbrev"))
+        .and_then(|s| s.uncompressed_data().ok())
+        .map(|d| d.into_owned())
+        .unwrap_or_default();
+    let locview_pairs: Vec<(u64, u64)> =
+        if !info_data.is_empty() && !abbrev_data.is_empty() {
+            collect_locview_pairs(&info_data, &abbrev_data, le)
+        } else {
+            Vec::new()
+        };
+    let view_to_loc: std::collections::BTreeMap<u64, u64> =
+        locview_pairs.iter().map(|&(l, v)| (v, l)).collect();
+    let loc_to_view: std::collections::BTreeMap<u64, u64> =
+        locview_pairs.iter().copied().collect();
+    let mut boundaries: std::collections::BTreeSet<u64> =
+        std::collections::BTreeSet::new();
+    for &(loc, vo) in &locview_pairs {
+        boundaries.insert(vo);
+        boundaries.insert(loc);
+    }
+
     let mut found = false;
     for section in obj.sections() {
         let name = section.name().unwrap_or("");
@@ -11568,15 +11638,60 @@ fn readelf_debug_loclists<'data, Elf: FileHeader>(
         let mut p = total_header;
         let mut base_addr: u64 = 0;
         let w = addr_size * 2;
+        // Track per-list view list iterator. Resets when a new location list
+        // starts (driven by `loc_to_view` lookup at base address / start of
+        // list entries).
+        let mut current_view_p: Option<usize> = None;
+        // Pending inline view from DW_LLE_GNU_view_pair (kind=9). Applies to
+        // the next non-end location entry.
+        let mut pending_inline_view: Option<(u64, u64)> = None;
+        // Track previous entry offset so we can emit a separator between
+        // a closed list and a new view list.
+        let mut just_after_end_of_list = false;
         while p < bytes.len() {
+            let pos_u64 = p as u64;
+            // If this offset is the start of a view list, walk it until
+            // the next boundary (next list start) — emitting view pairs.
+            if view_to_loc.contains_key(&pos_u64) {
+                let end_off = boundaries
+                    .range((pos_u64 + 1)..)
+                    .next()
+                    .copied()
+                    .unwrap_or(bytes.len() as u64);
+                if !just_after_end_of_list {
+                    println!();
+                }
+                while (p as u64) < end_off && p < bytes.len() {
+                    let pair_off = p;
+                    let begin_view = read_uleb(&bytes, &mut p);
+                    let end_view = read_uleb(&bytes, &mut p);
+                    println!(
+                        "    {:08x} v{:07} v{:07} location view pair",
+                        pair_off, begin_view, end_view
+                    );
+                }
+                println!();
+                just_after_end_of_list = false;
+                continue;
+            }
+            // If this offset is the start of a location list (per locview),
+            // remember its view list iterator so subsequent location entries
+            // get "views at OFF for:" annotations.
+            if let Some(&vo) = loc_to_view.get(&pos_u64) {
+                current_view_p = Some(vo as usize);
+            }
             let kind = bytes[p];
             let entry_off = p;
             p += 1;
+            just_after_end_of_list = false;
             match kind {
                 0 => {
                     // DW_LLE_end_of_list
                     println!("    {:08x} <End of list>", entry_off);
                     base_addr = 0;
+                    current_view_p = None;
+                    pending_inline_view = None;
+                    just_after_end_of_list = true;
                 }
                 4 => {
                     // DW_LLE_offset_pair: ULEB128 begin, ULEB128 end, counted_loc_desc
@@ -11592,14 +11707,43 @@ fn readelf_debug_loclists<'data, Elf: FileHeader>(
                     p = expr_end.min(bytes.len());
                     let abs_begin = base_addr.wrapping_add(begin_off);
                     let abs_end = base_addr.wrapping_add(end_off);
-                    println!(
-                        "    {:08x} {:0w$x} {:0w$x} {}",
-                        entry_off,
-                        abs_begin,
-                        abs_end,
-                        expr_str,
-                        w = w
-                    );
+                    // Pull a view pair: either inline (DW_LLE_GNU_view_pair
+                    // already emitted "views for:" at its own offset), or from
+                    // the per-list view list (`current_view_p`).
+                    if pending_inline_view.take().is_some() {
+                        println!(
+                            "    {:08x} {:0w$x} {:0w$x} {}",
+                            entry_off,
+                            abs_begin,
+                            abs_end,
+                            expr_str,
+                            w = w
+                        );
+                    } else if let Some(view_p) = current_view_p.as_mut() {
+                        let pair_off = *view_p;
+                        let begin_view = read_uleb(&bytes, view_p);
+                        let end_view = read_uleb(&bytes, view_p);
+                        println!(
+                            "    {:08x} v{:07} v{:07} views at {:08x} for:",
+                            entry_off, begin_view, end_view, pair_off
+                        );
+                        println!(
+                            "             {:0w$x} {:0w$x} {}",
+                            abs_begin,
+                            abs_end,
+                            expr_str,
+                            w = w
+                        );
+                    } else {
+                        println!(
+                            "    {:08x} {:0w$x} {:0w$x} {}",
+                            entry_off,
+                            abs_begin,
+                            abs_end,
+                            expr_str,
+                            w = w
+                        );
+                    }
                 }
                 6 => {
                     // DW_LLE_base_address: addr
@@ -11662,6 +11806,17 @@ fn readelf_debug_loclists<'data, Elf: FileHeader>(
                         expr_str,
                         w = w
                     );
+                }
+                9 => {
+                    // DW_LLE_GNU_view_pair: 2 ULEB128 view counts. Annotates
+                    // the NEXT entry with "views for:" prefix.
+                    let begin_view = read_uleb(&bytes, &mut p);
+                    let end_view = read_uleb(&bytes, &mut p);
+                    println!(
+                        "    {:08x} v{:07} v{:07} views for:",
+                        entry_off, begin_view, end_view
+                    );
+                    pending_inline_view = Some((begin_view, end_view));
                 }
                 _ => break,
             }
@@ -12031,36 +12186,33 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
         }
     }
     let mut new_shstr: Vec<u8> = vec![0];
-    let mut name_to_off: std::collections::HashMap<Vec<u8>, u32> =
-        std::collections::HashMap::new();
+    let mut name_to_off: std::collections::HashMap<Vec<u8>, u32> = std::collections::HashMap::new();
     name_to_off.insert(Vec::new(), 0);
-    let try_place = |s: &[u8],
-                     out: &mut Vec<u8>,
-                     map: &mut std::collections::HashMap<Vec<u8>, u32>|
-     -> u32 {
-        if let Some(&v) = map.get(s) {
-            return v;
-        }
-        let needle = {
-            let mut v = s.to_vec();
-            v.push(0);
-            v
+    let try_place =
+        |s: &[u8], out: &mut Vec<u8>, map: &mut std::collections::HashMap<Vec<u8>, u32>| -> u32 {
+            if let Some(&v) = map.get(s) {
+                return v;
+            }
+            let needle = {
+                let mut v = s.to_vec();
+                v.push(0);
+                v
+            };
+            for w in 0..out.len() {
+                if w + needle.len() > out.len() {
+                    break;
+                }
+                if out[w..w + needle.len()] == needle[..] {
+                    map.insert(s.to_vec(), w as u32);
+                    return w as u32;
+                }
+            }
+            let off = out.len() as u32;
+            out.extend_from_slice(s);
+            out.push(0);
+            map.insert(s.to_vec(), off);
+            off
         };
-        for w in 0..out.len() {
-            if w + needle.len() > out.len() {
-                break;
-            }
-            if out[w..w + needle.len()] == needle[..] {
-                map.insert(s.to_vec(), w as u32);
-                return w as u32;
-            }
-        }
-        let off = out.len() as u32;
-        out.extend_from_slice(s);
-        out.push(0);
-        map.insert(s.to_vec(), off);
-        off
-    };
     // Walk the original shstrtab in offset order. Skip strings that aren't
     // referenced by any kept section.
     let kept_orig_names: std::collections::HashSet<Vec<u8>> = {
@@ -14988,6 +15140,80 @@ fn readelf_debug_loc<'data, Elf: FileHeader>(
         }
     }
 
+    // Collect GNU location view pair info: each (loc_off, view_off) tells us
+    // the view list at view_off..loc_off contains pairs corresponding to
+    // entries in the location list at loc_off. We need to apply relocations
+    // to `.debug_info` first since DW_AT_location/DW_AT_GNU_locviews values
+    // are relocated against `.debug_loc`.
+    use object::ObjectSection as _2;
+    let read_with_relocs = |sect: &object::Section<'_, '_>| -> Vec<u8> {
+        let mut buf: Vec<u8> = sect
+            .uncompressed_data()
+            .ok()
+            .map(|d| d.into_owned())
+            .unwrap_or_default();
+        for (off, reloc) in sect.relocations() {
+            if let object::RelocationTarget::Symbol(idx) = reloc.target() {
+                if let Ok(sym) = obj.symbol_by_index(idx) {
+                    let value = sym.address().wrapping_add(reloc.addend() as u64);
+                    let off = off as usize;
+                    let size = reloc.size() as usize / 8;
+                    if off + size <= buf.len() {
+                        match size {
+                            4 => {
+                                let v = if le {
+                                    (value as u32).to_le_bytes()
+                                } else {
+                                    (value as u32).to_be_bytes()
+                                };
+                                buf[off..off + 4].copy_from_slice(&v);
+                            }
+                            8 => {
+                                let v = if le {
+                                    value.to_le_bytes()
+                                } else {
+                                    value.to_be_bytes()
+                                };
+                                buf[off..off + 8].copy_from_slice(&v);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        buf
+    };
+    let info_data: Vec<u8> = obj
+        .section_by_name(".debug_info")
+        .or_else(|| obj.section_by_name(".zdebug_info"))
+        .as_ref()
+        .map(read_with_relocs)
+        .unwrap_or_default();
+    let abbrev_data: Vec<u8> = obj
+        .section_by_name(".debug_abbrev")
+        .or_else(|| obj.section_by_name(".zdebug_abbrev"))
+        .and_then(|s| s.uncompressed_data().ok())
+        .map(|d| d.into_owned())
+        .unwrap_or_default();
+    let locview_pairs: Vec<(u64, u64)> = if !info_data.is_empty() && !abbrev_data.is_empty() {
+        collect_locview_pairs(&info_data, &abbrev_data, le)
+    } else {
+        Vec::new()
+    };
+    // Build a sorted set of view list offsets and a mapping
+    // view_off → loc_off so we can detect when we cross from view list to
+    // location list as we walk .debug_loc.
+    let mut view_to_loc: std::collections::BTreeMap<u64, u64> = std::collections::BTreeMap::new();
+    // Boundary offsets where some list starts (location or view).
+    // A view list at offset V ends at the next boundary > V.
+    let mut boundaries: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
+    for &(loc, vo) in &locview_pairs {
+        view_to_loc.insert(vo, loc);
+        boundaries.insert(vo);
+        boundaries.insert(loc);
+    }
+
     let mut found = false;
     for section in obj.sections() {
         let name = section.name().unwrap_or("");
@@ -14997,15 +15223,49 @@ fn readelf_debug_loc<'data, Elf: FileHeader>(
         let Ok(raw) = section.uncompressed_data() else {
             continue;
         };
-        let bytes: Vec<u8> = raw.into_owned();
+        // Apply relocations into a writable buffer so locview entries display
+        // the actual relocated addresses (matches GNU readelf which always
+        // applies relocations to `.debug_loc` for the display).
+        let mut bytes: Vec<u8> = raw.into_owned();
+        for (off, reloc) in section.relocations() {
+            if let object::RelocationTarget::Symbol(idx) = reloc.target() {
+                if let Ok(sym) = obj.symbol_by_index(idx) {
+                    let value = sym.address().wrapping_add(reloc.addend() as u64);
+                    let off = off as usize;
+                    let size = reloc.size() as usize / 8;
+                    if off + size <= bytes.len() {
+                        match size {
+                            4 => {
+                                let v = if le {
+                                    (value as u32).to_le_bytes()
+                                } else {
+                                    (value as u32).to_be_bytes()
+                                };
+                                bytes[off..off + 4].copy_from_slice(&v);
+                            }
+                            8 => {
+                                let v = if le {
+                                    value.to_le_bytes()
+                                } else {
+                                    value.to_be_bytes()
+                                };
+                                bytes[off..off + 8].copy_from_slice(&v);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
         let reloc_offsets: std::collections::BTreeSet<u64> =
             section.relocations().map(|(o, _)| o).collect();
         let has_relocs = !reloc_offsets.is_empty();
+        let has_locviews = !locview_pairs.is_empty();
         if !found {
             println!();
             println!("Contents of the .debug_loc section:");
             println!();
-            if has_relocs {
+            if has_relocs && !has_locviews {
                 println!(
                     " Warning: This section has relocations - addresses seen here may not be accurate."
                 );
@@ -15035,14 +15295,114 @@ fn readelf_debug_loc<'data, Elf: FileHeader>(
                 v as u64
             }
         };
+        let read_uleb = |buf: &[u8], pos: &mut usize| -> u64 {
+            let mut result: u64 = 0;
+            let mut shift: u32 = 0;
+            while *pos < buf.len() {
+                let b = buf[*pos];
+                *pos += 1;
+                result |= ((b & 0x7f) as u64) << shift;
+                if b & 0x80 == 0 {
+                    break;
+                }
+                shift += 7;
+            }
+            result
+        };
         let entry = addr_size * 2;
         let mut p = 0usize;
-        let mut list_start = 0usize;
         let aw = addr_size * 2;
-        while p + entry <= bytes.len() {
+        while p < bytes.len() {
+            let pos_u64 = p as u64;
+            // Are we at the start of a view list?
+            if view_to_loc.contains_key(&pos_u64) {
+                // Walk view list until we reach the next boundary (next view
+                // list or location list start).
+                let end_off = boundaries
+                    .range((pos_u64 + 1)..)
+                    .next()
+                    .copied()
+                    .unwrap_or(bytes.len() as u64);
+                if p > 0 {
+                    println!();
+                }
+                while (p as u64) < end_off && p < bytes.len() {
+                    let pair_off = p;
+                    let begin_view = read_uleb(&bytes, &mut p);
+                    let end_view = read_uleb(&bytes, &mut p);
+                    println!(
+                        "    {:08x} v{:07} v{:07} location view pair",
+                        pair_off, begin_view, end_view
+                    );
+                }
+                println!();
+                continue;
+            }
+            // Are we at the start of a location list (with locviews)?
+            let matching_view: Option<u64> = locview_pairs
+                .iter()
+                .find_map(|&(lo, vo)| if lo == pos_u64 { Some(vo) } else { None });
+            if let Some(view_off) = matching_view {
+                // Walk the location list. For each non-EOL entry, emit a
+                // "views at X for:" prefix referring to the matching view
+                // pair; the view counts come from re-reading the view list.
+                let mut view_p = view_off as usize;
+                while p + entry <= bytes.len() {
+                    let begin = read_addr(&bytes[p..p + addr_size]);
+                    let end = read_addr(&bytes[p + addr_size..p + entry]);
+                    let has_reloc_in_entry = reloc_offsets
+                        .range((p as u64)..((p + entry) as u64))
+                        .next()
+                        .is_some();
+                    if begin == 0 && end == 0 && !has_reloc_in_entry {
+                        println!("    {:08x} <End of list>", p);
+                        p += entry;
+                        break;
+                    }
+                    if p + entry + 2 > bytes.len() {
+                        break;
+                    }
+                    let mut lb = [0u8; 2];
+                    lb.copy_from_slice(&bytes[p + entry..p + entry + 2]);
+                    let expr_len = (if le {
+                        u16::from_le_bytes(lb)
+                    } else {
+                        u16::from_be_bytes(lb)
+                    }) as usize;
+                    let expr_off = p + entry + 2;
+                    if expr_off + expr_len > bytes.len() {
+                        break;
+                    }
+                    let expr_str = decode_dwop_expression(
+                        &bytes[expr_off..expr_off + expr_len],
+                        addr_size as u8,
+                        le,
+                    );
+                    // Read view counts for this entry from the view list.
+                    let pair_off = view_p;
+                    let begin_view = read_uleb(&bytes, &mut view_p);
+                    let end_view = read_uleb(&bytes, &mut view_p);
+                    println!(
+                        "    {:08x} v{:07} v{:07} views at {:08x} for:",
+                        p, begin_view, end_view, pair_off
+                    );
+                    println!(
+                        "             {:0aw$x} {:0aw$x} {}",
+                        begin,
+                        end,
+                        expr_str,
+                        aw = aw
+                    );
+                    p = expr_off + expr_len;
+                }
+                continue;
+            }
+            // Plain location list entry (no associated view list).
+            if p + entry > bytes.len() {
+                break;
+            }
             let begin = read_addr(&bytes[p..p + addr_size]);
             let end = read_addr(&bytes[p + addr_size..p + entry]);
-            // End-of-list if both zero AND no relocation targets this entry's bytes.
             let has_reloc_in_entry = reloc_offsets
                 .range((p as u64)..((p + entry) as u64))
                 .next()
@@ -15050,7 +15410,6 @@ fn readelf_debug_loc<'data, Elf: FileHeader>(
             if begin == 0 && end == 0 && !has_reloc_in_entry {
                 println!("    {:08x} <End of list>", p);
                 p += entry;
-                list_start = p;
                 continue;
             }
             if p + entry + 2 > bytes.len() {
@@ -15069,9 +15428,6 @@ fn readelf_debug_loc<'data, Elf: FileHeader>(
             }
             let expr_str =
                 decode_dwop_expression(&bytes[expr_off..expr_off + expr_len], addr_size as u8, le);
-            // Detect "(start == end)" suffix matching GNU readelf when both
-            // begin and end addresses are equal (after relocation, in
-            // practice always 0 in relocatable objects).
             let suffix = if begin == end { " (start == end)" } else { "" };
             println!(
                 "    {:08x} {:0aw$x} {:0aw$x} {}{}",
@@ -15478,9 +15834,7 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
                         &debug_str_dwo,
                     );
                     let attr_name_str = dwarf_attr_name(*attr_name);
-                    let sep = if value_str.starts_with('\t')
-                        || value_str.starts_with("readelf:")
-                    {
+                    let sep = if value_str.starts_with('\t') || value_str.starts_with("readelf:") {
                         ""
                     } else {
                         " "
@@ -15506,14 +15860,14 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
     {
         let types_data = read_sect(&types_sect);
         // Parse `.debug_tu_index` for type-unit Section contributions.
-        let tu_contribs: Vec<(u64, [(u32, u32); 9])> =
-            if let Some(idx_sect) = obj.section_by_name(".debug_tu_index")
-                && let Ok(idx_data) = idx_sect.uncompressed_data()
-            {
-                parse_dwp_cu_index(idx_data.as_ref(), obj.is_little_endian())
-            } else {
-                Vec::new()
-            };
+        let tu_contribs: Vec<(u64, [(u32, u32); 9])> = if let Some(idx_sect) =
+            obj.section_by_name(".debug_tu_index")
+            && let Ok(idx_data) = idx_sect.uncompressed_data()
+        {
+            parse_dwp_cu_index(idx_data.as_ref(), obj.is_little_endian())
+        } else {
+            Vec::new()
+        };
         dump_units(".debug_types.dwo", &types_data, &tu_contribs, true);
     }
 }
@@ -16612,6 +16966,178 @@ fn dwarf_form_name(form: u64) -> String {
         return s.to_string();
     }
     format!("DW_FORM_<unknown 0x{:x}>", form)
+}
+
+/// Scan `.debug_info` to find DW_AT_GNU_locviews + DW_AT_location attribute
+/// value pairs. Returns `Vec<(loc_off, view_off)>` — for each DIE that has
+/// both, the .debug_loc offset of the location list and the view list.
+/// Used to render the GNU location view extension in `.debug_loc` dumps.
+fn collect_locview_pairs(info: &[u8], abbrev: &[u8], le: bool) -> Vec<(u64, u64)> {
+    let mut out: Vec<(u64, u64)> = Vec::new();
+    let mut p = DwarfReader {
+        buf: info,
+        pos: 0,
+        le,
+    };
+    while p.pos < p.buf.len() {
+        let cu_start = p.pos;
+        let (len, is_64) = match p.read_initial_length() {
+            Some(v) => v,
+            None => return out,
+        };
+        let cu_end = p.pos + len as usize;
+        if cu_end > p.buf.len() {
+            return out;
+        }
+        let version = match p.read_u16() {
+            Some(v) => v,
+            None => return out,
+        };
+        let abbrev_off: u64;
+        let addr_size: u8;
+        if version >= 5 {
+            let _unit_type = p.read_u8();
+            addr_size = p.read_u8().unwrap_or(0);
+            abbrev_off = if is_64 {
+                p.read_u64().unwrap_or(0)
+            } else {
+                p.read_u32().unwrap_or(0) as u64
+            };
+        } else {
+            abbrev_off = if is_64 {
+                p.read_u64().unwrap_or(0)
+            } else {
+                p.read_u32().unwrap_or(0) as u64
+            };
+            addr_size = p.read_u8().unwrap_or(0);
+        }
+        let abbrevs = parse_abbrev_table(abbrev, abbrev_off as usize);
+        while p.pos < cu_end {
+            let code = match p.read_uleb128() {
+                Some(v) => v,
+                None => break,
+            };
+            if code == 0 {
+                continue;
+            }
+            let entry = match abbrevs.get(&code) {
+                Some(e) => e,
+                None => break,
+            };
+            let mut loc_off: Option<u64> = None;
+            let mut view_off: Option<u64> = None;
+            for (attr_name, attr_form, _implicit) in &entry.attrs {
+                let val = locview_read_attr(&mut p, *attr_form, addr_size, is_64, version);
+                match *attr_name {
+                    0x02 /* DW_AT_location */ => {
+                        if let Some(v) = val {
+                            loc_off = Some(v);
+                        }
+                    }
+                    0x2137 /* DW_AT_GNU_locviews */ => {
+                        if let Some(v) = val {
+                            view_off = Some(v);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if let (Some(lo), Some(vo)) = (loc_off, view_off) {
+                out.push((lo, vo));
+            }
+        }
+        let _ = cu_start;
+        p.pos = cu_end;
+    }
+    out
+}
+
+/// Read an attribute value for `collect_locview_pairs`, returning the
+/// numeric value when it's a sec_offset / data4 / data8 / udata, or `None`
+/// otherwise (still advancing the reader past the value).
+fn locview_read_attr(
+    p: &mut DwarfReader<'_>,
+    form: u64,
+    addr_size: u8,
+    is_64: bool,
+    _version: u16,
+) -> Option<u64> {
+    match form {
+        0x01 /* addr */ => {
+            read_addr(p, addr_size)
+        }
+        0x03 /* block2 */ => {
+            let n = p.read_u16().unwrap_or(0) as usize;
+            let _ = p.read_bytes(n);
+            None
+        }
+        0x04 /* block4 */ => {
+            let n = p.read_u32().unwrap_or(0) as usize;
+            let _ = p.read_bytes(n);
+            None
+        }
+        0x05 /* data2 */ => Some(p.read_u16().unwrap_or(0) as u64),
+        0x06 /* data4 */ => Some(p.read_u32().unwrap_or(0) as u64),
+        0x07 /* data8 */ => p.read_u64(),
+        0x08 /* string */ => {
+            while let Some(b) = p.read_u8() {
+                if b == 0 { break; }
+            }
+            None
+        }
+        0x09 /* block */ => {
+            let n = p.read_uleb128().unwrap_or(0) as usize;
+            let _ = p.read_bytes(n);
+            None
+        }
+        0x0a /* block1 */ => {
+            let n = p.read_u8().unwrap_or(0) as usize;
+            let _ = p.read_bytes(n);
+            None
+        }
+        0x0b /* data1 */ => Some(p.read_u8().unwrap_or(0) as u64),
+        0x0c /* flag */ => {
+            let _ = p.read_u8();
+            None
+        }
+        0x0d /* sdata */ => {
+            let _ = p.read_sleb128_tolerant();
+            None
+        }
+        0x0e /* strp */ | 0x1f /* line_strp */ | 0x1f21 /* GNU_strp_alt */ => {
+            if is_64 { p.read_u64(); } else { p.read_u32(); }
+            None
+        }
+        0x0f /* udata */ => p.read_uleb128(),
+        0x10 /* ref_addr */ => {
+            if is_64 { p.read_u64(); } else { p.read_u32(); }
+            None
+        }
+        0x11 /* ref1 */ => { p.read_u8(); None }
+        0x12 /* ref2 */ => { p.read_u16(); None }
+        0x13 /* ref4 */ => { p.read_u32(); None }
+        0x14 /* ref8 */ => { p.read_u64(); None }
+        0x15 /* ref_udata */ => { p.read_uleb128(); None }
+        0x17 /* sec_offset */ => {
+            if is_64 { p.read_u64() } else { p.read_u32().map(|v| v as u64) }
+        }
+        0x18 /* exprloc */ => {
+            let n = p.read_uleb128().unwrap_or(0) as usize;
+            let _ = p.read_bytes(n);
+            None
+        }
+        0x19 /* flag_present */ => None,
+        0x1a /* strx */ | 0x1b /* addrx */ => {
+            p.read_uleb128();
+            None
+        }
+        0x20 /* ref_sig8 */ => p.read_u64(),
+        0x1f01 /* GNU_addr_index */ | 0x1f02 /* GNU_str_index */ => {
+            p.read_uleb128();
+            None
+        }
+        _ => None,
+    }
 }
 
 fn parse_abbrev_table(

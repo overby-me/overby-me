@@ -204,8 +204,8 @@
       }
       {
         exp = "readelf.exp";
-        minPass = 36;
-        maxFail = 2;
+        minPass = 38;
+        maxFail = 0;
       }
       {
         exp = "objdump.exp";
