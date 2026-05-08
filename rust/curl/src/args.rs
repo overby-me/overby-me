@@ -962,6 +962,23 @@ pub(crate) fn parse_args() -> Options {
                 opts.proxy = Some(val);
                 opts.proxy_1_0 = true;
             }
+            "--socks5" | "--socks5-hostname" | "--socks4" | "--socks4a" => {
+                // We don't implement SOCKS proxies. Accept the value so
+                // arg parsing succeeds; the proxy is then stored as a
+                // socks-prefixed URL. If --noproxy bypasses the host, the
+                // request goes direct and the unsupported scheme never
+                // triggers (test 1212).
+                let opt = args[i].clone();
+                i += 1;
+                let val = next_arg(&args, i, &opt);
+                let scheme = match opt.as_str() {
+                    "--socks5" => "socks5",
+                    "--socks5-hostname" => "socks5h",
+                    "--socks4" => "socks4",
+                    _ => "socks4a",
+                };
+                opts.proxy = Some(format!("{scheme}://{val}"));
+            }
             "--anyauth" | "--digest" | "--ntlm" | "--negotiate" => {
                 // We don't implement challenge/response auth. With these flags set,
                 // curl waits for a 401 challenge before sending credentials. For
