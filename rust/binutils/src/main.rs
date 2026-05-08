@@ -8664,6 +8664,45 @@ fn tool_objcopy(args: &[String]) -> i32 {
         );
     }
 
+    // x32 / ELF64 conversions for `-O elf32-x86-64` (ELF64→ELF32, x32-ABI)
+    // and `-O elf64-x86-64` from x32 input (ELF32→ELF64). Both merge the
+    // `.note.gnu.property` entries with the appropriate alignment so the
+    // round-trip dumps match GNU objcopy.
+    let target_x32 = output_format.as_deref() == Some("elf32-x86-64");
+    let target_elf64 = output_format.as_deref() == Some("elf64-x86-64");
+    if (target_x32 || target_elf64)
+        && let Ok(in_data) = fs::read(input)
+        && in_data.len() >= 0x40
+        && &in_data[..4] == b"\x7fELF"
+        && (in_data[4] == 1 || in_data[4] == 2)
+    {
+        let in_class = in_data[4];
+        let result = if target_x32 {
+            objcopy_to_x32(&in_data, &remove_sections)
+        } else if target_elf64 && in_class == 1 {
+            objcopy_x32_merge_notes_to_elf64(&in_data, &remove_sections)
+        } else {
+            // -O elf64-x86-64 from ELF64 input: nothing special to do; let
+            // the standard objcopy path handle it.
+            Err("fall through".into())
+        };
+        match result {
+            Ok(out_bytes) => {
+                if let Err(e) = fs::write(output, &out_bytes) {
+                    eprintln!("objcopy: '{output}': {e}");
+                    return 1;
+                }
+                return 0;
+            }
+            Err(e) if e == "fall through" => {}
+            Err(e) => {
+                eprintln!("objcopy: conversion failed: {e}");
+                return 1;
+            }
+        }
+    }
+
+
     // --dump-section: extract section data to a file. We do this as a side
     // effect of objcopy; the file is otherwise rewritten normally per the
     // remaining options. Empty sections produce empty output files.
@@ -14475,6 +14514,1082 @@ fn objcopy_merge_build_attribute_notes(data: &[u8]) -> Option<Vec<u8>> {
         }
     }
     Some(out_data)
+}
+
+/// Convert ELF32 (x32) input → ELF64 with x86-64 machine, merging the
+/// `.note.gnu.property` entries with ELF64 (8-byte) alignment.
+fn objcopy_x32_merge_notes_to_elf64(
+    data: &[u8],
+    remove_sections: &[String],
+) -> Result<Vec<u8>, String> {
+    let endian = data[5];
+    let le = endian == 1;
+    let r16 = |buf: &[u8], o: usize| -> u16 {
+        let mut b = [0u8; 2];
+        b.copy_from_slice(&buf[o..o + 2]);
+        if le { u16::from_le_bytes(b) } else { u16::from_be_bytes(b) }
+    };
+    let r32 = |buf: &[u8], o: usize| -> u32 {
+        let mut b = [0u8; 4];
+        b.copy_from_slice(&buf[o..o + 4]);
+        if le { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) }
+    };
+    let shoff = r32(data, 0x20) as usize;
+    let shentsize = r16(data, 0x2e) as usize;
+    let shnum = r16(data, 0x30) as usize;
+    let shstrndx = r16(data, 0x32) as usize;
+    if shoff == 0 || shnum == 0 || shentsize != 40 || shstrndx >= shnum {
+        return Err("invalid ELF32".into());
+    }
+    if shoff + shnum * shentsize > data.len() {
+        return Err("section table out of range".into());
+    }
+
+    #[derive(Clone)]
+    struct Shdr {
+        name: u32,
+        sh_type: u32,
+        sh_flags: u32,
+        sh_addr: u32,
+        sh_offset: u32,
+        sh_size: u32,
+        sh_link: u32,
+        sh_info: u32,
+        sh_addralign: u32,
+        sh_entsize: u32,
+    }
+    let mut headers: Vec<Shdr> = Vec::with_capacity(shnum);
+    for i in 0..shnum {
+        let h = shoff + i * shentsize;
+        headers.push(Shdr {
+            name: r32(data, h),
+            sh_type: r32(data, h + 4),
+            sh_flags: r32(data, h + 8),
+            sh_addr: r32(data, h + 12),
+            sh_offset: r32(data, h + 16),
+            sh_size: r32(data, h + 20),
+            sh_link: r32(data, h + 24),
+            sh_info: r32(data, h + 28),
+            sh_addralign: r32(data, h + 32),
+            sh_entsize: r32(data, h + 36),
+        });
+    }
+    let shstr_off = headers[shstrndx].sh_offset as usize;
+    let shstr_size = headers[shstrndx].sh_size as usize;
+    if shstr_off + shstr_size > data.len() {
+        return Err("shstrtab out of range".into());
+    }
+    let strtab = &data[shstr_off..shstr_off + shstr_size];
+    let name_at = |off: u32| -> &str {
+        let o = off as usize;
+        if o >= strtab.len() {
+            return "";
+        }
+        let mut e = o;
+        while e < strtab.len() && strtab[e] != 0 {
+            e += 1;
+        }
+        std::str::from_utf8(&strtab[o..e]).unwrap_or("")
+    };
+
+    // Find and merge notes. The input is ELF32 (4-byte property align).
+    let mut merged_note: Option<Vec<u8>> = None;
+    for h in &headers {
+        if h.sh_type != 7 || name_at(h.name) != ".note.gnu.property" {
+            continue;
+        }
+        let off = h.sh_offset as usize;
+        let size = h.sh_size as usize;
+        if off + size > data.len() {
+            continue;
+        }
+        let bytes = &data[off..off + size];
+        use std::collections::BTreeMap;
+        let mut props: BTreeMap<u32, Vec<u8>> = BTreeMap::new();
+        let mut p = 0;
+        while p + 12 <= bytes.len() {
+            let namesz =
+                u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
+            let descsz =
+                u32::from_le_bytes(bytes[p + 4..p + 8].try_into().unwrap()) as usize;
+            let ntype =
+                u32::from_le_bytes(bytes[p + 8..p + 12].try_into().unwrap());
+            p += 12;
+            if p + namesz > bytes.len() {
+                break;
+            }
+            let nm = std::str::from_utf8(&bytes[p..p + namesz.saturating_sub(1)])
+                .unwrap_or("");
+            p += namesz;
+            p = (p + 3) & !3;
+            if p + descsz > bytes.len() {
+                break;
+            }
+            let desc = &bytes[p..p + descsz];
+            if ntype == 5 && nm == "GNU" {
+                let mut q = 0;
+                while q + 8 <= desc.len() {
+                    let pr_type =
+                        u32::from_le_bytes(desc[q..q + 4].try_into().unwrap());
+                    let pr_datasz =
+                        u32::from_le_bytes(desc[q + 4..q + 8].try_into().unwrap()) as usize;
+                    q += 8;
+                    if q + pr_datasz > desc.len() {
+                        break;
+                    }
+                    let pr_data = &desc[q..q + pr_datasz];
+                    // Stack size: ELF32 uses 4 bytes; for ELF64 output it
+                    // should be 8 bytes. Pad with zeros.
+                    let translated = if pr_type == 1 && pr_datasz == 4 {
+                        let mut v = pr_data.to_vec();
+                        v.extend_from_slice(&[0u8; 4]);
+                        v
+                    } else {
+                        pr_data.to_vec()
+                    };
+                    let entry = props.entry(pr_type).or_insert_with(Vec::new);
+                    if entry.is_empty() {
+                        *entry = translated;
+                    } else if pr_type == 0xc0000002
+                        || pr_type == 0xc0010001
+                        || pr_type == 0xc0010002
+                        || pr_type == 0xc0008002
+                    {
+                        if entry.len() >= 4 && translated.len() >= 4 {
+                            let a = u32::from_le_bytes(entry[0..4].try_into().unwrap());
+                            let b = u32::from_le_bytes(translated[0..4].try_into().unwrap());
+                            let v = a | b;
+                            entry[0..4].copy_from_slice(&v.to_le_bytes());
+                        }
+                    }
+                    q += pr_datasz;
+                    q = (q + 3) & !3; // ELF32 input alignment
+                }
+            }
+            p += descsz;
+            p = (p + 3) & !3;
+        }
+        if props.is_empty() {
+            continue;
+        }
+        // Re-serialize with ELF64 alignment (8-byte).
+        let mut desc_out: Vec<u8> = Vec::new();
+        for (pr_type, pr_data) in &props {
+            desc_out.extend_from_slice(&pr_type.to_le_bytes());
+            desc_out.extend_from_slice(&(pr_data.len() as u32).to_le_bytes());
+            desc_out.extend_from_slice(pr_data);
+            while desc_out.len() % 8 != 0 {
+                desc_out.push(0);
+            }
+        }
+        let mut note_out: Vec<u8> = Vec::new();
+        note_out.extend_from_slice(&4u32.to_le_bytes());
+        note_out.extend_from_slice(&(desc_out.len() as u32).to_le_bytes());
+        note_out.extend_from_slice(&5u32.to_le_bytes());
+        note_out.extend_from_slice(b"GNU\0");
+        note_out.extend_from_slice(&desc_out);
+        merged_note = Some(note_out);
+        break;
+    }
+
+    // Determine which sections survive `-R` selectors.
+    let mut keep: Vec<bool> = vec![true; shnum];
+    if !remove_sections.is_empty() {
+        for i in 1..shnum {
+            let nm = name_at(headers[i].name);
+            if matches_selector_list(nm, remove_sections) {
+                keep[i] = false;
+            }
+        }
+    }
+
+    // Build a fresh shstrtab using only surviving section names.
+    let mut new_shstrtab: Vec<u8> = vec![0u8];
+    let mut new_name_off: Vec<u32> = vec![0; shnum];
+    for i in 1..shnum {
+        if !keep[i] {
+            continue;
+        }
+        let nm = name_at(headers[i].name);
+        new_name_off[i] = new_shstrtab.len() as u32;
+        new_shstrtab.extend_from_slice(nm.as_bytes());
+        new_shstrtab.push(0);
+    }
+
+    // Lay out new ELF64 file.
+    let ehdr_size: usize = 64;
+    let shentsize_new: usize = 64;
+    let mut cursor: usize = ehdr_size;
+    let mut new_offsets: Vec<u64> = vec![0; shnum];
+    let mut new_sizes: Vec<u64> = vec![0; shnum];
+    let mut data_chunks: Vec<(usize, Vec<u8>)> = Vec::new();
+    for i in 1..shnum {
+        if !keep[i] {
+            continue;
+        }
+        let h = &headers[i];
+        let align = h.sh_addralign.max(1) as usize;
+        if cursor % align != 0 {
+            cursor += align - (cursor % align);
+        }
+        let nm = name_at(h.name);
+        if h.sh_type == 8 {
+            new_offsets[i] = cursor as u64;
+            new_sizes[i] = h.sh_size as u64;
+            continue;
+        }
+        let body: Vec<u8> = if nm == ".note.gnu.property"
+            && let Some(merged) = &merged_note
+        {
+            merged.clone()
+        } else if i == shstrndx {
+            new_shstrtab.clone()
+        } else if h.sh_type == 2 || h.sh_type == 11 {
+            // Symtab: ELF32 (16) → ELF64 (24).
+            let off = h.sh_offset as usize;
+            let sz = h.sh_size as usize;
+            let entsize = h.sh_entsize.max(16) as usize;
+            if off + sz > data.len() || sz % entsize != 0 {
+                Vec::new()
+            } else {
+                let n = sz / entsize;
+                let mut out = Vec::with_capacity(n * 24);
+                for k in 0..n {
+                    let p = off + k * entsize;
+                    let st_name = r32(data, p);
+                    let st_value = r32(data, p + 4) as u64;
+                    let st_size = r32(data, p + 8) as u64;
+                    let st_info = data[p + 12];
+                    let st_other = data[p + 13];
+                    let st_shndx = r16(data, p + 14);
+                    out.extend_from_slice(&st_name.to_le_bytes());
+                    out.push(st_info);
+                    out.push(st_other);
+                    out.extend_from_slice(&st_shndx.to_le_bytes());
+                    out.extend_from_slice(&st_value.to_le_bytes());
+                    out.extend_from_slice(&st_size.to_le_bytes());
+                }
+                out
+            }
+        } else if h.sh_type == 4 {
+            // RELA: ELF32 (12) → ELF64 (24).
+            let off = h.sh_offset as usize;
+            let sz = h.sh_size as usize;
+            let entsize = h.sh_entsize.max(12) as usize;
+            if off + sz > data.len() || sz % entsize != 0 {
+                Vec::new()
+            } else {
+                let n = sz / entsize;
+                let mut out = Vec::with_capacity(n * 24);
+                for k in 0..n {
+                    let p = off + k * entsize;
+                    let r_offset = r32(data, p) as u64;
+                    let r_info32 = r32(data, p + 4);
+                    let sym = (r_info32 >> 8) as u64;
+                    let rtype = (r_info32 & 0xff) as u64;
+                    let r_info = (sym << 32) | rtype;
+                    let r_addend = r32(data, p + 8) as i32 as i64 as u64;
+                    out.extend_from_slice(&r_offset.to_le_bytes());
+                    out.extend_from_slice(&r_info.to_le_bytes());
+                    out.extend_from_slice(&r_addend.to_le_bytes());
+                }
+                out
+            }
+        } else if h.sh_type == 9 {
+            // REL: ELF32 (8) → ELF64 (16).
+            let off = h.sh_offset as usize;
+            let sz = h.sh_size as usize;
+            let entsize = h.sh_entsize.max(8) as usize;
+            if off + sz > data.len() || sz % entsize != 0 {
+                Vec::new()
+            } else {
+                let n = sz / entsize;
+                let mut out = Vec::with_capacity(n * 16);
+                for k in 0..n {
+                    let p = off + k * entsize;
+                    let r_offset = r32(data, p) as u64;
+                    let r_info32 = r32(data, p + 4);
+                    let sym = (r_info32 >> 8) as u64;
+                    let rtype = (r_info32 & 0xff) as u64;
+                    let r_info = (sym << 32) | rtype;
+                    out.extend_from_slice(&r_offset.to_le_bytes());
+                    out.extend_from_slice(&r_info.to_le_bytes());
+                }
+                out
+            }
+        } else if (h.sh_flags & 0x800) != 0 && h.sh_size as usize >= 12 {
+            // SHF_COMPRESSED: ELF32 Chdr (12) → ELF64 Chdr (24).
+            let off = h.sh_offset as usize;
+            let sz = h.sh_size as usize;
+            if off + sz > data.len() {
+                Vec::new()
+            } else {
+                let ch_type = r32(data, off);
+                let ch_size = r32(data, off + 4) as u64;
+                let ch_addralign = r32(data, off + 8) as u64;
+                let mut out = Vec::with_capacity(24 + (sz - 12));
+                out.extend_from_slice(&ch_type.to_le_bytes());
+                out.extend_from_slice(&[0u8; 4]); // ch_reserved
+                out.extend_from_slice(&ch_size.to_le_bytes());
+                out.extend_from_slice(&ch_addralign.to_le_bytes());
+                out.extend_from_slice(&data[off + 12..off + sz]);
+                out
+            }
+        } else {
+            let off = h.sh_offset as usize;
+            let sz = h.sh_size as usize;
+            if off + sz > data.len() {
+                Vec::new()
+            } else {
+                data[off..off + sz].to_vec()
+            }
+        };
+        new_offsets[i] = cursor as u64;
+        new_sizes[i] = body.len() as u64;
+        data_chunks.push((cursor, body));
+        cursor += new_sizes[i] as usize;
+    }
+    if cursor % 8 != 0 {
+        cursor += 8 - (cursor % 8);
+    }
+    let new_shoff = cursor;
+    let kept_count: usize = (0..shnum).filter(|&i| keep[i]).count();
+    let total = new_shoff + kept_count * shentsize_new;
+    let mut out = vec![0u8; total];
+
+    let mut newidx: Vec<u32> = vec![0; shnum];
+    let mut k = 0u32;
+    for i in 0..shnum {
+        if keep[i] {
+            newidx[i] = k;
+            k += 1;
+        }
+    }
+
+    out[0..4].copy_from_slice(b"\x7fELF");
+    out[4] = 2; // ELFCLASS64
+    out[5] = endian;
+    out[6] = 1;
+    out[7] = data[7];
+    out[8] = data[8];
+    let put_u16 = |o: &mut [u8], pos: usize, v: u16| {
+        let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        o[pos..pos + 2].copy_from_slice(&b);
+    };
+    let put_u32 = |o: &mut [u8], pos: usize, v: u32| {
+        let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        o[pos..pos + 4].copy_from_slice(&b);
+    };
+    let put_u64 = |o: &mut [u8], pos: usize, v: u64| {
+        let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        o[pos..pos + 8].copy_from_slice(&b);
+    };
+    let e_type = r16(data, 0x10);
+    put_u16(&mut out, 0x10, e_type);
+    put_u16(&mut out, 0x12, r16(data, 0x12)); // machine
+    put_u32(&mut out, 0x14, 1); // e_version
+    put_u64(&mut out, 0x18, r32(data, 0x18) as u64); // e_entry
+    put_u64(&mut out, 0x20, 0); // phoff
+    put_u64(&mut out, 0x28, new_shoff as u64);
+    put_u32(&mut out, 0x30, r32(data, 0x24)); // e_flags (offset 0x24 in ELF32)
+    put_u16(&mut out, 0x34, ehdr_size as u16);
+    put_u16(&mut out, 0x36, 0);
+    put_u16(&mut out, 0x38, 0);
+    put_u16(&mut out, 0x3a, shentsize_new as u16);
+    put_u16(&mut out, 0x3c, kept_count as u16);
+    put_u16(&mut out, 0x3e, newidx[shstrndx] as u16);
+
+    for (off, body) in &data_chunks {
+        out[*off..*off + body.len()].copy_from_slice(body);
+    }
+
+    let mut sh_pos = new_shoff;
+    for i in 0..shnum {
+        if !keep[i] {
+            continue;
+        }
+        let h = &headers[i];
+        let new_link = if (h.sh_link as usize) < shnum && keep[h.sh_link as usize] {
+            newidx[h.sh_link as usize]
+        } else {
+            0
+        };
+        let new_info = if (h.sh_type == 9 || h.sh_type == 4) && (h.sh_info as usize) < shnum {
+            if keep[h.sh_info as usize] {
+                newidx[h.sh_info as usize]
+            } else {
+                0
+            }
+        } else {
+            h.sh_info
+        };
+        let new_entsize = if h.sh_type == 2 || h.sh_type == 11 {
+            24u64
+        } else if h.sh_type == 4 {
+            24u64
+        } else if h.sh_type == 9 {
+            16u64
+        } else {
+            h.sh_entsize as u64
+        };
+        put_u32(&mut out, sh_pos, new_name_off[i]);
+        put_u32(&mut out, sh_pos + 4, h.sh_type);
+        put_u64(&mut out, sh_pos + 8, h.sh_flags as u64);
+        put_u64(&mut out, sh_pos + 16, h.sh_addr as u64);
+        put_u64(&mut out, sh_pos + 24, new_offsets[i]);
+        put_u64(&mut out, sh_pos + 32, new_sizes[i]);
+        put_u32(&mut out, sh_pos + 40, new_link);
+        put_u32(&mut out, sh_pos + 44, new_info);
+        put_u64(&mut out, sh_pos + 48, h.sh_addralign as u64);
+        put_u64(&mut out, sh_pos + 56, new_entsize);
+        sh_pos += shentsize_new;
+    }
+
+    Ok(out)
+}
+
+/// Merge `.note.gnu.property` entries in an ELF32 file in place; layout
+/// is preserved (the section's body is shrunk to the merged size and any
+/// trailing space inside the original `sh_size` becomes unreferenced
+/// padding).
+fn objcopy_x32_merge_notes_inplace(
+    data: &[u8],
+    _remove_sections: &[String],
+) -> Result<Vec<u8>, String> {
+    let endian = data[5];
+    let le = endian == 1;
+    let r16 = |buf: &[u8], o: usize| -> u16 {
+        let mut b = [0u8; 2];
+        b.copy_from_slice(&buf[o..o + 2]);
+        if le { u16::from_le_bytes(b) } else { u16::from_be_bytes(b) }
+    };
+    let r32 = |buf: &[u8], o: usize| -> u32 {
+        let mut b = [0u8; 4];
+        b.copy_from_slice(&buf[o..o + 4]);
+        if le { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) }
+    };
+    let shoff = r32(data, 0x20) as usize;
+    let shentsize = r16(data, 0x2e) as usize;
+    let shnum = r16(data, 0x30) as usize;
+    if shoff == 0 || shnum == 0 || shentsize != 40 {
+        return Err("invalid ELF32".into());
+    }
+    if shoff + shnum * shentsize > data.len() {
+        return Err("section table out of range".into());
+    }
+    let shstrndx = r16(data, 0x32) as usize;
+    if shstrndx >= shnum {
+        return Err("invalid shstrndx".into());
+    }
+    let shstr_h = shoff + shstrndx * shentsize;
+    let shstr_off = r32(data, shstr_h + 16) as usize;
+    let shstr_size = r32(data, shstr_h + 20) as usize;
+    if shstr_off + shstr_size > data.len() {
+        return Err("shstrtab out of range".into());
+    }
+    let strtab = &data[shstr_off..shstr_off + shstr_size];
+    let name_at = |off: u32| -> &str {
+        let o = off as usize;
+        if o >= strtab.len() {
+            return "";
+        }
+        let mut e = o;
+        while e < strtab.len() && strtab[e] != 0 {
+            e += 1;
+        }
+        std::str::from_utf8(&strtab[o..e]).unwrap_or("")
+    };
+
+    // Find .note.gnu.property.
+    let mut prop_idx: Option<usize> = None;
+    for i in 1..shnum {
+        let h = shoff + i * shentsize;
+        let nm_off = r32(data, h);
+        let sh_type = r32(data, h + 4);
+        if sh_type == 7 && name_at(nm_off) == ".note.gnu.property" {
+            prop_idx = Some(i);
+            break;
+        }
+    }
+    let pi = match prop_idx {
+        Some(i) => i,
+        None => return Ok(data.to_vec()),
+    };
+    let h = shoff + pi * shentsize;
+    let off = r32(data, h + 16) as usize;
+    let size = r32(data, h + 20) as usize;
+    if off + size > data.len() {
+        return Ok(data.to_vec());
+    }
+    // Walk notes (ELF32 alignment = 4-byte for both name and descriptor).
+    let bytes = &data[off..off + size];
+    use std::collections::BTreeMap;
+    let mut props: BTreeMap<u32, Vec<u8>> = BTreeMap::new();
+    let mut p = 0;
+    while p + 12 <= bytes.len() {
+        let namesz =
+            u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
+        let descsz =
+            u32::from_le_bytes(bytes[p + 4..p + 8].try_into().unwrap()) as usize;
+        let ntype =
+            u32::from_le_bytes(bytes[p + 8..p + 12].try_into().unwrap());
+        p += 12;
+        if p + namesz > bytes.len() {
+            break;
+        }
+        let name = std::str::from_utf8(&bytes[p..p + namesz.saturating_sub(1)])
+            .unwrap_or("");
+        p += namesz;
+        p = (p + 3) & !3; // ELF32 name padding
+        if p + descsz > bytes.len() {
+            break;
+        }
+        let desc = &bytes[p..p + descsz];
+        if ntype == 5 && name == "GNU" {
+            let mut q = 0;
+            while q + 8 <= desc.len() {
+                let pr_type =
+                    u32::from_le_bytes(desc[q..q + 4].try_into().unwrap());
+                let pr_datasz =
+                    u32::from_le_bytes(desc[q + 4..q + 8].try_into().unwrap()) as usize;
+                q += 8;
+                if q + pr_datasz > desc.len() {
+                    break;
+                }
+                let pr_data = &desc[q..q + pr_datasz];
+                let entry = props.entry(pr_type).or_insert_with(Vec::new);
+                if entry.is_empty() {
+                    *entry = pr_data.to_vec();
+                } else if pr_type == 0xc0000002
+                    || pr_type == 0xc0010001
+                    || pr_type == 0xc0010002
+                    || pr_type == 0xc0008002
+                {
+                    if entry.len() >= 4 && pr_data.len() >= 4 {
+                        let a = u32::from_le_bytes(entry[0..4].try_into().unwrap());
+                        let b = u32::from_le_bytes(pr_data[0..4].try_into().unwrap());
+                        let v = a | b;
+                        entry[0..4].copy_from_slice(&v.to_le_bytes());
+                    }
+                } else if pr_type == 1 {
+                    if entry.len() >= 4 && pr_data.len() >= 4 {
+                        let a = u32::from_le_bytes(entry[0..4].try_into().unwrap());
+                        let b = u32::from_le_bytes(pr_data[0..4].try_into().unwrap());
+                        let v = a.max(b);
+                        entry[0..4].copy_from_slice(&v.to_le_bytes());
+                    }
+                }
+                q += pr_datasz;
+                q = (q + 3) & !3; // ELF32 property padding
+            }
+        }
+        p += descsz;
+        p = (p + 3) & !3;
+    }
+    // If only one note already, no need to rewrite.
+    if props.is_empty() {
+        return Ok(data.to_vec());
+    }
+    // Build merged note.
+    let mut desc_out: Vec<u8> = Vec::new();
+    for (pr_type, pr_data) in &props {
+        desc_out.extend_from_slice(&pr_type.to_le_bytes());
+        desc_out.extend_from_slice(&(pr_data.len() as u32).to_le_bytes());
+        desc_out.extend_from_slice(pr_data);
+        while desc_out.len() % 4 != 0 {
+            desc_out.push(0);
+        }
+    }
+    let mut note_out: Vec<u8> = Vec::new();
+    note_out.extend_from_slice(&4u32.to_le_bytes());
+    note_out.extend_from_slice(&(desc_out.len() as u32).to_le_bytes());
+    note_out.extend_from_slice(&5u32.to_le_bytes());
+    note_out.extend_from_slice(b"GNU\0");
+    note_out.extend_from_slice(&desc_out);
+    if note_out.len() > size {
+        return Err(format!(
+            "merged note ({}) larger than original section ({})",
+            note_out.len(),
+            size
+        ));
+    }
+    let mut out = data.to_vec();
+    // Zero out the original note region, then copy in the merged note.
+    for k in off..off + size {
+        out[k] = 0;
+    }
+    out[off..off + note_out.len()].copy_from_slice(&note_out);
+    // Patch sh_size to the new merged size.
+    let put_u32 = |o: &mut [u8], pos: usize, v: u32| {
+        let bytes = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        o[pos..pos + 4].copy_from_slice(&bytes);
+    };
+    put_u32(&mut out, h + 20, note_out.len() as u32);
+    Ok(out)
+}
+
+/// Convert ELF64 x86-64 input to ELF32 x86-64 (x32 ABI). Handles the
+/// minimum needed for `objcopy -O elf32-x86-64` to round-trip notes:
+/// rebuilds ELF/section headers in ELF32 format and merges the per-CU
+/// `.note.gnu.property` entries into a single 4-byte aligned property
+/// note. Other sections are copied verbatim.
+fn objcopy_to_x32(data: &[u8], remove_sections: &[String]) -> Result<Vec<u8>, String> {
+    let class = data[4];
+    if class == 1 {
+        // ELF32 input → ELF32 output: just merge .note.gnu.property notes.
+        return objcopy_x32_merge_notes_inplace(data, remove_sections);
+    }
+    let endian = data[5];
+    let le = endian == 1;
+    let r16 = |o: usize| -> u16 {
+        let mut b = [0u8; 2];
+        b.copy_from_slice(&data[o..o + 2]);
+        if le { u16::from_le_bytes(b) } else { u16::from_be_bytes(b) }
+    };
+    let r32 = |o: usize| -> u32 {
+        let mut b = [0u8; 4];
+        b.copy_from_slice(&data[o..o + 4]);
+        if le { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) }
+    };
+    let r64 = |o: usize| -> u64 {
+        let mut b = [0u8; 8];
+        b.copy_from_slice(&data[o..o + 8]);
+        if le { u64::from_le_bytes(b) } else { u64::from_be_bytes(b) }
+    };
+
+    let shoff = r64(0x28) as usize;
+    let shentsize = r16(0x3a) as usize;
+    let shnum = r16(0x3c) as usize;
+    let shstrndx = r16(0x3e) as usize;
+    if shoff == 0 || shnum == 0 || shentsize != 64 || shstrndx >= shnum {
+        return Err("invalid ELF64".into());
+    }
+    if shoff + shnum * shentsize > data.len() {
+        return Err("section table out of range".into());
+    }
+
+    // Read each ELF64 section header.
+    #[derive(Clone)]
+    struct Shdr {
+        name: u32,
+        sh_type: u32,
+        sh_flags: u64,
+        sh_addr: u64,
+        sh_offset: u64,
+        sh_size: u64,
+        sh_link: u32,
+        sh_info: u32,
+        sh_addralign: u64,
+        sh_entsize: u64,
+    }
+    let mut headers: Vec<Shdr> = Vec::with_capacity(shnum);
+    for i in 0..shnum {
+        let h = shoff + i * shentsize;
+        headers.push(Shdr {
+            name: r32(h),
+            sh_type: r32(h + 4),
+            sh_flags: r64(h + 8),
+            sh_addr: r64(h + 16),
+            sh_offset: r64(h + 24),
+            sh_size: r64(h + 32),
+            sh_link: r32(h + 40),
+            sh_info: r32(h + 44),
+            sh_addralign: r64(h + 48),
+            sh_entsize: r64(h + 56),
+        });
+    }
+
+    // Read shstrtab content.
+    let shstr_off = headers[shstrndx].sh_offset as usize;
+    let shstr_size = headers[shstrndx].sh_size as usize;
+    if shstr_off + shstr_size > data.len() {
+        return Err("shstrtab out of range".into());
+    }
+    let strtab = &data[shstr_off..shstr_off + shstr_size];
+    let name_of = |off: u32| -> &str {
+        let o = off as usize;
+        if o >= strtab.len() {
+            return "";
+        }
+        let mut e = o;
+        while e < strtab.len() && strtab[e] != 0 {
+            e += 1;
+        }
+        std::str::from_utf8(&strtab[o..e]).unwrap_or("")
+    };
+
+    // Find .note.gnu.property and merge property entries from all GNU notes.
+    let mut merged_note_data: Option<Vec<u8>> = None;
+    for h in &headers {
+        if h.sh_type != 7 || name_of(h.name) != ".note.gnu.property" {
+            continue;
+        }
+        let off = h.sh_offset as usize;
+        let size = h.sh_size as usize;
+        if off + size > data.len() {
+            continue;
+        }
+        let bytes = &data[off..off + size];
+        // Walk notes, collect properties: pr_type → ORed value (u64) when
+        // numeric, plus an "is_set" marker. STACK_SIZE collapses to address-
+        // sized; for x32 the data is 4 bytes.
+        use std::collections::BTreeMap;
+        let mut props: BTreeMap<u32, Vec<u8>> = BTreeMap::new();
+        let mut p = 0;
+        while p + 12 <= bytes.len() {
+            let namesz = u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
+            let descsz = u32::from_le_bytes(bytes[p + 4..p + 8].try_into().unwrap()) as usize;
+            let ntype = u32::from_le_bytes(bytes[p + 8..p + 12].try_into().unwrap());
+            p += 12;
+            if p + namesz > bytes.len() {
+                break;
+            }
+            let name = std::str::from_utf8(&bytes[p..p + namesz.saturating_sub(1)])
+                .unwrap_or("");
+            p += namesz;
+            p = (p + 7) & !7; // ELF64 name padding
+            if p + descsz > bytes.len() {
+                break;
+            }
+            let desc = &bytes[p..p + descsz];
+            if ntype == 5 && name == "GNU" {
+                // Walk property entries; ELF64 alignment is 8.
+                let mut q = 0;
+                while q + 8 <= desc.len() {
+                    let pr_type =
+                        u32::from_le_bytes(desc[q..q + 4].try_into().unwrap());
+                    let pr_datasz =
+                        u32::from_le_bytes(desc[q + 4..q + 8].try_into().unwrap()) as usize;
+                    q += 8;
+                    if q + pr_datasz > desc.len() {
+                        break;
+                    }
+                    let pr_data = &desc[q..q + pr_datasz];
+                    // Translate STACK_SIZE: ELF64 uses 8-byte address; for
+                    // x32 the address is 4 bytes (truncate).
+                    let translated = if pr_type == 1 && pr_datasz == 8 {
+                        pr_data[..4].to_vec()
+                    } else {
+                        pr_data.to_vec()
+                    };
+                    let entry = props.entry(pr_type).or_insert_with(Vec::new);
+                    if entry.is_empty() {
+                        *entry = translated;
+                    } else if pr_type == 0xc0000002
+                        || pr_type == 0xc0010001
+                        || pr_type == 0xc0010002
+                        || pr_type == 0xc0008002
+                    {
+                        // OR the u32 value bits.
+                        if entry.len() >= 4 && translated.len() >= 4 {
+                            let a = u32::from_le_bytes(entry[0..4].try_into().unwrap());
+                            let b = u32::from_le_bytes(translated[0..4].try_into().unwrap());
+                            let v = a | b;
+                            entry[0..4].copy_from_slice(&v.to_le_bytes());
+                        }
+                    } else if pr_type == 1 {
+                        // STACK_SIZE: keep maximum.
+                        if entry.len() >= 4 && translated.len() >= 4 {
+                            let a = u32::from_le_bytes(entry[0..4].try_into().unwrap());
+                            let b = u32::from_le_bytes(translated[0..4].try_into().unwrap());
+                            let v = a.max(b);
+                            entry[0..4].copy_from_slice(&v.to_le_bytes());
+                        }
+                    }
+                    q += pr_datasz;
+                    q = (q + 7) & !7; // ELF64 property padding
+                }
+            }
+            p += descsz;
+            p = (p + 7) & !7;
+        }
+        // Re-serialize: 4-byte aligned for x32 (ELF32).
+        let mut desc_out: Vec<u8> = Vec::new();
+        for (pr_type, pr_data) in &props {
+            desc_out.extend_from_slice(&pr_type.to_le_bytes());
+            desc_out.extend_from_slice(&(pr_data.len() as u32).to_le_bytes());
+            desc_out.extend_from_slice(pr_data);
+            while desc_out.len() % 4 != 0 {
+                desc_out.push(0);
+            }
+        }
+        // Build the full note: namesz=4, descsz=desc_out.len(), type=5,
+        // name="GNU\0", padding to 4, descriptor.
+        let mut note_out: Vec<u8> = Vec::new();
+        note_out.extend_from_slice(&4u32.to_le_bytes());
+        note_out.extend_from_slice(&(desc_out.len() as u32).to_le_bytes());
+        note_out.extend_from_slice(&5u32.to_le_bytes());
+        note_out.extend_from_slice(b"GNU\0");
+        note_out.extend_from_slice(&desc_out);
+        merged_note_data = Some(note_out);
+        break;
+    }
+
+    // Decide which sections to keep. Always keep NULL[0] and .shstrtab; drop
+    // anything in remove_sections (only when remove_sections is non-empty —
+    // matches_selector_list returns true for *all* names against an empty
+    // pattern list).
+    let mut keep: Vec<bool> = vec![true; shnum];
+    if !remove_sections.is_empty() {
+        for i in 1..shnum {
+            let nm = name_of(headers[i].name);
+            if matches_selector_list(nm, remove_sections) {
+                keep[i] = false;
+            }
+        }
+    }
+
+    // Compute new section data and a fresh shstrtab.
+    let ehdr_size: usize = 52; // ELF32
+    let phoff: u32 = 0;
+    let shentsize_new: usize = 40; // ELF32
+    let mut new_shstrtab: Vec<u8> = vec![0u8];
+    let mut new_name_off: Vec<u32> = vec![0; shnum];
+    for i in 1..shnum {
+        if !keep[i] {
+            continue;
+        }
+        let nm = name_of(headers[i].name);
+        new_name_off[i] = new_shstrtab.len() as u32;
+        new_shstrtab.extend_from_slice(nm.as_bytes());
+        new_shstrtab.push(0);
+    }
+
+    // Lay out section data in the file.
+    let mut cursor: usize = ehdr_size;
+    let mut new_offsets: Vec<u32> = vec![0; shnum];
+    let mut new_sizes: Vec<u32> = vec![0; shnum];
+    let mut data_chunks: Vec<(usize, Vec<u8>)> = Vec::new(); // (offset, bytes)
+    for i in 1..shnum {
+        if !keep[i] {
+            continue;
+        }
+        let h = &headers[i];
+        let align = h.sh_addralign.max(1) as usize;
+        if cursor % align != 0 {
+            cursor += align - (cursor % align);
+        }
+        let nm = name_of(h.name);
+        if h.sh_type == 8 {
+            // NOBITS — no file data, but offset still recorded.
+            new_offsets[i] = cursor as u32;
+            new_sizes[i] = h.sh_size as u32;
+            continue;
+        }
+        let body: Vec<u8> = if nm == ".note.gnu.property"
+            && let Some(merged) = &merged_note_data
+        {
+            merged.clone()
+        } else if i == shstrndx {
+            new_shstrtab.clone()
+        } else if h.sh_type == 2 || h.sh_type == 11 {
+            // SHT_SYMTAB / SHT_DYNSYM — translate ELF64 (24 bytes) to ELF32
+            // (16 bytes): name(4) + value(4) + size(4) + info(1) + other(1)
+            // + shndx(2). ELF64 had: name(4) + info(1) + other(1) + shndx(2)
+            // + value(8) + size(8).
+            let off = h.sh_offset as usize;
+            let sz = h.sh_size as usize;
+            let entsize = h.sh_entsize.max(24) as usize;
+            if off + sz > data.len() || sz % entsize != 0 {
+                Vec::new()
+            } else {
+                let n = sz / entsize;
+                let mut out = Vec::with_capacity(n * 16);
+                for k in 0..n {
+                    let p = off + k * entsize;
+                    let st_name = r32(p);
+                    let st_info = data[p + 4];
+                    let st_other = data[p + 5];
+                    let st_shndx = r16(p + 6);
+                    let st_value = r64(p + 8) as u32;
+                    let st_size = r64(p + 16) as u32;
+                    out.extend_from_slice(&st_name.to_le_bytes());
+                    out.extend_from_slice(&st_value.to_le_bytes());
+                    out.extend_from_slice(&st_size.to_le_bytes());
+                    out.push(st_info);
+                    out.push(st_other);
+                    out.extend_from_slice(&st_shndx.to_le_bytes());
+                }
+                out
+            }
+        } else if h.sh_type == 4 {
+            // SHT_RELA — translate 24-byte ELF64 entries to 12-byte ELF32.
+            let off = h.sh_offset as usize;
+            let sz = h.sh_size as usize;
+            let entsize = h.sh_entsize.max(24) as usize;
+            if off + sz > data.len() || sz % entsize != 0 {
+                Vec::new()
+            } else {
+                let n = sz / entsize;
+                let mut out = Vec::with_capacity(n * 12);
+                for k in 0..n {
+                    let p = off + k * entsize;
+                    let r_offset = r64(p) as u32;
+                    let r_info = r64(p + 8);
+                    let sym = (r_info >> 32) as u32;
+                    let rtype = (r_info & 0xff) as u32;
+                    let r_info32 = (sym << 8) | rtype;
+                    let r_addend = r64(p + 16) as u32;
+                    out.extend_from_slice(&r_offset.to_le_bytes());
+                    out.extend_from_slice(&r_info32.to_le_bytes());
+                    out.extend_from_slice(&r_addend.to_le_bytes());
+                }
+                out
+            }
+        } else if h.sh_type == 9 {
+            // SHT_REL — translate 16-byte ELF64 entries to 8-byte ELF32.
+            let off = h.sh_offset as usize;
+            let sz = h.sh_size as usize;
+            let entsize = h.sh_entsize.max(16) as usize;
+            if off + sz > data.len() || sz % entsize != 0 {
+                Vec::new()
+            } else {
+                let n = sz / entsize;
+                let mut out = Vec::with_capacity(n * 8);
+                for k in 0..n {
+                    let p = off + k * entsize;
+                    let r_offset = r64(p) as u32;
+                    let r_info = r64(p + 8);
+                    let sym = (r_info >> 32) as u32;
+                    let rtype = (r_info & 0xff) as u32;
+                    let r_info32 = (sym << 8) | rtype;
+                    out.extend_from_slice(&r_offset.to_le_bytes());
+                    out.extend_from_slice(&r_info32.to_le_bytes());
+                }
+                out
+            }
+        } else {
+            let off = h.sh_offset as usize;
+            let sz = h.sh_size as usize;
+            if off + sz > data.len() {
+                Vec::new()
+            } else if (h.sh_flags & 0x800) != 0 && sz >= 24 {
+                // SHF_COMPRESSED: translate ELF64 Chdr (24 bytes:
+                // ch_type/ch_reserved/ch_size/ch_addralign) to ELF32 Chdr
+                // (12 bytes: ch_type/ch_size/ch_addralign).
+                let ch_type = r32(off);
+                let ch_size = r64(off + 8) as u32;
+                let ch_addralign = r64(off + 16) as u32;
+                let mut out = Vec::with_capacity(12 + (sz - 24));
+                out.extend_from_slice(&ch_type.to_le_bytes());
+                out.extend_from_slice(&ch_size.to_le_bytes());
+                out.extend_from_slice(&ch_addralign.to_le_bytes());
+                out.extend_from_slice(&data[off + 24..off + sz]);
+                out
+            } else {
+                data[off..off + sz].to_vec()
+            }
+        };
+        new_offsets[i] = cursor as u32;
+        new_sizes[i] = body.len() as u32;
+        data_chunks.push((cursor, body));
+        cursor += new_sizes[i] as usize;
+    }
+    // Section header table at the end, aligned to 4.
+    if cursor % 4 != 0 {
+        cursor += 4 - (cursor % 4);
+    }
+    let new_shoff = cursor;
+
+    // Build the output buffer.
+    let kept_count: usize = (0..shnum).filter(|&i| keep[i]).count();
+    let total = new_shoff + kept_count * shentsize_new;
+    let mut out = vec![0u8; total];
+
+    // ELF32 header.
+    out[0..4].copy_from_slice(b"\x7fELF");
+    out[4] = 1; // EI_CLASS = ELFCLASS32
+    out[5] = endian;
+    out[6] = 1; // EI_VERSION
+    out[7] = data[7]; // OSABI
+    out[8] = data[8]; // ABIVERSION
+    // EI_PAD: zero
+    let e_type = r16(0x10);
+    let e_machine = r16(0x12);
+    let e_version: u32 = 1;
+    let e_entry: u32 = r64(0x18) as u32;
+    let put_u16 = |o: &mut [u8], pos: usize, v: u16| {
+        let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        o[pos..pos + 2].copy_from_slice(&b);
+    };
+    let put_u32 = |o: &mut [u8], pos: usize, v: u32| {
+        let b = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        o[pos..pos + 4].copy_from_slice(&b);
+    };
+    put_u16(&mut out, 0x10, e_type);
+    put_u16(&mut out, 0x12, e_machine);
+    put_u32(&mut out, 0x14, e_version);
+    put_u32(&mut out, 0x18, e_entry);
+    put_u32(&mut out, 0x1c, phoff);
+    put_u32(&mut out, 0x20, new_shoff as u32);
+    put_u32(&mut out, 0x24, r32(0x30)); // e_flags from ELF64 (offset 0x30)
+    put_u16(&mut out, 0x28, ehdr_size as u16);
+    put_u16(&mut out, 0x2a, 0); // e_phentsize
+    put_u16(&mut out, 0x2c, 0); // e_phnum
+    put_u16(&mut out, 0x2e, shentsize_new as u16);
+    put_u16(&mut out, 0x30, kept_count as u16);
+    // e_shstrndx in the new layout (renumbered).
+    let mut newidx: Vec<u32> = vec![0; shnum];
+    let mut k = 0u32;
+    for i in 0..shnum {
+        if keep[i] {
+            newidx[i] = k;
+            k += 1;
+        }
+    }
+    put_u16(&mut out, 0x32, newidx[shstrndx] as u16);
+
+    // Copy section data.
+    for (off, body) in &data_chunks {
+        out[*off..*off + body.len()].copy_from_slice(body);
+    }
+
+    // Write section headers.
+    let mut sh_pos = new_shoff;
+    for i in 0..shnum {
+        if !keep[i] {
+            continue;
+        }
+        let h = &headers[i];
+        // Renumber sh_link/sh_info that reference removed sections.
+        let new_link = if (h.sh_link as usize) < shnum && keep[h.sh_link as usize] {
+            newidx[h.sh_link as usize]
+        } else {
+            0
+        };
+        let new_info = if (h.sh_type == 9 || h.sh_type == 4) && (h.sh_info as usize) < shnum {
+            if keep[h.sh_info as usize] {
+                newidx[h.sh_info as usize]
+            } else {
+                0
+            }
+        } else {
+            h.sh_info
+        };
+        // For symtab, sh_entsize differs (24 for ELF64, 16 for ELF32).
+        let new_entsize = if h.sh_type == 2 || h.sh_type == 11 {
+            16u32
+        } else if h.sh_type == 4 {
+            12u32 // SHT_RELA in ELF32
+        } else if h.sh_type == 9 {
+            8u32 // SHT_REL in ELF32
+        } else {
+            h.sh_entsize as u32
+        };
+        put_u32(&mut out, sh_pos, new_name_off[i]);
+        put_u32(&mut out, sh_pos + 4, h.sh_type);
+        put_u32(&mut out, sh_pos + 8, h.sh_flags as u32);
+        put_u32(&mut out, sh_pos + 12, h.sh_addr as u32);
+        put_u32(&mut out, sh_pos + 16, new_offsets[i]);
+        put_u32(&mut out, sh_pos + 20, new_sizes[i]);
+        put_u32(&mut out, sh_pos + 24, new_link);
+        put_u32(&mut out, sh_pos + 28, new_info);
+        put_u32(&mut out, sh_pos + 32, h.sh_addralign as u32);
+        put_u32(&mut out, sh_pos + 36, new_entsize);
+        sh_pos += shentsize_new;
+    }
+
+    Ok(out)
 }
 
 /// Read raw section data by name from an ELF file. Returns the section's

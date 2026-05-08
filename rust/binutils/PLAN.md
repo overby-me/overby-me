@@ -82,8 +82,8 @@ Key design decisions:
 | addr2line.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
 | update-section.exp | **6** | 0 | 6 | minPass=6, maxFail=0 |
 | elfedit.exp | **6** | 0 | 6 | minPass=6, maxFail=0 |
-| x86-64/x86-64.exp | **25** | 10 | 35 | (informational; only the binutils-all-x86-64 subset is enabled) |
-| **Total** | **311** | **10** | **321** | |
+| x86-64/x86-64.exp | **33** | 2 | 35 | (informational; only the binutils-all-x86-64 subset is enabled) |
+| **Total** | **319** | **2** | **321** | |
 
 All upstream DejaGnu tests pass.
 
@@ -247,6 +247,7 @@ Two layers of testing:
   - Final trailing blank line emitted at end of `.debug_info` dump (matches GNU readelf's section-trailer convention).
   - objcopy now rejects `--set-section-flags X=...,large,...` when output target is non-x86-64 ELF (e.g. `-O elf32-i386`) with "objcopy: <input>[<section>]: 'large' flag is ELF x86-64 specific" — fixes `large-sections-i386`.
 - [x] Add `--sframe[=NAME]` SFrame v2/v3 header dump for both readelf and objdump (+2 dejagnu, 309→311 total): parses the SFrame preamble (magic 0xdee2 + version + flags), abi_arch, cfa_fixed_ra_offset, num_fdes, num_fres; emits `Contents of the SFrame section <name>:` + `Header:` block with `SFRAME_VERSION_<N>`, `SFRAME_F_FDE_SORTED`/`SFRAME_F_FRAME_POINTER`/`SFRAME_F_FDE_FUNC_START_PCREL` flag names, and per-field lines. Fixes `objdump dump SFrame section .sframe2` and `readelf dump SFrame section .sframe2`.
+- [x] objcopy `-O elf32-x86-64` (x32 ABI) and `-O elf64-x86-64` (x32→ELF64) conversions with `.note.gnu.property` merging (+8 dejagnu, 311→319 total): translates ELF64↔ELF32 section headers, symtab entries (16↔24 bytes), RELA entries (12↔24 bytes), REL entries (8↔16 bytes), and SHF_COMPRESSED Chdr (12↔24 bytes); merges per-CU GNU property notes by ORing flag values for the same `pr_type` and re-aligning to the target ABI's property alignment (8 for ELF64, 4 for ELF32). Fixes `binutils-all/x86-64/pr23494a/c/d/e` and their `-x32` variants.
 
 ## Next steps
 
