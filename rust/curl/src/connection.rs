@@ -429,14 +429,14 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
             }
         }
 
-        if status_code != 200 {
+        if !(200..300).contains(&status_code) {
             // Stash the failing CONNECT response — main.rs reads it for
             // stdout output and `%{http_connect}` substitution (217, 287).
             CONNECT_RESP.with(|r| *r.borrow_mut() = Some((status_code, response_bytes.clone())));
             return Err(format!("CONNECT tunnel failed, response {status_code}"));
         }
-        // CONNECT 200 — record the status so `%{http_connect}` reflects it
-        // even on a successful tunnel.
+        // CONNECT 2xx — record the status so `%{http_connect}` reflects it
+        // even on a successful tunnel (test 1904 uses 204).
         CONNECT_RESP.with(|r| *r.borrow_mut() = Some((status_code, response_bytes.clone())));
 
         connect_headers = response_bytes;
