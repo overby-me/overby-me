@@ -310,6 +310,42 @@ fn main() {
             let fpath = String::from_utf8_lossy(&decoded).into_owned();
             match fs::read(&fpath) {
                 Ok(content) => {
+                    // -C / --continue-at: skip the leading N bytes of the
+                    // file before output (test 231).
+                    let skip: usize = opts
+                        .resume_from
+                        .as_deref()
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+                    let mut start = skip;
+                    let mut end = content.len();
+                    // -r / --range on file://: forms `N-`, `-N`, `N-M`, `N`
+                    // (tests 1019, 1020).
+                    if let Some(ref r) = opts.range {
+                        if let Some(rest) = r.strip_prefix('-') {
+                            // last N bytes
+                            if let Ok(n) = rest.parse::<usize>() {
+                                start = content.len().saturating_sub(n);
+                                end = content.len();
+                            }
+                        } else if let Some((s, e)) = r.split_once('-') {
+                            if let Ok(s_n) = s.parse::<usize>() {
+                                start = s_n;
+                            }
+                            if !e.is_empty()
+                                && let Ok(e_n) = e.parse::<usize>()
+                            {
+                                end = (e_n + 1).min(content.len());
+                            }
+                        } else if let Ok(n) = r.parse::<usize>() {
+                            start = n;
+                        }
+                    }
+                    let slice: &[u8] = if start < end && start < content.len() {
+                        &content[start..end.min(content.len())]
+                    } else {
+                        &[]
+                    };
                     let body_path = opts.outputs.get(url_idx).cloned();
                     if let Some(out_path) = body_path
                         && out_path.to_str() != Some("-")
@@ -320,7 +356,7 @@ fn main() {
                         {
                             let _ = fs::create_dir_all(parent);
                         }
-                        if let Err(e) = fs::write(&out_path, &content) {
+                        if let Err(e) = fs::write(&out_path, slice) {
                             eprintln!(
                                 "curl: failed to write to {}: {e}",
                                 out_path.display()
@@ -328,7 +364,7 @@ fn main() {
                             exit_code = 23;
                         }
                     } else {
-                        let _ = io::stdout().write_all(&content);
+                        let _ = io::stdout().write_all(slice);
                         let _ = io::stdout().flush();
                     }
                 }
