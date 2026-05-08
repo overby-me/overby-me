@@ -3124,6 +3124,28 @@ impl Lexer {
             }
         }
 
+        // Reference perl rejects an empty-tag heredoc (`<<""`)
+        // immediately followed (on the same line) by a digit — the
+        // resulting `<<""0` shape ends with a number where an
+        // operator is expected. Emit "Number found where operator
+        // expected" so op/heredoc test 40 matches byte-for-byte.
+        if tag.is_empty() && self.error.is_none() && self.ch().is_ascii_digit() {
+            // Capture only the digits for the diagnostic's "near"
+            // hint, mirroring reference perl's output.
+            let mut near: String = String::new();
+            near.push_str("<<\"\"");
+            while self.pos + near.len() - 4 < self.input.len()
+                && self.input[self.pos + near.len() - 4].is_ascii_digit()
+            {
+                near.push(self.input[self.pos + near.len() - 4]);
+            }
+            self.error = Some(format!(
+                "Number found where operator expected (Missing operator before \"{}\"?) at {{FILE}} line {}, near \"{near}\"\nsyntax error at {{FILE}} line {}, near \"{near}\"\nExecution of {{FILE}} aborted due to compilation errors.\n",
+                self.ch(),
+                self.current_line,
+                self.current_line,
+            ));
+        }
         self.pending_heredocs.push(PendingHeredoc {
             tag,
             indent,
