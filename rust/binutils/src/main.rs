@@ -1390,7 +1390,7 @@ fn tool_nm(args: &[String]) -> i32 {
                     _ => opts.format = NmFormat::Bsd,
                 }
             }
-            "--format" => {
+            "--format" | "-f" => {
                 i += 1;
                 if i < args.len() {
                     match args[i].as_str() {
@@ -1398,6 +1398,14 @@ fn tool_nm(args: &[String]) -> i32 {
                         "sysv" => opts.format = NmFormat::Sysv,
                         _ => opts.format = NmFormat::Bsd,
                     }
+                }
+            }
+            _ if arg.starts_with("-f") && arg.len() > 2 => {
+                // -fposix, -fsysv, -fbsd (no separator)
+                match &arg[2..] {
+                    "posix" => opts.format = NmFormat::Posix,
+                    "sysv" => opts.format = NmFormat::Sysv,
+                    _ => opts.format = NmFormat::Bsd,
                 }
             }
             _ if arg.starts_with("--ifunc-chars=") => {
@@ -2304,6 +2312,7 @@ fn tool_strings(args: &[String]) -> i32 {
     let mut min_len: usize = 4;
     let mut offset_format: Option<char> = None;
     let mut encoding: Option<char> = None; // s=single-byte, S=single+multibyte, b=big-endian 16, l=little-endian 16, B=big-endian 32, L=little-endian 32
+    let mut print_filename = false;
     let mut files: Vec<String> = Vec::new();
 
     let mut i = 0;
@@ -2311,6 +2320,7 @@ fn tool_strings(args: &[String]) -> i32 {
         let arg = &args[i];
         match arg.as_str() {
             "-a" | "--all" | "-" => {} // scan all is default
+            "-f" | "--print-file-name" => print_filename = true,
             "-n" | "--bytes" => {
                 i += 1;
                 if i < args.len() {
@@ -2350,22 +2360,65 @@ fn tool_strings(args: &[String]) -> i32 {
             _ if !arg.starts_with('-') => {
                 files.push(arg.clone());
             }
+            _ if arg.starts_with('-') && !arg.starts_with("--") && arg.len() > 1 => {
+                // Bundled short options: -af, -fn5, etc. Process each char.
+                let chars: Vec<char> = arg[1..].chars().collect();
+                let mut j = 0;
+                while j < chars.len() {
+                    let c = chars[j];
+                    match c {
+                        'a' => {}
+                        'f' => print_filename = true,
+                        'n' => {
+                            // -nN or -n N (rest of arg or next arg)
+                            let rest: String = chars[j + 1..].iter().collect();
+                            if !rest.is_empty() {
+                                min_len = rest.parse().unwrap_or(4);
+                                j = chars.len();
+                                break;
+                            } else if i + 1 < args.len() {
+                                min_len = args[i + 1].parse().unwrap_or(4);
+                                i += 1;
+                            }
+                        }
+                        't' => {
+                            offset_format = chars.get(j + 1).copied();
+                            j = chars.len();
+                            break;
+                        }
+                        'e' => {
+                            encoding = chars.get(j + 1).copied();
+                            j = chars.len();
+                            break;
+                        }
+                        _ => {}
+                    }
+                    j += 1;
+                }
+            }
             _ => {}
         }
         i += 1;
     }
 
-    let scan_fn = |data: &[u8]| match encoding {
-        Some('l') => strings_scan_utf16(data, min_len, offset_format, false),
-        Some('b') | Some('B') => strings_scan_utf16(data, min_len, offset_format, true),
-        _ => strings_scan(data, min_len, offset_format),
+    let scan_fn = |data: &[u8], prefix: Option<&str>| match encoding {
+        Some('l') => strings_scan_utf16(data, min_len, offset_format, false, prefix),
+        Some('b') | Some('B') => strings_scan_utf16(data, min_len, offset_format, true, prefix),
+        _ => strings_scan(data, min_len, offset_format, prefix),
     };
 
     if files.is_empty() {
         // Read from stdin
         let mut data = Vec::new();
         let _ = io::stdin().lock().read_to_end(&mut data);
-        scan_fn(&data);
+        scan_fn(
+            &data,
+            if print_filename {
+                Some("{standard input}")
+            } else {
+                None
+            },
+        );
         return 0;
     }
 
@@ -2379,17 +2432,45 @@ fn tool_strings(args: &[String]) -> i32 {
                 continue;
             }
         };
-        scan_fn(&data);
+        scan_fn(&data, if print_filename { Some(file) } else { None });
     }
 
     if errors > 0 { 1 } else { 0 }
 }
 
-fn strings_scan_utf16(data: &[u8], min_len: usize, offset_format: Option<char>, big_endian: bool) {
+fn strings_scan_utf16(
+    data: &[u8],
+    min_len: usize,
+    offset_format: Option<char>,
+    big_endian: bool,
+    file_prefix: Option<&str>,
+) {
     let mut current = Vec::new();
     let mut start_offset = 0;
     let stdout = io::stdout();
     let mut out = stdout.lock();
+
+    let emit = |out: &mut std::io::StdoutLock<'_>, current: &[u8], start_offset: usize| {
+        if let Some(prefix) = file_prefix {
+            let _ = write!(out, "{}: ", prefix);
+        }
+        if let Some(fmt) = offset_format {
+            match fmt {
+                'd' => {
+                    let _ = write!(out, "{:>7} ", start_offset);
+                }
+                'o' => {
+                    let _ = write!(out, "{:>7o} ", start_offset);
+                }
+                'x' => {
+                    let _ = write!(out, "{:>7x} ", start_offset);
+                }
+                _ => {}
+            }
+        }
+        let _ = out.write_all(current);
+        let _ = out.write_all(b"\n");
+    };
 
     let mut i = 0;
     while i + 1 < data.len() {
@@ -2407,29 +2488,32 @@ fn strings_scan_utf16(data: &[u8], min_len: usize, offset_format: Option<char>, 
             i += 2;
         } else {
             if current.len() >= min_len {
-                if let Some(fmt) = offset_format {
-                    match fmt {
-                        'd' => {
-                            let _ = write!(out, "{:>7} ", start_offset);
-                        }
-                        'o' => {
-                            let _ = write!(out, "{:>7o} ", start_offset);
-                        }
-                        'x' => {
-                            let _ = write!(out, "{:>7x} ", start_offset);
-                        }
-                        _ => {}
-                    }
-                }
-                let _ = out.write_all(&current);
-                let _ = out.write_all(b"\n");
+                emit(&mut out, &current, start_offset);
             }
             current.clear();
             i += 1; // advance by 1 byte to handle misalignment
         }
     }
-    // Flush remaining
     if current.len() >= min_len {
+        emit(&mut out, &current, start_offset);
+    }
+}
+
+fn strings_scan(
+    data: &[u8],
+    min_len: usize,
+    offset_format: Option<char>,
+    file_prefix: Option<&str>,
+) {
+    let mut current = Vec::new();
+    let mut start_offset = 0;
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+
+    let emit = |out: &mut std::io::StdoutLock<'_>, current: &[u8], start_offset: usize| {
+        if let Some(prefix) = file_prefix {
+            let _ = write!(out, "{}: ", prefix);
+        }
         if let Some(fmt) = offset_format {
             match fmt {
                 'd' => {
@@ -2444,16 +2528,9 @@ fn strings_scan_utf16(data: &[u8], min_len: usize, offset_format: Option<char>, 
                 _ => {}
             }
         }
-        let _ = out.write_all(&current);
+        let _ = out.write_all(current);
         let _ = out.write_all(b"\n");
-    }
-}
-
-fn strings_scan(data: &[u8], min_len: usize, offset_format: Option<char>) {
-    let mut current = Vec::new();
-    let mut start_offset = 0;
-    let stdout = io::stdout();
-    let mut out = stdout.lock();
+    };
 
     for (i, &b) in data.iter().enumerate() {
         if (0x20..0x7f).contains(&b) {
@@ -2463,44 +2540,13 @@ fn strings_scan(data: &[u8], min_len: usize, offset_format: Option<char>) {
             current.push(b);
         } else {
             if current.len() >= min_len {
-                if let Some(fmt) = offset_format {
-                    match fmt {
-                        'd' => {
-                            let _ = write!(out, "{:>7} ", start_offset);
-                        }
-                        'o' => {
-                            let _ = write!(out, "{:>7o} ", start_offset);
-                        }
-                        'x' => {
-                            let _ = write!(out, "{:>7x} ", start_offset);
-                        }
-                        _ => {}
-                    }
-                }
-                let _ = out.write_all(&current);
-                let _ = out.write_all(b"\n");
+                emit(&mut out, &current, start_offset);
             }
             current.clear();
         }
     }
-    // Flush remaining
     if current.len() >= min_len {
-        if let Some(fmt) = offset_format {
-            match fmt {
-                'd' => {
-                    let _ = write!(out, "{:>7} ", start_offset);
-                }
-                'o' => {
-                    let _ = write!(out, "{:>7o} ", start_offset);
-                }
-                'x' => {
-                    let _ = write!(out, "{:>7x} ", start_offset);
-                }
-                _ => {}
-            }
-        }
-        let _ = out.write_all(&current);
-        let _ = out.write_all(b"\n");
+        emit(&mut out, &current, start_offset);
     }
 }
 
@@ -11615,6 +11661,9 @@ fn tool_addr2line(args: &[String]) -> i32 {
     let mut addrs: Vec<String> = Vec::new();
     let mut show_functions = false;
     let mut basenames_only = false;
+    let mut pretty_print = false;
+    let mut show_addresses = false;
+    let mut section_filter: Option<String> = None;
     let mut exe_path: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
@@ -11628,12 +11677,37 @@ fn tool_addr2line(args: &[String]) -> i32 {
             }
             "-f" | "--functions" => show_functions = true,
             "-s" | "--basenames" => basenames_only = true,
+            "-p" | "--pretty-print" => pretty_print = true,
+            "-a" | "--addresses" => show_addresses = true,
+            "-j" | "--section" => {
+                i += 1;
+                if i < args.len() {
+                    section_filter = Some(args[i].clone());
+                }
+            }
+            s if s.starts_with("--section=") => {
+                section_filter = Some(s["--section=".len()..].to_string());
+            }
             "-C" | "--demangle" | "-i" | "--inlines" => {}
             _ if !arg.starts_with('-') => addrs.push(arg.clone()),
             _ => {
                 // Handle combined short opts or -e=FILE style
                 if let Some(rest) = arg.strip_prefix("-e") {
                     exe_path = Some(rest.to_string());
+                } else if let Some(rest) = arg.strip_prefix("-j") {
+                    section_filter = Some(rest.to_string());
+                } else if arg.starts_with('-') && !arg.starts_with("--") && arg.len() > 1 {
+                    // Bundled short options: -fp, -fpa, -Cf, etc.
+                    for ch in arg[1..].chars() {
+                        match ch {
+                            'f' => show_functions = true,
+                            's' => basenames_only = true,
+                            'p' => pretty_print = true,
+                            'a' => show_addresses = true,
+                            'C' | 'i' => {}
+                            _ => {}
+                        }
+                    }
                 }
             }
         }
@@ -11659,19 +11733,94 @@ fn tool_addr2line(args: &[String]) -> i32 {
 
     let ctx = addr2line_build_context(&obj);
 
+    // Build a fallback symbol table lookup: addr -> name. Used when DWARF
+    // doesn't find a function (e.g. objects without debug info).
+    // (addr, size, name, is_text). is_text=true for symbols in executable
+    // sections, used to prefer text symbols for addresses that resolve
+    // ambiguously (e.g. relocatable objects where .text and .data both
+    // start at 0).
+    let symbol_table: Vec<(u64, u64, String, bool)> = {
+        use object::ObjectSection;
+        use object::ObjectSymbol;
+        let mut syms: Vec<(u64, u64, String, bool)> = Vec::new();
+        for sym in obj.symbols() {
+            let object::SymbolSection::Section(sec_idx) = sym.section() else {
+                continue;
+            };
+            if matches!(
+                sym.kind(),
+                object::SymbolKind::File | object::SymbolKind::Section
+            ) {
+                continue;
+            }
+            let is_text = obj
+                .section_by_index(sec_idx)
+                .ok()
+                .map(|s| s.kind() == object::SectionKind::Text)
+                .unwrap_or(false);
+            if let Ok(name) = sym.name()
+                && !name.is_empty()
+            {
+                syms.push((sym.address(), sym.size(), name.to_string(), is_text));
+            }
+        }
+        syms
+    };
+
+    // Compute section base address for -j SECTION
+    let section_base: u64 = if let Some(ref sec_name) = section_filter {
+        use object::ObjectSection;
+        obj.section_by_name(sec_name)
+            .map(|s| s.address())
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    let lookup_symbol = |addr: u64| -> Option<String> {
+        let mut best: Option<&(u64, u64, String, bool)> = None;
+        for s in &symbol_table {
+            if s.0 > addr {
+                continue;
+            }
+            if s.1 != 0 && addr >= s.0 + s.1 {
+                continue;
+            }
+            // Prefer (in order): text section, higher start addr, first seen
+            best = Some(match best {
+                None => s,
+                Some(b) => {
+                    if (s.3, s.0) > (b.3, b.0) {
+                        s
+                    } else {
+                        b
+                    }
+                }
+            });
+        }
+        best.map(|s| s.2.clone())
+    };
+
     let resolve = |addr_str: &str| {
         let addr_str = addr_str.trim();
-        let addr = u64::from_str_radix(
+        let raw = u64::from_str_radix(
             addr_str.trim_start_matches("0x").trim_start_matches("0X"),
             16,
         )
         .unwrap_or(0);
-        if show_functions {
-            let fname = ctx.as_ref().and_then(|c| addr2line_find_function(c, addr));
-            println!("{}", fname.unwrap_or_else(|| "??".to_string()));
-        }
+        let addr = raw.wrapping_add(section_base);
+
+        let fname = if show_functions {
+            ctx.as_ref()
+                .and_then(|c| addr2line_find_function(c, addr))
+                .or_else(|| lookup_symbol(addr))
+                .unwrap_or_else(|| "??".to_string())
+        } else {
+            String::new()
+        };
+
         let loc = ctx.as_ref().and_then(|c| addr2line_find_location(c, addr));
-        match loc {
+        let loc_str = match loc {
             Some((file, line)) => {
                 let display_file = if basenames_only {
                     std::path::Path::new(&file)
@@ -11681,9 +11830,39 @@ fn tool_addr2line(args: &[String]) -> i32 {
                 } else {
                     file
                 };
-                println!("{}:{}", display_file, line);
+                format!("{}:{}", display_file, line)
             }
-            None => println!("??:?"),
+            None => "??:?".to_string(),
+        };
+
+        let addr_prefix = if show_addresses {
+            format!("0x{:016x}", addr)
+        } else {
+            String::new()
+        };
+
+        if pretty_print {
+            // Pretty: combine func and location on one line, prefixed by addr+":"
+            // GNU's pretty-print uses "addr: func at loc" with -afp, "func at loc" with -fp.
+            if show_addresses {
+                if show_functions {
+                    println!("{}: {} at {}", addr_prefix, fname, loc_str);
+                } else {
+                    println!("{}: {}", addr_prefix, loc_str);
+                }
+            } else if show_functions {
+                println!("{} at {}", fname, loc_str);
+            } else {
+                println!("{}", loc_str);
+            }
+        } else {
+            if show_addresses {
+                println!("{}", addr_prefix);
+            }
+            if show_functions {
+                println!("{}", fname);
+            }
+            println!("{}", loc_str);
         }
     };
 

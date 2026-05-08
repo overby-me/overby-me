@@ -456,6 +456,26 @@
         name = "string-dump-data";
       }
       {
+        tool = "addr2line";
+        name = "functions";
+      }
+      {
+        tool = "addr2line";
+        name = "addresses";
+      }
+      {
+        tool = "addr2line";
+        name = "pretty-functions";
+      }
+      {
+        tool = "addr2line";
+        name = "addresses-functions-pretty";
+      }
+      {
+        tool = "strings";
+        name = "print-file-name";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }

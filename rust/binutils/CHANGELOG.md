@@ -3,6 +3,26 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
+## Custom-test expansion (110/110 ✅)
+
+- addr2line `-f`/`--functions` now falls back to the symbol table when
+  DWARF doesn't yield a function (objects without debug info still
+  resolve to a sensible name); preference order on tied addresses:
+  text-section symbols beat data, then highest start addr wins, then
+  first-seen. Adds `-p`/`--pretty-print` (combines function and
+  file:line as `func at FILE:LINE`), `-a`/`--addresses` (prints the
+  address before each entry), and `-j`/`--section=NAME` (treats
+  addresses as offsets into NAME). The combined `-afp` form prints
+  `addr: func at file:line` on one line. Bundled short opts (`-fp`,
+  `-Cf`, `-afp`) now parse correctly. strings `-f`/`--print-file-name`
+  prefixes each emitted string with `<file>:`, and bundled forms
+  like `-fn 5` / `-fn5` parse correctly. nm `-f sysv` (space-separated
+  short form) and `-fposix` (no separator) join the existing
+  `--format=NAME` parser. +5 custom tests (105→110):
+  `addr2line-addresses`, `addr2line-addresses-functions-pretty`,
+  `addr2line-functions`, `addr2line-pretty-functions`,
+  `strings-print-file-name`.
+
 ## Custom-test expansion (105/105 ✅)
 
 - readelf `-u`/`--unwind` (no-arch-specific decoder, prints "No
