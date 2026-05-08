@@ -3538,12 +3538,34 @@ impl Interpreter {
                         .flat_map(|e| self.eval_list(e))
                         .map(|v| v.to_num() as i64)
                         .collect();
+                    let prev_len = self.get_array_len(name);
+                    let max_idx = idxs_v.iter().copied().max().unwrap_or(-1);
                     for (i, &idx) in idxs_v.iter().enumerate() {
                         let v = items.get(i).cloned().unwrap_or(Value::Undef);
                         self.assign_to(
                             &Expr::ArrayElement(name.clone(), Box::new(Expr::IntLit(idx))),
                             v,
                         );
+                    }
+                    // Slots between `prev_len` and `max_idx` that aren't
+                    // in `idxs_v` were auto-padded with Undef but stay
+                    // non-existent per Perl semantics. Mark them in
+                    // `deleted_slots` so `exists $arr[i]` returns false
+                    // (op/array test 184: `@a[1..5] = 1..5` leaves
+                    // `$a[0]` non-existent).
+                    if max_idx >= 0 && (max_idx as usize) >= prev_len {
+                        let assigned_set: std::collections::HashSet<i64> =
+                            idxs_v.iter().copied().collect();
+                        let mut combined =
+                            self.deleted_slots.get(name).cloned().unwrap_or_default();
+                        for i in prev_len..=(max_idx as usize) {
+                            if !assigned_set.contains(&(i as i64)) {
+                                combined.insert(i);
+                            }
+                        }
+                        if !combined.is_empty() {
+                            self.deleted_slots.insert(name.to_string(), combined);
+                        }
                     }
                     return Value::Num(items.len() as f64);
                 }
@@ -6751,17 +6773,15 @@ impl Interpreter {
                                 // Check aliased_hashes (migrated globals)
                                 // before falling back to plain globals.
                                 let qname = self.qualify_global(name);
-                                let rc = self
-                                    .aliased_hashes
-                                    .get(qname.as_str())
-                                    .cloned()
-                                    .or_else(|| {
+                                let rc = self.aliased_hashes.get(qname.as_str()).cloned().or_else(
+                                    || {
                                         if qname.as_str() != name {
                                             self.aliased_hashes.get(name).cloned()
                                         } else {
                                             None
                                         }
-                                    });
+                                    },
+                                );
                                 if let Some(rc_h) = rc {
                                     let mut h = rc_h.borrow_mut();
                                     for k in &keys_v {
@@ -12105,17 +12125,15 @@ impl Interpreter {
                                 // slot delete after an arg-pass through
                                 // `cmp_ok($foo{k}, …)` returns empty.
                                 let qname = self.qualify_global(name);
-                                let rc = self
-                                    .aliased_hashes
-                                    .get(qname.as_str())
-                                    .cloned()
-                                    .or_else(|| {
+                                let rc = self.aliased_hashes.get(qname.as_str()).cloned().or_else(
+                                    || {
                                         if qname.as_str() != name {
                                             self.aliased_hashes.get(name).cloned()
                                         } else {
                                             None
                                         }
-                                    });
+                                    },
+                                );
                                 if let Some(rc_h) = rc {
                                     let mut h = rc_h.borrow_mut();
                                     for k in &keys_v {
