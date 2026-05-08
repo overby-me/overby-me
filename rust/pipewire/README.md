@@ -6,7 +6,7 @@ aimed at passing the upstream PipeWire test suite.
 
 ## Status
 
-- **49/53 Nix-level tests passing** (the 4 still-failing SMF tests have a
+- **52/56 Nix-level tests passing** (the 4 still-failing SMF tests have a
   null-byte / shell-quoting issue in their fixtures, unrelated to the
   parser)
 - **34 internal Rust unit tests passing** (POD round-trip, SMF parsing,
@@ -16,7 +16,8 @@ aimed at passing the upstream PipeWire test suite.
 - Native protocol client round-trips with a real C `pipewire` daemon
 - `pw-cli list-objects` and `pw-cli info` produce byte-identical output to
   the upstream C `pw-cli` against the same daemon, for Core / Module /
-  Factory / Client and per-interface registry walks
+  Factory / Client / Node / Port / Device, per-interface registry walks,
+  and `info all`
 - `pw-dump` emits structurally-correct JSON for the registry contents
 - `spa-json-dump`, `pw-mididump`, `pw-config paths` produce output identical
   to the upstream tools on every test fixture

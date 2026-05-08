@@ -7,9 +7,11 @@
 // to talk to a real daemon and exercise the protocol-native client.
 
 use crate::pipewire_lib::client::{
-    Client, ClientInfo, CoreInfo, DictItem, FactoryInfo, ModuleInfo,
-    RegistryGlobal, decode_client_info, decode_core_done, decode_core_error,
-    decode_factory_info, decode_module_info, fmt_permissions,
+    Client, ClientInfo, CoreInfo, DeviceInfo, DictItem, FactoryInfo,
+    ModuleInfo, NodeInfo, ParamInfo, PortInfo, RegistryGlobal,
+    decode_client_info, decode_core_done, decode_core_error,
+    decode_device_info, decode_factory_info, decode_module_info,
+    decode_node_info, decode_port_info, fmt_permissions,
 };
 use crate::pipewire_lib::interfaces;
 use crate::pipewire_lib::version::PIPEWIRE_API_VERSION;
@@ -250,8 +252,44 @@ fn run_info(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {
                     eprintln!("{argv0}: bind {} failed: {}", g.id, e);
                 }
             }
-            // Match the C tool: it can't bind unknown types, so it prints
-            // `info: unsupported type X` on stderr and continues.
+            interfaces::TYPE_NODE => {
+                if let Err(e) = bind_and_print(
+                    &mut client,
+                    registry_id,
+                    g,
+                    interfaces::VERSION_NODE,
+                    print_node_info,
+                ) {
+                    eprintln!("{argv0}: bind {} failed: {}", g.id, e);
+                }
+            }
+            interfaces::TYPE_PORT => {
+                if let Err(e) = bind_and_print(
+                    &mut client,
+                    registry_id,
+                    g,
+                    interfaces::VERSION_PORT,
+                    print_port_info,
+                ) {
+                    eprintln!("{argv0}: bind {} failed: {}", g.id, e);
+                }
+            }
+            interfaces::TYPE_DEVICE => {
+                if let Err(e) = bind_and_print(
+                    &mut client,
+                    registry_id,
+                    g,
+                    interfaces::VERSION_DEVICE,
+                    print_device_info,
+                ) {
+                    eprintln!("{argv0}: bind {} failed: {}", g.id, e);
+                }
+            }
+            // Types the C tool registers a class for but no `info` callback —
+            // silent like upstream. Adding more matches here is cheap.
+            interfaces::TYPE_METADATA | interfaces::TYPE_LINK => {}
+            // Anything else: type without a class in pw-cli. C tool prints
+            // `info: unsupported type X` on stderr.
             _ => eprintln!("info: unsupported type {}", g.interface),
         }
     }
@@ -354,6 +392,119 @@ fn print_client_info(g: &RegistryGlobal, args: &[crate::spa::pod::types::Value])
     print_global_header(g);
     let mark = if info.change_mask & 0x01 != 0 { '*' } else { ' ' };
     print_properties(&info.props, mark, true);
+}
+
+fn print_node_info(g: &RegistryGlobal, args: &[crate::spa::pod::types::Value]) {
+    let info: NodeInfo = match decode_node_info(args) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("rust-pipewire pw-cli: decode_node_info: {e}");
+            return;
+        }
+    };
+    print_global_header(g);
+    // Node change-mask bits (from `pipewire/node.h`):
+    //   INPUT_PORTS  = 1<<0
+    //   OUTPUT_PORTS = 1<<1
+    //   STATE        = 1<<2
+    //   PROPS        = 1<<3
+    //   PARAMS       = 1<<4
+    let cm_input = info.change_mask & (1 << 0) != 0;
+    let cm_output = info.change_mask & (1 << 1) != 0;
+    let cm_state = info.change_mask & (1 << 2) != 0;
+    let cm_props = info.change_mask & (1 << 3) != 0;
+    let cm_params = info.change_mask & (1 << 4) != 0;
+    if cm_input {
+        println!(
+            "*\tinput ports: {}/{}",
+            info.n_input_ports, info.max_input_ports
+        );
+    }
+    if cm_output {
+        println!(
+            "*\toutput ports: {}/{}",
+            info.n_output_ports, info.max_output_ports
+        );
+    }
+    if cm_state {
+        let state_str = interfaces::node_state_name(info.state);
+        if !info.error.is_empty() && state_str == "error" {
+            println!("*\tstate: \"{}\" \"{}\"", state_str, info.error);
+        } else {
+            println!("*\tstate: \"{}\"", state_str);
+        }
+    }
+    if cm_props {
+        print_properties(&info.props, '*', true);
+    }
+    if cm_params {
+        print_params(&info.params, '*', true);
+    }
+}
+
+fn print_port_info(g: &RegistryGlobal, args: &[crate::spa::pod::types::Value]) {
+    let info: PortInfo = match decode_port_info(args) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("rust-pipewire pw-cli: decode_port_info: {e}");
+            return;
+        }
+    };
+    print_global_header(g);
+    println!(
+        "\tdirection: \"{}\"",
+        interfaces::direction_name(info.direction)
+    );
+    let cm_props = info.change_mask & (1 << 0) != 0;
+    let cm_params = info.change_mask & (1 << 1) != 0;
+    if cm_props {
+        print_properties(&info.props, '*', true);
+    }
+    if cm_params {
+        print_params(&info.params, '*', true);
+    }
+}
+
+fn print_device_info(g: &RegistryGlobal, args: &[crate::spa::pod::types::Value]) {
+    let info: DeviceInfo = match decode_device_info(args) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("rust-pipewire pw-cli: decode_device_info: {e}");
+            return;
+        }
+    };
+    print_global_header(g);
+    let cm_props = info.change_mask & (1 << 0) != 0;
+    let cm_params = info.change_mask & (1 << 1) != 0;
+    if cm_props {
+        print_properties(&info.props, '*', true);
+    }
+    if cm_params {
+        print_params(&info.params, '*', true);
+    }
+}
+
+/// Mirror pw-cli's print_params:
+///   {mark}\tparams: ({n})
+///   if n==0: \t\tnone
+///   else, for each: {mark}\t  {id} ({name}) {r-}{w-}
+fn print_params(params: &[ParamInfo], mark: char, header: bool) {
+    if header {
+        println!("{mark}\tparams: ({})", params.len());
+        if params.is_empty() {
+            println!("\t\tnone");
+            return;
+        }
+    }
+    for p in params {
+        let r = if p.flags & interfaces::PARAM_INFO_READ != 0 { 'r' } else { '-' };
+        let w = if p.flags & interfaces::PARAM_INFO_WRITE != 0 { 'w' } else { '-' };
+        let name = interfaces::param_name(p.id).unwrap_or("Spa:Enum:ParamId:Unknown");
+        // C tool: `params[i].user > 0 ? mark : ' '`. On the first Info we
+        // see for a node, every param's user counter is set to 1 — match
+        // that behavior by always using `mark`.
+        println!("{mark}\t  {} ({}) {}{}", p.id, name, r, w);
+    }
 }
 
 fn print_core_info(g: &RegistryGlobal, info: Option<&CoreInfo>) {

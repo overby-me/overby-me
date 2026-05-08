@@ -241,6 +241,14 @@
       {name = "hello-info";}
     ];
 
+    # Rich-daemon tests — same as daemonTests but with a null-audio-sink
+    # Node pre-loaded so Node/Port code paths can be exercised.
+    richDaemonTests = [
+      {tool = "pw-cli"; name = "ls-node-rich";}
+      {tool = "pw-cli"; name = "ls-port-rich";}
+      {tool = "pw-cli"; name = "info-node-rich";}
+    ];
+
     # Daemon-comparison tests — spawn a real C pipewire daemon and run both
     # the C tool and the Rust tool against it, then diff. Each entry is
     # `tools/<tool>/<name>.sh`.
@@ -301,5 +309,14 @@
             };
         })
         daemonTests)
+      ++ (map (t: {
+          name = "rust-pipewire-rich-daemon-test-${t.tool}-${t.name}";
+          value = pkgs:
+            import ./rich-daemon-testsuite.nix {
+              inherit pkgs;
+              inherit (t) tool name;
+            };
+        })
+        richDaemonTests)
     );
 }

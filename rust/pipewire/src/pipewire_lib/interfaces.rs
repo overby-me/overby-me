@@ -99,6 +99,63 @@ pub fn short_name(t: &str) -> &str {
     t.rsplit_once(':').map(|(_, s)| s).unwrap_or(t)
 }
 
+/// pw-cli's `pw_node_state_as_string`. State enum from `spa/node/node.h`:
+/// 0=creating, 1=suspended, 2=idle, 3=running. -1 (0xFFFFFFFF on the wire
+/// as an Id) is "error".
+pub fn node_state_name(state: u32) -> &'static str {
+    match state {
+        0 => "creating",
+        1 => "suspended",
+        2 => "idle",
+        3 => "running",
+        _ => "error",
+    }
+}
+
+/// Direction enum from `spa/utils/defs.h`: 0=input, 1=output.
+pub fn direction_name(direction: u32) -> &'static str {
+    match direction {
+        0 => "input",
+        1 => "output",
+        _ => "unknown",
+    }
+}
+
+/// Map a SPA_PARAM_* id to the `Spa:Enum:ParamId:Name` string used by
+/// `spa_debug_type_find_name(spa_type_param, id)` in pw-cli's print_params.
+/// Mirrors `spa/include/spa/param/param-types.h::spa_type_param`.
+pub fn param_name(id: u32) -> Option<&'static str> {
+    Some(match id {
+        0 => "Spa:Enum:ParamId:Invalid",
+        1 => "Spa:Enum:ParamId:PropInfo",
+        2 => "Spa:Enum:ParamId:Props",
+        3 => "Spa:Enum:ParamId:EnumFormat",
+        4 => "Spa:Enum:ParamId:Format",
+        5 => "Spa:Enum:ParamId:Buffers",
+        6 => "Spa:Enum:ParamId:Meta",
+        7 => "Spa:Enum:ParamId:IO",
+        8 => "Spa:Enum:ParamId:EnumProfile",
+        9 => "Spa:Enum:ParamId:Profile",
+        10 => "Spa:Enum:ParamId:EnumPortConfig",
+        11 => "Spa:Enum:ParamId:PortConfig",
+        12 => "Spa:Enum:ParamId:EnumRoute",
+        13 => "Spa:Enum:ParamId:Route",
+        14 => "Spa:Enum:ParamId:Control",
+        15 => "Spa:Enum:ParamId:Latency",
+        16 => "Spa:Enum:ParamId:ProcessLatency",
+        17 => "Spa:Enum:ParamId:Tag",
+        18 => "Spa:Enum:ParamId:PeerEnumFormat",
+        20 => "Spa:Enum:ParamId:Capability",
+        21 => "Spa:Enum:ParamId:PeerCapability",
+        _ => return None,
+    })
+}
+
+/// Param info flags (from `spa/param/param.h`).
+pub const PARAM_INFO_SERIAL: u32 = 1 << 0;
+pub const PARAM_INFO_READ: u32 = 1 << 1;
+pub const PARAM_INFO_WRITE: u32 = 1 << 2;
+
 #[cfg(test)]
 mod tests {
     use super::*;

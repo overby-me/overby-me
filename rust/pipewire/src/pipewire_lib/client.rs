@@ -97,6 +97,44 @@ pub struct ClientInfo {
     pub props: Vec<DictItem>,
 }
 
+/// One entry of a `params` array (id + flags) on a Node, Port, or Device.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ParamInfo {
+    pub id: u32,
+    pub flags: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NodeInfo {
+    pub id: u32,
+    pub max_input_ports: u32,
+    pub max_output_ports: u32,
+    pub change_mask: i64,
+    pub n_input_ports: u32,
+    pub n_output_ports: u32,
+    pub state: u32,
+    pub error: String,
+    pub props: Vec<DictItem>,
+    pub params: Vec<ParamInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PortInfo {
+    pub id: u32,
+    pub direction: u32, // 0=input, 1=output
+    pub change_mask: i64,
+    pub props: Vec<DictItem>,
+    pub params: Vec<ParamInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeviceInfo {
+    pub id: u32,
+    pub change_mask: i64,
+    pub props: Vec<DictItem>,
+    pub params: Vec<ParamInfo>,
+}
+
 /// Resolve `$XDG_RUNTIME_DIR/$PIPEWIRE_CORE` (with the standard fallbacks
 /// used by `pw-cli`).
 pub fn resolve_socket() -> io::Result<PathBuf> {
@@ -394,6 +432,94 @@ pub fn decode_factory_info(args: &[Value]) -> Result<FactoryInfo, Error> {
         version: expect_int(&args[3], "Factory.Info.version")? as u32,
         change_mask: expect_long(&args[4], "Factory.Info.change_mask")?,
         props: decode_dict_struct(&args[5])?,
+    })
+}
+
+/// Decode the inner params struct (`{ Int n_params, Id id1, Int flags1,
+/// Id id2, Int flags2, ... }`).
+fn decode_params_struct(v: &Value) -> Result<Vec<ParamInfo>, Error> {
+    let items = match v {
+        Value::Struct(items) => items,
+        _ => return Err(Error::UnexpectedShape("params: not a Struct")),
+    };
+    let mut iter = items.iter();
+    let n = match iter.next() {
+        Some(Value::Int(n)) if *n >= 0 => *n as usize,
+        _ => {
+            return Err(Error::UnexpectedShape(
+                "params: n_params not Int>=0",
+            ))
+        }
+    };
+    let mut out = Vec::with_capacity(n);
+    for _ in 0..n {
+        let id = match iter.next() {
+            Some(Value::Id(id)) => *id,
+            _ => return Err(Error::UnexpectedShape("params: id not Id")),
+        };
+        let flags = match iter.next() {
+            Some(Value::Int(f)) => *f as u32,
+            _ => return Err(Error::UnexpectedShape("params: flags not Int")),
+        };
+        out.push(ParamInfo { id, flags });
+    }
+    Ok(out)
+}
+
+/// Decode `Node.Info`:
+/// `Struct { Int id, Int max_in, Int max_out, Long change_mask, Int n_in,
+/// Int n_out, Id state, String error, Struct dict, Struct params }`.
+pub fn decode_node_info(args: &[Value]) -> Result<NodeInfo, Error> {
+    if args.len() < 10 {
+        return Err(Error::UnexpectedShape("Node.Info: not enough fields"));
+    }
+    Ok(NodeInfo {
+        id: expect_int(&args[0], "Node.Info.id")? as u32,
+        max_input_ports: expect_int(&args[1], "Node.Info.max_input_ports")? as u32,
+        max_output_ports: expect_int(&args[2], "Node.Info.max_output_ports")? as u32,
+        change_mask: expect_long(&args[3], "Node.Info.change_mask")?,
+        n_input_ports: expect_int(&args[4], "Node.Info.n_input_ports")? as u32,
+        n_output_ports: expect_int(&args[5], "Node.Info.n_output_ports")? as u32,
+        state: match &args[6] {
+            Value::Id(s) => *s,
+            _ => {
+                return Err(Error::Decode(
+                    "Node.Info.state: expected Id".into(),
+                ))
+            }
+        },
+        error: expect_string(&args[7], "Node.Info.error")?,
+        props: decode_dict_struct(&args[8])?,
+        params: decode_params_struct(&args[9])?,
+    })
+}
+
+/// Decode `Port.Info`:
+/// `Struct { Int id, Int direction, Long change_mask, Struct dict, Struct params }`.
+pub fn decode_port_info(args: &[Value]) -> Result<PortInfo, Error> {
+    if args.len() < 5 {
+        return Err(Error::UnexpectedShape("Port.Info: not enough fields"));
+    }
+    Ok(PortInfo {
+        id: expect_int(&args[0], "Port.Info.id")? as u32,
+        direction: expect_int(&args[1], "Port.Info.direction")? as u32,
+        change_mask: expect_long(&args[2], "Port.Info.change_mask")?,
+        props: decode_dict_struct(&args[3])?,
+        params: decode_params_struct(&args[4])?,
+    })
+}
+
+/// Decode `Device.Info`:
+/// `Struct { Int id, Long change_mask, Struct dict, Struct params }`.
+pub fn decode_device_info(args: &[Value]) -> Result<DeviceInfo, Error> {
+    if args.len() < 4 {
+        return Err(Error::UnexpectedShape("Device.Info: not enough fields"));
+    }
+    Ok(DeviceInfo {
+        id: expect_int(&args[0], "Device.Info.id")? as u32,
+        change_mask: expect_long(&args[1], "Device.Info.change_mask")?,
+        props: decode_dict_struct(&args[2])?,
+        params: decode_params_struct(&args[3])?,
     })
 }
 
