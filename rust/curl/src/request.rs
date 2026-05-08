@@ -634,6 +634,11 @@ fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options)
     // (path_length, domain_length, name_length, name=value) — kept for sort by specificity.
     let mut file_pairs: Vec<(usize, usize, usize, String)> = Vec::new();
     let mut inline_pairs: Vec<String> = Vec::new();
+    // Per-domain cap: curl's CMAX_COOKIES_PER_DOMAIN is 150. New entries past
+    // that limit for a given domain are rejected at insert time (test 442).
+    let mut per_domain_count: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    const MAX_COOKIES_PER_DOMAIN: usize = 150;
 
     for cookie in &opts.cookies {
         if cookie.contains('=') {
@@ -798,6 +803,15 @@ fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options)
                     if secure && !secure_req {
                         continue;
                     }
+                    // Apply per-domain cap BEFORE match filtering so a huge
+                    // file gets capped at the cookie-store level, not just
+                    // at the matching set (test 442).
+                    let cap_key = domain.strip_prefix('.').unwrap_or(domain).to_lowercase();
+                    let count = per_domain_count.entry(cap_key).or_insert(0);
+                    if *count >= MAX_COOKIES_PER_DOMAIN {
+                        continue;
+                    }
+                    *count += 1;
                     if !domain_matches(&request_host, domain) {
                         continue;
                     }
