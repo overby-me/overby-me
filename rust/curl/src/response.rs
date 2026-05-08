@@ -3,6 +3,10 @@ use std::io::{BufRead, BufReader, Read};
 
 /// Maximum size of response headers for a single response (~300KB).
 const MAX_HEADER_SIZE: usize = 307200;
+/// Maximum size of a single response header line — matches curl's
+/// `CURL_MAX_HTTP_HEADER` (102400 bytes). Exceeding this triggers
+/// `CURLE_TOO_LARGE` / exit 100 (test 1154).
+const MAX_HEADER_LINE: usize = 102400;
 /// Maximum accumulated header size across all redirect hops (~6MB).
 const MAX_TOTAL_HEADER_SIZE: usize = 6 * 1024 * 1024;
 
@@ -228,6 +232,13 @@ pub(crate) fn read_response(
         let n = reader
             .read_line(&mut line)
             .map_err(|e| format!("failed to read header: {e}"))?;
+        // CURL_MAX_HTTP_HEADER per-line cap (test 1154).
+        if line.len() > MAX_HEADER_LINE {
+            return Err(format!(
+                "too large response header line: {} bytes",
+                line.len()
+            ));
+        }
         if n == 0 {
             // EOF mid-header block: flush whatever pending header we have so
             // the caller still sees the last unterminated line, then exit

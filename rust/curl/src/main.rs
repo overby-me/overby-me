@@ -1257,8 +1257,10 @@ fn main() {
                     exit_code = 1; // Unsupported protocol
                 } else if e.contains("invalid status") {
                     exit_code = 1; // CURLE_UNSUPPORTED_PROTOCOL — malformed status code (test 1430)
-                } else if e.contains("too many response headers") {
-                    exit_code = 100; // CURLE_TOO_MANY_HEADERS (test 747)
+                } else if e.contains("too many response headers")
+                    || e.contains("too large response header")
+                {
+                    exit_code = 100; // CURLE_TOO_MANY_HEADERS / CURLE_TOO_LARGE (tests 747, 1154)
                 } else if e.starts_with("onion: ") {
                     exit_code = 6; // Couldn't resolve host (RFC 7686 refusal)
                 } else if e.contains("DNS resolution failed for proxy") {
