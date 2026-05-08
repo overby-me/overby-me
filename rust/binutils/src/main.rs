@@ -7515,7 +7515,7 @@ fn objdump_process_object(
                                 .unwrap_or(section.address() + section.size())
                         };
 
-                        println!("\nDisassembly of section {sec_name}:");
+                        println!("\n\nDisassembly of section {sec_name}:");
                         if let Ok(sec_data) = section.data() {
                             let base = section.address();
                             let start_off = (sym_addr - base) as usize;
@@ -7561,7 +7561,7 @@ fn objdump_process_object(
                     continue;
                 }
             } else {
-                println!("\nDisassembly of section {sec_name}:");
+                println!("\n\nDisassembly of section {sec_name}:");
                 if let Ok(sec_data) = section.data() {
                     let base = section.address();
                     let sec_end = base.saturating_add(sec_data.len() as u64);
