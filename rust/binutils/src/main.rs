@@ -1697,8 +1697,9 @@ fn nm_print_symbols<'data>(
     }
 
     if opts.size_sort {
-        // For --size-sort, remove undefined and absolute symbols, sort by size
-        syms.retain(|s| s.2 != 'U' && s.2 != 'w' && s.2.to_ascii_lowercase() != 'a');
+        // GNU --size-sort: drop symbols whose size is zero, plus
+        // undefined / weak / absolute. Sort by size, ties by name.
+        syms.retain(|s| s.1 != 0 && s.2 != 'U' && s.2 != 'w' && s.2.to_ascii_lowercase() != 'a');
         syms.sort_by(|a, b| a.1.cmp(&b.1).then(a.3.cmp(&b.3)));
     } else if opts.numeric_sort {
         // Sort by address; undefined symbols (no address) sort by name first.
@@ -2682,6 +2683,13 @@ fn tool_size(args: &[String]) -> i32 {
         if format == SizeFormat::Sysv {
             println!("{file}  :");
             println!("{:<20}{:>5}{:>7}", "section", "size", "addr");
+            let fmt_val = |v: u64| -> String {
+                match radix {
+                    SizeRadix::Dec => format!("{v}"),
+                    SizeRadix::Oct => format!("0{v:o}"),
+                    SizeRadix::Hex => format!("0x{v:x}"),
+                }
+            };
             let mut total: u64 = 0;
             for section in obj.sections() {
                 let name = section.name().unwrap_or("");
@@ -2708,14 +2716,23 @@ fn tool_size(args: &[String]) -> i32 {
                 }
                 let sz = section.size();
                 let addr = section.address();
-                println!("{name:<20}{sz:>5}{addr:>7}");
+                println!(
+                    "{name:<20}{sz_str:>5}{addr_str:>7}",
+                    sz_str = fmt_val(sz),
+                    addr_str = fmt_val(addr)
+                );
                 total += sz;
             }
             if show_common && common_size > 0 {
-                println!("{:<20}{:>5}{:>7}", "*COM*", common_size, 0);
+                println!(
+                    "{:<20}{sz_str:>5}{addr_str:>7}",
+                    "*COM*",
+                    sz_str = fmt_val(common_size),
+                    addr_str = fmt_val(0)
+                );
                 total += common_size;
             }
-            println!("{:<20}{total:>5}", "Total");
+            println!("{:<20}{total_str:>5}", "Total", total_str = fmt_val(total));
             println!();
             println!();
         } else {
@@ -6587,6 +6604,7 @@ fn tool_objdump(args: &[String]) -> i32 {
     }
 
     let mut disassemble = false;
+    let mut disassemble_all = false;
     let mut disassemble_syms: Vec<String> = Vec::new();
     let mut show_headers = false;
     let mut show_symbols = false;
@@ -6672,6 +6690,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                 "-d" => disassemble = true,
                 "-D" | "--disassemble-all" => {
                     disassemble = true;
+                    disassemble_all = true;
                 }
                 "-S" | "--source" => {
                     show_source = true;
@@ -7243,6 +7262,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                     show_relocs,
                     show_full_contents,
                     disassemble,
+                    disassemble_all,
                     &disassemble_syms,
                     show_all_symbols,
                     disassemble_zeroes,
@@ -7309,6 +7329,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                         show_relocs,
                         show_full_contents,
                         disassemble,
+                        disassemble_all,
                         &disassemble_syms,
                         show_all_symbols,
                         disassemble_zeroes,
@@ -7336,6 +7357,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                 show_relocs,
                 show_full_contents,
                 disassemble,
+                disassemble_all,
                 &disassemble_syms,
                 show_all_symbols,
                 disassemble_zeroes,
@@ -7452,6 +7474,7 @@ fn objdump_process_object(
     show_relocs: bool,
     show_full_contents: bool,
     disassemble: bool,
+    disassemble_all: bool,
     disassemble_syms: &[String],
     show_all_symbols: bool,
     _disassemble_zeroes: bool,
@@ -7933,7 +7956,28 @@ fn objdump_process_object(
 
         for section in obj.sections() {
             let sec_name = section.name().unwrap_or("");
-            if section.kind() != object::SectionKind::Text {
+            // Decide whether to disassemble this section:
+            // - With -j SECTION: only sections matching the filter
+            // - With -D / --disassemble-all: any non-empty section
+            // - With plain -d: only Text sections (default)
+            let in_filter =
+                !section_filter.is_empty() && section_filter.iter().any(|f| f == sec_name);
+            let is_text = section.kind() == object::SectionKind::Text;
+            // For -D, GNU only disassembles "loadable" sections (SHF_ALLOC):
+            // .text, .data, .rodata, .note.*, etc. — skip metadata like
+            // .rela.*, .symtab, .strtab.
+            let is_alloc = match section.flags() {
+                object::SectionFlags::Elf { sh_flags } => sh_flags & 0x2 != 0,
+                _ => true,
+            };
+            let dissect = if !section_filter.is_empty() {
+                in_filter
+            } else if disassemble_all {
+                is_alloc && section.size() > 0
+            } else {
+                is_text
+            };
+            if !dissect {
                 continue;
             }
             let sec_idx = section.index();

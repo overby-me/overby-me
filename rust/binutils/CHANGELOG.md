@@ -3,6 +3,23 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
+## Custom-test expansion (122/122 ✅)
+
+- objdump now distinguishes `-d` (text only) from `-D`/`--disassemble-all`
+  (every loadable section). With `-D`, only SHF_ALLOC sections are
+  disassembled — `.rela.*` and other metadata sections are skipped to
+  match GNU. The section filter (`-j NAME`) now controls which
+  sections are disassembled, including non-text sections like `.data`.
+  size sysv format (`-A`) honors the radix flags `-d`/`-o`/`-x`:
+  decimal stays bare, octal gets a leading `0`, hex gets `0x` prefix.
+  nm `--size-sort` now drops symbols whose `st_size` is zero (in
+  addition to undefined/weak/absolute) — matches GNU's filter (we
+  don't yet replicate GNU's pseudo-size computation for symbols
+  without explicit `st_size`, so the displayed list is a subset of
+  GNU's output, ordered the same way). +4 custom tests (118→122):
+  `nm-size-sort`, `objdump-disassemble-section`, `size-sysv-hex`,
+  `size-sysv-octal`.
+
 ## Custom-test expansion (118/118 ✅)
 
 - nm bundled-short-options gained the previously-missing one-char

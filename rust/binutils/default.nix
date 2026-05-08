@@ -508,6 +508,22 @@
         name = "use-dynamic";
       }
       {
+        tool = "objdump";
+        name = "disassemble-section";
+      }
+      {
+        tool = "size";
+        name = "sysv-hex";
+      }
+      {
+        tool = "size";
+        name = "sysv-octal";
+      }
+      {
+        tool = "nm";
+        name = "size-sort";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }
