@@ -250,17 +250,22 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         req.push_str("Connection: close\r\n");
     }
 
+    // --tr-encoding: announce we accept gzip Transfer-Encoding via TE.
+    // Curl emits the TE header *before* Accept-Encoding (test 1277). The
+    // matching Connection: TE comes after Accept-Encoding.
+    if opts.tr_encoding {
+        req.push_str("TE: gzip\r\n");
+    }
+
     // Accept-Encoding.
     if opts.compressed {
         req.push_str("Accept-Encoding: gzip, deflate\r\n");
     }
 
-    // --tr-encoding: announce we accept gzip Transfer-Encoding via TE/Connection.
-    // If the user supplied a `-H "Connection: ..."` header we append "TE" to
-    // the *first* user value rather than emitting a separate Connection header
-    // (matches curl's behavior — see test 1125).
+    // --tr-encoding: emit Connection: TE after Accept-Encoding. If the user
+    // supplied a `-H "Connection: ..."` header we append "TE" to the *first*
+    // user value rather than emitting a separate Connection header (test 1125).
     if opts.tr_encoding {
-        req.push_str("TE: gzip\r\n");
         let user_conn = opts.headers.iter().position(|(k, v)| {
             k.eq_ignore_ascii_case("connection") && !v.is_empty() && v != "\x00"
         });
