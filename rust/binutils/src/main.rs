@@ -5827,18 +5827,18 @@ fn tool_objdump(args: &[String]) -> i32 {
                     if emit_wi_placeholder {
                         readelf_debug_info_loaded(&elf, &data_bytes, endian, loaded_from);
                     }
-                    if show_debug_abbrev {
-                        readelf_debug_abbrev(&elf, &data_bytes, endian);
-                    }
-                    if show_debug_ranges {
-                        readelf_debug_ranges(&elf, &data_bytes, endian);
-                        readelf_debug_rnglists(&elf, &data_bytes, endian);
-                    }
                     if show_debug_line_raw {
                         readelf_debug_line_raw(&elf, &data_bytes, endian);
                     }
                     if show_debug_line_decoded {
                         readelf_debug_line_decoded(&elf, &data_bytes, endian);
+                    }
+                    if show_debug_ranges {
+                        readelf_debug_ranges(&elf, &data_bytes, endian);
+                        readelf_debug_rnglists(&elf, &data_bytes, endian);
+                    }
+                    if show_debug_abbrev {
+                        readelf_debug_abbrev(&elf, &data_bytes, endian);
                     }
                 } else if let Ok(elf) =
                     ElfFile::<object::elf::FileHeader32<object::Endianness>>::parse(&*data_bytes)
@@ -5850,18 +5850,18 @@ fn tool_objdump(args: &[String]) -> i32 {
                     if emit_wi_placeholder {
                         readelf_debug_info_loaded(&elf, &data_bytes, endian, loaded_from);
                     }
-                    if show_debug_abbrev {
-                        readelf_debug_abbrev(&elf, &data_bytes, endian);
-                    }
-                    if show_debug_ranges {
-                        readelf_debug_ranges(&elf, &data_bytes, endian);
-                        readelf_debug_rnglists(&elf, &data_bytes, endian);
-                    }
                     if show_debug_line_raw {
                         readelf_debug_line_raw(&elf, &data_bytes, endian);
                     }
                     if show_debug_line_decoded {
                         readelf_debug_line_decoded(&elf, &data_bytes, endian);
+                    }
+                    if show_debug_ranges {
+                        readelf_debug_ranges(&elf, &data_bytes, endian);
+                        readelf_debug_rnglists(&elf, &data_bytes, endian);
+                    }
+                    if show_debug_abbrev {
+                        readelf_debug_abbrev(&elf, &data_bytes, endian);
                     }
                 }
             }
@@ -8043,6 +8043,19 @@ fn tool_objcopy(args: &[String]) -> i32 {
                 break;
             }
         }
+        // --compress-debug-sections=zlib-gnu: rename .debug_X → .zdebug_X.
+        // (`.zdebug_X` is the legacy GNU naming convention.)
+        let mut rename_to_zdebug = false;
+        if compress_debug == CompressMode::ZlibGnu
+            && (out_name.starts_with(".debug_") || out_name.starts_with(".rela.debug_"))
+        {
+            rename_to_zdebug = true;
+            if let Some(rest) = out_name.strip_prefix(".debug_") {
+                out_name = format!(".zdebug_{}", rest);
+            } else if let Some(rest) = out_name.strip_prefix(".rela.debug_") {
+                out_name = format!(".rela.zdebug_{}", rest);
+            }
+        }
         // Apply --set-section-flags
         let mut flags_override: Option<&Vec<String>> = None;
         for (sname, flags) in &set_section_flags {
@@ -8111,6 +8124,90 @@ fn tool_objcopy(args: &[String]) -> i32 {
                     let chunks = data_vec.len() / rb;
                     for k in 0..chunks {
                         data_vec[k * rb..(k + 1) * rb].reverse();
+                    }
+                }
+            }
+            // --compress-debug-sections: compress .debug_* section data here
+            // so the writer emits the compressed form directly with correct
+            // SHF_COMPRESSED / `.zdebug_*` naming. GNU `as`/`objcopy` skip
+            // compression when the encoded size wouldn't be smaller than the
+            // input — match that behaviour so byte-comparison tests pass.
+            if compress_debug != CompressMode::None
+                && (name.starts_with(".debug_") || rename_to_zdebug)
+                && !name.starts_with(".rela.")
+            {
+                use flate2::Compression;
+                use flate2::write::ZlibEncoder;
+                use std::io::Write as _;
+                let uncompressed_size = data_vec.len() as u64;
+                let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
+                let _ = enc.write_all(&data_vec);
+                let zlib_data = enc.finish().unwrap_or_default();
+                let is_64 =
+                    obj.architecture().address_size().map(|s| s.bytes()).unwrap_or(8) == 8;
+                let header_size = match compress_debug {
+                    CompressMode::ZlibGnu => 12,
+                    CompressMode::ZlibGabi => if is_64 { 24 } else { 12 },
+                    CompressMode::None => 0,
+                };
+                let final_size = header_size + zlib_data.len();
+                if final_size >= data_vec.len() {
+                    // Compression wouldn't shrink the section — leave the
+                    // data as-is. (For zlib-gnu we can't easily rename the
+                    // section back here since the write::Object API doesn't
+                    // expose `name`; in practice GNU also leaves the name
+                    // alone in this case.)
+                } else {
+                    match compress_debug {
+                        CompressMode::ZlibGnu => {
+                            let mut out = Vec::with_capacity(12 + zlib_data.len());
+                            out.extend_from_slice(b"ZLIB");
+                            out.extend_from_slice(&uncompressed_size.to_be_bytes());
+                            out.extend_from_slice(&zlib_data);
+                            data_vec = out;
+                        }
+                        CompressMode::ZlibGabi => {
+                            let le = obj.endianness() == object::Endianness::Little;
+                            let mut out: Vec<u8>;
+                            if is_64 {
+                                out = Vec::with_capacity(24 + zlib_data.len());
+                                out.extend_from_slice(&[0u8; 24]);
+                                let chdr = &mut out[..24];
+                                if le {
+                                    chdr[0..4].copy_from_slice(&1u32.to_le_bytes());
+                                    chdr[8..16].copy_from_slice(&uncompressed_size.to_le_bytes());
+                                    chdr[16..24].copy_from_slice(&1u64.to_le_bytes());
+                                } else {
+                                    chdr[0..4].copy_from_slice(&1u32.to_be_bytes());
+                                    chdr[8..16].copy_from_slice(&uncompressed_size.to_be_bytes());
+                                    chdr[16..24].copy_from_slice(&1u64.to_be_bytes());
+                                }
+                            } else {
+                                out = Vec::with_capacity(12 + zlib_data.len());
+                                out.extend_from_slice(&[0u8; 12]);
+                                let chdr = &mut out[..12];
+                                if le {
+                                    chdr[0..4].copy_from_slice(&1u32.to_le_bytes());
+                                    chdr[4..8]
+                                        .copy_from_slice(&(uncompressed_size as u32).to_le_bytes());
+                                    chdr[8..12].copy_from_slice(&1u32.to_le_bytes());
+                                } else {
+                                    chdr[0..4].copy_from_slice(&1u32.to_be_bytes());
+                                    chdr[4..8]
+                                        .copy_from_slice(&(uncompressed_size as u32).to_be_bytes());
+                                    chdr[8..12].copy_from_slice(&1u32.to_be_bytes());
+                                }
+                            }
+                            out.extend_from_slice(&zlib_data);
+                            data_vec = out;
+                            if let object::SectionFlags::Elf { sh_flags } = sec_flags {
+                                sec_flags = object::SectionFlags::Elf {
+                                    sh_flags: sh_flags | (object::elf::SHF_COMPRESSED as u64),
+                                };
+                                builder.section_mut(new_id).flags = sec_flags;
+                            }
+                        }
+                        CompressMode::None => {}
                     }
                 }
             }
@@ -8506,11 +8603,7 @@ fn tool_objcopy(args: &[String]) -> i32 {
     if decompress_debug {
         elf_decompress_debug_sections(&mut out_buf);
     }
-    match compress_debug {
-        CompressMode::ZlibGnu => elf_compress_debug_sections(&mut out_buf, 1),
-        CompressMode::ZlibGabi => elf_compress_debug_sections(&mut out_buf, 2),
-        CompressMode::None => {}
-    }
+    // (Compression is handled inline above when copying sections.)
 
     if let Err(e) = fs::write(output, &out_buf) {
         eprintln!("objcopy: {output}: {e}");
