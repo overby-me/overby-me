@@ -1626,8 +1626,38 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
             opts.user = Some(ui.clone());
         }
 
-        let resp = execute_request(&url, &opts, redirect_headers.len())?;
+        let mut resp = execute_request(&url, &opts, redirect_headers.len())?;
         connects += 1;
+
+        // --anyauth: when the server replies 401 with a Basic challenge,
+        // retry the same request with Basic auth so credentials are sent in
+        // the follow-up. We only support Basic, so skip if the WWW-Authenticate
+        // header doesn't offer it (test 1204).
+        if resp.status == 401
+            && opts.defer_auth
+            && (opts.user.is_some() || url.userinfo.is_some())
+        {
+            let offers_basic = resp.headers.iter().any(|(k, v)| {
+                k.eq_ignore_ascii_case("www-authenticate")
+                    && v.split(',').any(|tok| {
+                        tok.trim()
+                            .split_ascii_whitespace()
+                            .next()
+                            .is_some_and(|s| s.eq_ignore_ascii_case("basic"))
+                    })
+            });
+            if offers_basic {
+                // Capture the 401 headers as part of the redirect chain so
+                // -i shows both responses.
+                redirect_headers.extend_from_slice(&resp.header_bytes);
+                // Disable defer_auth on the live `opts` so subsequent
+                // redirects in this same `perform()` call also send Basic
+                // (test 1087, 1088).
+                opts.defer_auth = false;
+                resp = execute_request(&url, &opts, redirect_headers.len())?;
+                connects += 1;
+            }
+        }
 
         // When the cookie engine is active, accumulate Set-Cookie response
         // headers so subsequent redirects within this perform() call (and
