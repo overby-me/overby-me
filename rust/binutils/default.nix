@@ -222,6 +222,11 @@
         minPass = 45;
         maxFail = 0;
       }
+      {
+        exp = "update-section.exp";
+        minPass = 6;
+        maxFail = 0;
+      }
     ];
 
     customChecks = builtins.listToAttrs (map (t: {

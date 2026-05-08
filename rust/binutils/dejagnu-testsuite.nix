@@ -114,7 +114,7 @@ in
             base=$(basename "$f")
             # Skip tests for tools we don't implement or that need special setup
             case "$base" in
-              dlltool.exp|elfedit.exp|debuginfod.exp|update-section.exp)
+              dlltool.exp|elfedit.exp|debuginfod.exp)
                 continue ;;
             esac
             EXP_FILES="$EXP_FILES $base"

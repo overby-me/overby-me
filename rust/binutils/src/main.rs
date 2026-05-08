@@ -7517,6 +7517,8 @@ fn tool_objcopy(args: &[String]) -> i32 {
     let mut localize_hidden = false;
     let mut strip_section_headers = false;
     let mut add_sections: Vec<(String, String)> = Vec::new();
+    let mut dump_sections: Vec<(String, String)> = Vec::new();
+    let mut update_sections: Vec<(String, String)> = Vec::new();
     let mut add_symbols: Vec<String> = Vec::new();
     let mut remove_relocations: Vec<String> = Vec::new();
     let mut set_start: Option<u64> = None;
@@ -7692,6 +7694,22 @@ fn tool_objcopy(args: &[String]) -> i32 {
                 }
                 other_modifications = true;
             }
+            "--dump-section" => {
+                i += 1;
+                if i < args.len()
+                    && let Some((n, f)) = args[i].split_once('=')
+                {
+                    dump_sections.push((n.to_string(), f.to_string()));
+                }
+            }
+            "--update-section" => {
+                i += 1;
+                if i < args.len()
+                    && let Some((n, f)) = args[i].split_once('=')
+                {
+                    update_sections.push((n.to_string(), f.to_string()));
+                }
+            }
             "--add-symbol" => {
                 i += 1;
                 if i < args.len() {
@@ -7797,6 +7815,18 @@ fn tool_objcopy(args: &[String]) -> i32 {
                     add_sections.push((n.to_string(), f.to_string()));
                 }
                 other_modifications = true;
+            }
+            _ if arg.starts_with("--dump-section=") => {
+                let v = arg.split_once('=').unwrap().1;
+                if let Some((n, f)) = v.split_once('=') {
+                    dump_sections.push((n.to_string(), f.to_string()));
+                }
+            }
+            _ if arg.starts_with("--update-section=") => {
+                let v = arg.split_once('=').unwrap().1;
+                if let Some((n, f)) = v.split_once('=') {
+                    update_sections.push((n.to_string(), f.to_string()));
+                }
             }
             _ if arg.starts_with("--add-symbol=") => {
                 add_symbols.push(arg.split_once('=').unwrap().1.to_string());
@@ -7980,6 +8010,17 @@ fn tool_objcopy(args: &[String]) -> i32 {
         return 1;
     }
 
+    // --update-section and --remove-section on the same section is an error.
+    for (uname, _) in &update_sections {
+        if remove_sections.iter().any(|r| r == uname) {
+            eprintln!(
+                "objcopy: error: section {} matches both update and remove options",
+                uname
+            );
+            return 1;
+        }
+    }
+
     let input = &files[0];
     let output = if files.len() > 1 { &files[1] } else { input };
 
@@ -8014,6 +8055,71 @@ fn tool_objcopy(args: &[String]) -> i32 {
             binary_architecture.as_deref(),
             binary_symbol_prefix.as_deref(),
         );
+    }
+
+    // --dump-section: extract section data to a file. We do this as a side
+    // effect of objcopy; the file is otherwise rewritten normally per the
+    // remaining options. Empty sections produce empty output files.
+    if !dump_sections.is_empty()
+        && let Ok(in_data) = fs::read(input)
+    {
+        for (sname, fname) in &dump_sections {
+            let data = objcopy_extract_section_data(&in_data, sname).unwrap_or_default();
+            if let Err(e) = fs::write(fname, &data) {
+                eprintln!("objcopy: '{fname}': {e}");
+                return 1;
+            }
+        }
+    }
+
+    // --update-section / --rename-section in-place rewriter for ELF object
+    // files. Only takes this path when no other transformations are requested.
+    if !update_sections.is_empty()
+        && !strip_debug
+        && !strip_all
+        && !strip_unneeded
+        && remove_sections.is_empty()
+        && keep_sections.is_empty()
+        && strip_symbols.is_empty()
+        && globalize_syms.is_empty()
+        && keep_global_syms.is_empty()
+        && set_section_alignment.is_empty()
+        && set_section_flags.is_empty()
+        && localize_syms.is_empty()
+        && weaken_syms.is_empty()
+        && !weaken_all
+        && !localize_hidden
+        && add_sections.is_empty()
+        && add_symbols.is_empty()
+        && remove_relocations.is_empty()
+        && keep_symbols.is_empty()
+        && elf_stt_common.is_none()
+        && reverse_bytes.is_none()
+        && set_start.is_none()
+        && adjust_start == 0
+        && adjust_vma == 0
+        && adjust_section_vma.is_empty()
+    {
+        let in_data = match fs::read(input) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("objcopy: '{input}': {e}");
+                return 1;
+            }
+        };
+        match objcopy_inplace_update_sections(&in_data, &update_sections, &rename_sections) {
+            Ok(out_bytes) => {
+                if let Err(e) = fs::write(output, &out_bytes) {
+                    eprintln!("objcopy: '{output}': {e}");
+                    return 1;
+                }
+                return 0;
+            }
+            Err(msg) => {
+                eprintln!("{msg}");
+                return 1;
+            }
+        }
     }
 
     // Special output formats
@@ -11509,18 +11615,15 @@ fn readelf_debug_loclists<'data, Elf: FileHeader>(
         .and_then(|s| s.uncompressed_data().ok())
         .map(|d| d.into_owned())
         .unwrap_or_default();
-    let locview_pairs: Vec<(u64, u64)> =
-        if !info_data.is_empty() && !abbrev_data.is_empty() {
-            collect_locview_pairs(&info_data, &abbrev_data, le)
-        } else {
-            Vec::new()
-        };
+    let locview_pairs: Vec<(u64, u64)> = if !info_data.is_empty() && !abbrev_data.is_empty() {
+        collect_locview_pairs(&info_data, &abbrev_data, le)
+    } else {
+        Vec::new()
+    };
     let view_to_loc: std::collections::BTreeMap<u64, u64> =
         locview_pairs.iter().map(|&(l, v)| (v, l)).collect();
-    let loc_to_view: std::collections::BTreeMap<u64, u64> =
-        locview_pairs.iter().copied().collect();
-    let mut boundaries: std::collections::BTreeSet<u64> =
-        std::collections::BTreeSet::new();
+    let loc_to_view: std::collections::BTreeMap<u64, u64> = locview_pairs.iter().copied().collect();
+    let mut boundaries: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
     for &(loc, vo) in &locview_pairs {
         boundaries.insert(vo);
         boundaries.insert(loc);
@@ -13522,6 +13625,449 @@ fn objcopy_merge_build_attribute_notes(data: &[u8]) -> Option<Vec<u8>> {
         }
     }
     Some(out_data)
+}
+
+/// Read raw section data by name from an ELF file. Returns the section's
+/// bytes, or `None` if the file isn't ELF or the section is missing.
+/// Empty / NOBITS sections return `Some(empty_vec)` if the section exists.
+fn objcopy_extract_section_data(data: &[u8], name: &str) -> Option<Vec<u8>> {
+    if data.len() < 0x40 || &data[..4] != b"\x7fELF" {
+        return None;
+    }
+    let class = data[4];
+    let endian = data[5];
+    if class != 1 && class != 2 {
+        return None;
+    }
+    let le = endian == 1;
+    let r16 = |o: usize| -> u16 {
+        let mut b = [0u8; 2];
+        b.copy_from_slice(&data[o..o + 2]);
+        if le {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        }
+    };
+    let r32 = |o: usize| -> u32 {
+        let mut b = [0u8; 4];
+        b.copy_from_slice(&data[o..o + 4]);
+        if le {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        }
+    };
+    let r64 = |o: usize| -> u64 {
+        let mut b = [0u8; 8];
+        b.copy_from_slice(&data[o..o + 8]);
+        if le {
+            u64::from_le_bytes(b)
+        } else {
+            u64::from_be_bytes(b)
+        }
+    };
+    let (shoff, shentsize, shnum, shstrndx) = if class == 2 {
+        (
+            r64(0x28) as usize,
+            r16(0x3a) as usize,
+            r16(0x3c) as usize,
+            r16(0x3e) as usize,
+        )
+    } else {
+        (
+            r32(0x20) as usize,
+            r16(0x2e) as usize,
+            r16(0x30) as usize,
+            r16(0x32) as usize,
+        )
+    };
+    if shoff == 0 || shnum == 0 || shstrndx >= shnum {
+        return None;
+    }
+    let shstr_h = shoff + shstrndx * shentsize;
+    let (shstr_off, shstr_size) = if class == 2 {
+        (r64(shstr_h + 24) as usize, r64(shstr_h + 32) as usize)
+    } else {
+        (r32(shstr_h + 16) as usize, r32(shstr_h + 20) as usize)
+    };
+    if shstr_off + shstr_size > data.len() {
+        return None;
+    }
+    let strtab = &data[shstr_off..shstr_off + shstr_size];
+    for i in 0..shnum {
+        let h = shoff + i * shentsize;
+        let nm_off = r32(h) as usize;
+        if nm_off >= strtab.len() {
+            continue;
+        }
+        let mut e = nm_off;
+        while e < strtab.len() && strtab[e] != 0 {
+            e += 1;
+        }
+        let nm = std::str::from_utf8(&strtab[nm_off..e]).unwrap_or("");
+        if nm == name {
+            let (off, sz, ty) = if class == 2 {
+                (r64(h + 24) as usize, r64(h + 32) as usize, r32(h + 4))
+            } else {
+                (r32(h + 16) as usize, r32(h + 20) as usize, r32(h + 4))
+            };
+            // SHT_NOBITS (8) has no file data
+            if ty == 8 {
+                return Some(Vec::new());
+            }
+            if off + sz > data.len() {
+                return Some(Vec::new());
+            }
+            return Some(data[off..off + sz].to_vec());
+        }
+    }
+    None
+}
+
+/// In-place ELF rewriter for `--update-section` (and combined
+/// `--rename-section`) that preserves the assembler-produced layout: it
+/// reflows file offsets for all PROGBITS-style sections starting from
+/// the first updated section, respecting per-section sh_addralign, then
+/// patches sh_size, sh_offset, sh_name, and e_shoff.
+fn objcopy_inplace_update_sections(
+    data: &[u8],
+    updates: &[(String, String)],
+    renames: &[(String, String, Option<Vec<String>>)],
+) -> Result<Vec<u8>, String> {
+    if data.len() < 0x40 || &data[..4] != b"\x7fELF" {
+        return Err(format!("objcopy: not an ELF file"));
+    }
+    let class = data[4];
+    let endian = data[5];
+    if class != 1 && class != 2 {
+        return Err(format!("objcopy: unsupported ELF class"));
+    }
+    let le = endian == 1;
+    let r16 = |o: usize| -> u16 {
+        let mut b = [0u8; 2];
+        b.copy_from_slice(&data[o..o + 2]);
+        if le {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        }
+    };
+    let r32 = |o: usize| -> u32 {
+        let mut b = [0u8; 4];
+        b.copy_from_slice(&data[o..o + 4]);
+        if le {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        }
+    };
+    let r64 = |o: usize| -> u64 {
+        let mut b = [0u8; 8];
+        b.copy_from_slice(&data[o..o + 8]);
+        if le {
+            u64::from_le_bytes(b)
+        } else {
+            u64::from_be_bytes(b)
+        }
+    };
+
+    let (shoff, shentsize, shnum, shstrndx) = if class == 2 {
+        (
+            r64(0x28) as usize,
+            r16(0x3a) as usize,
+            r16(0x3c) as usize,
+            r16(0x3e) as usize,
+        )
+    } else {
+        (
+            r32(0x20) as usize,
+            r16(0x2e) as usize,
+            r16(0x30) as usize,
+            r16(0x32) as usize,
+        )
+    };
+    if shoff == 0 || shnum == 0 || shstrndx >= shnum {
+        return Err(format!("objcopy: invalid section header table"));
+    }
+    let expected_entsize = if class == 2 { 64 } else { 40 };
+    if shentsize != expected_entsize {
+        return Err(format!("objcopy: unexpected sh_entsize"));
+    }
+
+    #[derive(Clone, Default)]
+    struct Shdr {
+        name: u32,
+        sh_type: u32,
+        sh_flags: u64,
+        sh_addr: u64,
+        sh_offset: u64,
+        sh_size: u64,
+        sh_link: u32,
+        sh_info: u32,
+        sh_addralign: u64,
+        sh_entsize: u64,
+    }
+    let mut headers: Vec<Shdr> = Vec::with_capacity(shnum);
+    for i in 0..shnum {
+        let h = shoff + i * shentsize;
+        let sh = if class == 2 {
+            Shdr {
+                name: r32(h),
+                sh_type: r32(h + 4),
+                sh_flags: r64(h + 8),
+                sh_addr: r64(h + 16),
+                sh_offset: r64(h + 24),
+                sh_size: r64(h + 32),
+                sh_link: r32(h + 40),
+                sh_info: r32(h + 44),
+                sh_addralign: r64(h + 48),
+                sh_entsize: r64(h + 56),
+            }
+        } else {
+            Shdr {
+                name: r32(h),
+                sh_type: r32(h + 4),
+                sh_flags: r32(h + 8) as u64,
+                sh_addr: r32(h + 12) as u64,
+                sh_offset: r32(h + 16) as u64,
+                sh_size: r32(h + 20) as u64,
+                sh_link: r32(h + 24),
+                sh_info: r32(h + 28),
+                sh_addralign: r32(h + 32) as u64,
+                sh_entsize: r32(h + 36) as u64,
+            }
+        };
+        headers.push(sh);
+    }
+
+    let shstr_off = headers[shstrndx].sh_offset as usize;
+    let shstr_size = headers[shstrndx].sh_size as usize;
+    if shstr_off + shstr_size > data.len() {
+        return Err(format!("objcopy: invalid shstrtab"));
+    }
+    let mut strtab = data[shstr_off..shstr_off + shstr_size].to_vec();
+    let name_at = |strtab: &[u8], off: u32| -> String {
+        let o = off as usize;
+        if o >= strtab.len() {
+            return String::new();
+        }
+        let mut e = o;
+        while e < strtab.len() && strtab[e] != 0 {
+            e += 1;
+        }
+        std::str::from_utf8(&strtab[o..e]).unwrap_or("").to_string()
+    };
+
+    // Resolve update_sections to (section_index, new_data).
+    // Errors with "error: NAME not found, can't be updated" if missing.
+    let mut updated: Vec<(usize, Vec<u8>)> = Vec::new();
+    for (uname, fname) in updates {
+        let mut found_idx: Option<usize> = None;
+        for i in 1..shnum {
+            if name_at(&strtab, headers[i].name) == *uname {
+                found_idx = Some(i);
+                break;
+            }
+        }
+        let idx = match found_idx {
+            Some(i) => i,
+            None => {
+                return Err(format!(
+                    "objcopy: error: {} not found, can't be updated",
+                    uname
+                ));
+            }
+        };
+        let new_data = match fs::read(fname) {
+            Ok(d) => d,
+            Err(e) => return Err(format!("objcopy: '{fname}': {e}")),
+        };
+        updated.push((idx, new_data));
+    }
+
+    // Apply rename-section in shstrtab when names have the same length.
+    // This preserves byte layout.
+    for (from, to, _flags) in renames {
+        if from.len() != to.len() {
+            return Err(format!(
+                "objcopy: rename-section with different name lengths not supported"
+            ));
+        }
+        // Find the first occurrence of from\0 in strtab and replace.
+        let needle: Vec<u8> = from.bytes().chain(std::iter::once(0u8)).collect();
+        let mut found = false;
+        if needle.len() <= strtab.len() {
+            for k in 0..=strtab.len() - needle.len() {
+                if strtab[k..k + needle.len()] == needle[..] {
+                    let to_bytes = to.as_bytes();
+                    strtab[k..k + to_bytes.len()].copy_from_slice(to_bytes);
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if !found {
+            // Section doesn't exist; silently skip (matches GNU behavior).
+            continue;
+        }
+    }
+
+    // Map from index → new data (replacement or original).
+    let section_data = |i: usize| -> Vec<u8> {
+        if let Some((_, d)) = updated.iter().find(|(idx, _)| *idx == i) {
+            return d.clone();
+        }
+        if headers[i].sh_type == 8 {
+            return Vec::new();
+        }
+        let off = headers[i].sh_offset as usize;
+        let sz = headers[i].sh_size as usize;
+        if off + sz > data.len() {
+            return Vec::new();
+        }
+        data[off..off + sz].to_vec()
+    };
+
+    // Identify the shstrtab body (we updated it above).
+    // We need to write strtab at the same logical position; size unchanged.
+
+    // Determine which section we updated has the smallest sh_offset.
+    let min_updated_off = updated
+        .iter()
+        .map(|(i, _)| headers[*i].sh_offset)
+        .min()
+        .unwrap_or(0);
+
+    // Build a list of "data-bearing" sections (sh_type != NULL && != NOBITS)
+    // that have file presence (sh_offset > 0). Sort by sh_offset.
+    let mut data_indices: Vec<usize> = (1..shnum)
+        .filter(|&i| headers[i].sh_type != 0 && headers[i].sh_type != 8)
+        .collect();
+    data_indices.sort_by_key(|&i| headers[i].sh_offset);
+
+    // Compute new offsets: for sections at offset >= min_updated_off,
+    // reflow respecting alignment. For sections before, preserve offset.
+    let mut new_offsets: Vec<u64> = headers.iter().map(|h| h.sh_offset).collect();
+    let mut new_sizes: Vec<u64> = headers.iter().map(|h| h.sh_size).collect();
+    for (idx, d) in &updated {
+        new_sizes[*idx] = d.len() as u64;
+    }
+    // Determine cursor: start from min_updated_off (the first reflowed
+    // section is placed at its original offset, which is preserved).
+    let mut cursor = min_updated_off;
+    for &i in &data_indices {
+        if headers[i].sh_offset < min_updated_off {
+            continue;
+        }
+        let align = headers[i].sh_addralign.max(1);
+        // Round cursor up to alignment boundary.
+        if cursor % align != 0 {
+            cursor += align - (cursor % align);
+        }
+        new_offsets[i] = cursor;
+        cursor += new_sizes[i];
+    }
+
+    // The shstrtab is in data_indices; its new offset is in new_offsets.
+    // Determine new e_shoff: section header table goes after the last
+    // data-bearing section, aligned to 8 (ELF64) or 4 (ELF32).
+    let shdr_align = if class == 2 { 8u64 } else { 4u64 };
+    if cursor % shdr_align != 0 {
+        cursor += shdr_align - (cursor % shdr_align);
+    }
+    let new_shoff = cursor;
+    let new_total = (new_shoff as usize) + shnum * shentsize;
+
+    // Build the output buffer.
+    let mut out = vec![0u8; new_total];
+    // Copy ELF header up to (but not including) e_shoff field.
+    let shoff_field_off = if class == 2 { 0x28 } else { 0x20 };
+    out[..shoff_field_off].copy_from_slice(&data[..shoff_field_off]);
+
+    // Copy data for sections before min_updated_off (preserved offsets).
+    // We can copy a single byte range from header end to min_updated_off.
+    let prefix_end = min_updated_off as usize;
+    if prefix_end > shoff_field_off {
+        out[shoff_field_off..prefix_end].copy_from_slice(&data[shoff_field_off..prefix_end]);
+    }
+
+    // Write reflowed sections.
+    for &i in &data_indices {
+        if headers[i].sh_offset < min_updated_off {
+            continue;
+        }
+        let off = new_offsets[i] as usize;
+        let sz = new_sizes[i] as usize;
+        let body = if i == shstrndx {
+            strtab.clone()
+        } else {
+            section_data(i)
+        };
+        if body.len() < sz {
+            // Write what we have; pad rest with zeros (already zero-filled).
+            out[off..off + body.len()].copy_from_slice(&body);
+        } else {
+            out[off..off + sz].copy_from_slice(&body[..sz]);
+        }
+    }
+
+    // Patch e_shoff.
+    if class == 2 {
+        let v = if le {
+            new_shoff.to_le_bytes()
+        } else {
+            new_shoff.to_be_bytes()
+        };
+        out[0x28..0x30].copy_from_slice(&v);
+    } else {
+        let v32 = new_shoff as u32;
+        let v = if le {
+            v32.to_le_bytes()
+        } else {
+            v32.to_be_bytes()
+        };
+        out[0x20..0x24].copy_from_slice(&v);
+    }
+
+    // Write section headers with updated sh_offset / sh_size.
+    let put_u32 = |out: &mut [u8], pos: usize, v: u32| {
+        let bytes = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        out[pos..pos + 4].copy_from_slice(&bytes);
+    };
+    let put_u64 = |out: &mut [u8], pos: usize, v: u64| {
+        let bytes = if le { v.to_le_bytes() } else { v.to_be_bytes() };
+        out[pos..pos + 8].copy_from_slice(&bytes);
+    };
+    for i in 0..shnum {
+        let dst = (new_shoff as usize) + i * shentsize;
+        let h = &headers[i];
+        if class == 2 {
+            put_u32(&mut out, dst, h.name);
+            put_u32(&mut out, dst + 4, h.sh_type);
+            put_u64(&mut out, dst + 8, h.sh_flags);
+            put_u64(&mut out, dst + 16, h.sh_addr);
+            put_u64(&mut out, dst + 24, new_offsets[i]);
+            put_u64(&mut out, dst + 32, new_sizes[i]);
+            put_u32(&mut out, dst + 40, h.sh_link);
+            put_u32(&mut out, dst + 44, h.sh_info);
+            put_u64(&mut out, dst + 48, h.sh_addralign);
+            put_u64(&mut out, dst + 56, h.sh_entsize);
+        } else {
+            put_u32(&mut out, dst, h.name);
+            put_u32(&mut out, dst + 4, h.sh_type);
+            put_u32(&mut out, dst + 8, h.sh_flags as u32);
+            put_u32(&mut out, dst + 12, h.sh_addr as u32);
+            put_u32(&mut out, dst + 16, new_offsets[i] as u32);
+            put_u32(&mut out, dst + 20, new_sizes[i] as u32);
+            put_u32(&mut out, dst + 24, h.sh_link);
+            put_u32(&mut out, dst + 28, h.sh_info);
+            put_u32(&mut out, dst + 32, h.sh_addralign as u32);
+            put_u32(&mut out, dst + 36, h.sh_entsize as u32);
+        }
+    }
+
+    Ok(out)
 }
 
 /// In-place ELF objcopy fast path that ONLY handles `--remove-section`.
@@ -17186,7 +17732,6 @@ fn parse_abbrev_table(
     out
 }
 
-#[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_arguments)]
 fn read_and_format_attr(
     p: &mut DwarfReader<'_>,
