@@ -13604,10 +13604,13 @@ fn elf_remove_empty_symtab(data: &mut Vec<u8>) {
     if to_remove.is_empty() {
         return;
     }
-    // Build new section header table excluding removed sections
+    // Build new section header table excluding removed sections, and
+    // rebuild .shstrtab to drop the names of removed sections (and any
+    // other now-orphaned strings) so its on-disk size matches GNU strip.
     let mut new_headers: Vec<Vec<u8>> = Vec::new();
     let mut idx_map: Vec<i32> = vec![0; shnum];
     let mut new_idx = 0i32;
+    let mut surviving_indices: Vec<usize> = Vec::new();
     for i in 0..shnum {
         if to_remove.contains(&i) {
             idx_map[i] = -1;
@@ -13615,8 +13618,80 @@ fn elf_remove_empty_symtab(data: &mut Vec<u8>) {
         }
         idx_map[i] = new_idx;
         new_idx += 1;
+        surviving_indices.push(i);
         let hdr = shoff + i * shentsize;
         new_headers.push(data[hdr..hdr + shentsize].to_vec());
+    }
+    // Find the surviving shstrtab in the new header list.
+    let new_shstrndx_opt = idx_map[shstrndx];
+    if new_shstrndx_opt < 0 {
+        return;
+    }
+    let new_shstr_pos = new_shstrndx_opt as usize;
+    // Read each surviving section's name from the original strtab.
+    let mut surviving_names: Vec<String> = Vec::with_capacity(surviving_indices.len());
+    for &orig in &surviving_indices {
+        let hdr = shoff + orig * shentsize;
+        let name_off = read_u32(data, hdr) as usize;
+        let mut e = name_off;
+        while e < strtab.len() && strtab[e] != 0 {
+            e += 1;
+        }
+        let nm = std::str::from_utf8(&strtab[name_off..e])
+            .unwrap_or("")
+            .to_string();
+        surviving_names.push(nm);
+    }
+    // Build a new compact shstrtab: \0 + each unique non-empty name + \0.
+    let mut new_strtab: Vec<u8> = vec![0u8];
+    let mut name_to_off: HashMap<String, u32> = HashMap::new();
+    name_to_off.insert(String::new(), 0);
+    for n in &surviving_names {
+        if name_to_off.contains_key(n) {
+            continue;
+        }
+        name_to_off.insert(n.clone(), new_strtab.len() as u32);
+        new_strtab.extend_from_slice(n.as_bytes());
+        new_strtab.push(0);
+    }
+    // Update each surviving header's sh_name to point into the new strtab
+    // and (for the shstrtab itself) update its sh_size.
+    for (k, h) in new_headers.iter_mut().enumerate() {
+        let new_off = name_to_off.get(&surviving_names[k]).copied().unwrap_or(0);
+        let nb = if le {
+            new_off.to_le_bytes()
+        } else {
+            new_off.to_be_bytes()
+        };
+        h[0..4].copy_from_slice(&nb);
+        if k == new_shstr_pos {
+            // sh_size = new_strtab.len() (the new compact strtab will be
+            // written at the original shstrtab offset; junk at the tail
+            // stays unreferenced but doesn't grow the file).
+            let sz = new_strtab.len() as u64;
+            if class == 2 {
+                let b = if le {
+                    sz.to_le_bytes()
+                } else {
+                    sz.to_be_bytes()
+                };
+                h[32..40].copy_from_slice(&b);
+            } else {
+                let sz32 = sz as u32;
+                let b = if le {
+                    sz32.to_le_bytes()
+                } else {
+                    sz32.to_be_bytes()
+                };
+                h[20..24].copy_from_slice(&b);
+            }
+        }
+    }
+    // Replace the original shstrtab body with the new compact one (in place
+    // at the original offset; the trailing bytes inside the original size
+    // become unreferenced padding).
+    if shstr_off + new_strtab.len() <= data.len() {
+        data[shstr_off..shstr_off + new_strtab.len()].copy_from_slice(&new_strtab);
     }
     // Adjust sh_link and sh_info if they reference removed indices (set to 0).
     for h in new_headers.iter_mut() {

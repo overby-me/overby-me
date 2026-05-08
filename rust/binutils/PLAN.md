@@ -82,8 +82,8 @@ Key design decisions:
 | addr2line.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
 | update-section.exp | **6** | 0 | 6 | minPass=6, maxFail=0 |
 | elfedit.exp | **6** | 0 | 6 | minPass=6, maxFail=0 |
-| x86-64/x86-64.exp | **19** | 16 | 35 | (informational; only the binutils-all-x86-64 subset is enabled) |
-| **Total** | **305** | **16** | **321** | |
+| x86-64/x86-64.exp | **21** | 14 | 35 | (informational; only the binutils-all-x86-64 subset is enabled) |
+| **Total** | **307** | **14** | **321** | |
 
 All upstream DejaGnu tests pass.
 
@@ -240,6 +240,7 @@ Two layers of testing:
   - SHF_X86_64_LARGE (0x10000000): `large` keyword in objcopy `--set-section-flags`; readelf `-S` shows `l` without falling through to the generic `p` flag (fixes large-sections, large-sections-2, large-sections-2-x32).
   - readelf `-l` prefix: `Elf file type is …`, `Entry point 0x…`, `There are N program headers, starting at offset M`. Auto-detect PIE via DT_FLAGS_1 & DF_1_PIE so ET_DYN PIE shows "(Position-Independent Executable file)". INTERP segment annotated with `[Requesting program interpreter: <path>]`.
   - Strip/objcopy/nm/readelf `--help` now emits a `supported targets:` line listing common ELF formats including elf64-littleaarch64 (fixes pr33230 — test branches on whether help advertises the target).
+- [x] Compact `.shstrtab` after `strip --strip-all` removes empty `.symtab`/`.strtab` (+2 dejagnu, 305→307 total): `elf_remove_empty_symtab` now rebuilds `.shstrtab` to drop the names of removed sections, updates each surviving header's `sh_name` to the new offset, and shrinks `sh_size` accordingly. Original on-disk position is preserved (the trailing bytes inside the original size become unreferenced padding) so file offsets in other sections don't shift. Fixes `strip on uncompressed debug sections` and `strip on compressed debug sections`.
 
 ## Next steps
 
