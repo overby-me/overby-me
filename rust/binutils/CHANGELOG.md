@@ -3,7 +3,11 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
-## Custom-test expansion (64/64 ✅)
+## Custom-test expansion (67/67 ✅)
+
+- 3 more custom tests for already-supported flag combinations (+3,
+  64→67): `nm-radix-hex-print-file-name` (`-t x -A`),
+  `strings-radix-decimal` (`-t d`), `strings-radix-octal` (`-t o`).
 
 - nm `-A` POSIX prefix uses "file: " (space after colon); `-j` drops
   the file-name prefix entirely (matches GNU). +2 custom tests

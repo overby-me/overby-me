@@ -296,6 +296,18 @@
         name = "just-symbols-with-prefix";
       }
       {
+        tool = "nm";
+        name = "radix-hex-print-file-name";
+      }
+      {
+        tool = "strings";
+        name = "radix-decimal";
+      }
+      {
+        tool = "strings";
+        name = "radix-octal";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }
