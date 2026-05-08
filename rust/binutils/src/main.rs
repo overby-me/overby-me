@@ -12003,10 +12003,31 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
         };
         final_names.push(read_name(&shstr_data, new_idx as usize));
     }
-    // Build a fresh shstrtab in section header order, with suffix sharing —
-    // if string A ends with string B (followed by NUL), B can be referenced
-    // as a suffix of A. GNU's shstrtab uses this so e.g. `.zdebug_info` is
-    // found inside `.rela.zdebug_info` rather than stored separately.
+    // Build a fresh shstrtab by walking the *original* shstrtab in order
+    // and substituting each string with its renamed form. This preserves
+    // GNU's section name ordering for byte-exact compatibility, while
+    // suffix-sharing kicks in when a long form (e.g. `.rela.zdebug_info`)
+    // appears before its short alias (`.zdebug_info`).
+    let mut rename_map: std::collections::HashMap<Vec<u8>, Vec<u8>> =
+        std::collections::HashMap::new();
+    for cs in &compressed {
+        let h = shoff as usize + cs.idx * shentsize;
+        let orig_idx = r32(data, h);
+        let orig = read_name(&shstr_data, orig_idx as usize);
+        let new = read_name(&shstr_data, cs.new_name_idx as usize);
+        if orig != new {
+            rename_map.insert(orig, new);
+        }
+    }
+    for &(idx, new_idx) in &rela_renames {
+        let h = shoff as usize + idx * shentsize;
+        let orig_idx = r32(data, h);
+        let orig = read_name(&shstr_data, orig_idx as usize);
+        let new = read_name(&shstr_data, new_idx as usize);
+        if orig != new {
+            rename_map.insert(orig, new);
+        }
+    }
     let mut new_shstr: Vec<u8> = vec![0];
     let mut name_to_off: std::collections::HashMap<Vec<u8>, u32> =
         std::collections::HashMap::new();
@@ -12038,38 +12059,38 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
         map.insert(s.to_vec(), off);
         off
     };
-    // First pass: place all final names in section order. To maximize suffix
-    // sharing, place LONGER variants (e.g. `.rela.zdebug_info`) before their
-    // shorter suffixes (e.g. `.zdebug_info`) by deferring known short ones.
-    let is_short_with_long_alias = |s: &[u8]| -> bool {
-        // True if some other final_name strictly contains s as a non-prefix
-        // (i.e. s is the suffix after at least one extra char) plus a NUL
-        // terminator at the end.
-        for other in &final_names {
-            if other.len() <= s.len() || !other.ends_with(s) {
-                continue;
-            }
-            // Must NOT be a prefix match — i.e. the byte at len-s.len() is the
-            // start of s, fine; we just need other != s.
-            if other != s {
-                return true;
-            }
+    // Walk the original shstrtab in offset order. Skip strings that aren't
+    // referenced by any kept section.
+    let kept_orig_names: std::collections::HashSet<Vec<u8>> = {
+        let mut s = std::collections::HashSet::new();
+        for i in 0..shnum {
+            let h = shoff as usize + i * shentsize;
+            let nidx = r32(data, h);
+            s.insert(read_name(&shstr_data, nidx as usize));
         }
-        false
+        s
     };
-    // Place "long" names first (in section order).
-    for n in &final_names {
-        if !is_short_with_long_alias(n) {
-            try_place(n, &mut new_shstr, &mut name_to_off);
+    let mut p = 1usize;
+    while p < shstr_data.len() {
+        let end = shstr_data[p..]
+            .iter()
+            .position(|&b| b == 0)
+            .map(|x| p + x)
+            .unwrap_or(shstr_data.len());
+        if end > p {
+            let orig: Vec<u8> = shstr_data[p..end].to_vec();
+            if kept_orig_names.contains(&orig) {
+                let mapped = rename_map.get(&orig).cloned().unwrap_or(orig.clone());
+                try_place(&mapped, &mut new_shstr, &mut name_to_off);
+            }
         }
+        p = end + 1;
     }
-    // Then place short ones (which should now find suffix matches).
+    // Add any new names from compress (e.g. `.zdebug_info` that weren't in
+    // the original). Place new names in section header order.
     for n in &final_names {
-        if is_short_with_long_alias(n) {
-            try_place(n, &mut new_shstr, &mut name_to_off);
-        }
+        try_place(n, &mut new_shstr, &mut name_to_off);
     }
-    // Override shstr_data with the compacted version.
     shstr_data = new_shstr;
     let final_name_offsets: Vec<u32> = final_names
         .iter()
