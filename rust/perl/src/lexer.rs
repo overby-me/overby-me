@@ -1470,6 +1470,13 @@ impl Lexer {
                         "for" => Token::For,
                         "foreach" => Token::Foreach,
                         "my" => Token::My,
+                        // `state` is a feature-flagged variant of `my` that
+                        // initializes once and persists across sub calls. We
+                        // treat it as `my` here — for simple modules and
+                        // tests using `state $y = EXPR` for the init-only
+                        // semantics this is sufficient. True state-var
+                        // persistence would need per-sub static storage.
+                        "state" | "CORE::state" => Token::My,
                         "our" => Token::Our,
                         "local" => Token::Local,
                         "sub" => Token::Sub,
