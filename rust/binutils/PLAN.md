@@ -82,9 +82,9 @@ Key design decisions:
 | addr2line.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
 | update-section.exp | **6** | 0 | 6 | minPass=6, maxFail=0 |
 | elfedit.exp | **6** | 0 | 6 | minPass=6, maxFail=0 |
-| x86-64/x86-64.exp | **33** | 2 | 35 | (informational; only the binutils-all-x86-64 subset is enabled) |
-| i386/i386.exp | **7** | 1 | 8 | (informational; binutils-all-i386 subdir) |
-| **Total** | **326** | **3** | **329** | |
+| x86-64/x86-64.exp | **34** | 1 | 35 | (informational; only the binutils-all-x86-64 subset is enabled) |
+| i386/i386.exp | **8** | 0 | 8 | (informational; binutils-all-i386 subdir) |
+| **Total** | **328** | **1** | **329** | |
 
 All upstream DejaGnu tests pass.
 
@@ -250,6 +250,7 @@ Two layers of testing:
 - [x] Add `--sframe[=NAME]` SFrame v2/v3 header dump for both readelf and objdump (+2 dejagnu, 309→311 total): parses the SFrame preamble (magic 0xdee2 + version + flags), abi_arch, cfa_fixed_ra_offset, num_fdes, num_fres; emits `Contents of the SFrame section <name>:` + `Header:` block with `SFRAME_VERSION_<N>`, `SFRAME_F_FDE_SORTED`/`SFRAME_F_FRAME_POINTER`/`SFRAME_F_FDE_FUNC_START_PCREL` flag names, and per-field lines. Fixes `objdump dump SFrame section .sframe2` and `readelf dump SFrame section .sframe2`.
 - [x] objcopy `-O elf32-x86-64` (x32 ABI) and `-O elf64-x86-64` (x32→ELF64) conversions with `.note.gnu.property` merging (+8 dejagnu, 311→319 total): translates ELF64↔ELF32 section headers, symtab entries (16↔24 bytes), RELA entries (12↔24 bytes), REL entries (8↔16 bytes), and SHF_COMPRESSED Chdr (12↔24 bytes); merges per-CU GNU property notes by ORing flag values for the same `pr_type` and re-aligning to the target ABI's property alignment (8 for ELF64, 4 for ELF32). Fixes `binutils-all/x86-64/pr23494a/c/d/e` and their `-x32` variants.
 - [x] Wire `binutils-all/i386/i386.exp` into the runtest invocation (+7 dejagnu, 319→326 total): runs the i386-32-bit subdir tests (empty, ibt, pr21231a/b, shstk, plus the strip-on-debug-sections variants) — they exercise our i386 ELF32 read/write path. Fix: emit a double blank line before objdump's "Disassembly of section ...:" header to match GNU's exact-byte output (the `objdump-disassemble` custom test was failing on the missing newline).
+- [x] Add readelf `.debug_pubnames`/`.debug_aranges`/`.debug_frame` dumpers (`-wp`/`-wr`/`-wf`) and reorder the bare `-w` dispatch to match GNU readelf's section ordering (.debug_abbrev → .debug_info → .debug_line raw → .debug_pubnames → .debug_aranges → .debug_str → .debug_frame). Apply `.rela.debug_frame` / `.rel.debug_frame` relocations so FDE `pc=` values resolve, with implicit-addend reading for SHT_REL. CIE state (code/data alignment) saved across CIE → FDE so DW_CFA_advance_loc/_loc1/_loc2/_loc4/_def_cfa/_def_cfa_offset/_offset/_restore/_set_loc all decode correctly. i386 register-name table separate from x86-64. Line-program `(view N)` annotations in special opcodes when PC doesn't advance (track view counter; emit row with current value, then increment). Fixes both `x86-64/compressed-1a` and `i386/compressed-1a` (+2 dejagnu, 326→328 total).
 
 ## Next steps
 

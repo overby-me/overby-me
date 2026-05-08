@@ -2659,6 +2659,9 @@ struct ReadelfOpts {
     decompress: bool,
     hex_dump: Vec<String>,
     sframe_sections: Vec<String>,
+    show_debug_pubnames: bool,
+    show_debug_aranges: bool,
+    show_debug_frame: bool,
 }
 
 fn tool_readelf(args: &[String]) -> i32 {
@@ -2794,10 +2797,13 @@ fn tool_readelf(args: &[String]) -> i32 {
                 opts.show_debug_macro = true;
                 opts.show_debug_abbrev = true;
                 opts.show_debug_line_raw = true;
+                opts.show_debug_pubnames = true;
+                opts.show_debug_aranges = true;
+                opts.show_debug_frame = true;
             }
             s if s.starts_with("--debug-dump=") || s.starts_with("--dwarf=") => {
                 let v = s.split_once("=").unwrap().1;
-                if v.eq_ignore_ascii_case("ranges") || v.eq_ignore_ascii_case("r") {
+                if v == "Ranges" || v == "ranges" || v == "R" {
                     opts.show_debug_ranges = true;
                 }
                 if v.eq_ignore_ascii_case("loc") || v.eq_ignore_ascii_case("o") {
@@ -2829,6 +2835,15 @@ fn tool_readelf(args: &[String]) -> i32 {
                 if v.eq_ignore_ascii_case("decodedline") || v == "L" {
                     opts.show_debug_line_decoded = true;
                 }
+                if v.eq_ignore_ascii_case("pubnames") || v == "p" {
+                    opts.show_debug_pubnames = true;
+                }
+                if v.eq_ignore_ascii_case("aranges") || v == "r" {
+                    opts.show_debug_aranges = true;
+                }
+                if v.eq_ignore_ascii_case("frames") || v.eq_ignore_ascii_case("frames-interp") || v == "f" || v == "F" {
+                    opts.show_debug_frame = true;
+                }
             }
             s if s.starts_with("-w") && s.len() > 2 => {
                 if s.contains('R') {
@@ -2857,6 +2872,12 @@ fn tool_readelf(args: &[String]) -> i32 {
                 }
                 if s.contains('m') {
                     opts.show_debug_macro = true;
+                }
+                if s.contains('p') {
+                    opts.show_debug_pubnames = true;
+                }
+                if s.contains('f') || s.contains('F') {
+                    opts.show_debug_frame = true;
                 }
             }
             "--sframe" => {
@@ -3911,6 +3932,55 @@ fn readelf_display<'data, Elf: FileHeader>(
         readelf_debug_links(elf, data, endian);
     }
 
+    // Bare `-w` enables every dumper (including pubnames/aranges/frame).
+    // In that case use GNU readelf's section ordering. Otherwise keep our
+    // historical order which other readelf.exp tests (`-ws`, `-wsm`, etc.)
+    // depend on.
+    let full_w = opts.show_debug_info
+        && opts.show_debug_str
+        && opts.show_debug_abbrev
+        && opts.show_debug_line_raw
+        && opts.show_debug_pubnames
+        && opts.show_debug_aranges
+        && opts.show_debug_frame;
+    if full_w {
+        if opts.show_debug_abbrev {
+            readelf_debug_abbrev(elf, data, endian);
+        }
+        if opts.show_debug_info {
+            readelf_debug_info_loaded(elf, data, endian, loaded_from);
+        }
+        if opts.show_debug_line_raw {
+            readelf_debug_line_raw(elf, data, endian);
+        }
+        if opts.show_debug_pubnames {
+            readelf_debug_pubnames(elf, data, endian);
+        }
+        if opts.show_debug_aranges {
+            readelf_debug_aranges(elf, data, endian);
+        }
+        if opts.show_debug_str {
+            readelf_debug_str_loaded(elf, data, endian, loaded_from);
+        }
+        if opts.show_debug_frame {
+            readelf_debug_frame(elf, data, endian);
+        }
+        if opts.show_debug_macro {
+            readelf_debug_macro(elf, data, endian);
+        }
+        if opts.show_debug_loc {
+            readelf_debug_loc(elf, data, endian);
+            readelf_debug_loclists(elf, data, endian);
+        }
+        if opts.show_debug_ranges {
+            readelf_debug_ranges(elf, data, endian);
+            readelf_debug_rnglists(elf, data, endian);
+        }
+        if opts.show_debug_line_decoded {
+            readelf_debug_line_decoded(elf, data, endian);
+        }
+        return;
+    }
     // For -ws / -wi, GNU prints .debug_str BEFORE .debug_info.
     if opts.show_debug_str {
         readelf_debug_str_loaded(elf, data, endian, loaded_from);
@@ -3944,6 +4014,16 @@ fn readelf_display<'data, Elf: FileHeader>(
 
     if opts.show_debug_line_decoded {
         readelf_debug_line_decoded(elf, data, endian);
+    }
+
+    if opts.show_debug_pubnames {
+        readelf_debug_pubnames(elf, data, endian);
+    }
+    if opts.show_debug_aranges {
+        readelf_debug_aranges(elf, data, endian);
+    }
+    if opts.show_debug_frame {
+        readelf_debug_frame(elf, data, endian);
     }
 }
 
@@ -4521,7 +4601,18 @@ fn apply_note_relocs<'data, Elf: FileHeader>(
                     read_i32(&r_data[off + 8..]) as i64
                 }
             } else {
-                0
+                // SHT_REL — implicit addend stored at the destination.
+                let r_offset_u = r_offset as usize;
+                let width = if is_64 { 8 } else { 4 };
+                if r_offset_u + width <= out.len() {
+                    if width == 8 {
+                        read_i64(&out[r_offset_u..]) as i64
+                    } else {
+                        read_i32(&out[r_offset_u..]) as i64
+                    }
+                } else {
+                    0
+                }
             };
             let Some(sym_val) = lookup_sym_value(sym_idx) else {
                 continue;
@@ -17241,6 +17332,675 @@ fn readelf_collect_dwo_links(obj: &object::File) -> Vec<(String, String, Option<
     out
 }
 
+fn readelf_debug_pubnames<'data, Elf: FileHeader>(
+    elf: &ElfFile<'data, Elf>,
+    data: &'data [u8],
+    endian: Elf::Endian,
+) {
+    let Ok(sections) = elf.elf_header().sections(endian, data) else {
+        return;
+    };
+    for section in sections.iter() {
+        let nm = sections
+            .section_name(endian, section)
+            .ok()
+            .and_then(|n| std::str::from_utf8(n).ok())
+            .unwrap_or("");
+        if nm != ".debug_pubnames"
+            && nm != ".zdebug_pubnames"
+            && nm != ".debug_pubtypes"
+            && nm != ".zdebug_pubtypes"
+        {
+            continue;
+        }
+        let off: u64 = section.sh_offset(endian).into();
+        let size: u64 = section.sh_size(endian).into();
+        if off as usize + size as usize > data.len() {
+            continue;
+        }
+        let raw = &data[off as usize..(off + size) as usize];
+        let sh_flags: u64 = section.sh_flags(endian).into();
+        let bytes: Vec<u8> = if (sh_flags & 0x800) != 0 && raw.len() >= 24 {
+            let is_64 = data.len() >= 5 && data[4] == 2;
+            let hdr_len = if is_64 { 24 } else { 12 };
+            if raw.len() <= hdr_len {
+                continue;
+            }
+            use std::io::Read;
+            let mut dec = flate2::read::ZlibDecoder::new(&raw[hdr_len..]);
+            let mut out = Vec::new();
+            if dec.read_to_end(&mut out).is_err() {
+                continue;
+            }
+            out
+        } else if raw.len() >= 12 && &raw[..4] == b"ZLIB" {
+            use std::io::Read;
+            let mut dec = flate2::read::ZlibDecoder::new(&raw[12..]);
+            let mut out = Vec::new();
+            if dec.read_to_end(&mut out).is_err() {
+                continue;
+            }
+            out
+        } else {
+            raw.to_vec()
+        };
+        println!();
+        println!("Contents of the {} section:", nm);
+        println!();
+        let mut p = 0usize;
+        while p + 14 <= bytes.len() {
+            let unit_length =
+                u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
+            let unit_end = p + 4 + unit_length;
+            if unit_end > bytes.len() {
+                break;
+            }
+            let version = u16::from_le_bytes(bytes[p + 4..p + 6].try_into().unwrap());
+            let info_off = u32::from_le_bytes(bytes[p + 6..p + 10].try_into().unwrap());
+            let info_size =
+                u32::from_le_bytes(bytes[p + 10..p + 14].try_into().unwrap());
+            println!("  Length:                              {}", unit_length);
+            println!("  Version:                             {}", version);
+            if info_off == 0 {
+                println!("  Offset into .debug_info section:     0");
+            } else {
+                println!("  Offset into .debug_info section:     0x{:x}", info_off);
+            }
+            println!(
+                "  Size of area in .debug_info section: {}",
+                info_size
+            );
+            println!();
+            println!("    Offset	Name");
+            let mut q = p + 14;
+            while q + 4 <= unit_end {
+                let off = u32::from_le_bytes(bytes[q..q + 4].try_into().unwrap());
+                q += 4;
+                if off == 0 {
+                    break;
+                }
+                // Read NUL-terminated name.
+                let mut e = q;
+                while e < unit_end && bytes[e] != 0 {
+                    e += 1;
+                }
+                let name = std::str::from_utf8(&bytes[q..e]).unwrap_or("");
+                println!("    {:<6x}	{}", off, name);
+                q = e + 1;
+            }
+            p = unit_end;
+        }
+    }
+}
+
+fn readelf_debug_aranges<'data, Elf: FileHeader>(
+    elf: &ElfFile<'data, Elf>,
+    data: &'data [u8],
+    endian: Elf::Endian,
+) {
+    let Ok(sections) = elf.elf_header().sections(endian, data) else {
+        return;
+    };
+    for section in sections.iter() {
+        let nm = sections
+            .section_name(endian, section)
+            .ok()
+            .and_then(|n| std::str::from_utf8(n).ok())
+            .unwrap_or("");
+        if nm != ".debug_aranges" && nm != ".zdebug_aranges" {
+            continue;
+        }
+        let off: u64 = section.sh_offset(endian).into();
+        let size: u64 = section.sh_size(endian).into();
+        if off as usize + size as usize > data.len() {
+            continue;
+        }
+        let raw = &data[off as usize..(off + size) as usize];
+        let sh_flags: u64 = section.sh_flags(endian).into();
+        let bytes: Vec<u8> = if (sh_flags & 0x800) != 0 && raw.len() >= 24 {
+            let is_64 = data.len() >= 5 && data[4] == 2;
+            let hdr_len = if is_64 { 24 } else { 12 };
+            if raw.len() <= hdr_len {
+                continue;
+            }
+            use std::io::Read;
+            let mut dec = flate2::read::ZlibDecoder::new(&raw[hdr_len..]);
+            let mut out = Vec::new();
+            if dec.read_to_end(&mut out).is_err() {
+                continue;
+            }
+            out
+        } else if raw.len() >= 12 && &raw[..4] == b"ZLIB" {
+            use std::io::Read;
+            let mut dec = flate2::read::ZlibDecoder::new(&raw[12..]);
+            let mut out = Vec::new();
+            if dec.read_to_end(&mut out).is_err() {
+                continue;
+            }
+            out
+        } else {
+            raw.to_vec()
+        };
+        println!();
+        println!("Contents of the {} section:", nm);
+        println!();
+        let mut p = 0usize;
+        while p + 12 <= bytes.len() {
+            let unit_length =
+                u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
+            let unit_end = p + 4 + unit_length;
+            if unit_end > bytes.len() {
+                break;
+            }
+            let version = u16::from_le_bytes(bytes[p + 4..p + 6].try_into().unwrap());
+            let info_off = u32::from_le_bytes(bytes[p + 6..p + 10].try_into().unwrap());
+            let addr_size = bytes[p + 10];
+            let seg_size = bytes[p + 11];
+            println!("  Length:                   {}", unit_length);
+            println!("  Version:                  {}", version);
+            if info_off == 0 {
+                println!("  Offset into .debug_info:  0");
+            } else {
+                println!("  Offset into .debug_info:  0x{:x}", info_off);
+            }
+            println!("  Pointer Size:             {}", addr_size);
+            println!("  Segment Size:             {}", seg_size);
+            println!();
+            if addr_size == 8 {
+                println!("    Address            Length");
+            } else {
+                println!("    Address    Length");
+            }
+            // Header is 12 bytes; entries start aligned to 2 * addr_size.
+            let header_end = p + 12;
+            let tuple_size = (addr_size as usize) * 2;
+            let aligned = (header_end + tuple_size - 1) & !(tuple_size - 1);
+            let mut q = aligned;
+            while q + tuple_size <= unit_end {
+                let (addr, len) = if addr_size == 8 {
+                    (
+                        u64::from_le_bytes(bytes[q..q + 8].try_into().unwrap()),
+                        u64::from_le_bytes(bytes[q + 8..q + 16].try_into().unwrap()),
+                    )
+                } else {
+                    (
+                        u32::from_le_bytes(bytes[q..q + 4].try_into().unwrap()) as u64,
+                        u32::from_le_bytes(bytes[q + 4..q + 8].try_into().unwrap()) as u64,
+                    )
+                };
+                if addr_size == 8 {
+                    println!("    {:016x} {:016x}", addr, len);
+                } else {
+                    println!("    {:08x} {:08x}", addr, len);
+                }
+                q += tuple_size;
+                if addr == 0 && len == 0 {
+                    break;
+                }
+            }
+            p = unit_end;
+        }
+    }
+}
+
+fn readelf_debug_frame<'data, Elf: FileHeader>(
+    elf: &ElfFile<'data, Elf>,
+    data: &'data [u8],
+    endian: Elf::Endian,
+) {
+    let Ok(sections) = elf.elf_header().sections(endian, data) else {
+        return;
+    };
+    for section in sections.iter() {
+        let nm = sections
+            .section_name(endian, section)
+            .ok()
+            .and_then(|n| std::str::from_utf8(n).ok())
+            .unwrap_or("");
+        if nm != ".debug_frame" && nm != ".zdebug_frame" {
+            continue;
+        }
+        let off: u64 = section.sh_offset(endian).into();
+        let size: u64 = section.sh_size(endian).into();
+        if off as usize + size as usize > data.len() {
+            continue;
+        }
+        let raw = &data[off as usize..(off + size) as usize];
+        let sh_flags: u64 = section.sh_flags(endian).into();
+        let mut bytes: Vec<u8> = if (sh_flags & 0x800) != 0 && raw.len() >= 24 {
+            let is_64 = data.len() >= 5 && data[4] == 2;
+            let hdr_len = if is_64 { 24 } else { 12 };
+            if raw.len() <= hdr_len {
+                continue;
+            }
+            use std::io::Read;
+            let mut dec = flate2::read::ZlibDecoder::new(&raw[hdr_len..]);
+            let mut out = Vec::new();
+            if dec.read_to_end(&mut out).is_err() {
+                continue;
+            }
+            out
+        } else if raw.len() >= 12 && &raw[..4] == b"ZLIB" {
+            use std::io::Read;
+            let mut dec = flate2::read::ZlibDecoder::new(&raw[12..]);
+            let mut out = Vec::new();
+            if dec.read_to_end(&mut out).is_err() {
+                continue;
+            }
+            out
+        } else {
+            raw.to_vec()
+        };
+        // Apply .rela.<name> / .rel.<name> relocations to the decompressed
+        // .debug_frame so FDE `initial_location` fields show their resolved
+        // addresses instead of zero placeholders.
+        bytes = apply_note_relocs(elf, data, endian, section, &bytes);
+        println!();
+        println!("Contents of the {} section:", nm);
+        println!();
+        // Walk CIEs and FDEs.  Each starts with `length` (u32) — value
+        // 0xffffffff signals 64-bit DWARF (use next u64 as length); a
+        // length of 0 ends the section.
+        let mut p = 0usize;
+        // Saved CIE state for FDE instruction interpretation:
+        // (offset → (code_align, data_align)).
+        let mut cie_state: std::collections::HashMap<u32, (u64, i64)> =
+            std::collections::HashMap::new();
+        while p + 4 <= bytes.len() {
+            let entry_off = p;
+            let unit_length =
+                u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
+            p += 4;
+            if unit_length == 0 {
+                println!("{:08x} ZERO terminator", entry_off);
+                continue;
+            }
+            if unit_length == 0xffff_ffff {
+                // 64-bit DWARF — skip; we don't emit special headers for now.
+                if p + 8 > bytes.len() {
+                    break;
+                }
+                p += 8;
+                continue;
+            }
+            let unit_end = p + unit_length;
+            if unit_end > bytes.len() {
+                break;
+            }
+            // Read CIE_id / CIE_pointer.
+            let cie_id = u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap());
+            p += 4;
+            // 0xffffffff in .debug_frame means CIE.  In .eh_frame it's 0.
+            let is_cie = cie_id == 0xffff_ffff;
+            if is_cie {
+                let version = bytes[p];
+                p += 1;
+                // Augmentation string (NUL-terminated).
+                let aug_start = p;
+                while p < unit_end && bytes[p] != 0 {
+                    p += 1;
+                }
+                let aug = std::str::from_utf8(&bytes[aug_start..p]).unwrap_or("");
+                p += 1; // consume NUL
+                // Code/data alignment factors are LEB128.
+                let (code_align, n) = read_uleb128_at(&bytes, p);
+                p += n;
+                let (data_align, n) = read_sleb128_at(&bytes, p);
+                p += n;
+                // Return address column: u8 in DWARF v1; ULEB128 in v3+.
+                let (ra_col, n) = if version >= 3 {
+                    read_uleb128_at(&bytes, p)
+                } else {
+                    (bytes[p] as u64, 1)
+                };
+                p += n;
+                println!(
+                    "{:08x} {:08x} {:08x} CIE",
+                    entry_off,
+                    unit_length,
+                    cie_id
+                );
+                println!("  Version:               {}", version);
+                println!("  Augmentation:          \"{}\"", aug);
+                println!("  Code alignment factor: {}", code_align);
+                println!("  Data alignment factor: {}", data_align);
+                println!("  Return address column: {}", ra_col);
+                println!();
+                // Save this CIE's alignment factors for FDE parsing.
+                cie_state.insert(entry_off as u32, (code_align, data_align));
+                // Initial instructions: print as DW_CFA_* operations until end.
+                let machine: u16 = elf.elf_header().e_machine(endian);
+                while p < unit_end {
+                    let op = bytes[p];
+                    p += 1;
+                    print_dwarf_cfa_op(&bytes, &mut p, op, code_align, data_align, machine);
+                }
+                println!();
+            } else {
+                // FDE — print `<off> <length> <CIE_ptr> FDE cie=<CIE_off>
+                // pc=<low_pc>..<high_pc>` plus DW_CFA_* operations.
+                // Find addr_size from the e_ident class field.
+                let addr_size = if data.len() >= 5 && data[4] == 2 { 8usize } else { 4usize };
+                if p + 2 * addr_size > unit_end {
+                    p = unit_end;
+                    continue;
+                }
+                let initial_location = if addr_size == 8 {
+                    u64::from_le_bytes(bytes[p..p + 8].try_into().unwrap())
+                } else {
+                    u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as u64
+                };
+                p += addr_size;
+                let address_range = if addr_size == 8 {
+                    u64::from_le_bytes(bytes[p..p + 8].try_into().unwrap())
+                } else {
+                    u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as u64
+                };
+                p += addr_size;
+                println!(
+                    "{:08x} {:08x} {:08x} FDE cie={:08x} pc={:08x}..{:08x}",
+                    entry_off,
+                    unit_length,
+                    cie_id,
+                    cie_id,
+                    initial_location,
+                    initial_location + address_range
+                );
+                // Render FDE CFA instructions, advancing the program-counter
+                // tracker for DW_CFA_advance_loc operations.
+                let (code_align, data_align) = cie_state
+                    .get(&cie_id)
+                    .copied()
+                    .unwrap_or((1, -8));
+                let machine: u16 = elf.elf_header().e_machine(endian);
+                let mut fde_pc: u64 = initial_location;
+                while p < unit_end {
+                    let op = bytes[p];
+                    p += 1;
+                    print_dwarf_cfa_op_fde(
+                        &bytes,
+                        &mut p,
+                        op,
+                        code_align,
+                        data_align,
+                        machine,
+                        &mut fde_pc,
+                        addr_size,
+                    );
+                }
+                println!();
+            }
+            p = unit_end;
+        }
+    }
+}
+
+fn print_dwarf_cfa_op_fde(
+    bytes: &[u8],
+    p: &mut usize,
+    op: u8,
+    code_align: u64,
+    data_align: i64,
+    machine: u16,
+    pc: &mut u64,
+    addr_size: usize,
+) {
+    let high = op & 0xc0;
+    let low = op & 0x3f;
+    let pc_width = addr_size * 2;
+    let reg_name = |n: u32| -> &'static str {
+        if machine == 3 {
+            dwarf_i386_reg_name(n)
+        } else {
+            dwarf_x86_64_reg_name(n)
+        }
+    };
+    match (high, op) {
+        (0x40, _) /* DW_CFA_advance_loc */ => {
+            let delta = low as u64 * code_align;
+            *pc = pc.wrapping_add(delta);
+            println!(
+                "  DW_CFA_advance_loc: {} to {:0width$x}",
+                delta,
+                *pc,
+                width = pc_width
+            );
+        }
+        (0x80, _) /* DW_CFA_offset */ => {
+            let (off, n) = read_uleb128_at(bytes, *p);
+            *p += n;
+            println!(
+                "  DW_CFA_offset: r{} ({}) at cfa{:+}",
+                low,
+                reg_name(low as u32),
+                (off as i64) * data_align
+            );
+        }
+        (0xc0, _) /* DW_CFA_restore */ => {
+            println!("  DW_CFA_restore: r{}", low);
+        }
+        (_, 0x00) => {
+            println!("  DW_CFA_nop");
+        }
+        (_, 0x01) /* DW_CFA_set_loc */ => {
+            let new_pc = if addr_size == 8 {
+                u64::from_le_bytes(bytes[*p..*p + 8].try_into().unwrap())
+            } else {
+                u32::from_le_bytes(bytes[*p..*p + 4].try_into().unwrap()) as u64
+            };
+            *p += addr_size;
+            *pc = new_pc;
+            println!("  DW_CFA_set_loc: {:0width$x}", *pc, width = pc_width);
+        }
+        (_, 0x02) /* DW_CFA_advance_loc1 */ => {
+            let delta = bytes[*p] as u64 * code_align;
+            *p += 1;
+            *pc = pc.wrapping_add(delta);
+            println!(
+                "  DW_CFA_advance_loc1: {} to {:0width$x}",
+                delta,
+                *pc,
+                width = pc_width
+            );
+        }
+        (_, 0x03) /* DW_CFA_advance_loc2 */ => {
+            let delta = u16::from_le_bytes(bytes[*p..*p + 2].try_into().unwrap()) as u64
+                * code_align;
+            *p += 2;
+            *pc = pc.wrapping_add(delta);
+            println!(
+                "  DW_CFA_advance_loc2: {} to {:0width$x}",
+                delta,
+                *pc,
+                width = pc_width
+            );
+        }
+        (_, 0x04) /* DW_CFA_advance_loc4 */ => {
+            let delta = u32::from_le_bytes(bytes[*p..*p + 4].try_into().unwrap()) as u64
+                * code_align;
+            *p += 4;
+            *pc = pc.wrapping_add(delta);
+            println!(
+                "  DW_CFA_advance_loc4: {} to {:0width$x}",
+                delta,
+                *pc,
+                width = pc_width
+            );
+        }
+        (_, 0x0c) /* DW_CFA_def_cfa */ => {
+            let (reg, n) = read_uleb128_at(bytes, *p);
+            *p += n;
+            let (off, n) = read_uleb128_at(bytes, *p);
+            *p += n;
+            println!(
+                "  DW_CFA_def_cfa: r{} ({}) ofs {}",
+                reg,
+                reg_name(reg as u32),
+                off
+            );
+        }
+        (_, 0x0e) /* DW_CFA_def_cfa_offset */ => {
+            let (off, n) = read_uleb128_at(bytes, *p);
+            *p += n;
+            println!("  DW_CFA_def_cfa_offset: {}", off);
+        }
+        _ => {
+            println!("  DW_CFA_<unknown 0x{:x}>", op);
+        }
+    }
+}
+
+fn read_uleb128_at(bytes: &[u8], mut p: usize) -> (u64, usize) {
+    let start = p;
+    let mut result: u64 = 0;
+    let mut shift = 0u32;
+    loop {
+        if p >= bytes.len() {
+            break;
+        }
+        let b = bytes[p];
+        p += 1;
+        result |= ((b & 0x7f) as u64).wrapping_shl(shift);
+        if b & 0x80 == 0 {
+            break;
+        }
+        shift += 7;
+    }
+    (result, p - start)
+}
+
+fn read_sleb128_at(bytes: &[u8], mut p: usize) -> (i64, usize) {
+    let start = p;
+    let mut result: i64 = 0;
+    let mut shift = 0u32;
+    let mut last_byte: u8 = 0;
+    loop {
+        if p >= bytes.len() {
+            break;
+        }
+        let b = bytes[p];
+        p += 1;
+        result |= ((b & 0x7f) as i64).wrapping_shl(shift);
+        last_byte = b;
+        shift += 7;
+        if b & 0x80 == 0 {
+            break;
+        }
+    }
+    if shift < 64 && (last_byte & 0x40) != 0 {
+        result |= -1i64 << shift;
+    }
+    (result, p - start)
+}
+
+fn print_dwarf_cfa_op(
+    bytes: &[u8],
+    p: &mut usize,
+    op: u8,
+    code_align: u64,
+    data_align: i64,
+    machine: u16,
+) {
+    let reg_name = |n: u32| -> &'static str {
+        if machine == 3 {
+            dwarf_i386_reg_name(n)
+        } else {
+            dwarf_x86_64_reg_name(n)
+        }
+    };
+    // High 2 bits: opcode group; low 6 bits: operand.
+    let high = op & 0xc0;
+    let low = op & 0x3f;
+    match (high, op) {
+        (0x40, _) /* DW_CFA_advance_loc */ => {
+            println!(
+                "  DW_CFA_advance_loc: {} to {:x}",
+                low as u64 * code_align,
+                low as u64 * code_align
+            );
+        }
+        (0x80, _) /* DW_CFA_offset */ => {
+            let (off, n) = read_uleb128_at(bytes, *p);
+            *p += n;
+            println!(
+                "  DW_CFA_offset: r{} ({}) at cfa{:+}",
+                low,
+                reg_name(low as u32),
+                (off as i64) * data_align
+            );
+        }
+        (0xc0, _) /* DW_CFA_restore */ => {
+            println!("  DW_CFA_restore: r{}", low);
+        }
+        (_, 0x00) => {
+            println!("  DW_CFA_nop");
+        }
+        (_, 0x0c) /* DW_CFA_def_cfa */ => {
+            let (reg, n) = read_uleb128_at(bytes, *p);
+            *p += n;
+            let (off, n) = read_uleb128_at(bytes, *p);
+            *p += n;
+            println!(
+                "  DW_CFA_def_cfa: r{} ({}) ofs {}",
+                reg,
+                reg_name(reg as u32),
+                off
+            );
+        }
+        _ => {
+            println!("  DW_CFA_<unknown 0x{:x}>", op);
+        }
+    }
+}
+
+fn dwarf_x86_64_reg_name(n: u32) -> &'static str {
+    match n {
+        0 => "rax",
+        1 => "rdx",
+        2 => "rcx",
+        3 => "rbx",
+        4 => "rsi",
+        5 => "rdi",
+        6 => "rbp",
+        7 => "rsp",
+        8 => "r8",
+        9 => "r9",
+        10 => "r10",
+        11 => "r11",
+        12 => "r12",
+        13 => "r13",
+        14 => "r14",
+        15 => "r15",
+        16 => "rip",
+        _ => "?",
+    }
+}
+
+fn dwarf_i386_reg_name(n: u32) -> &'static str {
+    match n {
+        0 => "eax",
+        1 => "ecx",
+        2 => "edx",
+        3 => "ebx",
+        4 => "esp",
+        5 => "ebp",
+        6 => "esi",
+        7 => "edi",
+        8 => "eip",
+        9 => "eflags",
+        10 => "trapno",
+        11 => "st0",
+        12 => "st1",
+        13 => "st2",
+        14 => "st3",
+        15 => "st4",
+        16 => "st5",
+        17 => "st6",
+        18 => "st7",
+        _ => "?",
+    }
+}
+
 fn readelf_debug_str<'data, Elf: FileHeader>(
     elf: &ElfFile<'data, Elf>,
     data: &'data [u8],
@@ -18125,9 +18885,39 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
             if let object::RelocationTarget::Symbol(sym_idx) = reloc.target() {
                 if let Ok(sym) = obj.symbol_by_index(sym_idx) {
                     let sym_addr = sym.address();
-                    let value = sym_addr.wrapping_add(reloc.addend() as u64);
                     let off = offset as usize;
                     let size = reloc.size() as usize / 8;
+                    // For SHT_REL relocations the addend is implicit at the
+                    // destination; the object crate reports `reloc.addend()
+                    // == 0` for those. Read it from `buf` and combine.
+                    let implicit_addend: i64 = if reloc.addend() == 0
+                        && off + size <= buf.len()
+                    {
+                        match size {
+                            4 => {
+                                if is_le {
+                                    i32::from_le_bytes(buf[off..off + 4].try_into().unwrap())
+                                        as i64
+                                } else {
+                                    i32::from_be_bytes(buf[off..off + 4].try_into().unwrap())
+                                        as i64
+                                }
+                            }
+                            8 => {
+                                if is_le {
+                                    i64::from_le_bytes(buf[off..off + 8].try_into().unwrap())
+                                } else {
+                                    i64::from_be_bytes(buf[off..off + 8].try_into().unwrap())
+                                }
+                            }
+                            _ => 0,
+                        }
+                    } else {
+                        0
+                    };
+                    let value = sym_addr
+                        .wrapping_add(reloc.addend() as u64)
+                        .wrapping_add(implicit_addend as u64);
                     if off + size <= buf.len() {
                         match size {
                             4 => {
@@ -19145,11 +19935,19 @@ fn readelf_debug_line_raw<'data, Elf: FileHeader>(
                     let pc_advance = (adjusted / line_range) as u64 * min_instr_len as u64;
                     line += line_advance;
                     address = address.wrapping_add(pc_advance);
+                    if pc_advance > 0 {
+                        view = 0;
+                    }
+                    let view_suffix = if view > 0 {
+                        format!(" (view {})", view)
+                    } else {
+                        String::new()
+                    };
                     println!(
-                        "  [0x{:08x}]  Special opcode {}: advance Address by {} to 0x{:x} and Line by {} to {}",
-                        stmt_off, adjusted, pc_advance, address, line_advance, line
+                        "  [0x{:08x}]  Special opcode {}: advance Address by {} to 0x{:x} and Line by {} to {}{}",
+                        stmt_off, adjusted, pc_advance, address, line_advance, line, view_suffix
                     );
-                    view = 0;
+                    view += 1;
                 }
             }
             p.pos = unit_end;
