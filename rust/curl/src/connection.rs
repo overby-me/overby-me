@@ -22,7 +22,12 @@ thread_local! {
     /// origin) from a plain proxy stream (reusable for any HTTP origin
     /// going through the same proxy host:port). Tests 48, 1134, 1078.
     pub(crate) static CONN_POOL: RefCell<Option<PooledConn>> = const { RefCell::new(None) };
+    /// Set by `connect()` when a pooled connection that had a prior HTTP/1.0
+    /// response was reused — the request layer downgrades the next request to
+    /// HTTP/1.0 (test 1074).
+    pub(crate) static POOL_REUSED_HTTP10: RefCell<bool> = const { RefCell::new(false) };
 }
+
 
 pub(crate) struct PooledConn {
     pub host: String,
@@ -30,6 +35,10 @@ pub(crate) struct PooledConn {
     /// `true` when this is the direct stream to the proxy (no CONNECT tunnel
     /// up). `false` for plain origin connections OR after a CONNECT tunnel.
     pub is_proxy: bool,
+    /// `true` when the previous response on this connection was HTTP/1.0 —
+    /// the next request reusing the connection downgrades to HTTP/1.0
+    /// (test 1074).
+    pub http10: bool,
     pub conn: Connection,
 }
 
@@ -185,6 +194,10 @@ pub(crate) fn parse_proxy(proxy: &str) -> Result<(String, u16), String> {
 }
 
 pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Vec<u8>), String> {
+    // Default: not reusing an HTTP/1.0 pooled connection. Each connect call
+    // resets this so a stale value from a previous request never leaks into
+    // the request-line builder.
+    POOL_REUSED_HTTP10.with(|h| *h.borrow_mut() = false);
     // RFC 7686: curl refuses to resolve `.onion` TLDs (preventing accidental
     // DNS leakage for Tor hidden services). --resolve overrides still work.
     let host_norm = url.host.trim_end_matches('.').to_ascii_lowercase();
@@ -218,13 +231,18 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
                     && p.port == kport
                     && p.is_proxy == is_proxy_key
                 {
-                    return slot.take().map(|p| p.conn);
+                    let was_http10 = p.http10;
+                    let taken = slot.take().map(|p| p.conn);
+                    POOL_REUSED_HTTP10.with(|h| *h.borrow_mut() = was_http10);
+                    return taken;
                 }
+                POOL_REUSED_HTTP10.with(|h| *h.borrow_mut() = false);
                 None
             })
         {
             return Ok((reused, Vec::new()));
         }
+        POOL_REUSED_HTTP10.with(|h| *h.borrow_mut() = false);
     }
 
     // When a proxy is configured, always connect to the proxy.

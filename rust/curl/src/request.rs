@@ -21,8 +21,14 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         "GET".into()
     };
 
+    // Pool downgrade: when reusing a connection whose prior response was
+    // HTTP/1.0, downgrade this request to HTTP/1.0 too (test 1074). The
+    // `POOL_REUSED_HTTP10` flag is set by `connect()` immediately before
+    // `build_request` runs.
+    let pool_is_http10 = crate::connection::POOL_REUSED_HTTP10.with(|h| *h.borrow());
     let http_ver = match opts.http_version.as_deref() {
         Some("1.0") => "HTTP/1.0",
+        _ if pool_is_http10 => "HTTP/1.0",
         _ => "HTTP/1.1",
     };
 
@@ -1406,11 +1412,16 @@ fn execute_request(
         .headers
         .iter()
         .any(|(k, v)| k.eq_ignore_ascii_case("connection") && v.eq_ignore_ascii_case("close"));
-    let http10 = resp.header_bytes.starts_with(b"HTTP/1.0");
+    let resp_http10 = resp.header_bytes.starts_with(b"HTTP/1.0");
+    // HTTP/1.0 connections default to close. Only keep them in the pool when
+    // the response carried `Connection: keep-alive` (test 1074).
+    let keep_alive = resp.headers.iter().any(|(k, v)| {
+        k.eq_ignore_ascii_case("connection") && v.eq_ignore_ascii_case("keep-alive")
+    });
     let use_tunnel_save = opts.proxy.is_some() && (opts.proxy_tunnel || url.scheme == "https");
     let pool_ok = !conn_close
         && !user_close
-        && !http10
+        && (!resp_http10 || keep_alive)
         && url.scheme == "http"
         && !use_tunnel_save
         && !resp.recv_error
@@ -1433,6 +1444,7 @@ fn execute_request(
                 host: khost,
                 port: kport,
                 is_proxy: is_proxy_key,
+                http10: resp_http10,
                 conn,
             });
         });
