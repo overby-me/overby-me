@@ -2571,6 +2571,22 @@ impl Parser {
                         expr = Expr::Call("_scalar_block_deref".to_string(), vec![inner]);
                         continue;
                     }
+                    // `->$#*` — postfix array-length deref. Same as
+                    // `$#{EXPR}`. Lexer produces `ArrayLen("")` followed
+                    // by `Times` (`*`) since `read_ident` after `$#`
+                    // hits `*` and returns empty.
+                    if let Token::ArrayLen(n) = self.tok()
+                        && n.is_empty()
+                        && matches!(self.peek(1), Token::Star)
+                    {
+                        self.pos += 2; // consume ArrayLen("") and Star
+                        let inner = expr;
+                        expr = Expr::Call(
+                            "_arylen_block_deref".to_string(),
+                            vec![inner],
+                        );
+                        continue;
+                    }
                     match self.tok() {
                         Token::LBracket => {
                             self.pos += 1;
