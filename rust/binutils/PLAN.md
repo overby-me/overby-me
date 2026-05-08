@@ -66,7 +66,7 @@ Key design decisions:
 | `objdump-relocs` | objdump | ✅ PASS |
 | `addr2line-basic` | addr2line | ✅ PASS |
 
-### Upstream DejaGnu tests (286/286 passing, 100% 🎉)
+### Upstream DejaGnu tests (286/286 binutils-all + 12/35 x86-64 = 298 passing)
 
 | Test file | Pass | Fail | Total | Threshold |
 |-----------|------|------|-------|-----------|
@@ -82,7 +82,8 @@ Key design decisions:
 | addr2line.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
 | update-section.exp | **6** | 0 | 6 | minPass=6, maxFail=0 |
 | elfedit.exp | **6** | 0 | 6 | minPass=6, maxFail=0 |
-| **Total** | **286** | **0** | **286** | |
+| x86-64/x86-64.exp | **12** | 23 | 35 | (informational; only the binutils-all-x86-64 subset is enabled) |
+| **Total** | **298** | **23** | **321** | |
 
 All upstream DejaGnu tests pass.
 
@@ -233,6 +234,7 @@ Two layers of testing:
 - [x] Implement GNU location view pair extension for DWARF 5 `.debug_loclists` (37→38 readelf.exp = 100%): `DW_LLE_GNU_view_pair` (kind=9) inline annotations alongside per-list view list iteration; "views at OFF for:" and "views for:" prefix lines emitted at the right offsets. Fixes `readelf locview-2`.
 - [x] Add objcopy `--dump-section`, `--update-section`, and `--update-section + --remove-section` conflict detection (+6 update-section.exp, 274→280 total): in-place ELF rewriter `objcopy_inplace_update_sections` reflows section file offsets respecting per-section sh_addralign so that `update-N.o` (with .foo of any size) becomes byte-equal to `update-1.o` after section content replacement; `--rename-section` is applied via a same-length shstrtab rewrite. Enables previously-skipped `update-section.exp`.
 - [x] Add `elfedit` tool with `--output-mach`/`--output-type`/`--output-osabi`/`--output-abiversion` (+6 elfedit.exp, 280→286 total): minimal in-place ELF header field patcher (modifies e_type, e_machine, EI_OSABI, EI_ABIVERSION); readelf prints "Intel L1OM" / "Intel K1OM" / "Intel MCU" / "FenixOS". `dejagnu-testsuite.nix` now sets `tempfile`/`copyfile` globally so `run_dump_test` works for the binutils-all tests that don't set them per-platform.
+- [x] Decode `.note.gnu.property` (NT_GNU_PROPERTY_TYPE_0) entries in `readelf -n` output (+12 dejagnu, 286→298 total): walks the descriptor's pr_type/pr_datasz/pr_data sequence (8-byte aligned for ELF64); decodes GNU_PROPERTY_X86_FEATURE_1_AND (IBT/SHSTK/LAM_U48/LAM_U57), GNU_PROPERTY_X86_FEATURE_USED, GNU_PROPERTY_X86_ISA_USED/NEEDED, GNU_PROPERTY_STACK_SIZE, GNU_PROPERTY_NO_COPY_ON_PROTECTED. First property emits " Properties: " prefix; subsequent ones tab-indented. Wired in `binutils-all/x86-64/x86-64.exp` to the runtest invocation (separate runtest call due to subdir path resolution) — empty/ibt/shstk/lam-u48/lam-u57 all pass.
 
 ## Next steps
 

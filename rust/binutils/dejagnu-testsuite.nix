@@ -123,8 +123,15 @@ in
             esac
             EXP_FILES="$EXP_FILES $base"
           done
+          # Run x86-64 subdir tests separately afterwards (different srcdir
+          # path resolution).
+          EXTRA_EXP=""
+          if [ -f "$TESTSUITE/binutils-all/x86-64/x86-64.exp" ]; then
+            EXTRA_EXP="binutils-all/x86-64/x86-64.exp"
+          fi
         else
           EXP_FILES="${expFile}"
+          EXTRA_EXP=""
         fi
 
         echo "Running DejaGnu tests: $EXP_FILES"
@@ -141,6 +148,18 @@ in
           --srcdir "$TESTSUITE" \
           $EXP_FILES \
           > test-output.log 2>&1 || true
+
+        # Run any extra .exp files in a separate runtest invocation so paths
+        # with subdirs resolve correctly without confusing the basename-only
+        # ones above. Append to the same test-output.log.
+        if [ -n "$EXTRA_EXP" ]; then
+          runtest \
+            -a \
+            --tool binutils \
+            --srcdir "$TESTSUITE" \
+            $EXTRA_EXP \
+            >> test-output.log 2>&1 || true
+        fi
 
         cat test-output.log
 

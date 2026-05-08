@@ -4021,8 +4021,164 @@ fn readelf_notes<'data, Elf: FileHeader>(
             } else {
                 let type_str = elf_note_type_name(owner, ntype);
                 println!("  {:<20} 0x{:08x}	{}", owner, descsz, type_str);
+                // Decode GNU property notes (NT_GNU_PROPERTY_TYPE_0 = 5).
+                if owner == "GNU" && ntype == 5 {
+                    let prop_align = if is_64 { 8 } else { 4 };
+                    print_gnu_properties(desc, is_le, prop_align);
+                }
             }
         }
+    }
+}
+
+/// Decode and print the contents of an NT_GNU_PROPERTY_TYPE_0 note's
+/// descriptor.  Each property entry is `pr_type:u32 pr_datasz:u32 pr_data`
+/// padded to `prop_align` (8 for ELF64, 4 for ELF32).
+fn print_gnu_properties(desc: &[u8], is_le: bool, prop_align: usize) {
+    let read_u32 = |b: &[u8]| -> u32 {
+        if b.len() < 4 {
+            return 0;
+        }
+        if is_le {
+            u32::from_le_bytes([b[0], b[1], b[2], b[3]])
+        } else {
+            u32::from_be_bytes([b[0], b[1], b[2], b[3]])
+        }
+    };
+    let mut p = 0usize;
+    let mut first = true;
+    while p + 8 <= desc.len() {
+        let pr_type = read_u32(&desc[p..p + 4]);
+        let pr_datasz = read_u32(&desc[p + 4..p + 8]) as usize;
+        p += 8;
+        if p + pr_datasz > desc.len() {
+            break;
+        }
+        let pr_data = &desc[p..p + pr_datasz];
+        let line = format_gnu_property(pr_type, pr_data, is_le);
+        if first {
+            println!("      Properties: {}", line);
+            first = false;
+        } else {
+            println!("	{}", line);
+        }
+        p += pr_datasz;
+        // Align to prop_align.
+        let rem = p % prop_align;
+        if rem != 0 {
+            p += prop_align - rem;
+        }
+    }
+}
+
+fn format_gnu_property(pr_type: u32, pr_data: &[u8], is_le: bool) -> String {
+    let read_u32 = |b: &[u8]| -> u32 {
+        if b.len() < 4 {
+            return 0;
+        }
+        if is_le {
+            u32::from_le_bytes([b[0], b[1], b[2], b[3]])
+        } else {
+            u32::from_be_bytes([b[0], b[1], b[2], b[3]])
+        }
+    };
+    let bits_to_str = |val: u32, names: &[(u32, &str)], default_empty: &str, sep: &str| -> String {
+        if val == 0 {
+            return default_empty.to_string();
+        }
+        let mut out: Vec<&str> = Vec::new();
+        let mut remaining = val;
+        for (bit, name) in names {
+            if val & bit != 0 {
+                out.push(name);
+                remaining &= !*bit;
+            }
+        }
+        let mut s = out.join(sep);
+        if remaining != 0 {
+            if !s.is_empty() {
+                s.push_str(sep);
+            }
+            s.push_str(&format!("unknown(0x{:x})", remaining));
+        }
+        s
+    };
+    match pr_type {
+        // GNU_PROPERTY_STACK_SIZE
+        1 => {
+            let v = if pr_data.len() >= 8 {
+                u64::from_le_bytes([
+                    pr_data[0], pr_data[1], pr_data[2], pr_data[3], pr_data[4], pr_data[5],
+                    pr_data[6], pr_data[7],
+                ])
+            } else {
+                read_u32(pr_data) as u64
+            };
+            format!("stack size: 0x{:x}", v)
+        }
+        // GNU_PROPERTY_NO_COPY_ON_PROTECTED
+        2 => "no copy on protected".to_string(),
+        // GNU_PROPERTY_X86_FEATURE_1_AND
+        0xc0000002 => {
+            let v = read_u32(pr_data);
+            let names: &[(u32, &str)] = &[
+                (0x1, "IBT"),
+                (0x2, "SHSTK"),
+                (0x4, "LAM_U48"),
+                (0x8, "LAM_U57"),
+            ];
+            format!("x86 feature: {}", bits_to_str(v, names, "<None>", ", "))
+        }
+        // GNU_PROPERTY_X86_FEATURE_2_USED / GNU_PROPERTY_X86_FEATURE_USED
+        0xc0010001 => {
+            let v = read_u32(pr_data);
+            let names: &[(u32, &str)] = &[
+                (0x1, "x86"),
+                (0x2, "x87"),
+                (0x4, "MMX"),
+                (0x8, "XMM"),
+                (0x10, "YMM"),
+                (0x20, "ZMM"),
+                (0x40, "FXSR"),
+                (0x80, "XSAVE"),
+                (0x100, "XSAVEOPT"),
+                (0x200, "XSAVEC"),
+                (0x400, "TMM"),
+                (0x800, "MASK"),
+            ];
+            format!("x86 feature used: {}", bits_to_str(v, names, "", ", "))
+        }
+        // GNU_PROPERTY_X86_ISA_1_USED / GNU_PROPERTY_X86_ISA_USED
+        0xc0010002 => {
+            let v = read_u32(pr_data);
+            let names: &[(u32, &str)] = &[
+                (0x1, "x86-64-baseline"),
+                (0x2, "x86-64-v2"),
+                (0x4, "x86-64-v3"),
+                (0x8, "x86-64-v4"),
+            ];
+            format!("x86 ISA used: {}", bits_to_str(v, names, "", ", "))
+        }
+        // GNU_PROPERTY_X86_ISA_1_NEEDED
+        0xc0008002 => {
+            let v = read_u32(pr_data);
+            let names: &[(u32, &str)] = &[
+                (0x1, "x86-64-baseline"),
+                (0x2, "x86-64-v2"),
+                (0x4, "x86-64-v3"),
+                (0x8, "x86-64-v4"),
+            ];
+            format!("x86 ISA needed: {}", bits_to_str(v, names, "", ", "))
+        }
+        _ => format!(
+            "<unknown type 0x{:x}, data: {}>",
+            pr_type,
+            pr_data
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
     }
 }
 
