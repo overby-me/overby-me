@@ -3,8 +3,11 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
-## Custom-test expansion (48/48 ✅)
+## Custom-test expansion (49/49 ✅)
 
+- objdump `-f` trailing blank line + `objdump-file-headers` custom test
+  (+1 custom test, 48→49): emit a trailing blank line after `start
+  address 0x...` to match GNU's exact-byte output.
 - 3 more custom tests for already-supported flags (+3 custom tests,
   45→48): `strings-radix-hex` (`-t x` offset format),
   `cxxfilt-no-strip-leading` (`-n` keep underscore), `readelf-wide`

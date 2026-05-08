@@ -232,6 +232,10 @@
         name = "wide";
       }
       {
+        tool = "objdump";
+        name = "file-headers";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }

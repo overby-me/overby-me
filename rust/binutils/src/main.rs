@@ -7250,6 +7250,7 @@ fn objdump_process_object(
         println!("architecture: {arch_name}, flags 0x{flags_hex:08x}:",);
         println!("{}", flags_list.join(", "));
         println!("start address 0x{:016x}", obj.entry());
+        println!();
     }
 
     if show_private {
