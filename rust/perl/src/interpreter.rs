@@ -4547,15 +4547,51 @@ impl Interpreter {
             }
 
             Expr::Interp(parts) => {
+                // Track whether any interpolated value is overload-dispatched
+                // by `.` so the result preserves the handler's return value
+                // (which may be a non-string ref). This unblocks
+                // `use overload "." => sub { $_[0] }; "a $o b"` returning
+                // `$o` itself. Plain non-overloaded interpolation still
+                // builds a String result via stringify_value.
+                let mut has_overload_concat = false;
+                let mut acc: Value = Value::Str(String::new());
                 let mut result = String::new();
+                let mut accumulating = true;
                 for part in parts {
                     match part {
-                        InterpPart::Lit(s) => result.push_str(s),
+                        InterpPart::Lit(s) => {
+                            if accumulating {
+                                result.push_str(s);
+                            } else {
+                                acc = self.concat_with_overload(&acc, &Value::Str(s.clone()));
+                            }
+                        }
                         InterpPart::ScalarVar(name) => {
                             // Route through eval_expr so tied scalars
                             // get FETCH'd at interpolation time.
                             let v = self.eval_expr(&Expr::ScalarVar(name.clone()));
-                            result.push_str(&self.stringify_value(&v));
+                            // Probe for `.` overload — if present we
+                            // switch to value-chain mode so the
+                            // handler's return propagates.
+                            if !has_overload_concat
+                                && Self::ref_ptr(&v) != 0
+                                && self
+                                    .blessed_refs
+                                    .get(&Self::ref_ptr(&v))
+                                    .and_then(|cls| {
+                                        self.overload_handlers.get(cls).and_then(|m| m.get("."))
+                                    })
+                                    .is_some()
+                            {
+                                has_overload_concat = true;
+                                acc = Value::Str(std::mem::take(&mut result));
+                                accumulating = false;
+                            }
+                            if accumulating {
+                                result.push_str(&self.stringify_value(&v));
+                            } else {
+                                acc = self.concat_with_overload(&acc, &v);
+                            }
                         }
                         InterpPart::ArrayVar(name) => {
                             let arr = self.get_array(name);
@@ -4604,6 +4640,15 @@ impl Interpreter {
                             }
                         }
                     }
+                }
+                if has_overload_concat {
+                    // `.` overload preserves the handler's return value
+                    // unchanged — case modifiers don't apply when the
+                    // chain ends in a non-string ref.
+                    if !result.is_empty() {
+                        acc = self.concat_with_overload(&acc, &Value::Str(result));
+                    }
+                    return acc;
                 }
                 Value::Str(apply_case_modifiers(&result))
             }
