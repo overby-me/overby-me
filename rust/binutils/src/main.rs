@@ -5827,18 +5827,18 @@ fn tool_objdump(args: &[String]) -> i32 {
                     if emit_wi_placeholder {
                         readelf_debug_info_loaded(&elf, &data_bytes, endian, loaded_from);
                     }
-                    if show_debug_line_raw {
-                        readelf_debug_line_raw(&elf, &data_bytes, endian);
-                    }
-                    if show_debug_line_decoded {
-                        readelf_debug_line_decoded(&elf, &data_bytes, endian);
+                    if show_debug_abbrev {
+                        readelf_debug_abbrev(&elf, &data_bytes, endian);
                     }
                     if show_debug_ranges {
                         readelf_debug_ranges(&elf, &data_bytes, endian);
                         readelf_debug_rnglists(&elf, &data_bytes, endian);
                     }
-                    if show_debug_abbrev {
-                        readelf_debug_abbrev(&elf, &data_bytes, endian);
+                    if show_debug_line_raw {
+                        readelf_debug_line_raw(&elf, &data_bytes, endian);
+                    }
+                    if show_debug_line_decoded {
+                        readelf_debug_line_decoded(&elf, &data_bytes, endian);
                     }
                 } else if let Ok(elf) =
                     ElfFile::<object::elf::FileHeader32<object::Endianness>>::parse(&*data_bytes)
@@ -5850,18 +5850,18 @@ fn tool_objdump(args: &[String]) -> i32 {
                     if emit_wi_placeholder {
                         readelf_debug_info_loaded(&elf, &data_bytes, endian, loaded_from);
                     }
-                    if show_debug_line_raw {
-                        readelf_debug_line_raw(&elf, &data_bytes, endian);
-                    }
-                    if show_debug_line_decoded {
-                        readelf_debug_line_decoded(&elf, &data_bytes, endian);
+                    if show_debug_abbrev {
+                        readelf_debug_abbrev(&elf, &data_bytes, endian);
                     }
                     if show_debug_ranges {
                         readelf_debug_ranges(&elf, &data_bytes, endian);
                         readelf_debug_rnglists(&elf, &data_bytes, endian);
                     }
-                    if show_debug_abbrev {
-                        readelf_debug_abbrev(&elf, &data_bytes, endian);
+                    if show_debug_line_raw {
+                        readelf_debug_line_raw(&elf, &data_bytes, endian);
+                    }
+                    if show_debug_line_decoded {
+                        readelf_debug_line_decoded(&elf, &data_bytes, endian);
                     }
                 }
             }
