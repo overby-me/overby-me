@@ -961,10 +961,15 @@ pub(crate) fn parse_args() -> Options {
             }
             "--next" | "-:" => {
                 if !has_url {
-                    eprintln!("curl: missing URL before --next");
-                    eprintln!("curl: option --next: is badly used here");
-                    eprintln!("curl: try 'curl --help' or 'curl --manual' for more information");
-                    process::exit(2);
+                    // --next before any URL is silently tolerated (test 430:
+                    // -K config files that lead with `--next` get spliced in
+                    // and curl skips the boundary marker if no URL has been
+                    // collected yet). Test 686 still exits 2 because --next
+                    // at the very END (with no URL after) is caught by the
+                    // end-of-parse `expecting_url_after_next` check.
+                    expecting_url_after_next = true;
+                    i += 1;
+                    continue;
                 }
                 // Snapshot per-URL fields for all URLs in the current group.
                 // Mark the very first URL in the group so the -D dump file
