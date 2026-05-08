@@ -1116,6 +1116,86 @@ fn main() {
                         eprintln!("curl: {e}");
                     }
                 }
+                // When the failure was a non-2xx CONNECT response, emit the
+                // raw response bytes to stdout (tests 217, 287). Take the
+                // bytes out so a subsequent successful URL doesn't replay them,
+                // but keep the status code visible for `%{http_connect}`.
+                if e.starts_with("CONNECT tunnel failed") {
+                    let stashed = crate::connection::CONNECT_RESP.with(|r| r.borrow().clone());
+                    if let Some((_status, ref bytes)) = stashed {
+                        use std::io::Write as _;
+                        let _ = io::stdout().write_all(bytes);
+                        let _ = io::stdout().flush();
+                    }
+                    // Run -w write-out with a synthetic zero-status response
+                    // so `%{http_code} %{http_connect}` works (test 217).
+                    if let Some(ref fmt) = effective_opts.write_out
+                        && let Ok(parsed_url) = crate::url::parse_url(url_str)
+                    {
+                        let synth = crate::response::Response {
+                            trailer_bytes: Vec::new(),
+                            status: 0,
+                            status_text: String::new(),
+                            headers: Vec::new(),
+                            body: Vec::new(),
+                            header_bytes: Vec::new(),
+                            redirect_headers: Vec::new(),
+                            num_connects: 1,
+                            num_redirects: 0,
+                            max_redirects_reached: false,
+                            proto_redir_blocked: false,
+                            redirect_url_malformed: false,
+                            weird_server_reply: false,
+                            final_url: None,
+                            final_referer: None,
+                            redirect_url: None,
+                            timed_out: false,
+                            recv_error: false,
+                            partial_file: false,
+                            bad_content_encoding: false,
+                            bad_encoding_too_many: false,
+                            filesize_exceeded: false,
+                            header_size_error: false,
+                        };
+                        let chunks = crate::format::split_write_out(fmt);
+                        for (dest, gated, raw) in chunks {
+                            if raw.is_empty() {
+                                continue;
+                            }
+                            let text = crate::format::format_write_out(
+                                &raw,
+                                &synth,
+                                &parsed_url,
+                                1,
+                                0,
+                                "GET",
+                                None,
+                                url_idx,
+                                56,
+                                "CONNECT tunnel failed",
+                                "",
+                            );
+                            // CONNECT failure is "with error" — emit
+                            // unconditionally except for `%{onerror}` gating.
+                            if gated {
+                                // gated = on-error gate; we are in error,
+                                // so emit
+                            }
+                            use std::io::Write as _;
+                            match dest {
+                                crate::format::WriteOutDest::Stdout => {
+                                    let _ = io::stdout().write_all(text.as_bytes());
+                                }
+                                crate::format::WriteOutDest::Stderr => {
+                                    let _ = io::stderr().write_all(text.as_bytes());
+                                }
+                                crate::format::WriteOutDest::File { .. } => {}
+                            }
+                        }
+                        let _ = io::stdout().flush();
+                    }
+                    crate::connection::CONNECT_RESP.with(|r| *r.borrow_mut() = None);
+                }
                 // Map error messages to curl exit codes.
                 if e.starts_with("cacert: ") {
                     exit_code = 77; // Problem with reading the SSL CA cert

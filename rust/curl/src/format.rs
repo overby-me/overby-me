@@ -40,7 +40,10 @@ pub(crate) fn format_write_out(
     referer: &str,
 ) -> String {
     let mut result = fmt.to_string();
-    result = result.replace("%{http_code}", &resp.status.to_string());
+    // `%{http_code}` is always a 3-digit zero-padded code (curl pads when no
+    // response was received, e.g. CONNECT-failure → "000", test 217).
+    let http_code = format!("{:03}", resp.status);
+    result = result.replace("%{http_code}", &http_code);
     result = result.replace("%{response_code}", &resp.status.to_string());
     result = result.replace("%{urlnum}", &url_num.to_string());
     result = result.replace("%{exitcode}", &exit_code.to_string());
@@ -66,6 +69,11 @@ pub(crate) fn format_write_out(
     result = result.replace("%{num_redirects}", &num_redirects.to_string());
     result = result.replace("%{num_retries}", "0");
     result = result.replace("%{num_headers}", &resp.headers.len().to_string());
+    // %{http_connect}: status code of the last CONNECT response (0 if no
+    // CONNECT happened, otherwise the proxy's reply status).
+    let http_connect =
+        crate::connection::CONNECT_RESP.with(|r| r.borrow().as_ref().map(|(s, _)| *s).unwrap_or(0));
+    result = result.replace("%{http_connect}", &http_connect.to_string());
     result = result.replace("%{method}", method);
     result = result.replace(
         "%{filename_effective}",

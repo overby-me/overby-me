@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
@@ -6,6 +7,12 @@ use std::time::Duration;
 use crate::options::Options;
 use crate::tls::{InsecureVerifier, make_tls_config};
 use crate::url::ParsedUrl;
+
+thread_local! {
+    /// Last failing CONNECT response bytes — set by `connect()` and read by
+    /// main.rs when emitting error output (tests 217, 287).
+    pub(crate) static CONNECT_RESP: RefCell<Option<(u16, Vec<u8>)>> = const { RefCell::new(None) };
+}
 
 /// Match --connect-to entries ("HOST1:PORT1:HOST2:PORT2") against the
 /// requested host/port. An empty HOST1 or PORT1 acts as a wildcard. Returns
@@ -341,8 +348,14 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
         }
 
         if status_code != 200 {
+            // Stash the failing CONNECT response — main.rs reads it for
+            // stdout output and `%{http_connect}` substitution (217, 287).
+            CONNECT_RESP.with(|r| *r.borrow_mut() = Some((status_code, response_bytes.clone())));
             return Err(format!("CONNECT tunnel failed, response {status_code}"));
         }
+        // CONNECT 200 — record the status so `%{http_connect}` reflects it
+        // even on a successful tunnel.
+        CONNECT_RESP.with(|r| *r.borrow_mut() = Some((status_code, response_bytes.clone())));
 
         connect_headers = response_bytes;
 
