@@ -66,7 +66,7 @@ Key design decisions:
 | `objdump-relocs` | objdump | ✅ PASS |
 | `addr2line-basic` | addr2line | ✅ PASS |
 
-### Upstream DejaGnu tests (245/274 passing, 89%)
+### Upstream DejaGnu tests (265/274 passing, 97%)
 
 | Test file | Pass | Fail | Total | Threshold |
 |-----------|------|------|-------|-----------|
@@ -77,10 +77,10 @@ Key design decisions:
 | readelf.exp | **35** | 3 | 38 | minPass=35, maxFail=3 |
 | objdump.exp | **32** | 0 | 33 | minPass=32, maxFail=0 |
 | objcopy.exp | **120** | 0 | 120 | minPass=120, maxFail=0 |
-| compress.exp | **19** | 26 | 45 | minPass=19, maxFail=26 |
+| compress.exp | **39** | 6 | 45 | minPass=39, maxFail=6 |
 | strings.exp | **1** | 0 | 1 | minPass=1, maxFail=0 |
 | addr2line.exp | **3** | 0 | 3 | minPass=3, maxFail=0 |
-| **Total** | **245** | **29** | **274** | |
+| **Total** | **265** | **9** | **274** | |
 
 Remaining failures:
 

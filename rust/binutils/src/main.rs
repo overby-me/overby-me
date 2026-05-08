@@ -5864,54 +5864,139 @@ fn tool_objdump(args: &[String]) -> i32 {
                         println!();
                         println!("{}:     file format elf64-x86-64", member_name);
                         println!();
-                        if let Ok(elf) = ElfFile::<
-                            object::elf::FileHeader64<object::Endianness>,
-                        >::parse(member_data.as_slice())
+                        // Per-member dispatch order from the member's section header table.
+                        let m_section_order: Vec<&str> = {
+                            let mut v: Vec<(u64, &str)> = Vec::new();
+                            if let Ok(obj) = object::File::parse(member_data.as_slice()) {
+                                use object::ObjectSection as _;
+                                for s in obj.sections() {
+                                    let name = s.name().unwrap_or("");
+                                    let kind = if name == ".debug_info"
+                                        || name == ".zdebug_info"
+                                    {
+                                        "info"
+                                    } else if name == ".debug_abbrev"
+                                        || name == ".zdebug_abbrev"
+                                    {
+                                        "abbrev"
+                                    } else if name == ".debug_line"
+                                        || name == ".zdebug_line"
+                                    {
+                                        "line"
+                                    } else if name == ".debug_ranges"
+                                        || name == ".zdebug_ranges"
+                                        || name == ".debug_rnglists"
+                                    {
+                                        "ranges"
+                                    } else {
+                                        continue;
+                                    };
+                                    // Use section index (header order) — GNU
+                                    // dispatches debug sections in the order
+                                    // they appear in the section header table.
+                                    v.push((s.index().0 as u64, kind));
+                                }
+                            }
+                            v.sort_by_key(|&(o, _)| o);
+                            v.into_iter().map(|(_, k)| k).collect()
+                        };
+                        let m_dispatch_order: Vec<&str> = if m_section_order.is_empty() {
+                            vec!["info", "line", "abbrev", "ranges"]
+                        } else {
+                            m_section_order
+                        };
+                        let dump_member =
+                            |info_fn: &dyn Fn(),
+                             abbrev_fn: &dyn Fn(),
+                             line_fn: &dyn Fn(),
+                             ranges_fn: &dyn Fn()| {
+                                let mut info_done = false;
+                                let mut abbrev_done = false;
+                                let mut line_done = false;
+                                let mut ranges_done = false;
+                                for kind in &m_dispatch_order {
+                                    match *kind {
+                                        "info" if emit_wi_placeholder && !info_done => {
+                                            info_fn();
+                                            info_done = true;
+                                        }
+                                        "abbrev" if show_debug_abbrev && !abbrev_done => {
+                                            abbrev_fn();
+                                            abbrev_done = true;
+                                        }
+                                        "line" if (show_debug_line_raw
+                                            || show_debug_line_decoded)
+                                            && !line_done =>
+                                        {
+                                            line_fn();
+                                            line_done = true;
+                                        }
+                                        "ranges" if show_debug_ranges && !ranges_done => {
+                                            ranges_fn();
+                                            ranges_done = true;
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            };
+                        if let Ok(elf) =
+                            ElfFile::<object::elf::FileHeader64<object::Endianness>>::parse(
+                                member_data.as_slice(),
+                            )
                         {
                             let endian = elf.endian();
                             if show_debug_str {
                                 readelf_debug_str_loaded(&elf, member_data, endian, None);
                             }
-                            if emit_wi_placeholder {
-                                readelf_debug_info_loaded(&elf, member_data, endian, None);
-                            }
-                            if show_debug_abbrev {
-                                readelf_debug_abbrev(&elf, member_data, endian);
-                            }
-                            if show_debug_ranges {
-                                readelf_debug_ranges(&elf, member_data, endian);
-                                readelf_debug_rnglists(&elf, member_data, endian);
-                            }
-                            if show_debug_line_raw {
-                                readelf_debug_line_raw(&elf, member_data, endian);
-                            }
-                            if show_debug_line_decoded {
-                                readelf_debug_line_decoded(&elf, member_data, endian);
-                            }
-                        } else if let Ok(elf) = ElfFile::<
-                            object::elf::FileHeader32<object::Endianness>,
-                        >::parse(member_data.as_slice())
+                            dump_member(
+                                &|| {
+                                    readelf_debug_info_loaded(&elf, member_data, endian, None);
+                                },
+                                &|| {
+                                    readelf_debug_abbrev(&elf, member_data, endian);
+                                },
+                                &|| {
+                                    if show_debug_line_raw {
+                                        readelf_debug_line_raw(&elf, member_data, endian);
+                                    }
+                                    if show_debug_line_decoded {
+                                        readelf_debug_line_decoded(&elf, member_data, endian);
+                                    }
+                                },
+                                &|| {
+                                    readelf_debug_ranges(&elf, member_data, endian);
+                                    readelf_debug_rnglists(&elf, member_data, endian);
+                                },
+                            );
+                        } else if let Ok(elf) =
+                            ElfFile::<object::elf::FileHeader32<object::Endianness>>::parse(
+                                member_data.as_slice(),
+                            )
                         {
                             let endian = elf.endian();
                             if show_debug_str {
                                 readelf_debug_str_loaded(&elf, member_data, endian, None);
                             }
-                            if emit_wi_placeholder {
-                                readelf_debug_info_loaded(&elf, member_data, endian, None);
-                            }
-                            if show_debug_abbrev {
-                                readelf_debug_abbrev(&elf, member_data, endian);
-                            }
-                            if show_debug_ranges {
-                                readelf_debug_ranges(&elf, member_data, endian);
-                                readelf_debug_rnglists(&elf, member_data, endian);
-                            }
-                            if show_debug_line_raw {
-                                readelf_debug_line_raw(&elf, member_data, endian);
-                            }
-                            if show_debug_line_decoded {
-                                readelf_debug_line_decoded(&elf, member_data, endian);
-                            }
+                            dump_member(
+                                &|| {
+                                    readelf_debug_info_loaded(&elf, member_data, endian, None);
+                                },
+                                &|| {
+                                    readelf_debug_abbrev(&elf, member_data, endian);
+                                },
+                                &|| {
+                                    if show_debug_line_raw {
+                                        readelf_debug_line_raw(&elf, member_data, endian);
+                                    }
+                                    if show_debug_line_decoded {
+                                        readelf_debug_line_decoded(&elf, member_data, endian);
+                                    }
+                                },
+                                &|| {
+                                    readelf_debug_ranges(&elf, member_data, endian);
+                                    readelf_debug_rnglists(&elf, member_data, endian);
+                                },
+                            );
                         }
                     }
                     continue;
@@ -5956,7 +6041,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                             } else {
                                 continue;
                             };
-                            v.push((s.file_range().map(|(o, _)| o).unwrap_or(0), kind));
+                            v.push((s.index().0 as u64, kind));
                         }
                     }
                     v.sort_by_key(|&(o, _)| o);
@@ -5988,8 +6073,9 @@ fn tool_objdump(args: &[String]) -> i32 {
                                 readelf_debug_abbrev(&elf, &data_bytes, endian);
                                 abbrev_done = true;
                             }
-                            "line" if (show_debug_line_raw || show_debug_line_decoded)
-                                && !line_done =>
+                            "line"
+                                if (show_debug_line_raw || show_debug_line_decoded)
+                                    && !line_done =>
                             {
                                 if show_debug_line_raw {
                                     readelf_debug_line_raw(&elf, &data_bytes, endian);
@@ -6007,7 +6093,13 @@ fn tool_objdump(args: &[String]) -> i32 {
                             _ => {}
                         }
                     }
-                    let _ = (emit_wi_placeholder, info_done, abbrev_done, line_done, ranges_done);
+                    let _ = (
+                        emit_wi_placeholder,
+                        info_done,
+                        abbrev_done,
+                        line_done,
+                        ranges_done,
+                    );
                 } else if let Ok(elf) =
                     ElfFile::<object::elf::FileHeader32<object::Endianness>>::parse(&*data_bytes)
                 {
@@ -6029,8 +6121,9 @@ fn tool_objdump(args: &[String]) -> i32 {
                                 readelf_debug_abbrev(&elf, &data_bytes, endian);
                                 abbrev_done = true;
                             }
-                            "line" if (show_debug_line_raw || show_debug_line_decoded)
-                                && !line_done =>
+                            "line"
+                                if (show_debug_line_raw || show_debug_line_decoded)
+                                    && !line_done =>
                             {
                                 if show_debug_line_raw {
                                     readelf_debug_line_raw(&elf, &data_bytes, endian);
@@ -8399,14 +8492,24 @@ fn tool_objcopy(args: &[String]) -> i32 {
                 use std::io::Write as _;
                 let uncompressed_size = data_vec.len() as u64;
                 // GNU as uses Z_BEST_COMPRESSION (level 9) for the zlib stream.
-        let mut enc = ZlibEncoder::new(Vec::new(), Compression::best());
+                let mut enc = ZlibEncoder::new(Vec::new(), Compression::best());
                 let _ = enc.write_all(&data_vec);
                 let zlib_data = enc.finish().unwrap_or_default();
-                let is_64 =
-                    obj.architecture().address_size().map(|s| s.bytes()).unwrap_or(8) == 8;
+                let is_64 = obj
+                    .architecture()
+                    .address_size()
+                    .map(|s| s.bytes())
+                    .unwrap_or(8)
+                    == 8;
                 let header_size = match compress_debug {
                     CompressMode::ZlibGnu => 12,
-                    CompressMode::ZlibGabi => if is_64 { 24 } else { 12 },
+                    CompressMode::ZlibGabi => {
+                        if is_64 {
+                            24
+                        } else {
+                            12
+                        }
+                    }
                     CompressMode::None => 0,
                 };
                 let final_size = header_size + zlib_data.len();
@@ -11684,10 +11787,47 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
         addralign: u64,
     }
     let mut targets: Vec<CompressTarget> = Vec::new();
+    // For zlib-gnu mode, also collect `.rela.debug_*` / `.rel.debug_*`
+    // sections so we can rename them to `.rela.zdebug_*` / `.rel.zdebug_*`
+    // alongside their data sections.
+    let mut rela_renames: Vec<(usize, u32)> = Vec::new();
     for i in 0..shnum {
         let h = shoff as usize + i * shentsize;
         let name_idx = r32(data, h);
         let name = read_name(&shstr_data, name_idx as usize);
+        if mode == 1 && (name.starts_with(b".rela.debug_") || name.starts_with(b".rel.debug_")) {
+            // Build the new name with `zdebug` substituted in.
+            let new_name: Vec<u8> = if let Some(rest) = name.strip_prefix(b".rela.debug_") {
+                let mut v = Vec::with_capacity(b".rela.zdebug_".len() + rest.len());
+                v.extend_from_slice(b".rela.zdebug_");
+                v.extend_from_slice(rest);
+                v
+            } else if let Some(rest) = name.strip_prefix(b".rel.debug_") {
+                let mut v = Vec::with_capacity(b".rel.zdebug_".len() + rest.len());
+                v.extend_from_slice(b".rel.zdebug_");
+                v.extend_from_slice(rest);
+                v
+            } else {
+                continue;
+            };
+            let final_idx = if let Some(p) = find_subbytes(&shstr_data, &new_name) {
+                if shstr_data.get(p + new_name.len()) == Some(&0) {
+                    p as u32
+                } else {
+                    let off = shstr_data.len() as u32;
+                    shstr_data.extend_from_slice(&new_name);
+                    shstr_data.push(0);
+                    off
+                }
+            } else {
+                let off = shstr_data.len() as u32;
+                shstr_data.extend_from_slice(&new_name);
+                shstr_data.push(0);
+                off
+            };
+            rela_renames.push((i, final_idx));
+            continue;
+        }
         if !name.starts_with(b".debug_") {
             continue;
         }
@@ -11746,7 +11886,13 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
         // smaller than the input.
         let header_bytes = match mode {
             1 => 12usize,
-            2 => if class == 2 { 24 } else { 12 },
+            2 => {
+                if class == 2 {
+                    24
+                } else {
+                    12
+                }
+            }
             _ => 0,
         };
         if header_bytes + zlib_data.len() >= raw.len() {
@@ -11829,9 +11975,13 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
             new_name_idx,
             new_data,
             new_flags,
-            // GNU as/objcopy bump addralign for compressed debug sections to
-            // the address size (4 or 8) for proper Elf*_Chdr alignment.
-            new_addralign: if class == 2 { 8 } else { 4 },
+            // zlib-gabi bumps addralign to address size for ch_addralign;
+            // zlib-gnu keeps the original alignment.
+            new_addralign: if mode == 2 {
+                if class == 2 { 8 } else { 4 }
+            } else {
+                t.addralign.max(1)
+            },
         });
     }
     // Repack the file: emit ELF header, all section bodies (in original
@@ -11878,7 +12028,9 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
     order.sort_by_key(|&i| (secs[i].offset, i));
     for &i in &order {
         let sec = &secs[i];
-        if i == 0 || sec.sh_type == 8 /* NOBITS */ {
+        if i == 0 || sec.sh_type == 8
+        /* NOBITS */
+        {
             new_offsets[i] = sec.offset;
             new_sizes[i] = sec.size;
             continue;
@@ -11921,10 +12073,21 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
     let pad = (shoff_align - (off_now % shoff_align)) % shoff_align;
     new_data.resize(new_data.len() + pad as usize, 0);
     let new_shoff = new_data.len() as u64;
+    let rela_rename_map: std::collections::HashMap<usize, u32> =
+        rela_renames.iter().copied().collect();
     // Append section headers — copy originals and rewrite mutated fields.
     for i in 0..shnum {
         let h = shoff as usize + i * shentsize;
         let mut hdr = data[h..h + shentsize].to_vec();
+        // Apply `.rela.debug_*` -> `.rela.zdebug_*` rename for zlib-gnu.
+        if let Some(&new_idx) = rela_rename_map.get(&i) {
+            let v = if le {
+                new_idx.to_le_bytes()
+            } else {
+                new_idx.to_be_bytes()
+            };
+            hdr[0..4].copy_from_slice(&v);
+        }
         // Update name index if the section was renamed.
         if let Some(cs) = compressed_map.get(&i) {
             let v = if le {
@@ -11937,7 +12100,11 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
             new_flags_arr[i] = cs.new_flags;
             // Update flags.
             if class == 2 {
-                let v = if le { cs.new_flags.to_le_bytes() } else { cs.new_flags.to_be_bytes() };
+                let v = if le {
+                    cs.new_flags.to_le_bytes()
+                } else {
+                    cs.new_flags.to_be_bytes()
+                };
                 hdr[8..16].copy_from_slice(&v);
                 let v = if le {
                     cs.new_addralign.to_le_bytes()
@@ -11992,7 +12159,11 @@ fn elf_compress_debug_sections(data: &mut Vec<u8>, mode: u8) {
     }
     // Update e_shoff in the ELF header.
     if class == 2 {
-        let v = if le { new_shoff.to_le_bytes() } else { new_shoff.to_be_bytes() };
+        let v = if le {
+            new_shoff.to_le_bytes()
+        } else {
+            new_shoff.to_be_bytes()
+        };
         new_data[0x28..0x30].copy_from_slice(&v);
     } else {
         let v = if le {
@@ -12145,14 +12316,13 @@ fn elf_decompress_debug_sections(data: &mut Vec<u8>) {
                 nn.push(b'.');
                 nn.extend_from_slice(&name[2..]);
                 (out, Some(nn), sh_flags)
-            } else if name.starts_with(b".debug_")
-                && (sh_flags & 0x800 != 0 || chdr_zlib)
-            {
+            } else if name.starts_with(b".debug_") && (sh_flags & 0x800 != 0 || chdr_zlib) {
                 if raw.len() <= header_size_gabi {
                     continue;
                 }
                 let mut out = Vec::new();
-                let _ = flate2::read::ZlibDecoder::new(&raw[header_size_gabi..]).read_to_end(&mut out);
+                let _ =
+                    flate2::read::ZlibDecoder::new(&raw[header_size_gabi..]).read_to_end(&mut out);
                 (out, None, sh_flags & !0x800)
             } else {
                 continue;
