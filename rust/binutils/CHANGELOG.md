@@ -3,7 +3,11 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
-## Custom-test expansion (62/62 ✅)
+## Custom-test expansion (64/64 ✅)
+
+- nm `-A` POSIX prefix uses "file: " (space after colon); `-j` drops
+  the file-name prefix entirely (matches GNU). +2 custom tests
+  (62→64): `nm-print-file-name-posix`, `nm-just-symbols-with-prefix`.
 
 - 5 more custom tests for already-supported flag combinations (+5,
   57→62): `readelf-header-sections` (`-hS`), `readelf-header-program`

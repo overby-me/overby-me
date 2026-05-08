@@ -288,6 +288,14 @@
         name = "multiple";
       }
       {
+        tool = "nm";
+        name = "print-file-name-posix";
+      }
+      {
+        tool = "nm";
+        name = "just-symbols-with-prefix";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }

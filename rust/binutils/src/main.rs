@@ -1673,17 +1673,23 @@ fn nm_print_symbols<'data>(
     };
 
     for (addr, size, ty, name, _is_ifunc) in &syms {
-        let prefix = if opts.show_filename {
-            format!("{display_name}:")
+        // POSIX format uses `file: ` (space after colon); BSD uses `file:`.
+        // For `-j` GNU drops the `-A` prefix entirely.
+        let prefix = if opts.show_filename && !opts.just_names {
+            if opts.format == NmFormat::Posix {
+                format!("{display_name}: ")
+            } else {
+                format!("{display_name}:")
+            }
         } else {
             String::new()
         };
 
         let is_undef = *ty == 'U' || *ty == 'w';
 
-        // -j/--just-symbols: only print the name.
+        // -j/--just-symbols: only print the name (no file prefix).
         if opts.just_names {
-            println!("{prefix}{name}");
+            println!("{name}");
             continue;
         }
 
