@@ -6588,11 +6588,27 @@ impl Interpreter {
                             // hash, and remove the key from that exact copy.
                             for scope in self.scopes.iter_mut().rev() {
                                 if let Some(h) = scope.hashes.get_mut(name) {
-                                    return h.remove(&key).unwrap_or(Value::Undef);
+                                    let v = h.remove(&key).unwrap_or(Value::Undef);
+                                    return v.resolve();
                                 }
                             }
+                            // Check aliased hashes (migration target for
+                            // hash slots promoted via `\$h{k}` or
+                            // `eval_expr_for_arg`'s slot-alias path).
+                            let qname = self.qualify_global(name);
+                            if let Some(rc) = self.aliased_hashes.get(qname.as_str()).cloned() {
+                                let v = rc.borrow_mut().remove(&key).unwrap_or(Value::Undef);
+                                return v.resolve();
+                            }
+                            if qname.as_str() != name
+                                && let Some(rc) = self.aliased_hashes.get(name).cloned()
+                            {
+                                let v = rc.borrow_mut().remove(&key).unwrap_or(Value::Undef);
+                                return v.resolve();
+                            }
                             if let Some(h) = self.globals.hashes.get_mut(name) {
-                                return h.remove(&key).unwrap_or(Value::Undef);
+                                let v = h.remove(&key).unwrap_or(Value::Undef);
+                                return v.resolve();
                             }
                             Value::Undef
                         }
@@ -6729,15 +6745,40 @@ impl Interpreter {
                                     if is_kv {
                                         out.push(Value::Str(k.clone()));
                                     }
-                                    out.push(v);
+                                    out.push(v.resolve());
                                 }
-                            } else if let Some(h) = self.globals.hashes.get_mut(name) {
-                                for k in &keys_v {
-                                    let v = h.remove(k).unwrap_or(Value::Undef);
-                                    if is_kv {
-                                        out.push(Value::Str(k.clone()));
+                            } else {
+                                // Check aliased_hashes (migrated globals)
+                                // before falling back to plain globals.
+                                let qname = self.qualify_global(name);
+                                let rc = self
+                                    .aliased_hashes
+                                    .get(qname.as_str())
+                                    .cloned()
+                                    .or_else(|| {
+                                        if qname.as_str() != name {
+                                            self.aliased_hashes.get(name).cloned()
+                                        } else {
+                                            None
+                                        }
+                                    });
+                                if let Some(rc_h) = rc {
+                                    let mut h = rc_h.borrow_mut();
+                                    for k in &keys_v {
+                                        let v = h.remove(k).unwrap_or(Value::Undef);
+                                        if is_kv {
+                                            out.push(Value::Str(k.clone()));
+                                        }
+                                        out.push(v.resolve());
                                     }
-                                    out.push(v);
+                                } else if let Some(h) = self.globals.hashes.get_mut(name) {
+                                    for k in &keys_v {
+                                        let v = h.remove(k).unwrap_or(Value::Undef);
+                                        if is_kv {
+                                            out.push(Value::Str(k.clone()));
+                                        }
+                                        out.push(v.resolve());
+                                    }
                                 }
                             }
                             self.last_list_val = Some(out.clone());
@@ -11952,7 +11993,16 @@ impl Interpreter {
                         self.call_context.push(1);
                         let saved_us = self.get_var("_");
                         for (i, item) in items.iter().enumerate() {
-                            self.set_var("_", item.clone());
+                            // Direct slot insert (NOT set_var) — set_var
+                            // would write *through* the prior `$_` Alias,
+                            // chaining iterations together so iter N+1's
+                            // value lands in iter N's Rc. Replace the
+                            // slot wholesale each iteration.
+                            if let Some(scope) = self.scopes.last_mut() {
+                                scope.vars.insert("_".to_string(), item.clone());
+                            } else {
+                                self.globals.vars.insert("_".to_string(), item.clone());
+                            }
                             let result = self.eval_expr(block);
                             if alias_target.is_some() {
                                 mutated[i] = self.get_var("_");
@@ -11961,7 +12011,11 @@ impl Interpreter {
                                 results.push(mutated[i].clone());
                             }
                         }
-                        self.set_var("_", saved_us);
+                        if let Some(scope) = self.scopes.last_mut() {
+                            scope.vars.insert("_".to_string(), saved_us);
+                        } else {
+                            self.globals.vars.insert("_".to_string(), saved_us);
+                        }
                         self.call_context.pop();
                         if let Some(target) = alias_target {
                             match target {
@@ -12042,15 +12096,43 @@ impl Interpreter {
                                     if is_kv {
                                         out.push(Value::Str(k.clone()));
                                     }
-                                    out.push(v);
+                                    out.push(v.resolve());
                                 }
-                            } else if let Some(h) = self.globals.hashes.get_mut(name) {
-                                for k in &keys_v {
-                                    let v = h.remove(k).unwrap_or(Value::Undef);
-                                    if is_kv {
-                                        out.push(Value::Str(k.clone()));
+                            } else {
+                                // Aliased global hash (migrated by
+                                // `\$h{k}` / `eval_expr_for_arg`'s
+                                // promote path). Without this, hash
+                                // slot delete after an arg-pass through
+                                // `cmp_ok($foo{k}, …)` returns empty.
+                                let qname = self.qualify_global(name);
+                                let rc = self
+                                    .aliased_hashes
+                                    .get(qname.as_str())
+                                    .cloned()
+                                    .or_else(|| {
+                                        if qname.as_str() != name {
+                                            self.aliased_hashes.get(name).cloned()
+                                        } else {
+                                            None
+                                        }
+                                    });
+                                if let Some(rc_h) = rc {
+                                    let mut h = rc_h.borrow_mut();
+                                    for k in &keys_v {
+                                        let v = h.remove(k).unwrap_or(Value::Undef);
+                                        if is_kv {
+                                            out.push(Value::Str(k.clone()));
+                                        }
+                                        out.push(v.resolve());
                                     }
-                                    out.push(v);
+                                } else if let Some(h) = self.globals.hashes.get_mut(name) {
+                                    for k in &keys_v {
+                                        let v = h.remove(k).unwrap_or(Value::Undef);
+                                        if is_kv {
+                                            out.push(Value::Str(k.clone()));
+                                        }
+                                        out.push(v.resolve());
+                                    }
                                 }
                             }
                             out
