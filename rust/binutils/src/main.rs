@@ -8180,7 +8180,7 @@ fn tool_objcopy(args: &[String]) -> i32 {
                     let mut member_data = m.data.clone();
                     // Skip non-ELF members (e.g. symbol index "/", "//").
                     if member_data.len() >= 4 && &member_data[..4] == b"\x7fELF" {
-                        if decompress_debug {
+                        if decompress_debug || compress_debug != CompressMode::None {
                             elf_decompress_debug_sections(&mut member_data);
                         }
                         match compress_debug {
@@ -8216,7 +8216,9 @@ fn tool_objcopy(args: &[String]) -> i32 {
                 return 0;
             }
         }
-        if decompress_debug {
+        // When converting between compression formats, always decompress
+        // first so the compress step starts from uncompressed data.
+        if decompress_debug || compress_debug != CompressMode::None {
             elf_decompress_debug_sections(&mut data);
         }
         match compress_debug {
