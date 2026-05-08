@@ -248,6 +248,41 @@ pub(crate) fn parse_args() -> Options {
         })
         .collect();
 
+    // Auto-load curlrc unless `-q` / `--disable` is present anywhere on the
+    // command line. Curl looks at `$CURL_HOME/.curlrc`, then
+    // `$XDG_CONFIG_HOME/curlrc`, then `$HOME/.config/curlrc`, then
+    // `$HOME/.curlrc`, taking the first that exists. The selected path is
+    // spliced at the start of `args` so it gets processed like `-K <file>`
+    // (tests 433, 436).
+    let suppress = args.iter().any(|a| {
+        a == "-q"
+            || a == "--disable"
+            || (a.starts_with('-')
+                && !a.starts_with("--")
+                && a.len() > 1
+                && a.chars().skip(1).any(|c| c == 'q'))
+    });
+    if !suppress {
+        let candidates: Vec<std::path::PathBuf> = [
+            env::var_os("CURL_HOME").map(|h| std::path::PathBuf::from(h).join(".curlrc")),
+            env::var_os("CURL_HOME").map(|h| std::path::PathBuf::from(h).join(".config/curlrc")),
+            env::var_os("XDG_CONFIG_HOME").map(|h| std::path::PathBuf::from(h).join("curlrc")),
+            env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config/curlrc")),
+            env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".curlrc")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        for path in candidates {
+            if path.is_file() {
+                eprintln!("Note: Read config file from '{}'", path.display());
+                args.insert(0, "-K".to_string());
+                args.insert(1, path.to_string_lossy().into_owned());
+                break;
+            }
+        }
+    }
+
     let mut has_url = false;
     // Track the start index of the current --next group so we can snapshot
     // per-URL options at group boundaries rather than at URL-add time.
@@ -1195,6 +1230,45 @@ pub(crate) fn parse_args() -> Options {
     if opts.urls.is_empty() {
         eprintln!("curl: no URL specified");
         process::exit(2);
+    }
+
+    // --etag-save / --etag-compare reject groups (a `--next`-bounded run of
+    // URLs) that contain more than one URL. Per-group enforcement allows
+    // test 369's `URL --etag-save X --next URL` while still rejecting test
+    // 485's `URL URL --etag-save X` where both URLs would share the option.
+    {
+        let mut group_start = 0usize;
+        let mut i = 0usize;
+        while i < opts.per_url_opts.len() {
+            // Find the end of this group (next first_in_group or end-of-list).
+            let mut j = i + 1;
+            while j < opts.per_url_opts.len() && !opts.per_url_opts[j].first_in_group {
+                j += 1;
+            }
+            if j - group_start > 1 {
+                let mut name = "";
+                for k in group_start..j {
+                    if opts.per_url_opts[k].etag_save.is_some() {
+                        name = "etag-save";
+                        break;
+                    }
+                    if opts.per_url_opts[k].etag_compare.is_some() {
+                        name = "etag-compare";
+                        break;
+                    }
+                }
+                if !name.is_empty() {
+                    eprintln!("curl: The etag options only work on a single URL");
+                    eprintln!("curl: option --{name}: is badly used here");
+                    eprintln!(
+                        "curl: try 'curl --help' or 'curl --manual' for more information"
+                    );
+                    process::exit(2);
+                }
+            }
+            group_start = j;
+            i = j;
+        }
     }
 
     // --continue-at is not compatible with request bodies (-d/--data* etc.).
