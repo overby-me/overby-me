@@ -236,6 +236,22 @@
         name = "file-headers";
       }
       {
+        tool = "readelf";
+        name = "string-dump-missing";
+      }
+      {
+        tool = "readelf";
+        name = "histogram";
+      }
+      {
+        tool = "cxxfilt";
+        name = "types";
+      }
+      {
+        tool = "addr2line";
+        name = "demangle";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }

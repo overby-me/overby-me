@@ -6,7 +6,7 @@ at passing the upstream GNU binutils test suite.
 
 ## Status
 
-- **49/49 custom comparison tests passing (100%)**
+- **53/53 custom comparison tests passing (100%)**
 - **328/329 upstream DejaGnu tests passing (99.7%)**
 
 The single remaining failing dejagnu test is `readelf -wi
@@ -95,16 +95,16 @@ nix flake check
 
 ## Test results
 
-### Custom comparison tests (49/49 passing)
+### Custom comparison tests (53/53 passing)
 
 | Tool | Tests |
 |---|---|
 | `ar` | `create-list`, `extract`, `print` |
-| `addr2line` | `basic`, `pretty` |
-| `c++filt` | `basic`, `multiple`, `nested`, `no-strip-leading` |
+| `addr2line` | `basic`, `demangle`, `pretty` |
+| `c++filt` | `basic`, `multiple`, `nested`, `no-strip-leading`, `types` |
 | `nm` | `basic`, `defined-only`, `extern-only`, `just-symbols`, `no-sort`, `numeric-sort`, `posix`, `print-file-name`, `radix-decimal`, `radix-hex`, `radix-octal`, `reverse-sort`, `undefined-only` |
 | `objdump` | `disassemble`, `file-headers`, `headers`, `relocs`, `section-filter`, `syms` |
-| `readelf` | `arch-specific`, `dynamic`, `file-header`, `groups`, `headers-all`, `notes`, `program-headers`, `relocs`, `sections`, `symbols`, `wide` |
+| `readelf` | `arch-specific`, `dynamic`, `file-header`, `groups`, `headers-all`, `histogram`, `notes`, `program-headers`, `relocs`, `sections`, `string-dump-missing`, `symbols`, `wide` |
 | `size` | `basic`, `decimal`, `hex`, `octal`, `sysv`, `totals` |
 | `strings` | `basic`, `min-length`, `object`, `radix-hex` |
 

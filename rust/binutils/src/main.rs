@@ -4974,9 +4974,8 @@ fn readelf_string_dump<'data, Elf: FileHeader>(
         }
     }
     if !found {
-        println!();
         println!(
-            "readelf: Warning: Section '{}' was not dumped because it does not exist!",
+            "readelf: Warning: Section '{}' was not dumped because it does not exist",
             sect
         );
     }
@@ -5323,9 +5322,8 @@ fn readelf_hex_dump_section<'data, Elf: FileHeader>(
         println!();
     }
     if !found {
-        println!();
         println!(
-            "readelf: Warning: Section '{}' was not dumped because it does not exist!",
+            "readelf: Warning: Section '{}' was not dumped because it does not exist",
             sect
         );
     }

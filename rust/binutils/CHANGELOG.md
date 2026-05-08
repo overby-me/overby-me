@@ -3,8 +3,14 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
-## Custom-test expansion (49/49 ✅)
+## Custom-test expansion (53/53 ✅)
 
+- readelf `-p NAME` missing-section warning format + 4 more custom
+  tests (+4 custom tests, 49→53): the "Section 'X' was not dumped
+  because it does not exist" warning now matches GNU exactly (no
+  leading blank line, no trailing `!`). New tests:
+  `readelf-string-dump-missing`, `readelf-histogram`, `cxxfilt-types`,
+  `addr2line-demangle`.
 - objdump `-f` trailing blank line + `objdump-file-headers` custom test
   (+1 custom test, 48→49): emit a trailing blank line after `start
   address 0x...` to match GNU's exact-byte output.
