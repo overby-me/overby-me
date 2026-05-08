@@ -3793,206 +3793,209 @@ fn readelf_display<'data, Elf: FileHeader>(
         let phnum_check = elf.elf_header().e_phnum(endian);
         if phnum_check == 0 {
             // GNU readelf prints a single concise message for relocatable
-            // files (or any file with no program headers).
+            // files (or any file with no program headers). Don't `return`
+            // here — other display sections (e.g. dynamic, syms) may still
+            // need to run when their flags are set together with -l.
             println!();
             println!("There are no program headers in this file.");
-            return;
-        }
-        // Detect PIE: ET_DYN with DT_FLAGS_1 & DF_1_PIE.
-        let e_type = elf.elf_header().e_type(endian);
-        let mut is_pie = false;
-        if e_type == 3 {
-            for segment in segments {
-                if segment.p_type(endian) == 2 {
-                    let off: u64 = segment.p_offset(endian).into();
-                    let sz: u64 = segment.p_filesz(endian).into();
-                    if off as usize + sz as usize > data.len() {
-                        break;
-                    }
-                    let dyn_bytes = &data[off as usize..(off + sz) as usize];
-                    let is_64 = elf.elf_header().is_class_64();
-                    let is_le = elf.elf_header().e_ident().data == 1;
-                    let entry_size = if is_64 { 16 } else { 8 };
-                    let mut p = 0;
-                    while p + entry_size <= dyn_bytes.len() {
-                        let (tag, val) = if is_64 {
-                            let mut t = [0u8; 8];
-                            t.copy_from_slice(&dyn_bytes[p..p + 8]);
-                            let mut v = [0u8; 8];
-                            v.copy_from_slice(&dyn_bytes[p + 8..p + 16]);
-                            if is_le {
-                                (i64::from_le_bytes(t) as u64, u64::from_le_bytes(v))
-                            } else {
-                                (i64::from_be_bytes(t) as u64, u64::from_be_bytes(v))
-                            }
-                        } else {
-                            let mut t = [0u8; 4];
-                            t.copy_from_slice(&dyn_bytes[p..p + 4]);
-                            let mut v = [0u8; 4];
-                            v.copy_from_slice(&dyn_bytes[p + 4..p + 8]);
-                            if is_le {
-                                (u32::from_le_bytes(t) as u64, u32::from_le_bytes(v) as u64)
-                            } else {
-                                (u32::from_be_bytes(t) as u64, u32::from_be_bytes(v) as u64)
-                            }
-                        };
-                        // DT_FLAGS_1 = 0x6ffffffb, DF_1_PIE = 0x08000000
-                        if tag == 0x6ffffffb && (val & 0x08000000) != 0 {
-                            is_pie = true;
-                        }
-                        if tag == 0 {
+        } else {
+            // Detect PIE: ET_DYN with DT_FLAGS_1 & DF_1_PIE.
+            let e_type = elf.elf_header().e_type(endian);
+            let mut is_pie = false;
+            if e_type == 3 {
+                for segment in segments {
+                    if segment.p_type(endian) == 2 {
+                        let off: u64 = segment.p_offset(endian).into();
+                        let sz: u64 = segment.p_filesz(endian).into();
+                        if off as usize + sz as usize > data.len() {
                             break;
                         }
-                        p += entry_size;
-                    }
-                }
-            }
-        }
-        let type_str = match e_type {
-            0 => "NONE (No file type)".to_string(),
-            1 => "REL (Relocatable file)".to_string(),
-            2 => "EXEC (Executable file)".to_string(),
-            3 => {
-                if is_pie {
-                    "DYN (Position-Independent Executable file)".to_string()
-                } else {
-                    "DYN (Shared object file)".to_string()
-                }
-            }
-            4 => "CORE (Core file)".to_string(),
-            _ => format!("UNKNOWN ({})", e_type),
-        };
-        let phoff: u64 = elf.elf_header().e_phoff(endian).into();
-        let phnum = elf.elf_header().e_phnum(endian);
-        let entry: u64 = elf.elf_header().e_entry(endian).into();
-        println!();
-        println!("Elf file type is {}", type_str);
-        println!("Entry point 0x{:x}", entry);
-        if phnum == 1 {
-            println!("There is 1 program header, starting at offset {}", phoff);
-        } else {
-            println!(
-                "There are {} program headers, starting at offset {}",
-                phnum, phoff
-            );
-        }
-        println!();
-        println!("Program Headers:");
-        println!(
-            "  Type           Offset   VirtAddr           PhysAddr           FileSiz  MemSiz   Flg Align"
-        );
-        for segment in segments {
-            let p_type = segment.p_type(endian);
-            let offset: u64 = segment.p_offset(endian).into();
-            let vaddr: u64 = segment.p_vaddr(endian).into();
-            let paddr: u64 = segment.p_paddr(endian).into();
-            let filesz: u64 = segment.p_filesz(endian).into();
-            let memsz: u64 = segment.p_memsz(endian).into();
-            let flags = segment.p_flags(endian);
-            let align: u64 = segment.p_align(endian).into();
-
-            let flag_str = format!(
-                "{}{}{}",
-                if flags & 4 != 0 { "R" } else { " " },
-                if flags & 2 != 0 { "W" } else { " " },
-                if flags & 1 != 0 { "E" } else { " " }
-            );
-
-            println!(
-                "  {:<14} 0x{offset:06x} 0x{vaddr:016x} 0x{paddr:016x} 0x{filesz:06x} 0x{memsz:06x} {flag_str} 0x{align:x}",
-                elf_segment_type_name(p_type)
-            );
-            // INTERP segment: print the requested interpreter path.
-            if p_type == 3 && (offset as usize + filesz as usize) <= data.len() {
-                let interp = &data[offset as usize..(offset + filesz) as usize];
-                let s = match interp.iter().position(|&b| b == 0) {
-                    Some(n) => &interp[..n],
-                    None => interp,
-                };
-                if let Ok(s) = std::str::from_utf8(s) {
-                    println!("      [Requesting program interpreter: {}]", s);
-                }
-            }
-        }
-        println!();
-
-        // Section to Segment mapping.
-        if let Ok(sections) = elf.elf_header().sections(endian, data) {
-            println!(" Section to Segment mapping:");
-            println!("  Segment Sections...");
-            for (segidx, segment) in segments.iter().enumerate() {
-                let p_type = segment.p_type(endian);
-                let p_offset: u64 = segment.p_offset(endian).into();
-                let p_filesz: u64 = segment.p_filesz(endian).into();
-                let p_vaddr: u64 = segment.p_vaddr(endian).into();
-                let p_memsz: u64 = segment.p_memsz(endian).into();
-                let mut names: Vec<String> = Vec::new();
-                for section in sections.iter() {
-                    let sh_type = section.sh_type(endian);
-                    if sh_type == 0 {
-                        continue;
-                    }
-                    let sh_flags: u64 = section.sh_flags(endian).into();
-                    let sh_offset: u64 = section.sh_offset(endian).into();
-                    let sh_size: u64 = section.sh_size(endian).into();
-                    let sh_addr: u64 = section.sh_addr(endian).into();
-                    if sh_size == 0 {
-                        continue;
-                    }
-                    let is_tls = (sh_flags & 0x400) != 0;
-                    let is_nobits = sh_type == 8;
-                    // SHF_TLS sections belong to PT_TLS / PT_GNU_RELRO / PT_LOAD.
-                    // PT_PHDR contains nothing.
-                    if p_type == 6 {
-                        continue;
-                    }
-                    if is_tls {
-                        if !matches!(p_type, 7 | 0x6474e552 | 1) {
-                            continue;
+                        let dyn_bytes = &data[off as usize..(off + sz) as usize];
+                        let is_64 = elf.elf_header().is_class_64();
+                        let is_le = elf.elf_header().e_ident().data == 1;
+                        let entry_size = if is_64 { 16 } else { 8 };
+                        let mut p = 0;
+                        while p + entry_size <= dyn_bytes.len() {
+                            let (tag, val) = if is_64 {
+                                let mut t = [0u8; 8];
+                                t.copy_from_slice(&dyn_bytes[p..p + 8]);
+                                let mut v = [0u8; 8];
+                                v.copy_from_slice(&dyn_bytes[p + 8..p + 16]);
+                                if is_le {
+                                    (i64::from_le_bytes(t) as u64, u64::from_le_bytes(v))
+                                } else {
+                                    (i64::from_be_bytes(t) as u64, u64::from_be_bytes(v))
+                                }
+                            } else {
+                                let mut t = [0u8; 4];
+                                t.copy_from_slice(&dyn_bytes[p..p + 4]);
+                                let mut v = [0u8; 4];
+                                v.copy_from_slice(&dyn_bytes[p + 4..p + 8]);
+                                if is_le {
+                                    (u32::from_le_bytes(t) as u64, u32::from_le_bytes(v) as u64)
+                                } else {
+                                    (u32::from_be_bytes(t) as u64, u32::from_be_bytes(v) as u64)
+                                }
+                            };
+                            // DT_FLAGS_1 = 0x6ffffffb, DF_1_PIE = 0x08000000
+                            if tag == 0x6ffffffb && (val & 0x08000000) != 0 {
+                                is_pie = true;
+                            }
+                            if tag == 0 {
+                                break;
+                            }
+                            p += entry_size;
                         }
-                        // TLS+NOBITS sections (e.g. .tbss) are NOT in PT_LOAD
-                        // or PT_GNU_RELRO; they belong only to PT_TLS.
-                        if is_nobits && (p_type == 1 || p_type == 0x6474e552) {
-                            continue;
-                        }
-                    } else if p_type == 7 {
-                        // Non-TLS sections are not part of PT_TLS.
-                        continue;
                     }
-                    let alloc = (sh_flags & 0x2) != 0;
-                    let in_segment = if !alloc {
-                        // Non-allocated: compare by file offset.
-                        sh_offset >= p_offset
-                            && sh_offset + sh_size <= p_offset + p_filesz
-                            && !is_nobits
+                }
+            }
+            let type_str = match e_type {
+                0 => "NONE (No file type)".to_string(),
+                1 => "REL (Relocatable file)".to_string(),
+                2 => "EXEC (Executable file)".to_string(),
+                3 => {
+                    if is_pie {
+                        "DYN (Position-Independent Executable file)".to_string()
                     } else {
-                        // Allocated: compare by virtual address.
-                        // For NOBITS, use sh_size = 0 in the file-bound check.
-                        let file_size = if is_nobits { 0 } else { sh_size };
-                        let file_ok = is_nobits
-                            || (sh_offset >= p_offset
-                                && sh_offset + file_size <= p_offset + p_filesz);
-                        let mem_ok = sh_addr >= p_vaddr && sh_addr + sh_size <= p_vaddr + p_memsz;
-                        file_ok && mem_ok
+                        "DYN (Shared object file)".to_string()
+                    }
+                }
+                4 => "CORE (Core file)".to_string(),
+                _ => format!("UNKNOWN ({})", e_type),
+            };
+            let phoff: u64 = elf.elf_header().e_phoff(endian).into();
+            let phnum = elf.elf_header().e_phnum(endian);
+            let entry: u64 = elf.elf_header().e_entry(endian).into();
+            println!();
+            println!("Elf file type is {}", type_str);
+            println!("Entry point 0x{:x}", entry);
+            if phnum == 1 {
+                println!("There is 1 program header, starting at offset {}", phoff);
+            } else {
+                println!(
+                    "There are {} program headers, starting at offset {}",
+                    phnum, phoff
+                );
+            }
+            println!();
+            println!("Program Headers:");
+            println!(
+                "  Type           Offset   VirtAddr           PhysAddr           FileSiz  MemSiz   Flg Align"
+            );
+            for segment in segments {
+                let p_type = segment.p_type(endian);
+                let offset: u64 = segment.p_offset(endian).into();
+                let vaddr: u64 = segment.p_vaddr(endian).into();
+                let paddr: u64 = segment.p_paddr(endian).into();
+                let filesz: u64 = segment.p_filesz(endian).into();
+                let memsz: u64 = segment.p_memsz(endian).into();
+                let flags = segment.p_flags(endian);
+                let align: u64 = segment.p_align(endian).into();
+
+                let flag_str = format!(
+                    "{}{}{}",
+                    if flags & 4 != 0 { "R" } else { " " },
+                    if flags & 2 != 0 { "W" } else { " " },
+                    if flags & 1 != 0 { "E" } else { " " }
+                );
+
+                println!(
+                    "  {:<14} 0x{offset:06x} 0x{vaddr:016x} 0x{paddr:016x} 0x{filesz:06x} 0x{memsz:06x} {flag_str} 0x{align:x}",
+                    elf_segment_type_name(p_type)
+                );
+                // INTERP segment: print the requested interpreter path.
+                if p_type == 3 && (offset as usize + filesz as usize) <= data.len() {
+                    let interp = &data[offset as usize..(offset + filesz) as usize];
+                    let s = match interp.iter().position(|&b| b == 0) {
+                        Some(n) => &interp[..n],
+                        None => interp,
                     };
-                    if !in_segment {
-                        continue;
-                    }
-                    let nm = sections
-                        .section_name(endian, section)
-                        .ok()
-                        .and_then(|n| std::str::from_utf8(n).ok())
-                        .unwrap_or("");
-                    if !nm.is_empty() {
-                        names.push(nm.to_string());
+                    if let Ok(s) = std::str::from_utf8(s) {
+                        println!("      [Requesting program interpreter: {}]", s);
                     }
                 }
-                let mut line = format!("   {:02}     ", segidx);
-                for n in &names {
-                    line.push_str(n);
-                    line.push(' ');
+            }
+            println!();
+
+            // Section to Segment mapping.
+            if let Ok(sections) = elf.elf_header().sections(endian, data) {
+                println!(" Section to Segment mapping:");
+                println!("  Segment Sections...");
+                for (segidx, segment) in segments.iter().enumerate() {
+                    let p_type = segment.p_type(endian);
+                    let p_offset: u64 = segment.p_offset(endian).into();
+                    let p_filesz: u64 = segment.p_filesz(endian).into();
+                    let p_vaddr: u64 = segment.p_vaddr(endian).into();
+                    let p_memsz: u64 = segment.p_memsz(endian).into();
+                    let mut names: Vec<String> = Vec::new();
+                    for section in sections.iter() {
+                        let sh_type = section.sh_type(endian);
+                        if sh_type == 0 {
+                            continue;
+                        }
+                        let sh_flags: u64 = section.sh_flags(endian).into();
+                        let sh_offset: u64 = section.sh_offset(endian).into();
+                        let sh_size: u64 = section.sh_size(endian).into();
+                        let sh_addr: u64 = section.sh_addr(endian).into();
+                        if sh_size == 0 {
+                            continue;
+                        }
+                        let is_tls = (sh_flags & 0x400) != 0;
+                        let is_nobits = sh_type == 8;
+                        // SHF_TLS sections belong to PT_TLS / PT_GNU_RELRO / PT_LOAD.
+                        // PT_PHDR contains nothing.
+                        if p_type == 6 {
+                            continue;
+                        }
+                        if is_tls {
+                            if !matches!(p_type, 7 | 0x6474e552 | 1) {
+                                continue;
+                            }
+                            // TLS+NOBITS sections (e.g. .tbss) are NOT in PT_LOAD
+                            // or PT_GNU_RELRO; they belong only to PT_TLS.
+                            if is_nobits && (p_type == 1 || p_type == 0x6474e552) {
+                                continue;
+                            }
+                        } else if p_type == 7 {
+                            // Non-TLS sections are not part of PT_TLS.
+                            continue;
+                        }
+                        let alloc = (sh_flags & 0x2) != 0;
+                        let in_segment = if !alloc {
+                            // Non-allocated: compare by file offset.
+                            sh_offset >= p_offset
+                                && sh_offset + sh_size <= p_offset + p_filesz
+                                && !is_nobits
+                        } else {
+                            // Allocated: compare by virtual address.
+                            // For NOBITS, use sh_size = 0 in the file-bound check.
+                            let file_size = if is_nobits { 0 } else { sh_size };
+                            let file_ok = is_nobits
+                                || (sh_offset >= p_offset
+                                    && sh_offset + file_size <= p_offset + p_filesz);
+                            let mem_ok =
+                                sh_addr >= p_vaddr && sh_addr + sh_size <= p_vaddr + p_memsz;
+                            file_ok && mem_ok
+                        };
+                        if !in_segment {
+                            continue;
+                        }
+                        let nm = sections
+                            .section_name(endian, section)
+                            .ok()
+                            .and_then(|n| std::str::from_utf8(n).ok())
+                            .unwrap_or("");
+                        if !nm.is_empty() {
+                            names.push(nm.to_string());
+                        }
+                    }
+                    let mut line = format!("   {:02}     ", segidx);
+                    for n in &names {
+                        line.push_str(n);
+                        line.push(' ');
+                    }
+                    println!("{}", line);
                 }
-                println!("{}", line);
             }
         }
     }
@@ -8210,14 +8213,22 @@ fn objdump_process_object(
                     if s < e {
                         let so = (s - base) as usize;
                         let eo = (e - base) as usize;
-                        // GNU prints a synthetic <.section_name>: label at the
-                        // section's start when no real symbol covers it.
+                        // When the disassembly's start address has no symbol
+                        // already labeling it, GNU emits a synthetic label.
+                        // The label is `<sym+0xN>` if a preceding symbol
+                        // exists in this section's symbol map, otherwise
+                        // `<.section_name>`.
                         let mut effective_sym_map = sym_map.clone();
                         if !effective_sym_map.contains_key(&s) {
-                            effective_sym_map
-                                .entry(s)
-                                .or_default()
-                                .push(format!(".{}", sec_name.trim_start_matches('.')));
+                            let preceding = effective_sym_map
+                                .range(..s)
+                                .next_back()
+                                .and_then(|(&a, names)| names.first().map(|n| (a, n.clone())));
+                            let label = match preceding {
+                                Some((a, name)) => format!("{name}+0x{:x}", s - a),
+                                None => format!(".{}", sec_name.trim_start_matches('.')),
+                            };
+                            effective_sym_map.entry(s).or_default().push(label);
                         }
                         objdump_disassemble_section(
                             &sec_data[so..eo],

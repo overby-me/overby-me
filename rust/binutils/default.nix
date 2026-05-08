@@ -560,6 +560,14 @@
         name = "section-filter-bundled";
       }
       {
+        tool = "objdump";
+        name = "start-address";
+      }
+      {
+        tool = "readelf";
+        name = "dynamic-program-headers";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }

@@ -3,6 +3,19 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
+## Custom-test expansion (133/133 ✅)
+
+- objdump `--start-address`: when the start offset doesn't coincide
+  with an existing symbol, the synthetic label is now `<sym+0xN>`
+  (offset from the nearest preceding symbol) rather than the
+  fall-back `<.section_name>`. Matches GNU's `<text_symbol+0x4>`
+  style output exactly. readelf no longer `return`s after printing
+  "There are no program headers in this file." — combined flags like
+  `-dl` now correctly continue to the dynamic section message
+  ("There is no dynamic section in this file.") instead of stopping
+  early. +2 custom tests (131→133): `objdump-start-address`,
+  `readelf-dynamic-program-headers`.
+
 ## Custom-test expansion (131/131 ✅)
 
 - objdump bundled-short-options now thread argument-taking flags
