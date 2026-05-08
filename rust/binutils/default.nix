@@ -136,6 +136,18 @@
         name = "undefined-only";
       }
       {
+        tool = "nm";
+        name = "numeric-sort";
+      }
+      {
+        tool = "nm";
+        name = "defined-only";
+      }
+      {
+        tool = "nm";
+        name = "reverse-sort";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }

@@ -37,7 +37,7 @@ Key design decisions:
 
 ## Test results
 
-### Custom comparison tests (24/24 passing)
+### Custom comparison tests (27/27 passing)
 
 | Check name | Tool | Status |
 |---|---|---|
@@ -50,6 +50,9 @@ Key design decisions:
 | `nm-extern-only` | nm | ✅ PASS |
 | `nm-no-sort` | nm | ✅ PASS |
 | `nm-undefined-only` | nm | ✅ PASS |
+| `nm-numeric-sort` | nm | ✅ PASS |
+| `nm-defined-only` | nm | ✅ PASS |
+| `nm-reverse-sort` | nm | ✅ PASS |
 | `size-basic` | size | ✅ PASS |
 | `size-sysv` | size | ✅ PASS |
 | `size-totals` | size | ✅ PASS |
@@ -251,6 +254,7 @@ Two layers of testing:
 - [x] objcopy `-O elf32-x86-64` (x32 ABI) and `-O elf64-x86-64` (x32→ELF64) conversions with `.note.gnu.property` merging (+8 dejagnu, 311→319 total): translates ELF64↔ELF32 section headers, symtab entries (16↔24 bytes), RELA entries (12↔24 bytes), REL entries (8↔16 bytes), and SHF_COMPRESSED Chdr (12↔24 bytes); merges per-CU GNU property notes by ORing flag values for the same `pr_type` and re-aligning to the target ABI's property alignment (8 for ELF64, 4 for ELF32). Fixes `binutils-all/x86-64/pr23494a/c/d/e` and their `-x32` variants.
 - [x] Wire `binutils-all/i386/i386.exp` into the runtest invocation (+7 dejagnu, 319→326 total): runs the i386-32-bit subdir tests (empty, ibt, pr21231a/b, shstk, plus the strip-on-debug-sections variants) — they exercise our i386 ELF32 read/write path. Fix: emit a double blank line before objdump's "Disassembly of section ...:" header to match GNU's exact-byte output (the `objdump-disassemble` custom test was failing on the missing newline).
 - [x] Add readelf `.debug_pubnames`/`.debug_aranges`/`.debug_frame` dumpers (`-wp`/`-wr`/`-wf`) and reorder the bare `-w` dispatch to match GNU readelf's section ordering (.debug_abbrev → .debug_info → .debug_line raw → .debug_pubnames → .debug_aranges → .debug_str → .debug_frame). Apply `.rela.debug_frame` / `.rel.debug_frame` relocations so FDE `pc=` values resolve, with implicit-addend reading for SHT_REL. CIE state (code/data alignment) saved across CIE → FDE so DW_CFA_advance_loc/_loc1/_loc2/_loc4/_def_cfa/_def_cfa_offset/_offset/_restore/_set_loc all decode correctly. i386 register-name table separate from x86-64. Line-program `(view N)` annotations in special opcodes when PC doesn't advance (track view counter; emit row with current value, then increment). Fixes both `x86-64/compressed-1a` and `i386/compressed-1a` (+2 dejagnu, 326→328 total).
+- [x] nm `-U`/`--defined-only`, `-n`/`--numeric-sort`, `-r`/`--reverse-sort` (+3 custom tests, 24→27): filter out undefined symbols, sort by address (undefined symbols first by name), and reverse the final order. Numeric sort puts U/w symbols before defined ones, then sorts defined by address.
 
 ## Next steps
 

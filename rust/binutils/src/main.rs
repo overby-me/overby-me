@@ -1308,6 +1308,9 @@ struct NmOpts {
     line_numbers: bool,
     with_symbol_versions: bool,
     print_armap: bool,
+    defined_only: bool,
+    numeric_sort: bool,
+    reverse_sort: bool,
 }
 
 impl Default for NmOpts {
@@ -1326,6 +1329,9 @@ impl Default for NmOpts {
             line_numbers: false,
             with_symbol_versions: false,
             print_armap: false,
+            defined_only: false,
+            numeric_sort: false,
+            reverse_sort: false,
         }
     }
 }
@@ -1344,8 +1350,11 @@ fn tool_nm(args: &[String]) -> i32 {
         match arg.as_str() {
             "-g" | "--extern-only" => opts.extern_only = true,
             "-u" | "--undefined-only" => opts.undefined_only = true,
+            "-U" | "--defined-only" => opts.defined_only = true,
             "-D" | "--dynamic" => opts.dynamic = true,
             "-p" | "--no-sort" => opts.no_sort = true,
+            "-n" | "-v" | "--numeric-sort" => opts.numeric_sort = true,
+            "-r" | "--reverse-sort" => opts.reverse_sort = true,
             "-P" | "--portability" => opts.format = NmFormat::Posix,
             "-A" | "-o" | "--print-file-name" => opts.show_filename = true,
             "--size-sort" => opts.size_sort = true,
@@ -1535,6 +1544,9 @@ fn nm_collect_symbols<'data, 'file>(
         if opts.undefined_only && !sym.is_undefined() {
             continue;
         }
+        if opts.defined_only && sym.is_undefined() {
+            continue;
+        }
         if opts.no_weak && sym.is_weak() {
             continue;
         }
@@ -1628,8 +1640,23 @@ fn nm_print_symbols<'data>(
         // For --size-sort, remove undefined and absolute symbols, sort by size
         syms.retain(|s| s.2 != 'U' && s.2 != 'w' && s.2.to_ascii_lowercase() != 'a');
         syms.sort_by(|a, b| a.1.cmp(&b.1).then(a.3.cmp(&b.3)));
+    } else if opts.numeric_sort {
+        // Sort by address; undefined symbols (no address) sort by name first.
+        syms.sort_by(|a, b| {
+            let a_undef = a.2 == 'U' || a.2 == 'w' || a.2 == 'v';
+            let b_undef = b.2 == 'U' || b.2 == 'w' || b.2 == 'v';
+            match (a_undef, b_undef) {
+                (true, true) => a.3.cmp(&b.3),
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                (false, false) => a.0.cmp(&b.0).then(a.3.cmp(&b.3)),
+            }
+        });
     } else if !opts.no_sort {
         syms.sort_by(|a, b| a.3.cmp(&b.3));
+    }
+    if opts.reverse_sort {
+        syms.reverse();
     }
 
     // Build DWARF line info if --line-numbers
