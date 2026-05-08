@@ -188,6 +188,10 @@
         name = "posix";
       }
       {
+        tool = "readelf";
+        name = "headers-all";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }

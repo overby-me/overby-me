@@ -2771,6 +2771,12 @@ fn tool_readelf(args: &[String]) -> i32 {
                 opts.show_relocs = true;
                 opts.show_notes = true;
             }
+            "-e" | "--headers" => {
+                // -e: file header + section headers + program headers
+                opts.show_header = true;
+                opts.show_sections = true;
+                opts.show_program_headers = true;
+            }
             "-h" | "--file-header" => opts.show_header = true,
             "-S" | "--section-headers" | "--sections" => opts.show_sections = true,
             "-l" | "--program-headers" | "--segments" => opts.show_program_headers = true,
@@ -3414,10 +3420,15 @@ fn readelf_display<'data, Elf: FileHeader>(
                 }
             }
         }
-        println!(
-            "There are {} section headers, starting at offset 0x{:x}:",
-            num_sections, sh_offset
-        );
+        // GNU readelf only repeats "There are N section headers..." when
+        // the file header isn't being printed (i.e. without `-h`/`-e`/`-a`),
+        // because that information is already shown by the file header.
+        if !show_header {
+            println!(
+                "There are {} section headers, starting at offset 0x{:x}:",
+                num_sections, sh_offset
+            );
+        }
         println!();
         println!("Section Headers:");
         if show_section_details {
@@ -3562,14 +3573,32 @@ fn readelf_display<'data, Elf: FileHeader>(
                 );
             }
         }
+        // GNU readelf 2.46 only mentions "R (retain)" in the Key when the
+        // file actually has any SHF_GNU_RETAIN (0x200000) section.
+        let has_retain = sections.iter().any(|s| {
+            let f: u64 = s.sh_flags(endian).into();
+            (f & 0x200000) != 0
+        });
         println!("Key to Flags:");
         println!("  W (write), A (alloc), X (execute), M (merge), S (strings), I (info),");
         println!("  L (link order), O (extra OS processing required), G (group), T (TLS),");
         println!("  C (compressed), x (unknown), o (OS specific), E (exclude),");
-        println!("  R (retain), D (mbind), l (large), p (processor specific)");
+        if has_retain {
+            println!("  R (retain), D (mbind), l (large), p (processor specific)");
+        } else {
+            println!("  D (mbind), l (large), p (processor specific)");
+        }
     }
 
     if show_program_headers && let Ok(segments) = elf.elf_header().program_headers(endian, data) {
+        let phnum_check = elf.elf_header().e_phnum(endian);
+        if phnum_check == 0 {
+            // GNU readelf prints a single concise message for relocatable
+            // files (or any file with no program headers).
+            println!();
+            println!("There are no program headers in this file.");
+            return;
+        }
         // Detect PIE: ET_DYN with DT_FLAGS_1 & DF_1_PIE.
         let e_type = elf.elf_header().e_type(endian);
         let mut is_pie = false;

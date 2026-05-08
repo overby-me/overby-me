@@ -37,7 +37,7 @@ Key design decisions:
 
 ## Test results
 
-### Custom comparison tests (37/37 passing)
+### Custom comparison tests (38/38 passing)
 
 | Check name | Tool | Status |
 |---|---|---|
@@ -78,6 +78,7 @@ Key design decisions:
 | `objdump-relocs` | objdump | ✅ PASS |
 | `addr2line-basic` | addr2line | ✅ PASS |
 | `addr2line-pretty` | addr2line | ✅ PASS |
+| `readelf-headers-all` | readelf | ✅ PASS |
 
 ### Upstream DejaGnu tests (286/286 binutils-all + 12/35 x86-64 = 298 passing)
 
@@ -267,6 +268,7 @@ Two layers of testing:
 - [x] nm `-U`/`--defined-only`, `-n`/`--numeric-sort`, `-r`/`--reverse-sort` (+3 custom tests, 24→27): filter out undefined symbols, sort by address (undefined symbols first by name), and reverse the final order. Numeric sort puts U/w symbols before defined ones, then sorts defined by address.
 - [x] size `-d`/`-o`/`-x` radix flags + new `nm`/`size` custom tests (+5 custom tests, 27→32): individual columns formatted in chosen radix (decimal plain / octal with leading 0 / hex with `0x`); total columns are always "dec hex" (or "oct hex" with `-o`); total octal value is *not* zero-padded (matches GNU). Plus `nm -t d`, `nm -A`, `size -d`, `size -o`, `size -x` custom tests.
 - [x] nm POSIX format size-when-zero handling + 5 more custom tests (+5 custom tests, 32→37): `-P`/`--portability` now prints a blank size column for symbols with `st_size == 0` (except common where st_value is the alignment) — matches GNU's POSIX format. New tests: `nm-radix-octal`, `nm-radix-hex`, `nm-posix`, `ar-print`, `addr2line-pretty`.
+- [x] readelf `-e`/`--headers` (file + section + program headers) + format polish (+1 custom test, 37→38): wires the multi-section `-e` flag; suppresses the redundant "There are N section headers" line when `-h` is also requested (info already in file header); makes the "R (retain)" Key-to-Flags entry conditional on the file having any SHF_GNU_RETAIN section; emits "There are no program headers in this file." for relocatable files instead of an empty Program Headers table. New test: `readelf-headers-all`.
 
 ## Next steps
 
