@@ -2658,6 +2658,7 @@ struct ReadelfOpts {
     display_section: Vec<String>,
     decompress: bool,
     hex_dump: Vec<String>,
+    sframe_sections: Vec<String>,
 }
 
 fn tool_readelf(args: &[String]) -> i32 {
@@ -2857,6 +2858,13 @@ fn tool_readelf(args: &[String]) -> i32 {
                 if s.contains('m') {
                     opts.show_debug_macro = true;
                 }
+            }
+            "--sframe" => {
+                opts.sframe_sections.push(".sframe".to_string());
+            }
+            s if s.starts_with("--sframe=") => {
+                let v = s.split_once("=").unwrap().1;
+                opts.sframe_sections.push(v.to_string());
             }
             _ if arg.starts_with("--") => {
                 // unknown long option; ignore
@@ -3878,6 +3886,10 @@ fn readelf_display<'data, Elf: FileHeader>(
         readelf_hex_dump_section(elf, data, endian, sect, opts.decompress);
     }
 
+    for sect in &opts.sframe_sections {
+        readelf_dump_sframe(elf, data, endian, sect);
+    }
+
     // First pass: emit warnings for any -j/--display-section args that
     // don't match any section. This matches GNU readelf's output order.
     for sect in &opts.display_section {
@@ -4736,6 +4748,224 @@ fn readelf_string_dump<'data, Elf: FileHeader>(
             "readelf: Warning: Section '{}' was not dumped because it does not exist!",
             sect
         );
+    }
+}
+
+fn objdump_dump_sframe(data: &[u8], sect_name: &str, file: &str) {
+    if data.len() < 0x40 || &data[..4] != b"\x7fELF" {
+        return;
+    }
+    let class = data[4];
+    let endian = data[5];
+    if class != 1 && class != 2 {
+        return;
+    }
+    let le = endian == 1;
+    let r16 = |o: usize| -> u16 {
+        let mut b = [0u8; 2];
+        b.copy_from_slice(&data[o..o + 2]);
+        if le {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        }
+    };
+    let r32 = |o: usize| -> u32 {
+        let mut b = [0u8; 4];
+        b.copy_from_slice(&data[o..o + 4]);
+        if le {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        }
+    };
+    let r64 = |o: usize| -> u64 {
+        let mut b = [0u8; 8];
+        b.copy_from_slice(&data[o..o + 8]);
+        if le {
+            u64::from_le_bytes(b)
+        } else {
+            u64::from_be_bytes(b)
+        }
+    };
+    let (shoff, shentsize, shnum, shstrndx) = if class == 2 {
+        (
+            r64(0x28) as usize,
+            r16(0x3a) as usize,
+            r16(0x3c) as usize,
+            r16(0x3e) as usize,
+        )
+    } else {
+        (
+            r32(0x20) as usize,
+            r16(0x2e) as usize,
+            r16(0x30) as usize,
+            r16(0x32) as usize,
+        )
+    };
+    if shoff == 0 || shnum == 0 || shstrndx >= shnum {
+        return;
+    }
+    let shstr_h = shoff + shstrndx * shentsize;
+    let (shstr_off, shstr_size) = if class == 2 {
+        (r64(shstr_h + 24) as usize, r64(shstr_h + 32) as usize)
+    } else {
+        (r32(shstr_h + 16) as usize, r32(shstr_h + 20) as usize)
+    };
+    if shstr_off + shstr_size > data.len() {
+        return;
+    }
+    let strtab = &data[shstr_off..shstr_off + shstr_size];
+    let machine = r16(0x12);
+    let format_name = match machine {
+        62 => {
+            if class == 2 {
+                "elf64-x86-64"
+            } else {
+                "elf32-x86-64"
+            }
+        }
+        3 => "elf32-i386",
+        183 => "elf64-littleaarch64",
+        _ => "elf",
+    };
+    println!();
+    println!("{}:     file format {}", file, format_name);
+    for i in 0..shnum {
+        let h = shoff + i * shentsize;
+        let nm_off = r32(h) as usize;
+        if nm_off >= strtab.len() {
+            continue;
+        }
+        let mut e = nm_off;
+        while e < strtab.len() && strtab[e] != 0 {
+            e += 1;
+        }
+        let nm = std::str::from_utf8(&strtab[nm_off..e]).unwrap_or("");
+        if nm != sect_name {
+            continue;
+        }
+        let (off, sz) = if class == 2 {
+            (r64(h + 24) as usize, r64(h + 32) as usize)
+        } else {
+            (r32(h + 16) as usize, r32(h + 20) as usize)
+        };
+        if off + sz > data.len() || sz < 28 {
+            return;
+        }
+        let bytes = &data[off..off + sz];
+        let magic = u16::from_le_bytes([bytes[0], bytes[1]]);
+        if magic != 0xdee2 {
+            return;
+        }
+        let version = bytes[2];
+        let flags = bytes[3];
+        let ra_off = bytes[6] as i8;
+        let num_fdes = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+        let num_fres = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]);
+        println!();
+        println!("Contents of the SFrame section {}:", sect_name);
+        println!("  Header :");
+        println!();
+        let version_str = match version {
+            1 => "SFRAME_VERSION_1".to_string(),
+            2 => "SFRAME_VERSION_2".to_string(),
+            3 => "SFRAME_VERSION_3".to_string(),
+            v => format!("SFRAME_VERSION_<unknown {v}>"),
+        };
+        println!("    Version: {}", version_str);
+        let mut flag_names: Vec<&str> = Vec::new();
+        if flags & 0x1 != 0 {
+            flag_names.push("SFRAME_F_FDE_SORTED");
+        }
+        if flags & 0x2 != 0 {
+            flag_names.push("SFRAME_F_FRAME_POINTER");
+        }
+        if flags & 0x4 != 0 {
+            flag_names.push("SFRAME_F_FDE_FUNC_START_PCREL");
+        }
+        let flags_str = if flag_names.is_empty() {
+            "NONE".to_string()
+        } else {
+            flag_names.join(", ")
+        };
+        println!("    Flags: {}", flags_str);
+        println!("    CFA fixed RA offset: {}", ra_off);
+        println!("    Num FDEs: {}", num_fdes);
+        println!("    Num FREs: {}", num_fres);
+        return;
+    }
+}
+
+fn readelf_dump_sframe<'data, Elf: FileHeader>(
+    elf: &ElfFile<'data, Elf>,
+    data: &'data [u8],
+    endian: Elf::Endian,
+    sect_name: &str,
+) {
+    let Ok(sections) = elf.elf_header().sections(endian, data) else {
+        return;
+    };
+    for section in sections.iter() {
+        let nm = sections
+            .section_name(endian, section)
+            .ok()
+            .and_then(|n| std::str::from_utf8(n).ok())
+            .unwrap_or("");
+        if nm != sect_name {
+            continue;
+        }
+        let off: u64 = section.sh_offset(endian).into();
+        let size: u64 = section.sh_size(endian).into();
+        if off as usize + size as usize > data.len() || size < 28 {
+            return;
+        }
+        let bytes = &data[off as usize..(off + size) as usize];
+        // 28-byte SFrame v2/v3 header: magic 0xdee2 + version + flags + abi
+        // + fixed FP/RA offsets + aux len + counts + offsets.
+        let magic = u16::from_le_bytes([bytes[0], bytes[1]]);
+        if magic != 0xdee2 {
+            return;
+        }
+        let version = bytes[2];
+        let flags = bytes[3];
+        let _abi_arch = bytes[4];
+        let _fp_off = bytes[5] as i8;
+        let ra_off = bytes[6] as i8;
+        let _aux_len = bytes[7];
+        let num_fdes = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+        let num_fres = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]);
+        println!();
+        println!("Contents of the SFrame section {}:", sect_name);
+        println!("  Header :");
+        println!();
+        let version_str = match version {
+            1 => "SFRAME_VERSION_1".to_string(),
+            2 => "SFRAME_VERSION_2".to_string(),
+            3 => "SFRAME_VERSION_3".to_string(),
+            v => format!("SFRAME_VERSION_<unknown {v}>"),
+        };
+        println!("    Version: {}", version_str);
+        let mut flag_names: Vec<&str> = Vec::new();
+        if flags & 0x1 != 0 {
+            flag_names.push("SFRAME_F_FDE_SORTED");
+        }
+        if flags & 0x2 != 0 {
+            flag_names.push("SFRAME_F_FRAME_POINTER");
+        }
+        if flags & 0x4 != 0 {
+            flag_names.push("SFRAME_F_FDE_FUNC_START_PCREL");
+        }
+        let flags_str = if flag_names.is_empty() {
+            "NONE".to_string()
+        } else {
+            flag_names.join(", ")
+        };
+        println!("    Flags: {}", flags_str);
+        println!("    CFA fixed RA offset: {}", ra_off);
+        println!("    Num FDEs: {}", num_fdes);
+        println!("    Num FREs: {}", num_fres);
+        return;
     }
 }
 
@@ -5932,6 +6162,7 @@ fn tool_objdump(args: &[String]) -> i32 {
     let mut start_addr: Option<u64> = None;
     let mut stop_addr: Option<u64> = None;
     let mut section_filter: Vec<String> = Vec::new();
+    let mut sframe_sections: Vec<String> = Vec::new();
     let mut files: Vec<String> = Vec::new();
 
     let mut i = 0;
@@ -6025,6 +6256,13 @@ fn tool_objdump(args: &[String]) -> i32 {
                 }
                 "-Wk" | "--dwarf=links" => {
                     show_debug_links = true;
+                }
+                "--sframe" => {
+                    sframe_sections.push(".sframe".to_string());
+                }
+                _ if arg.starts_with("--sframe=") => {
+                    let v = arg.split_once("=").unwrap().1;
+                    sframe_sections.push(v.to_string());
                 }
                 "-WR"
                 | "-Wr"
@@ -6151,6 +6389,14 @@ fn tool_objdump(args: &[String]) -> i32 {
 
     let mut errors = 0;
     for file in &files {
+        if !sframe_sections.is_empty()
+            && let Ok(data_bytes) = fs::read(file)
+        {
+            for sect_name in &sframe_sections {
+                objdump_dump_sframe(&data_bytes, sect_name, file);
+            }
+            continue;
+        }
         if emit_wi_placeholder
             || show_debug_ranges
             || show_debug_str
