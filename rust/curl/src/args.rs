@@ -256,6 +256,10 @@ pub(crate) fn parse_args() -> Options {
     // at end of parsing, we error out — `--next` requires a URL after it
     // (test 686).
     let mut expecting_url_after_next = false;
+    // Track config files already loaded to prevent infinite recursion when
+    // a config file ends up including itself (test 774).
+    let mut config_paths: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
 
     let mut i = 0;
     while i < args.len() {
@@ -818,6 +822,15 @@ pub(crate) fn parse_args() -> Options {
             "-K" | "--config" => {
                 i += 1;
                 let path = next_arg(&args, i, "-K");
+                // Detect direct or indirect config-file recursion. Use the
+                // canonical path so symlinks and relative paths can't smuggle
+                // a duplicate include past the check (test 774).
+                let canon = std::fs::canonicalize(&path)
+                    .unwrap_or_else(|_| std::path::PathBuf::from(&path));
+                if !config_paths.insert(canon) {
+                    eprintln!("curl: config file '{path}' uses itself recursively");
+                    process::exit(2);
+                }
                 let file_args = read_config_file(&path);
                 // Splice read args after the current position. They are picked
                 // up by the next loop iterations and each is Unicode-checked.
