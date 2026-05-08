@@ -436,6 +436,26 @@
         name = "section-headers-wide";
       }
       {
+        tool = "readelf";
+        name = "unwind";
+      }
+      {
+        tool = "readelf";
+        name = "archive-index-not-archive";
+      }
+      {
+        tool = "readelf";
+        name = "string-dump-text";
+      }
+      {
+        tool = "readelf";
+        name = "hex-dump-text";
+      }
+      {
+        tool = "readelf";
+        name = "string-dump-data";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }

@@ -2797,6 +2797,8 @@ struct ReadelfOpts {
     show_debug_pubnames: bool,
     show_debug_aranges: bool,
     show_debug_frame: bool,
+    show_unwind: bool,
+    show_archive_index: bool,
 }
 
 fn tool_readelf(args: &[String]) -> i32 {
@@ -2845,6 +2847,8 @@ fn tool_readelf(args: &[String]) -> i32 {
                 opts.show_sections = true;
             }
             "-W" | "--wide" => opts.wide = true,
+            "-u" | "--unwind" => opts.show_unwind = true,
+            "-c" | "--archive-index" => opts.show_archive_index = true,
             "-V" | "--version-info" => {
                 // We don't yet parse SHT_GNU_VERDEF/SHT_GNU_VERNEED;
                 // produce GNU's "no version info" message.
@@ -3072,6 +3076,8 @@ fn tool_readelf(args: &[String]) -> i32 {
                             opts.show_sections = true;
                         }
                         'W' => opts.wide = true,
+                        'u' => opts.show_unwind = true,
+                        'c' => opts.show_archive_index = true,
                         'w' => {
                             // Treat -w followed by selector letters
                             let rest: String = chars[j + 1..].iter().collect();
@@ -3156,14 +3162,25 @@ fn tool_readelf(args: &[String]) -> i32 {
             }
         };
 
-        // Try archive first
-        if data.starts_with(
+        let is_archive = data.starts_with(
             b"!<arch>
 ",
         ) || data.starts_with(
             b"!<thin>
 ",
-        ) {
+        );
+
+        // -c (--archive-index) on a non-archive: emit GNU's error message
+        // and skip the file (no other display happens).
+        if opts.show_archive_index && !is_archive {
+            println!(
+                "readelf: Error: File {file} is not an archive so its index cannot be displayed."
+            );
+            continue;
+        }
+
+        // Try archive first
+        if is_archive {
             if !readelf_process_archive(&data, file, &opts) {
                 errors += 1;
             }
@@ -4216,6 +4233,12 @@ fn readelf_display<'data, Elf: FileHeader>(
     if opts.show_debug_frame {
         readelf_debug_frame(elf, data, endian);
     }
+
+    if opts.show_unwind {
+        // We don't decode IA-64 / ARM / Aarch64 / PPC64 unwind info; for any
+        // other architecture GNU prints this message.
+        println!("No processor specific unwind information to decode");
+    }
 }
 
 fn readelf_notes<'data, Elf: FileHeader>(
@@ -4982,17 +5005,34 @@ fn readelf_string_dump<'data, Elf: FileHeader>(
         let bytes = &data[off as usize..(off + size) as usize];
         println!();
         println!("String dump of section '{}':", name);
+        // Check if any other section is a relocation section targeting this one
+        let target_idx_u32 = i as u32;
+        let has_relocs = sections.iter().any(|s| {
+            let stype = s.sh_type(endian);
+            (stype == object::elf::SHT_REL || stype == object::elf::SHT_RELA)
+                && s.sh_info(endian) == target_idx_u32
+        });
+        if has_relocs {
+            println!(
+                " NOTE: This section has relocations against it, but these have NOT been applied to this dump."
+            );
+        }
         let mut p = 0usize;
         let mut had_string = false;
+        let is_printable = |b: u8| matches!(b, 0x20..=0x7e);
         while p < bytes.len() {
-            // skip nuls
-            while p < bytes.len() && bytes[p] == 0 {
+            // Skip leading non-printable bytes (the start of a string is the
+            // first printable character; nuls and lone control chars don't
+            // start a new string).
+            while p < bytes.len() && !is_printable(bytes[p]) {
                 p += 1;
             }
             if p >= bytes.len() {
                 break;
             }
             let start = p;
+            // Read until the next NUL — control chars in the middle of a
+            // string are kept (escaped on output).
             while p < bytes.len() && bytes[p] != 0 {
                 p += 1;
             }
@@ -5022,9 +5062,11 @@ fn readelf_string_dump<'data, Elf: FileHeader>(
         }
         if !had_string {
             println!("  No strings found in this section.");
+        } else {
+            // GNU readelf emits a trailing blank line after the strings,
+            // but not after the "No strings found in this section." line.
+            println!();
         }
-        // GNU readelf emits a trailing blank line after the strings.
-        println!();
     }
     if !found {
         println!(
@@ -5344,6 +5386,17 @@ fn readelf_hex_dump_section<'data, Elf: FileHeader>(
         };
         println!();
         println!("Hex dump of section '{}':", name);
+        let target_idx_u32 = i as u32;
+        let has_relocs = sections.iter().any(|s| {
+            let stype = s.sh_type(endian);
+            (stype == object::elf::SHT_REL || stype == object::elf::SHT_RELA)
+                && s.sh_info(endian) == target_idx_u32
+        });
+        if has_relocs {
+            println!(
+                " NOTE: This section has relocations against it, but these have NOT been applied to this dump."
+            );
+        }
         let mut p = 0usize;
         while p < bytes.len() {
             let chunk_end = (p + 16).min(bytes.len());
@@ -20206,6 +20259,10 @@ fn readelf_debug_line_decoded<'data, Elf: FileHeader>(
     let Ok(obj) = object::File::parse(data) else {
         return;
     };
+    if obj.section_by_name(".debug_line").is_none() && obj.section_by_name(".zdebug_line").is_none()
+    {
+        return;
+    }
     let endian = if obj.is_little_endian() {
         gimli::RunTimeEndian::Little
     } else {

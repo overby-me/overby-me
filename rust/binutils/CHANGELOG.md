@@ -3,6 +3,26 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
+## Custom-test expansion (105/105 ✅)
+
+- readelf `-u`/`--unwind` (no-arch-specific decoder, prints "No
+  processor specific unwind information to decode") and
+  `-c`/`--archive-index` (when given a non-archive, prints "readelf:
+  Error: File <path> is not an archive so its index cannot be
+  displayed."). readelf `-p NAME` and `-x NAME` now emit GNU's
+  " NOTE: This section has relocations against it..." line when a
+  matching `.rela.NAME`/`.rel.NAME` exists. `-p` no longer prints a
+  trailing blank line after "No strings found in this section." (only
+  after actual strings). `-p` string detection: skip leading
+  non-printable bytes (start-of-string requires a printable char) so
+  sections with only nul/control bytes report "No strings found";
+  control chars *inside* a string are still escaped (`\r` → `^M`).
+  `-wL`/`--debug-dump=decodedline` is silent when there's no
+  `.debug_line`. +5 custom tests (100→105):
+  `readelf-archive-index-not-archive`, `readelf-hex-dump-text`,
+  `readelf-string-dump-data`, `readelf-string-dump-text`,
+  `readelf-unwind`.
+
 ## Custom-test expansion (100/100 ✅)
 
 - nm `-S`/`--print-size` now shows the size column for symbols whose
