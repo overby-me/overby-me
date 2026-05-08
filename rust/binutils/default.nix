@@ -268,6 +268,26 @@
         name = "headers-combined";
       }
       {
+        tool = "readelf";
+        name = "header-sections";
+      }
+      {
+        tool = "readelf";
+        name = "header-program";
+      }
+      {
+        tool = "readelf";
+        name = "hex-dump-data";
+      }
+      {
+        tool = "cxxfilt";
+        name = "no-params";
+      }
+      {
+        tool = "addr2line";
+        name = "multiple";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }

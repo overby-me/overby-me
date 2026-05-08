@@ -3,7 +3,13 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
-## Custom-test expansion (57/57 ✅)
+## Custom-test expansion (62/62 ✅)
+
+- 5 more custom tests for already-supported flag combinations (+5,
+  57→62): `readelf-header-sections` (`-hS`), `readelf-header-program`
+  (`-hl`), `readelf-hex-dump-data` (`-x .data`), `cxxfilt-no-params`
+  (`-i`), `addr2line-multiple` (multiple addresses on the command
+  line).
 
 - nm `-a`/`--debug-syms` flag accepted (no-op for files without debug
   syms); readelf `-p NAME` / `--string-dump=NAME` emits the trailing
