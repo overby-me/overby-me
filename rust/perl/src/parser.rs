@@ -2581,10 +2581,7 @@ impl Parser {
                     {
                         self.pos += 2; // consume ArrayLen("") and Star
                         let inner = expr;
-                        expr = Expr::Call(
-                            "_arylen_block_deref".to_string(),
-                            vec![inner],
-                        );
+                        expr = Expr::Call("_arylen_block_deref".to_string(), vec![inner]);
                         continue;
                     }
                     match self.tok() {

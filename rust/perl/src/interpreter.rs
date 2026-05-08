@@ -1380,35 +1380,58 @@ impl Interpreter {
                 // contribute lvalue-shaped sources; non-array items
                 // become non-lvalue placeholder `Expr::Undef` slots so
                 // writeback skips them. (op/array test 179.)
-                let source_per_iter: Option<Vec<Expr>> = if let Expr::ArrayLit(elems) = list {
-                    fn collect_sources(
-                        this: &mut Interpreter,
-                        elems: &[Expr],
-                        sources: &mut Vec<Expr>,
-                    ) {
-                        for el in elems {
-                            match el {
-                                Expr::ArrayLit(inner) => {
-                                    collect_sources(this, inner, sources);
-                                }
-                                Expr::ArrayVar(name) => {
-                                    let len = this.get_array_len(name);
-                                    for i in 0..len {
-                                        sources.push(Expr::ArrayElement(
-                                            name.clone(),
-                                            Box::new(Expr::IntLit(i as i64)),
-                                        ));
+                let source_per_iter: Option<Vec<Expr>> = match list {
+                    Expr::ArrayLit(elems) => {
+                        fn collect_sources(
+                            this: &mut Interpreter,
+                            elems: &[Expr],
+                            sources: &mut Vec<Expr>,
+                        ) {
+                            for el in elems {
+                                match el {
+                                    Expr::ArrayLit(inner) => {
+                                        collect_sources(this, inner, sources);
                                     }
+                                    Expr::ArrayVar(name) => {
+                                        let len = this.get_array_len(name);
+                                        for i in 0..len {
+                                            sources.push(Expr::ArrayElement(
+                                                name.clone(),
+                                                Box::new(Expr::IntLit(i as i64)),
+                                            ));
+                                        }
+                                    }
+                                    // `scalar $#name` — magical `$#name`
+                                    // SV passed through `scalar` keeps the
+                                    // resize-on-write semantics. Capture
+                                    // as the bare `ArrayLen(name)` so
+                                    // `$_ = N` writeback lands on
+                                    // `assign_to(ArrayLen, N)` and resizes.
+                                    // op/array test 172.
+                                    Expr::Call(n, inner)
+                                        if n == "scalar"
+                                            && inner.len() == 1
+                                            && matches!(&inner[0], Expr::ArrayLen(name) if !name.starts_with('$')) =>
+                                    {
+                                        sources.push(inner[0].clone());
+                                    }
+                                    _ => sources.push(Expr::Undef),
                                 }
-                                _ => sources.push(Expr::Undef),
                             }
                         }
+                        let mut sources: Vec<Expr> = Vec::new();
+                        collect_sources(self, elems, &mut sources);
+                        Some(sources)
                     }
-                    let mut sources: Vec<Expr> = Vec::new();
-                    collect_sources(self, elems, &mut sources);
-                    Some(sources)
-                } else {
-                    None
+                    // `for(scalar $#name) { … }` — single-expr form.
+                    Expr::Call(n, inner)
+                        if n == "scalar"
+                            && inner.len() == 1
+                            && matches!(&inner[0], Expr::ArrayLen(name) if !name.starts_with('$')) =>
+                    {
+                        Some(vec![inner[0].clone()])
+                    }
+                    _ => None,
                 };
                 // Detect `for (!0)` / `for (!1)` / `for (not 0)` — the
                 // resulting list of one bool aliases Perl's read-only
@@ -4064,6 +4087,32 @@ impl Interpreter {
             }
 
             Expr::Ref(expr) => {
+                // `\my @a` — parser emits this as `Ref(DoBlock([Stmt::My,
+                // Stmt::Expr(ArrayVar(name))]))`. Run the My to declare
+                // the lexical, then take an ArrayRef on the resulting
+                // lexical slot. (op/array test 180 needs `(\my @a)`
+                // to ref the lexical's backing Vec, not a clone.)
+                if let Expr::DoBlock(stmts) = expr.as_ref()
+                    && stmts.len() == 2
+                    && let Stmt::My(_, _) = &stmts[0]
+                    && let Stmt::Expr(Expr::ArrayVar(_)) = &stmts[1]
+                {
+                    self.exec_stmt(&stmts[0]);
+                    if let Stmt::Expr(arr_expr) = &stmts[1] {
+                        // Recurse into Ref(ArrayVar(name)) directly.
+                        return self.eval_expr(&Expr::Ref(Box::new(arr_expr.clone())));
+                    }
+                }
+                if let Expr::DoBlock(stmts) = expr.as_ref()
+                    && stmts.len() == 2
+                    && let Stmt::My(_, _) = &stmts[0]
+                    && let Stmt::Expr(Expr::HashVar(_)) = &stmts[1]
+                {
+                    self.exec_stmt(&stmts[0]);
+                    if let Stmt::Expr(hash_expr) = &stmts[1] {
+                        return self.eval_expr(&Expr::Ref(Box::new(hash_expr.clone())));
+                    }
+                }
                 // Produce a reference appropriate to the referent.
                 match expr.as_ref() {
                     // `\$#name` — magic scalar ref bound to the array's
@@ -6918,6 +6967,16 @@ impl Interpreter {
             // treat as a symbolic ref to a global array (matches Perl
             // under `no strict 'refs'`).
             "_arylen_block_deref" => {
+                // Fast/correct path for `\@arr` literal: read $#arr
+                // directly — avoids the ArrayRef-clone path that would
+                // disconnect from the lexical's backing Vec, breaking
+                // `$#{\@a}++` / `(\@a)->$#*++` (op/array test 180).
+                if let Some(Expr::Ref(inner)) = args.first()
+                    && let Expr::ArrayVar(name) = inner.as_ref()
+                {
+                    let len = self.get_array_len(name);
+                    return Value::Num((len as i64 - 1) as f64);
+                }
                 let v = args
                     .first()
                     .map(|a| self.eval_expr(a))
@@ -11012,6 +11071,15 @@ impl Interpreter {
             }
             Expr::Call(name, inner_args) if name == "_arylen_block_deref" => {
                 // `$#{EXPR} = val` — block-form last-index assignment.
+                // If EXPR is `\@arr`, resize the lexical/global @arr
+                // directly via `assign_to(ArrayLen(name), val)` so the
+                // backing Vec sees the resize (op/array test 180).
+                if let Some(Expr::Ref(inner)) = inner_args.first()
+                    && let Expr::ArrayVar(arr_name) = inner.as_ref()
+                {
+                    self.assign_to(&Expr::ArrayLen(arr_name.clone()), val);
+                    return;
+                }
                 // If EXPR is an array ref, resize the backing array.
                 // If EXPR is a string/number, treat as a symbolic ref
                 // to a global array and resize that.
@@ -14480,6 +14548,7 @@ fn is_lvalue_shape(expr: &Expr) -> bool {
             | Expr::ScalarVar(_)
             | Expr::MyVar(_)
             | Expr::LocalVar(_)
+            | Expr::ArrayLen(_)
     )
 }
 
