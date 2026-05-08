@@ -5849,6 +5849,73 @@ fn tool_objdump(args: &[String]) -> i32 {
                         continue;
                     }
                 };
+                // Archive: iterate members and dump each one's DWARF.
+                if data_bytes.len() >= 8 && &data_bytes[..8] == b"!<arch>\n" {
+                    println!();
+                    println!("In archive {}:", current_file);
+                    let members = parse_archive_members(&data_bytes);
+                    for (member_name, member_data) in &members {
+                        if member_name == "/" || member_name == "//" {
+                            continue;
+                        }
+                        if member_data.len() < 4 || &member_data[..4] != b"\x7fELF" {
+                            continue;
+                        }
+                        println!();
+                        println!("{}:     file format elf64-x86-64", member_name);
+                        println!();
+                        if let Ok(elf) = ElfFile::<
+                            object::elf::FileHeader64<object::Endianness>,
+                        >::parse(member_data.as_slice())
+                        {
+                            let endian = elf.endian();
+                            if show_debug_str {
+                                readelf_debug_str_loaded(&elf, member_data, endian, None);
+                            }
+                            if emit_wi_placeholder {
+                                readelf_debug_info_loaded(&elf, member_data, endian, None);
+                            }
+                            if show_debug_abbrev {
+                                readelf_debug_abbrev(&elf, member_data, endian);
+                            }
+                            if show_debug_ranges {
+                                readelf_debug_ranges(&elf, member_data, endian);
+                                readelf_debug_rnglists(&elf, member_data, endian);
+                            }
+                            if show_debug_line_raw {
+                                readelf_debug_line_raw(&elf, member_data, endian);
+                            }
+                            if show_debug_line_decoded {
+                                readelf_debug_line_decoded(&elf, member_data, endian);
+                            }
+                        } else if let Ok(elf) = ElfFile::<
+                            object::elf::FileHeader32<object::Endianness>,
+                        >::parse(member_data.as_slice())
+                        {
+                            let endian = elf.endian();
+                            if show_debug_str {
+                                readelf_debug_str_loaded(&elf, member_data, endian, None);
+                            }
+                            if emit_wi_placeholder {
+                                readelf_debug_info_loaded(&elf, member_data, endian, None);
+                            }
+                            if show_debug_abbrev {
+                                readelf_debug_abbrev(&elf, member_data, endian);
+                            }
+                            if show_debug_ranges {
+                                readelf_debug_ranges(&elf, member_data, endian);
+                                readelf_debug_rnglists(&elf, member_data, endian);
+                            }
+                            if show_debug_line_raw {
+                                readelf_debug_line_raw(&elf, member_data, endian);
+                            }
+                            if show_debug_line_decoded {
+                                readelf_debug_line_decoded(&elf, member_data, endian);
+                            }
+                        }
+                    }
+                    continue;
+                }
                 println!();
                 println!("{current_file}:     file format elf64-x86-64");
                 println!();
@@ -15838,7 +15905,13 @@ fn readelf_debug_abbrev<'data, Elf: FileHeader>(
             continue;
         }
         if starting_new_table {
-            println!("  Number TAG ({})", table_offset);
+            // GNU readelf: print "0" for zero offset, "0xN" for non-zero
+            // (mirrors C `%#x` semantics — `#` flag suppresses prefix when 0).
+            if table_offset == 0 {
+                println!("  Number TAG (0)");
+            } else {
+                println!("  Number TAG (0x{:x})", table_offset);
+            }
             starting_new_table = false;
         }
         let tag = p.read_uleb128().unwrap_or(0);
