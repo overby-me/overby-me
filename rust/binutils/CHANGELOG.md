@@ -3,6 +3,22 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
+## Custom-test expansion (135/135 → 138/138 ✅)
+
+- objdump `-M`/`--disassembler-options` parsing now follows GNU's
+  comma-separated semantics correctly: `intel`/`intel-syntax` flips to
+  full Intel; `att`/`att-syntax`/`att-mnemonic` resets to AT&T;
+  `intel-mnemonic` is a mnemonic-only knob that doesn't change the
+  operand syntax (so `-M intel,intel-mnemonic` stays Intel, but `-M
+  intel,att-mnemonic` flips back to AT&T). Used to do a simple
+  `contains("intel")` which mistakenly switched on `intel-mnemonic`.
+  objdump blank-line spacing for combined flags also matches GNU now:
+  `-ht` (section headers + symbol table) emits no blank between them;
+  `-dt` (symbol table + disassembly) emits one trailing blank from
+  the symbol table instead of two. +3 custom tests (135→138):
+  `objdump-disassemble-with-syms`, `objdump-headers-syms`,
+  `objdump-intel-mnemonic`.
+
 ## DejaGnu suite (328/329 → 329/329 ✅)
 
 - Fix the long-standing `pr26808.dwp` failure (readelf -wi). It and

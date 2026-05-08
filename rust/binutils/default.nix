@@ -576,6 +576,18 @@
         name = "notes-wide";
       }
       {
+        tool = "objdump";
+        name = "intel-mnemonic";
+      }
+      {
+        tool = "objdump";
+        name = "headers-syms";
+      }
+      {
+        tool = "objdump";
+        name = "disassemble-with-syms";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }

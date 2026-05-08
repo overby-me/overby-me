@@ -6774,29 +6774,15 @@ fn tool_objdump(args: &[String]) -> i32 {
                 "-M" => {
                     i += 1;
                     if i < args.len() {
-                        let v = &args[i];
-                        if v.contains("intel") {
-                            intel_syntax = true;
-                        } else if v.contains("att") {
-                            intel_syntax = false;
-                        }
+                        objdump_apply_m_options(&args[i], &mut intel_syntax);
                     }
                 }
                 _ if arg.starts_with("-M") && arg.len() > 2 => {
-                    let v = &arg[2..];
-                    if v.contains("intel") {
-                        intel_syntax = true;
-                    } else if v.contains("att") {
-                        intel_syntax = false;
-                    }
+                    objdump_apply_m_options(&arg[2..], &mut intel_syntax);
                 }
                 _ if arg.starts_with("--disassembler-options=") => {
                     let v = arg.split_once('=').unwrap().1;
-                    if v.contains("intel") {
-                        intel_syntax = true;
-                    } else if v.contains("att") {
-                        intel_syntax = false;
-                    }
+                    objdump_apply_m_options(v, &mut intel_syntax);
                 }
                 _ if arg.starts_with("--insn-width=") => {} // accept silently
                 "--insn-width" => {
@@ -6934,11 +6920,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                                 } else {
                                     String::new()
                                 };
-                                if v.contains("intel") {
-                                    intel_syntax = true;
-                                } else if v.contains("att") {
-                                    intel_syntax = false;
-                                }
+                                objdump_apply_m_options(&v, &mut intel_syntax);
                                 break;
                             }
                             'j' => {
@@ -7827,7 +7809,14 @@ fn objdump_process_object(
     }
 
     if show_symbols {
-        println!("\nSYMBOL TABLE:");
+        // GNU prints a blank-line separator before SYMBOL TABLE only when
+        // the section-headers listing wasn't shown; with -h, the symbol
+        // table runs directly after the last section's flags line.
+        if show_headers {
+            println!("SYMBOL TABLE:");
+        } else {
+            println!("\nSYMBOL TABLE:");
+        }
         let mut printed_any = false;
         for sym in obj.symbols() {
             let name = sym.name().unwrap_or("");
@@ -7893,7 +7882,13 @@ fn objdump_process_object(
             println!("no symbols");
         }
         println!();
-        println!();
+        // GNU prints two trailing blank lines after the symbol table only
+        // when the table is the last thing in the output. If disassembly
+        // (or another later section) follows, GNU emits just one trailing
+        // blank — disassembly's own leading `\n\n` makes up the rest.
+        if !disassemble {
+            println!();
+        }
     }
 
     if show_relocs {
@@ -8573,6 +8568,21 @@ fn objdump_disassemble_section(
         }
 
         i += 1;
+    }
+}
+
+/// Parse a comma-separated `-M`/`--disassembler-options` value and update the
+/// intel-syntax flag. GNU's x86 backend treats `att-mnemonic` as also
+/// switching the operand syntax to AT&T, but `intel-mnemonic` is mnemonic-
+/// only and leaves the existing syntax alone. Target-arch tokens (`x86-64`,
+/// `i386`, `data16` etc.) are accepted silently.
+fn objdump_apply_m_options(spec: &str, intel_syntax: &mut bool) {
+    for tok in spec.split(',') {
+        match tok.trim() {
+            "intel" | "intel-syntax" => *intel_syntax = true,
+            "att" | "att-syntax" | "att-mnemonic" => *intel_syntax = false,
+            _ => {} // intel-mnemonic and target-arch — no-op
+        }
     }
 }
 
