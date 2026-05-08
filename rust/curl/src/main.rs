@@ -308,6 +308,66 @@ fn main() {
                 i += 1;
             }
             let fpath = String::from_utf8_lossy(&decoded).into_owned();
+            // --skip-existing on a download: if -o target exists, emit the
+            // standard notice and skip (test 1491).
+            if opts.skip_existing
+                && let Some(out_p) = opts.outputs.get(url_idx)
+                && out_p.to_str() != Some("-")
+                && out_p.exists()
+            {
+                eprintln!(
+                    "Note: skips transfer, \"{}\" exists locally",
+                    out_p.display()
+                );
+                continue;
+            }
+            // -T / --upload-file with file://: write the upload-source's
+            // bytes to the file:// path (tests 1490, 1491). Honor
+            // --skip-existing and --no-clobber the same way HTTP outputs do.
+            let upload_src = opts
+                .per_url_opts
+                .get(url_idx)
+                .and_then(|p| p.upload_file.clone())
+                .or_else(|| opts.upload_file.clone());
+            if let Some(src) = upload_src {
+                if opts.skip_existing && std::path::Path::new(&fpath).exists() {
+                    eprintln!(
+                        "Note: skips transfer, \"{}\" exists locally",
+                        fpath
+                    );
+                    continue;
+                }
+                let body = if src.to_str() == Some("-") {
+                    let mut buf = Vec::new();
+                    let _ = io::Read::read_to_end(&mut io::stdin(), &mut buf);
+                    buf
+                } else {
+                    match fs::read(&src) {
+                        Ok(b) => b,
+                        Err(_) => {
+                            eprintln!(
+                                "curl: read form file: couldn't open file \"{}\"",
+                                src.display()
+                            );
+                            exit_code = 26;
+                            if opts.fail_early {
+                                break;
+                            }
+                            continue;
+                        }
+                    }
+                };
+                if let Err(e) = fs::write(&fpath, &body) {
+                    if !opts.silent || opts.show_error {
+                        eprintln!("curl: failed to write to {fpath}: {e}");
+                    }
+                    exit_code = 23;
+                }
+                if opts.fail_early && exit_code != 0 {
+                    break;
+                }
+                continue;
+            }
             match fs::read(&fpath) {
                 Ok(content) => {
                     // -C / --continue-at: skip the leading N bytes of the
