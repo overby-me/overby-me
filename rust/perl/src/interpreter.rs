@@ -9716,7 +9716,14 @@ impl Interpreter {
             .entry(name.to_string())
             .or_default()
             .insert(idx);
-        // Contract trailing deleted slots.
+        // Contract trailing deleted slots — `scalar @a` reflects this
+        // shrunken length. The delete mark on each popped index *stays*
+        // in `deleted_slots` so a later `$a[M] = …` (M > popped) that
+        // re-grows the array doesn't accidentally mark the popped slot
+        // as "exists" when the test runs `exists $a[idx]`. This mirrors
+        // reference perl's semantic: a slot once deleted stays
+        // non-existent until directly reassigned (op/array tests 180,
+        // 181, 184, 187).
         loop {
             let len = self.get_array_len(name);
             if len == 0 {
@@ -9731,11 +9738,9 @@ impl Interpreter {
             if !is_deleted {
                 break;
             }
-            // Pop the slot and drop the delete mark for it.
             self.pop_array_last(name);
-            if let Some(s) = self.deleted_slots.get_mut(name) {
-                s.remove(&last);
-            }
+            // Note: deliberately keep `last` in `deleted_slots` —
+            // see above.
         }
     }
 
@@ -10756,7 +10761,21 @@ impl Interpreter {
                     *rc.borrow_mut() = val;
                 } else {
                     arr[idx] = val;
+                    // Preserve `deleted_slots` for slots OTHER than the
+                    // one being set — `set_array` wipes the entire entry.
+                    // Stash, set, then re-stash without `idx`. op/array
+                    // tests 181, 184, 187 (assigning to one slot via
+                    // slice doesn't autoviv another delete'd slot).
+                    let preserved: Option<std::collections::HashSet<usize>> = self
+                        .deleted_slots
+                        .get(name)
+                        .map(|s| s.iter().copied().filter(|&j| j != idx).collect());
                     self.set_array(name, arr);
+                    if let Some(set) = preserved
+                        && !set.is_empty()
+                    {
+                        self.deleted_slots.insert(name.to_string(), set);
+                    }
                 }
             }
             Expr::HashElement(name, key) => {
@@ -10775,6 +10794,7 @@ impl Interpreter {
                 let target = val.to_num() as i64;
                 let new_len = if target < 0 { 0 } else { (target + 1) as usize };
                 let mut arr = self.get_array(name);
+                let prev_len = arr.len();
                 if arr.len() > new_len {
                     arr.truncate(new_len);
                 } else {
@@ -10782,7 +10802,26 @@ impl Interpreter {
                         arr.push(Value::Undef);
                     }
                 }
+                // Newly grown slots from `$#a = N` (or `$#a++`) are
+                // unvivified per reference perl: `exists $a[i]` returns
+                // false even though the slot is reachable. Mark the
+                // grown range deleted so `exists` reports false. (op/array
+                // tests 180, 181, 184: `(\my @a)->$#*++; my @b = @a;
+                // ok !exists $a[0]`.)
+                let preserved = self.deleted_slots.get(name).cloned().unwrap_or_default();
                 self.set_array(name, arr);
+                let mut combined = preserved;
+                if new_len > prev_len {
+                    for j in prev_len..new_len {
+                        combined.insert(j);
+                    }
+                } else {
+                    // After truncation, drop entries past new_len.
+                    combined.retain(|&j| j < new_len);
+                }
+                if !combined.is_empty() {
+                    self.deleted_slots.insert(name.to_string(), combined);
+                }
             }
             Expr::ArrowElement(lhs, idx, kind) => {
                 // `$ref->[i] = val` / `$ref->{k} = val` — mutate through the
