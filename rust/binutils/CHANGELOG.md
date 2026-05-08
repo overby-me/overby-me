@@ -3,6 +3,21 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
+## Custom-test expansion (100/100 ✅)
+
+- nm `-S`/`--print-size` now shows the size column for symbols whose
+  size is non-zero, matching GNU's BSD-style output exactly. nm also
+  silently accepts `--target=NAME` and `--plugin=NAME` (we don't have
+  BFD targets or linker plugins, so these are no-ops). objdump `-t`
+  symbol-table flags column shrunk from 8 to 7 chars (matching GNU's
+  `[scope][weak][ctor][warn][indir][dbg][kind]` layout); common
+  symbols now correctly show `` for scope (not `g`), `O` for kind,
+  and `*COM*` for section. ar `-O` (offset display) now works without
+  `-v` and reports the data offset (post-header) like GNU. objdump
+  bundled short flags now recognize `w` (e.g. `-hw`). +4 custom tests
+  (96→100): `ar-offsets`, `nm-print-size`, `nm-target-noop`,
+  `objdump-section-headers-wide`.
+
 ## Custom-test expansion (96/96 ✅)
 
 - c++filt `-p`/`--no-params` strips the trailing `(...)` parameter
@@ -64,21 +79,26 @@ newest at top.
   leading blank line, no trailing `!`). New tests:
   `readelf-string-dump-missing`, `readelf-histogram`, `cxxfilt-types`,
   `addr2line-demangle`.
+
 - objdump `-f` trailing blank line + `objdump-file-headers` custom test
   (+1 custom test, 48→49): emit a trailing blank line after `start
   address 0x...` to match GNU's exact-byte output.
+
 - 3 more custom tests for already-supported flags (+3 custom tests,
   45→48): `strings-radix-hex` (`-t x` offset format),
   `cxxfilt-no-strip-leading` (`-n` keep underscore), `readelf-wide`
   (`-S -W` wide section headers).
+
 - readelf `-d` empty-file message + 4 custom tests (+4 custom tests,
   41→45): when there is no SHT_DYNAMIC section, print "There is no
   dynamic section in this file." instead of an empty "Dynamic
   section:" header. New tests: `readelf-dynamic`,
   `readelf-arch-specific`, `readelf-groups`, `objdump-section-filter`.
+
 - nm `-j`/`--just-symbols` flag and 3 more custom tests (+3 custom
   tests, 38→41): print only symbol names (no address, type, size). New
   tests: `nm-just-symbols`, `readelf-notes`, `readelf-relocs`.
+
 - readelf `-e`/`--headers` (file + section + program headers) + format
   polish (+1 custom test, 37→38): wires the multi-section `-e` flag;
   suppresses the redundant "There are N section headers" line when `-h`
@@ -87,18 +107,21 @@ newest at top.
   SHF_GNU_RETAIN section; emits "There are no program headers in this
   file." for relocatable files instead of an empty Program Headers
   table. New test: `readelf-headers-all`.
+
 - nm POSIX format size-when-zero handling + 5 more custom tests (+5
   custom tests, 32→37): `-P`/`--portability` now prints a blank size
   column for symbols with `st_size == 0` (except common where st_value
   is the alignment) — matches GNU's POSIX format. New tests:
   `nm-radix-octal`, `nm-radix-hex`, `nm-posix`, `ar-print`,
   `addr2line-pretty`.
+
 - size `-d`/`-o`/`-x` radix flags + new `nm`/`size` custom tests (+5
   custom tests, 27→32): individual columns formatted in chosen radix
   (decimal plain / octal with leading 0 / hex with `0x`); total columns
   are always "dec hex" (or "oct hex" with `-o`); total octal value is
   *not* zero-padded (matches GNU). Plus `nm -t d`, `nm -A`, `size -d`,
   `size -o`, `size -x` custom tests.
+
 - nm `-U`/`--defined-only`, `-n`/`--numeric-sort`,
   `-r`/`--reverse-sort` (+3 custom tests, 24→27): filter out undefined
   symbols, sort by address (undefined symbols first by name), and

@@ -1047,6 +1047,9 @@ fn ar_op_list(archive: &str, verbose: bool, show_offsets: bool) -> i32 {
                     m.name
                 );
             }
+        } else if show_offsets {
+            let offset = offsets.get(i).copied().unwrap_or(0);
+            println!("{} 0x{:x}", m.name, offset);
         } else {
             println!("{}", m.name);
         }
@@ -1070,7 +1073,7 @@ fn ar_compute_member_offsets(data: &[u8]) -> Vec<usize> {
             .parse()
             .unwrap_or(0);
         if name_raw != "/" && name_raw != "//" {
-            offsets.push(pos);
+            offsets.push(pos + AR_HDR_SIZE);
         }
         pos += AR_HDR_SIZE + size;
         if pos % 2 != 0 {
@@ -1312,6 +1315,7 @@ struct NmOpts {
     numeric_sort: bool,
     reverse_sort: bool,
     just_names: bool,
+    print_size: bool,
 }
 
 impl Default for NmOpts {
@@ -1334,6 +1338,7 @@ impl Default for NmOpts {
             numeric_sort: false,
             reverse_sort: false,
             just_names: false,
+            print_size: false,
         }
     }
 }
@@ -1367,9 +1372,16 @@ fn tool_nm(args: &[String]) -> i32 {
             "-A" | "-o" | "--print-file-name" => opts.show_filename = true,
             "--size-sort" => opts.size_sort = true,
             "--no-weak" | "-W" => opts.no_weak = true,
+            "-S" | "--print-size" => opts.print_size = true,
             "-l" | "--line-numbers" => opts.line_numbers = true,
             "--with-symbol-versions" => opts.with_symbol_versions = true,
             "-s" | "--print-armap" => opts.print_armap = true,
+            "--target" | "--plugin" => {
+                i += 1; // consume argument; no-op for us
+            }
+            _ if arg.starts_with("--target=") || arg.starts_with("--plugin=") => {
+                // no-op (BFD target/linker plugin not used)
+            }
             _ if arg.starts_with("--format=") || arg.starts_with("--format ") => {
                 let val = arg.splitn(2, '=').nth(1).unwrap_or("");
                 match val {
@@ -1429,6 +1441,7 @@ fn tool_nm(args: &[String]) -> i32 {
                         'A' | 'o' => opts.show_filename = true,
                         'l' => opts.line_numbers = true,
                         'W' => opts.no_weak = true,
+                        'S' => opts.print_size = true,
                         's' => opts.print_armap = true,
                         't' => {
                             // next char is the radix
@@ -1716,7 +1729,16 @@ fn nm_print_symbols<'data>(
                 } else {
                     String::new()
                 };
-                println!("{prefix}{addr_str} {ty} {name}{line_suffix}");
+                if opts.print_size && !opts.size_sort && *size != 0 {
+                    let size_str = match opts.radix {
+                        NmRadix::Hex => format!("{:016x}", size),
+                        NmRadix::Dec => format!("{:016}", size),
+                        NmRadix::Oct => format!("{:016o}", size),
+                    };
+                    println!("{prefix}{addr_str} {size_str} {ty} {name}{line_suffix}");
+                } else {
+                    println!("{prefix}{addr_str} {ty} {name}{line_suffix}");
+                }
             }
             NmFormat::Posix => {
                 // POSIX format: "name type value [size]"
@@ -6594,6 +6616,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                                 disassemble = true;
                             }
                             'l' => show_line_numbers = true,
+                            'w' => wide = true,
                             'h' => show_headers = true,
                             't' => show_symbols = true,
                             'r' => show_relocs = true,
@@ -7462,23 +7485,25 @@ fn objdump_process_object(
         for sym in obj.symbols() {
             let name = sym.name().unwrap_or("");
             let value = sym.address();
-            let section_name = match sym.section() {
-                object::SymbolSection::Section(idx) => obj
-                    .section_by_index(idx)
-                    .ok()
-                    .and_then(|s| s.name().ok())
-                    .unwrap_or("*UND*"),
-                object::SymbolSection::Undefined => "*UND*",
-                object::SymbolSection::Absolute => "*ABS*",
-                _ => "*UND*",
+            let is_common = sym.is_common();
+            let section_name = if is_common {
+                "*COM*"
+            } else {
+                match sym.section() {
+                    object::SymbolSection::Section(idx) => obj
+                        .section_by_index(idx)
+                        .ok()
+                        .and_then(|s| s.name().ok())
+                        .unwrap_or("*UND*"),
+                    object::SymbolSection::Undefined => "*UND*",
+                    object::SymbolSection::Absolute => "*ABS*",
+                    _ => "*UND*",
+                }
             };
-            // objdump symbol flags: 7 chars total
-            //  [lgu!] then weak indicator [w ] then debug [d ] then dynamic [D ]
-            //  then function/object [FfO ] etc.
-            let scope_ch = if sym.is_weak() {
+            // objdump symbol flags: 7 chars
+            // [scope][weak][ctor][warn][indir][debug/dyn][func/file/obj]
+            let scope_ch = if sym.is_weak() || sym.is_undefined() || is_common {
                 ' '
-            } else if sym.is_undefined() && sym.is_global() {
-                '!'
             } else if sym.is_global() {
                 'g'
             } else {
@@ -7488,7 +7513,14 @@ fn objdump_process_object(
             let kind_ch = match sym.kind() {
                 object::SymbolKind::Text => 'F',
                 object::SymbolKind::Data => 'O',
-                _ => ' ',
+                object::SymbolKind::File => 'f',
+                _ => {
+                    if is_common {
+                        'O'
+                    } else {
+                        ' '
+                    }
+                }
             };
             let visibility = if let object::SymbolFlags::Elf { st_other, .. } = sym.flags() {
                 match st_other & 0x3 {
@@ -7501,7 +7533,7 @@ fn objdump_process_object(
                 ""
             };
             println!(
-                "{value:016x} {scope_ch}{weak_ch}     {kind_ch} {section_name}\t{:016x} {visibility}{name}",
+                "{value:016x} {scope_ch}{weak_ch}    {kind_ch} {section_name}\t{:016x} {visibility}{name}",
                 sym.size()
             );
             printed_any = true;
@@ -7509,6 +7541,8 @@ fn objdump_process_object(
         if !printed_any {
             println!("no symbols");
         }
+        println!();
+        println!();
     }
 
     if show_relocs {

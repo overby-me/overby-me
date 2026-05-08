@@ -420,6 +420,22 @@
         name = "posix-octal";
       }
       {
+        tool = "nm";
+        name = "print-size";
+      }
+      {
+        tool = "nm";
+        name = "target-noop";
+      }
+      {
+        tool = "ar";
+        name = "offsets";
+      }
+      {
+        tool = "objdump";
+        name = "section-headers-wide";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }
