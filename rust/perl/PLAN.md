@@ -6,7 +6,7 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**259/269 Nix tests passing** (96.3%) — selected tests from the upstream Perl test suite. (35 of the 304 listed entries reference test paths that don't exist in the unpacked perl-5.42.0 tarball, so they are skipped at our local-runner level. The 9 still-failing tests are byte-mode-string semantics in `opbasic/concat`/`op/length`, byte-faithful UTF-8 layer in `op/print`, defelem PVLV in `op/pos`, hash-iteration order + DESTROY ordering in `op/undef`, slot-aliasing through `goto LABEL` exits in `op/array`, `(\my @a)->$#*++` syntax (a method-call form on `\@a`), TODO-marked tests where vanilla intentionally fails but we accidentally pass in `op/eval`, heredocs in s///e in eval in `base/lex`, and the bulk-fail `re/regexp` + the `Benchmark.pm`-driven `gh7094` benchmark — all in addition to handful of regex-engine features `re/regexp.t` exercises that the Rust regex backend doesn't model.)
+**261/269 Nix tests passing** (97.0%) — selected tests from the upstream Perl test suite. (35 of the 304 listed entries reference test paths that don't exist in the unpacked perl-5.42.0 tarball, so they are skipped at our local-runner level.) Sandbox-style survey (using full-path reference perl invocation matching the Nix sandbox's `${pkgs.perl}/bin/perl` form) confirms the 8 remaining byte-for-byte diff sources: `op/print` (19 lines — `:utf8` IO layer overlong-byte preservation), `opbasic/concat` (22 lines — byte-mode string `eq`/`.=`, regex-deref scalar assign, `tie`+multiconcat eval order), `op/length` (25 lines — `use bytes; length` on strings whose chars share byte values with their UTF-8 encoding), `op/eval` (72 lines — TODO-marked tests where vanilla intentionally returns undef but we resolve correctly through `my sub` + DB-package magic), `op/pos` (74 lines — defelem PVLV machinery for `$_` and arrow-derefs as match targets), `base/lex` (132 lines — heredocs interleaved with re-eval, q-comment spans, vstring labels, `${...}` literal-triple-dot etc.), `op/undef` (198 lines — DESTROY ordering during `undef %h` / hash-iteration-vs-delete), and `re/regexp` (1895 lines — bulk regex-engine feature gap covering ~520 distinct upstream tests). Tests now passing that were previously listed as failing: `op/array`, `op/heredoc`, `op/repeat`, `op/join`, `op/chr`, `opbasic/cmp`.
 
 This iteration's improvements:
 
@@ -1663,23 +1663,23 @@ This is the largest phase. Key clusters:
 
 **run (2):** exit, switches
 
-### Passing (65)
+### Passing (71)
 
 base/cond, base/if, base/num, base/pat, base/rs, base/term, base/translate,
 base/while, cmd/elsif, cmd/for, cmd/mod, cmd/subval, cmd/switch,
-opbasic/arith, opbasic/magic_phase, opbasic/qq, op/arith2, op/auto, op/bop,
-op/chop, op/closure, op/cond, op/context, op/defined, op/delete, op/die,
-op/do, op/each, op/grep, op/hash, op/inc, op/index, op/lc, op/list, op/local,
-op/my, op/not, op/oct, op/ord, op/pack, op/push, op/quotemeta, op/range,
-op/ref, op/reverse, op/sort, op/splice, op/split, op/sprintf, op/sub,
-op/substr, op/tr, op/unshift, op/vec, op/wantarray, io/argv, io/fs, io/open,
-io/print, io/read, io/tell, re/pat, re/subst, run/exit, run/switches
+opbasic/arith, opbasic/cmp, opbasic/magic_phase, opbasic/qq, op/arith2,
+op/array, op/auto, op/bop, op/chop, op/chr, op/closure, op/cond, op/context,
+op/defined, op/delete, op/die, op/do, op/each, op/grep, op/hash, op/heredoc,
+op/inc, op/index, op/join, op/lc, op/list, op/local, op/my, op/not, op/oct,
+op/ord, op/pack, op/push, op/quotemeta, op/range, op/ref, op/repeat,
+op/reverse, op/sort, op/splice, op/split, op/sprintf, op/sub, op/substr,
+op/tr, op/unshift, op/vec, op/wantarray, io/argv, io/fs, io/open, io/print,
+io/read, io/tell, re/pat, re/subst, run/exit, run/switches
 
-### Failing (14)
+### Failing (8)
 
-base/lex, opbasic/cmp, opbasic/concat,
-op/array, op/chr, op/eval, op/heredoc, op/join, op/length,
-op/pos, op/print, op/repeat, op/undef, re/regexp
+base/lex, opbasic/concat, op/eval, op/length,
+op/pos, op/print, op/undef, re/regexp
 
 ### Next high-impact targets
 
