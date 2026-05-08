@@ -4607,7 +4607,10 @@ impl Interpreter {
                 for arg in args.iter() {
                     self.autoviv_lvalue_for_call(arg);
                 }
-                let arg_vals: Vec<Value> = args.iter().flat_map(|a| self.eval_list(a)).collect();
+                let arg_vals: Vec<Value> = args
+                    .iter()
+                    .flat_map(|a| self.eval_list_for_arg(a))
+                    .collect();
                 match callee_val {
                     Value::CodeRef(name) => {
                         if let Some((_params, body)) = self.subs.get(&name).cloned() {
@@ -8071,10 +8074,72 @@ impl Interpreter {
     /// matches perl — the prototype doesn't re-type `@arr` call sites).
     /// `@` or `%` slots slurp the rest in list context. No prototype ⇒ all
     /// args flatten as lists.
+    /// Like `eval_expr` but for sub-call arguments: lvalue-shaped
+    /// arguments (`$arr[i]`, `$h{k}`) get promoted to `Value::Alias(rc)`
+    /// of the original slot so writes through `@_[i]` propagate to the
+    /// caller and survive `unshift`/`shift`/`splice` on the source array
+    /// (op/array tests 191-194). For non-lvalue shapes, falls back to
+    /// regular evaluation.
+    fn eval_expr_for_arg(&mut self, expr: &Expr) -> Value {
+        match expr {
+            // `$_[i]` aliasing is already handled by `underscore_arg_sources`
+            // and the negative-index off-by-one rewrite (op/array tests
+            // 131, 133, 135). Promoting `@_[i]` to a fresh `Value::Alias`
+            // here would short-circuit the source lookup and break those
+            // tests when `is $_[i], …` is called as a sub before the
+            // mutating `$_[i] = …`. Pass through `eval_expr` instead.
+            Expr::ArrayElement(name, _) if name == "_" => self.eval_expr(expr),
+            Expr::ArrayElement(name, index) => {
+                let raw = self.eval_expr(index).to_num() as i64;
+                // Negative indices: defer to caller's forwarding logic
+                // (line 10617 et al) which applies Perl's off-by-one
+                // shift for `@_` aliases pointing past the autoviv
+                // boundary (op/array tests 131, 133, 135). Promoting
+                // the resolved slot here would bypass that rewrite.
+                if raw < 0 {
+                    return self.eval_expr(expr);
+                }
+                let real = raw as usize;
+                let rc = self.promote_slot_to_alias(name, real);
+                Value::Alias(rc)
+            }
+            Expr::HashElement(name, key) => {
+                let key_val = self.eval_expr(key).to_str();
+                let rc = self.promote_hash_slot_to_alias(name, &key_val);
+                Value::Alias(rc)
+            }
+            _ => self.eval_expr(expr),
+        }
+    }
+
+    /// Like `eval_list` but for sub-call arguments — preserves `Alias`
+    /// for each lvalue-shaped element of an array.
+    fn eval_list_for_arg(&mut self, expr: &Expr) -> Vec<Value> {
+        match expr {
+            Expr::ArrayElement(_, _) | Expr::HashElement(_, _) => {
+                vec![self.eval_expr_for_arg(expr)]
+            }
+            Expr::ArrayVar(name) => {
+                // Pass each slot's Alias so `@_` aliasing carries through.
+                let len = self.get_array_len(name);
+                let mut out = Vec::with_capacity(len);
+                for i in 0..len {
+                    let rc = self.promote_slot_to_alias(name, i);
+                    out.push(Value::Alias(rc));
+                }
+                out
+            }
+            _ => self.eval_list(expr),
+        }
+    }
+
     fn eval_args_with_proto(&mut self, args: &[Expr], params: &[String]) -> Vec<Value> {
         let proto = params.first().map(String::as_str).unwrap_or("");
         if proto.is_empty() {
-            return args.iter().flat_map(|a| self.eval_list(a)).collect();
+            return args
+                .iter()
+                .flat_map(|a| self.eval_list_for_arg(a))
+                .collect();
         }
         let chars: Vec<char> = proto.chars().filter(|c| *c != ';' && *c != '\\').collect();
         let mut out = Vec::new();
@@ -8094,9 +8159,9 @@ impl Interpreter {
             // scalarize per the prototype.
             let pass_through = matches!(arg, Expr::ArrayVar(n) if n == "_");
             if pass_through {
-                out.extend(self.eval_list(arg));
+                out.extend(self.eval_list_for_arg(arg));
             } else {
-                out.push(self.eval_expr(arg));
+                out.push(self.eval_expr_for_arg(arg));
             }
             ai += 1;
             pi += 1;
@@ -10559,7 +10624,16 @@ impl Interpreter {
                     && let Some(sources) = self.underscore_arg_sources.last().cloned()
                 {
                     let i = raw as usize;
-                    if let Some(src) = sources.get(i)
+                    // If `@_[i]` is already a `Value::Alias(rc)`, the
+                    // shared cell *is* the slot — write through it via
+                    // the fall-through and skip the source-expr forward
+                    // (which would re-evaluate the index on the source
+                    // array, missing slot motion from `unshift`/`shift`/
+                    // `splice` inside the sub). op/array tests 191-194.
+                    let underscore_arr = self.get_array("_");
+                    let is_alias_slot = matches!(underscore_arr.get(i), Some(Value::Alias(_)));
+                    if !is_alias_slot
+                        && let Some(src) = sources.get(i)
                         && is_lvalue_shape(src)
                     {
                         // Reference perl applies an off-by-one shift to
