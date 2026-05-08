@@ -135,7 +135,7 @@
             -c "${rust-curl-dev}/bin/curl" \
             -n \
             -a \
-            700 to 900 \
+            500 to 700 \
             2>&1 | ${coreutils}/bin/tee "$TMPDIR/results.txt" || true
 
           ${coreutils}/bin/mkdir -p $out
@@ -725,11 +725,11 @@
       1909
       1979
       1980
-      2075
       2040
       2044
       2049
       2054
+      2075
       2080
       2081
       2088
