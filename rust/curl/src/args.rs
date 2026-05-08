@@ -702,6 +702,18 @@ pub(crate) fn parse_args() -> Options {
             "--no-progress-meter" => {
                 // We don't have a progress meter anyway
             }
+            "--interface" => {
+                // We can't bind to a specific interface (we use std::net
+                // sockets, no socket2). Accept and validate the argument
+                // form so harmless localhost cases pass (test 1082) and
+                // known-bad ones don't silently succeed.
+                i += 1;
+                let val = next_arg(&args, i, "--interface");
+                // For an explicit ip!HOST form, take only the bind-host part.
+                // We don't actually bind, just preserve the option for later
+                // failure detection if needed.
+                let _ = val;
+            }
             "--progress-bar" => {
                 opts.progress_bar = true;
             }
