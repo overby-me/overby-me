@@ -3,6 +3,15 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
+## Custom-test expansion (135/135 ✅)
+
+- addr2line distinguishes "in-section, no DWARF" from "out-of-section":
+  addresses outside any section's range emit `??:0` (matching GNU)
+  instead of `??:?`. readelf `-nW` now emits the GNU_PROPERTY_TYPE_0
+  properties on the same line as the description (joined with `,`)
+  instead of separate lines. +2 custom tests (133→135):
+  `addr2line-out-of-section`, `readelf-notes-wide`.
+
 ## Custom-test expansion (133/133 ✅)
 
 - objdump `--start-address`: when the start offset doesn't coincide

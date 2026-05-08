@@ -4245,7 +4245,7 @@ fn readelf_display<'data, Elf: FileHeader>(
     }
 
     if show_notes {
-        readelf_notes(elf, data, endian);
+        readelf_notes(elf, data, endian, wide);
     }
 
     for sect in &opts.string_dump {
@@ -4386,6 +4386,7 @@ fn readelf_notes<'data, Elf: FileHeader>(
     elf: &ElfFile<'data, Elf>,
     data: &'data [u8],
     endian: Elf::Endian,
+    wide: bool,
 ) {
     let is_le = elf.elf_header().e_ident().data == 1;
     let is_64 = elf.elf_header().is_class_64();
@@ -4645,15 +4646,58 @@ fn readelf_notes<'data, Elf: FileHeader>(
                 );
             } else {
                 let type_str = elf_note_type_name(owner, ntype);
-                println!("  {:<20} 0x{:08x}	{}", owner, descsz, type_str);
-                // Decode GNU property notes (NT_GNU_PROPERTY_TYPE_0 = 5).
-                if owner == "GNU" && ntype == 5 {
+                if wide && owner == "GNU" && ntype == 5 {
+                    // -W: Properties on the same line as the description.
                     let prop_align = if is_64 { 8 } else { 4 };
-                    print_gnu_properties(desc, is_le, prop_align);
+                    let props = format_gnu_properties_wide(desc, is_le, prop_align);
+                    println!(
+                        "  {:<20} 0x{:08x}	{}	      {}",
+                        owner, descsz, type_str, props
+                    );
+                } else {
+                    println!("  {:<20} 0x{:08x}	{}", owner, descsz, type_str);
+                    // Decode GNU property notes (NT_GNU_PROPERTY_TYPE_0 = 5).
+                    if owner == "GNU" && ntype == 5 {
+                        let prop_align = if is_64 { 8 } else { 4 };
+                        print_gnu_properties(desc, is_le, prop_align);
+                    }
                 }
             }
         }
     }
+}
+
+/// Wide-mode: produce `Properties: prop1, prop2, ...` as a single string for
+/// the inline display used by `readelf -nW`.
+fn format_gnu_properties_wide(desc: &[u8], is_le: bool, prop_align: usize) -> String {
+    let read_u32 = |b: &[u8]| -> u32 {
+        if b.len() < 4 {
+            return 0;
+        }
+        if is_le {
+            u32::from_le_bytes([b[0], b[1], b[2], b[3]])
+        } else {
+            u32::from_be_bytes([b[0], b[1], b[2], b[3]])
+        }
+    };
+    let mut p = 0usize;
+    let mut parts: Vec<String> = Vec::new();
+    while p + 8 <= desc.len() {
+        let pr_type = read_u32(&desc[p..p + 4]);
+        let pr_datasz = read_u32(&desc[p + 4..p + 8]) as usize;
+        p += 8;
+        if p + pr_datasz > desc.len() {
+            break;
+        }
+        let pr_data = &desc[p..p + pr_datasz];
+        parts.push(format_gnu_property(pr_type, pr_data, is_le));
+        p += pr_datasz;
+        let rem = p % prop_align;
+        if rem != 0 {
+            p += prop_align - rem;
+        }
+    }
+    format!("Properties: {}", parts.join(", "))
 }
 
 /// Decode and print the contents of an NT_GNU_PROPERTY_TYPE_0 note's
@@ -12071,6 +12115,22 @@ fn tool_addr2line(args: &[String]) -> i32 {
         0
     };
 
+    // Build a list of (start, end) pairs for sections that contain code or
+    // data — used to distinguish "in-section, no DWARF" (→ `??:?`) from
+    // "out-of-section" (→ `??:0`), matching GNU addr2line.
+    let section_ranges: Vec<(u64, u64)> = {
+        use object::ObjectSection;
+        obj.sections()
+            .filter(|s| s.size() > 0)
+            .map(|s| (s.address(), s.address() + s.size()))
+            .collect()
+    };
+    let in_any_section = |addr: u64| -> bool {
+        section_ranges
+            .iter()
+            .any(|&(start, end)| addr >= start && addr < end)
+    };
+
     let lookup_symbol = |addr: u64| -> Option<String> {
         let mut best: Option<&(u64, u64, String, bool)> = None;
         for s in &symbol_table {
@@ -12126,7 +12186,13 @@ fn tool_addr2line(args: &[String]) -> i32 {
                 };
                 format!("{}:{}", display_file, line)
             }
-            None => "??:?".to_string(),
+            None => {
+                if in_any_section(addr) {
+                    "??:?".to_string()
+                } else {
+                    "??:0".to_string()
+                }
+            }
         };
 
         let addr_prefix = if show_addresses {

@@ -568,6 +568,14 @@
         name = "dynamic-program-headers";
       }
       {
+        tool = "addr2line";
+        name = "out-of-section";
+      }
+      {
+        tool = "readelf";
+        name = "notes-wide";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }
