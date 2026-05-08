@@ -5924,6 +5924,49 @@ fn tool_objdump(args: &[String]) -> i32 {
                 } else {
                     None
                 };
+                // Determine section dump order from file section layout —
+                // GNU objdump -W emits debug sections in the order they
+                // appear in the section header table.
+                let section_order: Vec<&str> = {
+                    let mut v: Vec<(u64, &str)> = Vec::new();
+                    if let Ok(obj) = object::File::parse(&*data_bytes) {
+                        use object::ObjectSection as _;
+                        for s in obj.sections() {
+                            let name = s.name().unwrap_or("");
+                            let kind = if name == ".debug_info"
+                                || name == ".zdebug_info"
+                                || name == ".debug_info.dwo"
+                            {
+                                "info"
+                            } else if name == ".debug_abbrev"
+                                || name == ".zdebug_abbrev"
+                                || name == ".debug_abbrev.dwo"
+                            {
+                                "abbrev"
+                            } else if name == ".debug_line"
+                                || name == ".zdebug_line"
+                                || name == ".debug_line.dwo"
+                            {
+                                "line"
+                            } else if name == ".debug_ranges"
+                                || name == ".zdebug_ranges"
+                                || name == ".debug_rnglists"
+                            {
+                                "ranges"
+                            } else {
+                                continue;
+                            };
+                            v.push((s.file_range().map(|(o, _)| o).unwrap_or(0), kind));
+                        }
+                    }
+                    v.sort_by_key(|&(o, _)| o);
+                    v.into_iter().map(|(_, k)| k).collect()
+                };
+                let dispatch_order: Vec<&str> = if section_order.is_empty() {
+                    vec!["info", "line", "abbrev", "ranges"]
+                } else {
+                    section_order
+                };
                 if let Ok(elf) =
                     ElfFile::<object::elf::FileHeader64<object::Endianness>>::parse(&*data_bytes)
                 {
@@ -5931,22 +5974,40 @@ fn tool_objdump(args: &[String]) -> i32 {
                     if show_debug_str {
                         readelf_debug_str_loaded(&elf, &data_bytes, endian, loaded_from);
                     }
-                    if emit_wi_placeholder {
-                        readelf_debug_info_loaded(&elf, &data_bytes, endian, loaded_from);
+                    let mut info_done = false;
+                    let mut abbrev_done = false;
+                    let mut line_done = false;
+                    let mut ranges_done = false;
+                    for kind in &dispatch_order {
+                        match *kind {
+                            "info" if emit_wi_placeholder && !info_done => {
+                                readelf_debug_info_loaded(&elf, &data_bytes, endian, loaded_from);
+                                info_done = true;
+                            }
+                            "abbrev" if show_debug_abbrev && !abbrev_done => {
+                                readelf_debug_abbrev(&elf, &data_bytes, endian);
+                                abbrev_done = true;
+                            }
+                            "line" if (show_debug_line_raw || show_debug_line_decoded)
+                                && !line_done =>
+                            {
+                                if show_debug_line_raw {
+                                    readelf_debug_line_raw(&elf, &data_bytes, endian);
+                                }
+                                if show_debug_line_decoded {
+                                    readelf_debug_line_decoded(&elf, &data_bytes, endian);
+                                }
+                                line_done = true;
+                            }
+                            "ranges" if show_debug_ranges && !ranges_done => {
+                                readelf_debug_ranges(&elf, &data_bytes, endian);
+                                readelf_debug_rnglists(&elf, &data_bytes, endian);
+                                ranges_done = true;
+                            }
+                            _ => {}
+                        }
                     }
-                    if show_debug_line_raw {
-                        readelf_debug_line_raw(&elf, &data_bytes, endian);
-                    }
-                    if show_debug_line_decoded {
-                        readelf_debug_line_decoded(&elf, &data_bytes, endian);
-                    }
-                    if show_debug_ranges {
-                        readelf_debug_ranges(&elf, &data_bytes, endian);
-                        readelf_debug_rnglists(&elf, &data_bytes, endian);
-                    }
-                    if show_debug_abbrev {
-                        readelf_debug_abbrev(&elf, &data_bytes, endian);
-                    }
+                    let _ = (emit_wi_placeholder, info_done, abbrev_done, line_done, ranges_done);
                 } else if let Ok(elf) =
                     ElfFile::<object::elf::FileHeader32<object::Endianness>>::parse(&*data_bytes)
                 {
@@ -5954,22 +6015,40 @@ fn tool_objdump(args: &[String]) -> i32 {
                     if show_debug_str {
                         readelf_debug_str_loaded(&elf, &data_bytes, endian, loaded_from);
                     }
-                    if emit_wi_placeholder {
-                        readelf_debug_info_loaded(&elf, &data_bytes, endian, loaded_from);
+                    let mut info_done = false;
+                    let mut abbrev_done = false;
+                    let mut line_done = false;
+                    let mut ranges_done = false;
+                    for kind in &dispatch_order {
+                        match *kind {
+                            "info" if emit_wi_placeholder && !info_done => {
+                                readelf_debug_info_loaded(&elf, &data_bytes, endian, loaded_from);
+                                info_done = true;
+                            }
+                            "abbrev" if show_debug_abbrev && !abbrev_done => {
+                                readelf_debug_abbrev(&elf, &data_bytes, endian);
+                                abbrev_done = true;
+                            }
+                            "line" if (show_debug_line_raw || show_debug_line_decoded)
+                                && !line_done =>
+                            {
+                                if show_debug_line_raw {
+                                    readelf_debug_line_raw(&elf, &data_bytes, endian);
+                                }
+                                if show_debug_line_decoded {
+                                    readelf_debug_line_decoded(&elf, &data_bytes, endian);
+                                }
+                                line_done = true;
+                            }
+                            "ranges" if show_debug_ranges && !ranges_done => {
+                                readelf_debug_ranges(&elf, &data_bytes, endian);
+                                readelf_debug_rnglists(&elf, &data_bytes, endian);
+                                ranges_done = true;
+                            }
+                            _ => {}
+                        }
                     }
-                    if show_debug_line_raw {
-                        readelf_debug_line_raw(&elf, &data_bytes, endian);
-                    }
-                    if show_debug_line_decoded {
-                        readelf_debug_line_decoded(&elf, &data_bytes, endian);
-                    }
-                    if show_debug_ranges {
-                        readelf_debug_ranges(&elf, &data_bytes, endian);
-                        readelf_debug_rnglists(&elf, &data_bytes, endian);
-                    }
-                    if show_debug_abbrev {
-                        readelf_debug_abbrev(&elf, &data_bytes, endian);
-                    }
+                    let _ = (info_done, abbrev_done, line_done, ranges_done);
                 }
             }
             continue;
@@ -14787,7 +14866,8 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
 
         let mut depth: isize = 0;
         while p.pos < cu_end {
-            let die_off = p.pos - cu_start;
+            // GNU readelf prints absolute file offsets for DIEs (not CU-relative).
+            let die_off = p.pos;
             let code = match p.read_uleb128() {
                 Some(v) => v,
                 None => break,
@@ -14823,7 +14903,7 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
             );
 
             for (attr_name, attr_form, implicit_const) in &entry.attrs {
-                let attr_off = p.pos - cu_start;
+                let attr_off = p.pos;
                 let value_str = read_and_format_attr(
                     &mut p,
                     *attr_form,
@@ -16103,11 +16183,12 @@ fn read_and_format_attr(
             };
             format!("<0x{:x}>", off)
         }
-        0x11 /* ref1 */ => format!("<0x{:x}>", p.read_u8().unwrap_or(0)),
-        0x12 /* ref2 */ => format!("<0x{:x}>", p.read_u16().unwrap_or(0)),
-        0x13 /* ref4 */ => format!("<0x{:x}>", p.read_u32().unwrap_or(0)),
-        0x14 /* ref8 */ => format!("<0x{:x}>", p.read_u64().unwrap_or(0)),
-        0x15 /* ref_udata */ => format!("<0x{:x}>", p.read_uleb128().unwrap_or(0)),
+        // CU-relative DIE references — display as absolute file offset.
+        0x11 /* ref1 */ => format!("<0x{:x}>", p.read_u8().unwrap_or(0) as usize + _cu_start),
+        0x12 /* ref2 */ => format!("<0x{:x}>", p.read_u16().unwrap_or(0) as usize + _cu_start),
+        0x13 /* ref4 */ => format!("<0x{:x}>", p.read_u32().unwrap_or(0) as usize + _cu_start),
+        0x14 /* ref8 */ => format!("<0x{:x}>", p.read_u64().unwrap_or(0) as usize + _cu_start),
+        0x15 /* ref_udata */ => format!("<0x{:x}>", p.read_uleb128().unwrap_or(0) as usize + _cu_start),
         0x16 /* indirect */ => {
             let f = p.read_uleb128().unwrap_or(0);
             read_and_format_attr(

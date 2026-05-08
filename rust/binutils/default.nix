@@ -219,8 +219,8 @@
       }
       {
         exp = "compress.exp";
-        minPass = 20;
-        maxFail = 25;
+        minPass = 39;
+        maxFail = 6;
       }
     ];
 
