@@ -106,10 +106,13 @@ pub struct Options {
     pub(crate) time_cond: Option<TimeCond>,
     /// --stderr: redirect stderr to file; "-" means stdout.
     pub(crate) stderr_redirect: Option<PathBuf>,
-    pub(crate) proxy: Option<String>,                // -x / --proxy
-    pub(crate) proxy_user: Option<String>,           // --proxy-user "user:pass"
-    pub(crate) proxy_tunnel: bool,                   // -p / --proxytunnel — force CONNECT tunnel
-    pub(crate) proxy_1_0: bool,                      // --proxy1.0 — use HTTP/1.0 for CONNECT
+    pub(crate) proxy: Option<String>,      // -x / --proxy
+    pub(crate) proxy_user: Option<String>, // --proxy-user "user:pass"
+    /// 0 = off, 1 = --netrc (required), 2 = --netrc-optional.
+    pub(crate) netrc_mode: u8,
+    pub(crate) netrc_file: Option<PathBuf>,
+    pub(crate) proxy_tunnel: bool, // -p / --proxytunnel — force CONNECT tunnel
+    pub(crate) proxy_1_0: bool,    // --proxy1.0 — use HTTP/1.0 for CONNECT
     pub(crate) proxy_headers: Vec<(String, String)>, // --proxy-header — extra headers for proxy CONNECT or HTTP-via-proxy
     pub(crate) noproxy: Option<String>, // --noproxy (comma-separated hosts to skip proxy)
     pub(crate) fail_early: bool, // --fail-early — abort processing further URLs after the first error
@@ -209,6 +212,8 @@ impl Default for Options {
             stderr_redirect: None,
             proxy: None,
             proxy_user: None,
+            netrc_mode: 0,
+            netrc_file: None,
             proxy_tunnel: false,
             proxy_1_0: false,
             proxy_headers: Vec::new(),

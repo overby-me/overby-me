@@ -1854,6 +1854,23 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                         // userinfo of its own.
                         opts.user = Some(ui);
                     }
+                    // If `--netrc` is on and we just dropped credentials, try
+                    // to recover them from the netrc file for the new host
+                    // (test 257, 478).
+                    if opts.netrc_mode != 0 && opts.user.is_none() {
+                        let path = opts.netrc_file.clone().or_else(|| {
+                            std::env::var_os("HOME")
+                                .map(|h| std::path::PathBuf::from(h).join(".netrc"))
+                        });
+                        if let Some(p) = path
+                            && let Some((login, password)) =
+                                crate::netrc::lookup(&p, &new_url.host, None)
+                            && let Some(u) = login
+                        {
+                            let pw = password.unwrap_or_default();
+                            opts.user = Some(format!("{u}:{pw}"));
+                        }
+                    }
                 }
 
                 // --referer "...;auto" updates Referer to the URL we just

@@ -2,6 +2,7 @@ mod args;
 mod connection;
 mod cookie;
 mod format;
+mod netrc;
 mod options;
 mod request;
 mod response;
@@ -341,7 +342,7 @@ fn main() {
         // Apply per-URL option overrides. Each URL was snapshotted at parse
         // time so that `--next` resets don't retroactively affect earlier URLs.
         // We always clone so that `opts` remains free for mutable cookie updates.
-        let effective_opts = if let Some(puo) = opts.per_url_opts.get(url_idx) {
+        let mut effective_opts = if let Some(puo) = opts.per_url_opts.get(url_idx) {
             let mut o = opts.clone();
             o.data = puo.data.clone();
             o.data_raw = puo.data_raw;
@@ -362,6 +363,46 @@ fn main() {
         } else {
             opts.clone()
         };
+
+        // --netrc / --netrc-optional: look up credentials for the URL host
+        // and set them when the user did not pass `-u` (test 478, 2006).
+        if effective_opts.netrc_mode != 0 && effective_opts.user.is_none() {
+            // Resolve order: --netrc-file > NETRC env var > $HOME/.netrc.
+            let netrc_path = effective_opts
+                .netrc_file
+                .clone()
+                .or_else(|| std::env::var_os("NETRC").map(std::path::PathBuf::from))
+                .or_else(|| {
+                    std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".netrc"))
+                });
+            if let Some(path) = netrc_path
+                && let Ok(parsed) = crate::url::parse_url(url_str)
+            {
+                // The netrc lookup should also pick up creds carried in the
+                // URL itself (e.g. `ftp://mary@host/`, test 380): if there is
+                // a userinfo with no password, find the password by host+user.
+                let host_user = parsed.userinfo.as_deref().and_then(|ui| {
+                    if ui.contains(':') {
+                        None
+                    } else {
+                        Some(ui.to_string())
+                    }
+                });
+                if let Some((login, password)) =
+                    crate::netrc::lookup(&path, &parsed.host, host_user.as_deref())
+                {
+                    // Either login or password may be omitted; emit
+                    // Authorization as long as at least one of the three
+                    // sources (URL user / netrc login / netrc password) has
+                    // a value (test 684 has password-only with empty user).
+                    if host_user.is_some() || login.is_some() || password.is_some() {
+                        let u = host_user.or(login).unwrap_or_default();
+                        let p = password.unwrap_or_default();
+                        effective_opts.user = Some(format!("{u}:{p}"));
+                    }
+                }
+            }
+        }
 
         let result = if effective_opts.retry > 0 {
             let mut last_err = String::new();

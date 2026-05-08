@@ -637,7 +637,7 @@ pub(crate) fn parse_args() -> Options {
                 // TODO: implement trace output
             }
             "-n" | "--netrc" => {
-                // Ignore netrc support
+                opts.netrc_mode = 1;
             }
             "--no-progress-meter" => {
                 // We don't have a progress meter anyway
@@ -850,12 +850,22 @@ pub(crate) fn parse_args() -> Options {
                 opts.defer_auth = true;
             }
             "--netrc-optional" => {
-                // We don't read netrc; this is a no-op so tests like 495
-                // (URL-userinfo + --netrc-optional) get past arg parsing.
+                opts.netrc_mode = 2;
             }
             "--netrc-file" => {
                 i += 1;
-                let _ = next_arg(&args, i, "--netrc-file");
+                let path = PathBuf::from(next_arg(&args, i, "--netrc-file"));
+                // Curl exits 2 (CURLE_FAILED_INIT) when --netrc-file refers
+                // to a non-existent file (test 697).
+                if !path.exists() {
+                    eprintln!("curl: (2) Failed to read .netrc from '{}'", path.display());
+                    process::exit(2);
+                }
+                opts.netrc_file = Some(path);
+                // --netrc-file implies --netrc (test 744).
+                if opts.netrc_mode == 0 {
+                    opts.netrc_mode = 1;
+                }
             }
             "--basic" => {
                 opts.no_basic = false;
