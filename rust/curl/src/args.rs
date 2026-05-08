@@ -1089,6 +1089,7 @@ pub(crate) fn parse_args() -> Options {
                             'k' => opts.insecure = true,
                             'O' => opts.remote_name = true,
                             'J' => opts.remote_header_name = true,
+                            'R' => opts.remote_time = true,
                             'n' => {} // --netrc, ignored
                             'q' => {} // disable .curlrc, ignored
                             'g' => opts.globoff = true,
