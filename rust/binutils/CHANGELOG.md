@@ -3,6 +3,19 @@
 Round-by-round development log of `rust/binutils`. Reverse-chronological:
 newest at top.
 
+## Custom-test expansion (128/128 ✅)
+
+- objdump `-M intel`/`-M att` (and the `-M=` / `--disassembler-options=`
+  forms) now switch the disassembly syntax. Intel mode is byte-for-byte
+  with GNU's `objdump -M intel`: uppercase `BYTE PTR / WORD PTR /
+  DWORD PTR / QWORD PTR` size hints (uses iced-x86's IntelFormatter
+  with `MemorySizeOptions::Always` and uppercase keywords). objdump
+  `--insn-width` is accepted (consumed; we don't yet honor it). nm now
+  silently accepts `--no-demangle` (we don't demangle by default; `-C`
+  enables it), `--quiet` (archive-listing terseness; no-op for single
+  ELFs), and `--special` (synonym for `--special-syms`). +3 custom
+  tests (125→128): `nm-no-demangle`, `nm-quiet`, `objdump-intel-syntax`.
+
 ## Custom-test expansion (125/125 ✅)
 
 - objdump `--no-show-raw-insn`/`--show-raw-insn` toggle the bytes column

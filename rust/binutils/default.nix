@@ -536,6 +536,18 @@
         name = "no-show-raw-insn";
       }
       {
+        tool = "objdump";
+        name = "intel-syntax";
+      }
+      {
+        tool = "nm";
+        name = "no-demangle";
+      }
+      {
+        tool = "nm";
+        name = "quiet";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }

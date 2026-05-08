@@ -27,7 +27,9 @@
 
 use cpp_demangle::{DemangleOptions, Symbol as CppSymbol};
 
-use iced_x86::{Decoder, DecoderOptions, Formatter, GasFormatter};
+use iced_x86::{
+    Decoder, DecoderOptions, Formatter, GasFormatter, IntelFormatter, MemorySizeOptions,
+};
 use object::Object as _;
 use object::ObjectSection as _;
 use object::ObjectSymbol as _;
@@ -1361,7 +1363,9 @@ fn tool_nm(args: &[String]) -> i32 {
             "-D" | "--dynamic" => opts.dynamic = true,
             "-a" | "--debug-syms" => {} // we don't filter debug syms by default
             "--no-recurse-limit" | "--recurse-limit" => {} // demangler-only knob; no-op here
-            "--special-syms" | "--no-special-syms" => {} // no synthetic syms produced; no-op
+            "--special-syms" | "--no-special-syms" | "--special" => {} // no synthetic syms produced
+            "--no-demangle" => {}       // we don't demangle by default; -C enables it
+            "--quiet" => {}             // archive listing terseness; no-op for us
             "-p" | "--no-sort" => {
                 opts.no_sort = true;
                 opts.numeric_sort = false;
@@ -6606,6 +6610,7 @@ fn tool_objdump(args: &[String]) -> i32 {
     let mut disassemble = false;
     let mut disassemble_all = false;
     let mut show_raw_insn = true;
+    let mut intel_syntax = false;
     let mut disassemble_syms: Vec<String> = Vec::new();
     let mut show_headers = false;
     let mut show_symbols = false;
@@ -6719,6 +6724,37 @@ fn tool_objdump(args: &[String]) -> i32 {
                 "-i" | "--info" => show_info = true,
                 "--no-show-raw-insn" => show_raw_insn = false,
                 "--show-raw-insn" => show_raw_insn = true,
+                "-M" => {
+                    i += 1;
+                    if i < args.len() {
+                        let v = &args[i];
+                        if v.contains("intel") {
+                            intel_syntax = true;
+                        } else if v.contains("att") {
+                            intel_syntax = false;
+                        }
+                    }
+                }
+                _ if arg.starts_with("-M") && arg.len() > 2 => {
+                    let v = &arg[2..];
+                    if v.contains("intel") {
+                        intel_syntax = true;
+                    } else if v.contains("att") {
+                        intel_syntax = false;
+                    }
+                }
+                _ if arg.starts_with("--disassembler-options=") => {
+                    let v = arg.split_once('=').unwrap().1;
+                    if v.contains("intel") {
+                        intel_syntax = true;
+                    } else if v.contains("att") {
+                        intel_syntax = false;
+                    }
+                }
+                _ if arg.starts_with("--insn-width=") => {} // accept silently
+                "--insn-width" => {
+                    i += 1; // consume argument
+                }
                 "-s" | "--full-contents" => show_full_contents = true,
                 "--show-all-symbols" => show_all_symbols = true,
                 "--disassemble-zeroes" => disassemble_zeroes = true,
@@ -7279,6 +7315,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                     show_line_numbers,
                     wide,
                     show_raw_insn,
+                    intel_syntax,
                 );
             }
         } else if let Some(info) = parse_srec(&data) {
@@ -7347,6 +7384,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                         show_line_numbers,
                         wide,
                         show_raw_insn,
+                        intel_syntax,
                     );
                 }
             }
@@ -7376,6 +7414,7 @@ fn tool_objdump(args: &[String]) -> i32 {
                 show_line_numbers,
                 wide,
                 show_raw_insn,
+                intel_syntax,
             );
         }
     }
@@ -7494,6 +7533,7 @@ fn objdump_process_object(
     show_line_numbers: bool,
     wide: bool,
     show_raw_insn: bool,
+    intel_syntax: bool,
 ) {
     use object::ObjectSymbol as _;
 
@@ -8098,6 +8138,7 @@ fn objdump_process_object(
                                     show_source,
                                     show_line_numbers,
                                     show_raw_insn,
+                                    intel_syntax,
                                 );
                             }
                         }
@@ -8131,6 +8172,7 @@ fn objdump_process_object(
                             show_source,
                             show_line_numbers,
                             show_raw_insn,
+                            intel_syntax,
                         );
                     }
                 }
@@ -8229,6 +8271,7 @@ fn objdump_disassemble_section(
     show_source: bool,
     show_line_numbers: bool,
     show_raw_insn: bool,
+    intel_syntax: bool,
 ) {
     // First pass: decode all instructions
     let mut decoder = Decoder::with_ip(bitness, data, base, DecoderOptions::NONE);
@@ -8237,10 +8280,28 @@ fn objdump_disassemble_section(
         instructions.push(decoder.decode());
     }
 
-    let mut formatter = GasFormatter::new();
-    // GNU objdump pads mnemonic column
-    formatter.options_mut().set_first_operand_char_index(7);
-    formatter.options_mut().set_uppercase_hex(false);
+    let mut gas_formatter = GasFormatter::new();
+    let mut intel_formatter = IntelFormatter::new();
+    {
+        let opts = gas_formatter.options_mut();
+        opts.set_first_operand_char_index(7);
+        opts.set_uppercase_hex(false);
+    }
+    {
+        let opts = intel_formatter.options_mut();
+        opts.set_first_operand_char_index(7);
+        opts.set_uppercase_hex(false);
+        // GNU's Intel mode always emits "BYTE PTR / WORD PTR / DWORD PTR"
+        // size hints in upper case, even when the operand size is
+        // unambiguous.
+        opts.set_memory_size_options(MemorySizeOptions::Always);
+        opts.set_uppercase_keywords(true);
+    }
+    let formatter: &mut dyn Formatter = if intel_syntax {
+        &mut intel_formatter
+    } else {
+        &mut gas_formatter
+    };
 
     let mut output = String::new();
     let end_addr = base + data.len() as u64;

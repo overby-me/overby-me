@@ -15,6 +15,7 @@ iced-x86 = { version = "1.21", default-features = false, features = [
   "std",
   "decoder",
   "gas",
+  "intel",
 ] }
 flate2 = { version = "1", default-features = false, features = ["zlib"] }
 object = { version = "0.36", features = [
