@@ -2462,6 +2462,14 @@ fn tool_size(args: &[String]) -> i32 {
     let mut format = SizeFormat::Berkeley;
     let mut show_totals = false;
     let mut files: Vec<String> = Vec::new();
+    // Berkeley/GNU radix: dec | oct | hex.
+    #[derive(PartialEq, Eq, Clone, Copy)]
+    enum SizeRadix {
+        Dec,
+        Oct,
+        Hex,
+    }
+    let mut radix = SizeRadix::Dec;
 
     for arg in args {
         match arg.as_str() {
@@ -2469,6 +2477,9 @@ fn tool_size(args: &[String]) -> i32 {
             "-B" | "--format=berkeley" => format = SizeFormat::Berkeley,
             "-G" | "--format=gnu" => format = SizeFormat::Gnu,
             "-t" | "--totals" => show_totals = true,
+            "-d" | "--radix=10" => radix = SizeRadix::Dec,
+            "-o" | "--radix=8" => radix = SizeRadix::Oct,
+            "-x" | "--radix=16" => radix = SizeRadix::Hex,
             _ if !arg.starts_with('-') => files.push(arg.clone()),
             _ => {}
         }
@@ -2483,9 +2494,15 @@ fn tool_size(args: &[String]) -> i32 {
     let mut total_bss: u64 = 0;
     let mut errors = 0;
 
+    // GNU size header: the total columns are always "dec" + "hex" except
+    // when -o is used, in which case the first total column becomes "oct".
+    let total_label = match radix {
+        SizeRadix::Dec | SizeRadix::Hex => "dec",
+        SizeRadix::Oct => "oct",
+    };
     match format {
         SizeFormat::Berkeley => {
-            println!("   text\t   data\t    bss\t    dec\t    hex\tfilename");
+            println!("   text\t   data\t    bss\t    {total_label}\t    hex\tfilename");
         }
         SizeFormat::Gnu => {
             println!(
@@ -2623,12 +2640,32 @@ fn tool_size(args: &[String]) -> i32 {
                 }
             }
             let dec = text + data_size + bss;
+            // Format individual columns per radix; totals always shown as
+            // "dec hex" except for -o which shows "oct hex". GNU's octal
+            // format uses leading zeros on individual columns; -x adds 0x.
+            let col_radix_str = |v: u64| -> String {
+                match radix {
+                    SizeRadix::Dec => format!("{v}"),
+                    SizeRadix::Oct => format!("0{v:o}"),
+                    SizeRadix::Hex => format!("0x{v:x}"),
+                }
+            };
+            let total_primary = match radix {
+                SizeRadix::Oct => format!("{dec:o}"),
+                _ => format!("{dec}"),
+            };
+            let total_hex = format!("{dec:x}");
+            let text_s = col_radix_str(text);
+            let data_s = col_radix_str(data_size);
+            let bss_s = col_radix_str(bss);
             match format {
                 SizeFormat::Gnu => {
-                    println!("{text:>10} {data_size:>10} {bss:>10} {dec:>10} {file}");
+                    println!("{text_s:>10} {data_s:>10} {bss_s:>10} {total_primary:>10} {file}");
                 }
                 _ => {
-                    println!("{text:>7}\t{data_size:>7}\t{bss:>7}\t{dec:>7}\t{dec:>7x}\t{file}");
+                    println!(
+                        "{text_s:>7}\t{data_s:>7}\t{bss_s:>7}\t{total_primary:>7}\t{total_hex:>7}\t{file}"
+                    );
                 }
             }
             total_text += text;
@@ -2639,14 +2676,27 @@ fn tool_size(args: &[String]) -> i32 {
 
     if show_totals {
         let dec = total_text + total_data + total_bss;
+        let col_radix_str = |v: u64| -> String {
+            match radix {
+                SizeRadix::Dec => format!("{v}"),
+                SizeRadix::Oct => format!("0{v:o}"),
+                SizeRadix::Hex => format!("0x{v:x}"),
+            }
+        };
+        let total_primary = match radix {
+            SizeRadix::Oct => format!("0{dec:o}"),
+            _ => format!("{dec}"),
+        };
+        let total_hex = format!("{dec:x}");
+        let tt = col_radix_str(total_text);
+        let td = col_radix_str(total_data);
+        let tb = col_radix_str(total_bss);
         match format {
             SizeFormat::Gnu => {
-                println!("{total_text:>10} {total_data:>10} {total_bss:>10} {dec:>10} (TOTALS)");
+                println!("{tt:>10} {td:>10} {tb:>10} {total_primary:>10} (TOTALS)");
             }
             SizeFormat::Berkeley => {
-                println!(
-                    "{total_text:>7}\t{total_data:>7}\t{total_bss:>7}\t{dec:>7}\t{dec:>7x}\t(TOTALS)"
-                );
+                println!("{tt:>7}\t{td:>7}\t{tb:>7}\t{total_primary:>7}\t{total_hex:>7}\t(TOTALS)");
             }
             SizeFormat::Sysv => {}
         }
@@ -2868,7 +2918,11 @@ fn tool_readelf(args: &[String]) -> i32 {
                 if v.eq_ignore_ascii_case("aranges") || v == "r" {
                     opts.show_debug_aranges = true;
                 }
-                if v.eq_ignore_ascii_case("frames") || v.eq_ignore_ascii_case("frames-interp") || v == "f" || v == "F" {
+                if v.eq_ignore_ascii_case("frames")
+                    || v.eq_ignore_ascii_case("frames-interp")
+                    || v == "f"
+                    || v == "F"
+                {
                     opts.show_debug_frame = true;
                 }
             }
@@ -8820,7 +8874,6 @@ fn tool_objcopy(args: &[String]) -> i32 {
         }
     }
 
-
     // --dump-section: extract section data to a file. We do this as a side
     // effect of objcopy; the file is otherwise rewritten normally per the
     // remaining options. Empty sections produce empty output files.
@@ -14645,12 +14698,20 @@ fn objcopy_x32_merge_notes_to_elf64(
     let r16 = |buf: &[u8], o: usize| -> u16 {
         let mut b = [0u8; 2];
         b.copy_from_slice(&buf[o..o + 2]);
-        if le { u16::from_le_bytes(b) } else { u16::from_be_bytes(b) }
+        if le {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        }
     };
     let r32 = |buf: &[u8], o: usize| -> u32 {
         let mut b = [0u8; 4];
         b.copy_from_slice(&buf[o..o + 4]);
-        if le { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) }
+        if le {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        }
     };
     let shoff = r32(data, 0x20) as usize;
     let shentsize = r16(data, 0x2e) as usize;
@@ -14726,18 +14787,14 @@ fn objcopy_x32_merge_notes_to_elf64(
         let mut props: BTreeMap<u32, Vec<u8>> = BTreeMap::new();
         let mut p = 0;
         while p + 12 <= bytes.len() {
-            let namesz =
-                u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
-            let descsz =
-                u32::from_le_bytes(bytes[p + 4..p + 8].try_into().unwrap()) as usize;
-            let ntype =
-                u32::from_le_bytes(bytes[p + 8..p + 12].try_into().unwrap());
+            let namesz = u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
+            let descsz = u32::from_le_bytes(bytes[p + 4..p + 8].try_into().unwrap()) as usize;
+            let ntype = u32::from_le_bytes(bytes[p + 8..p + 12].try_into().unwrap());
             p += 12;
             if p + namesz > bytes.len() {
                 break;
             }
-            let nm = std::str::from_utf8(&bytes[p..p + namesz.saturating_sub(1)])
-                .unwrap_or("");
+            let nm = std::str::from_utf8(&bytes[p..p + namesz.saturating_sub(1)]).unwrap_or("");
             p += namesz;
             p = (p + 3) & !3;
             if p + descsz > bytes.len() {
@@ -14747,8 +14804,7 @@ fn objcopy_x32_merge_notes_to_elf64(
             if ntype == 5 && nm == "GNU" {
                 let mut q = 0;
                 while q + 8 <= desc.len() {
-                    let pr_type =
-                        u32::from_le_bytes(desc[q..q + 4].try_into().unwrap());
+                    let pr_type = u32::from_le_bytes(desc[q..q + 4].try_into().unwrap());
                     let pr_datasz =
                         u32::from_le_bytes(desc[q + 4..q + 8].try_into().unwrap()) as usize;
                     q += 8;
@@ -14765,7 +14821,7 @@ fn objcopy_x32_merge_notes_to_elf64(
                     } else {
                         pr_data.to_vec()
                     };
-                    let entry = props.entry(pr_type).or_insert_with(Vec::new);
+                    let entry = props.entry(pr_type).or_default();
                     if entry.is_empty() {
                         *entry = translated;
                     } else if pr_type == 0xc0000002
@@ -15079,12 +15135,20 @@ fn objcopy_x32_merge_notes_inplace(
     let r16 = |buf: &[u8], o: usize| -> u16 {
         let mut b = [0u8; 2];
         b.copy_from_slice(&buf[o..o + 2]);
-        if le { u16::from_le_bytes(b) } else { u16::from_be_bytes(b) }
+        if le {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        }
     };
     let r32 = |buf: &[u8], o: usize| -> u32 {
         let mut b = [0u8; 4];
         b.copy_from_slice(&buf[o..o + 4]);
-        if le { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) }
+        if le {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        }
     };
     let shoff = r32(data, 0x20) as usize;
     let shentsize = r16(data, 0x2e) as usize;
@@ -15145,18 +15209,14 @@ fn objcopy_x32_merge_notes_inplace(
     let mut props: BTreeMap<u32, Vec<u8>> = BTreeMap::new();
     let mut p = 0;
     while p + 12 <= bytes.len() {
-        let namesz =
-            u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
-        let descsz =
-            u32::from_le_bytes(bytes[p + 4..p + 8].try_into().unwrap()) as usize;
-        let ntype =
-            u32::from_le_bytes(bytes[p + 8..p + 12].try_into().unwrap());
+        let namesz = u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
+        let descsz = u32::from_le_bytes(bytes[p + 4..p + 8].try_into().unwrap()) as usize;
+        let ntype = u32::from_le_bytes(bytes[p + 8..p + 12].try_into().unwrap());
         p += 12;
         if p + namesz > bytes.len() {
             break;
         }
-        let name = std::str::from_utf8(&bytes[p..p + namesz.saturating_sub(1)])
-            .unwrap_or("");
+        let name = std::str::from_utf8(&bytes[p..p + namesz.saturating_sub(1)]).unwrap_or("");
         p += namesz;
         p = (p + 3) & !3; // ELF32 name padding
         if p + descsz > bytes.len() {
@@ -15166,16 +15226,14 @@ fn objcopy_x32_merge_notes_inplace(
         if ntype == 5 && name == "GNU" {
             let mut q = 0;
             while q + 8 <= desc.len() {
-                let pr_type =
-                    u32::from_le_bytes(desc[q..q + 4].try_into().unwrap());
-                let pr_datasz =
-                    u32::from_le_bytes(desc[q + 4..q + 8].try_into().unwrap()) as usize;
+                let pr_type = u32::from_le_bytes(desc[q..q + 4].try_into().unwrap());
+                let pr_datasz = u32::from_le_bytes(desc[q + 4..q + 8].try_into().unwrap()) as usize;
                 q += 8;
                 if q + pr_datasz > desc.len() {
                     break;
                 }
                 let pr_data = &desc[q..q + pr_datasz];
-                let entry = props.entry(pr_type).or_insert_with(Vec::new);
+                let entry = props.entry(pr_type).or_default();
                 if entry.is_empty() {
                     *entry = pr_data.to_vec();
                 } else if pr_type == 0xc0000002
@@ -15262,17 +15320,29 @@ fn objcopy_to_x32(data: &[u8], remove_sections: &[String]) -> Result<Vec<u8>, St
     let r16 = |o: usize| -> u16 {
         let mut b = [0u8; 2];
         b.copy_from_slice(&data[o..o + 2]);
-        if le { u16::from_le_bytes(b) } else { u16::from_be_bytes(b) }
+        if le {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        }
     };
     let r32 = |o: usize| -> u32 {
         let mut b = [0u8; 4];
         b.copy_from_slice(&data[o..o + 4]);
-        if le { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) }
+        if le {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        }
     };
     let r64 = |o: usize| -> u64 {
         let mut b = [0u8; 8];
         b.copy_from_slice(&data[o..o + 8]);
-        if le { u64::from_le_bytes(b) } else { u64::from_be_bytes(b) }
+        if le {
+            u64::from_le_bytes(b)
+        } else {
+            u64::from_be_bytes(b)
+        }
     };
 
     let shoff = r64(0x28) as usize;
@@ -15362,8 +15432,7 @@ fn objcopy_to_x32(data: &[u8], remove_sections: &[String]) -> Result<Vec<u8>, St
             if p + namesz > bytes.len() {
                 break;
             }
-            let name = std::str::from_utf8(&bytes[p..p + namesz.saturating_sub(1)])
-                .unwrap_or("");
+            let name = std::str::from_utf8(&bytes[p..p + namesz.saturating_sub(1)]).unwrap_or("");
             p += namesz;
             p = (p + 7) & !7; // ELF64 name padding
             if p + descsz > bytes.len() {
@@ -15374,8 +15443,7 @@ fn objcopy_to_x32(data: &[u8], remove_sections: &[String]) -> Result<Vec<u8>, St
                 // Walk property entries; ELF64 alignment is 8.
                 let mut q = 0;
                 while q + 8 <= desc.len() {
-                    let pr_type =
-                        u32::from_le_bytes(desc[q..q + 4].try_into().unwrap());
+                    let pr_type = u32::from_le_bytes(desc[q..q + 4].try_into().unwrap());
                     let pr_datasz =
                         u32::from_le_bytes(desc[q + 4..q + 8].try_into().unwrap()) as usize;
                     q += 8;
@@ -15390,7 +15458,7 @@ fn objcopy_to_x32(data: &[u8], remove_sections: &[String]) -> Result<Vec<u8>, St
                     } else {
                         pr_data.to_vec()
                     };
-                    let entry = props.entry(pr_type).or_insert_with(Vec::new);
+                    let entry = props.entry(pr_type).or_default();
                     if entry.is_empty() {
                         *entry = translated;
                     } else if pr_type == 0xc0000002
@@ -17416,16 +17484,14 @@ fn readelf_debug_pubnames<'data, Elf: FileHeader>(
         println!();
         let mut p = 0usize;
         while p + 14 <= bytes.len() {
-            let unit_length =
-                u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
+            let unit_length = u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
             let unit_end = p + 4 + unit_length;
             if unit_end > bytes.len() {
                 break;
             }
             let version = u16::from_le_bytes(bytes[p + 4..p + 6].try_into().unwrap());
             let info_off = u32::from_le_bytes(bytes[p + 6..p + 10].try_into().unwrap());
-            let info_size =
-                u32::from_le_bytes(bytes[p + 10..p + 14].try_into().unwrap());
+            let info_size = u32::from_le_bytes(bytes[p + 10..p + 14].try_into().unwrap());
             println!("  Length:                              {}", unit_length);
             println!("  Version:                             {}", version);
             if info_off == 0 {
@@ -17433,10 +17499,7 @@ fn readelf_debug_pubnames<'data, Elf: FileHeader>(
             } else {
                 println!("  Offset into .debug_info section:     0x{:x}", info_off);
             }
-            println!(
-                "  Size of area in .debug_info section: {}",
-                info_size
-            );
+            println!("  Size of area in .debug_info section: {}", info_size);
             println!();
             println!("    Offset	Name");
             let mut q = p + 14;
@@ -17513,8 +17576,7 @@ fn readelf_debug_aranges<'data, Elf: FileHeader>(
         println!();
         let mut p = 0usize;
         while p + 12 <= bytes.len() {
-            let unit_length =
-                u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
+            let unit_length = u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
             let unit_end = p + 4 + unit_length;
             if unit_end > bytes.len() {
                 break;
@@ -17635,8 +17697,7 @@ fn readelf_debug_frame<'data, Elf: FileHeader>(
             std::collections::HashMap::new();
         while p + 4 <= bytes.len() {
             let entry_off = p;
-            let unit_length =
-                u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
+            let unit_length = u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) as usize;
             p += 4;
             if unit_length == 0 {
                 println!("{:08x} ZERO terminator", entry_off);
@@ -17681,12 +17742,7 @@ fn readelf_debug_frame<'data, Elf: FileHeader>(
                     (bytes[p] as u64, 1)
                 };
                 p += n;
-                println!(
-                    "{:08x} {:08x} {:08x} CIE",
-                    entry_off,
-                    unit_length,
-                    cie_id
-                );
+                println!("{:08x} {:08x} {:08x} CIE", entry_off, unit_length, cie_id);
                 println!("  Version:               {}", version);
                 println!("  Augmentation:          \"{}\"", aug);
                 println!("  Code alignment factor: {}", code_align);
@@ -17707,7 +17763,11 @@ fn readelf_debug_frame<'data, Elf: FileHeader>(
                 // FDE — print `<off> <length> <CIE_ptr> FDE cie=<CIE_off>
                 // pc=<low_pc>..<high_pc>` plus DW_CFA_* operations.
                 // Find addr_size from the e_ident class field.
-                let addr_size = if data.len() >= 5 && data[4] == 2 { 8usize } else { 4usize };
+                let addr_size = if data.len() >= 5 && data[4] == 2 {
+                    8usize
+                } else {
+                    4usize
+                };
                 if p + 2 * addr_size > unit_end {
                     p = unit_end;
                     continue;
@@ -17735,10 +17795,7 @@ fn readelf_debug_frame<'data, Elf: FileHeader>(
                 );
                 // Render FDE CFA instructions, advancing the program-counter
                 // tracker for DW_CFA_advance_loc operations.
-                let (code_align, data_align) = cie_state
-                    .get(&cie_id)
-                    .copied()
-                    .unwrap_or((1, -8));
+                let (code_align, data_align) = cie_state.get(&cie_id).copied().unwrap_or((1, -8));
                 let machine: u16 = elf.elf_header().e_machine(endian);
                 let mut fde_pc: u64 = initial_location;
                 while p < unit_end {
@@ -18917,17 +18974,13 @@ fn readelf_debug_info_loaded<'data, Elf: FileHeader>(
                     // For SHT_REL relocations the addend is implicit at the
                     // destination; the object crate reports `reloc.addend()
                     // == 0` for those. Read it from `buf` and combine.
-                    let implicit_addend: i64 = if reloc.addend() == 0
-                        && off + size <= buf.len()
-                    {
+                    let implicit_addend: i64 = if reloc.addend() == 0 && off + size <= buf.len() {
                         match size {
                             4 => {
                                 if is_le {
-                                    i32::from_le_bytes(buf[off..off + 4].try_into().unwrap())
-                                        as i64
+                                    i32::from_le_bytes(buf[off..off + 4].try_into().unwrap()) as i64
                                 } else {
-                                    i32::from_be_bytes(buf[off..off + 4].try_into().unwrap())
-                                        as i64
+                                    i32::from_be_bytes(buf[off..off + 4].try_into().unwrap()) as i64
                                 }
                             }
                             8 => {

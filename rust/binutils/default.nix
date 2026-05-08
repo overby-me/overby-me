@@ -148,6 +148,26 @@
         name = "reverse-sort";
       }
       {
+        tool = "nm";
+        name = "radix-decimal";
+      }
+      {
+        tool = "nm";
+        name = "print-file-name";
+      }
+      {
+        tool = "size";
+        name = "decimal";
+      }
+      {
+        tool = "size";
+        name = "octal";
+      }
+      {
+        tool = "size";
+        name = "hex";
+      }
+      {
         tool = "strings";
         name = "min-length";
       }

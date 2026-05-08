@@ -37,7 +37,7 @@ Key design decisions:
 
 ## Test results
 
-### Custom comparison tests (27/27 passing)
+### Custom comparison tests (32/32 passing)
 
 | Check name | Tool | Status |
 |---|---|---|
@@ -53,9 +53,14 @@ Key design decisions:
 | `nm-numeric-sort` | nm | ✅ PASS |
 | `nm-defined-only` | nm | ✅ PASS |
 | `nm-reverse-sort` | nm | ✅ PASS |
+| `nm-radix-decimal` | nm | ✅ PASS |
+| `nm-print-file-name` | nm | ✅ PASS |
 | `size-basic` | size | ✅ PASS |
 | `size-sysv` | size | ✅ PASS |
 | `size-totals` | size | ✅ PASS |
+| `size-decimal` | size | ✅ PASS |
+| `size-octal` | size | ✅ PASS |
+| `size-hex` | size | ✅ PASS |
 | `cxxfilt-basic` | c++filt | ✅ PASS |
 | `cxxfilt-multiple` | c++filt | ✅ PASS |
 | `cxxfilt-nested` | c++filt | ✅ PASS |
@@ -255,6 +260,7 @@ Two layers of testing:
 - [x] Wire `binutils-all/i386/i386.exp` into the runtest invocation (+7 dejagnu, 319→326 total): runs the i386-32-bit subdir tests (empty, ibt, pr21231a/b, shstk, plus the strip-on-debug-sections variants) — they exercise our i386 ELF32 read/write path. Fix: emit a double blank line before objdump's "Disassembly of section ...:" header to match GNU's exact-byte output (the `objdump-disassemble` custom test was failing on the missing newline).
 - [x] Add readelf `.debug_pubnames`/`.debug_aranges`/`.debug_frame` dumpers (`-wp`/`-wr`/`-wf`) and reorder the bare `-w` dispatch to match GNU readelf's section ordering (.debug_abbrev → .debug_info → .debug_line raw → .debug_pubnames → .debug_aranges → .debug_str → .debug_frame). Apply `.rela.debug_frame` / `.rel.debug_frame` relocations so FDE `pc=` values resolve, with implicit-addend reading for SHT_REL. CIE state (code/data alignment) saved across CIE → FDE so DW_CFA_advance_loc/_loc1/_loc2/_loc4/_def_cfa/_def_cfa_offset/_offset/_restore/_set_loc all decode correctly. i386 register-name table separate from x86-64. Line-program `(view N)` annotations in special opcodes when PC doesn't advance (track view counter; emit row with current value, then increment). Fixes both `x86-64/compressed-1a` and `i386/compressed-1a` (+2 dejagnu, 326→328 total).
 - [x] nm `-U`/`--defined-only`, `-n`/`--numeric-sort`, `-r`/`--reverse-sort` (+3 custom tests, 24→27): filter out undefined symbols, sort by address (undefined symbols first by name), and reverse the final order. Numeric sort puts U/w symbols before defined ones, then sorts defined by address.
+- [x] size `-d`/`-o`/`-x` radix flags + new `nm`/`size` custom tests (+5 custom tests, 27→32): individual columns formatted in chosen radix (decimal plain / octal with leading 0 / hex with `0x`); total columns are always "dec hex" (or "oct hex" with `-o`); total octal value is *not* zero-padded (matches GNU). Plus `nm -t d`, `nm -A`, `size -d`, `size -o`, `size -x` custom tests.
 
 ## Next steps
 
