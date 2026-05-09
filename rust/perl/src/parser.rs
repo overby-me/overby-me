@@ -4245,7 +4245,76 @@ fn parse_interp_string(s: &str) -> Expr {
                             let var_name = idx_str.strip_prefix('$').unwrap_or(&idx_str);
                             Box::new(Expr::ScalarVar(var_name.to_string()))
                         };
-                        parts.push(InterpPart::ArrayElement(name, idx_expr));
+                        // `$name[i][j]` / `$name[i]{k}` — chained
+                        // subscripts in interpolation become arrow
+                        // chains (Perl auto-inserts `->` between them).
+                        // Without this, `$a[0][0]` interpolates as
+                        // `$a[0]` followed by literal `[0]`.
+                        let mut chain_started = false;
+                        let mut accum: Expr = Expr::Undef;
+                        loop {
+                            // Optional `->` separator (Perl allows it
+                            // but doesn't require it between chained
+                            // subscripts).
+                            if i + 1 < chars.len() && chars[i] == '-' && chars[i + 1] == '>' {
+                                i += 2;
+                            }
+                            if i >= chars.len()
+                                || (chars[i] != '[' && chars[i] != '{')
+                            {
+                                break;
+                            }
+                            if !chain_started {
+                                accum = Expr::ArrayElement(name.clone(), idx_expr.clone());
+                                chain_started = true;
+                            }
+                            let opener = chars[i];
+                            let (closer, kind) = if opener == '[' {
+                                (']', crate::ast::ArrowKind::Array)
+                            } else {
+                                ('}', crate::ast::ArrowKind::Hash)
+                            };
+                            i += 1;
+                            let mut inner = String::new();
+                            let mut depth = 1;
+                            while i < chars.len() && depth > 0 {
+                                if chars[i] == opener {
+                                    depth += 1;
+                                } else if chars[i] == closer {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        break;
+                                    }
+                                }
+                                inner.push(chars[i]);
+                                i += 1;
+                            }
+                            if i < chars.len() && chars[i] == closer {
+                                i += 1;
+                            }
+                            let key_expr = if opener == '[' {
+                                if let Ok(n) = inner.trim().parse::<i64>() {
+                                    Expr::IntLit(n)
+                                } else {
+                                    let v = inner.strip_prefix('$').unwrap_or(&inner);
+                                    Expr::ScalarVar(v.to_string())
+                                }
+                            } else if let Some(v) = inner.strip_prefix('$') {
+                                Expr::ScalarVar(v.to_string())
+                            } else {
+                                Expr::StringLit(inner)
+                            };
+                            accum = Expr::ArrowElement(
+                                Box::new(accum),
+                                Box::new(key_expr),
+                                kind,
+                            );
+                        }
+                        if chain_started {
+                            parts.push(InterpPart::Expr(Box::new(accum)));
+                        } else {
+                            parts.push(InterpPart::ArrayElement(name, idx_expr));
+                        }
                     } else if i < chars.len() && chars[i] == '{' {
                         // Hash subscript $name{key}
                         i += 1;
@@ -4264,7 +4333,68 @@ fn parse_interp_string(s: &str) -> Expr {
                         } else {
                             Expr::StringLit(key_str)
                         };
-                        parts.push(InterpPart::HashElement(name, Box::new(key_expr)));
+                        // Chained subscripts after the hash key
+                        // (`$h{a}[0]`, `$h{a}{b}`).
+                        let mut chain_started = false;
+                        let mut accum: Expr = Expr::Undef;
+                        loop {
+                            if i + 1 < chars.len() && chars[i] == '-' && chars[i + 1] == '>' {
+                                i += 2;
+                            }
+                            if i >= chars.len()
+                                || (chars[i] != '[' && chars[i] != '{')
+                            {
+                                break;
+                            }
+                            if !chain_started {
+                                accum =
+                                    Expr::HashElement(name.clone(), Box::new(key_expr.clone()));
+                                chain_started = true;
+                            }
+                            let opener = chars[i];
+                            let (closer, kind) = if opener == '[' {
+                                (']', crate::ast::ArrowKind::Array)
+                            } else {
+                                ('}', crate::ast::ArrowKind::Hash)
+                            };
+                            i += 1;
+                            let mut inner = String::new();
+                            let mut depth = 1;
+                            while i < chars.len() && depth > 0 {
+                                if chars[i] == opener {
+                                    depth += 1;
+                                } else if chars[i] == closer {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        break;
+                                    }
+                                }
+                                inner.push(chars[i]);
+                                i += 1;
+                            }
+                            if i < chars.len() && chars[i] == closer {
+                                i += 1;
+                            }
+                            let kex = if opener == '[' {
+                                if let Ok(n) = inner.trim().parse::<i64>() {
+                                    Expr::IntLit(n)
+                                } else {
+                                    let v = inner.strip_prefix('$').unwrap_or(&inner);
+                                    Expr::ScalarVar(v.to_string())
+                                }
+                            } else if let Some(v) = inner.strip_prefix('$') {
+                                Expr::ScalarVar(v.to_string())
+                            } else {
+                                Expr::StringLit(inner)
+                            };
+                            accum =
+                                Expr::ArrowElement(Box::new(accum), Box::new(kex), kind);
+                        }
+                        if chain_started {
+                            parts.push(InterpPart::Expr(Box::new(accum)));
+                        } else {
+                            parts.push(InterpPart::HashElement(name, Box::new(key_expr)));
+                        }
                     } else if i + 1 < chars.len()
                         && chars[i] == '-'
                         && chars[i + 1] == '>'

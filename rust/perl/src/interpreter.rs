@@ -6753,31 +6753,54 @@ impl Interpreter {
                             let key = self.eval_expr(key_e).to_str();
                             // Find innermost scope (or globals) that owns the
                             // hash, and remove the key from that exact copy.
+                            let mut removed: Option<Value> = None;
                             for scope in self.scopes.iter_mut().rev() {
                                 if let Some(h) = scope.hashes.get_mut(name) {
-                                    let v = h.remove(&key).unwrap_or(Value::Undef);
-                                    return v.resolve();
+                                    removed = Some(h.remove(&key).unwrap_or(Value::Undef));
+                                    break;
                                 }
                             }
-                            // Check aliased hashes (migration target for
-                            // hash slots promoted via `\$h{k}` or
-                            // `eval_expr_for_arg`'s slot-alias path).
-                            let qname = self.qualify_global(name);
-                            if let Some(rc) = self.aliased_hashes.get(qname.as_str()).cloned() {
-                                let v = rc.borrow_mut().remove(&key).unwrap_or(Value::Undef);
-                                return v.resolve();
+                            if removed.is_none() {
+                                let qname = self.qualify_global(name);
+                                if let Some(rc) = self.aliased_hashes.get(qname.as_str()).cloned()
+                                {
+                                    removed =
+                                        Some(rc.borrow_mut().remove(&key).unwrap_or(Value::Undef));
+                                } else if qname.as_str() != name
+                                    && let Some(rc) = self.aliased_hashes.get(name).cloned()
+                                {
+                                    removed =
+                                        Some(rc.borrow_mut().remove(&key).unwrap_or(Value::Undef));
+                                } else if let Some(h) = self.globals.hashes.get_mut(name) {
+                                    removed = Some(h.remove(&key).unwrap_or(Value::Undef));
+                                }
                             }
-                            if qname.as_str() != name
-                                && let Some(rc) = self.aliased_hashes.get(name).cloned()
+                            let v = removed.unwrap_or(Value::Undef).resolve();
+                            // Fire DESTROY if the removed slot held the
+                            // last reference to a blessed ref. Mirror's
+                            // set_var's overwrite-DESTROY semantics so
+                            // `delete $h{key}` invokes Class::DESTROY
+                            // on the contained blessed object before
+                            // returning. op/undef hash-iteration tests.
+                            if let Some(class) = self.blessed_refs.get(&Self::ref_ptr(&v)).cloned()
+                                && !self.ref_pointer_reachable_elsewhere_global(
+                                    Self::ref_ptr(&v),
+                                    "",
+                                )
                             {
-                                let v = rc.borrow_mut().remove(&key).unwrap_or(Value::Undef);
-                                return v.resolve();
+                                let destroy_key = format!("{class}::DESTROY");
+                                if let Some((_params, body)) = self.subs.get(&destroy_key).cloned()
+                                {
+                                    let ptr = Self::ref_ptr(&v);
+                                    self.call_sub_named(
+                                        &body,
+                                        std::slice::from_ref(&v),
+                                        Some(&destroy_key),
+                                    );
+                                    self.blessed_refs.remove(&ptr);
+                                }
                             }
-                            if let Some(h) = self.globals.hashes.get_mut(name) {
-                                let v = h.remove(&key).unwrap_or(Value::Undef);
-                                return v.resolve();
-                            }
-                            Value::Undef
+                            v
                         }
                         Expr::ArrayElement(name, idx_e) => {
                             let idx = self.eval_expr(idx_e).to_num() as i64;
