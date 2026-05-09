@@ -416,6 +416,10 @@
       {tool = "pw-link"; name = "output-rich";}
       {tool = "pw-link"; name = "input-id-rich";}
       {tool = "pw-link"; name = "input-verbose-rich";}
+      {tool = "pw-cli"; name = "ls-module-rich";}
+      {tool = "pw-cli"; name = "ls-factory-rich";}
+      {tool = "pw-cli"; name = "ls-securitycontext-rich";}
+      {tool = "pw-cli"; name = "ls-metadata-rich";}
       {tool = "pw-metadata"; name = "list-rich";}
       {tool = "pw-metadata"; name = "list-byname";}
     ];
