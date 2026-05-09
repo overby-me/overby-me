@@ -870,6 +870,26 @@
       { tool = "pw-dsdplay"; name = "version-with-arg"; }
       { tool = "pw-encplay"; name = "help-with-arg"; }
       { tool = "pw-encplay"; name = "version-with-arg"; }
+      { tool = "pw-config"; name = "help-with-arg"; }
+      { tool = "pw-config"; name = "version-with-arg"; }
+      { tool = "pw-mididump"; name = "help-with-arg"; }
+      { tool = "pw-mididump"; name = "version-with-arg"; }
+      { tool = "pw-loopback"; name = "help-with-arg"; }
+      { tool = "pw-loopback"; name = "version-with-arg"; }
+      { tool = "pw-reserve"; name = "help-with-arg"; }
+      { tool = "pw-reserve"; name = "version-with-arg"; }
+      { tool = "pw-container"; name = "help-with-arg"; }
+      { tool = "pw-container"; name = "version-with-arg"; }
+      { tool = "pipewire"; name = "help-with-arg"; }
+      { tool = "pipewire"; name = "version-with-arg"; }
+      { tool = "pipewire-pulse"; name = "help-with-arg"; }
+      { tool = "pipewire-pulse"; name = "version-with-arg"; }
+      { tool = "pipewire-aes67"; name = "help-with-arg"; }
+      { tool = "pipewire-aes67"; name = "version-with-arg"; }
+      { tool = "pipewire-avb"; name = "help-with-arg"; }
+      { tool = "pipewire-avb"; name = "version-with-arg"; }
+      { tool = "pipewire-vulkan"; name = "help-with-arg"; }
+      { tool = "pipewire-vulkan"; name = "version-with-arg"; }
 
       # --- per-tool --help byte-identical parity ---
       {

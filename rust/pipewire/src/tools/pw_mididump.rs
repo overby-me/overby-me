@@ -26,6 +26,16 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_version(argv0);
                 return 0;
             }
+            s if s.starts_with("--help=") => {
+                eprintln!("{argv0}: option '--help' doesn't allow an argument");
+                print_help(argv0);
+                return 0;
+            }
+            s if s.starts_with("--version=") => {
+                eprintln!("{argv0}: option '--version' doesn't allow an argument");
+                print_help(argv0);
+                return 0;
+            }
             "-r" | "--remote" => {
                 i += 1;
             }

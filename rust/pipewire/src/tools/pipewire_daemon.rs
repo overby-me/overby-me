@@ -28,6 +28,14 @@ pub fn main(args: &[String]) -> i32 {
             print_version(argv0);
             0
         }
+        Some(s) if s.starts_with("--help=") => {
+            eprintln!("{argv0}: option '--help' doesn't allow an argument");
+            234
+        }
+        Some(s) if s.starts_with("--version=") => {
+            eprintln!("{argv0}: option '--version' doesn't allow an argument");
+            234
+        }
         // Recognized flags we don't yet implement — running the daemon
         // is Phase 9. Just print "not implemented" so callers know.
         Some("-v") | Some("--verbose") | Some("-c") | Some("--config") | Some("-P")
@@ -35,9 +43,16 @@ pub fn main(args: &[String]) -> i32 {
             eprintln!("{argv0}: not yet implemented in rust-pipewire");
             1
         }
+        Some(s) if s.starts_with("--") => {
+            eprintln!("{argv0}: unrecognized option '{s}'");
+            234
+        }
+        Some(s) if s.starts_with('-') && s.len() == 2 => {
+            let ch = s.chars().nth(1).unwrap_or('?');
+            eprintln!("{argv0}: invalid option -- '{ch}'");
+            234
+        }
         Some(s) if s.starts_with('-') => {
-            // getopt_long writes the unrecognized-option message; C main
-            // returns res = -EINVAL (-22) which truncates to 234.
             eprintln!("{argv0}: unrecognized option '{s}'");
             234
         }
