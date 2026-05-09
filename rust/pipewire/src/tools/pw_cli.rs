@@ -71,8 +71,20 @@ pub fn main(args: &[String]) -> i32 {
         return 0;
     }
 
-    let cmd = positional[0];
-    let rest = &positional[1..];
+    // The C tool joins every positional arg with spaces into a single
+    // buffer, then splits on whitespace. So `pw-cli "ls Core"` and
+    // `pw-cli ls Core` both parse to command="ls", rest=["Core"].
+    let joined: String = positional.join(" ");
+    let mut split = joined.split_whitespace();
+    let cmd = match split.next() {
+        Some(c) => c,
+        None => {
+            print_help(argv0);
+            return 0;
+        }
+    };
+    let rest_owned: Vec<&str> = split.collect();
+    let rest = rest_owned.as_slice();
     match cmd {
         // The interactive `help` / `h` command prints just the command list,
         // not the option summary at the top — that's only emitted by the

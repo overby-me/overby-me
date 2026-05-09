@@ -333,6 +333,7 @@
       {tool = "pw-cli"; name = "info-by-name-SecurityContext";}
       {tool = "pw-cli"; name = "info-by-name-Metadata";}
       {tool = "pw-cli"; name = "unknown-command";}
+      {tool = "pw-cli"; name = "ls-core-quoted";}
       {tool = "pw-cli"; name = "help-cmd";}
       {tool = "pw-cli"; name = "list-vars";}
       {tool = "pw-cli"; name = "list-remotes";}
