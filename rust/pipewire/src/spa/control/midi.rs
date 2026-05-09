@@ -65,7 +65,11 @@ struct Track<'a> {
 
 pub fn parse(bytes: &[u8]) -> Result<(FileInfo, Vec<Event>), ParseError> {
     if bytes.len() < 14 || &bytes[0..4] != b"MThd" {
-        return err("not a Standard MIDI File (missing MThd)");
+        // Match upstream pw-mididump's `read_mthd` behavior: it returns
+        // -EINVAL when the file is shorter than the MThd chunk header
+        // or when the magic doesn't match. The C tool prints `%m` =
+        // "Invalid argument".
+        return err("Invalid argument");
     }
     let _length = be32(&bytes[4..8]);
     let format = be16(&bytes[8..10]);

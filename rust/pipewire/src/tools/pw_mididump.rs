@@ -70,9 +70,9 @@ pub fn main(raw_args: &[String]) -> i32 {
                 // `-` is the conventional stdin marker, treated as a
                 // filename by the C tool (which then fopen's it and
                 // fails with "Invalid argument" because "-" isn't a real
-                // path on disk).
+                // path on disk). C's getopt permutes argv so options
+                // after positionals are still processed; we don't break.
                 filename = Some(s.to_string());
-                break;
             }
             s => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
