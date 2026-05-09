@@ -8877,6 +8877,17 @@ impl Interpreter {
         if n.starts_with("__anon_") {
             return false;
         }
+        // DESTROY runs synchronously while the lexical container is
+        // being torn down (e.g. `undef %hash` calls DESTROY for each
+        // blessed value as it pops a key); the handler must see the
+        // partially-shrunk LIVE container, not the snapshot frozen
+        // when the sub was registered. Leaving the dynamic frames
+        // un-stashed lets `keys %hash` inside DESTROY see the live
+        // value through the dynamic chain (which sits on top of the
+        // captured chain). op/undef DELETE(kN) tests.
+        if n.ends_with("::DESTROY") {
+            return false;
+        }
         // closure_call_stack's top entry stores the captured env Rc.
         // Its length tells us how many bottom frames are the captured
         // ones; everything above is the dynamic caller's chain.
