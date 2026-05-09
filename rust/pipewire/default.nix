@@ -264,6 +264,7 @@
       {tool = "pw-cli"; name = "ls-empty-port";}
       {tool = "pw-cli"; name = "ls-empty-device";}
       {tool = "pw-cli"; name = "ls-all-normalized";}
+      {tool = "pw-cli"; name = "ls-substring";}
       {tool = "pw-cli"; name = "info-core";}
       {tool = "pw-cli"; name = "info-module-1";}
       {tool = "pw-cli"; name = "info-module-3";}
@@ -272,6 +273,7 @@
       {tool = "pw-cli"; name = "info-all";}
       {tool = "pw-cli"; name = "info-bad-id";}
       {tool = "pw-cli"; name = "info-securitycontext";}
+      {tool = "pw-cli"; name = "help-cmd";}
       {tool = "pw-dump"; name = "structural";}
     ];
   in

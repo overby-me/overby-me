@@ -135,6 +135,21 @@ pub struct DeviceInfo {
     pub params: Vec<ParamInfo>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinkInfo {
+    pub id: u32,
+    pub output_node_id: u32,
+    pub output_port_id: u32,
+    pub input_node_id: u32,
+    pub input_port_id: u32,
+    pub change_mask: i64,
+    pub state: i32,
+    pub error: String,
+    /// Negotiated format POD; `None` when no format yet (unlinked / init).
+    pub format: Option<Value>,
+    pub props: Vec<DictItem>,
+}
+
 /// Resolve `$XDG_RUNTIME_DIR/$PIPEWIRE_CORE` (with the standard fallbacks
 /// used by `pw-cli`).
 pub fn resolve_socket() -> io::Result<PathBuf> {
@@ -509,6 +524,33 @@ pub fn decode_port_info(args: &[Value]) -> Result<PortInfo, Error> {
     })
 }
 
+/// Decode `Link.Info`:
+/// `Struct { Int id, Int out_node, Int out_port, Int in_node, Int in_port,
+/// Long change_mask, Int state, String error, Pod format, Struct dict }`.
+///
+/// `format` may be a None POD when the link hasn't negotiated a format.
+pub fn decode_link_info(args: &[Value]) -> Result<LinkInfo, Error> {
+    if args.len() < 10 {
+        return Err(Error::UnexpectedShape("Link.Info: not enough fields"));
+    }
+    let format = match &args[8] {
+        Value::None => None,
+        other => Some(other.clone()),
+    };
+    Ok(LinkInfo {
+        id: expect_int(&args[0], "Link.Info.id")? as u32,
+        output_node_id: expect_int(&args[1], "Link.Info.output_node_id")? as u32,
+        output_port_id: expect_int(&args[2], "Link.Info.output_port_id")? as u32,
+        input_node_id: expect_int(&args[3], "Link.Info.input_node_id")? as u32,
+        input_port_id: expect_int(&args[4], "Link.Info.input_port_id")? as u32,
+        change_mask: expect_long(&args[5], "Link.Info.change_mask")?,
+        state: expect_int(&args[6], "Link.Info.state")?,
+        error: expect_string(&args[7], "Link.Info.error")?,
+        format,
+        props: decode_dict_struct(&args[9])?,
+    })
+}
+
 /// Decode `Device.Info`:
 /// `Struct { Int id, Long change_mask, Struct dict, Struct params }`.
 pub fn decode_device_info(args: &[Value]) -> Result<DeviceInfo, Error> {
@@ -731,5 +773,105 @@ mod tests {
             full_interface_name("PipeWire:Interface:Node"),
             "PipeWire:Interface:Node"
         );
+    }
+
+    #[test]
+    fn module_info_decode() {
+        let dict = build_dict(&[("module.name", "libpipewire-module-foo")]);
+        let args = vec![
+            Value::Int(7),
+            Value::String("foo".into()),
+            Value::String("/path/foo.so".into()),
+            Value::None, // null args
+            Value::Long(1),
+            dict,
+        ];
+        let info = decode_module_info(&args).unwrap();
+        assert_eq!(info.id, 7);
+        assert_eq!(info.name, "foo");
+        assert_eq!(info.filename, "/path/foo.so");
+        // None POD becomes "(null)" — matches printf("%s", NULL).
+        assert_eq!(info.args, "(null)");
+        assert_eq!(info.props.len(), 1);
+    }
+
+    #[test]
+    fn factory_info_decode() {
+        let dict = build_dict(&[("factory.name", "client-node")]);
+        let args = vec![
+            Value::Int(11),
+            Value::String("client-node".into()),
+            Value::String("PipeWire:Interface:ClientNode".into()),
+            Value::Int(6),
+            Value::Long(1),
+            dict,
+        ];
+        let info = decode_factory_info(&args).unwrap();
+        assert_eq!(info.id, 11);
+        assert_eq!(info.object_type, "PipeWire:Interface:ClientNode");
+        assert_eq!(info.version, 6);
+    }
+
+    #[test]
+    fn node_info_decode() {
+        let dict = build_dict(&[("node.name", "test")]);
+        let params = Value::Struct(vec![
+            Value::Int(2),
+            Value::Id(1),
+            Value::Int(0o002), // PARAM_INFO_READ
+            Value::Id(2),
+            Value::Int(0o006), // READ | WRITE
+        ]);
+        let args = vec![
+            Value::Int(8),
+            Value::Int(1),       // max_input_ports
+            Value::Int(0),       // max_output_ports
+            Value::Long(0x1f),   // change_mask all
+            Value::Int(1),       // n_input_ports
+            Value::Int(0),       // n_output_ports
+            Value::Id(1),        // state = suspended
+            Value::None,         // error null
+            dict,
+            params,
+        ];
+        let info = decode_node_info(&args).unwrap();
+        assert_eq!(info.id, 8);
+        assert_eq!(info.state, 1);
+        assert_eq!(info.error, "(null)");
+        assert_eq!(info.params.len(), 2);
+        assert_eq!(info.params[0].id, 1);
+        assert_eq!(info.params[0].flags, 0o002);
+    }
+
+    #[test]
+    fn link_info_decode_no_format() {
+        let dict = build_dict(&[]);
+        let args = vec![
+            Value::Int(20),
+            Value::Int(11),  // out_node
+            Value::Int(12),  // out_port
+            Value::Int(13),  // in_node
+            Value::Int(14),  // in_port
+            Value::Long(7),
+            Value::Int(0),   // state
+            Value::String("".into()),
+            Value::None,     // no format
+            dict,
+        ];
+        let info = decode_link_info(&args).unwrap();
+        assert_eq!(info.id, 20);
+        assert_eq!(info.output_node_id, 11);
+        assert_eq!(info.input_port_id, 14);
+        assert!(info.format.is_none());
+    }
+
+    #[test]
+    fn permissions_octal_format() {
+        // PW_PERM_RWXM = 0o400 | 0o200 | 0o100 | 0o010 = 0o710
+        assert_eq!(fmt_permissions(0o710), "rwxm-");
+        assert_eq!(fmt_permissions(0o010), "---m-");
+        assert_eq!(fmt_permissions(0o500), "r-x--");
+        assert_eq!(fmt_permissions(0), "-----");
+        assert_eq!(fmt_permissions(0o430), "r--ml");
     }
 }

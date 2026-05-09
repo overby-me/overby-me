@@ -73,8 +73,11 @@ pub fn main(args: &[String]) -> i32 {
     let cmd = positional[0];
     let rest = &positional[1..];
     match cmd {
+        // The interactive `help` / `h` command prints just the command list,
+        // not the option summary at the top — that's only emitted by the
+        // top-level `--help` / `-h` flag handlers above.
         "help" | "h" => {
-            print_help(argv0);
+            print_command_list();
             0
         }
         "list-objects" | "ls" => run_list_objects(argv0, remote.as_deref(), rest),
@@ -94,6 +97,12 @@ fn print_help(argv0: &str) {
     println!("  -r, --remote                          Remote daemon name");
     println!("  -m, --monitor                         Monitor activity");
     println!();
+    print_command_list();
+}
+
+/// The interactive `help` command's body — just the command list, no top
+/// option summary. Mirrors `do_help` in upstream `pw-cli.c`.
+fn print_command_list() {
     println!("Available commands:");
     let cmds = [
         ("help | h            ", "Show this help"),
@@ -561,15 +570,11 @@ fn print_properties(items: &[DictItem], mark: char, header: bool) {
 }
 
 fn run_list_objects(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {
-    let filter = args.first().map(|s| {
-        let s = *s;
-        // Accept either short ("Node") or full ("PipeWire:Interface:Node").
-        if s.contains(':') {
-            s.to_string()
-        } else {
-            format!("PipeWire:Interface:{s}")
-        }
-    });
+    // Mirror the C tool's `global_matches`: it uses `strstr(g->type, pattern)`
+    // — a substring match against the raw user input. So `ls Node` also lists
+    // any `PipeWire:Interface:ClientNode` etc. (and `ls Pi` matches every
+    // global since they all contain "PipeWire").
+    let filter: Option<&str> = args.first().copied();
 
     let globals = match collect_globals(remote, "rust-pipewire-cli") {
         Ok(g) => g,
@@ -581,7 +586,7 @@ fn run_list_objects(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {
 
     let mut sorted: Vec<&RegistryGlobal> = globals
         .iter()
-        .filter(|g| filter.as_deref().map_or(true, |f| g.interface == f))
+        .filter(|g| filter.map_or(true, |f| g.interface.contains(f)))
         .collect();
     sorted.sort_by_key(|g| g.id);
     for g in sorted {
