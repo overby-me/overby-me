@@ -429,6 +429,7 @@
       {tool = "pw-cli"; name = "info-factory-rich";}
       {tool = "pw-cli"; name = "info-bad-id-rich";}
       {tool = "pw-cli"; name = "info-securitycontext-rich";}
+      {tool = "pw-cli"; name = "info-by-name-Port";}
       {tool = "pw-cli"; name = "help-cmd-rich";}
       {tool = "pw-metadata"; name = "list-rich";}
       {tool = "pw-metadata"; name = "list-byname";}
@@ -462,6 +463,7 @@
       {tool = "pw-cli"; name = "info-by-name-Factory";}
       {tool = "pw-cli"; name = "info-by-name-SecurityContext";}
       {tool = "pw-cli"; name = "info-by-name-Metadata";}
+      {tool = "pw-cli"; name = "info-by-name-NonExistent";}
       {tool = "pw-cli"; name = "unknown-command";}
       {tool = "pw-cli"; name = "ls-core-quoted";}
       {tool = "pw-cli"; name = "ls-multiarg";}
