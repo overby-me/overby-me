@@ -55,7 +55,11 @@ pub fn main(args: &[String]) -> i32 {
                     }
                 }
             }
-            s if !s.starts_with('-') => {
+            s if !s.starts_with('-') || s == "-" => {
+                // `-` is the conventional stdin marker, treated as a
+                // filename by the C tool (which then fopen's it and
+                // fails with "Invalid argument" because "-" isn't a real
+                // path on disk).
                 filename = Some(s.to_string());
                 break;
             }
@@ -80,6 +84,14 @@ pub fn main(args: &[String]) -> i32 {
             return 1;
         }
     };
+
+    if filename == "-" {
+        // C tool's open_read for "-" sets file=stdin then read_mthd
+        // returns -EINVAL because no header is present (empty input).
+        // Mirror the error text byte-for-byte.
+        eprintln!("error opening -: Invalid argument");
+        return 255;
+    }
 
     match midi::read_file(&filename) {
         Ok((info, events)) => {

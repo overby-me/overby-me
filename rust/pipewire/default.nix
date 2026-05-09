@@ -362,6 +362,10 @@
         tool = "pw-mididump";
         name = "missing-M-arg";
       }
+      {
+        tool = "pw-mididump";
+        name = "stdin";
+      }
 
       # --- pw-config offline tests ---
       {
