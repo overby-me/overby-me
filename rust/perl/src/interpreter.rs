@@ -15186,10 +15186,15 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
             // re/regexp tests 1499/1507-1525.
             if i + 1 < chars.len() && chars[i + 1] == 'N' {
                 // Walk a `\N` followed by optional whitespace then `{...}`.
+                // Whitespace before `{count}` is allowed under `/x` (it
+                // turns into `\N{count}` quantifier form). Whitespace
+                // before `{NAME}` is rejected — handled in the
+                // post-brace name validator below. re/regexp 1525.
                 let mut j = i + 2;
                 while j < chars.len() && chars[j].is_ascii_whitespace() {
                     j += 1;
                 }
+                let had_ws = j > i + 2;
                 let in_class = {
                     // Quick scan back to see if we're inside an unclosed `[`.
                     let mut depth = 0i32;
@@ -15236,6 +15241,17 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                         body.chars().filter(|c| !c.is_ascii_whitespace()).collect();
                     let is_count = !stripped.is_empty()
                         && stripped.chars().all(|c| c.is_ascii_digit() || c == ',');
+                    // If whitespace appeared between `\N` and `{`, the
+                    // body MUST be a count (`{N}` / `{N,M}`); reference
+                    // perl rejects `\N {U+41}` / `\N {NAME}` with
+                    // "Missing braces on \N{}". re/regexp test 1525.
+                    if had_ws && !is_count {
+                        let prefix: String = chars[..=i + 1].iter().collect();
+                        let suffix: String = chars[i + 2..].iter().collect();
+                        return Some(format!(
+                            "Missing braces on \\N{{}} in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                        ));
+                    }
                     // For non-count names, use the outer-trimmed form
                     // so reference perl's `Unknown charname '<name>'`
                     // wording matches.
