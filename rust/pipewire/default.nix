@@ -420,6 +420,10 @@
       {tool = "pw-cli"; name = "ls-factory-rich";}
       {tool = "pw-cli"; name = "ls-securitycontext-rich";}
       {tool = "pw-cli"; name = "ls-metadata-rich";}
+      {tool = "pw-cli"; name = "info-module-1-rich";}
+      {tool = "pw-cli"; name = "info-module-3-rich";}
+      {tool = "pw-cli"; name = "info-module-5-rich";}
+      {tool = "pw-cli"; name = "info-factory-rich";}
       {tool = "pw-metadata"; name = "list-rich";}
       {tool = "pw-metadata"; name = "list-byname";}
     ];
