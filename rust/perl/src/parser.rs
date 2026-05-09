@@ -361,19 +361,50 @@ impl Parser {
                 return Some(Stmt::Begin(body, end_line));
             }
             Token::End => {
+                // `END { ... }` is a phaser. Bare `END` (no following
+                // `{`) is just the bareword string "END" — common in
+                // heredoc bodies (`<<END\n...\nEND`) where the
+                // trailing tag terminates the heredoc and any later
+                // expression evaluates `END` as a bareword. Letting
+                // the phaser parser swallow the rest of the file as
+                // its body would absorb subsequent statements and
+                // run them in END phase (after lexicals are torn down).
+                if matches!(self.tokens.get(self.pos + 1), Some(Token::LBrace)) {
+                    self.pos += 1;
+                    let body = self.parse_brace_block();
+                    return Some(Stmt::End(body));
+                }
+                // Fall through: parse as expression. The bareword
+                // resolves to the string "END".
                 self.pos += 1;
-                let body = self.parse_brace_block();
-                return Some(Stmt::End(body));
+                let stmt = Stmt::Expr(Expr::StringLit("END".to_string()));
+                let stmt = self.maybe_postfix(stmt);
+                self.eat(&Token::Semi);
+                return Some(stmt);
             }
             Token::Check => {
+                if matches!(self.tokens.get(self.pos + 1), Some(Token::LBrace)) {
+                    self.pos += 1;
+                    let body = self.parse_brace_block();
+                    return Some(Stmt::Check(body));
+                }
                 self.pos += 1;
-                let body = self.parse_brace_block();
-                return Some(Stmt::Check(body));
+                let stmt = Stmt::Expr(Expr::StringLit("CHECK".to_string()));
+                let stmt = self.maybe_postfix(stmt);
+                self.eat(&Token::Semi);
+                return Some(stmt);
             }
             Token::Init => {
+                if matches!(self.tokens.get(self.pos + 1), Some(Token::LBrace)) {
+                    self.pos += 1;
+                    let body = self.parse_brace_block();
+                    return Some(Stmt::Init(body));
+                }
                 self.pos += 1;
-                let body = self.parse_brace_block();
-                return Some(Stmt::Init(body));
+                let stmt = Stmt::Expr(Expr::StringLit("INIT".to_string()));
+                let stmt = self.maybe_postfix(stmt);
+                self.eat(&Token::Semi);
+                return Some(stmt);
             }
             Token::Last => {
                 self.pos += 1;
