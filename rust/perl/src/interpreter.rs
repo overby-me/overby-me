@@ -11436,6 +11436,7 @@ impl Interpreter {
         let (pattern, flags) = unwrap_qr(&pattern, flags);
         let pattern = perl_backslash_n(&pattern);
         let pattern = strip_regex_comments(&pattern);
+        let (pattern, code_blocks) = extract_regex_code_blocks(&pattern);
         let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_atomic_groups(&pattern);
         let pattern = fix_inverted_quantifiers(&pattern);
@@ -11500,6 +11501,9 @@ impl Interpreter {
                     &named,
                 );
                 let end = start + group_ends[0].unwrap();
+                for code in &code_blocks {
+                    self.eval_string(code);
+                }
                 return (true, end);
             }
             return (false, start);
@@ -11536,6 +11540,9 @@ impl Interpreter {
                         &named,
                     );
                     let end = start + group_ends[0].unwrap();
+                    for code in &code_blocks {
+                        self.eval_string(code);
+                    }
                     (true, end)
                 }
                 _ => (false, start),
@@ -11616,6 +11623,7 @@ impl Interpreter {
         let (pattern, flags) = unwrap_qr(&pattern, flags);
         let pattern = perl_backslash_n(&pattern);
         let pattern = strip_regex_comments(&pattern);
+        let (pattern, code_blocks) = extract_regex_code_blocks(&pattern);
         let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_atomic_groups(&pattern);
         let pattern = fix_inverted_quantifiers(&pattern);
@@ -11671,6 +11679,9 @@ impl Interpreter {
                     }
                     self.set_array("-", minus_arr);
                     self.set_array("+", plus_arr);
+                    for code in &code_blocks {
+                        self.eval_string(code);
+                    }
                     true
                 } else {
                     false
@@ -15641,6 +15652,102 @@ fn strip_regex_comments(pattern: &str) -> String {
         i += 1;
     }
     out
+}
+
+/// Extract Perl regex code blocks `(?{...})` and `(??{...})` from
+/// `pattern`. Returns `(cleaned_pattern, code_blocks)` — each `(?{...})`
+/// is replaced with `(?:)` (always-matching empty group) so the regex
+/// crate accepts the pattern, and the inner code is collected so the
+/// caller can `eval_string` it after a successful match. We only treat
+/// these as zero-width side-effects: every captured block runs once
+/// per successful match, regardless of which alternation branch matched.
+/// That's loose compared to reference perl (which only runs blocks on
+/// branches actually visited) but correct for the simple cases in
+/// base/lex tests 69–70 (`/(?{print ...})/`).
+fn extract_regex_code_blocks(pattern: &str) -> (String, Vec<String>) {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::new();
+    let mut blocks = Vec::new();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if !in_class && c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class
+            && c == '('
+            && i + 2 < chars.len()
+            && chars[i + 1] == '?'
+            && (chars[i + 2] == '{'
+                || (chars[i + 2] == '?' && i + 3 < chars.len() && chars[i + 3] == '{'))
+        {
+            // `(?{...})` or `(??{...})`. Skip past the introducer to the
+            // opening `{` of the code body.
+            let body_start = if chars[i + 2] == '?' { i + 4 } else { i + 3 };
+            let mut depth = 1;
+            let mut j = body_start;
+            let mut code = String::new();
+            while j < chars.len() && depth > 0 {
+                let cc = chars[j];
+                if cc == '\\' && j + 1 < chars.len() {
+                    code.push(cc);
+                    code.push(chars[j + 1]);
+                    j += 2;
+                    continue;
+                }
+                if cc == '{' {
+                    depth += 1;
+                    code.push(cc);
+                    j += 1;
+                    continue;
+                }
+                if cc == '}' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                    code.push(cc);
+                    j += 1;
+                    continue;
+                }
+                code.push(cc);
+                j += 1;
+            }
+            // Consume the closing `}` and the matching `)`.
+            if j < chars.len() && chars[j] == '}' {
+                j += 1;
+            }
+            if j < chars.len() && chars[j] == ')' {
+                j += 1;
+            }
+            blocks.push(code);
+            // Replace with an always-matching zero-width group so the
+            // surrounding pattern's structure / capture-group count is
+            // preserved.
+            out.push_str("(?:)");
+            i = j;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    (out, blocks)
 }
 
 /// before `|`, or before `)` into `(?:\n?$)`. Skips alternations and
