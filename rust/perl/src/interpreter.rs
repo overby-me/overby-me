@@ -11654,6 +11654,7 @@ impl Interpreter {
         let (pattern, code_blocks) = extract_regex_code_blocks(&pattern);
         let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_inline_flag_groups(&pattern);
+        let pattern = translate_perl_whitespace_escapes(&pattern);
         // If the pattern uses atomic groups `(?>...)` or possessive
         // quantifiers (`X++`, `X*+`, `X?+`, `X{N,M}+`), rust regex
         // either rejects them or silently mishandles (treats `++`
@@ -11875,6 +11876,8 @@ impl Interpreter {
         let pattern = rewrite_nonexistent_group_conditionals(&pattern);
         let (pattern, code_blocks) = extract_regex_code_blocks(&pattern);
         let pattern = strip_unsupported_regex_flags(&pattern);
+        let pattern = translate_inline_flag_groups(&pattern);
+        let pattern = translate_perl_whitespace_escapes(&pattern);
         let pattern = translate_atomic_groups(&pattern);
         let pattern = fix_inverted_quantifiers(&pattern);
         let pattern = neutralise_false_ranges(&pattern);
@@ -16346,6 +16349,89 @@ fn strip_regex_comments(pattern: &str) -> String {
             }
             i = k;
             continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Translate Perl's vertical/horizontal whitespace escapes that
+/// rust regex / fancy_regex don't natively understand:
+///   - `\R` → `(?:\r\n|[\n\r\u{B}\u{C}\u{85}\u{2028}\u{2029}])` (line break)
+///   - `\v` → `[\n\r\u{B}\u{C}\u{85}\u{2028}\u{2029}]` (vertical ws)
+///   - `\V` → `[^\n\r\u{B}\u{C}\u{85}\u{2028}\u{2029}]` (not vertical ws)
+///   - `\h` → `[\t \u{A0}…]` (horizontal ws — common Unicode set)
+///   - `\H` → `[^\t \u{A0}…]` (not horizontal ws)
+/// Operates outside character classes only — within a class, `\v`/`\V`
+/// also need expanding but the surrounding `[...]` complicates the
+/// rewrite (we'd need to splice into the class body).
+fn translate_perl_whitespace_escapes(pattern: &str) -> String {
+    const VWS: &str = "\\n\\r\\x0B\\x0C\\x{85}\\x{2028}\\x{2029}";
+    const HWS: &str = "\\t \\xA0\\x{1680}\\x{2000}-\\x{200A}\\x{202F}\\x{205F}\\x{3000}";
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            let nxt = chars[i + 1];
+            if !in_class {
+                match nxt {
+                    'R' => {
+                        out.push_str(&format!("(?:\\r\\n|[{VWS}])"));
+                        i += 2;
+                        continue;
+                    }
+                    'v' => {
+                        out.push_str(&format!("[{VWS}]"));
+                        i += 2;
+                        continue;
+                    }
+                    'V' => {
+                        out.push_str(&format!("[^{VWS}]"));
+                        i += 2;
+                        continue;
+                    }
+                    'h' => {
+                        out.push_str(&format!("[{HWS}]"));
+                        i += 2;
+                        continue;
+                    }
+                    'H' => {
+                        out.push_str(&format!("[^{HWS}]"));
+                        i += 2;
+                        continue;
+                    }
+                    _ => {}
+                }
+            } else {
+                // Inside `[...]`: splice the char-set body inline.
+                match nxt {
+                    'v' => {
+                        out.push_str(VWS);
+                        i += 2;
+                        continue;
+                    }
+                    'h' => {
+                        out.push_str(HWS);
+                        i += 2;
+                        continue;
+                    }
+                    // `\R`/`\V`/`\H` inside class are unusual; pass through.
+                    _ => {}
+                }
+            }
+            out.push(c);
+            out.push(nxt);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+        } else if in_class && c == ']' {
+            in_class = false;
         }
         out.push(c);
         i += 1;
