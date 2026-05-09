@@ -11862,11 +11862,8 @@ impl Interpreter {
                             group_strs.push(None);
                         }
                     }
-                    let named: Vec<(String, Option<String>)> = re
-                        .capture_names()
-                        .flatten()
-                        .map(|n| (n.to_string(), caps.name(n).map(|m| m.as_str().to_string())))
-                        .collect();
+                    let named: Vec<(String, Option<String>)> =
+                        named_captures_from_pattern(&fancy_pat, &group_strs);
                     self.populate_match_vars(
                         text,
                         start,
@@ -16804,6 +16801,113 @@ fn fix_inverted_quantifiers(pattern: &str) -> String {
         }
         out.push(c);
         i += 1;
+    }
+    out
+}
+
+/// Walk `pattern` collecting `(GROUP_INDEX, NAME)` pairs for each
+/// `(?<NAME>…)` / `(?'NAME'…)` / `(?P<NAME>…)` capture group. Used to
+/// produce the `%+` / `$+{NAME}` mapping when fancy_regex's own
+/// `capture_names()` confuses duplicates (multiple groups sharing a
+/// name from branch-reset patterns or just user-written aliases).
+fn extract_named_group_indices(pattern: &str) -> Vec<(usize, String)> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = Vec::new();
+    let mut idx: usize = 0;
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            i += 1;
+            continue;
+        }
+        if !in_class && c == '(' {
+            if i + 1 < chars.len() && chars[i + 1] == '?' {
+                let (open_idx, close_ch) = if i + 3 < chars.len()
+                    && chars[i + 2] == '<'
+                    && chars[i + 3] != '='
+                    && chars[i + 3] != '!'
+                {
+                    (i + 3, '>')
+                } else if i + 2 < chars.len() && chars[i + 2] == '\'' {
+                    (i + 3, '\'')
+                } else if i + 3 < chars.len()
+                    && chars[i + 2] == 'P'
+                    && chars[i + 3] == '<'
+                {
+                    (i + 4, '>')
+                } else {
+                    (0, '\0')
+                };
+                if close_ch != '\0' {
+                    let mut k = open_idx;
+                    while k < chars.len() && chars[k] != close_ch {
+                        k += 1;
+                    }
+                    if k < chars.len() {
+                        let name: String = chars[open_idx..k].iter().collect();
+                        if !name.is_empty()
+                            && name
+                                .chars()
+                                .next()
+                                .map(|c| c == '_' || c.is_ascii_alphabetic())
+                                .unwrap_or(false)
+                        {
+                            idx += 1;
+                            out.push((idx, name));
+                            i = k + 1;
+                            continue;
+                        }
+                    }
+                }
+            } else {
+                idx += 1;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Build the `%+`/`$+{NAME}` mapping for a fancy_regex match.
+/// fancy_regex's `capture_names()` reports `None` for groups whose
+/// name is reused by a later group; we work around that by parsing
+/// the pattern ourselves, then for each `(name, group_idx)` pair,
+/// pick the matched group whose value isn't `None`. re/regexp 1130.
+fn named_captures_from_pattern(
+    pattern: &str,
+    group_strs: &[Option<String>],
+) -> Vec<(String, Option<String>)> {
+    let mut out: Vec<(String, Option<String>)> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (idx, name) in extract_named_group_indices(pattern) {
+        if seen.contains(&name) {
+            // Already populated from an earlier (matched) group; if
+            // that earlier value is `None` and this one matched, we
+            // overwrite it.
+            if let Some(slot) = out.iter_mut().find(|(n, _)| n == &name) {
+                if slot.1.is_none() {
+                    if let Some(Some(v)) = group_strs.get(idx) {
+                        slot.1 = Some(v.clone());
+                    }
+                }
+            }
+            continue;
+        }
+        seen.insert(name.clone());
+        let val = group_strs.get(idx).cloned().unwrap_or(None);
+        out.push((name, val));
     }
     out
 }
