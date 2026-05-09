@@ -9,7 +9,7 @@ pub fn main(args: &[String]) -> i32 {
             print_help(argv0);
             0
         }
-        Some("--version") => {
+        Some("--version") | Some("-V") => {
             print_version(argv0);
             0
         }

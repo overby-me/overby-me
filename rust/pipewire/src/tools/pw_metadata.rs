@@ -25,7 +25,7 @@ pub fn main(args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
-            "--version" => {
+            "--version" | "-V" => {
                 print_version(argv0);
                 return 0;
             }

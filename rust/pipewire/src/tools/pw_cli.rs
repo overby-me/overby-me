@@ -25,7 +25,7 @@ pub fn main(args: &[String]) -> i32 {
     while i < args.len() {
         let a = args[i].as_str();
         match a {
-            "--version" => {
+            "--version" | "-V" => {
                 println!("{argv0}");
                 println!("Compiled with libpipewire {PIPEWIRE_API_VERSION}");
                 println!("Linked with libpipewire {PIPEWIRE_API_VERSION}");
