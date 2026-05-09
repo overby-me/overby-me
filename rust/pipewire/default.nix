@@ -850,6 +850,26 @@
       { tool = "pw-metadata"; name = "version-with-arg"; }
       { tool = "pw-profiler"; name = "help-with-arg"; }
       { tool = "pw-profiler"; name = "version-with-arg"; }
+      { tool = "pw-cat"; name = "help-with-arg"; }
+      { tool = "pw-cat"; name = "version-with-arg"; }
+      { tool = "pw-play"; name = "help-with-arg"; }
+      { tool = "pw-play"; name = "version-with-arg"; }
+      { tool = "pw-record"; name = "help-with-arg"; }
+      { tool = "pw-record"; name = "version-with-arg"; }
+      { tool = "pw-midiplay"; name = "help-with-arg"; }
+      { tool = "pw-midiplay"; name = "version-with-arg"; }
+      { tool = "pw-midirecord"; name = "help-with-arg"; }
+      { tool = "pw-midirecord"; name = "version-with-arg"; }
+      { tool = "pw-midi2play"; name = "help-with-arg"; }
+      { tool = "pw-midi2play"; name = "version-with-arg"; }
+      { tool = "pw-midi2record"; name = "help-with-arg"; }
+      { tool = "pw-midi2record"; name = "version-with-arg"; }
+      { tool = "pw-sysex"; name = "help-with-arg"; }
+      { tool = "pw-sysex"; name = "version-with-arg"; }
+      { tool = "pw-dsdplay"; name = "help-with-arg"; }
+      { tool = "pw-dsdplay"; name = "version-with-arg"; }
+      { tool = "pw-encplay"; name = "help-with-arg"; }
+      { tool = "pw-encplay"; name = "version-with-arg"; }
 
       # --- per-tool --help byte-identical parity ---
       {

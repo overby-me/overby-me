@@ -94,6 +94,16 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_version(argv0);
                 return 0;
             }
+            s if s.starts_with("--help=") => {
+                eprintln!("{getopt_argv0}: option '--help' doesn't allow an argument");
+                print_help(argv0);
+                return 1;
+            }
+            s if s.starts_with("--version=") => {
+                eprintln!("{getopt_argv0}: option '--version' doesn't allow an argument");
+                print_help(argv0);
+                return 1;
+            }
             s if s.starts_with("--") => {
                 let (name, has_inline) = match s.split_once('=') {
                     Some((n, _)) => (n, true),
