@@ -2446,27 +2446,27 @@ impl Lexer {
                     // U+0010-U+0015 are control chars unlikely to appear
                     // in literal strings.
                     'u' => {
-                        s.push('\x10'); // ucfirst next char
+                        s.push('\u{F0010}'); // ucfirst next char
                         self.pos += 1;
                     }
                     'l' => {
-                        s.push('\x11'); // lcfirst next char
+                        s.push('\u{F0011}'); // lcfirst next char
                         self.pos += 1;
                     }
                     'U' => {
-                        s.push('\x12'); // uc all chars until \E
+                        s.push('\u{F0012}'); // uc all chars until \E
                         self.pos += 1;
                     }
                     'L' => {
-                        s.push('\x13'); // lc all chars until \E
+                        s.push('\u{F0013}'); // lc all chars until \E
                         self.pos += 1;
                     }
                     'E' => {
-                        s.push('\x14'); // end \U/\L/\Q
+                        s.push('\u{F0014}'); // end \U/\L/\Q
                         self.pos += 1;
                     }
                     'Q' => {
-                        s.push('\x15'); // quotemeta all chars until \E
+                        s.push('\u{F0015}'); // quotemeta all chars until \E
                         self.pos += 1;
                     }
                     'c' => {

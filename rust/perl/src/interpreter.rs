@@ -14325,15 +14325,17 @@ fn bool_value(b: bool) -> Value {
 }
 
 /// Apply Perl's case-modifier escapes to an interpolated string. The
-/// lexer encodes each escape as a sentinel ASCII control byte:
-///   `\x10` = `\u` (uppercase next char)
-///   `\x11` = `\l` (lowercase next char)
-///   `\x12` = `\U` (uppercase all subsequent chars until `\E`)
-///   `\x13` = `\L` (lowercase all subsequent chars until `\E`)
-///   `\x14` = `\E` (end most-recent `\U` / `\L` / `\Q` block)
-///   `\x15` = `\Q` (quotemeta all subsequent chars until `\E`)
+/// lexer encodes each escape as a private-use codepoint so a user-
+/// written octal escape like `"\022"` (which produces `\x12` = a real
+/// control byte) doesn't collide with our `\U` sentinel:
+///   `\u{F0010}` = `\u` (uppercase next char)
+///   `\u{F0011}` = `\l` (lowercase next char)
+///   `\u{F0012}` = `\U` (uppercase all subsequent chars until `\E`)
+///   `\u{F0013}` = `\L` (lowercase all subsequent chars until `\E`)
+///   `\u{F0014}` = `\E` (end most-recent `\U` / `\L` / `\Q` block)
+///   `\u{F0015}` = `\Q` (quotemeta all subsequent chars until `\E`)
 fn apply_case_modifiers(s: &str) -> String {
-    if !s.chars().any(|c| matches!(c, '\u{10}'..='\u{15}')) {
+    if !s.chars().any(|c| matches!(c, '\u{F0010}'..='\u{F0015}')) {
         return s.to_string();
     }
     let mut out = String::with_capacity(s.len());
@@ -14341,12 +14343,12 @@ fn apply_case_modifiers(s: &str) -> String {
     let mut single_mode: Option<char> = None; // 'u', 'l'
     for c in s.chars() {
         match c {
-            '\u{10}' => single_mode = Some('u'),
-            '\u{11}' => single_mode = Some('l'),
-            '\u{12}' => block_mode = Some('U'),
-            '\u{13}' => block_mode = Some('L'),
-            '\u{14}' => block_mode = None,
-            '\u{15}' => block_mode = Some('Q'),
+            '\u{F0010}' => single_mode = Some('u'),
+            '\u{F0011}' => single_mode = Some('l'),
+            '\u{F0012}' => block_mode = Some('U'),
+            '\u{F0013}' => block_mode = Some('L'),
+            '\u{F0014}' => block_mode = None,
+            '\u{F0015}' => block_mode = Some('Q'),
             _ => {
                 // Apply block-mode FIRST, then single-mode on top —
                 // matching Perl's `\u\L$x` order: $x is lowercased
@@ -15349,20 +15351,31 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                 }
             }
             // `\N` (1..9) is a backref to capture group N; flag any
-            // reference past total_groups. Exception: when followed by
-            // another digit, Perl falls back to interpreting as octal
-            // (`\42` = octal 042 → 0x22). Only fire the error when
-            // there's no following digit, i.e. the entire `\N` clearly
-            // intended a backref.
+            // reference past total_groups. Exception: when N is itself
+            // an octal-valid digit AND followed by another octal-valid
+            // digit, Perl falls back to octal (`\42` = octal 042 →
+            // 0x22). `\87` / `\97` etc. can't be octal so must error.
             if i + 1 < chars.len() {
                 let nxt = chars[i + 1];
                 if nxt.is_ascii_digit() && nxt != '0' {
                     let n = nxt.to_digit(10).unwrap() as usize;
-                    let next_is_digit =
-                        i + 2 < chars.len() && chars[i + 2].is_ascii_digit();
-                    if n > total_groups && !next_is_digit {
-                        let prefix: String = chars[..=i + 1].iter().collect();
-                        let suffix: String = chars[i + 2..].iter().collect();
+                    let next_is_octal_digit = i + 2 < chars.len()
+                        && chars[i + 2].is_ascii_digit()
+                        && chars[i + 2] != '8'
+                        && chars[i + 2] != '9';
+                    let nxt_is_octal = nxt != '8' && nxt != '9';
+                    let can_be_octal_fallback = nxt_is_octal && next_is_octal_digit;
+                    if n > total_groups && !can_be_octal_fallback {
+                        // Walk to the end of the digit run so HERE
+                        // points after the full `\NN…` rather than
+                        // splitting it. Reference perl emits e.g.
+                        // `m/\87 <-- HERE /`, not `m/\8 <-- HERE 7/`.
+                        let mut here = i + 2;
+                        while here < chars.len() && chars[here].is_ascii_digit() {
+                            here += 1;
+                        }
+                        let prefix: String = chars[..here].iter().collect();
+                        let suffix: String = chars[here..].iter().collect();
                         return Some(format!(
                             "Reference to nonexistent group in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
                         ));
@@ -15708,6 +15721,13 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
     while k < chars.len() {
         let cc = chars[k];
         if cc == '\\' {
+            // `\cX` is a 3-char control-character escape; skip the
+            // controlled char so a `\c[` doesn't get treated as the
+            // start of a `[...]` class. re/regexp test 1550.
+            if k + 1 < chars.len() && chars[k + 1] == 'c' {
+                k += 3;
+                continue;
+            }
             k += 2;
             continue;
         }
@@ -15716,6 +15736,10 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
             k += 1;
             while k < chars.len() {
                 if chars[k] == '\\' {
+                    if k + 1 < chars.len() && chars[k + 1] == 'c' {
+                        k += 3;
+                        continue;
+                    }
                     k += 2;
                     continue;
                 }
