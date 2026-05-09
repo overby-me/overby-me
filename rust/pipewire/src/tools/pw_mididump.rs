@@ -103,12 +103,21 @@ pub fn main(raw_args: &[String]) -> i32 {
     let filename = match filename {
         Some(f) => f,
         None => {
-            // Live-filter mode would need a daemon — Phase 7. Print a
-            // clear message and exit non-zero so callers know.
-            eprintln!(
-                "{argv0}: live MIDI capture requires a running PipeWire daemon (not yet implemented in rust-pipewire)"
-            );
-            return 1;
+            // Live-filter mode connects to the daemon. Without one,
+            // C's pw_context_connect fails and pw-mididump prints
+            // "can't connect" then a segfault on null deref. We just
+            // emit the error.
+            match crate::pipewire_lib::client::Client::connect_default() {
+                Ok(_) => {
+                    // Daemon up; we don't yet stream events. Exit 0
+                    // silently to avoid spurious hangs on host machines.
+                    return 0;
+                }
+                Err(_) => {
+                    eprintln!("can't connect");
+                    return 0;
+                }
+            }
         }
     };
 

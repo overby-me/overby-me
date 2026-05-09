@@ -1407,6 +1407,7 @@
       { tool = "pw-cat"; name = "playback-bad-file"; }
       { tool = "pw-play"; name = "bad-file"; }
       { tool = "pw-record"; name = "bad-file"; }
+      { tool = "pw-mididump"; name = "live-no-daemon"; }
       {
         tool = "pw-cli";
         name = "cmd-connect-bad";
