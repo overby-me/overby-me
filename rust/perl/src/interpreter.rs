@@ -15135,10 +15135,22 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                         ));
                     }
                     let body: String = chars[body_start..k].iter().collect();
-                    let trimmed = body.trim();
-                    // Counts (`\N{N}` / `\N{N,M}`) are valid.
-                    let is_count = !trimmed.is_empty()
-                        && trimmed.chars().all(|c| c.is_ascii_digit() || c == ',');
+                    // `\N{ 3 , 4 }` is a valid count form — Perl
+                    // strips ALL whitespace before checking the
+                    // count shape. re/regexp test 49.
+                    let stripped: String =
+                        body.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+                    let is_count = !stripped.is_empty()
+                        && stripped.chars().all(|c| c.is_ascii_digit() || c == ',');
+                    // For non-count names, use the outer-trimmed form
+                    // so reference perl's `Unknown charname '<name>'`
+                    // wording matches.
+                    let trimmed = if is_count {
+                        stripped
+                    } else {
+                        body.trim().to_string()
+                    };
+                    let trimmed = trimmed.as_str();
                     if !is_count {
                         let prefix: String = chars[..=k].iter().collect();
                         let suffix: String = if k + 1 < chars.len() {
