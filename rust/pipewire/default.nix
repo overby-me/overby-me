@@ -1448,6 +1448,7 @@
       { tool = "pw-mon"; name = "lone-dash"; }
       { tool = "pw-link"; name = "d-then-i"; }
       { tool = "pw-link"; name = "i-then-d"; }
+      { tool = "pw-link"; name = "I-without-list"; }
       { tool = "pw-config"; name = "list-empty-no-newline"; }
       {
         tool = "pw-cli";

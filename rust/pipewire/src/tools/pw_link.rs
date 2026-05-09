@@ -176,6 +176,13 @@ pub fn main(raw_args: &[String]) -> i32 {
         print_help(argv0);
     }
 
+    // -I needs MODE_LIST. C errors "-I option needs one or more of
+    // -l, -i or -o" if -I was given without any list flag.
+    if show_id && !list_inputs && !list_outputs && !list_links && !list_latency {
+        eprintln!("-I option needs one or more of -l, -i or -o");
+        return 255;
+    }
+
     // C tool's mode-validation runs after option parsing:
     //   MODE_DISCONNECT (--disconnect): needs at least one positional
     //     (link-id or output-port name); empty → error + exit -1.
