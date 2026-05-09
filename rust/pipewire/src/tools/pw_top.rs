@@ -15,6 +15,17 @@ pub fn main(args: &[String]) -> i32 {
                 return 0;
             }
             "-b" | "--batch-mode" | "-n" | "--iterations" | "-r" | "--remote" => {}
+            s if s.starts_with("--") => {
+                eprintln!("{argv0}: unrecognized option '{s}'");
+                print_help(argv0);
+                return 0;
+            }
+            s if s.starts_with('-') && s.len() == 2 => {
+                let ch = s.chars().nth(1).unwrap_or('?');
+                eprintln!("{argv0}: invalid option -- '{ch}'");
+                print_help(argv0);
+                return 0;
+            }
             s if s.starts_with('-') => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);

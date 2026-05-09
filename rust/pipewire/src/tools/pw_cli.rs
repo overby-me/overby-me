@@ -7,12 +7,10 @@
 // to talk to a real daemon and exercise the protocol-native client.
 
 use crate::pipewire_lib::client::{
-    Client, ClientInfo, CoreInfo, DeviceInfo, DictItem, FactoryInfo,
-    LinkInfo, ModuleInfo, NodeInfo, ParamInfo, PortInfo, RegistryGlobal,
-    decode_client_info, decode_core_done, decode_core_error,
-    decode_device_info, decode_factory_info, decode_link_info,
-    decode_module_info, decode_node_info, decode_port_info,
-    fmt_permissions,
+    Client, ClientInfo, CoreInfo, DeviceInfo, DictItem, FactoryInfo, LinkInfo, ModuleInfo,
+    NodeInfo, ParamInfo, PortInfo, RegistryGlobal, decode_client_info, decode_core_done,
+    decode_core_error, decode_device_info, decode_factory_info, decode_link_info,
+    decode_module_info, decode_node_info, decode_port_info, fmt_permissions,
 };
 use crate::pipewire_lib::interfaces;
 use crate::pipewire_lib::version::PIPEWIRE_API_VERSION;
@@ -54,9 +52,24 @@ pub fn main(args: &[String]) -> i32 {
                 }
                 break;
             }
+            s if s.starts_with("--") => {
+                // Unrecognized long option; mirror getopt_long's
+                // "unrecognized option" message followed by the help dump.
+                eprintln!("{argv0}: unrecognized option '{s}'");
+                print_help(argv0);
+                return 0;
+            }
+            s if s.starts_with('-') && s.len() == 2 => {
+                // Unrecognized short option; getopt prints
+                // `invalid option -- 'X'`.
+                let ch = s.chars().nth(1).unwrap_or('?');
+                eprintln!("{argv0}: invalid option -- '{ch}'");
+                print_help(argv0);
+                return 0;
+            }
             s if s.starts_with('-') => {
-                // Unrecognized; mirror getopt_long's "unrecognized option"
-                // message followed by the help dump.
+                // Other unrecognized cluster (e.g. -ab) — fall back to
+                // unrecognized.
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);
                 return 0;
@@ -164,9 +177,7 @@ pub fn main(args: &[String]) -> i32 {
             // Match the C tool's exact "unknown command" error format. C
             // wraps the parse error in `Error: "..."` and uses literal
             // (unescaped) double-quotes around the unknown command name.
-            eprintln!(
-                "Error: \"Command \"{other}\" does not exist. Type 'help' for usage.\""
-            );
+            eprintln!("Error: \"Command \"{other}\" does not exist. Type 'help' for usage.\"");
             1
         }
     }
@@ -431,11 +442,7 @@ where
         .map_err(|e| format!("{e}"))?;
 
     let mut info_args: Option<Vec<crate::spa::pod::types::Value>> = None;
-    loop {
-        let msg = match client.read_message().map_err(|e| format!("{e}"))? {
-            Some(m) => m,
-            None => break,
-        };
+    while let Some(msg) = client.read_message().map_err(|e| format!("{e}"))? {
         if msg.id == proxy_id && msg.opcode == 0 {
             // For all the interfaces we currently bind, opcode 0 is Info.
             info_args = Some(msg.args);
@@ -459,7 +466,10 @@ where
     if let Some(args) = info_args {
         print_fn(g, &args);
     } else {
-        eprintln!("rust-pipewire pw-cli: no info event received for id {}", g.id);
+        eprintln!(
+            "rust-pipewire pw-cli: no info event received for id {}",
+            g.id
+        );
         print_global_only(g);
     }
     Ok(())
@@ -477,7 +487,11 @@ fn print_module_info(g: &RegistryGlobal, args: &[crate::spa::pod::types::Value])
     println!("\tname: \"{}\"", info.name);
     println!("\tfilename: \"{}\"", info.filename);
     println!("\targs: \"{}\"", info.args);
-    let mark = if info.change_mask & 0x01 != 0 { '*' } else { ' ' };
+    let mark = if info.change_mask & 0x01 != 0 {
+        '*'
+    } else {
+        ' '
+    };
     print_properties(&info.props, mark, true);
 }
 
@@ -492,7 +506,11 @@ fn print_factory_info(g: &RegistryGlobal, args: &[crate::spa::pod::types::Value]
     print_global_header(g);
     println!("\tname: \"{}\"", info.name);
     println!("\tobject-type: {}/{}", info.object_type, info.version);
-    let mark = if info.change_mask & 0x01 != 0 { '*' } else { ' ' };
+    let mark = if info.change_mask & 0x01 != 0 {
+        '*'
+    } else {
+        ' '
+    };
     print_properties(&info.props, mark, true);
 }
 
@@ -505,7 +523,11 @@ fn print_client_info(g: &RegistryGlobal, args: &[crate::spa::pod::types::Value])
         }
     };
     print_global_header(g);
-    let mark = if info.change_mask & 0x01 != 0 { '*' } else { ' ' };
+    let mark = if info.change_mask & 0x01 != 0 {
+        '*'
+    } else {
+        ' '
+    };
     print_properties(&info.props, mark, true);
 }
 
@@ -654,8 +676,16 @@ fn print_params(params: &[ParamInfo], mark: char, header: bool) {
         }
     }
     for p in params {
-        let r = if p.flags & interfaces::PARAM_INFO_READ != 0 { 'r' } else { '-' };
-        let w = if p.flags & interfaces::PARAM_INFO_WRITE != 0 { 'w' } else { '-' };
+        let r = if p.flags & interfaces::PARAM_INFO_READ != 0 {
+            'r'
+        } else {
+            '-'
+        };
+        let w = if p.flags & interfaces::PARAM_INFO_WRITE != 0 {
+            'w'
+        } else {
+            '-'
+        };
         let name = interfaces::param_name(p.id).unwrap_or("Spa:Enum:ParamId:Unknown");
         // C tool: `params[i].user > 0 ? mark : ' '`. On the first Info we
         // see for a node, every param's user counter is set to 1 — match
@@ -674,7 +704,11 @@ fn print_core_info(g: &RegistryGlobal, info: Option<&CoreInfo>) {
         println!("\tname: \"{}\"", info.name);
         // PW_CORE_CHANGE_MASK_PROPS = bit 0. Mark with '*' on the first
         // emission (where the change mask is set).
-        let mark = if info.change_mask & 0x01 != 0 { '*' } else { ' ' };
+        let mark = if info.change_mask & 0x01 != 0 {
+            '*'
+        } else {
+            ' '
+        };
         print_properties(&info.props, mark, true);
     }
 }
@@ -746,11 +780,7 @@ fn run_list_objects(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {
     // the literal substring "Node Foo" (which never matches any type),
     // unlike `ls Node` which matches all Node-typed globals.
     let joined = args.join(" ");
-    let filter: Option<&str> = if args.is_empty() {
-        None
-    } else {
-        Some(&joined)
-    };
+    let filter: Option<&str> = if args.is_empty() { None } else { Some(&joined) };
 
     let globals = match collect_globals(remote, "rust-pipewire-cli") {
         Ok(g) => g,
@@ -762,14 +792,11 @@ fn run_list_objects(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {
 
     let mut sorted: Vec<&RegistryGlobal> = globals
         .iter()
-        .filter(|g| filter.map_or(true, |f| g.interface.contains(f)))
+        .filter(|g| filter.is_none_or(|f| g.interface.contains(f)))
         .collect();
     sorted.sort_by_key(|g| g.id);
     for g in sorted {
-        println!(
-            "\tid {}, type {}/{}",
-            g.id, g.interface, g.version
-        );
+        println!("\tid {}, type {}/{}", g.id, g.interface, g.version);
         for item in &g.props {
             println!(" \t\t{} = \"{}\"", item.key, item.value);
         }
@@ -785,13 +812,10 @@ struct Snapshot {
 
 fn open_client(remote: Option<&str>, app_name: &str) -> Result<Client, String> {
     let mut client = match remote {
-        Some(name) if name.starts_with('/') => {
-            Client::connect_path(std::path::Path::new(name))
-        }
+        Some(name) if name.starts_with('/') => Client::connect_path(std::path::Path::new(name)),
         Some(name) => {
-            let runtime = std::env::var("XDG_RUNTIME_DIR").map_err(|_| {
-                "XDG_RUNTIME_DIR unset (cannot resolve remote name)".to_string()
-            })?;
+            let runtime = std::env::var("XDG_RUNTIME_DIR")
+                .map_err(|_| "XDG_RUNTIME_DIR unset (cannot resolve remote name)".to_string())?;
             let path = std::path::PathBuf::from(runtime).join(name);
             Client::connect_path(&path)
         }
@@ -840,9 +864,7 @@ fn drain_registry(client: &mut Client) -> Result<Snapshot, String> {
             continue;
         }
         if msg.opcode == interfaces::registry_event::GLOBAL_REMOVE && msg.id == 2 {
-            if let Ok(rid) =
-                crate::pipewire_lib::client::decode_registry_global_remove(&msg.args)
-            {
+            if let Ok(rid) = crate::pipewire_lib::client::decode_registry_global_remove(&msg.args) {
                 snap.globals.retain(|g| g.id != rid);
             }
             continue;
@@ -862,22 +884,18 @@ fn drain_registry(client: &mut Client) -> Result<Snapshot, String> {
         {
             break;
         }
-        if msg.id == interfaces::ID_CORE && msg.opcode == interfaces::core_event::ERROR
+        if msg.id == interfaces::ID_CORE
+            && msg.opcode == interfaces::core_event::ERROR
             && let Ok((eid, seq, res, m)) =
                 crate::pipewire_lib::client::decode_core_error(&msg.args)
         {
-            return Err(format!(
-                "core.error id={eid} seq={seq} res={res}: {m}"
-            ));
+            return Err(format!("core.error id={eid} seq={seq} res={res}: {m}"));
         }
     }
     Ok(snap)
 }
 
-fn collect_globals(
-    remote: Option<&str>,
-    app_name: &str,
-) -> Result<Vec<RegistryGlobal>, String> {
+fn collect_globals(remote: Option<&str>, app_name: &str) -> Result<Vec<RegistryGlobal>, String> {
     let mut client = open_client(remote, app_name)?;
     let snap = drain_registry(&mut client)?;
     Ok(snap.globals)

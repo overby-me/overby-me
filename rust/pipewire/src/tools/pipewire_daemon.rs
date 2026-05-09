@@ -30,8 +30,8 @@ pub fn main(args: &[String]) -> i32 {
         }
         // Recognized flags we don't yet implement — running the daemon
         // is Phase 9. Just print "not implemented" so callers know.
-        Some("-v") | Some("--verbose") | Some("-c") | Some("--config")
-        | Some("-P") | Some("--properties") => {
+        Some("-v") | Some("--verbose") | Some("-c") | Some("--config") | Some("-P")
+        | Some("--properties") => {
             eprintln!("{argv0}: not yet implemented in rust-pipewire");
             1
         }

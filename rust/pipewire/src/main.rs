@@ -43,8 +43,9 @@ fn dispatch(name: &str, args: &[String]) -> i32 {
         // Daemons (real and stubbed). The aes67/avb/vulkan variants share
         // the same help-text shape — only the default config filename
         // differs.
-        "pipewire" | "pipewire-pulse" | "pipewire-aes67" | "pipewire-avb"
-        | "pipewire-vulkan" => tools::pipewire_daemon::main(args),
+        "pipewire" | "pipewire-pulse" | "pipewire-aes67" | "pipewire-avb" | "pipewire-vulkan" => {
+            tools::pipewire_daemon::main(args)
+        }
 
         // Internal helpers — used by the test harness, not user-facing.
         "pod-encode" => tools::pod_test_helper::main(args),
@@ -55,9 +56,8 @@ fn dispatch(name: &str, args: &[String]) -> i32 {
         // The pw-cat family (cat / play / record + the midi/dsd/encoded
         // variants) all share the same help text apart from the tool name
         // and the trailing mode-flag block.
-        "pw-cat" | "pw-play" | "pw-record" | "pw-midiplay" | "pw-midirecord"
-        | "pw-midi2play" | "pw-midi2record" | "pw-sysex" | "pw-dsdplay"
-        | "pw-encplay" => tools::pw_cat::main(args),
+        "pw-cat" | "pw-play" | "pw-record" | "pw-midiplay" | "pw-midirecord" | "pw-midi2play"
+        | "pw-midi2record" | "pw-sysex" | "pw-dsdplay" | "pw-encplay" => tools::pw_cat::main(args),
 
         "pw-reserve" => tools::pw_reserve::main(args),
         "pw-container" => tools::pw_container::main(args),
@@ -77,6 +77,7 @@ fn dispatch(name: &str, args: &[String]) -> i32 {
     }
 }
 
+#[allow(dead_code)]
 fn stub_main(name: &str, args: &[String]) -> i32 {
     if args.iter().any(|a| a == "--version") {
         let v = pipewire_lib::version::PIPEWIRE_API_VERSION;

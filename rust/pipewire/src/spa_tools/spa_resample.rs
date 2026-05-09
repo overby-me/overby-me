@@ -2,42 +2,73 @@
 // would link the SPA resampler plugin and run it on a WAV; for now we
 // just emit upstream's --help text byte-for-byte.
 
-use crate::tools::common::print_version;
-
 pub fn main(args: &[String]) -> i32 {
     let argv0 = args.first().map(String::as_str).unwrap_or("spa-resample");
 
     let mut positional_count = 0;
-    for a in args.iter().skip(1) {
+    let mut consumed_flags = 0;
+    let mut i = 1;
+    while i < args.len() {
+        let a = &args[i];
         match a.as_str() {
             "-h" | "--help" => {
                 print_help(argv0);
                 return 0;
             }
-            // spa-resample's getopt_long doesn't include --version, so
-            // unknown long options fall through to the help block with
-            // a getopt error first.
-            "-v" | "--verbose" | "-c" | "--cpuflags" | "-r" | "--rate"
-            | "-f" | "--format" | "-w" | "--window" | "-q" | "--quality"
-            | "-u" | "--cutoff" | "-t" | "--taps" | "-p" | "--param" => {}
-            s if s.starts_with('-') => {
+            "-v" | "--verbose" => {
+                consumed_flags += 1;
+                i += 1;
+            }
+            // Flags that REQUIRE a value; if missing, getopt prints
+            // `option requires an argument -- 'X'`.
+            opt @ ("-c" | "--cpuflags" | "-r" | "--rate" | "-f" | "--format" | "-w"
+            | "--window" | "-q" | "--quality" | "-u" | "--cutoff" | "-t" | "--taps"
+            | "-p" | "--param") => {
+                if i + 1 >= args.len() {
+                    let ch = match opt {
+                        "-c" | "--cpuflags" => 'c',
+                        "-r" | "--rate" => 'r',
+                        "-f" | "--format" => 'f',
+                        "-w" | "--window" => 'w',
+                        "-q" | "--quality" => 'q',
+                        "-u" | "--cutoff" => 'u',
+                        "-t" | "--taps" => 't',
+                        "-p" | "--param" => 'p',
+                        _ => '?',
+                    };
+                    eprintln!("{argv0}: option requires an argument -- '{ch}'");
+                    eprintln!("error: unknown option '?'");
+                    print_help(argv0);
+                    return 1;
+                }
+                consumed_flags += 2;
+                i += 2;
+            }
+            s if s.starts_with("--") => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 eprintln!("error: unknown option '?'");
                 print_help(argv0);
                 return 1;
             }
-            _ => positional_count += 1,
+            s if s.starts_with('-') && s.len() == 2 => {
+                let ch = s.chars().nth(1).unwrap_or('?');
+                eprintln!("{argv0}: invalid option -- '{ch}'");
+                eprintln!("error: unknown option '?'");
+                print_help(argv0);
+                return 1;
+            }
+            _ => {
+                positional_count += 1;
+                i += 1;
+            }
         }
     }
 
     if positional_count < 2 {
         // C: prints `error: filename arguments missing (<optind> <argc>)`.
-        // After getopt_long completes, optind points to the first
-        // non-option argument; since we accept all options without
-        // values (none of the recognized ones in this stub take a
-        // value-as-separate-arg), optind == 1 and argc = positional + 1.
-        let optind = 1;
-        let argc = positional_count + 1;
+        // optind = 1 + number of consumed option args; argc = total argv.
+        let optind = 1 + consumed_flags;
+        let argc = consumed_flags + positional_count + 1;
         eprintln!("error: filename arguments missing ({optind} {argc})");
         print_help(argv0);
         return 0;

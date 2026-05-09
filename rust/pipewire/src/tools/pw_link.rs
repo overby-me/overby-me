@@ -48,13 +48,23 @@ pub fn main(args: &[String]) -> i32 {
             }
             "-d" | "--disconnect" => disconnect = true,
             // Flags we don't yet implement; ignore so they don't trip parser.
-            "-t" | "--latency" | "-m" | "--monitor" | "-L" | "--linger"
-            | "-P" | "--passive" | "-w" | "--wait"
-            | "-N" | "--no-colors" => {}
+            "-t" | "--latency" | "-m" | "--monitor" | "-L" | "--linger" | "-P" | "--passive"
+            | "-w" | "--wait" | "-N" | "--no-colors" => {}
             s if s.starts_with("--props") || s.starts_with("-p") => {
                 // -p / --props=PROPS — skip with optional next arg.
             }
             s if s.starts_with("--color") || s.starts_with("-C") => {}
+            s if s.starts_with("--") => {
+                eprintln!("{argv0}: unrecognized option '{s}'");
+                print_help(argv0);
+                return 0;
+            }
+            s if s.starts_with('-') && s.len() == 2 => {
+                let ch = s.chars().nth(1).unwrap_or('?');
+                eprintln!("{argv0}: invalid option -- '{ch}'");
+                print_help(argv0);
+                return 0;
+            }
             s if s.starts_with('-') => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);
@@ -142,14 +152,9 @@ pub fn main(args: &[String]) -> i32 {
     0
 }
 
-fn collect_globals(
-    remote: Option<&str>,
-    app_name: &str,
-) -> Result<Vec<RegistryGlobal>, String> {
+fn collect_globals(remote: Option<&str>, app_name: &str) -> Result<Vec<RegistryGlobal>, String> {
     let mut client = match remote {
-        Some(name) if name.starts_with('/') => {
-            Client::connect_path(std::path::Path::new(name))
-        }
+        Some(name) if name.starts_with('/') => Client::connect_path(std::path::Path::new(name)),
         Some(name) => {
             let runtime = std::env::var("XDG_RUNTIME_DIR")
                 .map_err(|_| "XDG_RUNTIME_DIR unset".to_string())?;
@@ -173,15 +178,15 @@ fn collect_globals(
             Ok(None) => break,
             Err(e) => return Err(format!("read: {e}")),
         };
-        if msg.opcode == interfaces::registry_event::GLOBAL && msg.id == 2
+        if msg.opcode == interfaces::registry_event::GLOBAL
+            && msg.id == 2
             && let Ok(g) = crate::pipewire_lib::client::decode_registry_global(&msg.args)
         {
             globals.push(g);
         }
         if msg.id == interfaces::ID_CORE
             && msg.opcode == interfaces::core_event::DONE
-            && let Ok((_id, seq)) =
-                crate::pipewire_lib::client::decode_core_done(&msg.args)
+            && let Ok((_id, seq)) = crate::pipewire_lib::client::decode_core_done(&msg.args)
             && seq == sync_seq
         {
             break;
@@ -219,6 +224,7 @@ fn port_full_name(globals: &[RegistryGlobal], port: &RegistryGlobal) -> String {
     format!("{node_name}:{port_name}")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn print_listing(
     globals: &[RegistryGlobal],
     list_inputs: bool,
@@ -232,7 +238,10 @@ fn print_listing(
 ) {
     // pw-link iterates Nodes in registry order; for each Node, walks Ports
     // belonging to it (also in registry order).
-    for node in globals.iter().filter(|g| g.interface == interfaces::TYPE_NODE) {
+    for node in globals
+        .iter()
+        .filter(|g| g.interface == interfaces::TYPE_NODE)
+    {
         for direction in [
             (list_outputs, "out", opt_output),
             (list_inputs, "in", opt_input),
@@ -248,12 +257,10 @@ fn print_listing(
             for port in globals
                 .iter()
                 .filter(|g| g.interface == interfaces::TYPE_PORT)
-                .filter(|p| {
-                    prop(p, "node.id").and_then(|s| s.parse().ok()) == Some(node.id)
-                })
+                .filter(|p| prop(p, "node.id").and_then(|s| s.parse().ok()) == Some(node.id))
                 .filter(|p| prop(p, "port.direction") == Some(direction.1))
                 .filter(|p| {
-                    pattern.map_or(true, |pat| {
+                    pattern.is_none_or(|pat| {
                         let name = port_full_name(globals, p);
                         port_regex_match(&name, pat)
                     })
@@ -282,8 +289,7 @@ fn print_listing(
 fn port_regex_match(text: &str, pattern: &str) -> bool {
     let anchored_start = pattern.starts_with('^');
     let anchored_end = pattern.ends_with('$') && !pattern.ends_with("\\$");
-    let core = &pattern[anchored_start as usize
-        ..pattern.len() - if anchored_end { 1 } else { 0 }];
+    let core = &pattern[anchored_start as usize..pattern.len() - if anchored_end { 1 } else { 0 }];
 
     // Split on `.*` — every segment must appear in order in `text`.
     let segments: Vec<&str> = core.split(".*").collect();
@@ -326,9 +332,7 @@ mod tests {
     #[test]
     fn wildcard_match() {
         assert!(port_regex_match("alsa_output:playback_FL", "alsa.*FL"));
-        assert!(port_regex_match("alsa_output:playback_FL", "alsa.*Speaker.*FL"
-            )
-            == false); // "Speaker" not in this string
+        assert!(port_regex_match("alsa_output:playback_FL", "alsa.*Speaker.*FL") == false); // "Speaker" not in this string
         assert!(port_regex_match(
             "alsa_output_Speaker:playback_FL",
             "alsa.*Speaker.*FL"
@@ -423,7 +427,11 @@ fn print_port_links(
             .find(|g| g.id == peer_id && g.interface == interfaces::TYPE_PORT)
         {
             Some(p) => (
-                if show_id { format!("{:>4} ", p.id) } else { String::new() },
+                if show_id {
+                    format!("{:>4} ", p.id)
+                } else {
+                    String::new()
+                },
                 port_full_name(globals, p),
             ),
             None => (String::new(), format!("<unknown:{peer_id}>")),

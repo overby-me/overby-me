@@ -22,8 +22,15 @@ pub fn main(args: &[String]) -> i32 {
             s if s.starts_with('-')
                 && !matches!(
                     s,
-                    "-n" | "--name" | "-a" | "--appname" | "-p" | "--priority"
-                        | "-m" | "--monitor" | "-r" | "--release"
+                    "-n" | "--name"
+                        | "-a"
+                        | "--appname"
+                        | "-p"
+                        | "--priority"
+                        | "-m"
+                        | "--monitor"
+                        | "-r"
+                        | "--release"
                 ) =>
             {
                 eprintln!("{argv0}: unrecognized option '{s}'");

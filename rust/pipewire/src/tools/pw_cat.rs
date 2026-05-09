@@ -117,11 +117,39 @@ pub fn main(args: &[String]) -> i32 {
 fn print_list_formats() {
     println!("Supported formats:");
     for f in [
-        "ulaw", "alaw", "s8", "u8", "s16", "s24", "s32", "f32", "f64", "mp1",
-        "mp2", "mp3", "vorbis", "opus", "ima-adpcm", "ms-adpcm",
-        "nms-adpcm-16", "nms-adpcm-24", "nms-adpcm-32", "alac-16", "alac-20",
-        "alac-24", "alac-32", "gsm610", "g721-32", "g723-24", "g723-40",
-        "dwvw-12", "dwvw-16", "dwvw-24", "vox", "dpcm-16", "dpcm-8",
+        "ulaw",
+        "alaw",
+        "s8",
+        "u8",
+        "s16",
+        "s24",
+        "s32",
+        "f32",
+        "f64",
+        "mp1",
+        "mp2",
+        "mp3",
+        "vorbis",
+        "opus",
+        "ima-adpcm",
+        "ms-adpcm",
+        "nms-adpcm-16",
+        "nms-adpcm-24",
+        "nms-adpcm-32",
+        "alac-16",
+        "alac-20",
+        "alac-24",
+        "alac-32",
+        "gsm610",
+        "g721-32",
+        "g723-24",
+        "g723-40",
+        "dwvw-12",
+        "dwvw-16",
+        "dwvw-24",
+        "vox",
+        "dpcm-16",
+        "dpcm-8",
     ] {
         println!("  {f}");
     }
@@ -131,10 +159,9 @@ fn print_list_channel_names() {
     println!("Supported channel names:");
     println!("    AUX0 ... AUX4095");
     for n in [
-        "UNK", "NA", "MONO", "FL", "FR", "FC", "LFE", "SL", "SR", "FLC",
-        "FRC", "RC", "RL", "RR", "TC", "TFL", "TFC", "TFR", "TRL", "TRC",
-        "TRR", "RLC", "RRC", "FLW", "FRW", "LFE2", "FLH", "FCH", "FRH",
-        "TFLC", "TFRC", "TSL", "TSR", "LLFE", "RLFE", "BC", "BLC", "BRC",
+        "UNK", "NA", "MONO", "FL", "FR", "FC", "LFE", "SL", "SR", "FLC", "FRC", "RC", "RL", "RR",
+        "TC", "TFL", "TFC", "TFR", "TRL", "TRC", "TRR", "RLC", "RRC", "FLW", "FRW", "LFE2", "FLH",
+        "FCH", "FRH", "TFLC", "TFRC", "TSL", "TSR", "LLFE", "RLFE", "BC", "BLC", "BRC",
     ] {
         println!("    {n}");
     }
@@ -149,8 +176,14 @@ fn print_list_layouts() {
         ("Quad", &["FL", "FR", "RL", "RR"]),
         ("Pentagonal", &["FL", "FR", "RL", "RR", "FC"]),
         ("Hexagonal", &["FL", "FR", "RL", "RR", "FC", "RC"]),
-        ("Octagonal", &["FL", "FR", "RL", "RR", "FC", "RC", "SL", "SR"]),
-        ("Cube", &["FL", "FR", "RL", "RR", "TFL", "TFR", "TRL", "TRR"]),
+        (
+            "Octagonal",
+            &["FL", "FR", "RL", "RR", "FC", "RC", "SL", "SR"],
+        ),
+        (
+            "Cube",
+            &["FL", "FR", "RL", "RR", "TFL", "TFR", "TRL", "TRR"],
+        ),
         ("MPEG-1.0", &["MONO"]),
         ("MPEG-2.0", &["FL", "FR"]),
         ("MPEG-3.0A", &["FL", "FR", "FC"]),
@@ -166,9 +199,18 @@ fn print_list_layouts() {
         ("MPEG-5.1C", &["FL", "FC", "FR", "SL", "SR", "LFE"]),
         ("MPEG-5.1D", &["FC", "FL", "FR", "SL", "SR", "LFE"]),
         ("MPEG-6.1A", &["FL", "FR", "FC", "LFE", "SL", "SR", "RC"]),
-        ("MPEG-7.1A", &["FL", "FR", "FC", "LFE", "RL", "RR", "SL", "SR"]),
-        ("MPEG-7.1B", &["FC", "SL", "SR", "FL", "FR", "RL", "RR", "LFE"]),
-        ("MPEG-7.1C", &["FL", "FR", "FC", "LFE", "SL", "SR", "RL", "RR"]),
+        (
+            "MPEG-7.1A",
+            &["FL", "FR", "FC", "LFE", "RL", "RR", "SL", "SR"],
+        ),
+        (
+            "MPEG-7.1B",
+            &["FC", "SL", "SR", "FL", "FR", "RL", "RR", "LFE"],
+        ),
+        (
+            "MPEG-7.1C",
+            &["FL", "FR", "FC", "LFE", "SL", "SR", "RL", "RR"],
+        ),
         ("2.1", &["FL", "FR", "LFE"]),
         ("2RC", &["FL", "FR", "RC"]),
         ("2FC", &["FL", "FR", "FC"]),
@@ -188,7 +230,10 @@ fn print_list_layouts() {
         ("7.0F", &["FL", "FR", "FC", "FLC", "FRC", "SL", "SR"]),
         ("7.1", &["FL", "FR", "FC", "LFE", "RL", "RR", "SL", "SR"]),
         ("7.1W", &["FL", "FR", "FC", "LFE", "FLC", "FRC", "SL", "SR"]),
-        ("7.1WR", &["FL", "FR", "FC", "LFE", "RL", "RR", "FLC", "FRC"]),
+        (
+            "7.1WR",
+            &["FL", "FR", "FC", "LFE", "RL", "RR", "FLC", "FRC"],
+        ),
     ];
     for (name, ch) in layouts {
         println!("    {name}: [ {} ]", ch.join(", "));

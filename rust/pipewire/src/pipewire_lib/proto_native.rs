@@ -25,6 +25,7 @@ pub const HDR_SIZE: usize = 16;
 #[derive(Debug, Clone)]
 pub struct Message {
     pub bytes: Vec<u8>,
+    #[allow(dead_code)]
     pub n_fds: u32,
 }
 
@@ -32,7 +33,10 @@ pub struct Message {
 pub fn encode_call(id: u32, opcode: u8, seq: u32, args: &[Value]) -> Message {
     let body = builder::encode(&Value::Struct(args.to_vec()));
     let size = body.len();
-    assert!(size <= 0x00ff_ffff, "POD body too large for 24-bit size field");
+    assert!(
+        size <= 0x00ff_ffff,
+        "POD body too large for 24-bit size field"
+    );
 
     let mut msg = Vec::with_capacity(HDR_SIZE + size);
     msg.extend_from_slice(&id.to_le_bytes());
@@ -89,7 +93,11 @@ pub fn decode(bytes: &[u8]) -> Result<(Decoded, usize), DecodeError> {
         .map_err(|e| DecodeError(format!("body POD parse: {e}")))?;
     let args = match root {
         Value::Struct(v) => v,
-        other => return Err(DecodeError(format!("expected Struct POD body, got {other:?}"))),
+        other => {
+            return Err(DecodeError(format!(
+                "expected Struct POD body, got {other:?}"
+            )));
+        }
     };
 
     Ok((

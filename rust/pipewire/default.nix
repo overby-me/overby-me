@@ -155,155 +155,650 @@
       }
 
       # --- per-tool --version byte-identical parity ---
-      { tool = "pw-cli"; name = "version"; }
-      { tool = "pw-mon"; name = "version"; }
-      { tool = "pw-link"; name = "version"; }
-      { tool = "pw-metadata"; name = "version"; }
-      { tool = "pw-config"; name = "version"; }
-      { tool = "pw-dump"; name = "version"; }
-      { tool = "pw-dot"; name = "version"; }
-      { tool = "pw-mididump"; name = "version"; }
-      { tool = "pw-profiler"; name = "version"; }
-      { tool = "pw-top"; name = "version"; }
-      { tool = "pipewire"; name = "version"; }
-      { tool = "pipewire-pulse"; name = "version"; }
-      { tool = "pw-cat"; name = "help"; }
-      { tool = "pw-play"; name = "help"; }
-      { tool = "pw-record"; name = "help"; }
-      { tool = "pw-midiplay"; name = "help"; }
-      { tool = "pw-midirecord"; name = "help"; }
-      { tool = "pw-midi2play"; name = "help"; }
-      { tool = "pw-midi2record"; name = "help"; }
-      { tool = "pw-sysex"; name = "help"; }
-      { tool = "pw-dsdplay"; name = "help"; }
-      { tool = "pw-encplay"; name = "help"; }
-      { tool = "pw-cat"; name = "version"; }
-      { tool = "pw-play"; name = "version"; }
-      { tool = "pw-record"; name = "version"; }
-      { tool = "pw-midiplay"; name = "version"; }
-      { tool = "pw-midirecord"; name = "version"; }
-      { tool = "pw-midi2play"; name = "version"; }
-      { tool = "pw-midi2record"; name = "version"; }
-      { tool = "pw-sysex"; name = "version"; }
-      { tool = "pw-dsdplay"; name = "version"; }
-      { tool = "pw-encplay"; name = "version"; }
-      { tool = "pw-cat"; name = "no-args"; }
-      { tool = "pw-play"; name = "no-args"; }
-      { tool = "pw-record"; name = "no-args"; }
-      { tool = "pw-midiplay"; name = "no-args"; }
-      { tool = "pw-midirecord"; name = "no-args"; }
-      { tool = "pw-midi2play"; name = "no-args"; }
-      { tool = "pw-midi2record"; name = "no-args"; }
-      { tool = "pw-sysex"; name = "no-args"; }
-      { tool = "pw-dsdplay"; name = "no-args"; }
-      { tool = "pw-encplay"; name = "no-args"; }
-      { tool = "pw-cat"; name = "bad-flag"; }
-      { tool = "pw-play"; name = "bad-flag"; }
-      { tool = "pw-record"; name = "bad-flag"; }
-      { tool = "pw-midiplay"; name = "bad-flag"; }
-      { tool = "pw-midirecord"; name = "bad-flag"; }
-      { tool = "pw-midi2play"; name = "bad-flag"; }
-      { tool = "pw-midi2record"; name = "bad-flag"; }
-      { tool = "pw-sysex"; name = "bad-flag"; }
-      { tool = "pw-dsdplay"; name = "bad-flag"; }
-      { tool = "pw-encplay"; name = "bad-flag"; }
-      { tool = "pw-cat"; name = "help-short"; }
-      { tool = "pw-play"; name = "help-short"; }
-      { tool = "pw-record"; name = "help-short"; }
-      { tool = "pw-midiplay"; name = "help-short"; }
-      { tool = "pw-midirecord"; name = "help-short"; }
-      { tool = "pw-midi2play"; name = "help-short"; }
-      { tool = "pw-midi2record"; name = "help-short"; }
-      { tool = "pw-sysex"; name = "help-short"; }
-      { tool = "pw-dsdplay"; name = "help-short"; }
-      { tool = "pw-encplay"; name = "help-short"; }
-      { tool = "pw-cat"; name = "invalid-V"; }
-      { tool = "pw-play"; name = "invalid-V"; }
-      { tool = "pw-record"; name = "invalid-V"; }
-      { tool = "pw-midiplay"; name = "invalid-V"; }
-      { tool = "pw-midirecord"; name = "invalid-V"; }
-      { tool = "pw-midi2play"; name = "invalid-V"; }
-      { tool = "pw-midi2record"; name = "invalid-V"; }
-      { tool = "pw-sysex"; name = "invalid-V"; }
-      { tool = "pw-dsdplay"; name = "invalid-V"; }
-      { tool = "pw-encplay"; name = "invalid-V"; }
-      { tool = "pw-cat"; name = "list-formats"; }
-      { tool = "pw-dot"; name = "empty-json"; }
-      { tool = "pw-cat"; name = "list-channel-names"; }
-      { tool = "pw-cat"; name = "list-layouts"; }
-      { tool = "pw-cat"; name = "list-containers"; }
-      { tool = "pw-reserve"; name = "help"; }
-      { tool = "pw-reserve"; name = "version"; }
-      { tool = "pw-container"; name = "help"; }
-      { tool = "pw-container"; name = "version"; }
-      { tool = "pipewire-aes67"; name = "help"; }
-      { tool = "pipewire-aes67"; name = "version"; }
-      { tool = "pipewire-avb"; name = "help"; }
-      { tool = "pipewire-avb"; name = "version"; }
-      { tool = "pipewire-vulkan"; name = "help"; }
-      { tool = "pipewire-vulkan"; name = "version"; }
-      { tool = "pipewire-aes67"; name = "help-short"; }
-      { tool = "pipewire-aes67"; name = "version-short"; }
-      { tool = "pipewire-avb"; name = "help-short"; }
-      { tool = "pipewire-avb"; name = "version-short"; }
-      { tool = "pipewire-vulkan"; name = "help-short"; }
-      { tool = "pipewire-vulkan"; name = "version-short"; }
-      { tool = "pw-reserve"; name = "help-short"; }
-      { tool = "pw-reserve"; name = "version-short"; }
-      { tool = "pw-container"; name = "help-short"; }
-      { tool = "pw-container"; name = "version-short"; }
-      { tool = "pw-loopback"; name = "help-short"; }
-      { tool = "pipewire"; name = "bad-flag"; }
-      { tool = "pipewire-pulse"; name = "bad-flag"; }
-      { tool = "pipewire-aes67"; name = "bad-flag"; }
-      { tool = "pipewire-avb"; name = "bad-flag"; }
-      { tool = "pipewire-vulkan"; name = "bad-flag"; }
-      { tool = "pw-mon"; name = "bad-flag"; }
-      { tool = "pw-mididump"; name = "bad-flag"; }
-      { tool = "pw-dot"; name = "bad-flag"; }
-      { tool = "pw-top"; name = "bad-flag"; }
-      { tool = "pw-profiler"; name = "bad-flag"; }
-      { tool = "pw-reserve"; name = "bad-flag"; }
-      { tool = "pw-container"; name = "bad-flag"; }
-      { tool = "pw-loopback"; name = "bad-flag"; }
-      { tool = "pw-v4l2"; name = "bad-flag"; }
-      { tool = "spa-acp-tool"; name = "bad-flag"; }
-      { tool = "spa-resample"; name = "help"; }
-      { tool = "spa-resample"; name = "no-args"; }
-      { tool = "spa-resample"; name = "one-arg"; }
-      { tool = "spa-resample"; name = "bad-flag"; }
-      { tool = "pw-v4l2"; name = "help"; }
-      { tool = "spa-inspect"; name = "usage"; }
-      { tool = "spa-monitor"; name = "usage"; }
-      { tool = "spa-inspect"; name = "bad-plugin"; }
-      { tool = "spa-monitor"; name = "bad-plugin"; }
-      { tool = "spa-acp-tool"; name = "help"; }
-      { tool = "spa-acp-tool"; name = "invalid-V"; }
-      { tool = "pw-loopback"; name = "help"; }
-      { tool = "pw-cli"; name = "version-short"; }
-      { tool = "pw-mon"; name = "version-short"; }
-      { tool = "pw-link"; name = "version-short"; }
-      { tool = "pw-metadata"; name = "version-short"; }
-      { tool = "pw-config"; name = "version-short"; }
-      { tool = "pw-dump"; name = "version-short"; }
-      { tool = "pw-dot"; name = "version-short"; }
-      { tool = "pw-mididump"; name = "version-short"; }
-      { tool = "pw-profiler"; name = "version-short"; }
-      { tool = "pw-top"; name = "version-short"; }
-      { tool = "pipewire"; name = "version-short"; }
-      { tool = "pipewire-pulse"; name = "version-short"; }
-      { tool = "pw-cli"; name = "help-short"; }
-      { tool = "pw-mon"; name = "help-short"; }
-      { tool = "pw-link"; name = "help-short"; }
-      { tool = "pw-metadata"; name = "help-short"; }
-      { tool = "pw-config"; name = "help-short"; }
-      { tool = "pw-dump"; name = "help-short"; }
-      { tool = "pw-dot"; name = "help-short"; }
-      { tool = "pw-mididump"; name = "help-short"; }
-      { tool = "pw-profiler"; name = "help-short"; }
-      { tool = "pw-top"; name = "help-short"; }
-      { tool = "pipewire"; name = "help-short"; }
-      { tool = "pipewire-pulse"; name = "help-short"; }
+      {
+        tool = "pw-cli";
+        name = "version";
+      }
+      {
+        tool = "pw-mon";
+        name = "version";
+      }
+      {
+        tool = "pw-link";
+        name = "version";
+      }
+      {
+        tool = "pw-metadata";
+        name = "version";
+      }
+      {
+        tool = "pw-config";
+        name = "version";
+      }
+      {
+        tool = "pw-dump";
+        name = "version";
+      }
+      {
+        tool = "pw-dot";
+        name = "version";
+      }
+      {
+        tool = "pw-mididump";
+        name = "version";
+      }
+      {
+        tool = "pw-profiler";
+        name = "version";
+      }
+      {
+        tool = "pw-top";
+        name = "version";
+      }
+      {
+        tool = "pipewire";
+        name = "version";
+      }
+      {
+        tool = "pipewire-pulse";
+        name = "version";
+      }
+      {
+        tool = "pw-cat";
+        name = "help";
+      }
+      {
+        tool = "pw-play";
+        name = "help";
+      }
+      {
+        tool = "pw-record";
+        name = "help";
+      }
+      {
+        tool = "pw-midiplay";
+        name = "help";
+      }
+      {
+        tool = "pw-midirecord";
+        name = "help";
+      }
+      {
+        tool = "pw-midi2play";
+        name = "help";
+      }
+      {
+        tool = "pw-midi2record";
+        name = "help";
+      }
+      {
+        tool = "pw-sysex";
+        name = "help";
+      }
+      {
+        tool = "pw-dsdplay";
+        name = "help";
+      }
+      {
+        tool = "pw-encplay";
+        name = "help";
+      }
+      {
+        tool = "pw-cat";
+        name = "version";
+      }
+      {
+        tool = "pw-play";
+        name = "version";
+      }
+      {
+        tool = "pw-record";
+        name = "version";
+      }
+      {
+        tool = "pw-midiplay";
+        name = "version";
+      }
+      {
+        tool = "pw-midirecord";
+        name = "version";
+      }
+      {
+        tool = "pw-midi2play";
+        name = "version";
+      }
+      {
+        tool = "pw-midi2record";
+        name = "version";
+      }
+      {
+        tool = "pw-sysex";
+        name = "version";
+      }
+      {
+        tool = "pw-dsdplay";
+        name = "version";
+      }
+      {
+        tool = "pw-encplay";
+        name = "version";
+      }
+      {
+        tool = "pw-cat";
+        name = "no-args";
+      }
+      {
+        tool = "pw-play";
+        name = "no-args";
+      }
+      {
+        tool = "pw-record";
+        name = "no-args";
+      }
+      {
+        tool = "pw-midiplay";
+        name = "no-args";
+      }
+      {
+        tool = "pw-midirecord";
+        name = "no-args";
+      }
+      {
+        tool = "pw-midi2play";
+        name = "no-args";
+      }
+      {
+        tool = "pw-midi2record";
+        name = "no-args";
+      }
+      {
+        tool = "pw-sysex";
+        name = "no-args";
+      }
+      {
+        tool = "pw-dsdplay";
+        name = "no-args";
+      }
+      {
+        tool = "pw-encplay";
+        name = "no-args";
+      }
+      {
+        tool = "pw-cat";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-play";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-record";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-midiplay";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-midirecord";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-midi2play";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-midi2record";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-sysex";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-dsdplay";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-encplay";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-cat";
+        name = "help-short";
+      }
+      {
+        tool = "pw-play";
+        name = "help-short";
+      }
+      {
+        tool = "pw-record";
+        name = "help-short";
+      }
+      {
+        tool = "pw-midiplay";
+        name = "help-short";
+      }
+      {
+        tool = "pw-midirecord";
+        name = "help-short";
+      }
+      {
+        tool = "pw-midi2play";
+        name = "help-short";
+      }
+      {
+        tool = "pw-midi2record";
+        name = "help-short";
+      }
+      {
+        tool = "pw-sysex";
+        name = "help-short";
+      }
+      {
+        tool = "pw-dsdplay";
+        name = "help-short";
+      }
+      {
+        tool = "pw-encplay";
+        name = "help-short";
+      }
+      {
+        tool = "pw-cat";
+        name = "invalid-V";
+      }
+      {
+        tool = "pw-play";
+        name = "invalid-V";
+      }
+      {
+        tool = "pw-record";
+        name = "invalid-V";
+      }
+      {
+        tool = "pw-midiplay";
+        name = "invalid-V";
+      }
+      {
+        tool = "pw-midirecord";
+        name = "invalid-V";
+      }
+      {
+        tool = "pw-midi2play";
+        name = "invalid-V";
+      }
+      {
+        tool = "pw-midi2record";
+        name = "invalid-V";
+      }
+      {
+        tool = "pw-sysex";
+        name = "invalid-V";
+      }
+      {
+        tool = "pw-dsdplay";
+        name = "invalid-V";
+      }
+      {
+        tool = "pw-encplay";
+        name = "invalid-V";
+      }
+      {
+        tool = "pw-cat";
+        name = "list-formats";
+      }
+      {
+        tool = "pw-dot";
+        name = "empty-json";
+      }
+      {
+        tool = "pw-cat";
+        name = "list-channel-names";
+      }
+      {
+        tool = "pw-cat";
+        name = "list-layouts";
+      }
+      {
+        tool = "pw-cat";
+        name = "list-containers";
+      }
+      {
+        tool = "pw-reserve";
+        name = "help";
+      }
+      {
+        tool = "pw-reserve";
+        name = "version";
+      }
+      {
+        tool = "pw-container";
+        name = "help";
+      }
+      {
+        tool = "pw-container";
+        name = "version";
+      }
+      {
+        tool = "pipewire-aes67";
+        name = "help";
+      }
+      {
+        tool = "pipewire-aes67";
+        name = "version";
+      }
+      {
+        tool = "pipewire-avb";
+        name = "help";
+      }
+      {
+        tool = "pipewire-avb";
+        name = "version";
+      }
+      {
+        tool = "pipewire-vulkan";
+        name = "help";
+      }
+      {
+        tool = "pipewire-vulkan";
+        name = "version";
+      }
+      {
+        tool = "pipewire-aes67";
+        name = "help-short";
+      }
+      {
+        tool = "pipewire-aes67";
+        name = "version-short";
+      }
+      {
+        tool = "pipewire-avb";
+        name = "help-short";
+      }
+      {
+        tool = "pipewire-avb";
+        name = "version-short";
+      }
+      {
+        tool = "pipewire-vulkan";
+        name = "help-short";
+      }
+      {
+        tool = "pipewire-vulkan";
+        name = "version-short";
+      }
+      {
+        tool = "pw-reserve";
+        name = "help-short";
+      }
+      {
+        tool = "pw-reserve";
+        name = "version-short";
+      }
+      {
+        tool = "pw-container";
+        name = "help-short";
+      }
+      {
+        tool = "pw-container";
+        name = "version-short";
+      }
+      {
+        tool = "pw-loopback";
+        name = "help-short";
+      }
+      {
+        tool = "pipewire";
+        name = "bad-flag";
+      }
+      {
+        tool = "pipewire-pulse";
+        name = "bad-flag";
+      }
+      {
+        tool = "pipewire-aes67";
+        name = "bad-flag";
+      }
+      {
+        tool = "pipewire-avb";
+        name = "bad-flag";
+      }
+      {
+        tool = "pipewire-vulkan";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-mon";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-mididump";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-dot";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-top";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-profiler";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-reserve";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-container";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-loopback";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-v4l2";
+        name = "bad-flag";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "bad-flag";
+      }
+      {
+        tool = "spa-resample";
+        name = "help";
+      }
+      {
+        tool = "spa-resample";
+        name = "no-args";
+      }
+      {
+        tool = "spa-resample";
+        name = "one-arg";
+      }
+      {
+        tool = "spa-resample";
+        name = "bad-flag";
+      }
+      {
+        tool = "spa-resample";
+        name = "invalid-V";
+      }
+      {
+        tool = "spa-resample";
+        name = "missing-arg-c";
+      }
+      {
+        tool = "spa-resample";
+        name = "missing-arg-r";
+      }
+      {
+        tool = "spa-resample";
+        name = "with-c-flag";
+      }
+      {
+        tool = "pw-v4l2";
+        name = "help";
+      }
+      {
+        tool = "spa-inspect";
+        name = "usage";
+      }
+      {
+        tool = "spa-monitor";
+        name = "usage";
+      }
+      {
+        tool = "spa-inspect";
+        name = "bad-plugin";
+      }
+      {
+        tool = "spa-monitor";
+        name = "bad-plugin";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "help";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "invalid-V";
+      }
+      {
+        tool = "pw-loopback";
+        name = "help";
+      }
+      {
+        tool = "pw-cli";
+        name = "version-short";
+      }
+      {
+        tool = "pw-mon";
+        name = "version-short";
+      }
+      {
+        tool = "pw-link";
+        name = "version-short";
+      }
+      {
+        tool = "pw-metadata";
+        name = "version-short";
+      }
+      {
+        tool = "pw-config";
+        name = "version-short";
+      }
+      {
+        tool = "pw-dump";
+        name = "version-short";
+      }
+      {
+        tool = "pw-dot";
+        name = "version-short";
+      }
+      {
+        tool = "pw-mididump";
+        name = "version-short";
+      }
+      {
+        tool = "pw-profiler";
+        name = "version-short";
+      }
+      {
+        tool = "pw-top";
+        name = "version-short";
+      }
+      {
+        tool = "pipewire";
+        name = "version-short";
+      }
+      {
+        tool = "pipewire-pulse";
+        name = "version-short";
+      }
+      {
+        tool = "pw-cli";
+        name = "help-short";
+      }
+      {
+        tool = "pw-mon";
+        name = "help-short";
+      }
+      {
+        tool = "pw-link";
+        name = "help-short";
+      }
+      {
+        tool = "pw-metadata";
+        name = "help-short";
+      }
+      {
+        tool = "pw-config";
+        name = "help-short";
+      }
+      {
+        tool = "pw-dump";
+        name = "help-short";
+      }
+      {
+        tool = "pw-dot";
+        name = "help-short";
+      }
+      {
+        tool = "pw-mididump";
+        name = "help-short";
+      }
+      {
+        tool = "pw-profiler";
+        name = "help-short";
+      }
+      {
+        tool = "pw-top";
+        name = "help-short";
+      }
+      {
+        tool = "pipewire";
+        name = "help-short";
+      }
+      {
+        tool = "pipewire-pulse";
+        name = "help-short";
+      }
+      {
+        tool = "pw-cli";
+        name = "short-bad-flag";
+      }
+      {
+        tool = "pw-mon";
+        name = "short-bad-flag";
+      }
+      {
+        tool = "pw-link";
+        name = "short-bad-flag";
+      }
+      {
+        tool = "pw-metadata";
+        name = "short-bad-flag";
+      }
+      {
+        tool = "pw-dump";
+        name = "short-bad-flag";
+      }
+      {
+        tool = "pw-dot";
+        name = "short-bad-flag";
+      }
+      {
+        tool = "pw-profiler";
+        name = "short-bad-flag";
+      }
+      {
+        tool = "pw-top";
+        name = "short-bad-flag";
+      }
 
       # --- per-tool --help byte-identical parity ---
       {
@@ -427,122 +922,452 @@
     # Rich-daemon tests — same as daemonTests but with a null-audio-sink
     # Node pre-loaded so Node/Port code paths can be exercised.
     richDaemonTests = [
-      {tool = "pw-cli"; name = "ls-node-rich";}
-      {tool = "pw-cli"; name = "ls-port-rich";}
-      {tool = "pw-cli"; name = "info-node-rich";}
-      {tool = "pw-cli"; name = "info-all-rich";}
-      {tool = "pw-cli"; name = "ls-substring-rich";}
-      {tool = "pw-cli"; name = "ls-no-filter-rich";}
-      {tool = "pw-cli"; name = "info-by-name-rich";}
-      {tool = "pw-link"; name = "input-rich";}
-      {tool = "pw-link"; name = "output-rich";}
-      {tool = "pw-link"; name = "input-id-rich";}
-      {tool = "pw-link"; name = "input-verbose-rich";}
-      {tool = "pw-link"; name = "input-links-rich";}
-      {tool = "pw-link"; name = "output-links-rich";}
-      {tool = "pw-link"; name = "all-flags-rich";}
-      {tool = "pw-link"; name = "pattern-output-empty";}
-      {tool = "pw-link"; name = "pattern-both-empty";}
-      {tool = "pw-cli"; name = "ls-module-rich";}
-      {tool = "pw-cli"; name = "ls-factory-rich";}
-      {tool = "pw-cli"; name = "ls-securitycontext-rich";}
-      {tool = "pw-cli"; name = "ls-metadata-rich";}
-      {tool = "pw-cli"; name = "info-module-1-rich";}
-      {tool = "pw-cli"; name = "info-module-3-rich";}
-      {tool = "pw-cli"; name = "info-module-5-rich";}
-      {tool = "pw-cli"; name = "info-factory-rich";}
-      {tool = "pw-cli"; name = "info-bad-id-rich";}
-      {tool = "pw-cli"; name = "info-securitycontext-rich";}
-      {tool = "pw-cli"; name = "info-by-name-Port";}
-      {tool = "pw-cli"; name = "help-cmd-rich";}
-      {tool = "pw-metadata"; name = "list-rich";}
-      {tool = "pw-metadata"; name = "list-byname";}
+      {
+        tool = "pw-cli";
+        name = "ls-node-rich";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-port-rich";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-node-rich";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-all-rich";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-substring-rich";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-no-filter-rich";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-by-name-rich";
+      }
+      {
+        tool = "pw-link";
+        name = "input-rich";
+      }
+      {
+        tool = "pw-link";
+        name = "output-rich";
+      }
+      {
+        tool = "pw-link";
+        name = "input-id-rich";
+      }
+      {
+        tool = "pw-link";
+        name = "input-verbose-rich";
+      }
+      {
+        tool = "pw-link";
+        name = "input-links-rich";
+      }
+      {
+        tool = "pw-link";
+        name = "output-links-rich";
+      }
+      {
+        tool = "pw-link";
+        name = "all-flags-rich";
+      }
+      {
+        tool = "pw-link";
+        name = "pattern-output-empty";
+      }
+      {
+        tool = "pw-link";
+        name = "pattern-both-empty";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-module-rich";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-factory-rich";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-securitycontext-rich";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-metadata-rich";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-module-1-rich";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-module-3-rich";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-module-5-rich";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-factory-rich";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-bad-id-rich";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-securitycontext-rich";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-by-name-Port";
+      }
+      {
+        tool = "pw-cli";
+        name = "help-cmd-rich";
+      }
+      {
+        tool = "pw-metadata";
+        name = "list-rich";
+      }
+      {
+        tool = "pw-metadata";
+        name = "list-byname";
+      }
     ];
 
     # Daemon-comparison tests — spawn a real C pipewire daemon and run both
     # the C tool and the Rust tool against it, then diff. Each entry is
     # `tools/<tool>/<name>.sh`.
     daemonTests = [
-      {tool = "pw-cli"; name = "ls-core";}
-      {tool = "pw-cli"; name = "ls-module";}
-      {tool = "pw-cli"; name = "ls-factory";}
-      {tool = "pw-cli"; name = "ls-securitycontext";}
-      {tool = "pw-cli"; name = "ls-metadata";}
-      {tool = "pw-cli"; name = "ls-empty-node";}
-      {tool = "pw-cli"; name = "ls-empty-link";}
-      {tool = "pw-cli"; name = "ls-empty-port";}
-      {tool = "pw-cli"; name = "ls-empty-device";}
-      {tool = "pw-cli"; name = "ls-all-normalized";}
-      {tool = "pw-cli"; name = "ls-substring";}
-      {tool = "pw-cli"; name = "info-core";}
-      {tool = "pw-cli"; name = "info-module-1";}
-      {tool = "pw-cli"; name = "info-module-3";}
-      {tool = "pw-cli"; name = "info-module-5";}
-      {tool = "pw-cli"; name = "info-factory";}
-      {tool = "pw-cli"; name = "info-all";}
-      {tool = "pw-cli"; name = "info-bad-id";}
-      {tool = "pw-cli"; name = "info-securitycontext";}
-      {tool = "pw-cli"; name = "info-by-name";}
-      {tool = "pw-cli"; name = "info-by-name-Module";}
-      {tool = "pw-cli"; name = "info-by-name-Factory";}
-      {tool = "pw-cli"; name = "info-by-name-SecurityContext";}
-      {tool = "pw-cli"; name = "info-by-name-Metadata";}
-      {tool = "pw-cli"; name = "info-by-name-NonExistent";}
-      {tool = "pw-cli"; name = "unknown-command";}
-      {tool = "pw-cli"; name = "ls-core-quoted";}
-      {tool = "pw-cli"; name = "ls-multiarg";}
-      {tool = "pw-cli"; name = "help-with-d";}
-      {tool = "pw-cli"; name = "ls-help-mixed";}
-      {tool = "pw-cli"; name = "connect-fail";}
-      {tool = "pw-cli"; name = "cmd-connect";}
-      {tool = "pw-cli"; name = "cmd-disconnect";}
-      {tool = "pw-cli"; name = "cmd-switch-remote";}
-      {tool = "pw-cli"; name = "bad-flag";}
-      {tool = "pw-link"; name = "bad-flag";}
-      {tool = "pw-metadata"; name = "bad-flag";}
-      {tool = "pw-dump"; name = "bad-flag";}
-      {tool = "pw-cli"; name = "help-cmd";}
-      {tool = "pw-cli"; name = "list-vars";}
-      {tool = "pw-cli"; name = "list-remotes";}
-      {tool = "pw-cli"; name = "quit";}
-      {tool = "pw-cli"; name = "usage-load-module";}
-      {tool = "pw-cli"; name = "usage-unload-module";}
-      {tool = "pw-cli"; name = "usage-create-device";}
-      {tool = "pw-cli"; name = "usage-create-node";}
-      {tool = "pw-cli"; name = "usage-destroy";}
-      {tool = "pw-cli"; name = "usage-enum-params";}
-      {tool = "pw-cli"; name = "usage-set-param";}
-      {tool = "pw-cli"; name = "usage-permissions";}
-      {tool = "pw-cli"; name = "usage-send-command";}
-      {tool = "pw-cli"; name = "usage-get-permissions";}
-      {tool = "pw-cli"; name = "usage-create-link";}
-      {tool = "pw-cli"; name = "usage-export-node";}
-      {tool = "pw-cli"; name = "usage-alias-lm";}
-      {tool = "pw-cli"; name = "usage-alias-um";}
-      {tool = "pw-cli"; name = "usage-alias-cd";}
-      {tool = "pw-cli"; name = "usage-alias-cn";}
-      {tool = "pw-cli"; name = "usage-alias-d";}
-      {tool = "pw-cli"; name = "usage-alias-cl";}
-      {tool = "pw-cli"; name = "usage-alias-en";}
-      {tool = "pw-cli"; name = "usage-alias-e";}
-      {tool = "pw-cli"; name = "usage-alias-s";}
-      {tool = "pw-cli"; name = "usage-alias-sp";}
-      {tool = "pw-cli"; name = "usage-alias-gp";}
-      {tool = "pw-cli"; name = "usage-alias-c";}
-      {tool = "pw-link"; name = "empty-input";}
-      {tool = "pw-link"; name = "latency-only";}
-      {tool = "pw-link"; name = "disconnect-no-args";}
-      {tool = "pw-link"; name = "connect-missing-input";}
-      {tool = "pw-link"; name = "empty-output";}
-      {tool = "pw-link"; name = "empty-links";}
-      {tool = "pw-link"; name = "links-empty-verbose-id";}
-      {tool = "pw-link"; name = "connect-fail";}
-      {tool = "pw-metadata"; name = "list-empty";}
-      {tool = "pw-metadata"; name = "connect-fail";}
-      {tool = "pw-dump"; name = "connect-fail";}
-      {tool = "pw-dump"; name = "structural";}
-      {tool = "pw-dump"; name = "structural-indent4";}
-      {tool = "pw-dump"; name = "structural-indent0";}
+      {
+        tool = "pw-cli";
+        name = "ls-core";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-module";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-factory";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-securitycontext";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-metadata";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-empty-node";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-empty-link";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-empty-port";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-empty-device";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-all-normalized";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-substring";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-core";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-module-1";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-module-3";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-module-5";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-factory";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-all";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-bad-id";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-securitycontext";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-by-name";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-by-name-Module";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-by-name-Factory";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-by-name-SecurityContext";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-by-name-Metadata";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-by-name-NonExistent";
+      }
+      {
+        tool = "pw-cli";
+        name = "unknown-command";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-core-quoted";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-multiarg";
+      }
+      {
+        tool = "pw-cli";
+        name = "help-with-d";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-help-mixed";
+      }
+      {
+        tool = "pw-cli";
+        name = "connect-fail";
+      }
+      {
+        tool = "pw-cli";
+        name = "cmd-connect";
+      }
+      {
+        tool = "pw-cli";
+        name = "cmd-disconnect";
+      }
+      {
+        tool = "pw-cli";
+        name = "cmd-switch-remote";
+      }
+      {
+        tool = "pw-cli";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-link";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-metadata";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-dump";
+        name = "bad-flag";
+      }
+      {
+        tool = "pw-cli";
+        name = "help-cmd";
+      }
+      {
+        tool = "pw-cli";
+        name = "list-vars";
+      }
+      {
+        tool = "pw-cli";
+        name = "list-remotes";
+      }
+      {
+        tool = "pw-cli";
+        name = "quit";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-load-module";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-unload-module";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-create-device";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-create-node";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-destroy";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-enum-params";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-set-param";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-permissions";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-send-command";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-get-permissions";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-create-link";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-export-node";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-alias-lm";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-alias-um";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-alias-cd";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-alias-cn";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-alias-d";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-alias-cl";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-alias-en";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-alias-e";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-alias-s";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-alias-sp";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-alias-gp";
+      }
+      {
+        tool = "pw-cli";
+        name = "usage-alias-c";
+      }
+      {
+        tool = "pw-link";
+        name = "empty-input";
+      }
+      {
+        tool = "pw-link";
+        name = "latency-only";
+      }
+      {
+        tool = "pw-link";
+        name = "disconnect-no-args";
+      }
+      {
+        tool = "pw-link";
+        name = "connect-missing-input";
+      }
+      {
+        tool = "pw-link";
+        name = "empty-output";
+      }
+      {
+        tool = "pw-link";
+        name = "empty-links";
+      }
+      {
+        tool = "pw-link";
+        name = "links-empty-verbose-id";
+      }
+      {
+        tool = "pw-link";
+        name = "connect-fail";
+      }
+      {
+        tool = "pw-metadata";
+        name = "list-empty";
+      }
+      {
+        tool = "pw-metadata";
+        name = "connect-fail";
+      }
+      {
+        tool = "pw-dump";
+        name = "connect-fail";
+      }
+      {
+        tool = "pw-dump";
+        name = "structural";
+      }
+      {
+        tool = "pw-dump";
+        name = "structural-indent4";
+      }
+      {
+        tool = "pw-dump";
+        name = "structural-indent0";
+      }
     ];
   in
     builtins.listToAttrs (

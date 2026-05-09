@@ -13,6 +13,17 @@ pub fn main(args: &[String]) -> i32 {
             print_version(argv0);
             0
         }
+        Some(s) if s.starts_with("--") => {
+            eprintln!("{argv0}: unrecognized option '{s}'");
+            print_help(argv0);
+            0
+        }
+        Some(s) if s.starts_with('-') && s.len() == 2 => {
+            let ch = s.chars().nth(1).unwrap_or('?');
+            eprintln!("{argv0}: invalid option -- '{ch}'");
+            print_help(argv0);
+            0
+        }
         Some(s) if s.starts_with('-') => {
             eprintln!("{argv0}: unrecognized option '{s}'");
             print_help(argv0);

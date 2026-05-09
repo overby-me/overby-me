@@ -2,8 +2,6 @@
 // implementation drives ALSA via the SPA bluez/alsa monitor and is
 // Phase 10+ work. We mirror the C tool's --help / -h output exactly.
 
-use crate::tools::common::print_version;
-
 pub fn main(args: &[String]) -> i32 {
     let argv0 = args.first().map(String::as_str).unwrap_or("spa-acp-tool");
 
@@ -16,9 +14,7 @@ pub fn main(args: &[String]) -> i32 {
             // spa-acp-tool's getopt has no --version or -V — both fall
             // through to the unrecognized-option branch.
             // Long unknown:
-            s if s.starts_with("--")
-                && !matches!(s, "--verbose" | "--card" | "--properties") =>
-            {
+            s if s.starts_with("--") && !matches!(s, "--verbose" | "--card" | "--properties") => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 eprintln!("error: unknown option '?'");
                 print_options(argv0);
@@ -28,10 +24,7 @@ pub fn main(args: &[String]) -> i32 {
             }
             // Short unknown: getopt prints `invalid option -- 'X'`
             // (single-quoted single char, like pw-cat).
-            s if s.starts_with('-')
-                && s.len() == 2
-                && !matches!(s, "-v" | "-c" | "-p") =>
-            {
+            s if s.starts_with('-') && s.len() == 2 && !matches!(s, "-v" | "-c" | "-p") => {
                 let ch = s.chars().nth(1).unwrap_or('?');
                 eprintln!("{argv0}: invalid option -- '{ch}'");
                 eprintln!("error: unknown option '?'");
@@ -86,9 +79,18 @@ fn print_commands() {
         ("list-devices    [id]      ", "List available devices (ld)"),
         ("get-volume      <id>      ", "Get volume from device (gv)"),
         ("set-volume      <id> <vol>", "Set volume on device (v)"),
-        ("inc-volume      <id>      ", "Increase volume on device (v+)"),
-        ("dec-volume      <id>      ", "Decrease volume on device (v-)"),
-        ("get-mute        <id>      ", "Get mute state from device (gm)"),
+        (
+            "inc-volume      <id>      ",
+            "Increase volume on device (v+)",
+        ),
+        (
+            "dec-volume      <id>      ",
+            "Decrease volume on device (v-)",
+        ),
+        (
+            "get-mute        <id>      ",
+            "Get mute state from device (gm)",
+        ),
         ("set-mute        <id> <val>", "Set mute on device (sm)"),
         ("toggle-mute     <id>      ", "Toggle mute on device (m)"),
     ];

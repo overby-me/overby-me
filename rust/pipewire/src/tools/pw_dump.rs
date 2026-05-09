@@ -53,6 +53,17 @@ pub fn main(args: &[String]) -> i32 {
             s if s.starts_with("--color") => {
                 // --color or --color=auto/always/never; ignored.
             }
+            s if s.starts_with("--") => {
+                eprintln!("{argv0}: unrecognized option '{s}'");
+                print_help(argv0);
+                return 0;
+            }
+            s if s.starts_with('-') && s.len() == 2 => {
+                let ch = s.chars().nth(1).unwrap_or('?');
+                eprintln!("{argv0}: invalid option -- '{ch}'");
+                print_help(argv0);
+                return 0;
+            }
             s if s.starts_with('-') => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);
@@ -95,12 +106,8 @@ pub fn main(args: &[String]) -> i32 {
 
     let mut sorted: Vec<&RegistryGlobal> = globals
         .iter()
-        .filter(|g| filter_id.map_or(true, |f| g.id == f))
-        .filter(|g| {
-            filter_iface
-                .as_deref()
-                .map_or(true, |f| g.interface == f)
-        })
+        .filter(|g| filter_id.is_none_or(|f| g.id == f))
+        .filter(|g| filter_iface.as_deref().is_none_or(|f| g.interface == f))
         .collect();
     sorted.sort_by_key(|g| g.id);
 
@@ -127,9 +134,7 @@ fn print_help(argv0: &str) {
 
 fn collect_globals(remote: Option<&str>) -> Result<Vec<RegistryGlobal>, String> {
     let mut client = match remote {
-        Some(name) if name.starts_with('/') => {
-            Client::connect_path(std::path::Path::new(name))
-        }
+        Some(name) if name.starts_with('/') => Client::connect_path(std::path::Path::new(name)),
         Some(name) => {
             let runtime = std::env::var("XDG_RUNTIME_DIR")
                 .map_err(|_| "XDG_RUNTIME_DIR unset (cannot resolve remote)".to_string())?;
@@ -154,18 +159,20 @@ fn collect_globals(remote: Option<&str>) -> Result<Vec<RegistryGlobal>, String> 
             Ok(None) => break,
             Err(e) => return Err(format!("read: {e}")),
         };
-        if msg.opcode == interfaces::registry_event::GLOBAL && msg.id == 2
+        if msg.opcode == interfaces::registry_event::GLOBAL
+            && msg.id == 2
             && let Ok(g) = crate::pipewire_lib::client::decode_registry_global(&msg.args)
         {
             globals.push(g);
         }
-        if msg.opcode == interfaces::registry_event::GLOBAL_REMOVE && msg.id == 2
-            && let Ok(rid) =
-                crate::pipewire_lib::client::decode_registry_global_remove(&msg.args)
+        if msg.opcode == interfaces::registry_event::GLOBAL_REMOVE
+            && msg.id == 2
+            && let Ok(rid) = crate::pipewire_lib::client::decode_registry_global_remove(&msg.args)
         {
             globals.retain(|g: &RegistryGlobal| g.id != rid);
         }
-        if msg.id == interfaces::ID_CORE && msg.opcode == interfaces::core_event::DONE
+        if msg.id == interfaces::ID_CORE
+            && msg.opcode == interfaces::core_event::DONE
             && let Ok((_id, seq)) = crate::pipewire_lib::client::decode_core_done(&msg.args)
             && seq == sync_seq
         {

@@ -13,8 +13,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crate::pipewire_lib::interfaces::{
-    self, ID_CLIENT, ID_CORE, VERSION_CORE, VERSION_REGISTRY,
-    client_method, core_method,
+    self, ID_CLIENT, ID_CORE, VERSION_CORE, VERSION_REGISTRY, client_method, core_method,
 };
 use crate::pipewire_lib::proto_native::{Decoded, HDR_SIZE, Message, decode, encode_call};
 use crate::spa::pod::types::Value;
@@ -153,10 +152,10 @@ pub struct LinkInfo {
 /// Resolve `$XDG_RUNTIME_DIR/$PIPEWIRE_CORE` (with the standard fallbacks
 /// used by `pw-cli`).
 pub fn resolve_socket() -> io::Result<PathBuf> {
-    if let Ok(remote) = env::var("PIPEWIRE_REMOTE") {
-        if remote.starts_with('/') {
-            return Ok(PathBuf::from(remote));
-        }
+    if let Ok(remote) = env::var("PIPEWIRE_REMOTE")
+        && remote.starts_with('/')
+    {
+        return Ok(PathBuf::from(remote));
     }
     let runtime = env::var("XDG_RUNTIME_DIR")
         .map_err(|_| io::Error::new(io::ErrorKind::NotFound, "XDG_RUNTIME_DIR unset"))?;
@@ -199,6 +198,7 @@ impl Client {
         })
     }
 
+    #[allow(dead_code)]
     pub fn set_timeout(&mut self, t: Duration) -> io::Result<()> {
         self.timeout = t;
         self.stream.set_read_timeout(Some(t))
@@ -332,6 +332,7 @@ impl Client {
 
     /// Read messages until `pred(msg) -> Some(out)` succeeds, or no more
     /// messages arrive within the timeout. Useful for "wait for Done".
+    #[allow(dead_code)]
     pub fn drain_until<T>(
         &mut self,
         mut pred: impl FnMut(&Decoded) -> Option<T>,
@@ -460,11 +461,7 @@ fn decode_params_struct(v: &Value) -> Result<Vec<ParamInfo>, Error> {
     let mut iter = items.iter();
     let n = match iter.next() {
         Some(Value::Int(n)) if *n >= 0 => *n as usize,
-        _ => {
-            return Err(Error::UnexpectedShape(
-                "params: n_params not Int>=0",
-            ))
-        }
+        _ => return Err(Error::UnexpectedShape("params: n_params not Int>=0")),
     };
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
@@ -497,11 +494,7 @@ pub fn decode_node_info(args: &[Value]) -> Result<NodeInfo, Error> {
         n_output_ports: expect_int(&args[5], "Node.Info.n_output_ports")? as u32,
         state: match &args[6] {
             Value::Id(s) => *s,
-            _ => {
-                return Err(Error::Decode(
-                    "Node.Info.state: expected Id".into(),
-                ))
-            }
+            _ => return Err(Error::Decode("Node.Info.state: expected Id".into())),
         },
         error: expect_string(&args[7], "Node.Info.error")?,
         props: decode_dict_struct(&args[8])?,
@@ -581,9 +574,7 @@ pub fn decode_client_info(args: &[Value]) -> Result<ClientInfo, Error> {
 /// Decode `Registry.Global` (id=registry_proxy, opcode=0).
 pub fn decode_registry_global(args: &[Value]) -> Result<RegistryGlobal, Error> {
     if args.len() < 5 {
-        return Err(Error::UnexpectedShape(
-            "Registry.Global: not enough fields",
-        ));
+        return Err(Error::UnexpectedShape("Registry.Global: not enough fields"));
     }
     let id = expect_int(&args[0], "Registry.Global.id")? as u32;
     let permissions = expect_int(&args[1], "Registry.Global.permissions")? as u32;
@@ -602,9 +593,7 @@ pub fn decode_registry_global(args: &[Value]) -> Result<RegistryGlobal, Error> {
 /// Decode `Registry.GlobalRemove` (id=registry_proxy, opcode=1).
 pub fn decode_registry_global_remove(args: &[Value]) -> Result<u32, Error> {
     if args.is_empty() {
-        return Err(Error::UnexpectedShape(
-            "Registry.GlobalRemove: empty args",
-        ));
+        return Err(Error::UnexpectedShape("Registry.GlobalRemove: empty args"));
     }
     let id = expect_int(&args[0], "Registry.GlobalRemove.id")? as u32;
     Ok(id)
@@ -621,6 +610,7 @@ pub fn decode_core_done(args: &[Value]) -> Result<(u32, u32), Error> {
 }
 
 /// Decode `Core.Ping(id, seq)` so the client can reply with Core.Pong.
+#[allow(dead_code)]
 pub fn decode_core_ping(args: &[Value]) -> Result<(u32, u32), Error> {
     if args.len() < 2 {
         return Err(Error::UnexpectedShape("Core.Ping: not enough fields"));
@@ -670,6 +660,7 @@ fn expect_string(v: &Value, ctx: &'static str) -> Result<String, Error> {
 }
 
 /// Convenience: is this proxy id the Core?
+#[allow(dead_code)]
 pub fn is_core(id: u32) -> bool {
     id == ID_CORE
 }
@@ -677,6 +668,7 @@ pub fn is_core(id: u32) -> bool {
 /// Convenience: convert an interface short-name (e.g. "Node") back to the
 /// full type string. Returns the input unchanged if it already looks fully
 /// qualified.
+#[allow(dead_code)]
 pub fn full_interface_name(s: &str) -> String {
     if s.starts_with("PipeWire:Interface:") {
         s.to_string()
@@ -765,10 +757,7 @@ mod tests {
 
     #[test]
     fn full_name_helper() {
-        assert_eq!(
-            full_interface_name("Node"),
-            "PipeWire:Interface:Node"
-        );
+        assert_eq!(full_interface_name("Node"), "PipeWire:Interface:Node");
         assert_eq!(
             full_interface_name("PipeWire:Interface:Node"),
             "PipeWire:Interface:Node"
@@ -824,13 +813,13 @@ mod tests {
         ]);
         let args = vec![
             Value::Int(8),
-            Value::Int(1),       // max_input_ports
-            Value::Int(0),       // max_output_ports
-            Value::Long(0x1f),   // change_mask all
-            Value::Int(1),       // n_input_ports
-            Value::Int(0),       // n_output_ports
-            Value::Id(1),        // state = suspended
-            Value::None,         // error null
+            Value::Int(1),     // max_input_ports
+            Value::Int(0),     // max_output_ports
+            Value::Long(0x1f), // change_mask all
+            Value::Int(1),     // n_input_ports
+            Value::Int(0),     // n_output_ports
+            Value::Id(1),      // state = suspended
+            Value::None,       // error null
             dict,
             params,
         ];
@@ -848,14 +837,14 @@ mod tests {
         let dict = build_dict(&[]);
         let args = vec![
             Value::Int(20),
-            Value::Int(11),  // out_node
-            Value::Int(12),  // out_port
-            Value::Int(13),  // in_node
-            Value::Int(14),  // in_port
+            Value::Int(11), // out_node
+            Value::Int(12), // out_port
+            Value::Int(13), // in_node
+            Value::Int(14), // in_port
             Value::Long(7),
-            Value::Int(0),   // state
+            Value::Int(0), // state
             Value::String("".into()),
-            Value::None,     // no format
+            Value::None, // no format
             dict,
         ];
         let info = decode_link_info(&args).unwrap();

@@ -19,10 +19,7 @@ pub fn main(args: &[String]) -> i32 {
 
     // Arguments:
     //   <0|none> [max_messages]
-    let max_messages: usize = args
-        .get(1)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(20);
+    let max_messages: usize = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(20);
 
     let socket = match resolve_socket() {
         Ok(p) => p,
@@ -56,16 +53,14 @@ pub fn main(args: &[String]) -> i32 {
 
 fn resolve_socket() -> io::Result<PathBuf> {
     // Mirror `pw-cli`'s default: $PIPEWIRE_REMOTE > $XDG_RUNTIME_DIR/$PIPEWIRE_CORE.
-    if let Ok(remote) = env::var("PIPEWIRE_REMOTE") {
-        if remote.starts_with('/') {
-            return Ok(PathBuf::from(remote));
-        }
+    if let Ok(remote) = env::var("PIPEWIRE_REMOTE")
+        && remote.starts_with('/')
+    {
+        return Ok(PathBuf::from(remote));
     }
-    let runtime = env::var("XDG_RUNTIME_DIR").map_err(|_| {
-        io::Error::new(io::ErrorKind::NotFound, "XDG_RUNTIME_DIR unset")
-    })?;
-    let core_name =
-        env::var("PIPEWIRE_CORE").unwrap_or_else(|_| "pipewire-0".into());
+    let runtime = env::var("XDG_RUNTIME_DIR")
+        .map_err(|_| io::Error::new(io::ErrorKind::NotFound, "XDG_RUNTIME_DIR unset"))?;
+    let core_name = env::var("PIPEWIRE_CORE").unwrap_or_else(|_| "pipewire-0".into());
     Ok(PathBuf::from(runtime).join(core_name))
 }
 
@@ -91,12 +86,7 @@ fn handshake(mut stream: &UnixStream) -> io::Result<()> {
 
     // Core.GetRegistry(version=3, new_id=2) — opcode 5 in C
     // protocol-native.c. Body: (i32 version, i32 new_id).
-    let get_reg = encode_call(
-        0,
-        CORE_OP_GET_REGISTRY,
-        2,
-        &[Value::Int(3), Value::Int(2)],
-    );
+    let get_reg = encode_call(0, CORE_OP_GET_REGISTRY, 2, &[Value::Int(3), Value::Int(2)]);
     stream.write_all(&get_reg.bytes)?;
 
     let _ = IoSlice::new(&[]); // anchor for io::Write trait
@@ -119,8 +109,9 @@ fn drain(mut stream: &UnixStream, max: usize) -> io::Result<()> {
                     read_count += 1;
                     let _ = read_count;
                 }
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock
-                    || e.kind() == io::ErrorKind::TimedOut =>
+                Err(e)
+                    if e.kind() == io::ErrorKind::WouldBlock
+                        || e.kind() == io::ErrorKind::TimedOut =>
                 {
                     break;
                 }
@@ -151,7 +142,7 @@ fn drain(mut stream: &UnixStream, max: usize) -> io::Result<()> {
                         if e.kind() == io::ErrorKind::WouldBlock
                             || e.kind() == io::ErrorKind::TimedOut =>
                     {
-                        break
+                        break;
                     }
                     Err(e) => return Err(e),
                 }

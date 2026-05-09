@@ -33,6 +33,9 @@ restat = "restat"
 endianity = "endianity"
 # DWARF section name .debug_aranges / .zdebug_aranges (Address Range Table)
 aranges = "aranges"
+# CAF = Apple Core Audio Format (libsndfile container)
+caf = "caf"
+CAF = "CAF"
 
 
 [default]
