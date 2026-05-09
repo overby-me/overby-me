@@ -15837,6 +15837,124 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
             "Unmatched ( in regex; marked by <-- HERE in m/{prefix} <-- HERE /"
         ));
     }
+    if let Some(err) = validate_conditional_groups(&chars, &named_groups) {
+        return Some(err);
+    }
+    None
+}
+
+/// Validate Perl's `(?(COND)yes|no)` conditional groups. The COND
+/// can be `N` (group exists), `<NAME>` / `'NAME'` (named group),
+/// `?=PAT` / `?!PAT` (lookahead/behind), or `?{CODE}` (code). Anything
+/// else triggers "Switch condition not recognized". The body may have
+/// at most one `|` — more triggers "Switch (?(condition)... contains
+/// too many branches". re/regexp tests 623, 624.
+fn validate_conditional_groups(
+    chars: &[char],
+    named_groups: &std::collections::HashSet<String>,
+) -> Option<String> {
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' {
+            i += 2;
+            continue;
+        }
+        if i + 3 < chars.len() && chars[i] == '(' && chars[i + 1] == '?' && chars[i + 2] == '(' {
+            let cond_start = i + 3;
+            // Identify condition + its closing `)`.
+            let cond_end = if chars[cond_start].is_ascii_digit() {
+                let mut k = cond_start;
+                while k < chars.len() && chars[k].is_ascii_digit() {
+                    k += 1;
+                }
+                if k < chars.len() && chars[k] == ')' {
+                    Some(k)
+                } else {
+                    // Walk to next `)` so the HERE marker points to the
+                    // position where the close-paren was expected.
+                    let mut here = k;
+                    while here < chars.len() && chars[here] != ')' {
+                        here += 1;
+                    }
+                    let prefix: String = chars[..here].iter().collect();
+                    let suffix: String = chars[here..].iter().collect();
+                    return Some(format!(
+                        "Switch condition not recognized in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                    ));
+                }
+            } else if chars[cond_start] == '<' || chars[cond_start] == '\'' {
+                let close = if chars[cond_start] == '<' { '>' } else { '\'' };
+                let mut k = cond_start + 1;
+                while k < chars.len() && chars[k] != close {
+                    k += 1;
+                }
+                if k < chars.len() && k + 1 < chars.len() && chars[k + 1] == ')' {
+                    let name: String = chars[cond_start + 1..k].iter().collect();
+                    if !named_groups.contains(&name) {
+                        let prefix: String = chars[..=k].iter().collect();
+                        let suffix: String = chars[k + 1..].iter().collect();
+                        return Some(format!(
+                            "Reference to nonexistent named group in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                        ));
+                    }
+                    Some(k + 1)
+                } else {
+                    None
+                }
+            } else if chars[cond_start] == '?'
+                && cond_start + 1 < chars.len()
+                && (chars[cond_start + 1] == '='
+                    || chars[cond_start + 1] == '!'
+                    || chars[cond_start + 1] == '<'
+                    || chars[cond_start + 1] == '{')
+            {
+                None // Skip — handled by rewrite layer.
+            } else {
+                let prefix: String = chars[..cond_start].iter().collect();
+                let suffix: String = chars[cond_start..].iter().collect();
+                return Some(format!(
+                    "Switch condition not recognized in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                ));
+            };
+            // Walk body counting `|` at depth 1.
+            if let Some(end) = cond_end {
+                let body_start = end + 1;
+                let mut depth = 1;
+                let mut alt_count = 0;
+                let mut second_alt: Option<usize> = None;
+                let mut p = body_start;
+                while p < chars.len() && depth > 0 {
+                    if chars[p] == '\\' {
+                        p += 2;
+                        continue;
+                    }
+                    if chars[p] == '(' {
+                        depth += 1;
+                    } else if chars[p] == ')' {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    } else if chars[p] == '|' && depth == 1 {
+                        alt_count += 1;
+                        if alt_count == 2 && second_alt.is_none() {
+                            second_alt = Some(p + 1);
+                        }
+                    }
+                    p += 1;
+                }
+                if alt_count > 1 {
+                    let here = second_alt.unwrap_or(p);
+                    let prefix: String = chars[..here].iter().collect();
+                    let suffix: String = chars[here..].iter().collect();
+                    return Some(format!(
+                        "Switch (?(condition)... contains too many branches in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                    ));
+                }
+            }
+        }
+        i += 1;
+    }
     None
 }
 
