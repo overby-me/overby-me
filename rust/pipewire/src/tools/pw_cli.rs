@@ -448,13 +448,9 @@ fn run_info(argv0: &str, cmd_name: &str, remote: Option<&str>, args: &[&str]) ->
     // Match C's pw_split_ip(args, WHITESPACE, 1, ...) behavior:
     // with max_tokens=1 the entire rest is one token. So `info 0 garbage`
     // looks up "0 garbage" — not "0".
-    if args.is_empty() {
-        eprintln!("{argv0}: info needs <object-id> | all");
-        return 2;
-    }
-    let target_owned = args.join(" ");
-    let target = target_owned.as_str();
 
+    // C connects on REPL startup BEFORE dispatching info/usage check.
+    // Without daemon, the connect-fail error preempts the usage error.
     let mut client = match open_client(remote, "pw-cli") {
         Ok(c) => c,
         Err(e) => {
@@ -462,6 +458,13 @@ fn run_info(argv0: &str, cmd_name: &str, remote: Option<&str>, args: &[&str]) ->
             return 1;
         }
     };
+
+    if args.is_empty() {
+        eprintln!("Error: \"{cmd_name} <object-id>|all\"");
+        return 0;
+    }
+    let target_owned = args.join(" ");
+    let target = target_owned.as_str();
     let snap = match drain_registry(&mut client) {
         Ok(s) => s,
         Err(e) => {
