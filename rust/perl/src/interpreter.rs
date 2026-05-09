@@ -11684,7 +11684,15 @@ impl Interpreter {
         // as plain `+` and over-matches). Skip rust regex and route
         // to fancy_regex which supports both. re/regexp tests
         // 1185-1201 (possessive) and atomic-group tests.
-        let needs_fancy = pattern_uses_atomic_or_possessive(&pattern);
+        // Also force fancy_regex when single `/x` is in effect (but
+        // not `/xx`): rust regex strips whitespace from inside
+        // `[...]` classes under `(?x)`, but Perl + fancy_regex treat
+        // it as a literal space. `/xx` should still strip class
+        // whitespace, which rust regex already does. re/regexp
+        // 2018-2028.
+        let xx = flags.matches('x').count() >= 2;
+        let needs_fancy = pattern_uses_atomic_or_possessive(&pattern)
+            || (flags.contains('x') && !xx);
         let fancy_pattern = pattern.clone();
         let pattern = translate_atomic_groups(&pattern);
         let pattern = fix_inverted_quantifiers(&pattern);
