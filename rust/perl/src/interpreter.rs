@@ -11444,6 +11444,7 @@ impl Interpreter {
         let pattern = fix_inverted_quantifiers(&pattern);
         let pattern = neutralise_false_ranges(&pattern);
         let pattern = strip_unicode_boundary_types(&pattern);
+        let pattern = translate_octal_escapes(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -11631,6 +11632,7 @@ impl Interpreter {
         let pattern = fix_inverted_quantifiers(&pattern);
         let pattern = neutralise_false_ranges(&pattern);
         let pattern = strip_unicode_boundary_types(&pattern);
+        let pattern = translate_octal_escapes(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -15706,6 +15708,78 @@ fn strip_regex_comments(pattern: &str) -> String {
                 k += 1;
             }
             i = k;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Translate Perl octal escapes `\NNN` (1-3 octal digits) inside a
+/// regex pattern to `\xHH` so the rust `regex` / `fancy_regex`
+/// backends accept them. Skips digits that look like backreferences
+/// (a single digit with that capture group present); we approximate
+/// by treating `\0` and `\NNN` (≥ 2 leading zeros / 3-digit) as
+/// octal, leaving `\1`..`\9` alone for backref handling.
+fn translate_octal_escapes(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if c == '\\' && i + 1 < chars.len() {
+            let nxt = chars[i + 1];
+            // `\0NN` / `\NNN` — octal escape. We only treat as octal
+            // when:
+            //   - first digit is `0`, OR
+            //   - we have three octal digits in a row (so `\041`
+            //     becomes octal, but `\1`, `\10`, `\99` stay as
+            //     potential backrefs / literal).
+            if nxt == '0'
+                || (nxt.is_digit(8)
+                    && i + 3 < chars.len()
+                    && chars[i + 2].is_digit(8)
+                    && chars[i + 3].is_digit(8))
+            {
+                let mut n = nxt.to_digit(8).unwrap_or(0) as u32;
+                let mut consumed = 1;
+                while consumed < 3 && i + 1 + consumed < chars.len() {
+                    let d = chars[i + 1 + consumed];
+                    if let Some(v) = d.to_digit(8) {
+                        n = n * 8 + v;
+                        consumed += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if n <= 0x7f {
+                    out.push_str(&format!("\\x{n:02x}"));
+                } else if n <= 0xff {
+                    out.push_str(&format!("\\x{n:02x}"));
+                } else {
+                    out.push_str(&format!("\\x{{{n:x}}}"));
+                }
+                i += 1 + consumed;
+                continue;
+            }
+            // Not octal — pass through `\X` as-is.
+            out.push(c);
+            out.push(nxt);
+            i += 2;
             continue;
         }
         out.push(c);
