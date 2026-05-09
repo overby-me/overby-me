@@ -123,6 +123,10 @@
       }
       {
         tool = "spa-json-dump";
+        name = "bad-file";
+      }
+      {
+        tool = "spa-json-dump";
         name = "nested";
       }
       {

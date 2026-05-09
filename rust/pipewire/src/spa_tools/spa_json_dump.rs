@@ -66,8 +66,15 @@ pub fn main(args: &[String]) -> i32 {
     let input = match read_input(&filename) {
         Ok(s) => s,
         Err(e) => {
-            // Match the C tool's error wording closely so test fixtures work.
-            eprintln!("error opening file '{filename}': {e}");
+            // Match the C tool's error wording closely. Strip Rust's
+            // trailing `(os error N)` so the message ends with just the
+            // strerror text like upstream's `%m`.
+            let msg = e
+                .to_string()
+                .rsplit_once(" (os error ")
+                .map(|(m, _)| m.to_string())
+                .unwrap_or_else(|| e.to_string());
+            eprintln!("error opening file '{filename}': {msg}");
             return 1;
         }
     };
