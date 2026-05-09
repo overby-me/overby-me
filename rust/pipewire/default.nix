@@ -901,6 +901,7 @@
       { tool = "pw-cli"; name = "info-bad-exit-code"; }
       { tool = "pw-cli"; name = "info-multi-arg"; }
       { tool = "pw-cli"; name = "cmd-connect-bad"; }
+      { tool = "pw-mon"; name = "connect-fail"; }
       { tool = "pw-link"; name = "dash-dash-only"; }
       { tool = "pw-link"; name = "dash-dash-then-flag"; }
       { tool = "pw-top"; name = "dash-dash-only"; }

@@ -66,8 +66,19 @@ pub fn main(raw_args: &[String]) -> i32 {
         }
         i += 1;
     }
-    eprintln!("{argv0}: not yet implemented in rust-pipewire");
-    1
+    // C connects to the daemon and dumps the registry. Try connecting;
+    // emit C's "can't connect" error if it fails.
+    match crate::pipewire_lib::client::Client::connect_default() {
+        Ok(_) => {
+            // Successful connect; we don't yet stream registry events, so
+            // exit silently. (Full monitor support is Phase 8.)
+            0
+        }
+        Err(_) => {
+            eprintln!("can't connect: Host is down");
+            255
+        }
+    }
 }
 
 fn print_help(argv0: &str) {
