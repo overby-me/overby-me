@@ -1394,6 +1394,11 @@
       { tool = "pw-cli"; name = "remote-inline-eq"; }
       { tool = "pw-cli"; name = "remote-short-eq"; }
       { tool = "pw-cli"; name = "remote-short-attached"; }
+      { tool = "pw-mon"; name = "remote-bad"; }
+      { tool = "pw-link"; name = "remote-bad"; }
+      { tool = "pw-dump"; name = "remote-bad"; }
+      { tool = "pw-dot"; name = "remote-attached"; }
+      { tool = "pw-metadata"; name = "remote-bad"; }
       {
         tool = "pw-cli";
         name = "cmd-connect-bad";

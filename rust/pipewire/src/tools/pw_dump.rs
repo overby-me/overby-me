@@ -81,6 +81,9 @@ pub fn main(raw_args: &[String]) -> i32 {
             s if s.starts_with("--remote=") => {
                 remote = Some(s["--remote=".len()..].to_string());
             }
+            s if s.starts_with("-r") && s.len() > 2 => {
+                remote = Some(s[2..].to_string());
+            }
             "-N" | "--no-colors" | "-R" | "--raw" | "-s" | "--spa" | "-m" | "--monitor" => {
                 // Accepted but ignored at this phase.
             }
@@ -186,8 +189,9 @@ fn collect_globals(remote: Option<&str>) -> Result<Vec<RegistryGlobal>, String> 
     let mut client = match remote {
         Some(name) if name.starts_with('/') => Client::connect_path(std::path::Path::new(name)),
         Some(name) => {
-            let runtime = std::env::var("XDG_RUNTIME_DIR")
-                .map_err(|_| "XDG_RUNTIME_DIR unset (cannot resolve remote)".to_string())?;
+            let runtime = std::env::var("PIPEWIRE_RUNTIME_DIR")
+                .or_else(|_| std::env::var("XDG_RUNTIME_DIR"))
+                .unwrap_or_else(|_| "/tmp".to_string());
             let path = std::path::PathBuf::from(runtime).join(name);
             Client::connect_path(&path)
         }

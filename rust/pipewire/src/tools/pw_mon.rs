@@ -7,6 +7,7 @@ pub fn main(raw_args: &[String]) -> i32 {
     // Expand `-hV` / `-Vh` etc. into separate flags so getopt-cluster
     // semantics match the C tool.
     let args = expand_short_clusters(raw_args, &['h', 'V', 'N', 'o', 'a', 'p']);
+    let mut remote: Option<String> = None;
     let mut i = 1;
     while i < args.len() {
         let a = args[i].as_str();
@@ -48,10 +49,16 @@ pub fn main(raw_args: &[String]) -> i32 {
                     print_help(argv0);
                     return 0;
                 }
+                remote = Some(args[i + 1].clone());
                 i += 2;
                 continue;
             }
-            s if s.starts_with("--remote=") => {}
+            s if s.starts_with("--remote=") => {
+                remote = Some(s["--remote=".len()..].to_string());
+            }
+            s if s.starts_with("-r") && s.len() > 2 => {
+                remote = Some(s[2..].to_string());
+            }
             // -C and --color have OPTIONAL argument; bare `-C` is fine.
             "-C" | "--color" => {}
             "-N" | "--no-colors" | "-o" | "--hide-props" | "-a"
@@ -84,14 +91,20 @@ pub fn main(raw_args: &[String]) -> i32 {
         }
         i += 1;
     }
-    // C connects to the daemon and dumps the registry. Try connecting;
-    // emit C's "can't connect" error if it fails.
-    match crate::pipewire_lib::client::Client::connect_default() {
-        Ok(_) => {
-            // Successful connect; we don't yet stream registry events, so
-            // exit silently. (Full monitor support is Phase 8.)
-            0
-        }
+    // C connects to the daemon and dumps the registry. Use the remote
+    // path if --remote was given (so a bad remote yields the connect-fail
+    // error). Otherwise the default socket.
+    let connect = if let Some(name) = &remote {
+        let runtime = std::env::var("PIPEWIRE_RUNTIME_DIR")
+            .or_else(|_| std::env::var("XDG_RUNTIME_DIR"))
+            .unwrap_or_else(|_| "/tmp".to_string());
+        let path = std::path::PathBuf::from(runtime).join(name);
+        crate::pipewire_lib::client::Client::connect_path(&path)
+    } else {
+        crate::pipewire_lib::client::Client::connect_default()
+    };
+    match connect {
+        Ok(_) => 0,
         Err(_) => {
             eprintln!("can't connect: Host is down");
             255

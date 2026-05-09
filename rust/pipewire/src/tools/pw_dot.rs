@@ -67,8 +67,18 @@ pub fn main(raw_args: &[String]) -> i32 {
                     print_help(argv0);
                     return 0;
                 }
+                let val = args.get(i + 1).cloned().unwrap_or_default();
+                println!("set remote to {val}");
                 i += 2;
                 continue;
+            }
+            s if s.starts_with("--remote=") => {
+                let val = &s["--remote=".len()..];
+                println!("set remote to {val}");
+            }
+            s if s.starts_with("-r") && s.len() > 2 => {
+                let val = &s[2..];
+                println!("set remote to {val}");
             }
             "-a" | "--all" | "-s" | "--smart" | "-d" | "--detail" | "-L"
             | "--lr" | "-9" | "--90" => {}

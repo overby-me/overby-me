@@ -94,6 +94,9 @@ pub fn main(raw_args: &[String]) -> i32 {
             s if s.starts_with("--remote=") => {
                 remote = Some(s["--remote=".len()..].to_string());
             }
+            s if s.starts_with("-r") && s.len() > 2 => {
+                remote = Some(s[2..].to_string());
+            }
             "-d" | "--disconnect" => disconnect = true,
             // Per pw-link.c optstring "hVr:oilmIvLPp:wdt", `t` takes
             // NO argument — it just sets MODE_LIST + LIST_LATENCY (which
@@ -235,8 +238,9 @@ fn collect_globals(remote: Option<&str>, app_name: &str) -> Result<Vec<RegistryG
     let mut client = match remote {
         Some(name) if name.starts_with('/') => Client::connect_path(std::path::Path::new(name)),
         Some(name) => {
-            let runtime = std::env::var("XDG_RUNTIME_DIR")
-                .map_err(|_| "XDG_RUNTIME_DIR unset".to_string())?;
+            let runtime = std::env::var("PIPEWIRE_RUNTIME_DIR")
+                .or_else(|_| std::env::var("XDG_RUNTIME_DIR"))
+                .unwrap_or_else(|_| "/tmp".to_string());
             Client::connect_path(&std::path::PathBuf::from(runtime).join(name))
         }
         None => Client::connect_default(),
