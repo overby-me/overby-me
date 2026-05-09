@@ -62,7 +62,7 @@ pub fn main(args: &[String]) -> i32 {
         i += 1;
     }
 
-    let _ = (verbose, &positional);
+    let _ = &positional;
 
     if !list_inputs && !list_outputs && !list_links {
         // No mode requested → C tool defaults to printing nothing useful;
@@ -94,6 +94,7 @@ pub fn main(args: &[String]) -> i32 {
         list_links,
         list_ports,
         show_id,
+        verbose,
     );
     0
 }
@@ -182,6 +183,7 @@ fn print_listing(
     list_links: bool,
     list_ports: bool,
     show_id: bool,
+    verbose: bool,
 ) {
     // pw-link iterates Nodes in registry order; for each Node, walks Ports
     // belonging to it (also in registry order).
@@ -202,13 +204,7 @@ fn print_listing(
                 .filter(|p| prop(p, "port.direction") == Some(direction.1))
             {
                 if list_ports {
-                    let id_prefix = if show_id {
-                        format!("{:>4} ", port.id)
-                    } else {
-                        String::new()
-                    };
-                    let name = port_full_name(globals, port);
-                    println!("{id_prefix}{name}");
+                    print_port_line(port, globals, show_id, verbose);
                 }
                 if list_links {
                     // When LIST_PORTS is unset (just `-l`), `do_list_port_links`
@@ -219,6 +215,37 @@ fn print_listing(
                 }
             }
         }
+    }
+}
+
+/// Print one port line ("\t<id?> <node:port>"), plus, if verbose, the
+/// object.path and port.alias indented underneath.
+fn print_port_line(
+    port: &RegistryGlobal,
+    globals: &[RegistryGlobal],
+    show_id: bool,
+    verbose: bool,
+) {
+    let id_prefix = if show_id {
+        format!("{:>4} ", port.id)
+    } else {
+        String::new()
+    };
+    let prefix2 = if show_id { "     " } else { "" };
+    let name = port_full_name(globals, port);
+    println!("{id_prefix}{name}");
+    if !verbose {
+        return;
+    }
+    if let Some(path) = prop(port, "object.path") {
+        println!("  {prefix2}{path}");
+    } else {
+        println!("  {prefix2}port.path.{}", port.id);
+    }
+    if let Some(alias) = prop(port, "port.alias") {
+        println!("  {prefix2}{alias}");
+    } else {
+        println!("  {prefix2}port_alias.{}", port.id);
     }
 }
 
