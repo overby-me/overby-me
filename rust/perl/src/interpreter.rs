@@ -15499,6 +15499,19 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                 "Missing right curly or square bracket in regex; marked by <-- HERE".to_string(),
             );
         }
+        // If the LAST unmatched `(` is part of a `(?…` flag-prefix
+        // form (e.g. `(?i`, `(?a-x`), reference perl emits the
+        // dotted "Sequence (?... not terminated" form. re/regexp
+        // tests 2005/2006.
+        if let Some(&last) = unmatched_starts.last()
+            && last + 2 < chars.len()
+            && chars[last + 1] == '?'
+            && (chars[last + 2].is_ascii_alphabetic()
+                || chars[last + 2] == '-'
+                || chars[last + 2] == '^')
+        {
+            return Some("Sequence (?... not terminated".to_string());
+        }
         // If the LAST unmatched `(` is part of a `(?…` group form,
         // reference perl reports the more specific "Sequence (?
         // incomplete" instead of generic "Unmatched (".
