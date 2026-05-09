@@ -227,7 +227,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                 let file = raw_args
                     .iter()
                     .skip(1)
-                    .find(|a| !a.starts_with('-'))
+                    .find(|a| !a.starts_with('-') || a == &"-")
                     .map(|s| s.as_str())
                     .unwrap_or("");
                 eprintln!(

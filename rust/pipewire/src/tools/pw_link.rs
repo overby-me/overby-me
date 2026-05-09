@@ -76,9 +76,18 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
-            "-i" | "--input" => list_inputs = true,
-            "-o" | "--output" => list_outputs = true,
-            "-l" | "--links" => list_links = true,
+            "-i" | "--input" => {
+                list_inputs = true;
+                disconnect = false;
+            }
+            "-o" | "--output" => {
+                list_outputs = true;
+                disconnect = false;
+            }
+            "-l" | "--links" => {
+                list_links = true;
+                disconnect = false;
+            }
             "-I" | "--id" => show_id = true,
             "-v" | "--verbose" => verbose = true,
             "-r" | "--remote" => {
@@ -97,11 +106,20 @@ pub fn main(raw_args: &[String]) -> i32 {
             s if s.starts_with("-r") && s.len() > 2 => {
                 remote = Some(s[2..].to_string());
             }
-            "-d" | "--disconnect" => disconnect = true,
+            "-d" | "--disconnect" => {
+                disconnect = true;
+                list_inputs = false;
+                list_outputs = false;
+                list_links = false;
+                list_latency = false;
+            }
             // Per pw-link.c optstring "hVr:oilmIvLPp:wdt", `t` takes
             // NO argument — it just sets MODE_LIST + LIST_LATENCY (which
             // by itself produces no output without -i/-o/-l).
-            "-t" | "--latency" => list_latency = true,
+            "-t" | "--latency" => {
+                list_latency = true;
+                disconnect = false;
+            }
             // pw-link's long_options don't include --no-colors, so the
             // long form is unrecognized — only -N short works.
             "-m" | "--monitor" | "-L" | "--linger"
