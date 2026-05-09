@@ -16912,8 +16912,51 @@ fn normalize_named_backref(pattern: &str) -> String {
     let mut out = String::with_capacity(pattern.len());
     let mut i = 0;
     let mut in_class = false;
+    let mut groups_before: usize = 0;
     while i < chars.len() {
         let c = chars[i];
+        // Track capturing-group count up to current position so
+        // relative refs `\g-N` / `\g+N` can resolve. Skip `(?…)`
+        // non-capturing forms.
+        if !in_class
+            && c == '('
+            && !(i + 1 < chars.len() && chars[i + 1] == '?')
+        {
+            groups_before += 1;
+        }
+        // `\g-N` / `\g+N` — relative numeric backref. Translate to
+        // `\(absolute)`. fancy_regex doesn't understand the relative
+        // form. re/regexp 1309-1311.
+        if !in_class
+            && c == '\\'
+            && i + 2 < chars.len()
+            && chars[i + 1] == 'g'
+            && (chars[i + 2] == '-' || chars[i + 2] == '+')
+        {
+            let sign = chars[i + 2];
+            let num_start = i + 3;
+            let mut k = num_start;
+            while k < chars.len() && chars[k].is_ascii_digit() {
+                k += 1;
+            }
+            if k > num_start {
+                let n: i64 = chars[num_start..k]
+                    .iter()
+                    .collect::<String>()
+                    .parse()
+                    .unwrap_or(0);
+                let abs = if sign == '-' {
+                    groups_before as i64 - n + 1
+                } else {
+                    groups_before as i64 + n
+                };
+                if abs > 0 {
+                    out.push_str(&format!("\\{abs}"));
+                    i = k;
+                    continue;
+                }
+            }
+        }
         if !in_class
             && c == '\\'
             && i + 2 < chars.len()
@@ -16935,8 +16978,8 @@ fn normalize_named_backref(pattern: &str) -> String {
             }
         }
         // `\g{NAME}` → `\k<NAME>` for named, `\g{N}` → `\N` for
-        // numeric (fancy_regex handles bare-digit backrefs but not the
-        // braced `\g{...}` form).
+        // numeric, `\g{-N}` / `\g{+N}` → resolve to absolute group
+        // index.
         if !in_class
             && c == '\\'
             && i + 3 < chars.len()
@@ -16952,12 +16995,26 @@ fn normalize_named_backref(pattern: &str) -> String {
                 let raw: String = chars[name_start..k].iter().collect();
                 let name = raw.trim();
                 let first_meaningful = name.chars().next();
-                let is_numeric =
-                    matches!(first_meaningful, Some('0'..='9') | Some('-') | Some('+'));
+                let is_relative = matches!(first_meaningful, Some('-') | Some('+'));
+                let is_pure_digit = !name.is_empty()
+                    && name.chars().all(|c| c.is_ascii_digit());
                 if name.is_empty() {
                     // Leave malformed `\g{}` alone — let the engine
                     // produce its own error.
-                } else if is_numeric {
+                } else if is_relative {
+                    let sign = first_meaningful.unwrap();
+                    let n: i64 = name[1..].parse().unwrap_or(0);
+                    let abs = if sign == '-' {
+                        groups_before as i64 - n + 1
+                    } else {
+                        groups_before as i64 + n
+                    };
+                    if abs > 0 {
+                        out.push_str(&format!("\\{abs}"));
+                        i = k + 1;
+                        continue;
+                    }
+                } else if is_pure_digit {
                     out.push_str(&format!("\\{name}"));
                     i = k + 1;
                     continue;
