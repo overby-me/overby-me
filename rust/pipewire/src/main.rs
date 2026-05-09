@@ -52,9 +52,12 @@ fn dispatch(name: &str, args: &[String]) -> i32 {
         | "pw-midi2play" | "pw-midi2record" | "pw-sysex" | "pw-dsdplay"
         | "pw-encplay" => tools::pw_cat::main(args),
 
+        "pw-reserve" => tools::pw_reserve::main(args),
+        "pw-container" => tools::pw_container::main(args),
+
         "pipewire-aes67" | "pipewire-avb" | "pipewire-vulkan" | "pw-loopback"
-        | "pw-reserve" | "pw-container" | "pw-v4l2" | "spa-inspect"
-        | "spa-monitor" | "spa-acp-tool" | "spa-resample" => stub_main(name, args),
+        | "pw-v4l2" | "spa-inspect" | "spa-monitor" | "spa-acp-tool"
+        | "spa-resample" => stub_main(name, args),
 
         "rust-pipewire" => {
             eprintln!(

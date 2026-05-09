@@ -175,6 +175,10 @@
       { tool = "pw-sysex"; name = "version"; }
       { tool = "pw-dsdplay"; name = "version"; }
       { tool = "pw-encplay"; name = "version"; }
+      { tool = "pw-reserve"; name = "help"; }
+      { tool = "pw-reserve"; name = "version"; }
+      { tool = "pw-container"; name = "help"; }
+      { tool = "pw-container"; name = "version"; }
       { tool = "pw-cli"; name = "version-short"; }
       { tool = "pw-mon"; name = "version-short"; }
       { tool = "pw-link"; name = "version-short"; }
