@@ -894,6 +894,9 @@
       { tool = "spa-acp-tool"; name = "help-with-arg"; }
       { tool = "spa-resample"; name = "help-with-arg"; }
       { tool = "pw-config"; name = "merge-no-section"; }
+      { tool = "pw-config"; name = "paths-recurse"; }
+      { tool = "pw-config"; name = "paths-prefix"; }
+      { tool = "pw-config"; name = "paths-prefix-inline"; }
       { tool = "pw-cli"; name = "info-alias-i-bad"; }
       { tool = "pw-cli"; name = "info-bad-exit-code"; }
       { tool = "pw-cli"; name = "info-multi-arg"; }
