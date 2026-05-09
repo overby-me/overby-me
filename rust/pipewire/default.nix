@@ -179,6 +179,12 @@
       { tool = "pw-reserve"; name = "version"; }
       { tool = "pw-container"; name = "help"; }
       { tool = "pw-container"; name = "version"; }
+      { tool = "pipewire-aes67"; name = "help"; }
+      { tool = "pipewire-aes67"; name = "version"; }
+      { tool = "pipewire-avb"; name = "help"; }
+      { tool = "pipewire-avb"; name = "version"; }
+      { tool = "pipewire-vulkan"; name = "help"; }
+      { tool = "pipewire-vulkan"; name = "version"; }
       { tool = "pw-cli"; name = "version-short"; }
       { tool = "pw-mon"; name = "version-short"; }
       { tool = "pw-link"; name = "version-short"; }

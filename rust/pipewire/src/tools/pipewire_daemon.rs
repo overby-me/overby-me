@@ -5,8 +5,16 @@ use crate::tools::common::print_version;
 
 pub fn main(args: &[String]) -> i32 {
     let argv0 = args.first().map(String::as_str).unwrap_or("pipewire");
+    // Each daemon variant has its own default config name. We infer it
+    // from argv0 — the C tools all derive their default the same way.
     let default_config = if argv0.contains("pulse") {
         "pipewire-pulse.conf"
+    } else if argv0.contains("aes67") {
+        "pipewire-aes67.conf"
+    } else if argv0.contains("avb") {
+        "pipewire-avb.conf"
+    } else if argv0.contains("vulkan") {
+        "pipewire-vulkan.conf"
     } else {
         "pipewire.conf"
     };

@@ -36,8 +36,11 @@ fn dispatch(name: &str, args: &[String]) -> i32 {
         "pw-profiler" => tools::pw_profiler::main(args),
         "pw-top" => tools::pw_top::main(args),
 
-        // Daemons
-        "pipewire" | "pipewire-pulse" => tools::pipewire_daemon::main(args),
+        // Daemons (real and stubbed). The aes67/avb/vulkan variants share
+        // the same help-text shape — only the default config filename
+        // differs.
+        "pipewire" | "pipewire-pulse" | "pipewire-aes67" | "pipewire-avb"
+        | "pipewire-vulkan" => tools::pipewire_daemon::main(args),
 
         // Internal helpers — used by the test harness, not user-facing.
         "pod-encode" => tools::pod_test_helper::main(args),
@@ -55,9 +58,8 @@ fn dispatch(name: &str, args: &[String]) -> i32 {
         "pw-reserve" => tools::pw_reserve::main(args),
         "pw-container" => tools::pw_container::main(args),
 
-        "pipewire-aes67" | "pipewire-avb" | "pipewire-vulkan" | "pw-loopback"
-        | "pw-v4l2" | "spa-inspect" | "spa-monitor" | "spa-acp-tool"
-        | "spa-resample" => stub_main(name, args),
+        "pw-loopback" | "pw-v4l2" | "spa-inspect" | "spa-monitor"
+        | "spa-acp-tool" | "spa-resample" => stub_main(name, args),
 
         "rust-pipewire" => {
             eprintln!(
