@@ -897,6 +897,8 @@
       { tool = "pw-cli"; name = "info-alias-i-bad"; }
       { tool = "pw-cli"; name = "info-bad-exit-code"; }
       { tool = "pw-cli"; name = "info-multi-arg"; }
+      { tool = "pw-link"; name = "connect-three-args"; }
+      { tool = "pw-link"; name = "connect-one-arg"; }
       { tool = "pw-mididump"; name = "empty-file"; }
       { tool = "pw-mididump"; name = "positional-then-bad"; }
       { tool = "pw-v4l2"; name = "missing-arg-r"; }

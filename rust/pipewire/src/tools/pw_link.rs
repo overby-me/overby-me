@@ -130,10 +130,11 @@ pub fn main(raw_args: &[String]) -> i32 {
         && !list_links
         && !list_latency
         && !disconnect
-        && positional.len() != 2
+        && positional.len() < 2
     {
         // MODE_CONNECT_PORTS path in C: requires both opt_output and
-        // opt_input. With anything but exactly 2 positional, error.
+        // opt_input. With <2 positional, error. Extra positionals are
+        // silently ignored (C just consumes argv[optind] / argv[optind+1]).
         // -t/--latency also sets MODE_LIST which skips this check.
         eprintln!("missing output and input port names to connect");
         return 255;
