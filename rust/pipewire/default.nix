@@ -913,6 +913,7 @@
       { tool = "pw-cli"; name = "get-permissions-bad"; }
       { tool = "pw-cli"; name = "create-link-bad"; }
       { tool = "pw-cli"; name = "export-node-bad"; }
+      { tool = "pw-mon"; name = "invalid-color"; }
       { tool = "pw-cli"; name = "cmd-connect-bad"; }
       { tool = "pw-mon"; name = "connect-fail"; }
       { tool = "pw-profiler"; name = "connect-fail"; }

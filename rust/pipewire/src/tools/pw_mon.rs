@@ -45,7 +45,14 @@ pub fn main(raw_args: &[String]) -> i32 {
             "-C" | "--color" => {}
             "-N" | "--no-colors" | "-o" | "--hide-props" | "-a"
             | "--hide-params" | "-p" | "--print-separator" => {}
-            s if s.starts_with("--color=") => {}
+            s if s.starts_with("--color=") => {
+                let val = &s["--color=".len()..];
+                if !matches!(val, "" | "never" | "always" | "auto") {
+                    eprintln!("Invalid color: {val}");
+                    print_help(argv0);
+                    return 255;
+                }
+            }
             s if s.starts_with("--") => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);
