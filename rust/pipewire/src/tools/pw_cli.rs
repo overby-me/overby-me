@@ -89,6 +89,10 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
+            "-" => {
+                // Lone `-` is a positional, not an option.
+                positional.push("-");
+            }
             s if s.starts_with('-') && s.len() == 2 => {
                 // Unrecognized short option; getopt prints
                 // `invalid option -- 'X'`.

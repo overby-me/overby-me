@@ -1411,6 +1411,7 @@
       { tool = "pw-config"; name = "dash-dash-paths"; }
       { tool = "pw-cli"; name = "info-no-args"; }
       { tool = "pw-cli"; name = "i-alias-no-args"; }
+      { tool = "pw-cli"; name = "ls-dash"; }
       {
         tool = "pw-cli";
         name = "cmd-connect-bad";
