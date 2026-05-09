@@ -411,6 +411,7 @@
       {tool = "pw-cli"; name = "info-node-rich";}
       {tool = "pw-cli"; name = "info-all-rich";}
       {tool = "pw-cli"; name = "ls-substring-rich";}
+      {tool = "pw-cli"; name = "ls-no-filter-rich";}
       {tool = "pw-cli"; name = "info-by-name-rich";}
       {tool = "pw-link"; name = "input-rich";}
       {tool = "pw-link"; name = "output-rich";}
