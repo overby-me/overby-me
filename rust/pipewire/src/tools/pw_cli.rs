@@ -142,7 +142,12 @@ pub fn main(args: &[String]) -> i32 {
             1
         }
         other => {
-            eprintln!("{argv0}: command \"{other}\" not yet implemented");
+            // Match the C tool's exact "unknown command" error format. C
+            // wraps the parse error in `Error: "..."` and uses literal
+            // (unescaped) double-quotes around the unknown command name.
+            eprintln!(
+                "Error: \"Command \"{other}\" does not exist. Type 'help' for usage.\""
+            );
             1
         }
     }
