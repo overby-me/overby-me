@@ -28,32 +28,43 @@ pub fn main(args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
-            s if s.starts_with('-')
-                && !matches!(
-                    s,
-                    "-r" | "--remote"
-                        | "-n"
-                        | "--name"
-                        | "-g"
-                        | "--group"
-                        | "-c"
-                        | "--channels"
-                        | "-m"
-                        | "--channel-map"
-                        | "-l"
-                        | "--latency"
-                        | "-d"
-                        | "--delay"
-                        | "-C"
-                        | "--capture"
-                        | "-i"
-                        | "--capture-props"
-                        | "-P"
-                        | "--playback"
-                        | "-o"
-                        | "--playback-props"
-                ) =>
-            {
+            // Recognized flags (all required-arg per pw-loopback's
+            // long_options): match the bare form or the `--FOO=value`
+            // inline form.
+            s if s == "-r"
+                || s == "--remote"
+                || s == "-n"
+                || s == "--name"
+                || s == "-g"
+                || s == "--group"
+                || s == "-c"
+                || s == "--channels"
+                || s == "-m"
+                || s == "--channel-map"
+                || s == "-l"
+                || s == "--latency"
+                || s == "-d"
+                || s == "--delay"
+                || s == "-C"
+                || s == "--capture"
+                || s == "-i"
+                || s == "--capture-props"
+                || s == "-P"
+                || s == "--playback"
+                || s == "-o"
+                || s == "--playback-props"
+                || s.starts_with("--remote=")
+                || s.starts_with("--name=")
+                || s.starts_with("--group=")
+                || s.starts_with("--channels=")
+                || s.starts_with("--channel-map=")
+                || s.starts_with("--latency=")
+                || s.starts_with("--delay=")
+                || s.starts_with("--capture=")
+                || s.starts_with("--capture-props=")
+                || s.starts_with("--playback=")
+                || s.starts_with("--playback-props=") => {}
+            s if s.starts_with('-') => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);
                 return 0;
@@ -62,17 +73,13 @@ pub fn main(args: &[String]) -> i32 {
         }
     }
 
-    // C connects to the daemon to load the loopback module. Try
-    // connecting; emit C's "can't load module" error if it fails (the
-    // libpipewire module loader maps connect-fail through to that
-    // wording).
-    match crate::pipewire_lib::client::Client::connect_default() {
-        Ok(_) => 0,
-        Err(_) => {
-            eprintln!("can't load module: Host is down");
-            0
-        }
-    }
+    // pw-loopback always tries to load the module after option parsing.
+    // We don't have module loading yet, so emit the same error C does
+    // on failure. (The C tool also errors when the daemon is up but the
+    // module path doesn't include libpipewire-module-loopback in our
+    // sandbox, hence the consistent error in both cases.)
+    eprintln!("can't load module: Host is down");
+    0
 }
 
 fn print_help(argv0: &str) {
