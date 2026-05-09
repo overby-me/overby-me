@@ -15179,6 +15179,80 @@ fn push_maybe_quotemeta(out: &mut String, s: &str, quotemeta: bool) {
 /// `Unmatched [` diagnostic instead of a silent compile-success. Only
 /// the bracketed-class checks are wired up; full pattern validation
 /// would duplicate the regex engine.
+/// Detect `(?<=…)` / `(?<!…)` lookbehind groups whose body uses an
+/// unbounded quantifier (`*`, `+`, `{N,}`, `{N,M}` with M-N > 255).
+/// Reference perl rejects these with "Lookbehind longer than 255 not
+/// implemented". Heuristic: any `*` or `+` outside char classes
+/// inside the lookbehind body counts as unbounded.
+fn check_unbounded_lookbehind(chars: &[char]) -> Option<String> {
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' {
+            i += 2;
+            continue;
+        }
+        if i + 3 < chars.len()
+            && chars[i] == '('
+            && chars[i + 1] == '?'
+            && chars[i + 2] == '<'
+            && (chars[i + 3] == '=' || chars[i + 3] == '!')
+        {
+            // Walk lookbehind body to its closing `)` while tracking
+            // class context and ignoring escapes.
+            let body_start = i + 4;
+            let mut depth = 1;
+            let mut j = body_start;
+            let mut in_class = false;
+            let mut has_unbounded = false;
+            while j < chars.len() && depth > 0 {
+                if chars[j] == '\\' && j + 1 < chars.len() {
+                    j += 2;
+                    continue;
+                }
+                if !in_class && chars[j] == '[' {
+                    in_class = true;
+                } else if in_class && chars[j] == ']' {
+                    in_class = false;
+                } else if !in_class && chars[j] == '(' {
+                    depth += 1;
+                } else if !in_class && chars[j] == ')' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                } else if !in_class && (chars[j] == '*' || chars[j] == '+') {
+                    has_unbounded = true;
+                } else if !in_class && chars[j] == '{' {
+                    // `{N,}` (unbounded) — scan for `,` then `}`.
+                    let mut k = j + 1;
+                    while k < chars.len() && chars[k].is_ascii_digit() {
+                        k += 1;
+                    }
+                    if k < chars.len() && chars[k] == ',' {
+                        let mut m = k + 1;
+                        while m < chars.len() && chars[m].is_ascii_digit() {
+                            m += 1;
+                        }
+                        if m < chars.len() && chars[m] == '}' && m == k + 1 {
+                            // `{N,}` no upper bound
+                            has_unbounded = true;
+                        }
+                    }
+                }
+                j += 1;
+            }
+            if has_unbounded {
+                let prefix: String = chars.iter().collect();
+                return Some(format!(
+                    "Lookbehind longer than 255 not implemented in regex m/{prefix}/"
+                ));
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
 fn validate_regex_pattern(pat: &str) -> Option<String> {
     let chars: Vec<char> = pat.chars().collect();
     // First pass: count capturing groups so we can validate `\N`
@@ -15227,6 +15301,13 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
             }
         }
         j += 1;
+    }
+    // Reject `(?<=…+)` / `(?<!…+)` variable-width lookbehind whose
+    // body uses an unbounded quantifier — Perl caps lookbehind at 255
+    // chars and rejects unbounded forms with "Lookbehind longer than
+    // 255 not implemented". re/regexp test 697.
+    if let Some(err) = check_unbounded_lookbehind(&chars) {
+        return Some(err);
     }
     let mut i = 0;
     while i < chars.len() {
