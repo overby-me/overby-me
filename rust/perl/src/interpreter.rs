@@ -15781,9 +15781,17 @@ fn escape_literal_bracket_in_class(pattern: &str) -> String {
             i += 1;
             continue;
         }
-        if in_class && c == '[' && i + 1 < chars.len() && chars[i + 1] == ':' {
-            // Look ahead for the matching `:]` BEFORE the outer `]`.
-            // If none, the `[:` is literal — escape the leading `[`.
+        if in_class
+            && c == '['
+            && i + 1 < chars.len()
+            && (chars[i + 1] == ':' || chars[i + 1] == '=' || chars[i + 1] == '.')
+        {
+            // Look ahead for the matching `X]` (where X is the same
+            // sigil as the introducer) BEFORE the outer `]`. If
+            // none, the `[X` is literal — escape the leading `[` so
+            // Rust regex doesn't try to parse it as a POSIX
+            // class / equivalence class / collating element.
+            let intro = chars[i + 1];
             let mut k = i + 2;
             let mut found = false;
             while k + 1 < chars.len() {
@@ -15795,7 +15803,7 @@ fn escape_literal_bracket_in_class(pattern: &str) -> String {
                 if cc == ']' {
                     break;
                 }
-                if cc == ':' && chars[k + 1] == ']' {
+                if cc == intro && chars[k + 1] == ']' {
                     found = true;
                     break;
                 }
