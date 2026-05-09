@@ -1098,6 +1098,9 @@
         tool = "pw-link";
         name = "all-flags-rich";
       }
+      { tool = "pw-link"; name = "output-verbose-rich"; }
+      { tool = "pw-link"; name = "all-flags-verbose-rich"; }
+      { tool = "pw-link"; name = "input-id-verbose-rich"; }
       {
         tool = "pw-link";
         name = "pattern-output-empty";
