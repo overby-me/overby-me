@@ -147,6 +147,18 @@ pub fn main(raw_args: &[String]) -> i32 {
         // do_connect/do_disconnect/do_switch_remote mutate the REPL's
         // remote table but produce no output in non-interactive mode
         // when the operation succeeds.
+        "connect" | "con" if !rest.is_empty() => {
+            // C's `do_connect` opens a new connection to the named remote.
+            // Failure → "failed to connect: <strerror>".
+            let name = rest[0];
+            match open_client(Some(name), "pw-cli") {
+                Ok(_) => 0,
+                Err(e) => {
+                    print_open_error(argv0, &e);
+                    1
+                }
+            }
+        }
         "connect" | "con" | "disconnect" | "dis" | "switch-remote" | "sr" => 0,
         // Commands we don't implement but whose usage error matches
         // upstream byte-for-byte. Each one's `parse()`-side error is
@@ -843,8 +855,14 @@ fn open_client(remote: Option<&str>, app_name: &str) -> Result<Client, String> {
     let mut client = match remote {
         Some(name) if name.starts_with('/') => Client::connect_path(std::path::Path::new(name)),
         Some(name) => {
-            let runtime = std::env::var("XDG_RUNTIME_DIR")
-                .map_err(|_| "XDG_RUNTIME_DIR unset (cannot resolve remote name)".to_string())?;
+            // pw_get_runtime_dir() prefers PIPEWIRE_RUNTIME_DIR, then
+            // XDG_RUNTIME_DIR, then /tmp. Our test sandbox mostly sets
+            // XDG_RUNTIME_DIR; the /tmp fallback ensures we always
+            // produce the same "Host is down" error as C when no socket
+            // exists at the target path.
+            let runtime = std::env::var("PIPEWIRE_RUNTIME_DIR")
+                .or_else(|_| std::env::var("XDG_RUNTIME_DIR"))
+                .unwrap_or_else(|_| "/tmp".to_string());
             let path = std::path::PathBuf::from(runtime).join(name);
             Client::connect_path(&path)
         }
