@@ -43,10 +43,12 @@ pub fn main(args: &[String]) -> i32 {
                 return 0;
             }
             // Long flag we don't recognize → standard `unrecognized
-            // option` then help.
-            s if s.starts_with("--")
-                && !matches!(
-                    s,
+            // option` then help. Accepts both `--foo` and `--foo=value`
+            // forms; we strip the value before checking the known set.
+            s if s.starts_with("--") => {
+                let name = s.split_once('=').map(|(n, _)| n).unwrap_or(s);
+                if !matches!(
+                    name,
                     "--verbose"
                         | "--playback"
                         | "--record"
@@ -60,11 +62,27 @@ pub fn main(args: &[String]) -> i32 {
                         | "--list-channel-names"
                         | "--list-formats"
                         | "--list-containers"
-                ) =>
-            {
-                eprintln!("{getopt_argv0}: unrecognized option '{s}'");
-                print_help(argv0);
-                return 1;
+                        | "--remote"
+                        | "--media-type"
+                        | "--media-category"
+                        | "--media-role"
+                        | "--target"
+                        | "--latency"
+                        | "--properties"
+                        | "--rate"
+                        | "--channels"
+                        | "--channel-map"
+                        | "--format"
+                        | "--container"
+                        | "--volume"
+                        | "--quality"
+                        | "--force-midi"
+                        | "--sample-count"
+                ) {
+                    eprintln!("{getopt_argv0}: unrecognized option '{s}'");
+                    print_help(argv0);
+                    return 1;
+                }
             }
             // Short flag we don't recognize → `invalid option -- 'X'`
             // (note the singly-quoted single character, not the full
