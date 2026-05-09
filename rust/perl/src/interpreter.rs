@@ -11655,6 +11655,7 @@ impl Interpreter {
         let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_inline_flag_groups(&pattern);
         let pattern = translate_perl_whitespace_escapes(&pattern);
+        let pattern = normalize_named_backref(&pattern);
         // If the pattern uses atomic groups `(?>...)` or possessive
         // quantifiers (`X++`, `X*+`, `X?+`, `X{N,M}+`), rust regex
         // either rejects them or silently mishandles (treats `++`
@@ -11878,6 +11879,7 @@ impl Interpreter {
         let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_inline_flag_groups(&pattern);
         let pattern = translate_perl_whitespace_escapes(&pattern);
+        let pattern = normalize_named_backref(&pattern);
         let pattern = translate_atomic_groups(&pattern);
         let pattern = fix_inverted_quantifiers(&pattern);
         let pattern = neutralise_false_ranges(&pattern);
@@ -15286,7 +15288,10 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                     while k < chars.len() && chars[k] != close {
                         k += 1;
                     }
-                    let name: String = chars[name_start..k].iter().collect();
+                    let raw_name: String = chars[name_start..k].iter().collect();
+                    // `\k{ NAME }` — Perl allows surrounding whitespace
+                    // inside the brace form.
+                    let name = raw_name.trim().to_string();
                     let prefix: String = chars[..=k].iter().collect();
                     let suffix: String = if k + 1 < chars.len() {
                         chars[k + 1..].iter().collect()
@@ -16349,6 +16354,53 @@ fn strip_regex_comments(pattern: &str) -> String {
             }
             i = k;
             continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Normalise `\k{NAME}` / `\k'NAME'` named-backref forms to the
+/// angle-bracket form `\k<NAME>` that fancy_regex's parser accepts.
+/// Whitespace inside `\k{ NAME }` is trimmed.
+fn normalize_named_backref(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if !in_class
+            && c == '\\'
+            && i + 2 < chars.len()
+            && chars[i + 1] == 'k'
+            && (chars[i + 2] == '{' || chars[i + 2] == '\'')
+        {
+            let close = if chars[i + 2] == '{' { '}' } else { '\'' };
+            let name_start = i + 3;
+            let mut k = name_start;
+            while k < chars.len() && chars[k] != close {
+                k += 1;
+            }
+            if k < chars.len() {
+                let raw: String = chars[name_start..k].iter().collect();
+                let name = raw.trim();
+                out.push_str(&format!("\\k<{name}>"));
+                i = k + 1;
+                continue;
+            }
+        }
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+        } else if in_class && c == ']' {
+            in_class = false;
         }
         out.push(c);
         i += 1;
