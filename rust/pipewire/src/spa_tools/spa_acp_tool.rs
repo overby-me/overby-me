@@ -23,7 +23,17 @@ pub fn main(args: &[String]) -> i32 {
                 print_commands();
                 return 0;
             }
+            s if s.starts_with("--verbose=") => {
+                eprintln!("{argv0}: option '--verbose' doesn't allow an argument");
+                eprintln!("error: unknown option '?'");
+                print_options(argv0);
+                println!("Available commands:");
+                print_commands();
+                return 0;
+            }
             "-v" | "--verbose" => {}
+            // Inline-value forms for required-arg flags.
+            s if s.starts_with("--card=") || s.starts_with("--properties=") => {}
             // -c, -p require an argument per spa-acp-tool's optstring.
             "-c" | "--card" => {
                 if i + 1 >= args.len() {

@@ -935,6 +935,9 @@
       { tool = "pw-config"; name = "recurse-with-arg"; }
       { tool = "pw-config"; name = "no-newline-with-arg"; }
       { tool = "pw-loopback"; name = "remote-with-arg"; }
+      { tool = "spa-acp-tool"; name = "verbose-with-arg"; }
+      { tool = "spa-resample"; name = "verbose-with-arg"; }
+      { tool = "spa-resample"; name = "rate-inline"; }
       { tool = "pw-cli"; name = "cmd-connect-bad"; }
       { tool = "pw-mon"; name = "connect-fail"; }
       { tool = "pw-profiler"; name = "connect-fail"; }

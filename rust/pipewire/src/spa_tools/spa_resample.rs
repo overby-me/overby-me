@@ -24,7 +24,25 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_help(argv0);
                 return 1;
             }
+            s if s.starts_with("--verbose=") => {
+                eprintln!("{argv0}: option '--verbose' doesn't allow an argument");
+                eprintln!("error: unknown option '?'");
+                print_help(argv0);
+                return 1;
+            }
             "-v" | "--verbose" => {
+                i += 1;
+            }
+            // Inline-value forms for required-arg long flags.
+            s if s.starts_with("--cpuflags=")
+                || s.starts_with("--rate=")
+                || s.starts_with("--format=")
+                || s.starts_with("--window=")
+                || s.starts_with("--quality=")
+                || s.starts_with("--cutoff=")
+                || s.starts_with("--taps=")
+                || s.starts_with("--param=") =>
+            {
                 i += 1;
             }
             // Flags that REQUIRE a value; if missing, getopt prints
