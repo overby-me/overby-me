@@ -1020,14 +1020,18 @@ fn open_client(remote: Option<&str>, app_name: &str) -> Result<Client, String> {
         }
         None => Client::connect_default(),
     }
-    // Match C's `pw_protocol_native` error wrapping: ENOENT becomes
-    // `failed to connect: Host is down` and the parse() layer wraps that
-    // in `Error: "..."`. We emit the same shape.
+    // Match C's `pw_protocol_native` error wrapping: any connect error
+    // becomes `failed to connect: <strerror>`. ENOENT → "Host is down"
+    // (libpipewire's standard mapping), ECONNREFUSED → "Connection
+    // refused", etc. The parse() layer wraps that in `Error: "..."`.
     .map_err(|e| match &e {
-        crate::pipewire_lib::client::Error::Io(io_err)
-            if io_err.kind() == std::io::ErrorKind::NotFound =>
-        {
-            "Error: \"failed to connect: Host is down\"".to_string()
+        crate::pipewire_lib::client::Error::Io(io_err) => {
+            let msg = match io_err.kind() {
+                std::io::ErrorKind::NotFound => "Host is down".to_string(),
+                std::io::ErrorKind::ConnectionRefused => "Connection refused".to_string(),
+                _ => io_err.to_string(),
+            };
+            format!("Error: \"failed to connect: {msg}\"")
         }
         _ => format!("connect: {e}"),
     })?;

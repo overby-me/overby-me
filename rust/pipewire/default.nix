@@ -1413,6 +1413,7 @@
       { tool = "spa-json-dump"; name = "conf-pipewire-vulkan"; }
       { tool = "spa-json-dump"; name = "conf-pipewire-pulse"; }
       { tool = "spa-json-dump"; name = "conf-pipewire-avb"; }
+      { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-config"; name = "list-empty-no-newline"; }
       {
         tool = "pw-cli";
