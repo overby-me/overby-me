@@ -61,6 +61,9 @@ pub fn main(args: &[String]) -> i32 {
                 }
             }
             _ => {
+                // Match getopt_long's "unrecognized option" message. The
+                // C tool then falls through to show_help on stdout.
+                eprintln!("{argv0}: unrecognized option '{a}'");
                 print_help(argv0);
                 return u8::MAX as i32;
             }

@@ -269,6 +269,10 @@
         tool = "pw-config";
         name = "paths-custom-name";
       }
+      {
+        tool = "pw-config";
+        name = "bad-flag";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
@@ -346,6 +350,7 @@
       {tool = "pw-cli"; name = "usage-create-link";}
       {tool = "pw-cli"; name = "usage-export-node";}
       {tool = "pw-link"; name = "empty-input";}
+      {tool = "pw-link"; name = "latency-only";}
       {tool = "pw-link"; name = "empty-output";}
       {tool = "pw-link"; name = "empty-links";}
       {tool = "pw-metadata"; name = "list-empty";}

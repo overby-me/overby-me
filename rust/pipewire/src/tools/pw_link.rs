@@ -64,10 +64,14 @@ pub fn main(args: &[String]) -> i32 {
 
     let _ = &positional;
 
-    if !list_inputs && !list_outputs && !list_links {
-        // No mode requested → C tool defaults to printing nothing useful;
-        // act like the help case.
+    if args.len() == 1 {
+        // No flags at all → C calls show_help on stderr and exits -1.
         print_help(argv0);
+        return 0;
+    }
+    if !list_inputs && !list_outputs && !list_links {
+        // Some flags were given (e.g. -t) but no list mode; the C tool
+        // walks nothing in MODE_LIST, producing no output. Match that.
         return 0;
     }
 
