@@ -17381,6 +17381,15 @@ fn translate_octal_escapes(pattern: &str) -> String {
         }
         if c == '\\' && i + 1 < chars.len() {
             let nxt = chars[i + 1];
+            // `\8` and `\9` inside `[...]` aren't valid backrefs (no
+            // octal digit, no group), Perl warns + treats as literal
+            // `8` / `9`. fancy_regex rejects the form, so emit the
+            // literal digit. re/regexp tests 1620-1621.
+            if in_class && (nxt == '8' || nxt == '9') {
+                out.push(nxt);
+                i += 2;
+                continue;
+            }
             // `\o{NNN}` braced octal — translate to `\xHH` / `\x{HHHH}`.
             // re/regexp tests 1567-1572.
             if nxt == 'o' && i + 2 < chars.len() && chars[i + 2] == '{' {
