@@ -3740,21 +3740,46 @@ impl Interpreter {
                     Expr::ScalarVar(n) => Some(n.clone()),
                     _ => None,
                 };
-                let start = if flags.contains('g')
-                    && let Some(n) = &var_name
-                {
-                    self.pos_offsets.get(n).copied().unwrap_or(0)
+                // For matches against alias-bearing slots (`$_[0]`,
+                // `$h{k}` passed as a sub arg), key pos by the
+                // underlying Rc pointer so the offset propagates back
+                // to the caller's lvalue. op/pos defelem `=~ //g`
+                // tests.
+                let alias_rc_ptr: Option<usize> = if var_name.is_none() {
+                    let slot = self.lvalue_alias_slot(expr);
+                    if let Value::Alias(rc) = slot {
+                        Some(std::rc::Rc::as_ptr(&rc) as usize)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let start = if flags.contains('g') {
+                    if let Some(n) = &var_name {
+                        self.pos_offsets.get(n).copied().unwrap_or(0)
+                    } else if let Some(p) = alias_rc_ptr {
+                        self.pos_offsets_by_rc.get(&p).copied().unwrap_or(0)
+                    } else {
+                        0
+                    }
                 } else {
                     0
                 };
                 let (matched, end) = self.regex_match_pos(&text, pat, flags, start);
-                if flags.contains('g')
-                    && let Some(n) = var_name
-                {
-                    if matched {
-                        self.pos_offsets.insert(n, end);
-                    } else if !flags.contains('c') {
-                        self.pos_offsets.remove(&n);
+                if flags.contains('g') {
+                    if let Some(n) = var_name {
+                        if matched {
+                            self.pos_offsets.insert(n, end);
+                        } else if !flags.contains('c') {
+                            self.pos_offsets.remove(&n);
+                        }
+                    } else if let Some(p) = alias_rc_ptr {
+                        if matched {
+                            self.pos_offsets_by_rc.insert(p, end);
+                        } else if !flags.contains('c') {
+                            self.pos_offsets_by_rc.remove(&p);
+                        }
                     }
                 }
                 Value::Num(if matched { 1.0 } else { 0.0 })
