@@ -354,6 +354,10 @@
         tool = "pw-mididump";
         name = "bad-file";
       }
+      {
+        tool = "pw-mididump";
+        name = "bad-force-midi";
+      }
 
       # --- pw-config offline tests ---
       {
