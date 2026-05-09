@@ -1400,6 +1400,7 @@
       { tool = "pw-dot"; name = "remote-attached"; }
       { tool = "pw-metadata"; name = "remote-bad"; }
       { tool = "pw-cli"; name = "help-with-bad-remote"; }
+      { tool = "spa-acp-tool"; name = "cluster-hv"; }
       {
         tool = "pw-cli";
         name = "cmd-connect-bad";

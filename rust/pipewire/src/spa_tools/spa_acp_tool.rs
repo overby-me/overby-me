@@ -2,8 +2,9 @@
 // implementation drives ALSA via the SPA bluez/alsa monitor and is
 // Phase 10+ work. We mirror the C tool's --help / -h output exactly.
 
-pub fn main(args: &[String]) -> i32 {
-    let argv0 = args.first().map(String::as_str).unwrap_or("spa-acp-tool");
+pub fn main(raw_args: &[String]) -> i32 {
+    let argv0 = raw_args.first().map(String::as_str).unwrap_or("spa-acp-tool");
+    let args = crate::tools::common::expand_short_clusters(raw_args, &['h', 'v']);
 
     let mut i = 1;
     let mut command: Option<String> = None;
