@@ -16372,6 +16372,23 @@ fn neutralise_false_ranges(pattern: &str) -> String {
             i += 1;
             continue;
         }
+        // `[:NAME:]` POSIX-class introducer inside an outer class —
+        // copy through as-is so the inner `]` doesn't close the outer
+        // class. Without this, `[[:digit:]-z]` flips `in_class` off
+        // at the inner `]` and we miss the false-range neutralisation
+        // that follows.
+        if in_class && c == '[' && i + 1 < chars.len() && chars[i + 1] == ':' {
+            let mut k = i + 2;
+            while k + 1 < chars.len() && !(chars[k] == ':' && chars[k + 1] == ']') {
+                k += 1;
+            }
+            if k + 1 < chars.len() {
+                let chunk: String = chars[i..=k + 1].iter().collect();
+                out.push_str(&chunk);
+                i = k + 2;
+                continue;
+            }
+        }
         if in_class && c == ']' {
             in_class = false;
             out.push(c);
