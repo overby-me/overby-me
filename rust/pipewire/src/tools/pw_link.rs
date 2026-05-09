@@ -93,7 +93,8 @@ pub fn main(raw_args: &[String]) -> i32 {
             s if s.starts_with("--props=") => {
                 // --props=PROPS — value is inline.
             }
-            s if s.starts_with("--color") || s.starts_with("-C") => {}
+            // pw-link's getopt has no --color or -C option — it falls
+            // through to the unrecognized-option branch.
             s if s.starts_with("--") => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);

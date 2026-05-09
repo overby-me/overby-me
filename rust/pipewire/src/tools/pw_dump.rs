@@ -74,8 +74,24 @@ pub fn main(raw_args: &[String]) -> i32 {
             "-N" | "--no-colors" | "-R" | "--raw" | "-s" | "--spa" | "-m" | "--monitor" => {
                 // Accepted but ignored at this phase.
             }
-            s if s.starts_with("--color") => {
-                // --color or --color=auto/always/never; ignored.
+            "--color" | "-C" => {
+                // Bare flag → defaults to "auto"; OK.
+            }
+            s if s.starts_with("--color=") => {
+                let val = &s["--color=".len()..];
+                if !matches!(val, "" | "never" | "always" | "auto") {
+                    eprintln!("Unknown color: {val}");
+                    print_help(argv0);
+                    return 255;
+                }
+            }
+            s if s.starts_with("-C") && s.len() > 2 => {
+                let val = &s[2..];
+                if !matches!(val, "never" | "always" | "auto") {
+                    eprintln!("Unknown color: {val}");
+                    print_help(argv0);
+                    return 255;
+                }
             }
             s if s.starts_with("--") => {
                 eprintln!("{argv0}: unrecognized option '{s}'");

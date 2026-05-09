@@ -165,6 +165,30 @@ pub fn main(raw_args: &[String]) -> i32 {
                 // C treats lone `-` as a positional filename (stdin).
                 positional_count += 1;
             }
+            s if s.starts_with('-') && s.len() > 2 && !s.starts_with("--") => {
+                // Short cluster like `-hV` or `-Vh`. Process char-by-char
+                // (getopt's behaviour). If the first char is `h`, print
+                // help and exit before processing the rest.
+                let ch = s.chars().nth(1).unwrap_or('?');
+                if ch == 'h' {
+                    print_help(argv0);
+                    return 0;
+                }
+                if !known_short_no_arg.contains(&ch)
+                    && !short_required.iter().any(|(c, _)| *c == ch)
+                {
+                    eprintln!("{getopt_argv0}: invalid option -- '{ch}'");
+                    print_help(argv0);
+                    return 1;
+                }
+                // First char is a known no-arg flag (other than h). Apply
+                // its mode-setter side effect, then fall through (we
+                // don't currently handle inline values for required-arg
+                // clusters in pw-cat).
+                if matches!(ch, 'p' | 'r' | 'm' | 'd' | 's' | 'o') {
+                    mode_set = true;
+                }
+            }
             _ => {}
         }
         i += 1;
