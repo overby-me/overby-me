@@ -6260,17 +6260,30 @@ impl Interpreter {
                 } else {
                     self.get_var("_").to_str()
                 };
-
+                let limit: Option<i64> = args.get(2).map(|a| self.eval_expr(a).to_num() as i64);
                 let parts: Vec<Value> = if pat == " " {
                     text.split_whitespace()
                         .map(|s| Value::Str(s.to_string()))
                         .collect()
                 } else if let Ok(re) = regex::Regex::new(&pat) {
-                    re.split(&text).map(|s| Value::Str(s.to_string())).collect()
+                    match limit {
+                        Some(n) if n > 0 => re
+                            .splitn(&text, n as usize)
+                            .map(|s| Value::Str(s.to_string()))
+                            .collect(),
+                        _ => re.split(&text).map(|s| Value::Str(s.to_string())).collect(),
+                    }
                 } else {
-                    text.split(&pat)
-                        .map(|s| Value::Str(s.to_string()))
-                        .collect()
+                    match limit {
+                        Some(n) if n > 0 => text
+                            .splitn(n as usize, pat.as_str())
+                            .map(|s| Value::Str(s.to_string()))
+                            .collect(),
+                        _ => text
+                            .split(&pat)
+                            .map(|s| Value::Str(s.to_string()))
+                            .collect(),
+                    }
                 };
                 Value::Num(parts.len() as f64) // In scalar context
             }
