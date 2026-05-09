@@ -189,6 +189,7 @@
       { tool = "pw-v4l2"; name = "help"; }
       { tool = "spa-inspect"; name = "usage"; }
       { tool = "spa-monitor"; name = "usage"; }
+      { tool = "spa-acp-tool"; name = "help"; }
       { tool = "pw-cli"; name = "version-short"; }
       { tool = "pw-mon"; name = "version-short"; }
       { tool = "pw-link"; name = "version-short"; }
