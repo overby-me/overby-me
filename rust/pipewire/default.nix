@@ -907,6 +907,9 @@
       { tool = "spa-monitor"; name = "two-args"; }
       { tool = "spa-acp-tool"; name = "missing-arg-c"; }
       { tool = "spa-acp-tool"; name = "missing-arg-p"; }
+      { tool = "pw-mididump"; name = "sysex"; }
+      { tool = "pw-mididump"; name = "poly-pressure"; }
+      { tool = "pw-mididump"; name = "copyright-meta"; }
 
       # --- per-tool --help byte-identical parity ---
       {
