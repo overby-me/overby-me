@@ -267,7 +267,7 @@ fn run_info(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {
     let mut client = match open_client(remote, "rust-pipewire-cli") {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("{argv0}: {e}");
+            print_open_error(argv0, &e);
             return 1;
         }
     };
@@ -702,6 +702,16 @@ fn print_properties(items: &[DictItem], mark: char, header: bool) {
     }
 }
 
+/// Errors that already include the `Error: "..."` wrapper get printed
+/// verbatim; everything else gets the usual `<tool>: <msg>` prefix.
+fn print_open_error(argv0: &str, e: &str) {
+    if e.starts_with("Error:") {
+        eprintln!("{e}");
+    } else {
+        eprintln!("{argv0}: {e}");
+    }
+}
+
 /// Mirror C `do_list_vars`: prints "Known variables:" then one line per
 /// var. After do_connect there's exactly one TYPE_REMOTE var (the one we
 /// just connected to) printed as `0 = @remote:<pointer>`. We use a sentinel
@@ -734,7 +744,7 @@ fn run_list_objects(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {
     let globals = match collect_globals(remote, "rust-pipewire-cli") {
         Ok(g) => g,
         Err(e) => {
-            eprintln!("{argv0}: {e}");
+            print_open_error(argv0, &e);
             return 1;
         }
     };
@@ -776,7 +786,17 @@ fn open_client(remote: Option<&str>, app_name: &str) -> Result<Client, String> {
         }
         None => Client::connect_default(),
     }
-    .map_err(|e| format!("connect: {e}"))?;
+    // Match C's `pw_protocol_native` error wrapping: ENOENT becomes
+    // `failed to connect: Host is down` and the parse() layer wraps that
+    // in `Error: "..."`. We emit the same shape.
+    .map_err(|e| match &e {
+        crate::pipewire_lib::client::Error::Io(io_err)
+            if io_err.kind() == std::io::ErrorKind::NotFound =>
+        {
+            "Error: \"failed to connect: Host is down\"".to_string()
+        }
+        _ => format!("connect: {e}"),
+    })?;
 
     client
         .handshake(app_name)

@@ -28,6 +28,13 @@ pub fn main(args: &[String]) -> i32 {
             print_version(argv0);
             0
         }
+        // Recognized flags we don't yet implement — running the daemon
+        // is Phase 9. Just print "not implemented" so callers know.
+        Some("-v") | Some("--verbose") | Some("-c") | Some("--config")
+        | Some("-P") | Some("--properties") => {
+            eprintln!("{argv0}: not yet implemented in rust-pipewire");
+            1
+        }
         Some(s) if s.starts_with('-') => {
             // getopt_long writes the unrecognized-option message; C main
             // returns res = -EINVAL (-22) which truncates to 234.
