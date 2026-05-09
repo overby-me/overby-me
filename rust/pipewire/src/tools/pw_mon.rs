@@ -22,6 +22,16 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_version(argv0);
                 return 0;
             }
+            s if s.starts_with("--help=") => {
+                eprintln!("{argv0}: option '--help' doesn't allow an argument");
+                print_help(argv0);
+                return 0;
+            }
+            s if s.starts_with("--version=") => {
+                eprintln!("{argv0}: option '--version' doesn't allow an argument");
+                print_help(argv0);
+                return 0;
+            }
             // -r and -C take a required arg.
             "-r" | "--remote" => {
                 if i + 1 >= args.len() {
@@ -32,6 +42,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                 i += 2;
                 continue;
             }
+            s if s.starts_with("--remote=") => {}
             // -C and --color have OPTIONAL argument; bare `-C` is fine.
             "-C" | "--color" => {}
             "-N" | "--no-colors" | "-o" | "--hide-props" | "-a"

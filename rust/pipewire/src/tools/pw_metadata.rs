@@ -30,6 +30,16 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_version(argv0);
                 return 0;
             }
+            s if s.starts_with("--help=") => {
+                eprintln!("{argv0}: option '--help' doesn't allow an argument");
+                print_help(argv0);
+                return 0;
+            }
+            s if s.starts_with("--version=") => {
+                eprintln!("{argv0}: option '--version' doesn't allow an argument");
+                print_help(argv0);
+                return 0;
+            }
             "-l" | "--list" => list = true,
             "-n" | "--name" => {
                 if i + 1 >= args.len() {
@@ -50,6 +60,9 @@ pub fn main(raw_args: &[String]) -> i32 {
                 remote = Some(args[i + 1].clone());
                 i += 2;
                 continue;
+            }
+            s if s.starts_with("--remote=") => {
+                remote = Some(s["--remote=".len()..].to_string());
             }
             "-m" | "--monitor" | "-d" | "--delete" => {}
             s if s.starts_with("--") => {

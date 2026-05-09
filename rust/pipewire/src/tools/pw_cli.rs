@@ -31,6 +31,27 @@ pub fn main(raw_args: &[String]) -> i32 {
                 println!("Linked with libpipewire {PIPEWIRE_API_VERSION}");
                 return 0;
             }
+            // No-arg long flags reject `--flag=value` form.
+            s if s.starts_with("--help=") => {
+                eprintln!("{argv0}: option '--help' doesn't allow an argument");
+                print_help(argv0);
+                return 0;
+            }
+            s if s.starts_with("--version=") => {
+                eprintln!("{argv0}: option '--version' doesn't allow an argument");
+                print_help(argv0);
+                return 0;
+            }
+            s if s.starts_with("--monitor=") => {
+                eprintln!("{argv0}: option '--monitor' doesn't allow an argument");
+                print_help(argv0);
+                return 0;
+            }
+            s if s.starts_with("--daemon=") => {
+                eprintln!("{argv0}: option '--daemon' doesn't allow an argument");
+                print_help(argv0);
+                return 0;
+            }
             "-h" | "--help" => {
                 print_help(argv0);
                 return 0;
@@ -44,6 +65,9 @@ pub fn main(raw_args: &[String]) -> i32 {
                 remote = Some(args[i + 1].clone());
                 i += 2;
                 continue;
+            }
+            s if s.starts_with("--remote=") => {
+                remote = Some(s["--remote=".len()..].to_string());
             }
             "-m" | "--monitor" | "-d" | "--daemon" => {
                 // Flags consumed by the C tool; ignored at this stage.

@@ -38,6 +38,16 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_version(argv0);
                 return 0;
             }
+            s if s.starts_with("--help=") => {
+                eprintln!("{argv0}: option '--help' doesn't allow an argument");
+                print_help(argv0);
+                return 0;
+            }
+            s if s.starts_with("--version=") => {
+                eprintln!("{argv0}: option '--version' doesn't allow an argument");
+                print_help(argv0);
+                return 0;
+            }
             "-i" | "--input" => list_inputs = true,
             "-o" | "--output" => list_outputs = true,
             "-l" | "--links" => list_links = true,
@@ -52,6 +62,9 @@ pub fn main(raw_args: &[String]) -> i32 {
                 eprintln!("{argv0}: option requires an argument -- 'r'");
                 print_help(argv0);
                 return 0;
+            }
+            s if s.starts_with("--remote=") => {
+                remote = Some(s["--remote=".len()..].to_string());
             }
             "-d" | "--disconnect" => disconnect = true,
             // Per pw-link.c optstring "hVr:oilmIvLPp:wdt", `t` takes

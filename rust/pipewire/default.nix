@@ -834,6 +834,22 @@
       { tool = "pw-mididump"; name = "cluster-hV"; }
       { tool = "pw-cat"; name = "cluster-hp"; }
       { tool = "pw-cat"; name = "cluster-Vh"; }
+      { tool = "pw-cli"; name = "help-with-arg"; }
+      { tool = "pw-cli"; name = "version-with-arg"; }
+      { tool = "pw-mon"; name = "help-with-arg"; }
+      { tool = "pw-mon"; name = "version-with-arg"; }
+      { tool = "pw-link"; name = "help-with-arg"; }
+      { tool = "pw-link"; name = "version-with-arg"; }
+      { tool = "pw-top"; name = "help-with-arg"; }
+      { tool = "pw-top"; name = "version-with-arg"; }
+      { tool = "pw-dump"; name = "help-with-arg"; }
+      { tool = "pw-dump"; name = "version-with-arg"; }
+      { tool = "pw-dot"; name = "help-with-arg"; }
+      { tool = "pw-dot"; name = "version-with-arg"; }
+      { tool = "pw-metadata"; name = "help-with-arg"; }
+      { tool = "pw-metadata"; name = "version-with-arg"; }
+      { tool = "pw-profiler"; name = "help-with-arg"; }
+      { tool = "pw-profiler"; name = "version-with-arg"; }
 
       # --- per-tool --help byte-identical parity ---
       {
