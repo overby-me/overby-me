@@ -17326,6 +17326,29 @@ fn translate_octal_escapes(pattern: &str) -> String {
         }
         if c == '\\' && i + 1 < chars.len() {
             let nxt = chars[i + 1];
+            // `\o{NNN}` braced octal — translate to `\xHH` / `\x{HHHH}`.
+            // re/regexp tests 1567-1572.
+            if nxt == 'o' && i + 2 < chars.len() && chars[i + 2] == '{' {
+                let body_start = i + 3;
+                let mut k = body_start;
+                while k < chars.len() && chars[k] != '}' {
+                    k += 1;
+                }
+                if k < chars.len() {
+                    let raw: String = chars[body_start..k].iter().collect();
+                    let body = raw.trim();
+                    if !body.is_empty() && body.chars().all(|c| c.is_digit(8)) {
+                        let n: u32 = u32::from_str_radix(body, 8).unwrap_or(0);
+                        if n <= 0xff {
+                            out.push_str(&format!("\\x{n:02x}"));
+                        } else {
+                            out.push_str(&format!("\\x{{{n:x}}}"));
+                        }
+                        i = k + 1;
+                        continue;
+                    }
+                }
+            }
             // Octal-disambiguation: `\Nd...` where N is followed by
             // another digit AND group N doesn't exist falls back to
             // octal (1-3 octal digits, leftmost wins). Reference perl
