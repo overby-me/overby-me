@@ -22,6 +22,15 @@ pub fn main(raw_args: &[String]) -> i32 {
     while i < args.len() {
         let a = args[i].as_str();
         match a {
+            "--" => {
+                // End of options; remaining args are positional.
+                for v in args.iter().skip(i + 1) {
+                    if command == "paths" && !command_set(&mut command, v) {
+                        command_args.push(v.clone());
+                    }
+                }
+                break;
+            }
             "-h" | "--help" => {
                 print_help(argv0);
                 return 0;
@@ -48,6 +57,12 @@ pub fn main(raw_args: &[String]) -> i32 {
                 eprintln!("{argv0}: option '{name}' doesn't allow an argument");
                 print_help(argv0);
                 return 0;
+            }
+            s if s.starts_with("-n") && s.len() > 2 => {
+                opt_name = s[2..].to_string();
+            }
+            s if s.starts_with("-p") && s.len() > 2 => {
+                opt_prefix = s[2..].to_string();
             }
             "-n" | "--name" => {
                 i += 1;
