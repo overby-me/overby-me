@@ -15178,6 +15178,54 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                     ));
                 }
             }
+            // `(?'NAME'…)` — quoted named-capture group. Same name
+            // rules as `(?<NAME>...)`. re/regexp tests 1325-1331.
+            if k + 2 < chars.len()
+                && chars[k + 1] == '?'
+                && chars[k + 2] == '\''
+                && k + 3 < chars.len()
+            {
+                let next = chars[k + 3];
+                let is_word_start = next == '_' || next.is_ascii_alphabetic();
+                if !is_word_start {
+                    let prefix: String = chars[..=k + 3].iter().collect();
+                    let suffix: String = chars[k + 4..].iter().collect();
+                    return Some(format!(
+                        "Group name must start with a non-digit word character in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                    ));
+                }
+            }
+            // `(?P<NAME>…)` — Python-flavour named-capture group.
+            // `(?P=NAME)` is a backref. `(?PX…)` (anything else after
+            // `?P`) emits "Sequence (?PX...) not recognized".
+            if k + 2 < chars.len()
+                && chars[k + 1] == '?'
+                && chars[k + 2] == 'P'
+                && k + 3 < chars.len()
+            {
+                let after_p = chars[k + 3];
+                if after_p == '<' && k + 4 < chars.len() {
+                    let next = chars[k + 4];
+                    // `(?P<=`/`(?P<!` are NOT lookbehinds in Perl — the
+                    // P is just literal.
+                    let is_word_start = next == '_' || next.is_ascii_alphabetic();
+                    if !is_word_start {
+                        let prefix: String = chars[..=k + 4].iter().collect();
+                        let suffix: String = chars[k + 5..].iter().collect();
+                        return Some(format!(
+                            "Group name must start with a non-digit word character in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                        ));
+                    }
+                } else if after_p != '<' && after_p != '=' && after_p != '\'' {
+                    // `(?PX…)` for any X other than `<`/`=`/`'` is
+                    // unrecognised. Reference perl's diagnostic uses
+                    // a `(?PX)` prefix (3 chars) marker.
+                    let prefix: String = chars[..=k + 3].iter().collect();
+                    return Some(format!(
+                        "Sequence (?P{after_p}...) not recognized in regex; marked by <-- HERE in m/{prefix} <-- HERE /"
+                    ));
+                }
+            }
             depth += 1;
             unmatched_starts.push(k);
         } else if cc == ')' {
