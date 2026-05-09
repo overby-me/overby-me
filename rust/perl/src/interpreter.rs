@@ -15218,6 +15218,43 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
+        // Skip past `(?{...})` / `(??{...})` regex code blocks: their
+        // body is Perl source and may contain regex metachars (`[`,
+        // `(`, …) that mustn't be parsed as regex syntax. re/regexp
+        // tests 1701-1707.
+        if c == '('
+            && i + 2 < chars.len()
+            && chars[i + 1] == '?'
+            && (chars[i + 2] == '{'
+                || (chars[i + 2] == '?' && i + 3 < chars.len() && chars[i + 3] == '{'))
+        {
+            let body_open = if chars[i + 2] == '?' { i + 3 } else { i + 2 };
+            let mut depth = 1;
+            let mut j = body_open + 1;
+            while j < chars.len() && depth > 0 {
+                if chars[j] == '\\' && j + 1 < chars.len() {
+                    j += 2;
+                    continue;
+                }
+                if chars[j] == '{' {
+                    depth += 1;
+                } else if chars[j] == '}' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                j += 1;
+            }
+            if j < chars.len() && j + 1 < chars.len() && chars[j + 1] == ')' {
+                i = j + 2;
+            } else if j < chars.len() {
+                i = j + 1;
+            } else {
+                i = chars.len();
+            }
+            continue;
+        }
         if c == '\\' {
             // `\cX` is a 3-char control-character escape; consume the
             // controlled char so `\c[` doesn't get misread as the
@@ -15789,6 +15826,49 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
     let mut unmatched_starts: Vec<usize> = Vec::new();
     while k < chars.len() {
         let cc = chars[k];
+        // Skip past `(?{...})` / `(??{...})` blocks so their Perl-
+        // source body's metachars don't unbalance the paren counter.
+        // re/regexp tests 1701-1707.
+        if cc == '('
+            && k + 2 < chars.len()
+            && chars[k + 1] == '?'
+            && (chars[k + 2] == '{'
+                || (chars[k + 2] == '?' && k + 3 < chars.len() && chars[k + 3] == '{'))
+        {
+            let body_open = if chars[k + 2] == '?' { k + 3 } else { k + 2 };
+            let mut bdepth = 1;
+            let mut j = body_open + 1;
+            while j < chars.len() && bdepth > 0 {
+                if chars[j] == '\\' && j + 1 < chars.len() {
+                    j += 2;
+                    continue;
+                }
+                if chars[j] == '{' {
+                    bdepth += 1;
+                } else if chars[j] == '}' {
+                    bdepth -= 1;
+                    if bdepth == 0 {
+                        break;
+                    }
+                }
+                j += 1;
+            }
+            if bdepth != 0 {
+                // Unterminated `(?{…)` — reference perl emits the
+                // "Missing right curly" diagnostic. re/regexp 573-574.
+                let prefix: String = chars[..body_open + 1].iter().collect();
+                let suffix: String = chars[body_open + 1..].iter().collect();
+                return Some(format!(
+                    "Missing right curly or square bracket in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                ));
+            }
+            if j + 1 < chars.len() && chars[j + 1] == ')' {
+                k = j + 2;
+            } else {
+                k = j + 1;
+            }
+            continue;
+        }
         if cc == '\\' {
             // `\cX` is a 3-char control-character escape; skip the
             // controlled char so a `\c[` doesn't get treated as the
