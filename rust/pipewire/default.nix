@@ -903,6 +903,8 @@
       { tool = "pw-cli"; name = "cmd-connect-bad"; }
       { tool = "pw-link"; name = "connect-three-args"; }
       { tool = "pw-link"; name = "connect-one-arg"; }
+      { tool = "pw-link"; name = "disconnect-with-id"; }
+      { tool = "pw-link"; name = "connect-two-args"; }
       { tool = "pw-mididump"; name = "force-midi-bad-value"; }
       { tool = "spa-resample"; name = "cluster-hh"; }
       { tool = "spa-resample"; name = "double-v"; }

@@ -141,6 +141,17 @@ pub fn main(raw_args: &[String]) -> i32 {
     }
 
     if !list_inputs && !list_outputs && !list_links {
+        if disconnect {
+            // C tries to unlink ports — without daemon, ENOENT becomes
+            // "failed to unlink ports: No such file or directory".
+            eprintln!("failed to unlink ports: No such file or directory");
+            return 255;
+        }
+        if positional.len() >= 2 {
+            // C tries to link ports — without daemon, fails the same way.
+            eprintln!("failed to link ports: No such file or directory");
+            return 255;
+        }
         // Some flags were given (e.g. -t) but no list mode; the C tool
         // walks nothing in MODE_LIST, producing no output. Match that.
         return 0;
