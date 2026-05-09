@@ -55,6 +55,26 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
+            // Long no-arg flags: input/output/links/latency/monitor/etc.
+            // reject `--FOO=value` form.
+            s if s.starts_with("--input=")
+                || s.starts_with("--output=")
+                || s.starts_with("--links=")
+                || s.starts_with("--latency=")
+                || s.starts_with("--monitor=")
+                || s.starts_with("--linger=")
+                || s.starts_with("--passive=")
+                || s.starts_with("--wait=")
+                || s.starts_with("--no-colors=")
+                || s.starts_with("--id=")
+                || s.starts_with("--verbose=")
+                || s.starts_with("--disconnect=") =>
+            {
+                let name = s.split_once('=').map(|(n, _)| n).unwrap_or(s);
+                eprintln!("{argv0}: option '{name}' doesn't allow an argument");
+                print_help(argv0);
+                return 0;
+            }
             "-i" | "--input" => list_inputs = true,
             "-o" | "--output" => list_outputs = true,
             "-l" | "--links" => list_links = true,

@@ -916,6 +916,8 @@
       { tool = "pw-mon"; name = "invalid-color"; }
       { tool = "pw-link"; name = "color-rejected"; }
       { tool = "pw-dump"; name = "invalid-color"; }
+      { tool = "pw-link"; name = "latency-with-arg"; }
+      { tool = "pw-link"; name = "input-with-arg"; }
       { tool = "pw-cli"; name = "cmd-connect-bad"; }
       { tool = "pw-mon"; name = "connect-fail"; }
       { tool = "pw-profiler"; name = "connect-fail"; }
