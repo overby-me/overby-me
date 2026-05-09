@@ -910,6 +910,9 @@
       { tool = "pw-mididump"; name = "sysex"; }
       { tool = "pw-mididump"; name = "poly-pressure"; }
       { tool = "pw-mididump"; name = "copyright-meta"; }
+      { tool = "spa-json-dump"; name = "array-mixed"; }
+      { tool = "spa-json-dump"; name = "empty-object"; }
+      { tool = "spa-json-dump"; name = "special-keys"; }
 
       # --- per-tool --help byte-identical parity ---
       {
