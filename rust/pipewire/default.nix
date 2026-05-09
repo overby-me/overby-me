@@ -1404,6 +1404,9 @@
       { tool = "pw-cat"; name = "dash-dash-only"; }
       { tool = "pw-mididump"; name = "multi-positional"; }
       { tool = "spa-resample"; name = "two-positional-fail"; }
+      { tool = "pw-cat"; name = "playback-bad-file"; }
+      { tool = "pw-play"; name = "bad-file"; }
+      { tool = "pw-record"; name = "bad-file"; }
       {
         tool = "pw-cli";
         name = "cmd-connect-bad";

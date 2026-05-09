@@ -219,9 +219,26 @@ pub fn main(raw_args: &[String]) -> i32 {
     } else if positional_count == 0 {
         eprintln!("error: filename or - argument missing");
     } else {
-        // We don't actually run the audio engine yet; emit a stub error.
-        eprintln!("{argv0}: not yet implemented in rust-pipewire");
-        print_help(argv0);
+        // C tries to connect first, then open the file via sndfile.
+        // Without daemon → connect-fail. With daemon → sndfile error.
+        match crate::pipewire_lib::client::Client::connect_default() {
+            Ok(_) => {
+                // Daemon up; emit the sndfile error.
+                let file = raw_args
+                    .iter()
+                    .skip(1)
+                    .find(|a| !a.starts_with('-'))
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+                eprintln!(
+                    "sndfile: failed to open audio file \"{file}\": System error : No such file or directory."
+                );
+                eprintln!("error: open failed: Input/output error");
+            }
+            Err(_) => {
+                eprintln!("error: pw_context_connect() failed: Host is down");
+            }
+        }
         return 1;
     }
     print_help(argv0);
