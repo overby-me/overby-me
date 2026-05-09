@@ -4259,9 +4259,7 @@ fn parse_interp_string(s: &str) -> Expr {
                             if i + 1 < chars.len() && chars[i] == '-' && chars[i + 1] == '>' {
                                 i += 2;
                             }
-                            if i >= chars.len()
-                                || (chars[i] != '[' && chars[i] != '{')
-                            {
+                            if i >= chars.len() || (chars[i] != '[' && chars[i] != '{') {
                                 break;
                             }
                             if !chain_started {
@@ -4304,11 +4302,7 @@ fn parse_interp_string(s: &str) -> Expr {
                             } else {
                                 Expr::StringLit(inner)
                             };
-                            accum = Expr::ArrowElement(
-                                Box::new(accum),
-                                Box::new(key_expr),
-                                kind,
-                            );
+                            accum = Expr::ArrowElement(Box::new(accum), Box::new(key_expr), kind);
                         }
                         if chain_started {
                             parts.push(InterpPart::Expr(Box::new(accum)));
@@ -4341,14 +4335,11 @@ fn parse_interp_string(s: &str) -> Expr {
                             if i + 1 < chars.len() && chars[i] == '-' && chars[i + 1] == '>' {
                                 i += 2;
                             }
-                            if i >= chars.len()
-                                || (chars[i] != '[' && chars[i] != '{')
-                            {
+                            if i >= chars.len() || (chars[i] != '[' && chars[i] != '{') {
                                 break;
                             }
                             if !chain_started {
-                                accum =
-                                    Expr::HashElement(name.clone(), Box::new(key_expr.clone()));
+                                accum = Expr::HashElement(name.clone(), Box::new(key_expr.clone()));
                                 chain_started = true;
                             }
                             let opener = chars[i];
@@ -4387,8 +4378,7 @@ fn parse_interp_string(s: &str) -> Expr {
                             } else {
                                 Expr::StringLit(inner)
                             };
-                            accum =
-                                Expr::ArrowElement(Box::new(accum), Box::new(kex), kind);
+                            accum = Expr::ArrowElement(Box::new(accum), Box::new(kex), kind);
                         }
                         if chain_started {
                             parts.push(InterpPart::Expr(Box::new(accum)));

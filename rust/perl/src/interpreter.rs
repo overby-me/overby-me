@@ -6762,8 +6762,7 @@ impl Interpreter {
                             }
                             if removed.is_none() {
                                 let qname = self.qualify_global(name);
-                                if let Some(rc) = self.aliased_hashes.get(qname.as_str()).cloned()
-                                {
+                                if let Some(rc) = self.aliased_hashes.get(qname.as_str()).cloned() {
                                     removed =
                                         Some(rc.borrow_mut().remove(&key).unwrap_or(Value::Undef));
                                 } else if qname.as_str() != name
@@ -6783,10 +6782,8 @@ impl Interpreter {
                             // on the contained blessed object before
                             // returning. op/undef hash-iteration tests.
                             if let Some(class) = self.blessed_refs.get(&Self::ref_ptr(&v)).cloned()
-                                && !self.ref_pointer_reachable_elsewhere_global(
-                                    Self::ref_ptr(&v),
-                                    "",
-                                )
+                                && !self
+                                    .ref_pointer_reachable_elsewhere_global(Self::ref_ptr(&v), "")
                             {
                                 let destroy_key = format!("{class}::DESTROY");
                                 if let Some((_params, body)) = self.subs.get(&destroy_key).cloned()
@@ -14840,8 +14837,7 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
     // group names so `\k<NAME>` / `\k'NAME'` references can be
     // validated against actual groups.
     let mut total_groups: usize = 0;
-    let mut named_groups: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
+    let mut named_groups: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut j = 0;
     while j < chars.len() {
         let c = chars[j];
@@ -14945,8 +14941,8 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                     let body: String = chars[body_start..k].iter().collect();
                     let trimmed = body.trim();
                     // Counts (`\N{N}` / `\N{N,M}`) are valid.
-                    let is_count =
-                        !trimmed.is_empty() && trimmed.chars().all(|c| c.is_ascii_digit() || c == ',');
+                    let is_count = !trimmed.is_empty()
+                        && trimmed.chars().all(|c| c.is_ascii_digit() || c == ',');
                     if !is_count {
                         let prefix: String = chars[..=k].iter().collect();
                         let suffix: String = if k + 1 < chars.len() {
@@ -16123,7 +16119,7 @@ fn translate_octal_escapes(pattern: &str) -> String {
                     && chars[i + 2].is_digit(8)
                     && chars[i + 3].is_digit(8))
             {
-                let mut n = nxt.to_digit(8).unwrap_or(0) as u32;
+                let mut n = nxt.to_digit(8).unwrap_or(0);
                 let mut consumed = 1;
                 while consumed < 3 && i + 1 + consumed < chars.len() {
                     let d = chars[i + 1 + consumed];
@@ -16134,9 +16130,7 @@ fn translate_octal_escapes(pattern: &str) -> String {
                         break;
                     }
                 }
-                if n <= 0x7f {
-                    out.push_str(&format!("\\x{n:02x}"));
-                } else if n <= 0xff {
+                if n <= 0xff {
                     out.push_str(&format!("\\x{n:02x}"));
                 } else {
                     out.push_str(&format!("\\x{{{n:x}}}"));

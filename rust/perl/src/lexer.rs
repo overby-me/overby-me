@@ -1350,7 +1350,22 @@ impl Lexer {
                     }
                     if self.ch() == '=' && self.peek(1) == '>' {
                         self.pos += 2;
-                        tokens.push(Token::StringLit(ident));
+                        // Reference perl's `=>` auto-quote rule: a
+                        // bareword on the LHS is auto-quoted UNLESS
+                        // it's actually a defined sub, in which case
+                        // the sub is called and its result is the
+                        // hash key. Package-qualified names (with
+                        // `::`) are typically sub references, so
+                        // emit them as `Ident` and let the parser
+                        // decide via `known_subs`. Non-qualified
+                        // names go through the legacy auto-quote
+                        // path (since most are intended as keys, not
+                        // sub calls).
+                        if ident.contains("::") {
+                            tokens.push(Token::Ident(ident));
+                        } else {
+                            tokens.push(Token::StringLit(ident));
+                        }
                         tokens.push(Token::FatComma);
                         continue;
                     }
