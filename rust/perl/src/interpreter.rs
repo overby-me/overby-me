@@ -15319,12 +15319,18 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                 }
             }
             // `\N` (1..9) is a backref to capture group N; flag any
-            // reference past total_groups.
+            // reference past total_groups. Exception: when followed by
+            // another digit, Perl falls back to interpreting as octal
+            // (`\42` = octal 042 → 0x22). Only fire the error when
+            // there's no following digit, i.e. the entire `\N` clearly
+            // intended a backref.
             if i + 1 < chars.len() {
                 let nxt = chars[i + 1];
                 if nxt.is_ascii_digit() && nxt != '0' {
                     let n = nxt.to_digit(10).unwrap() as usize;
-                    if n > total_groups {
+                    let next_is_digit =
+                        i + 2 < chars.len() && chars[i + 2].is_ascii_digit();
+                    if n > total_groups && !next_is_digit {
                         let prefix: String = chars[..=i + 1].iter().collect();
                         let suffix: String = chars[i + 2..].iter().collect();
                         return Some(format!(
@@ -16269,8 +16275,36 @@ fn neutralise_false_ranges(pattern: &str) -> String {
             && (chars[i + 1] == '\\' || chars[i + 1] == '[')
             && i > 0
         {
+            // Only neutralise the dash when the right-hand side is a
+            // class-shorthand (`\d`, `\s`, `\w`, …) — those don't
+            // represent a single codepoint so they're invalid range
+            // endpoints. A `\xNN`/`\x{}`/`\NNN`/`\uNNNN`/`\cX` *does*
+            // expand to one char and should stay a real range.
+            let next_after_backslash = if chars[i + 1] == '\\' && i + 2 < chars.len() {
+                Some(chars[i + 2])
+            } else {
+                None
+            };
+            let rhs_is_shorthand = matches!(
+                next_after_backslash,
+                Some(
+                    'd' | 'D'
+                        | 's'
+                        | 'S'
+                        | 'w'
+                        | 'W'
+                        | 'h'
+                        | 'H'
+                        | 'v'
+                        | 'V'
+                        | 'p'
+                        | 'P'
+                        | 'R'
+                        | 'N'
+                )
+            ) || chars[i + 1] == '[';
             let prev = chars[i - 1];
-            if prev != '[' && prev != '\\' {
+            if prev != '[' && prev != '\\' && rhs_is_shorthand {
                 out.push('\\');
                 out.push('-');
                 i += 1;
