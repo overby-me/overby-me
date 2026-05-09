@@ -475,6 +475,18 @@
       {tool = "pw-cli"; name = "usage-get-permissions";}
       {tool = "pw-cli"; name = "usage-create-link";}
       {tool = "pw-cli"; name = "usage-export-node";}
+      {tool = "pw-cli"; name = "usage-alias-lm";}
+      {tool = "pw-cli"; name = "usage-alias-um";}
+      {tool = "pw-cli"; name = "usage-alias-cd";}
+      {tool = "pw-cli"; name = "usage-alias-cn";}
+      {tool = "pw-cli"; name = "usage-alias-d";}
+      {tool = "pw-cli"; name = "usage-alias-cl";}
+      {tool = "pw-cli"; name = "usage-alias-en";}
+      {tool = "pw-cli"; name = "usage-alias-e";}
+      {tool = "pw-cli"; name = "usage-alias-s";}
+      {tool = "pw-cli"; name = "usage-alias-sp";}
+      {tool = "pw-cli"; name = "usage-alias-gp";}
+      {tool = "pw-cli"; name = "usage-alias-c";}
       {tool = "pw-link"; name = "empty-input";}
       {tool = "pw-link"; name = "latency-only";}
       {tool = "pw-link"; name = "empty-output";}
