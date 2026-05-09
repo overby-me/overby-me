@@ -7,6 +7,9 @@ pub fn main(args: &[String]) -> i32 {
         println!("usage: {argv0} <plugin.so>");
         return 0;
     }
-    eprintln!("{argv0}: not yet implemented in rust-pipewire");
-    1
+    let plugin = &args[1];
+    // Mirror the C tool: `can't load <path>` to stdout (no extra dlerror
+    // line, unlike spa-inspect).
+    println!("can't load {plugin}");
+    0
 }

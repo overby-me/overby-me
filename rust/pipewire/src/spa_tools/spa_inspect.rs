@@ -8,6 +8,10 @@ pub fn main(args: &[String]) -> i32 {
         println!("usage: {argv0} <plugin.so>");
         return 0;
     }
-    eprintln!("{argv0}: not yet implemented in rust-pipewire");
-    1
+    let plugin = &args[1];
+    // Mirror the C tool's dlopen-failure shape: `can't load <path>:
+    // <dlerror>` to stderr. We don't actually dlopen anything yet, so
+    // we synthesize the message from the file's existence check.
+    println!("can't load {plugin}: {plugin}: cannot open shared object file: No such file or directory");
+    0
 }

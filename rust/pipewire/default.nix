@@ -254,6 +254,8 @@
       { tool = "pw-v4l2"; name = "help"; }
       { tool = "spa-inspect"; name = "usage"; }
       { tool = "spa-monitor"; name = "usage"; }
+      { tool = "spa-inspect"; name = "bad-plugin"; }
+      { tool = "spa-monitor"; name = "bad-plugin"; }
       { tool = "spa-acp-tool"; name = "help"; }
       { tool = "pw-loopback"; name = "help"; }
       { tool = "pw-cli"; name = "version-short"; }
