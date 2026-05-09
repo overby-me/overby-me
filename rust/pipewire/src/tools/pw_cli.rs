@@ -129,6 +129,16 @@ pub fn main(raw_args: &[String]) -> i32 {
             0
         }
     } else {
+        // If --remote was explicitly given, C connects on startup BEFORE
+        // dispatching the command. Mirror that: a bad remote produces
+        // the connect error even for commands like `help` that wouldn't
+        // otherwise need a daemon.
+        if remote.is_some() {
+            if let Err(e) = open_client(remote.as_deref(), "pw-cli") {
+                print_open_error(argv0, &e);
+                return 1;
+            }
+        }
         run_positional(argv0, remote, positional)
     }
 }
