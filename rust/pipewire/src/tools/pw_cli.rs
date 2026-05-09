@@ -34,14 +34,14 @@ pub fn main(args: &[String]) -> i32 {
                 return 0;
             }
             "-r" | "--remote" => {
-                if let Some(v) = args.get(i + 1) {
-                    remote = Some(v.clone());
-                    i += 2;
-                    continue;
-                } else {
-                    eprintln!("{argv0}: --remote requires an argument");
-                    return 2;
+                if i + 1 >= args.len() {
+                    eprintln!("{argv0}: option requires an argument -- 'r'");
+                    print_help(argv0);
+                    return 0;
                 }
+                remote = Some(args[i + 1].clone());
+                i += 2;
+                continue;
             }
             "-m" | "--monitor" | "-d" | "--daemon" => {
                 // Flags consumed by the C tool; ignored at this stage.

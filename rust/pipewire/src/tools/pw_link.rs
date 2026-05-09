@@ -14,6 +14,7 @@ pub fn main(args: &[String]) -> i32 {
     let mut list_inputs = false;
     let mut list_outputs = false;
     let mut list_links = false;
+    let mut list_latency = false;
     let mut show_id = false;
     let mut verbose = false;
     let mut disconnect = false;
@@ -43,15 +44,29 @@ pub fn main(args: &[String]) -> i32 {
                     i += 2;
                     continue;
                 }
-                eprintln!("{argv0}: --remote needs an argument");
-                return 2;
+                eprintln!("{argv0}: option requires an argument -- 'r'");
+                print_help(argv0);
+                return 0;
             }
             "-d" | "--disconnect" => disconnect = true,
-            // Flags we don't yet implement; ignore so they don't trip parser.
-            "-t" | "--latency" | "-m" | "--monitor" | "-L" | "--linger" | "-P" | "--passive"
-            | "-w" | "--wait" | "-N" | "--no-colors" => {}
-            s if s.starts_with("--props") || s.starts_with("-p") => {
-                // -p / --props=PROPS — skip with optional next arg.
+            // Per pw-link.c optstring "hVr:oilmIvLPp:wdt", `t` takes
+            // NO argument — it just sets MODE_LIST + LIST_LATENCY (which
+            // by itself produces no output without -i/-o/-l).
+            "-t" | "--latency" => list_latency = true,
+            "-m" | "--monitor" | "-L" | "--linger"
+            | "-P" | "--passive" | "-w" | "--wait" | "-N" | "--no-colors" => {}
+            "-p" | "--props" => {
+                // -p / --props requires an argument.
+                if i + 1 >= args.len() {
+                    eprintln!("{argv0}: option requires an argument -- 'p'");
+                    print_help(argv0);
+                    return 0;
+                }
+                i += 2;
+                continue;
+            }
+            s if s.starts_with("--props=") => {
+                // --props=PROPS — value is inline.
             }
             s if s.starts_with("--color") || s.starts_with("-C") => {}
             s if s.starts_with("--") => {
@@ -95,10 +110,13 @@ pub fn main(args: &[String]) -> i32 {
     if !list_inputs
         && !list_outputs
         && !list_links
+        && !list_latency
         && !disconnect
-        && !positional.is_empty()
-        && positional.len() < 2
+        && positional.len() != 2
     {
+        // MODE_CONNECT_PORTS path in C: requires both opt_output and
+        // opt_input. With anything but exactly 2 positional, error.
+        // -t/--latency also sets MODE_LIST which skips this check.
         eprintln!("missing output and input port names to connect");
         return 255;
     }

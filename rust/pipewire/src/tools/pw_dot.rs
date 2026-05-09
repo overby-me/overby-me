@@ -19,16 +19,35 @@ pub fn main(args: &[String]) -> i32 {
                 return 0;
             }
             "-o" | "--output" => {
+                if i + 1 >= args.len() {
+                    eprintln!("{argv0}: option requires an argument -- 'o'");
+                    print_help(argv0);
+                    return 0;
+                }
                 output = args.get(i + 1).cloned();
                 i += 2;
                 continue;
             }
             "-j" | "--json" => {
+                if i + 1 >= args.len() {
+                    eprintln!("{argv0}: option requires an argument -- 'j'");
+                    print_help(argv0);
+                    return 0;
+                }
                 json_input = args.get(i + 1).cloned();
                 i += 2;
                 continue;
             }
-            "-a" | "--all" | "-s" | "--smart" | "-d" | "--detail" | "-r" | "--remote" | "-L"
+            "-r" | "--remote" => {
+                if i + 1 >= args.len() {
+                    eprintln!("{argv0}: option requires an argument -- 'r'");
+                    print_help(argv0);
+                    return 0;
+                }
+                i += 2;
+                continue;
+            }
+            "-a" | "--all" | "-s" | "--smart" | "-d" | "--detail" | "-L"
             | "--lr" | "-9" | "--90" => {}
             s if s.starts_with("--") => {
                 eprintln!("{argv0}: unrecognized option '{s}'");

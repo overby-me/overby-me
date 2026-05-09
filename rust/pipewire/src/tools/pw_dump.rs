@@ -28,24 +28,26 @@ pub fn main(args: &[String]) -> i32 {
                 return 0;
             }
             "-i" | "--indent" => {
+                if i + 1 >= args.len() {
+                    eprintln!("{argv0}: option requires an argument -- 'i'");
+                    print_help(argv0);
+                    return 0;
+                }
                 if let Some(v) = args.get(i + 1).and_then(|s| s.parse::<usize>().ok()) {
                     indent = v;
-                    i += 2;
-                    continue;
-                } else {
-                    eprintln!("{argv0}: --indent needs a number");
-                    return 2;
                 }
+                i += 2;
+                continue;
             }
             "-r" | "--remote" => {
-                if let Some(v) = args.get(i + 1) {
-                    remote = Some(v.clone());
-                    i += 2;
-                    continue;
-                } else {
-                    eprintln!("{argv0}: --remote needs an argument");
-                    return 2;
+                if i + 1 >= args.len() {
+                    eprintln!("{argv0}: option requires an argument -- 'r'");
+                    print_help(argv0);
+                    return 0;
                 }
+                remote = Some(args[i + 1].clone());
+                i += 2;
+                continue;
             }
             "-N" | "--no-colors" | "-R" | "--raw" | "-s" | "--spa" | "-m" | "--monitor" => {
                 // Accepted but ignored at this phase.

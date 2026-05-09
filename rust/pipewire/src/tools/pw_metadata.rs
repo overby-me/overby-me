@@ -31,22 +31,24 @@ pub fn main(args: &[String]) -> i32 {
             }
             "-l" | "--list" => list = true,
             "-n" | "--name" => {
-                if let Some(v) = args.get(i + 1) {
-                    name = Some(v.clone());
-                    i += 2;
-                    continue;
+                if i + 1 >= args.len() {
+                    eprintln!("{argv0}: option requires an argument -- 'n'");
+                    print_help(argv0);
+                    return 0;
                 }
-                eprintln!("{argv0}: --name needs an argument");
-                return 2;
+                name = Some(args[i + 1].clone());
+                i += 2;
+                continue;
             }
             "-r" | "--remote" => {
-                if let Some(v) = args.get(i + 1) {
-                    remote = Some(v.clone());
-                    i += 2;
-                    continue;
+                if i + 1 >= args.len() {
+                    eprintln!("{argv0}: option requires an argument -- 'r'");
+                    print_help(argv0);
+                    return 0;
                 }
-                eprintln!("{argv0}: --remote needs an argument");
-                return 2;
+                remote = Some(args[i + 1].clone());
+                i += 2;
+                continue;
             }
             "-m" | "--monitor" | "-d" | "--delete" => {}
             s if s.starts_with("--") => {

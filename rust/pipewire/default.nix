@@ -799,6 +799,19 @@
         tool = "pw-top";
         name = "short-bad-flag";
       }
+      { tool = "pw-cli"; name = "missing-arg-r"; }
+      { tool = "pw-link"; name = "missing-arg-r"; }
+      { tool = "pw-link"; name = "missing-arg-p"; }
+      { tool = "pw-mon"; name = "missing-arg-r"; }
+      { tool = "pw-top"; name = "missing-arg-r"; }
+      { tool = "pw-top"; name = "missing-arg-n"; }
+      { tool = "pw-dump"; name = "missing-arg-r"; }
+      { tool = "pw-dump"; name = "missing-arg-i"; }
+      { tool = "pw-dot"; name = "missing-arg-r"; }
+      { tool = "pw-dot"; name = "missing-arg-j"; }
+      { tool = "pw-dot"; name = "missing-arg-o"; }
+      { tool = "pw-metadata"; name = "missing-arg-r"; }
+      { tool = "pw-metadata"; name = "missing-arg-n"; }
 
       # --- per-tool --help byte-identical parity ---
       {
