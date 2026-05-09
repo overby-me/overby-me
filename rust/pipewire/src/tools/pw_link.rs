@@ -87,8 +87,15 @@ pub fn main(args: &[String]) -> i32 {
     let globals = match collect_globals(remote.as_deref(), "rust-pipewire-link") {
         Ok(g) => g,
         Err(e) => {
-            eprintln!("{argv0}: {e}");
-            return 1;
+            // C pw-link prints `can't connect: <strerror>\n` and returns
+            // -1 (= 255 truncated). The protocol-native client maps
+            // ENOENT → EHOSTDOWN ("Host is down").
+            if e.contains("connect:") || e.starts_with("connect:") {
+                eprintln!("can't connect: Host is down");
+            } else {
+                eprintln!("{argv0}: {e}");
+            }
+            return 255;
         }
     };
 
