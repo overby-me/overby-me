@@ -11458,6 +11458,7 @@ impl Interpreter {
         let pattern = neutralise_false_ranges(&pattern);
         let pattern = strip_unicode_boundary_types(&pattern);
         let pattern = translate_octal_escapes(&pattern);
+        let pattern = escape_literal_bracket_in_class(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -11646,6 +11647,7 @@ impl Interpreter {
         let pattern = neutralise_false_ranges(&pattern);
         let pattern = strip_unicode_boundary_types(&pattern);
         let pattern = translate_octal_escapes(&pattern);
+        let pattern = escape_literal_bracket_in_class(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -15726,6 +15728,92 @@ fn strip_regex_comments(pattern: &str) -> String {
         out.push(c);
         i += 1;
     }
+    out
+}
+
+/// Inside a Perl character class, `[:` only starts a POSIX class
+/// when it's followed by a known name and `:]` later. Bare `[[:]` (a
+/// class containing literal `[` and `:`) is accepted by Perl as
+/// the class `[:`. Rust's `regex` parser unconditionally treats
+/// `[:` inside a class as the start of a POSIX class and rejects
+/// the pattern when no `:]` follows. Escape such literal `[` chars
+/// so the engine sees `[\[:]` instead. re/regexp tests 658-663.
+fn escape_literal_bracket_in_class(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    let mut class_start_in_out = 0usize;
+    while i < chars.len() {
+        let c = chars[i];
+        if !in_class && c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            class_start_in_out = out.len();
+            out.push(c);
+            i += 1;
+            // Optional `^` for negation.
+            if i < chars.len() && chars[i] == '^' {
+                out.push('^');
+                i += 1;
+            }
+            // Leading `]` is literal in a Perl character class.
+            if i < chars.len() && chars[i] == ']' {
+                out.push(']');
+                i += 1;
+            }
+            continue;
+        }
+        if in_class && c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == '[' && i + 1 < chars.len() && chars[i + 1] == ':' {
+            // Look ahead for the matching `:]` BEFORE the outer `]`.
+            // If none, the `[:` is literal — escape the leading `[`.
+            let mut k = i + 2;
+            let mut found = false;
+            while k + 1 < chars.len() {
+                let cc = chars[k];
+                if cc == '\\' {
+                    k += 2;
+                    continue;
+                }
+                if cc == ']' {
+                    break;
+                }
+                if cc == ':' && chars[k + 1] == ']' {
+                    found = true;
+                    break;
+                }
+                k += 1;
+            }
+            if !found {
+                out.push('\\');
+                out.push('[');
+                i += 1;
+                continue;
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    // Unused but explicit: silences unused-warnings in case the
+    // class-start tracking is later useful for richer rewrites.
+    let _ = class_start_in_out;
     out
 }
 
