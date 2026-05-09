@@ -1413,6 +1413,12 @@
       { tool = "spa-json-dump"; name = "conf-pipewire-vulkan"; }
       { tool = "spa-json-dump"; name = "conf-pipewire-pulse"; }
       { tool = "spa-json-dump"; name = "conf-pipewire-avb"; }
+      { tool = "spa-json-dump"; name = "conf-fc-22-onnx-vad"; }
+      { tool = "spa-json-dump"; name = "conf-fc-35-ebur128"; }
+      { tool = "spa-json-dump"; name = "conf-fc-36-dcblock"; }
+      { tool = "spa-json-dump"; name = "conf-fc-demonic"; }
+      { tool = "spa-json-dump"; name = "conf-fc-sink-dolby-pro-logic-ii"; }
+      { tool = "spa-json-dump"; name = "conf-fc-sink-eq6"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }
