@@ -41,8 +41,16 @@ pub fn main(raw_args: &[String]) -> i32 {
             0
         }
         _ => {
-            eprintln!("{argv0}: not yet implemented in rust-pipewire");
-            1
+            // C connects to the daemon to collect profiler events. Try
+            // connecting; emit C's "Can't connect" error if it fails
+            // (capital C, matches pw-profiler.c's show_error).
+            match crate::pipewire_lib::client::Client::connect_default() {
+                Ok(_) => 0,
+                Err(_) => {
+                    eprintln!("Can't connect: Host is down");
+                    0
+                }
+            }
         }
     }
 }
