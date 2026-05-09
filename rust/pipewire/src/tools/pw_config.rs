@@ -40,6 +40,15 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
+            s if s.starts_with("--recurse=")
+                || s.starts_with("--no-newline=")
+                || s.starts_with("--no-colors=") =>
+            {
+                let name = s.split_once('=').map(|(n, _)| n).unwrap_or(s);
+                eprintln!("{argv0}: option '{name}' doesn't allow an argument");
+                print_help(argv0);
+                return 0;
+            }
             "-n" | "--name" => {
                 i += 1;
                 if let Some(v) = args.get(i) {

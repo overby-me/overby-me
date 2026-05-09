@@ -932,6 +932,8 @@
       { tool = "pw-play"; name = "verbose-with-arg"; }
       { tool = "pw-record"; name = "raw-with-arg"; }
       { tool = "pw-record"; name = "verbose-with-arg"; }
+      { tool = "pw-config"; name = "recurse-with-arg"; }
+      { tool = "pw-config"; name = "no-newline-with-arg"; }
       { tool = "pw-cli"; name = "cmd-connect-bad"; }
       { tool = "pw-mon"; name = "connect-fail"; }
       { tool = "pw-profiler"; name = "connect-fail"; }
