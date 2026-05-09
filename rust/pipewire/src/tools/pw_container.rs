@@ -37,8 +37,15 @@ pub fn main(args: &[String]) -> i32 {
         }
     }
 
-    eprintln!("{argv0}: not yet implemented in rust-pipewire");
-    1
+    // C connects to the daemon to fork an application inside a sandboxed
+    // context. Try connecting; emit the same "can't connect" error.
+    match crate::pipewire_lib::client::Client::connect_default() {
+        Ok(_) => 0,
+        Err(_) => {
+            eprintln!("can't connect: Host is down");
+            0
+        }
+    }
 }
 
 fn print_help(argv0: &str) {

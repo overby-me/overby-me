@@ -62,8 +62,17 @@ pub fn main(args: &[String]) -> i32 {
         }
     }
 
-    eprintln!("{argv0}: not yet implemented in rust-pipewire");
-    1
+    // C connects to the daemon to load the loopback module. Try
+    // connecting; emit C's "can't load module" error if it fails (the
+    // libpipewire module loader maps connect-fail through to that
+    // wording).
+    match crate::pipewire_lib::client::Client::connect_default() {
+        Ok(_) => 0,
+        Err(_) => {
+            eprintln!("can't load module: Host is down");
+            0
+        }
+    }
 }
 
 fn print_help(argv0: &str) {
