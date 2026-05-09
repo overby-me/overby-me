@@ -2528,17 +2528,34 @@ impl Lexer {
     /// end of input (false). Callers that produce position-specific
     /// diagnostics (`m//`, `s///`) need this distinction.
     fn read_delimited_string_term(&mut self) -> (char, char, String, bool) {
-        // Skip plain whitespace before the delimiter — but NOT comments.
-        // `#` is a perfectly valid delimiter (`q#foo#`), and treating it
-        // as a comment would consume the q's body. We do allow newlines
-        // between the operator name and its delimiter to match Perl.
-        while self.pos < self.input.len()
-            && (self.ch() == ' ' || self.ch() == '\t' || self.ch() == '\n')
-        {
-            if self.ch() == '\n' {
-                self.current_line += 1;
+        // Skip whitespace and `#`-style comments before the delimiter.
+        // Bare `#` followed by another non-whitespace char is a valid
+        // delimiter (`q#foo#`); only treat `#` as a comment when it
+        // appears after a whitespace separator, mirroring Perl's
+        // `q # comment\n /body/` form. base/lex tests 92–99.
+        loop {
+            while self.pos < self.input.len()
+                && (self.ch() == ' ' || self.ch() == '\t' || self.ch() == '\n')
+            {
+                if self.ch() == '\n' {
+                    self.current_line += 1;
+                }
+                self.pos += 1;
             }
-            self.pos += 1;
+            // After whitespace, a `#` introduces a line comment if it's
+            // followed by space/tab/newline OR EOF — that disambiguates
+            // from `q#foo#` where the `#` is immediately followed by
+            // body chars.
+            if self.pos < self.input.len() && self.ch() == '#' {
+                let next = self.input.get(self.pos + 1).copied().unwrap_or('\0');
+                if next == ' ' || next == '\t' || next == '\n' || next == '\0' {
+                    while self.pos < self.input.len() && self.ch() != '\n' {
+                        self.pos += 1;
+                    }
+                    continue;
+                }
+            }
+            break;
         }
 
         let open = self.advance();

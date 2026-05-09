@@ -6171,8 +6171,7 @@ impl Interpreter {
                             if off_bytes == bytes.len() {
                                 return Value::Num(s.chars().count() as f64);
                             }
-                            let prefix =
-                                std::str::from_utf8(&bytes[..off_bytes]).unwrap_or("");
+                            let prefix = std::str::from_utf8(&bytes[..off_bytes]).unwrap_or("");
                             return Value::Num(prefix.chars().count() as f64);
                         }
                     }
@@ -15194,12 +15193,9 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                     // Single-char property: only the standard top-
                     // level categories are accepted. Others get the
                     // "Can't find Unicode property definition" form.
-                    let valid_single =
-                        matches!(nxt, 'L' | 'M' | 'N' | 'P' | 'S' | 'Z' | 'C');
+                    let valid_single = matches!(nxt, 'L' | 'M' | 'N' | 'P' | 'S' | 'Z' | 'C');
                     if !valid_single {
-                        return Some(format!(
-                            "Can't find Unicode property definition \"{nxt}\""
-                        ));
+                        return Some(format!("Can't find Unicode property definition \"{nxt}\""));
                     }
                 }
             }
