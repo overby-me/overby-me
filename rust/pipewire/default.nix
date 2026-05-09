@@ -253,6 +253,8 @@
       {tool = "pw-link"; name = "input-rich";}
       {tool = "pw-link"; name = "output-rich";}
       {tool = "pw-link"; name = "input-id-rich";}
+      {tool = "pw-metadata"; name = "list-rich";}
+      {tool = "pw-metadata"; name = "list-byname";}
     ];
 
     # Daemon-comparison tests — spawn a real C pipewire daemon and run both
@@ -298,6 +300,7 @@
       {tool = "pw-link"; name = "empty-input";}
       {tool = "pw-link"; name = "empty-output";}
       {tool = "pw-link"; name = "empty-links";}
+      {tool = "pw-metadata"; name = "list-empty";}
       {tool = "pw-dump"; name = "structural";}
     ];
   in
