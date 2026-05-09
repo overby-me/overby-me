@@ -17,6 +17,21 @@ pub fn main(args: &[String]) -> i32 {
                 print_version(argv0);
                 return 0;
             }
+            s if s.starts_with('-')
+                && !matches!(s, "-v" | "--verbose" | "-c" | "--card" | "-p" | "--properties") =>
+            {
+                // C: getopt-error path goes through show_usage(true) →
+                // tool name + options on stderr, then cmd_help writes
+                // "Available commands:" on stderr and the list on stdout.
+                // The merged order is: error msgs, options, "Available
+                // commands:", commands.
+                eprintln!("{argv0}: unrecognized option '{s}'");
+                eprintln!("error: unknown option '?'");
+                print_options(argv0);
+                println!("Available commands:");
+                print_commands();
+                return 0;
+            }
             _ => {}
         }
     }
@@ -26,10 +41,19 @@ pub fn main(args: &[String]) -> i32 {
 }
 
 fn print_help(argv0: &str) {
-    // C's `show_help` prefixes "Available commands:\n" before the usual
-    // tool-name + options block (yes, it really emits "Available
-    // commands:" as the very first line — even before the usage).
+    // C's --help path: cmd_help (stderr "Available commands:" + stdout
+    // commands) is called from inside show_usage(false) (stdout). With
+    // line-buffered stderr and block-buffered stdout, the user sees:
+    //   1. "Available commands:"  (stderr, flushed first)
+    //   2. tool name + options   (stdout)
+    //   3. blank line             (stdout, from trailing \n)
+    //   4. command list           (stdout)
     println!("Available commands:");
+    print_options(argv0);
+    print_commands();
+}
+
+fn print_options(argv0: &str) {
     println!("{argv0} [options] [COMMAND]");
     println!("  -h, --help                            Show this help");
     println!("  -v  --verbose                         Be verbose");
@@ -37,6 +61,9 @@ fn print_help(argv0: &str) {
     println!("  -p  --properties                      Extra properties:");
     println!("                                         'key=value ... '");
     println!();
+}
+
+fn print_commands() {
     let cmds = [
         ("help                      ", "Show available commands (h)"),
         ("quit                      ", "Quit (q)"),

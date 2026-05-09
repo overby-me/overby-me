@@ -220,6 +220,16 @@
       { tool = "pipewire-aes67"; name = "bad-flag"; }
       { tool = "pipewire-avb"; name = "bad-flag"; }
       { tool = "pipewire-vulkan"; name = "bad-flag"; }
+      { tool = "pw-mon"; name = "bad-flag"; }
+      { tool = "pw-mididump"; name = "bad-flag"; }
+      { tool = "pw-dot"; name = "bad-flag"; }
+      { tool = "pw-top"; name = "bad-flag"; }
+      { tool = "pw-profiler"; name = "bad-flag"; }
+      { tool = "pw-reserve"; name = "bad-flag"; }
+      { tool = "pw-container"; name = "bad-flag"; }
+      { tool = "pw-loopback"; name = "bad-flag"; }
+      { tool = "pw-v4l2"; name = "bad-flag"; }
+      { tool = "spa-acp-tool"; name = "bad-flag"; }
       { tool = "spa-resample"; name = "help"; }
       { tool = "pw-v4l2"; name = "help"; }
       { tool = "spa-inspect"; name = "usage"; }

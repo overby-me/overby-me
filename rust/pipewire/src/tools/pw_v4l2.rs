@@ -11,6 +11,20 @@ pub fn main(args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
+            "-r" | "-v" => {}
+            // pw-v4l2 uses old-style getopt (no long options), so any
+            // long flag triggers the BSD-flavoured `illegal option -- -`
+            // message and the help block.
+            s if s.starts_with('-') => {
+                let ch = if s.starts_with("--") {
+                    '-'
+                } else {
+                    s.chars().nth(1).unwrap_or('?')
+                };
+                eprintln!("{argv0}: illegal option -- {ch}");
+                print_help(argv0);
+                return 0;
+            }
             _ => {}
         }
     }

@@ -18,6 +18,13 @@ pub fn main(args: &[String]) -> i32 {
                 print_version(argv0);
                 return 0;
             }
+            s if s.starts_with('-')
+                && !matches!(s, "-r" | "--remote" | "-P" | "--properties") =>
+            {
+                eprintln!("{argv0}: unrecognized option '{s}'");
+                print_help(argv0);
+                return 0;
+            }
             _ => {}
         }
     }

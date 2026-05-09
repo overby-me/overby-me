@@ -18,6 +18,26 @@ pub fn main(args: &[String]) -> i32 {
                 print_version(argv0);
                 return 0;
             }
+            s if s.starts_with('-')
+                && !matches!(
+                    s,
+                    "-r" | "--remote"
+                        | "-n" | "--name"
+                        | "-g" | "--group"
+                        | "-c" | "--channels"
+                        | "-m" | "--channel-map"
+                        | "-l" | "--latency"
+                        | "-d" | "--delay"
+                        | "-C" | "--capture"
+                        | "-i" | "--capture-props"
+                        | "-P" | "--playback"
+                        | "-o" | "--playback-props"
+                ) =>
+            {
+                eprintln!("{argv0}: unrecognized option '{s}'");
+                print_help(argv0);
+                return 0;
+            }
             _ => {}
         }
     }

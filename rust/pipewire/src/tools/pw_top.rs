@@ -13,6 +13,11 @@ pub fn main(args: &[String]) -> i32 {
             print_version(argv0);
             0
         }
+        Some(s) if s.starts_with('-') => {
+            eprintln!("{argv0}: unrecognized option '{s}'");
+            print_help(argv0);
+            0
+        }
         _ => {
             eprintln!("{argv0}: not yet implemented in rust-pipewire");
             1

@@ -51,7 +51,8 @@ pub fn main(args: &[String]) -> i32 {
                 filename = Some(s.to_string());
                 break;
             }
-            _ => {
+            s => {
+                eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);
                 return u8::MAX as i32;
             }
