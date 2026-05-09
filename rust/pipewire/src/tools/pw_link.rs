@@ -99,6 +99,12 @@ pub fn main(args: &[String]) -> i32 {
         }
     };
 
+    // Mirror C: opt_output / opt_input are the first / second positional
+    // args, used as regexes (we use a simple substring match) to filter
+    // ports by direction.
+    let opt_output = positional.first().copied();
+    let opt_input = positional.get(1).copied();
+
     print_listing(
         &globals,
         list_inputs,
@@ -107,6 +113,8 @@ pub fn main(args: &[String]) -> i32 {
         list_ports,
         show_id,
         verbose,
+        opt_output,
+        opt_input,
     );
     0
 }
@@ -196,17 +204,24 @@ fn print_listing(
     list_ports: bool,
     show_id: bool,
     verbose: bool,
+    opt_output: Option<&str>,
+    opt_input: Option<&str>,
 ) {
     // pw-link iterates Nodes in registry order; for each Node, walks Ports
     // belonging to it (also in registry order).
     for node in globals.iter().filter(|g| g.interface == interfaces::TYPE_NODE) {
         for direction in [
-            (list_outputs, "out"),
-            (list_inputs, "in"),
+            (list_outputs, "out", opt_output),
+            (list_inputs, "in", opt_input),
         ] {
             if !direction.0 {
                 continue;
             }
+            // Substring filter against `<node-name>:<port-name>` mirrors C
+            // `port_regex` for simple non-anchored patterns. (Full POSIX
+            // ERE would require the regex crate; this gets us most
+            // practical patterns including alphanumerics and dots.)
+            let pattern = direction.2;
             for port in globals
                 .iter()
                 .filter(|g| g.interface == interfaces::TYPE_PORT)
@@ -214,6 +229,12 @@ fn print_listing(
                     prop(p, "node.id").and_then(|s| s.parse().ok()) == Some(node.id)
                 })
                 .filter(|p| prop(p, "port.direction") == Some(direction.1))
+                .filter(|p| {
+                    pattern.map_or(true, |pat| {
+                        let name = port_full_name(globals, p);
+                        port_regex_match(&name, pat)
+                    })
+                })
             {
                 if list_ports {
                     print_port_line(port, globals, show_id, verbose);
@@ -229,6 +250,42 @@ fn print_listing(
             }
         }
     }
+}
+
+/// Approximate POSIX ERE matching: handle the common patterns C's
+/// `port_regex` is asked to match — plain substrings, `.*` wildcards
+/// between literal segments, and `^X` / `X$` anchors. Falls back to
+/// full substring containment for anything more exotic.
+fn port_regex_match(text: &str, pattern: &str) -> bool {
+    let anchored_start = pattern.starts_with('^');
+    let anchored_end = pattern.ends_with('$') && !pattern.ends_with("\\$");
+    let core = &pattern[anchored_start as usize
+        ..pattern.len() - if anchored_end { 1 } else { 0 }];
+
+    // Split on `.*` — every segment must appear in order in `text`.
+    let segments: Vec<&str> = core.split(".*").collect();
+    let mut pos = 0usize;
+    for (i, seg) in segments.iter().enumerate() {
+        if seg.is_empty() {
+            continue;
+        }
+        let must_start = i == 0 && anchored_start;
+        let must_end = i == segments.len() - 1 && anchored_end;
+        let haystack = &text[pos..];
+        let idx = match haystack.find(seg) {
+            Some(j) => j,
+            None => return false,
+        };
+        if must_start && idx != 0 {
+            return false;
+        }
+        let new_pos = pos + idx + seg.len();
+        if must_end && new_pos != text.len() {
+            return false;
+        }
+        pos = new_pos;
+    }
+    true
 }
 
 /// Print one port line ("\t<id?> <node:port>"), plus, if verbose, the

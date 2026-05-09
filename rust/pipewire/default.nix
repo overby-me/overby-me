@@ -419,6 +419,8 @@
       {tool = "pw-link"; name = "input-links-rich";}
       {tool = "pw-link"; name = "output-links-rich";}
       {tool = "pw-link"; name = "all-flags-rich";}
+      {tool = "pw-link"; name = "pattern-output-empty";}
+      {tool = "pw-link"; name = "pattern-both-empty";}
       {tool = "pw-cli"; name = "ls-module-rich";}
       {tool = "pw-cli"; name = "ls-factory-rich";}
       {tool = "pw-cli"; name = "ls-securitycontext-rich";}
