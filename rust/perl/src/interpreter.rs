@@ -17191,6 +17191,21 @@ fn escape_literal_bracket_in_class(pattern: &str) -> String {
 /// octal, leaving `\1`..`\9` alone for backref handling.
 fn translate_octal_escapes(pattern: &str) -> String {
     let chars: Vec<char> = pattern.chars().collect();
+    // Pre-count capturing groups so `\Nd...` falls back to octal
+    // when group N doesn't exist (matches Perl's backref-or-octal
+    // disambiguation).
+    let mut total_groups: usize = 0;
+    let mut j = 0;
+    while j < chars.len() {
+        if chars[j] == '\\' {
+            j += 2;
+            continue;
+        }
+        if chars[j] == '(' && !(j + 1 < chars.len() && chars[j + 1] == '?') {
+            total_groups += 1;
+        }
+        j += 1;
+    }
     let mut out = String::with_capacity(pattern.len());
     let mut i = 0;
     let mut in_class = false;
@@ -17210,6 +17225,36 @@ fn translate_octal_escapes(pattern: &str) -> String {
         }
         if c == '\\' && i + 1 < chars.len() {
             let nxt = chars[i + 1];
+            // Octal-disambiguation: `\Nd...` where N is followed by
+            // another digit AND group N doesn't exist falls back to
+            // octal (1-3 octal digits, leftmost wins). Reference perl
+            // matches `(.)\4294967296` against `b\042…` because `\42`
+            // is octal `"`. re/regexp 1613-1620.
+            if nxt.is_digit(8)
+                && nxt != '0'
+                && i + 2 < chars.len()
+                && chars[i + 2].is_ascii_digit()
+                && (nxt.to_digit(10).unwrap_or(0) as usize) > total_groups
+            {
+                let mut n = nxt.to_digit(8).unwrap_or(0);
+                let mut consumed = 1;
+                while consumed < 3 && i + 1 + consumed < chars.len() {
+                    let d = chars[i + 1 + consumed];
+                    if let Some(v) = d.to_digit(8) {
+                        n = n * 8 + v;
+                        consumed += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if n <= 0xff {
+                    out.push_str(&format!("\\x{n:02x}"));
+                } else {
+                    out.push_str(&format!("\\x{{{n:x}}}"));
+                }
+                i += 1 + consumed;
+                continue;
+            }
             // `\0NN` / `\NNN` — octal escape. We only treat as octal
             // when:
             //   - first digit is `0`, OR
