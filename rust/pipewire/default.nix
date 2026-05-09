@@ -931,6 +931,7 @@
       { tool = "spa-json-dump"; name = "array-mixed"; }
       { tool = "spa-json-dump"; name = "empty-object"; }
       { tool = "spa-json-dump"; name = "special-keys"; }
+      { tool = "spa-json-dump"; name = "dash-stdin"; }
 
       # --- per-tool --help byte-identical parity ---
       {

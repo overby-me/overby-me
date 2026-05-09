@@ -51,9 +51,11 @@ pub fn main(args: &[String]) -> i32 {
             s if s.starts_with("--indent=") => {
                 indent = s[9..].parse::<usize>().unwrap_or(DEFAULT_INDENT);
             }
-            s if !s.starts_with('-') => {
+            s if !s.starts_with('-') || s == "-" => {
+                // `-` is the conventional stdin marker; C's spa-json-dump
+                // treats it identically to no filename (default reads
+                // stdin).
                 filename = s.to_string();
-                // Anything after the filename is currently ignored.
                 break;
             }
             s if s.starts_with("--") => {
