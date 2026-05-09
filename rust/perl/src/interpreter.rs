@@ -11655,6 +11655,7 @@ impl Interpreter {
         let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_inline_flag_groups(&pattern);
         let pattern = translate_perl_whitespace_escapes(&pattern);
+        let pattern = translate_control_escapes(&pattern);
         let pattern = normalize_named_backref(&pattern);
         // If the pattern uses atomic groups `(?>...)` or possessive
         // quantifiers (`X++`, `X*+`, `X?+`, `X{N,M}+`), rust regex
@@ -11879,6 +11880,7 @@ impl Interpreter {
         let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_inline_flag_groups(&pattern);
         let pattern = translate_perl_whitespace_escapes(&pattern);
+        let pattern = translate_control_escapes(&pattern);
         let pattern = normalize_named_backref(&pattern);
         let pattern = translate_atomic_groups(&pattern);
         let pattern = fix_inverted_quantifiers(&pattern);
@@ -16361,6 +16363,37 @@ fn strip_regex_comments(pattern: &str) -> String {
     out
 }
 
+/// Translate Perl's `\cX` (control character) regex escape to
+/// `\xNN`. `\cA` → `\x01`, `\c?` → `\x7F`, etc. Rust regex doesn't
+/// understand `\c` natively. Operates outside character classes.
+fn translate_control_escapes(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 2 < chars.len() && chars[i + 1] == 'c' {
+            let next = chars[i + 2];
+            // `\cX` is XOR with 0x40, then masked to 7 bits.
+            let byte = (next as u32) ^ 0x40;
+            if byte <= 0x7f {
+                out.push_str(&format!("\\x{byte:02x}"));
+                i += 3;
+                continue;
+            }
+        }
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 /// Normalise `\k{NAME}` / `\k'NAME'` named-backref forms to the
 /// angle-bracket form `\k<NAME>` that fancy_regex's parser accepts.
 /// Whitespace inside `\k{ NAME }` is trimmed.
@@ -16415,6 +16448,7 @@ fn normalize_named_backref(pattern: &str) -> String {
 ///   - `\V` → `[^\n\r\u{B}\u{C}\u{85}\u{2028}\u{2029}]` (not vertical ws)
 ///   - `\h` → `[\t \u{A0}…]` (horizontal ws — common Unicode set)
 ///   - `\H` → `[^\t \u{A0}…]` (not horizontal ws)
+///
 /// Operates outside character classes only — within a class, `\v`/`\V`
 /// also need expanding but the surrounding `[...]` complicates the
 /// rewrite (we'd need to splice into the class body).
@@ -16491,13 +16525,8 @@ fn translate_perl_whitespace_escapes(pattern: &str) -> String {
     out
 }
 
-/// Inline `(?s)` / `(?-s)` flag groups inside a `(...)` capture get
-/// rewritten to `(?s:...)` / `(?-s:...)` form so the dotall flag's
-/// scope matches Perl. fancy_regex's `(?s)` applies to the rest of
-/// the pattern; Perl's `(?s)` inside a group applies only to that
-/// group. Without this rewrite, `((?s).)c(?!.)` against `"...\nc\n"`
-/// misbehaves because the trailing `(?!.)` also gets dotall.
-/// re/regexp tests 599-602.
+/// Rewrite `(?s)` / `(?-s)` to `(?s:...)` form so dotall scopes
+/// match Perl (fancy_regex applies them to rest-of-pattern).
 fn translate_inline_flag_groups(pattern: &str) -> String {
     let chars: Vec<char> = pattern.chars().collect();
     let mut out = String::with_capacity(pattern.len());
@@ -16523,17 +16552,11 @@ fn translate_inline_flag_groups(pattern: &str) -> String {
             i += 1;
             continue;
         }
-        if !in_class
-            && c == '('
-            && i + 1 < chars.len()
-            && chars[i + 1] == '?'
-        {
+        if !in_class && c == '(' && i + 1 < chars.len() && chars[i + 1] == '?' {
             // Walk past flag chars to find the closing `)` (no body).
             let mut k = i + 2;
             let mut flags = String::new();
-            while k < chars.len()
-                && (chars[k].is_ascii_alphabetic() || chars[k] == '-')
-            {
+            while k < chars.len() && (chars[k].is_ascii_alphabetic() || chars[k] == '-') {
                 flags.push(chars[k]);
                 k += 1;
             }
@@ -16671,6 +16694,7 @@ fn translate_g_anchor(pattern: &str) -> String {
 ///   - `(?(?!PAT)yes|no)` → `(?:(?!PAT)yes|(?=PAT)no)`.
 ///   - `(?(?{0})yes|no)` → `(?:no)`.
 ///   - `(?(?{1})yes|no)` → `(?:yes)`.
+///
 /// re/regexp tests 608, 626, 628, 630, 632.
 fn rewrite_nonexistent_group_conditionals(pattern: &str) -> String {
     let chars: Vec<char> = pattern.chars().collect();
@@ -16685,11 +16709,7 @@ fn rewrite_nonexistent_group_conditionals(pattern: &str) -> String {
             continue;
         }
         // Skip past `(?(N)` — those 5+ chars don't introduce a group.
-        if j + 3 < chars.len()
-            && chars[j] == '('
-            && chars[j + 1] == '?'
-            && chars[j + 2] == '('
-        {
+        if j + 3 < chars.len() && chars[j] == '(' && chars[j + 1] == '?' && chars[j + 2] == '(' {
             // Skip past the inner `(...)` by seeking matching `)`.
             let mut k = j + 3;
             while k < chars.len() && chars[k] != ')' {

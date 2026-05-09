@@ -1340,12 +1340,19 @@ impl Lexer {
                     }
 
                     // Check for => (fat comma) - the ident is auto-quoted.
-                    // Skip ONLY whitespace here, not comments — `#` is a
-                    // valid quote-operator delimiter (`q#hello#`) and
-                    // consuming it as a comment would eat the body. For
-                    // q/qq/qw/qr/m/s/tr/y the next char after whitespace
-                    // is the delimiter, never a comment.
-                    while self.pos < self.input.len() && (self.ch() == ' ' || self.ch() == '\t') {
+                    // Skip whitespace including newlines — `time\n=>`
+                    // also auto-quotes (base/lex test 100). `#` is a
+                    // valid quote-operator delimiter (`q#hello#`) so
+                    // we don't consume comments here; q/qq/qw/qr/m/s
+                    // /tr/y read their delimiter via a separate path.
+                    let saved_pos = self.pos;
+                    let saved_line = self.current_line;
+                    while self.pos < self.input.len()
+                        && (self.ch() == ' ' || self.ch() == '\t' || self.ch() == '\n')
+                    {
+                        if self.ch() == '\n' {
+                            self.current_line += 1;
+                        }
                         self.pos += 1;
                     }
                     if self.ch() == '=' && self.peek(1) == '>' {
@@ -1369,6 +1376,11 @@ impl Lexer {
                         tokens.push(Token::FatComma);
                         continue;
                     }
+                    // No `=>` ahead — restore position so the newlines
+                    // we consumed don't disrupt heredoc-drain or line
+                    // tracking.
+                    self.pos = saved_pos;
+                    self.current_line = saved_line;
 
                     // Check for q//, qq//, qw//, qr// quoting operators
                     match ident.as_str() {
@@ -1385,18 +1397,19 @@ impl Lexer {
                             let s = self.read_qq_string_at(slot_idx);
                             // qq// is double-quote-equivalent. Route through
                             // InterpString iff there's an *unescaped* sigil
-                            // (a real $ / @, not the \x01 / \x02 placeholders
-                            // process_escapes leaves behind for `\$` / `\@`).
-                            // Otherwise StringLit, with placeholders mapped
-                            // back so the literal carries `$` / `@` directly.
+                            // (a real $ / @, not the `\u{F0001}` / `\u{F0002}`
+                            // placeholders process_escapes leaves behind for
+                            // `\$` / `\@`). Otherwise StringLit, with
+                            // placeholders mapped back so the literal carries
+                            // `$` / `@` directly.
                             if s.contains('$') || s.contains('@') {
                                 tokens.push(Token::InterpString(s));
-                            } else if s.contains('\x01') || s.contains('\x02') {
+                            } else if s.contains('\u{F0001}') || s.contains('\u{F0002}') {
                                 let restored: String = s
                                     .chars()
                                     .map(|c| match c {
-                                        '\x01' => '$',
-                                        '\x02' => '@',
+                                        '\u{F0001}' => '$',
+                                        '\u{F0002}' => '@',
                                         c => c,
                                     })
                                     .collect();
@@ -2309,12 +2322,13 @@ impl Lexer {
                         self.pos += 1;
                     }
                     '$' => {
-                        // Escaped $ — use a placeholder that won't conflict
-                        s.push('\x01'); // placeholder for literal $
+                        // Escaped $ — use a private-use placeholder that
+                        // won't collide with literal `\x01` the user wrote.
+                        s.push('\u{F0001}'); // placeholder for literal $
                         self.pos += 1;
                     }
                     '@' => {
-                        s.push('\x02'); // placeholder for literal @
+                        s.push('\u{F0002}'); // placeholder for literal @
                         self.pos += 1;
                     }
                     '0'..='7' => {
@@ -2496,10 +2510,12 @@ impl Lexer {
         if self.pos < self.input.len() && self.ch() == delim {
             self.pos += 1;
         }
-        // After processing, replace placeholders back
-        // \x01 → $, \x02 → @  (these were escaped in the source)
+        // After processing, replace placeholders back. Use private-
+        // use plane chars (`\u{F0001}` / `\u{F0002}`) so they don't
+        // collide with literal control chars the user wrote (`\x01`
+        // / `\x02` etc.). re/regexp tests 1539+ (`\cA` matching).
         if !has_interp {
-            s = s.replace('\x01', "$").replace('\x02', "@");
+            s = s.replace('\u{F0001}', "$").replace('\u{F0002}', "@");
         }
         (s, has_interp)
     }
@@ -3570,8 +3586,8 @@ fn process_escapes(s: &str) -> String {
                 // turns back into the literal character — keeps `qq{\$1}` /
                 // `<<"END"\n\$1\nEND` from interpolating $1 (which would
                 // otherwise hit the regex match group).
-                '$' => result.push('\x01'),
-                '@' => result.push('\x02'),
+                '$' => result.push('\u{F0001}'),
+                '@' => result.push('\u{F0002}'),
                 '0'..='7' => {
                     let mut oct = String::new();
                     oct.push(chars[i]);

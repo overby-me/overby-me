@@ -4622,12 +4622,13 @@ fn parse_interp_string(s: &str) -> Expr {
                 }
                 parts.push(InterpPart::ArrayVar(name));
             }
-        } else if chars[i] == '\x01' {
-            // Escaped $ placeholder
+        } else if chars[i] == '\u{F0001}' {
+            // Escaped $ placeholder (private-use plane to avoid colliding
+            // with literal `\x01` the user wrote).
             lit.push('$');
             i += 1;
-        } else if chars[i] == '\x02' {
-            // Escaped @ placeholder
+        } else if chars[i] == '\u{F0002}' {
+            // Escaped @ placeholder.
             lit.push('@');
             i += 1;
         } else {
