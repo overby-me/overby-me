@@ -716,10 +716,13 @@ impl Lexer {
     }
 
     fn skip_pod(&mut self) {
-        // Skip =pod / =head1 / =cut blocks. POD ends only at a line that
-        // starts with `=cut` followed by whitespace or end-of-line —
-        // `=cute`, `=cut2`, `=cut_` keep us in POD (per perlpod and
-        // base/lex tests 53–55).
+        // Skip =pod / =head1 / =cut blocks. POD ends only at a line
+        // that starts with the directive `=cut` — the directive name
+        // is the run of word chars after `=`, so `=cute`/`=cut2`/
+        // `=cut_` are different directives and keep us in POD, while
+        // `=cut$cene` ends POD (the directive is `cut`, with `$cene`
+        // as content). base/lex tests 53–55 (negative) and 124-128
+        // (positive after non-word).
         while self.pos < self.input.len() {
             if self.ch() == '\n' {
                 self.pos += 1;
@@ -729,7 +732,7 @@ impl Lexer {
                     let ends_pod = rest.starts_with("=cut")
                         && match after_cut {
                             None => true,
-                            Some(c) => c.is_whitespace() || c == '\r',
+                            Some(c) => !(c.is_ascii_alphanumeric() || c == '_'),
                         };
                     if ends_pod {
                         while self.pos < self.input.len() && self.ch() != '\n' {
