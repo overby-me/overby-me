@@ -15429,29 +15429,48 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                         k += 1;
                     }
                     let raw_name: String = chars[name_start..k].iter().collect();
-                    // `\k{ NAME }` — Perl allows surrounding whitespace
-                    // inside the brace form.
-                    let name = raw_name.trim().to_string();
-                    let prefix: String = chars[..=k].iter().collect();
+                    // Only the brace form `\k{ NAME }` permits leading
+                    // whitespace; angle (`\k<…>`) and quote (`\k'…'`)
+                    // forms reject any non-word leading char. re/regexp
+                    // 1353.
+                    let allow_ws = chars[i + 2] == '{';
+                    let prefix_until = if allow_ws {
+                        chars[..=k].iter().collect::<String>()
+                    } else {
+                        // For non-trimmed forms, position HERE before
+                        // the offending char.
+                        let mut here = name_start;
+                        while here < k && chars[here].is_ascii_whitespace() {
+                            here += 1;
+                        }
+                        chars[..=here].iter().collect::<String>()
+                    };
                     let suffix: String = if k + 1 < chars.len() {
                         chars[k + 1..].iter().collect()
                     } else {
                         String::new()
                     };
-                    if name.is_empty() {
+                    let check_name = if allow_ws {
+                        raw_name.trim().to_string()
+                    } else {
+                        raw_name.clone()
+                    };
+                    if check_name.is_empty() {
                         return Some(format!(
-                            "Group name must start with a non-digit word character in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                            "Group name must start with a non-digit word character in regex; marked by <-- HERE in m/{prefix_until} <-- HERE {suffix}/"
                         ));
                     }
-                    let first = name.chars().next().unwrap();
+                    let first = check_name.chars().next().unwrap();
                     if !(first == '_' || first.is_ascii_alphabetic()) {
                         return Some(format!(
-                            "Group name must start with a non-digit word character in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                            "Group name must start with a non-digit word character in regex; marked by <-- HERE in m/{prefix_until} <-- HERE {suffix}/"
                         ));
                     }
-                    if !named_groups.contains(&name) {
+                    let lookup_name = raw_name.trim().to_string();
+                    if !named_groups.contains(&lookup_name) {
+                        let prefix_full: String = chars[..=k].iter().collect();
                         return Some(format!(
-                            "Reference to nonexistent named group in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                            "Reference to nonexistent named group in regex; marked by <-- HERE in m/{prefix_full} <-- HERE {suffix}/"
                         ));
                     }
                 }
