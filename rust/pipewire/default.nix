@@ -462,6 +462,7 @@
       {tool = "pw-cli"; name = "unknown-command";}
       {tool = "pw-cli"; name = "ls-core-quoted";}
       {tool = "pw-cli"; name = "ls-multiarg";}
+      {tool = "pw-cli"; name = "help-with-d";}
       {tool = "pw-cli"; name = "connect-fail";}
       {tool = "pw-cli"; name = "cmd-connect";}
       {tool = "pw-cli"; name = "cmd-disconnect";}
