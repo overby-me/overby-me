@@ -247,6 +247,7 @@
       {tool = "pw-cli"; name = "ls-node-rich";}
       {tool = "pw-cli"; name = "ls-port-rich";}
       {tool = "pw-cli"; name = "info-node-rich";}
+      {tool = "pw-cli"; name = "info-all-rich";}
     ];
 
     # Daemon-comparison tests — spawn a real C pipewire daemon and run both
@@ -269,6 +270,8 @@
       {tool = "pw-cli"; name = "info-module-5";}
       {tool = "pw-cli"; name = "info-factory";}
       {tool = "pw-cli"; name = "info-all";}
+      {tool = "pw-cli"; name = "info-bad-id";}
+      {tool = "pw-cli"; name = "info-securitycontext";}
       {tool = "pw-dump"; name = "structural";}
     ];
   in

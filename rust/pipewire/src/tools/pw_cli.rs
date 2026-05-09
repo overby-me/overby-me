@@ -211,10 +211,13 @@ fn run_info(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {
     };
 
     if globals.is_empty() {
-        eprintln!("{argv0}: object {target} not found");
+        // Match the C tool's error format: parse() wraps the inner message
+        // in `Error: "..."` and writes to stderr.
+        eprintln!("Error: \"info: unknown global '{target}'\"");
         return 1;
     }
 
+    let is_all = target == "all";
     let registry_id = 2u32; // we always allocate this in handshake.
     for g in &globals {
         match g.interface.as_str() {
@@ -289,8 +292,15 @@ fn run_info(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {
             // silent like upstream. Adding more matches here is cheap.
             interfaces::TYPE_METADATA | interfaces::TYPE_LINK => {}
             // Anything else: type without a class in pw-cli. C tool prints
-            // `info: unsupported type X` on stderr.
-            _ => eprintln!("info: unsupported type {}", g.interface),
+            // `info: unsupported type X` (info-all path) or
+            // `Error: "unsupported type X"` (single-id path).
+            _ => {
+                if is_all {
+                    eprintln!("info: unsupported type {}", g.interface);
+                } else {
+                    eprintln!("Error: \"unsupported type {}\"", g.interface);
+                }
+            }
         }
     }
     0

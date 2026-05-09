@@ -46,6 +46,10 @@ pkgs.runCommand "rust-pipewire-rich-daemon-test-${tool}-${name}" {
       { name = libpipewire-module-access }
       # Need the spa-node-factory to instantiate the null-audio-sink below.
       { name = libpipewire-module-spa-node-factory }
+      # Same reason as in daemon-testsuite.nix: pw-cli auto-binds every
+      # global it sees, and a missing metadata factory writes a noisy
+      # error to stderr that breaks comparison.
+      { name = libpipewire-module-metadata }
   ]
   context.objects = [
       {   factory = spa-node-factory

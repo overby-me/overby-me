@@ -51,6 +51,11 @@ pkgs.runCommand "rust-pipewire-daemon-test-${tool}-${name}" {
       # without it the registry has zero visible globals because every
       # global's read permission check fails.
       { name = libpipewire-module-access }
+      # The C pw-cli auto-binds every global it sees on the registry. If
+      # the daemon doesn't ship a metadata factory, that bind fails with
+      # `remote 0: error ... can't bind global N/3: -71` and pollutes
+      # stderr, breaking our diff-based comparison tests.
+      { name = libpipewire-module-metadata }
   ]
   context.objects = []
   context.exec = []
