@@ -102,7 +102,11 @@ pub fn main(raw_args: &[String]) -> i32 {
                 }
             }
             s if !s.starts_with('-') => {
-                if command == "paths" && !command_set(&mut command, s) {
+                // First positional becomes the command (if recognized);
+                // later ones become arguments to that command.
+                if command == "paths" && command_set(&mut command, s) {
+                    // command was set; don't push.
+                } else {
                     command_args.push(s.to_string());
                 }
             }
@@ -143,10 +147,9 @@ pub fn main(raw_args: &[String]) -> i32 {
                 eprintln!("merge requires a section");
                 return 1;
             }
-            // Section-aware merge is Phase 2; emit the section name on
-            // stderr and an empty body (consistent with the daemon-less
-            // behavior of upstream when no configs match the section).
-            println!("{{}}");
+            // Section-aware merge is Phase 2; without a real merge, the
+            // body is empty. Fall through to the assemble.serialize
+            // call to get the proper `{ }`/`{\n}` formatting.
         }
         "list" => {
             // C dumps the resolved tree of configs; for our stub, list

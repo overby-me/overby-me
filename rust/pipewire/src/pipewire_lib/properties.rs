@@ -64,12 +64,10 @@ impl Properties {
             let _ = last_index;
         }
         if flags.enclose {
-            // C `pw-config` always emits the closing brace on its own line
-            // when newline mode is on, even for an empty container, so the
-            // empty output is `{\n}` not `{}`.
-            if !self.items.is_empty() || flags.newline {
-                out.push_str(sep);
-            }
+            // C `pw-config` always emits a separator before the closing
+            // brace, even for an empty container — `{ }` in no-newline
+            // mode and `{\n}` in newline mode.
+            out.push_str(sep);
             out.push(close);
         }
         out

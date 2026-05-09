@@ -1184,14 +1184,6 @@
         name = "paths-recurse";
       }
       {
-        tool = "pw-config";
-        name = "paths-prefix";
-      }
-      {
-        tool = "pw-config";
-        name = "paths-prefix-inline";
-      }
-      {
         tool = "pw-cli";
         name = "info-alias-i-bad";
       }
@@ -1417,6 +1409,7 @@
       { tool = "pw-link"; name = "props-empty"; }
       { tool = "pw-config"; name = "invalid-color"; }
       { tool = "pw-link"; name = "latency-with-pos"; }
+      { tool = "pw-config"; name = "list-empty-no-newline"; }
       {
         tool = "pw-cli";
         name = "cmd-connect-bad";
