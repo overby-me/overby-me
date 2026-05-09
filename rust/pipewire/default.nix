@@ -907,6 +907,12 @@
       { tool = "pw-cli"; name = "um-alias-bad"; }
       { tool = "pw-cli"; name = "create-device-bad"; }
       { tool = "pw-cli"; name = "create-node-bad"; }
+      { tool = "pw-cli"; name = "enum-params-bad"; }
+      { tool = "pw-cli"; name = "set-param-bad"; }
+      { tool = "pw-cli"; name = "send-command-bad"; }
+      { tool = "pw-cli"; name = "get-permissions-bad"; }
+      { tool = "pw-cli"; name = "create-link-bad"; }
+      { tool = "pw-cli"; name = "export-node-bad"; }
       { tool = "pw-cli"; name = "cmd-connect-bad"; }
       { tool = "pw-mon"; name = "connect-fail"; }
       { tool = "pw-profiler"; name = "connect-fail"; }

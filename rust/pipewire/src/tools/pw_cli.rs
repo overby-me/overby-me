@@ -263,6 +263,19 @@ pub fn main(raw_args: &[String]) -> i32 {
             eprintln!("Error: \"{cmd} <node-id> [<remote-var>]\"");
             1
         }
+        // Recognized commands with sufficient args. C tries to connect to
+        // the daemon and execute. Without daemon → connect-fail.
+        "enum-params" | "e" | "set-param" | "s" | "permissions" | "sp"
+        | "send-command" | "c" | "get-permissions" | "gp" | "create-link" | "cl"
+        | "export-node" | "en" => {
+            match open_client(remote.as_deref(), "pw-cli") {
+                Ok(_) => 0,
+                Err(e) => {
+                    print_open_error(argv0, &e);
+                    1
+                }
+            }
+        }
         other => {
             // Match the C tool's exact "unknown command" error format. C
             // wraps the parse error in `Error: "..."` and uses literal
