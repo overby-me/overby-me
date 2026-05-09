@@ -128,6 +128,18 @@ pub fn main(args: &[String]) -> i32 {
             eprintln!("Error: \"{cmd} <object-id> <command-id> <command-json>\"");
             1
         }
+        "get-permissions" | "gp" if rest.is_empty() => {
+            eprintln!("Error: \"{cmd} <client-id>\"");
+            1
+        }
+        "create-link" | "cl" if rest.len() < 4 => {
+            eprintln!("Error: \"{cmd} <node-id> <port> <node-id> <port> [<properties>]\"");
+            1
+        }
+        "export-node" | "en" if rest.is_empty() => {
+            eprintln!("Error: \"{cmd} <node-id> [<remote-var>]\"");
+            1
+        }
         other => {
             eprintln!("{argv0}: command \"{other}\" not yet implemented");
             1
@@ -251,18 +263,17 @@ fn run_info(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {
         let mut v: Vec<&RegistryGlobal> = snap.globals.iter().collect();
         v.sort_by_key(|g| g.id);
         v
+    } else if let Ok(id) = target.parse::<u32>() {
+        snap.globals.iter().filter(|g| g.id == id).collect()
     } else {
-        match target.parse::<u32>() {
-            Ok(id) => snap
-                .globals
-                .iter()
-                .filter(|g| g.id == id)
-                .collect::<Vec<_>>(),
-            Err(_) => {
-                eprintln!("{argv0}: invalid object id {target:?}");
-                return 2;
-            }
-        }
+        // Mirror C `find_global`: try numeric first, otherwise match on
+        // type substring (and additional fields the C tool checks). This
+        // returns the first match, just like the C iteration.
+        snap.globals
+            .iter()
+            .find(|g| g.interface.contains(target))
+            .into_iter()
+            .collect()
     };
 
     if globals.is_empty() {
