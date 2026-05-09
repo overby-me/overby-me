@@ -2,11 +2,14 @@
 // would link the SPA resampler plugin and run it on a WAV; for now we
 // just emit upstream's --help text byte-for-byte.
 
-pub fn main(args: &[String]) -> i32 {
-    let argv0 = args.first().map(String::as_str).unwrap_or("spa-resample");
+use crate::tools::common::expand_short_clusters;
+
+pub fn main(raw_args: &[String]) -> i32 {
+    let argv0 = raw_args.first().map(String::as_str).unwrap_or("spa-resample");
+    // OPTIONS = "hvc:r:f:w:q:u:t:p:": h, v are no-arg; rest take values.
+    let args = expand_short_clusters(raw_args, &['h', 'v']);
 
     let mut positional_count = 0;
-    let mut consumed_flags = 0;
     let mut i = 1;
     while i < args.len() {
         let a = &args[i];
@@ -22,7 +25,6 @@ pub fn main(args: &[String]) -> i32 {
                 return 1;
             }
             "-v" | "--verbose" => {
-                consumed_flags += 1;
                 i += 1;
             }
             // Flags that REQUIRE a value; if missing, getopt prints
@@ -47,7 +49,6 @@ pub fn main(args: &[String]) -> i32 {
                     print_help(argv0);
                     return 1;
                 }
-                consumed_flags += 2;
                 i += 2;
             }
             s if s.starts_with("--") => {
@@ -72,9 +73,11 @@ pub fn main(args: &[String]) -> i32 {
 
     if positional_count < 2 {
         // C: prints `error: filename arguments missing (<optind> <argc>)`.
-        // optind = 1 + number of consumed option args; argc = total argv.
-        let optind = 1 + consumed_flags;
-        let argc = consumed_flags + positional_count + 1;
+        // optind / argc are based on the ORIGINAL argv (before cluster
+        // expansion), since getopt advances optind once per argv slot,
+        // not once per char in a cluster.
+        let argc = raw_args.len();
+        let optind = argc - positional_count;
         eprintln!("error: filename arguments missing ({optind} {argc})");
         print_help(argv0);
         return 0;
