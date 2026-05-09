@@ -232,6 +232,17 @@
       { tool = "pipewire-avb"; name = "version"; }
       { tool = "pipewire-vulkan"; name = "help"; }
       { tool = "pipewire-vulkan"; name = "version"; }
+      { tool = "pipewire-aes67"; name = "help-short"; }
+      { tool = "pipewire-aes67"; name = "version-short"; }
+      { tool = "pipewire-avb"; name = "help-short"; }
+      { tool = "pipewire-avb"; name = "version-short"; }
+      { tool = "pipewire-vulkan"; name = "help-short"; }
+      { tool = "pipewire-vulkan"; name = "version-short"; }
+      { tool = "pw-reserve"; name = "help-short"; }
+      { tool = "pw-reserve"; name = "version-short"; }
+      { tool = "pw-container"; name = "help-short"; }
+      { tool = "pw-container"; name = "version-short"; }
+      { tool = "pw-loopback"; name = "help-short"; }
       { tool = "pipewire"; name = "bad-flag"; }
       { tool = "pipewire-pulse"; name = "bad-flag"; }
       { tool = "pipewire-aes67"; name = "bad-flag"; }
