@@ -905,6 +905,8 @@
       { tool = "spa-inspect"; name = "two-args"; }
       { tool = "spa-monitor"; name = "help-flag"; }
       { tool = "spa-monitor"; name = "two-args"; }
+      { tool = "spa-acp-tool"; name = "missing-arg-c"; }
+      { tool = "spa-acp-tool"; name = "missing-arg-p"; }
 
       # --- per-tool --help byte-identical parity ---
       {
