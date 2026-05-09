@@ -142,6 +142,20 @@
         name = "conf-aes67";
       }
 
+      # --- per-tool --version byte-identical parity ---
+      { tool = "pw-cli"; name = "version"; }
+      { tool = "pw-mon"; name = "version"; }
+      { tool = "pw-link"; name = "version"; }
+      { tool = "pw-metadata"; name = "version"; }
+      { tool = "pw-config"; name = "version"; }
+      { tool = "pw-dump"; name = "version"; }
+      { tool = "pw-dot"; name = "version"; }
+      { tool = "pw-mididump"; name = "version"; }
+      { tool = "pw-profiler"; name = "version"; }
+      { tool = "pw-top"; name = "version"; }
+      { tool = "pipewire"; name = "version"; }
+      { tool = "pipewire-pulse"; name = "version"; }
+
       # --- per-tool --help byte-identical parity ---
       {
         tool = "pw-config";
