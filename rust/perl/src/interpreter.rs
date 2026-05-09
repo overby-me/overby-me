@@ -15183,8 +15183,6 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                     // character (`\N{...}`), not the bare "any non-
                     // newline" form. Reference perl emits "\N in a
                     // character class must be a named character".
-                    // Only fire for bare `\N` (no `{...}`); `\N{name}`
-                    // is OK and gets validated separately.
                     if chars[i + 1] == 'N' {
                         let mut p = i + 2;
                         while p < chars.len() && chars[p].is_ascii_whitespace() {
@@ -15196,6 +15194,45 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                                 "\\N in a character class must be a named character in regex; marked by <-- HERE in m/{prefix} <-- HERE /"
                             ));
                         }
+                        // `\N{...}` body validation, also inside a
+                        // class. Same rules as outside-class `\N{}`:
+                        // empty `U+`, non-hex after `U+`, missing `}`.
+                        let body_start = p + 1;
+                        let mut q = body_start;
+                        while q < chars.len() && chars[q] != '}' {
+                            q += 1;
+                        }
+                        if q >= chars.len() {
+                            let prefix: String = chars[..body_start].iter().collect();
+                            return Some(format!(
+                                "Missing right brace on \\N{{}} in regex; marked by <-- HERE in m/{prefix} <-- HERE /"
+                            ));
+                        }
+                        let body: String = chars[body_start..q].iter().collect();
+                        let trimmed = body.trim();
+                        let is_count = !trimmed.is_empty()
+                            && trimmed.chars().all(|c| c.is_ascii_digit() || c == ',');
+                        if !is_count {
+                            let prefix: String = chars[..=q].iter().collect();
+                            let suffix: String = if q + 1 < chars.len() {
+                                chars[q + 1..].iter().collect()
+                            } else {
+                                String::new()
+                            };
+                            if let Some(rest) = trimmed.strip_prefix("U+") {
+                                if rest.is_empty() || !rest.chars().all(|c| c.is_ascii_hexdigit()) {
+                                    return Some(format!(
+                                        "Invalid hexadecimal number in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                                    ));
+                                }
+                            } else if !trimmed.is_empty() {
+                                return Some(format!(
+                                    "Unknown charname '{trimmed}' in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                                ));
+                            }
+                        }
+                        i = q + 1;
+                        continue;
                     }
                     i += 2;
                     continue;
