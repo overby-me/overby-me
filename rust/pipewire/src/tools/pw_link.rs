@@ -288,6 +288,46 @@ fn port_regex_match(text: &str, pattern: &str) -> bool {
     true
 }
 
+#[cfg(test)]
+mod tests {
+    use super::port_regex_match;
+
+    #[test]
+    fn substring_match() {
+        assert!(port_regex_match("alsa_output:playback_FL", "alsa"));
+        assert!(port_regex_match("alsa_output:playback_FL", "FL"));
+        assert!(!port_regex_match("alsa_output:playback_FL", "FR"));
+        assert!(!port_regex_match("alsa_output:playback_FL", "nonexistent"));
+    }
+
+    #[test]
+    fn wildcard_match() {
+        assert!(port_regex_match("alsa_output:playback_FL", "alsa.*FL"));
+        assert!(port_regex_match("alsa_output:playback_FL", "alsa.*Speaker.*FL"
+            )
+            == false); // "Speaker" not in this string
+        assert!(port_regex_match(
+            "alsa_output_Speaker:playback_FL",
+            "alsa.*Speaker.*FL"
+        ));
+    }
+
+    #[test]
+    fn anchors() {
+        assert!(port_regex_match("alsa_output:playback_FL", "^alsa"));
+        assert!(!port_regex_match("alsa_output:playback_FL", "^playback"));
+        assert!(port_regex_match("alsa_output:playback_FL", "FL$"));
+        assert!(!port_regex_match("alsa_output:playback_FL", "FR$"));
+        assert!(port_regex_match("alsa", "^alsa$"));
+        assert!(!port_regex_match("alsa_output", "^alsa$"));
+    }
+
+    #[test]
+    fn empty_pattern_matches_all() {
+        assert!(port_regex_match("anything", ""));
+    }
+}
+
 /// Print one port line ("\t<id?> <node:port>"), plus, if verbose, the
 /// object.path and port.alias indented underneath.
 fn print_port_line(
