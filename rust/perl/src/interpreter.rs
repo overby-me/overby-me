@@ -17553,7 +17553,46 @@ fn extract_regex_code_blocks(pattern: &str) -> (String, Vec<String>) {
 /// before `|`, or before `)` into `(?:\n?$)`. Skips alternations and
 /// inner subexpressions only minimally — it's a heuristic, not a full
 /// regex parser.
+/// True when `pattern` enables the multiline flag anywhere via
+/// `(?m...)` or `(?-...m...)` (case-insensitive scan, ignoring inside
+/// `[...]` classes and after `\\`). Used to decide whether to leave
+/// `$` as native rather than translating to a `(?=\n?\z)` lookahead —
+/// the inline flag would otherwise fight our rewrite.
+fn pattern_has_inline_multiline(pattern: &str) -> bool {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+        } else if in_class && c == ']' {
+            in_class = false;
+        }
+        if !in_class && c == '(' && i + 1 < chars.len() && chars[i + 1] == '?' {
+            let mut k = i + 2;
+            while k < chars.len() && (chars[k].is_ascii_alphabetic() || chars[k] == '-') {
+                if chars[k] == 'm' {
+                    return true;
+                }
+                k += 1;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
 fn perl_dollar_anchor(pattern: &str, multiline: bool) -> String {
+    // If the pattern contains an inline `(?m...)` flag, leave `$` as
+    // native — translating would fight the flag.
+    if !multiline && pattern_has_inline_multiline(pattern) {
+        return pattern.to_string();
+    }
     let chars: Vec<char> = pattern.chars().collect();
     let mut out = String::new();
     let mut i = 0;
@@ -17605,7 +17644,9 @@ fn perl_dollar_anchor(pattern: &str, multiline: bool) -> String {
             // variable interpolation has already happened). Translate
             // to a zero-width lookahead `(?=\n?\z)` so a following
             // pattern atom (e.g. `\n` literal) can still consume the
-            // newline. re/regexp tests 1463-1467.
+            // newline, and so non-`/m` Perl `$` matches end-of-string
+            // OR before final `\n`. Skip when followed by a
+            // quantifier — `$?` etc. would mangle. re/regexp 1463-1467.
             let next = chars.get(i + 1).copied();
             let is_quantifier = matches!(next, Some('?') | Some('+') | Some('*') | Some('{'));
             if !is_quantifier {
