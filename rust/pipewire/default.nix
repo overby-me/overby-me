@@ -257,6 +257,7 @@
       { tool = "spa-inspect"; name = "bad-plugin"; }
       { tool = "spa-monitor"; name = "bad-plugin"; }
       { tool = "spa-acp-tool"; name = "help"; }
+      { tool = "spa-acp-tool"; name = "invalid-V"; }
       { tool = "pw-loopback"; name = "help"; }
       { tool = "pw-cli"; name = "version-short"; }
       { tool = "pw-mon"; name = "version-short"; }

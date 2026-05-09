@@ -13,19 +13,27 @@ pub fn main(args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
-            "--version" | "-V" => {
-                print_version(argv0);
+            // spa-acp-tool's getopt has no --version or -V — both fall
+            // through to the unrecognized-option branch.
+            // Long unknown:
+            s if s.starts_with("--")
+                && !matches!(s, "--verbose" | "--card" | "--properties") =>
+            {
+                eprintln!("{argv0}: unrecognized option '{s}'");
+                eprintln!("error: unknown option '?'");
+                print_options(argv0);
+                println!("Available commands:");
+                print_commands();
                 return 0;
             }
+            // Short unknown: getopt prints `invalid option -- 'X'`
+            // (single-quoted single char, like pw-cat).
             s if s.starts_with('-')
-                && !matches!(s, "-v" | "--verbose" | "-c" | "--card" | "-p" | "--properties") =>
+                && s.len() == 2
+                && !matches!(s, "-v" | "-c" | "-p") =>
             {
-                // C: getopt-error path goes through show_usage(true) →
-                // tool name + options on stderr, then cmd_help writes
-                // "Available commands:" on stderr and the list on stdout.
-                // The merged order is: error msgs, options, "Available
-                // commands:", commands.
-                eprintln!("{argv0}: unrecognized option '{s}'");
+                let ch = s.chars().nth(1).unwrap_or('?');
+                eprintln!("{argv0}: invalid option -- '{ch}'");
                 eprintln!("error: unknown option '?'");
                 print_options(argv0);
                 println!("Available commands:");
