@@ -8,10 +8,11 @@
 
 use crate::pipewire_lib::client::{
     Client, ClientInfo, CoreInfo, DeviceInfo, DictItem, FactoryInfo,
-    ModuleInfo, NodeInfo, ParamInfo, PortInfo, RegistryGlobal,
+    LinkInfo, ModuleInfo, NodeInfo, ParamInfo, PortInfo, RegistryGlobal,
     decode_client_info, decode_core_done, decode_core_error,
-    decode_device_info, decode_factory_info, decode_module_info,
-    decode_node_info, decode_port_info, fmt_permissions,
+    decode_device_info, decode_factory_info, decode_link_info,
+    decode_module_info, decode_node_info, decode_port_info,
+    fmt_permissions,
 };
 use crate::pipewire_lib::interfaces;
 use crate::pipewire_lib::version::PIPEWIRE_API_VERSION;
@@ -267,10 +268,13 @@ fn run_info(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {
         snap.globals.iter().filter(|g| g.id == id).collect()
     } else {
         // Mirror C `find_global`: try numeric first, otherwise match on
-        // type substring (and additional fields the C tool checks). This
-        // returns the first match, just like the C iteration.
-        snap.globals
-            .iter()
+        // type substring (and additional fields the C tool checks). C
+        // iterates `pw_map` in id-slot order, so sort by id to find the
+        // same first match.
+        let mut sorted: Vec<&RegistryGlobal> = snap.globals.iter().collect();
+        sorted.sort_by_key(|g| g.id);
+        sorted
+            .into_iter()
             .find(|g| g.interface.contains(target))
             .into_iter()
             .collect()
@@ -354,9 +358,20 @@ fn run_info(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {
                     eprintln!("{argv0}: bind {} failed: {}", g.id, e);
                 }
             }
-            // Types the C tool registers a class for but no `info` callback —
-            // silent like upstream. Adding more matches here is cheap.
-            interfaces::TYPE_METADATA | interfaces::TYPE_LINK => {}
+            interfaces::TYPE_LINK => {
+                if let Err(e) = bind_and_print(
+                    &mut client,
+                    registry_id,
+                    g,
+                    interfaces::VERSION_LINK,
+                    print_link_info,
+                ) {
+                    eprintln!("{argv0}: bind {} failed: {}", g.id, e);
+                }
+            }
+            // Metadata has a class in the C tool but no `info` callback —
+            // silent like upstream.
+            interfaces::TYPE_METADATA => {}
             // Anything else: type without a class in pw-cli. C tool prints
             // `info: unsupported type X` (info-all path) or
             // `Error: "unsupported type X"` (single-id path).
@@ -538,6 +553,48 @@ fn print_port_info(g: &RegistryGlobal, args: &[crate::spa::pod::types::Value]) {
     }
     if cm_params {
         print_params(&info.params, '*', true);
+    }
+}
+
+fn print_link_info(g: &RegistryGlobal, args: &[crate::spa::pod::types::Value]) {
+    let info: LinkInfo = match decode_link_info(args) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("rust-pipewire pw-cli: decode_link_info: {e}");
+            return;
+        }
+    };
+    print_global_header(g);
+    println!("\toutput-node-id: {}", info.output_node_id);
+    println!("\toutput-port-id: {}", info.output_port_id);
+    println!("\tinput-node-id: {}", info.input_node_id);
+    println!("\tinput-port-id: {}", info.input_port_id);
+    // Link change-mask bits (from `pipewire/link.h`):
+    //   STATE = 1<<0, FORMAT = 1<<1, PROPS = 1<<2.
+    let cm_state = info.change_mask & (1 << 0) != 0;
+    let cm_format = info.change_mask & (1 << 1) != 0;
+    if cm_state {
+        let s = interfaces::link_state_name(info.state);
+        if info.state == -2 && !info.error.is_empty() {
+            println!("*\tstate: \"{}\" \"{}\"", s, info.error);
+        } else {
+            println!("*\tstate: \"{}\"", s);
+        }
+    }
+    if cm_format {
+        println!("*\tformat:");
+        if info.format.is_none() {
+            println!("\t\tnone");
+        } else {
+            // Full POD pretty-printing (spa_debug_pod) is Phase 8 work.
+            // Emit a placeholder so the rest of the output remains stable.
+            println!("\t\t<format pod>");
+        }
+    }
+    // Bug-compat with upstream pw-cli: it gates `print_properties` on the
+    // STATE mask, not the PROPS mask, so we do too.
+    if cm_state {
+        print_properties(&info.props, '*', true);
     }
 }
 

@@ -296,6 +296,10 @@
       {tool = "pw-cli"; name = "info-bad-id";}
       {tool = "pw-cli"; name = "info-securitycontext";}
       {tool = "pw-cli"; name = "info-by-name";}
+      {tool = "pw-cli"; name = "info-by-name-Module";}
+      {tool = "pw-cli"; name = "info-by-name-Factory";}
+      {tool = "pw-cli"; name = "info-by-name-SecurityContext";}
+      {tool = "pw-cli"; name = "info-by-name-Metadata";}
       {tool = "pw-cli"; name = "help-cmd";}
       {tool = "pw-cli"; name = "list-vars";}
       {tool = "pw-cli"; name = "list-remotes";}

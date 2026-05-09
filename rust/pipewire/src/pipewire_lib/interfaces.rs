@@ -121,6 +121,23 @@ pub fn direction_name(direction: u32) -> &'static str {
     }
 }
 
+/// pw-cli's `pw_link_state_as_string`. Link state from `pipewire/link.h`:
+/// -2=error, -1=unlinked, 0=init, 1=negotiating, 2=allocating, 3=paused,
+/// 4=active. Negative values arrive on the wire as i32, hence the signed
+/// match arm here.
+pub fn link_state_name(state: i32) -> &'static str {
+    match state {
+        -2 => "error",
+        -1 => "unlinked",
+        0 => "init",
+        1 => "negotiating",
+        2 => "allocating",
+        3 => "paused",
+        4 => "active",
+        _ => "unknown",
+    }
+}
+
 /// Map a SPA_PARAM_* id to the `Spa:Enum:ParamId:Name` string used by
 /// `spa_debug_type_find_name(spa_type_param, id)` in pw-cli's print_params.
 /// Mirrors `spa/include/spa/param/param-types.h::spa_type_param`.
