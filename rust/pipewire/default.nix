@@ -899,6 +899,7 @@
       { tool = "pw-cli"; name = "info-multi-arg"; }
       { tool = "pw-link"; name = "connect-three-args"; }
       { tool = "pw-link"; name = "connect-one-arg"; }
+      { tool = "pw-mididump"; name = "force-midi-bad-value"; }
       { tool = "pw-mididump"; name = "empty-file"; }
       { tool = "pw-mididump"; name = "positional-then-bad"; }
       { tool = "pw-v4l2"; name = "missing-arg-r"; }

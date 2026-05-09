@@ -66,6 +66,18 @@ pub fn main(raw_args: &[String]) -> i32 {
                     }
                 }
             }
+            s if s.starts_with("--force-midi=") => {
+                let val = &s["--force-midi=".len()..];
+                match val {
+                    "midi" => force_ump = false,
+                    "ump" => force_ump = true,
+                    _ => {
+                        eprintln!("error: bad force-midi {val}");
+                        print_help(argv0);
+                        return 0;
+                    }
+                }
+            }
             s if !s.starts_with('-') || s == "-" => {
                 // `-` is the conventional stdin marker, treated as a
                 // filename by the C tool (which then fopen's it and
