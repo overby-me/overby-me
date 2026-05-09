@@ -62,8 +62,7 @@ fn dispatch(name: &str, args: &[String]) -> i32 {
         "pw-reserve" => tools::pw_reserve::main(args),
         "pw-container" => tools::pw_container::main(args),
         "pw-v4l2" => tools::pw_v4l2::main(args),
-
-        "pw-loopback" => stub_main(name, args),
+        "pw-loopback" => tools::pw_loopback::main(args),
 
         "rust-pipewire" => {
             eprintln!(

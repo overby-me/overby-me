@@ -7,6 +7,7 @@ pub mod pw_config;
 pub mod pw_dot;
 pub mod pw_dump;
 pub mod pw_link;
+pub mod pw_loopback;
 pub mod pw_metadata;
 pub mod pw_mididump;
 pub mod pw_mon;
