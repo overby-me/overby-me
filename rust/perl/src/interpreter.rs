@@ -12517,20 +12517,79 @@ impl Interpreter {
                         let limit: Option<i64> =
                             args.get(2).map(|a| self.eval_expr(a).to_num() as i64);
                         let mut items: Vec<Value> = if pat == " " {
-                            text.split_whitespace()
-                                .map(|s| Value::Str(s.to_string()))
-                                .collect()
+                            // `split " ", …` is the awk-mode split: skip
+                            // leading whitespace and split on whitespace
+                            // runs. The limit applies to whitespace-mode
+                            // split too — once we've collected `n-1`
+                            // fields, the rest is one tail field.
+                            let mut parts: Vec<String> =
+                                text.split_whitespace().map(|s| s.to_string()).collect();
+                            if let Some(n) = limit
+                                && n > 0
+                                && parts.len() > n as usize
+                            {
+                                let mut head: Vec<String> =
+                                    parts.drain(..(n as usize - 1)).collect();
+                                // Find the offset of the n-th non-whitespace
+                                // run in `text` and take the rest as one
+                                // string (with the original whitespace).
+                                let mut chars_iter = text.char_indices().peekable();
+                                let mut found_runs = 0usize;
+                                let mut tail_start = text.len();
+                                let mut in_run = false;
+                                while let Some((idx, c)) = chars_iter.peek().copied() {
+                                    if c.is_whitespace() {
+                                        if in_run {
+                                            in_run = false;
+                                        }
+                                        chars_iter.next();
+                                    } else {
+                                        if !in_run {
+                                            in_run = true;
+                                            found_runs += 1;
+                                            if found_runs == n as usize {
+                                                tail_start = idx;
+                                                break;
+                                            }
+                                        }
+                                        chars_iter.next();
+                                    }
+                                }
+                                head.push(text[tail_start..].to_string());
+                                head.into_iter().map(Value::Str).collect()
+                            } else {
+                                parts.into_iter().map(Value::Str).collect()
+                            }
                         } else if pat.is_empty() {
                             // `split //, STR` — split at every char boundary.
                             // Perl's semantics don't include the leading empty
                             // field that `regex::split("")` would produce.
                             text.chars().map(|c| Value::Str(c.to_string())).collect()
                         } else if let Ok(re) = regex::Regex::new(&pat) {
-                            re.split(&text).map(|s| Value::Str(s.to_string())).collect()
+                            // Use splitn when a positive limit is given so
+                            // the tail field isn't split further. Without
+                            // this, capping the result via reverse-join used
+                            // the regex SOURCE (e.g. `\s*#\s*`) literally
+                            // instead of the actual matched delimiters,
+                            // corrupting the result.
+                            match limit {
+                                Some(n) if n > 0 => re
+                                    .splitn(&text, n as usize)
+                                    .map(|s| Value::Str(s.to_string()))
+                                    .collect(),
+                                _ => re.split(&text).map(|s| Value::Str(s.to_string())).collect(),
+                            }
                         } else {
-                            text.split(&pat)
-                                .map(|s| Value::Str(s.to_string()))
-                                .collect()
+                            match limit {
+                                Some(n) if n > 0 => text
+                                    .splitn(n as usize, pat.as_str())
+                                    .map(|s| Value::Str(s.to_string()))
+                                    .collect(),
+                                _ => text
+                                    .split(&pat)
+                                    .map(|s| Value::Str(s.to_string()))
+                                    .collect(),
+                            }
                         };
                         // Perl default: strip trailing empty fields. A
                         // positive limit preserves them; 0 / no limit strips.
@@ -12538,20 +12597,6 @@ impl Interpreter {
                         if !keep_trailing {
                             while matches!(items.last(), Some(Value::Str(s)) if s.is_empty()) {
                                 items.pop();
-                            }
-                        }
-                        if let Some(n) = limit {
-                            if n > 0 && items.len() > n as usize {
-                                // We don't re-split, but cap to N by joining
-                                // the remainder with the pattern — matches Perl
-                                // only when pattern is a single char, which is
-                                // the common case in tests.
-                                let extra: Vec<String> = items
-                                    .split_off(n as usize - 1)
-                                    .into_iter()
-                                    .map(|v| v.to_str())
-                                    .collect();
-                                items.push(Value::Str(extra.join(&pat)));
                             }
                         }
                         items
