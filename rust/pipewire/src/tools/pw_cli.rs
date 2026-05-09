@@ -343,9 +343,10 @@ fn run_info(argv0: &str, cmd_name: &str, remote: Option<&str>, args: &[&str]) ->
 
     if globals.is_empty() {
         // Match the C tool's error format: parse() wraps the inner message
-        // in `Error: "..."` and writes to stderr.
+        // in `Error: "..."` and writes to stderr. C exits 0 — the error
+        // was just informational.
         eprintln!("Error: \"{cmd_name}: unknown global '{target}'\"");
-        return 1;
+        return 0;
     }
 
     let is_all = target == "all";

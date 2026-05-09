@@ -895,6 +895,7 @@
       { tool = "spa-resample"; name = "help-with-arg"; }
       { tool = "pw-config"; name = "merge-no-section"; }
       { tool = "pw-cli"; name = "info-alias-i-bad"; }
+      { tool = "pw-cli"; name = "info-bad-exit-code"; }
 
       # --- per-tool --help byte-identical parity ---
       {
