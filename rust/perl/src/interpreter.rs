@@ -3799,8 +3799,28 @@ impl Interpreter {
                 let pat_interp = self.interp_regex_pattern(pat);
                 let (pat_inner, inner_flags) = unwrap_qr(&pat_interp, flags);
                 let case_insensitive = case_insensitive || inner_flags.contains('i');
-                let pat_str = if case_insensitive {
-                    format!("(?i){}", pat_inner)
+                // Build a `(?flags)` prefix carrying every flag the
+                // engine understands. Without `/x`, whitespace inside
+                // `s/  pat /repl/x` patterns is treated literally and
+                // matches fail (re/regexp tests 1618-1621).
+                let mut prefix = String::new();
+                if case_insensitive {
+                    prefix.push('i');
+                }
+                let want_dotall = flags.contains('s') || inner_flags.contains('s');
+                if want_dotall {
+                    prefix.push('s');
+                }
+                let want_extend = flags.contains('x') || inner_flags.contains('x');
+                if want_extend {
+                    prefix.push('x');
+                }
+                let want_multiline = flags.contains('m') || inner_flags.contains('m');
+                if want_multiline {
+                    prefix.push('m');
+                }
+                let pat_str = if !prefix.is_empty() {
+                    format!("(?{prefix}){pat_inner}")
                 } else {
                     pat_inner.clone()
                 };
@@ -11656,6 +11676,7 @@ impl Interpreter {
         let pattern = translate_inline_flag_groups(&pattern);
         let pattern = translate_perl_whitespace_escapes(&pattern);
         let pattern = translate_control_escapes(&pattern);
+        let pattern = translate_named_char_escapes(&pattern);
         let pattern = normalize_named_backref(&pattern);
         // If the pattern uses atomic groups `(?>...)` or possessive
         // quantifiers (`X++`, `X*+`, `X?+`, `X{N,M}+`), rust regex
@@ -11881,6 +11902,7 @@ impl Interpreter {
         let pattern = translate_inline_flag_groups(&pattern);
         let pattern = translate_perl_whitespace_escapes(&pattern);
         let pattern = translate_control_escapes(&pattern);
+        let pattern = translate_named_char_escapes(&pattern);
         let pattern = normalize_named_backref(&pattern);
         let pattern = translate_atomic_groups(&pattern);
         let pattern = fix_inverted_quantifiers(&pattern);
@@ -15700,6 +15722,35 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
             continue;
         }
         if cc == '(' {
+            // `(?#…)` regex comment: skip past the matching `)`.
+            // Without this, `(?#( (?{1+)a/` looks like four
+            // unbalanced parens to the counter and we falsely flag
+            // it as unmatched. re/regexp test 1697.
+            if k + 2 < chars.len() && chars[k + 1] == '?' && chars[k + 2] == '#' {
+                let mut m = k + 3;
+                let mut closed = false;
+                while m < chars.len() {
+                    if chars[m] == '\\' && m + 1 < chars.len() {
+                        m += 2;
+                        continue;
+                    }
+                    if chars[m] == ')' {
+                        m += 1;
+                        closed = true;
+                        break;
+                    }
+                    m += 1;
+                }
+                if !closed {
+                    let prefix: String = chars[..k + 3].iter().collect();
+                    let suffix: String = chars[k + 3..].iter().collect();
+                    return Some(format!(
+                        "Sequence (?#... not terminated in regex m/{prefix}{suffix}/"
+                    ));
+                }
+                k = m;
+                continue;
+            }
             // `(?<X…)` named-capture group: X must be a non-digit
             // word character. Reference perl emits "Group name must
             // start with a non-digit word character" for `(?<%)`,
@@ -16521,6 +16572,47 @@ fn strip_regex_comments(pattern: &str) -> String {
     out
 }
 
+/// Translate Perl's `\N{U+NNNN}` codepoint references to `\x{NNNN}`
+/// since neither rust regex nor fancy_regex understand the named-char
+/// syntax. Whitespace inside the braces (`\N{ U+0100 }`) is trimmed.
+/// re/regexp tests 1476-1477.
+fn translate_named_char_escapes(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 2 < chars.len() && chars[i + 1] == 'N' && chars[i + 2] == '{' {
+            let body_start = i + 3;
+            let mut k = body_start;
+            while k < chars.len() && chars[k] != '}' {
+                k += 1;
+            }
+            if k < chars.len() {
+                let raw: String = chars[body_start..k].iter().collect();
+                let body = raw.trim();
+                if let Some(rest) = body.strip_prefix("U+").or_else(|| body.strip_prefix("u+")) {
+                    let hex = rest.trim();
+                    if !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+                        out.push_str(&format!("\\x{{{hex}}}"));
+                        i = k + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 /// Translate Perl's `\cX` (control character) regex escape to
 /// `\xNN`. `\cA` → `\x01`, `\c?` → `\x7F`, etc. Rust regex doesn't
 /// understand `\c` natively. Operates outside character classes.
@@ -16659,7 +16751,13 @@ fn translate_perl_whitespace_escapes(pattern: &str) -> String {
             if !in_class {
                 match nxt {
                     'R' => {
-                        out.push_str(&format!("(?:\\r\\n|[{VWS}])"));
+                        // `\R` is atomic in Perl — once `\r\n` is
+                        // matched, it doesn't backtrack into the
+                        // single-char alternative. fancy_regex doesn't
+                        // emit atomic groups inside our regex pipeline,
+                        // so wrap in `(?>...)` so the two-char alt wins.
+                        // re/regexp test 1689.
+                        out.push_str(&format!("(?>\\r\\n|[{VWS}])"));
                         i += 2;
                         continue;
                     }
