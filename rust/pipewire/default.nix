@@ -317,6 +317,8 @@
       {tool = "pw-link"; name = "empty-links";}
       {tool = "pw-metadata"; name = "list-empty";}
       {tool = "pw-dump"; name = "structural";}
+      {tool = "pw-dump"; name = "structural-indent4";}
+      {tool = "pw-dump"; name = "structural-indent0";}
     ];
   in
     builtins.listToAttrs (
