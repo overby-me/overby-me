@@ -942,6 +942,9 @@
       { tool = "pw-mididump"; name = "key-signature"; }
       { tool = "pw-mididump"; name = "smpte-offset"; }
       { tool = "pw-mididump"; name = "midi-channel-prefix"; }
+      { tool = "spa-json-dump"; name = "escaped-strings"; }
+      { tool = "spa-json-dump"; name = "deep-nesting"; }
+      { tool = "spa-json-dump"; name = "array-of-arrays"; }
       { tool = "pw-cli"; name = "cmd-connect-bad"; }
       { tool = "pw-mon"; name = "connect-fail"; }
       { tool = "pw-profiler"; name = "connect-fail"; }
