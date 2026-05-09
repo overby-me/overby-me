@@ -14836,8 +14836,12 @@ fn push_maybe_quotemeta(out: &mut String, s: &str, quotemeta: bool) {
 fn validate_regex_pattern(pat: &str) -> Option<String> {
     let chars: Vec<char> = pat.chars().collect();
     // First pass: count capturing groups so we can validate `\N`
-    // backrefs against actually existing groups.
+    // backrefs against actually existing groups, plus collect named
+    // group names so `\k<NAME>` / `\k'NAME'` references can be
+    // validated against actual groups.
     let mut total_groups: usize = 0;
+    let mut named_groups: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
     let mut j = 0;
     while j < chars.len() {
         let c = chars[j];
@@ -14848,12 +14852,83 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
         if c == '(' && !(j + 1 < chars.len() && chars[j + 1] == '?') {
             total_groups += 1;
         }
+        // `(?<NAME>...)` / `(?'NAME'...)` / `(?P<NAME>...)`.
+        if c == '(' && j + 2 < chars.len() && chars[j + 1] == '?' {
+            let (open_idx, close_ch) = if chars[j + 2] == '<'
+                && j + 3 < chars.len()
+                && chars[j + 3] != '='
+                && chars[j + 3] != '!'
+            {
+                (j + 3, '>')
+            } else if chars[j + 2] == '\'' {
+                (j + 3, '\'')
+            } else if chars[j + 2] == 'P' && j + 3 < chars.len() && chars[j + 3] == '<' {
+                (j + 4, '>')
+            } else {
+                (0, '\0')
+            };
+            if close_ch != '\0' {
+                let mut k = open_idx;
+                while k < chars.len() && chars[k] != close_ch {
+                    k += 1;
+                }
+                if k > open_idx && k < chars.len() {
+                    let name: String = chars[open_idx..k].iter().collect();
+                    if !name.is_empty() {
+                        total_groups += 1;
+                        named_groups.insert(name);
+                    }
+                }
+            }
+        }
         j += 1;
     }
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
         if c == '\\' {
+            // `\k<NAME>` / `\k'NAME'` / `\k{NAME}` — named-group
+            // backref. Validate name shape (must start with non-digit
+            // word char) and that the name actually refers to an
+            // existing named group. re/regexp tests 1333-1353.
+            if i + 1 < chars.len() && chars[i + 1] == 'k' && i + 2 < chars.len() {
+                let close_ch = match chars[i + 2] {
+                    '<' => Some('>'),
+                    '\'' => Some('\''),
+                    '{' => Some('}'),
+                    _ => None,
+                };
+                if let Some(close) = close_ch {
+                    let name_start = i + 3;
+                    let mut k = name_start;
+                    while k < chars.len() && chars[k] != close {
+                        k += 1;
+                    }
+                    let name: String = chars[name_start..k].iter().collect();
+                    let prefix: String = chars[..=k].iter().collect();
+                    let suffix: String = if k + 1 < chars.len() {
+                        chars[k + 1..].iter().collect()
+                    } else {
+                        String::new()
+                    };
+                    if name.is_empty() {
+                        return Some(format!(
+                            "Group name must start with a non-digit word character in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                        ));
+                    }
+                    let first = name.chars().next().unwrap();
+                    if !(first == '_' || first.is_ascii_alphabetic()) {
+                        return Some(format!(
+                            "Group name must start with a non-digit word character in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                        ));
+                    }
+                    if !named_groups.contains(&name) {
+                        return Some(format!(
+                            "Reference to nonexistent named group in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                        ));
+                    }
+                }
+            }
             // `\N` (1..9) is a backref to capture group N; flag any
             // reference past total_groups.
             if i + 1 < chars.len() {
