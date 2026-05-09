@@ -14968,6 +14968,44 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                     }
                 }
             }
+            // `\p` / `\P` Unicode property escape. After the `p`/`P`
+            // we expect either `{NAME}` or a single-character property
+            // name. Reference perl errors:
+            //   - `\p` at EOF / followed by non-letter / `^` / etc.:
+            //     "Character following \p must be '{' or a single-
+            //     character Unicode property name"
+            //   - `\PU` (single letter that's not a known top-level
+            //     category): "Can't find Unicode property definition \"U\""
+            // re/regexp tests 2000-2003.
+            if i + 1 < chars.len() && (chars[i + 1] == 'p' || chars[i + 1] == 'P') {
+                let pp = chars[i + 1];
+                if i + 2 >= chars.len() {
+                    let prefix: String = chars[..=i + 1].iter().collect();
+                    return Some(format!(
+                        "Character following \\{pp} must be '{{' or a single-character Unicode property name in regex; marked by <-- HERE in m/{prefix} <-- HERE /"
+                    ));
+                }
+                let nxt = chars[i + 2];
+                if nxt == '{' {
+                    // `\p{NAME}` — pass through; body has its own rules.
+                } else if !nxt.is_ascii_alphabetic() {
+                    let prefix: String = chars[..=i + 2].iter().collect();
+                    return Some(format!(
+                        "Character following \\{pp} must be '{{' or a single-character Unicode property name in regex; marked by <-- HERE in m/{prefix} <-- HERE /"
+                    ));
+                } else {
+                    // Single-char property: only the standard top-
+                    // level categories are accepted. Others get the
+                    // "Can't find Unicode property definition" form.
+                    let valid_single =
+                        matches!(nxt, 'L' | 'M' | 'N' | 'P' | 'S' | 'Z' | 'C');
+                    if !valid_single {
+                        return Some(format!(
+                            "Can't find Unicode property definition \"{nxt}\""
+                        ));
+                    }
+                }
+            }
             // `\k<NAME>` / `\k'NAME'` / `\k{NAME}` — named-group
             // backref. Validate name shape (must start with non-digit
             // word char) and that the name actually refers to an
