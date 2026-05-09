@@ -215,8 +215,9 @@ fn print_listing(
                     // When LIST_PORTS is unset (just `-l`), `do_list_port_links`
                     // sets `first = true` and prints the port name lazily —
                     // only when it finds a matching link. Otherwise the port
-                    // line was already emitted above.
-                    print_port_links(globals, port, show_id, !list_ports);
+                    // line was already emitted above. Verbose only applies to
+                    // the port-being-listed; peer ports are always non-verbose.
+                    print_port_links(globals, port, show_id, !list_ports, verbose);
                 }
             }
         }
@@ -259,6 +260,7 @@ fn print_port_links(
     port: &RegistryGlobal,
     show_id: bool,
     mut print_port_first: bool,
+    verbose_port: bool,
 ) {
     let port_dir = prop(port, "port.direction");
     for link in globals
@@ -279,10 +281,7 @@ fn print_port_links(
             continue;
         };
         if print_port_first {
-            let id_prefix =
-                if show_id { format!("{:>4} ", port.id) } else { String::new() };
-            let name = port_full_name(globals, port);
-            println!("{id_prefix}{name}");
+            print_port_line(port, globals, show_id, verbose_port);
             print_port_first = false;
         }
         // C `print_port_id`: prefix has the link's id (when -I); inner

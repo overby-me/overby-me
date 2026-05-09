@@ -443,6 +443,7 @@
       {tool = "pw-link"; name = "latency-only";}
       {tool = "pw-link"; name = "empty-output";}
       {tool = "pw-link"; name = "empty-links";}
+      {tool = "pw-link"; name = "links-empty-verbose-id";}
       {tool = "pw-metadata"; name = "list-empty";}
       {tool = "pw-dump"; name = "structural";}
       {tool = "pw-dump"; name = "structural-indent4";}
