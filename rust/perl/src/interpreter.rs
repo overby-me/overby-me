@@ -15173,6 +15173,13 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
     while i < chars.len() {
         let c = chars[i];
         if c == '\\' {
+            // `\cX` is a 3-char control-character escape; consume the
+            // controlled char so `\c[` doesn't get misread as the
+            // start of a `[...]` class. re/regexp test 1550.
+            if i + 1 < chars.len() && chars[i + 1] == 'c' {
+                i += 3;
+                continue;
+            }
             // `\N{...}` — named character / codepoint escape.
             // Reference perl validates the body before passing to
             // the regex engine. Rejected forms:
