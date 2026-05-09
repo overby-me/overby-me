@@ -71,6 +71,9 @@ pub fn main(raw_args: &[String]) -> i32 {
                     return 255;
                 }
             }
+            "-" => {
+                // Lone `-` is a positional, not an option.
+            }
             s if s.starts_with("--") => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);

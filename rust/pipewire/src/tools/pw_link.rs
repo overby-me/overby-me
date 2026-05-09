@@ -129,6 +129,10 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
+            "-" => {
+                // Lone `-` is a positional argument, not an option.
+                positional.push("-");
+            }
             s if s.starts_with('-') && s.len() == 2 => {
                 let ch = s.chars().nth(1).unwrap_or('?');
                 eprintln!("{argv0}: invalid option -- '{ch}'");

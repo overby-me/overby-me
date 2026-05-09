@@ -1444,6 +1444,8 @@
       { tool = "pw-config"; name = "cluster-Vxx"; }
       { tool = "pw-mididump"; name = "cluster-hxx"; }
       { tool = "pw-mididump"; name = "cluster-Vxx"; }
+      { tool = "pw-link"; name = "lone-dash"; }
+      { tool = "pw-mon"; name = "lone-dash"; }
       { tool = "pw-config"; name = "list-empty-no-newline"; }
       {
         tool = "pw-cli";

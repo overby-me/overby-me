@@ -87,6 +87,11 @@ pub fn main(raw_args: &[String]) -> i32 {
             "-N" | "--no-colors" | "-R" | "--raw" | "-s" | "--spa" | "-m" | "--monitor" => {
                 // Accepted but ignored at this phase.
             }
+            "-" => {
+                // Lone `-` is a positional id/interface filter, not an
+                // option. Use it as the filter (won't match anything).
+                filter = Some("-".to_string());
+            }
             "--color" | "-C" => {
                 // Bare flag → defaults to "auto"; OK.
             }
