@@ -1413,6 +1413,8 @@
       { tool = "pw-cli"; name = "i-alias-no-args"; }
       { tool = "pw-cli"; name = "ls-dash"; }
       { tool = "spa-acp-tool"; name = "unknown-cmd"; }
+      { tool = "pw-link"; name = "props-attached"; }
+      { tool = "pw-link"; name = "props-empty"; }
       {
         tool = "pw-cli";
         name = "cmd-connect-bad";

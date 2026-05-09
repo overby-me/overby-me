@@ -119,6 +119,9 @@ pub fn main(raw_args: &[String]) -> i32 {
             s if s.starts_with("--props=") => {
                 // --props=PROPS — value is inline.
             }
+            s if s.starts_with("-p") && s.len() > 2 => {
+                // -p<value> attached form.
+            }
             // pw-link's getopt has no --color or -C option — it falls
             // through to the unrecognized-option branch.
             s if s.starts_with("--") => {
@@ -175,16 +178,25 @@ pub fn main(raw_args: &[String]) -> i32 {
     }
 
     if !list_inputs && !list_outputs && !list_links {
-        if disconnect {
-            // C tries to unlink ports — without daemon, ENOENT becomes
-            // "failed to unlink ports: No such file or directory".
-            eprintln!("failed to unlink ports: No such file or directory");
-            return 255;
-        }
-        if positional.len() >= 2 {
-            // C tries to link ports — without daemon, fails the same way.
-            eprintln!("failed to link ports: No such file or directory");
-            return 255;
+        if disconnect || positional.len() >= 2 {
+            // C tries to (un)link ports. With no daemon, the connect
+            // itself fails first with "can't connect: Host is down".
+            // With a daemon up, the link/unlink op then fails with
+            // "failed to (un)link ports: No such file or directory".
+            match crate::pipewire_lib::client::Client::connect_default() {
+                Ok(_) => {
+                    if disconnect {
+                        eprintln!("failed to unlink ports: No such file or directory");
+                    } else {
+                        eprintln!("failed to link ports: No such file or directory");
+                    }
+                    return 255;
+                }
+                Err(_) => {
+                    eprintln!("can't connect: Host is down");
+                    return 255;
+                }
+            }
         }
         // Some flags were given (e.g. -t) but no list mode; the C tool
         // walks nothing in MODE_LIST, producing no output. Match that.
