@@ -14,8 +14,57 @@ pub fn main(args: &[String]) -> i32 {
     let argv0 = raw0.rsplit('/').next().unwrap_or("pw-cat");
     let getopt_argv0 = raw0;
 
-    for a in args.iter().skip(1) {
-        match a.as_str() {
+    // Short required-argument flags per OPTIONS = "hvprmdsR:P:q:aM:n:c"
+    // (the `:`-marked entries).
+    let short_required: &[(char, &str)] = &[
+        ('R', "R"),
+        ('P', "P"),
+        ('q', "q"),
+        ('M', "M"),
+        ('n', "n"),
+    ];
+    // Long required-argument flags per long_options[].
+    let long_required: &[&str] = &[
+        "--remote",
+        "--media-type",
+        "--media-category",
+        "--media-role",
+        "--target",
+        "--latency",
+        "--properties",
+        "--rate",
+        "--channels",
+        "--channel-map",
+        "--format",
+        "--container",
+        "--volume",
+        "--quality",
+        "--force-midi",
+        "--sample-count",
+    ];
+    let known_long_no_arg: &[&str] = &[
+        "--verbose",
+        "--playback",
+        "--record",
+        "--midi",
+        "--dsd",
+        "--encoded",
+        "--sysex",
+        "--midi-clip",
+        "--raw",
+        "--list-layouts",
+        "--list-channel-names",
+        "--list-formats",
+        "--list-containers",
+    ];
+    let known_short_no_arg = ['v', 'p', 'r', 'm', 'd', 'o', 's', 'c', 'a'];
+
+    let mut mode_set = false;
+    let mut positional_count: usize = 0;
+    let mut i = 1;
+    while i < args.len() {
+        let a = args[i].as_str();
+        match a {
             "-h" | "--help" => {
                 print_help(argv0);
                 return 0;
@@ -36,79 +85,89 @@ pub fn main(args: &[String]) -> i32 {
                 print_list_containers();
                 return 0;
             }
-            // pw-cat's getopt_long has no `-V` short alias (it only takes
-            // the long `--version`).
             "--version" => {
                 print_version(argv0);
                 return 0;
             }
-            // Long flag we don't recognize → standard `unrecognized
-            // option` then help. Accepts both `--foo` and `--foo=value`
-            // forms; we strip the value before checking the known set.
             s if s.starts_with("--") => {
-                let name = s.split_once('=').map(|(n, _)| n).unwrap_or(s);
-                if !matches!(
-                    name,
-                    "--verbose"
-                        | "--playback"
-                        | "--record"
-                        | "--midi"
-                        | "--dsd"
-                        | "--encoded"
-                        | "--sysex"
-                        | "--midi-clip"
-                        | "--raw"
-                        | "--list-layouts"
-                        | "--list-channel-names"
-                        | "--list-formats"
-                        | "--list-containers"
-                        | "--remote"
-                        | "--media-type"
-                        | "--media-category"
-                        | "--media-role"
-                        | "--target"
-                        | "--latency"
-                        | "--properties"
-                        | "--rate"
-                        | "--channels"
-                        | "--channel-map"
-                        | "--format"
-                        | "--container"
-                        | "--volume"
-                        | "--quality"
-                        | "--force-midi"
-                        | "--sample-count"
-                ) {
+                let (name, has_inline) = match s.split_once('=') {
+                    Some((n, _)) => (n, true),
+                    None => (s, false),
+                };
+                if known_long_no_arg.contains(&name) {
+                    if matches!(
+                        name,
+                        "--playback"
+                            | "--record"
+                            | "--midi"
+                            | "--dsd"
+                            | "--sysex"
+                            | "--encoded"
+                    ) {
+                        mode_set = true;
+                    }
+                } else if let Some(&long) = long_required.iter().find(|&&l| l == name) {
+                    if has_inline {
+                        // --foo=val (consumed inline)
+                    } else if i + 1 >= args.len() {
+                        eprintln!("{getopt_argv0}: option '{long}' requires an argument");
+                        print_help(argv0);
+                        return 1;
+                    } else {
+                        i += 2;
+                        continue;
+                    }
+                } else {
                     eprintln!("{getopt_argv0}: unrecognized option '{s}'");
                     print_help(argv0);
                     return 1;
                 }
             }
-            // Short flag we don't recognize → `invalid option -- 'X'`
-            // (note the singly-quoted single character, not the full
-            // `-X` token like for long options).
-            s if s.starts_with('-')
-                && s.len() == 2
-                && !matches!(
-                    s,
-                    "-v" | "-p" | "-r" | "-m" | "-d" | "-o" | "-s" | "-c" | "-a"
-                ) =>
-            {
+            s if s.starts_with('-') && s.len() == 2 => {
                 let ch = s.chars().nth(1).unwrap_or('?');
-                eprintln!("{getopt_argv0}: invalid option -- '{ch}'");
-                print_help(argv0);
-                return 1;
+                if known_short_no_arg.contains(&ch) {
+                    // Mode-selector flags cause `mode_set = true` so the
+                    // post-loop error is `filename or - argument missing`
+                    // instead of `one of the playback/record options...`.
+                    if matches!(ch, 'p' | 'r' | 'm' | 'd' | 's' | 'o') {
+                        mode_set = true;
+                    }
+                } else if let Some(&(_, name)) = short_required.iter().find(|(c, _)| *c == ch) {
+                    if i + 1 >= args.len() {
+                        eprintln!("{getopt_argv0}: option requires an argument -- '{name}'");
+                        print_help(argv0);
+                        return 1;
+                    }
+                    i += 2;
+                    continue;
+                } else {
+                    eprintln!("{getopt_argv0}: invalid option -- '{ch}'");
+                    print_help(argv0);
+                    return 1;
+                }
+            }
+            s if !s.starts_with('-') => {
+                positional_count += 1;
             }
             _ => {}
         }
+        i += 1;
     }
 
-    // C: when run with no mode-selecting flag (pw-cat alone) → error.
-    // When the file argument is missing on the typed variants → error.
-    if is_cat_master(argv0) {
+    // C: post-getopt validation:
+    //   - master `pw-cat` with no mode flag → "playback/record options"
+    //     error
+    //   - any path with mode set (or pw-play/pw-record/etc) but no file →
+    //     "filename or - argument missing"
+    if is_cat_master(argv0) && !mode_set {
         eprintln!("error: one of the playback/record options must be provided");
-    } else {
+    } else if positional_count == 0 {
         eprintln!("error: filename or - argument missing");
+    } else {
+        // We don't actually run the audio engine yet; emit a stub error.
+        eprintln!("{argv0}: not yet implemented in rust-pipewire");
+        print_help(argv0);
+        return 1;
     }
     print_help(argv0);
     0

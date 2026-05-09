@@ -812,6 +812,16 @@
       { tool = "pw-dot"; name = "missing-arg-o"; }
       { tool = "pw-metadata"; name = "missing-arg-r"; }
       { tool = "pw-metadata"; name = "missing-arg-n"; }
+      { tool = "pw-cat"; name = "missing-arg-R"; }
+      { tool = "pw-cat"; name = "missing-arg-P"; }
+      { tool = "pw-cat"; name = "missing-arg-q"; }
+      { tool = "pw-cat"; name = "missing-arg-M"; }
+      { tool = "pw-cat"; name = "missing-arg-n"; }
+      { tool = "pw-cat"; name = "missing-arg-rate"; }
+      { tool = "pw-cat"; name = "missing-arg-target"; }
+      { tool = "pw-cat"; name = "missing-arg-media-type"; }
+      { tool = "pw-cat"; name = "playback-no-file"; }
+      { tool = "pw-cat"; name = "record-no-file"; }
 
       # --- per-tool --help byte-identical parity ---
       {
