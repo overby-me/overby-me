@@ -104,6 +104,11 @@ pub fn main(args: &[String]) -> i32 {
         "quit" | "q" => 0,
         "list-vars" | "lv" => run_list_vars(),
         "list-remotes" | "lr" => run_list_remotes(),
+        // No-op interactive commands. The C tool's
+        // do_connect/do_disconnect/do_switch_remote mutate the REPL's
+        // remote table but produce no output in non-interactive mode
+        // when the operation succeeds.
+        "connect" | "con" | "disconnect" | "dis" | "switch-remote" | "sr" => 0,
         // Commands we don't implement but whose usage error matches
         // upstream byte-for-byte. Each one's `parse()`-side error is
         // wrapped in `Error: "..."` and printed to stderr.

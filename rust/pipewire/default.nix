@@ -420,6 +420,9 @@
       {tool = "pw-cli"; name = "unknown-command";}
       {tool = "pw-cli"; name = "ls-core-quoted";}
       {tool = "pw-cli"; name = "connect-fail";}
+      {tool = "pw-cli"; name = "cmd-connect";}
+      {tool = "pw-cli"; name = "cmd-disconnect";}
+      {tool = "pw-cli"; name = "cmd-switch-remote";}
       {tool = "pw-cli"; name = "bad-flag";}
       {tool = "pw-link"; name = "bad-flag";}
       {tool = "pw-metadata"; name = "bad-flag";}
