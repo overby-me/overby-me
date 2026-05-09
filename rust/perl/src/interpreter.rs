@@ -5223,7 +5223,9 @@ impl Interpreter {
                     | "created_as_string"
                     | "created_as_number"
             )
-            && !self.subs.contains_key(&format!("{}::{}", self.package, name))
+            && !self
+                .subs
+                .contains_key(&format!("{}::{}", self.package, name))
         {
             let file = if self.current_file.is_empty() {
                 "-e".to_string()
@@ -15111,6 +15113,19 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
         ));
     }
     if depth > 0 {
+        // If the LAST unmatched `(` is part of a `(?{…` code-block
+        // form, reference perl reports "Missing right curly or
+        // square bracket" — the missing `}` closing the code body.
+        if let Some(&last) = unmatched_starts.last()
+            && last + 2 < chars.len()
+            && chars[last + 1] == '?'
+            && (chars[last + 2] == '{'
+                || (chars[last + 2] == '?' && last + 3 < chars.len() && chars[last + 3] == '{'))
+        {
+            return Some(
+                "Missing right curly or square bracket in regex; marked by <-- HERE".to_string(),
+            );
+        }
         // If the LAST unmatched `(` is part of a `(?…` group form,
         // reference perl reports the more specific "Sequence (?
         // incomplete" instead of generic "Unmatched (".
