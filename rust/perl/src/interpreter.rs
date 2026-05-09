@@ -3924,8 +3924,16 @@ impl Interpreter {
                         }
 
                         // The /e flag treats the replacement as Perl
-                        // code: eval it for each match and use the result.
-                        let want_eval = flags.contains('e') || inner_flags.contains('e');
+                        // code: eval it for each match and use the
+                        // result. /ee means eval twice (first eval
+                        // gives a string of code; second evals that
+                        // as Perl). Count the e's in the flags string.
+                        // `inner_flags` already merges the qr's flags
+                        // with `flags`. Counting `e` from BOTH double-
+                        // counts the same flag, breaking single `/e`
+                        // (1 eval) vs `/ee` (2 evals) discrimination.
+                        let want_eval = inner_flags.contains('e');
+                        let eval_count = inner_flags.matches('e').count();
                         // Hoist target var name (for pos tracking under /g).
                         let target_name: Option<String> = match target.as_ref() {
                             Expr::ScalarVar(n) => Some(n.clone()),
@@ -3960,7 +3968,11 @@ impl Interpreter {
                                     self.pos_offsets.insert(n.clone(), m0.start());
                                 }
                                 let r = if want_eval {
-                                    self.eval_string(&replacement).to_str()
+                                    let mut current = replacement.clone();
+                                    for _ in 0..eval_count {
+                                        current = self.eval_string(&current).to_str();
+                                    }
+                                    current
                                 } else {
                                     expand_replacement(&m, &replacement)
                                 };
@@ -3998,7 +4010,11 @@ impl Interpreter {
                                 }
                             }
                             let r = if want_eval {
-                                self.eval_string(&replacement).to_str()
+                                let mut current = replacement.clone();
+                                for _ in 0..eval_count {
+                                    current = self.eval_string(&current).to_str();
+                                }
+                                current
                             } else {
                                 expand_replacement(&m, &replacement)
                             };
