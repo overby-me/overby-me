@@ -1412,6 +1412,7 @@
       { tool = "pw-cli"; name = "info-no-args"; }
       { tool = "pw-cli"; name = "i-alias-no-args"; }
       { tool = "pw-cli"; name = "ls-dash"; }
+      { tool = "spa-acp-tool"; name = "unknown-cmd"; }
       {
         tool = "pw-cli";
         name = "cmd-connect-bad";

@@ -167,9 +167,11 @@ fn handle_command(cmd: &str, args: &[String]) -> i32 {
         "info" | "list" | "list-verbose" | "list-profiles" | "set-profile"
         | "list-ports" | "set-port" | "list-devices" | "get-volume" | "set-volume"
         | "inc-volume" | "dec-volume" | "get-mute" | "set-mute" | "toggle-mute" => 0,
-        _ => {
-            // Unknown command — C silently prints the prompt and continues
-            // in REPL mode; we exit 0 too to avoid spurious errors.
+        other => {
+            eprintln!("unknown command {other}");
+            // C calls cmd_help() after the unknown-command error.
+            eprintln!("Available commands:");
+            print_commands();
             0
         }
     }
