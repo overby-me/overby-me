@@ -11653,6 +11653,7 @@ impl Interpreter {
         let pattern = rewrite_nonexistent_group_conditionals(&pattern);
         let (pattern, code_blocks) = extract_regex_code_blocks(&pattern);
         let pattern = strip_unsupported_regex_flags(&pattern);
+        let pattern = translate_inline_flag_groups(&pattern);
         // If the pattern uses atomic groups `(?>...)` or possessive
         // quantifiers (`X++`, `X*+`, `X?+`, `X{N,M}+`), rust regex
         // either rejects them or silently mishandles (treats `++`
@@ -16345,6 +16346,98 @@ fn strip_regex_comments(pattern: &str) -> String {
             }
             i = k;
             continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Inline `(?s)` / `(?-s)` flag groups inside a `(...)` capture get
+/// rewritten to `(?s:...)` / `(?-s:...)` form so the dotall flag's
+/// scope matches Perl. fancy_regex's `(?s)` applies to the rest of
+/// the pattern; Perl's `(?s)` inside a group applies only to that
+/// group. Without this rewrite, `((?s).)c(?!.)` against `"...\nc\n"`
+/// misbehaves because the trailing `(?!.)` also gets dotall.
+/// re/regexp tests 599-602.
+fn translate_inline_flag_groups(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class
+            && c == '('
+            && i + 1 < chars.len()
+            && chars[i + 1] == '?'
+        {
+            // Walk past flag chars to find the closing `)` (no body).
+            let mut k = i + 2;
+            let mut flags = String::new();
+            while k < chars.len()
+                && (chars[k].is_ascii_alphabetic() || chars[k] == '-')
+            {
+                flags.push(chars[k]);
+                k += 1;
+            }
+            if k < chars.len() && chars[k] == ')' && !flags.is_empty() {
+                // `(?flags)` — find the enclosing group's `)` and
+                // rewrite the entire inline group + remaining body
+                // to `(?flags:remaining_body)`.
+                // Find the matching `)` of the enclosing context: we
+                // need to scan from k+1 to the parent's close `)`.
+                let body_start = k + 1;
+                let mut depth = 1;
+                let mut p = body_start;
+                while p < chars.len() && depth > 0 {
+                    if chars[p] == '\\' {
+                        p += 2;
+                        continue;
+                    }
+                    if chars[p] == '(' {
+                        depth += 1;
+                    } else if chars[p] == ')' {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    p += 1;
+                }
+                if depth == 0 || p == chars.len() {
+                    // The enclosing context ends at p (close of outer
+                    // group, or end-of-pattern).
+                    let body: String = chars[body_start..p].iter().collect();
+                    out.push_str("(?");
+                    out.push_str(&flags);
+                    out.push(':');
+                    out.push_str(&body);
+                    out.push(')');
+                    // Continue from p (NOT past it — the outer `)` is
+                    // still consumed by enclosing context).
+                    i = p;
+                    continue;
+                }
+            }
         }
         out.push(c);
         i += 1;
