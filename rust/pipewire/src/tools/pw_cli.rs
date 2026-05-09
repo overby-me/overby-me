@@ -298,13 +298,15 @@ fn print_command_list() {
 }
 
 fn run_info(argv0: &str, cmd_name: &str, remote: Option<&str>, args: &[&str]) -> i32 {
-    let target = match args.first() {
-        Some(s) => *s,
-        None => {
-            eprintln!("{argv0}: info needs <object-id> | all");
-            return 2;
-        }
-    };
+    // Match C's pw_split_ip(args, WHITESPACE, 1, ...) behavior:
+    // with max_tokens=1 the entire rest is one token. So `info 0 garbage`
+    // looks up "0 garbage" — not "0".
+    if args.is_empty() {
+        eprintln!("{argv0}: info needs <object-id> | all");
+        return 2;
+    }
+    let target_owned = args.join(" ");
+    let target = target_owned.as_str();
 
     let mut client = match open_client(remote, "pw-cli") {
         Ok(c) => c,
