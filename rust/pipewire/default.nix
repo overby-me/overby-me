@@ -248,6 +248,9 @@
       { tool = "pw-v4l2"; name = "bad-flag"; }
       { tool = "spa-acp-tool"; name = "bad-flag"; }
       { tool = "spa-resample"; name = "help"; }
+      { tool = "spa-resample"; name = "no-args"; }
+      { tool = "spa-resample"; name = "one-arg"; }
+      { tool = "spa-resample"; name = "bad-flag"; }
       { tool = "pw-v4l2"; name = "help"; }
       { tool = "spa-inspect"; name = "usage"; }
       { tool = "spa-monitor"; name = "usage"; }
