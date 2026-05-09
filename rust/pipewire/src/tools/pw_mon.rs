@@ -4,25 +4,29 @@ use crate::tools::common::print_version;
 
 pub fn main(args: &[String]) -> i32 {
     let argv0 = args.first().map(String::as_str).unwrap_or("pw-mon");
-    match args.get(1).map(String::as_str) {
-        Some("-h") | Some("--help") => {
-            print_help(argv0);
-            0
-        }
-        Some("--version") | Some("-V") => {
-            print_version(argv0);
-            0
-        }
-        Some(s) if s.starts_with('-') => {
-            eprintln!("{argv0}: unrecognized option '{s}'");
-            print_help(argv0);
-            0
-        }
-        _ => {
-            eprintln!("{argv0}: not yet implemented in rust-pipewire");
-            1
+    for a in args.iter().skip(1) {
+        match a.as_str() {
+            "-h" | "--help" => {
+                print_help(argv0);
+                return 0;
+            }
+            "--version" | "-V" => {
+                print_version(argv0);
+                return 0;
+            }
+            "-r" | "--remote" | "-N" | "--no-colors" | "-o" | "--hide-props"
+            | "-a" | "--hide-params" | "-p" | "--print-separator" => {}
+            s if s.starts_with("--color") || s.starts_with("-C") => {}
+            s if s.starts_with('-') => {
+                eprintln!("{argv0}: unrecognized option '{s}'");
+                print_help(argv0);
+                return 0;
+            }
+            _ => {}
         }
     }
+    eprintln!("{argv0}: not yet implemented in rust-pipewire");
+    1
 }
 
 fn print_help(argv0: &str) {
