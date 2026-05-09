@@ -3755,7 +3755,8 @@ impl Interpreter {
                 } else {
                     None
                 };
-                let start = if flags.contains('g') {
+                let has_g_anchor = pat.contains("\\G");
+                let start = if flags.contains('g') || has_g_anchor {
                     if let Some(n) = &var_name {
                         self.pos_offsets.get(n).copied().unwrap_or(0)
                     } else if let Some(p) = alias_rc_ptr {
@@ -11642,6 +11643,7 @@ impl Interpreter {
         let pattern = strip_unicode_boundary_types(&pattern);
         let pattern = translate_octal_escapes(&pattern);
         let pattern = escape_literal_bracket_in_class(&pattern);
+        let pattern = translate_g_anchor(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -11835,6 +11837,7 @@ impl Interpreter {
         let pattern = strip_unicode_boundary_types(&pattern);
         let pattern = translate_octal_escapes(&pattern);
         let pattern = escape_literal_bracket_in_class(&pattern);
+        let pattern = translate_g_anchor(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -16299,6 +16302,39 @@ fn strip_regex_comments(pattern: &str) -> String {
             }
             i = k;
             continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Translate Perl's `\G` (match-anchored-at-pos) into `\A`. The
+/// caller passes `text[pos..]` as the slice to match against, so
+/// `\A` (start of input regardless of `m` flag) gives the same
+/// semantics. Outside character classes only.
+fn translate_g_anchor(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            if !in_class && chars[i + 1] == 'G' {
+                out.push_str("\\A");
+                i += 2;
+                continue;
+            }
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+        } else if in_class && c == ']' {
+            in_class = false;
         }
         out.push(c);
         i += 1;
