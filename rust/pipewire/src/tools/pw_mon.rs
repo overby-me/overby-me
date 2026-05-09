@@ -106,7 +106,7 @@ pub fn main(raw_args: &[String]) -> i32 {
     match connect {
         Ok(_) => 0,
         Err(_) => {
-            eprintln!("can't connect: Host is down");
+            eprintln!("can't connect: {}", crate::tools::common::connect_failure_msg());
             255
         }
     }

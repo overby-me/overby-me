@@ -148,9 +148,10 @@ pub fn main(raw_args: &[String]) -> i32 {
     let _ = &positional;
 
     if args.len() == 1 {
-        // No flags at all → C calls show_help on stderr and exits -1.
+        // No flags at all → C calls show_help on stderr but does NOT
+        // return; falls through to MODE_CONNECT_PORTS check which
+        // errors `missing output and input port names to connect`.
         print_help(argv0);
-        return 0;
     }
 
     // C tool's mode-validation runs after option parsing:
@@ -183,7 +184,7 @@ pub fn main(raw_args: &[String]) -> i32 {
         let connected = match crate::pipewire_lib::client::Client::connect_default() {
             Ok(_) => true,
             Err(_) => {
-                eprintln!("can't connect: Host is down");
+                eprintln!("can't connect: {}", crate::tools::common::connect_failure_msg());
                 return 255;
             }
         };
@@ -217,7 +218,7 @@ pub fn main(raw_args: &[String]) -> i32 {
             // -1 (= 255 truncated). The protocol-native client maps
             // ENOENT → EHOSTDOWN ("Host is down").
             if e.contains("connect:") || e.starts_with("connect:") {
-                eprintln!("can't connect: Host is down");
+                eprintln!("can't connect: {}", crate::tools::common::connect_failure_msg());
             } else {
                 eprintln!("{argv0}: {e}");
             }

@@ -78,7 +78,10 @@ pub fn main(args: &[String]) -> i32 {
     // on failure. (The C tool also errors when the daemon is up but the
     // module path doesn't include libpipewire-module-loopback in our
     // sandbox, hence the consistent error in both cases.)
-    eprintln!("can't load module: Host is down");
+    eprintln!(
+        "can't load module: {}",
+        crate::tools::common::connect_failure_msg()
+    );
     0
 }
 

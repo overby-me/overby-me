@@ -236,7 +236,10 @@ pub fn main(raw_args: &[String]) -> i32 {
                 eprintln!("error: open failed: Input/output error");
             }
             Err(_) => {
-                eprintln!("error: pw_context_connect() failed: Host is down");
+                eprintln!(
+                    "error: pw_context_connect() failed: {}",
+                    crate::tools::common::connect_failure_msg()
+                );
             }
         }
         return 1;

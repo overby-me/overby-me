@@ -113,7 +113,7 @@ pub fn main(raw_args: &[String]) -> i32 {
             // pattern (no `Error:` wrapper), with errno mapped through
             // EHOSTDOWN.
             if e.contains("connect:") || e.starts_with("connect:") {
-                eprintln!("can't connect: Host is down");
+                eprintln!("can't connect: {}", crate::tools::common::connect_failure_msg());
             } else {
                 eprintln!("{argv0}: {e}");
             }

@@ -133,10 +133,13 @@ pub fn main(raw_args: &[String]) -> i32 {
     let globals = match collect_globals(remote.as_deref()) {
         Ok(g) => g,
         Err(e) => {
-            // C pw-dump prints `can't connect: Host is down` (no `Error:`
+            // C pw-dump prints `can't connect: <strerror>` (no `Error:`
             // wrapper) and exits 255.
             if e.contains("connect:") || e.starts_with("connect:") {
-                eprintln!("can't connect: Host is down");
+                eprintln!(
+                    "can't connect: {}",
+                    crate::tools::common::connect_failure_msg()
+                );
             } else {
                 eprintln!("{argv0}: {e}");
             }

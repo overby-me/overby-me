@@ -47,7 +47,7 @@ pub fn main(raw_args: &[String]) -> i32 {
             match crate::pipewire_lib::client::Client::connect_default() {
                 Ok(_) => 0,
                 Err(_) => {
-                    eprintln!("Can't connect: Host is down");
+                    eprintln!("Can't connect: {}", crate::tools::common::connect_failure_msg());
                     0
                 }
             }

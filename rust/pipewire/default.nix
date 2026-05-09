@@ -1414,6 +1414,15 @@
       { tool = "spa-json-dump"; name = "conf-pipewire-pulse"; }
       { tool = "spa-json-dump"; name = "conf-pipewire-avb"; }
       { tool = "pw-cli"; name = "connect-refused"; }
+      { tool = "pw-link"; name = "connect-refused"; }
+      { tool = "pw-mon"; name = "connect-refused"; }
+      { tool = "pw-dump"; name = "connect-refused"; }
+      { tool = "pw-dot"; name = "connect-refused"; }
+      { tool = "pw-metadata"; name = "connect-refused"; }
+      { tool = "pw-top"; name = "connect-refused"; }
+      { tool = "pw-profiler"; name = "connect-refused"; }
+      { tool = "pw-loopback"; name = "connect-refused"; }
+      { tool = "pw-container"; name = "connect-refused"; }
       { tool = "pw-config"; name = "list-empty-no-newline"; }
       {
         tool = "pw-cli";

@@ -2,6 +2,36 @@
 
 use crate::pipewire_lib::version::PIPEWIRE_API_VERSION;
 
+/// Map a `connect_default()` failure's I/O error to the strerror string
+/// libpipewire's pw_protocol_native uses. ENOENT → "Host is down",
+/// ECONNREFUSED → "Connection refused", everything else → native
+/// to_string().
+pub fn connect_failure_msg() -> String {
+    // Try probing the default socket once to find out *why* connect
+    // failed; we accept that this is a second attempt vs. plumbing the
+    // original error through, but every tool that needs this only calls
+    // connect_default() once and returns immediately on failure.
+    let runtime = std::env::var("PIPEWIRE_RUNTIME_DIR")
+        .or_else(|_| std::env::var("XDG_RUNTIME_DIR"))
+        .unwrap_or_else(|_| "/tmp".to_string());
+    let core = std::env::var("PIPEWIRE_REMOTE")
+        .or_else(|_| std::env::var("PIPEWIRE_CORE"))
+        .unwrap_or_else(|_| "pipewire-0".to_string());
+    let path = if core.starts_with('/') {
+        std::path::PathBuf::from(&core)
+    } else {
+        std::path::PathBuf::from(runtime).join(core)
+    };
+    match std::os::unix::net::UnixStream::connect(&path) {
+        Ok(_) => "Host is down".to_string(),
+        Err(e) => match e.kind() {
+            std::io::ErrorKind::NotFound => "Host is down".to_string(),
+            std::io::ErrorKind::ConnectionRefused => "Connection refused".to_string(),
+            _ => e.to_string(),
+        },
+    }
+}
+
 /// Mirror the C tools' `--version` output:
 ///
 /// ```text
