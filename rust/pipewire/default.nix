@@ -155,6 +155,26 @@
       { tool = "pw-top"; name = "version"; }
       { tool = "pipewire"; name = "version"; }
       { tool = "pipewire-pulse"; name = "version"; }
+      { tool = "pw-cat"; name = "help"; }
+      { tool = "pw-play"; name = "help"; }
+      { tool = "pw-record"; name = "help"; }
+      { tool = "pw-midiplay"; name = "help"; }
+      { tool = "pw-midirecord"; name = "help"; }
+      { tool = "pw-midi2play"; name = "help"; }
+      { tool = "pw-midi2record"; name = "help"; }
+      { tool = "pw-sysex"; name = "help"; }
+      { tool = "pw-dsdplay"; name = "help"; }
+      { tool = "pw-encplay"; name = "help"; }
+      { tool = "pw-cat"; name = "version"; }
+      { tool = "pw-play"; name = "version"; }
+      { tool = "pw-record"; name = "version"; }
+      { tool = "pw-midiplay"; name = "version"; }
+      { tool = "pw-midirecord"; name = "version"; }
+      { tool = "pw-midi2play"; name = "version"; }
+      { tool = "pw-midi2record"; name = "version"; }
+      { tool = "pw-sysex"; name = "version"; }
+      { tool = "pw-dsdplay"; name = "version"; }
+      { tool = "pw-encplay"; name = "version"; }
       { tool = "pw-cli"; name = "version-short"; }
       { tool = "pw-mon"; name = "version-short"; }
       { tool = "pw-link"; name = "version-short"; }

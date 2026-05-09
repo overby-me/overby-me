@@ -1,5 +1,6 @@
 pub mod common;
 pub mod pipewire_daemon;
+pub mod pw_cat;
 pub mod pw_cli;
 pub mod pw_config;
 pub mod pw_dot;

@@ -45,11 +45,16 @@ fn dispatch(name: &str, args: &[String]) -> i32 {
 
         // Placeholder dispatchers for the rest. Each prints a stable
         // "not implemented" message and exits 0 on --version / --help.
-        "pipewire-aes67" | "pipewire-avb" | "pipewire-vulkan" | "pw-loopback" | "pw-cat"
-        | "pw-play" | "pw-record" | "pw-reserve" | "pw-container" | "pw-midiplay"
-        | "pw-midirecord" | "pw-midi2play" | "pw-midi2record" | "pw-sysex" | "pw-dsdplay"
-        | "pw-encplay" | "pw-v4l2" | "spa-inspect" | "spa-monitor" | "spa-acp-tool"
-        | "spa-resample" => stub_main(name, args),
+        // The pw-cat family (cat / play / record + the midi/dsd/encoded
+        // variants) all share the same help text apart from the tool name
+        // and the trailing mode-flag block.
+        "pw-cat" | "pw-play" | "pw-record" | "pw-midiplay" | "pw-midirecord"
+        | "pw-midi2play" | "pw-midi2record" | "pw-sysex" | "pw-dsdplay"
+        | "pw-encplay" => tools::pw_cat::main(args),
+
+        "pipewire-aes67" | "pipewire-avb" | "pipewire-vulkan" | "pw-loopback"
+        | "pw-reserve" | "pw-container" | "pw-v4l2" | "spa-inspect"
+        | "spa-monitor" | "spa-acp-tool" | "spa-resample" => stub_main(name, args),
 
         "rust-pipewire" => {
             eprintln!(
