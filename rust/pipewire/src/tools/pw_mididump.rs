@@ -33,6 +33,14 @@ pub fn main(args: &[String]) -> i32 {
                 let val = match args.get(i) {
                     Some(v) => v.as_str(),
                     None => {
+                        // Match C getopt's `option requires an argument`.
+                        // -M is the short form; long would be --force-midi.
+                        let flag_short = a == "-M";
+                        if flag_short {
+                            eprintln!("{argv0}: option requires an argument -- 'M'");
+                        } else {
+                            eprintln!("{argv0}: option '--force-midi' requires an argument");
+                        }
                         print_help(argv0);
                         return u8::MAX as i32;
                     }

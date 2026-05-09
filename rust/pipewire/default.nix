@@ -358,6 +358,10 @@
         tool = "pw-mididump";
         name = "bad-force-midi";
       }
+      {
+        tool = "pw-mididump";
+        name = "missing-M-arg";
+      }
 
       # --- pw-config offline tests ---
       {
