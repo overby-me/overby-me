@@ -898,6 +898,9 @@
       { tool = "pw-cli"; name = "info-bad-exit-code"; }
       { tool = "pw-mididump"; name = "empty-file"; }
       { tool = "pw-mididump"; name = "positional-then-bad"; }
+      { tool = "pw-v4l2"; name = "missing-arg-r"; }
+      { tool = "pw-v4l2"; name = "cluster-vh"; }
+      { tool = "pw-v4l2"; name = "no-args"; }
 
       # --- per-tool --help byte-identical parity ---
       {
