@@ -247,6 +247,10 @@
         tool = "pw-mididump";
         name = "running-status";
       }
+      {
+        tool = "pw-mididump";
+        name = "bad-file";
+      }
 
       # --- pw-config offline tests ---
       {

@@ -86,8 +86,16 @@ pub fn main(args: &[String]) -> i32 {
             0
         }
         Err(e) => {
-            eprintln!("error opening {filename}: {e}");
-            1
+            // Match the C tool's `%m` output, which is just strerror(errno)
+            // without Rust's `(os error N)` parenthetical.
+            let msg = e
+                .to_string()
+                .rsplit_once(" (os error ")
+                .map(|(m, _)| m.to_string())
+                .unwrap_or_else(|| e.to_string());
+            eprintln!("error opening {filename}: {msg}");
+            // C tool returns -1 from main, which truncates to 255.
+            255
         }
     }
 }
