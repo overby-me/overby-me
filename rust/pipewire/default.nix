@@ -167,6 +167,18 @@
       { tool = "pw-top"; name = "version-short"; }
       { tool = "pipewire"; name = "version-short"; }
       { tool = "pipewire-pulse"; name = "version-short"; }
+      { tool = "pw-cli"; name = "help-short"; }
+      { tool = "pw-mon"; name = "help-short"; }
+      { tool = "pw-link"; name = "help-short"; }
+      { tool = "pw-metadata"; name = "help-short"; }
+      { tool = "pw-config"; name = "help-short"; }
+      { tool = "pw-dump"; name = "help-short"; }
+      { tool = "pw-dot"; name = "help-short"; }
+      { tool = "pw-mididump"; name = "help-short"; }
+      { tool = "pw-profiler"; name = "help-short"; }
+      { tool = "pw-top"; name = "help-short"; }
+      { tool = "pipewire"; name = "help-short"; }
+      { tool = "pipewire-pulse"; name = "help-short"; }
 
       # --- per-tool --help byte-identical parity ---
       {
