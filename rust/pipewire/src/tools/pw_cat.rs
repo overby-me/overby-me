@@ -70,6 +70,15 @@ pub fn main(raw_args: &[String]) -> i32 {
     while i < args.len() {
         let a = args[i].as_str();
         match a {
+            "--" => {
+                // End of options; rest are positional filenames.
+                for s in args.iter().skip(i + 1) {
+                    if !s.starts_with('-') || s == "-" {
+                        positional_count += 1;
+                    }
+                }
+                break;
+            }
             "-h" | "--help" => {
                 print_help(argv0);
                 return 0;
