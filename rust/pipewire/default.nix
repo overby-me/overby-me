@@ -209,6 +209,10 @@
       { tool = "pw-sysex"; name = "invalid-V"; }
       { tool = "pw-dsdplay"; name = "invalid-V"; }
       { tool = "pw-encplay"; name = "invalid-V"; }
+      { tool = "pw-cat"; name = "list-formats"; }
+      { tool = "pw-cat"; name = "list-channel-names"; }
+      { tool = "pw-cat"; name = "list-layouts"; }
+      { tool = "pw-cat"; name = "list-containers"; }
       { tool = "pw-reserve"; name = "help"; }
       { tool = "pw-reserve"; name = "version"; }
       { tool = "pw-container"; name = "help"; }
