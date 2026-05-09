@@ -1409,6 +1409,10 @@
       { tool = "pw-link"; name = "props-empty"; }
       { tool = "pw-config"; name = "invalid-color"; }
       { tool = "pw-link"; name = "latency-with-pos"; }
+      { tool = "spa-json-dump"; name = "conf-filter-chain"; }
+      { tool = "spa-json-dump"; name = "conf-pipewire-vulkan"; }
+      { tool = "spa-json-dump"; name = "conf-pipewire-pulse"; }
+      { tool = "spa-json-dump"; name = "conf-pipewire-avb"; }
       { tool = "pw-config"; name = "list-empty-no-newline"; }
       {
         tool = "pw-cli";
