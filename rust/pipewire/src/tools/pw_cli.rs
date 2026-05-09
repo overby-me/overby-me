@@ -113,14 +113,15 @@ pub fn main(raw_args: &[String]) -> i32 {
         i += 1;
     }
 
+    // C connects on startup BEFORE the REPL/dispatch when:
+    //   * --remote was explicitly given, OR
+    //   * PIPEWIRE_REMOTE env is set (any name).
+    // Mirror that: a bad remote produces the connect error even for
+    // commands like `help` that wouldn't otherwise need a daemon.
+    let force_connect =
+        remote.is_some() || std::env::var("PIPEWIRE_REMOTE").is_ok();
     if positional.is_empty() {
-        // C tool drops into a REPL here, attempting an initial connect.
-        // If --remote was given (even with a bad name), the connect
-        // happens before the REPL prompt. Mirror that: try to connect,
-        // emit C's error if it fails. With the default remote name and
-        // no daemon, falls through to the help dump (preserves the
-        // original "no-daemon" sandbox behaviour).
-        if remote.is_some() {
+        if force_connect {
             match open_client(remote.as_deref(), "pw-cli") {
                 Ok(_) => 0,
                 Err(e) => {
@@ -133,11 +134,7 @@ pub fn main(raw_args: &[String]) -> i32 {
             0
         }
     } else {
-        // If --remote was explicitly given, C connects on startup BEFORE
-        // dispatching the command. Mirror that: a bad remote produces
-        // the connect error even for commands like `help` that wouldn't
-        // otherwise need a daemon.
-        if remote.is_some() {
+        if force_connect {
             if let Err(e) = open_client(remote.as_deref(), "pw-cli") {
                 print_open_error(argv0, &e);
                 return 1;

@@ -1423,6 +1423,7 @@
       { tool = "pw-profiler"; name = "connect-refused"; }
       { tool = "pw-loopback"; name = "connect-refused"; }
       { tool = "pw-container"; name = "connect-refused"; }
+      { tool = "pw-cli"; name = "pipewire-remote-bad"; }
       { tool = "pw-config"; name = "list-empty-no-newline"; }
       {
         tool = "pw-cli";
