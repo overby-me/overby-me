@@ -175,6 +175,16 @@
       { tool = "pw-sysex"; name = "version"; }
       { tool = "pw-dsdplay"; name = "version"; }
       { tool = "pw-encplay"; name = "version"; }
+      { tool = "pw-cat"; name = "no-args"; }
+      { tool = "pw-play"; name = "no-args"; }
+      { tool = "pw-record"; name = "no-args"; }
+      { tool = "pw-midiplay"; name = "no-args"; }
+      { tool = "pw-midirecord"; name = "no-args"; }
+      { tool = "pw-midi2play"; name = "no-args"; }
+      { tool = "pw-midi2record"; name = "no-args"; }
+      { tool = "pw-sysex"; name = "no-args"; }
+      { tool = "pw-dsdplay"; name = "no-args"; }
+      { tool = "pw-encplay"; name = "no-args"; }
       { tool = "pw-reserve"; name = "help"; }
       { tool = "pw-reserve"; name = "version"; }
       { tool = "pw-container"; name = "help"; }

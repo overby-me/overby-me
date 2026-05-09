@@ -24,12 +24,41 @@ pub fn main(args: &[String]) -> i32 {
                 print_version(argv0);
                 return 0;
             }
+            s if s.starts_with('-')
+                && !matches!(
+                    s,
+                    "-v" | "--verbose"
+                        | "-p" | "--playback"
+                        | "-r" | "--record"
+                        | "-m" | "--midi"
+                        | "-d" | "--dsd"
+                        | "-o" | "--encoded"
+                        | "-s" | "--sysex"
+                        | "-c" | "--midi-clip"
+                        | "-a" | "--raw"
+                        | "--list-layouts"
+                        | "--list-channel-names"
+                        | "--list-formats"
+                        | "--list-containers"
+                ) =>
+            {
+                eprintln!("{argv0}: unrecognized option '{s}'");
+                print_help(argv0);
+                return 0;
+            }
             _ => {}
         }
     }
 
-    eprintln!("{argv0}: not yet implemented in rust-pipewire");
-    1
+    // C: when run with no mode-selecting flag (pw-cat alone) → error.
+    // When the file argument is missing on the typed variants → error.
+    if is_cat_master(argv0) {
+        eprintln!("error: one of the playback/record options must be provided");
+    } else {
+        eprintln!("error: filename or - argument missing");
+    }
+    print_help(argv0);
+    0
 }
 
 /// Whether `argv0` is the master tool that shows the trailing mode flags.
