@@ -1,4 +1,18 @@
 digraph pipewire {
+link_185 [shape=box style=filled fillcolor=lightblue];
+link_185 [label="link_id: 185\loutput_node_id: 50\linput_node_id: 120\loutput_port_id: 92\linput_port_id: 80\lstate: active\l"];
+port_92 -> link_185 -> port_80;
+link_128 [shape=box style=filled fillcolor=lightblue];
+link_128 [label="link_id: 128\loutput_node_id: 50\linput_node_id: 120\loutput_port_id: 91\linput_port_id: 76\lstate: active\l"];
+port_91 -> link_128 -> port_76;
+subgraph cluster_node_120{
+bgcolor=palegreen;
+label="node_id: 120\lname: pw-cat\lmedia_class: Stream/Input/Audio\l"
+port_64 [shape=box style=filled fillcolor=lightcoral];port_64 [label="port_id: 64\lname: monitor_FR\ldirection: output\l"];
+port_109 [shape=box style=filled fillcolor=lightcoral];port_109 [label="port_id: 109\lname: monitor_FL\ldirection: output\l"];
+port_80 [shape=box style=filled fillcolor=lightslateblue];port_80 [label="port_id: 80\lname: input_FR\ldirection: input\l"];
+port_76 [shape=box style=filled fillcolor=lightslateblue];port_76 [label="port_id: 76\lname: input_FL\ldirection: input\l"];
+}
 subgraph cluster_node_71{
 bgcolor=palegreen;
 label="node_id: 71\lname: midi-dump\lmedia_class: (null)\l"

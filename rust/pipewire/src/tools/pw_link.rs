@@ -65,7 +65,8 @@ pub fn main(raw_args: &[String]) -> i32 {
                 || s.starts_with("--linger=")
                 || s.starts_with("--passive=")
                 || s.starts_with("--wait=")
-                || s.starts_with("--no-colors=")
+                // --no-colors isn't in pw-link's long_options, so the
+                // `=value` form falls through to "unrecognized option".
                 || s.starts_with("--id=")
                 || s.starts_with("--verbose=")
                 || s.starts_with("--disconnect=") =>
@@ -98,8 +99,10 @@ pub fn main(raw_args: &[String]) -> i32 {
             // NO argument — it just sets MODE_LIST + LIST_LATENCY (which
             // by itself produces no output without -i/-o/-l).
             "-t" | "--latency" => list_latency = true,
+            // pw-link's long_options don't include --no-colors, so the
+            // long form is unrecognized — only -N short works.
             "-m" | "--monitor" | "-L" | "--linger"
-            | "-P" | "--passive" | "-w" | "--wait" | "-N" | "--no-colors" => {}
+            | "-P" | "--passive" | "-w" | "--wait" | "-N" => {}
             "-p" | "--props" => {
                 // -p / --props requires an argument.
                 if i + 1 >= args.len() {

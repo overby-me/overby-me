@@ -46,6 +46,16 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
+            s if s.starts_with("--no-colors=")
+                || s.starts_with("--raw=")
+                || s.starts_with("--spa=")
+                || s.starts_with("--monitor=") =>
+            {
+                let name = s.split_once('=').map(|(n, _)| n).unwrap_or(s);
+                eprintln!("{argv0}: option '{name}' doesn't allow an argument");
+                print_help(argv0);
+                return 0;
+            }
             "-i" | "--indent" => {
                 if i + 1 >= args.len() {
                     eprintln!("{argv0}: option requires an argument -- 'i'");

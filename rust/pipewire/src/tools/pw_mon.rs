@@ -30,6 +30,17 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
+            // No-arg long flags reject `--FOO=value`.
+            s if s.starts_with("--no-colors=")
+                || s.starts_with("--hide-props=")
+                || s.starts_with("--hide-params=")
+                || s.starts_with("--print-separator=") =>
+            {
+                let name = s.split_once('=').map(|(n, _)| n).unwrap_or(s);
+                eprintln!("{argv0}: option '{name}' doesn't allow an argument");
+                print_help(argv0);
+                return 0;
+            }
             // -r and -C take a required arg.
             "-r" | "--remote" => {
                 if i + 1 >= args.len() {
