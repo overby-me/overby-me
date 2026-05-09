@@ -1,22 +1,276 @@
 // pw-link: PipeWire port and link manager.
+//
+// Phase 7 minimal mode: -i / -o (list ports), -l (list links), -I (with
+// id prefix). No latency, no monitor, no link create/disconnect — those
+// will land as Phase 7 progresses.
 
+use crate::pipewire_lib::client::{Client, RegistryGlobal};
+use crate::pipewire_lib::interfaces;
 use crate::tools::common::print_version;
 
 pub fn main(args: &[String]) -> i32 {
     let argv0 = args.first().map(String::as_str).unwrap_or("pw-link");
-    match args.get(1).map(String::as_str) {
-        Some("-h") | Some("--help") | None => {
-            print_help(argv0);
-            0
+
+    let mut list_inputs = false;
+    let mut list_outputs = false;
+    let mut list_links = false;
+    let mut show_id = false;
+    let mut verbose = false;
+    let mut remote: Option<String> = None;
+    let mut positional: Vec<&str> = Vec::new();
+
+    let mut i = 1;
+    while i < args.len() {
+        let a = args[i].as_str();
+        match a {
+            "-h" | "--help" => {
+                print_help(argv0);
+                return 0;
+            }
+            "--version" => {
+                print_version(argv0);
+                return 0;
+            }
+            "-i" | "--input" => list_inputs = true,
+            "-o" | "--output" => list_outputs = true,
+            "-l" | "--links" => list_links = true,
+            "-I" | "--id" => show_id = true,
+            "-v" | "--verbose" => verbose = true,
+            "-r" | "--remote" => {
+                if let Some(v) = args.get(i + 1) {
+                    remote = Some(v.clone());
+                    i += 2;
+                    continue;
+                }
+                eprintln!("{argv0}: --remote needs an argument");
+                return 2;
+            }
+            // Flags we don't yet implement; ignore so they don't trip parser.
+            "-t" | "--latency" | "-m" | "--monitor" | "-L" | "--linger"
+            | "-P" | "--passive" | "-w" | "--wait" | "-d" | "--disconnect"
+            | "-N" | "--no-colors" => {}
+            s if s.starts_with("--props") || s.starts_with("-p") => {
+                // -p / --props=PROPS — skip with optional next arg.
+            }
+            s if s.starts_with("--color") || s.starts_with("-C") => {}
+            s if s.starts_with('-') => {
+                eprintln!("{argv0}: unknown flag {s}");
+                return 2;
+            }
+            s => positional.push(s),
         }
-        Some("--version") => {
-            print_version(argv0);
-            0
+        i += 1;
+    }
+
+    let _ = (verbose, &positional);
+
+    if !list_inputs && !list_outputs && !list_links {
+        // No mode requested → C tool defaults to printing nothing useful;
+        // act like the help case.
+        print_help(argv0);
+        return 0;
+    }
+
+    // pw-link.c line 1096–7: `pw-link -l` (links only) implies both
+    // directions, so each port that participates in any link is listed.
+    let list_ports = list_inputs || list_outputs;
+    if !list_ports && list_links {
+        list_inputs = true;
+        list_outputs = true;
+    }
+
+    let globals = match collect_globals(remote.as_deref(), "rust-pipewire-link") {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("{argv0}: {e}");
+            return 1;
         }
-        _ => {
-            eprintln!("{argv0}: not yet implemented in rust-pipewire");
-            1
+    };
+
+    print_listing(
+        &globals,
+        list_inputs,
+        list_outputs,
+        list_links,
+        list_ports,
+        show_id,
+    );
+    0
+}
+
+fn collect_globals(
+    remote: Option<&str>,
+    app_name: &str,
+) -> Result<Vec<RegistryGlobal>, String> {
+    let mut client = match remote {
+        Some(name) if name.starts_with('/') => {
+            Client::connect_path(std::path::Path::new(name))
         }
+        Some(name) => {
+            let runtime = std::env::var("XDG_RUNTIME_DIR")
+                .map_err(|_| "XDG_RUNTIME_DIR unset".to_string())?;
+            Client::connect_path(&std::path::PathBuf::from(runtime).join(name))
+        }
+        None => Client::connect_default(),
+    }
+    .map_err(|e| format!("connect: {e}"))?;
+
+    client
+        .handshake(app_name)
+        .map_err(|e| format!("handshake: {e}"))?;
+    let sync_seq = client
+        .sync(interfaces::ID_CORE)
+        .map_err(|e| format!("sync: {e}"))?;
+
+    let mut globals = Vec::new();
+    loop {
+        let msg = match client.read_message() {
+            Ok(Some(m)) => m,
+            Ok(None) => break,
+            Err(e) => return Err(format!("read: {e}")),
+        };
+        if msg.opcode == interfaces::registry_event::GLOBAL && msg.id == 2
+            && let Ok(g) = crate::pipewire_lib::client::decode_registry_global(&msg.args)
+        {
+            globals.push(g);
+        }
+        if msg.id == interfaces::ID_CORE
+            && msg.opcode == interfaces::core_event::DONE
+            && let Ok((_id, seq)) =
+                crate::pipewire_lib::client::decode_core_done(&msg.args)
+            && seq == sync_seq
+        {
+            break;
+        }
+    }
+    Ok(globals)
+}
+
+fn prop<'a>(g: &'a RegistryGlobal, key: &str) -> Option<&'a str> {
+    g.props
+        .iter()
+        .find(|i| i.key == key)
+        .map(|i| i.value.as_str())
+}
+
+fn node_name_for(globals: &[RegistryGlobal], node_id: u32) -> String {
+    if let Some(n) = globals
+        .iter()
+        .find(|g| g.id == node_id && g.interface == interfaces::TYPE_NODE)
+        && let Some(name) = prop(n, "node.name")
+    {
+        return name.to_string();
+    }
+    format!("node.id.{node_id}")
+}
+
+fn port_full_name(globals: &[RegistryGlobal], port: &RegistryGlobal) -> String {
+    let node_id: u32 = prop(port, "node.id")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let node_name = node_name_for(globals, node_id);
+    let port_name = prop(port, "port.name")
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("port.id.{}", port.id));
+    format!("{node_name}:{port_name}")
+}
+
+fn print_listing(
+    globals: &[RegistryGlobal],
+    list_inputs: bool,
+    list_outputs: bool,
+    list_links: bool,
+    list_ports: bool,
+    show_id: bool,
+) {
+    // pw-link iterates Nodes in registry order; for each Node, walks Ports
+    // belonging to it (also in registry order).
+    for node in globals.iter().filter(|g| g.interface == interfaces::TYPE_NODE) {
+        for direction in [
+            (list_outputs, "out"),
+            (list_inputs, "in"),
+        ] {
+            if !direction.0 {
+                continue;
+            }
+            for port in globals
+                .iter()
+                .filter(|g| g.interface == interfaces::TYPE_PORT)
+                .filter(|p| {
+                    prop(p, "node.id").and_then(|s| s.parse().ok()) == Some(node.id)
+                })
+                .filter(|p| prop(p, "port.direction") == Some(direction.1))
+            {
+                if list_ports {
+                    let id_prefix = if show_id {
+                        format!("{:>4} ", port.id)
+                    } else {
+                        String::new()
+                    };
+                    let name = port_full_name(globals, port);
+                    println!("{id_prefix}{name}");
+                }
+                if list_links {
+                    // When LIST_PORTS is unset (just `-l`), `do_list_port_links`
+                    // sets `first = true` and prints the port name lazily —
+                    // only when it finds a matching link. Otherwise the port
+                    // line was already emitted above.
+                    print_port_links(globals, port, show_id, !list_ports);
+                }
+            }
+        }
+    }
+}
+
+fn print_port_links(
+    globals: &[RegistryGlobal],
+    port: &RegistryGlobal,
+    show_id: bool,
+    mut print_port_first: bool,
+) {
+    let port_dir = prop(port, "port.direction");
+    for link in globals
+        .iter()
+        .filter(|g| g.interface == interfaces::TYPE_LINK)
+    {
+        let out_port: u32 = prop(link, "link.output.port")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let in_port: u32 = prop(link, "link.input.port")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let (peer_id, arrow) = if port_dir == Some("out") && out_port == port.id {
+            (in_port, "|-> ")
+        } else if port_dir == Some("in") && in_port == port.id {
+            (out_port, "|<- ")
+        } else {
+            continue;
+        };
+        if print_port_first {
+            let id_prefix =
+                if show_id { format!("{:>4} ", port.id) } else { String::new() };
+            let name = port_full_name(globals, port);
+            println!("{id_prefix}{name}");
+            print_port_first = false;
+        }
+        // C `print_port_id`: prefix has the link's id (when -I); inner
+        // print_port appends the peer's id (also when -I) before the name.
+        let link_prefix = if show_id {
+            format!("{:>4} ", link.id)
+        } else {
+            String::new()
+        };
+        let (peer_id_prefix, peer_name) = match globals
+            .iter()
+            .find(|g| g.id == peer_id && g.interface == interfaces::TYPE_PORT)
+        {
+            Some(p) => (
+                if show_id { format!("{:>4} ", p.id) } else { String::new() },
+                port_full_name(globals, p),
+            ),
+            None => (String::new(), format!("<unknown:{peer_id}>")),
+        };
+        println!("{link_prefix}  {arrow}{peer_id_prefix}{peer_name}");
     }
 }
 

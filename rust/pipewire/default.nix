@@ -250,6 +250,9 @@
       {tool = "pw-cli"; name = "info-all-rich";}
       {tool = "pw-cli"; name = "ls-substring-rich";}
       {tool = "pw-cli"; name = "info-by-name-rich";}
+      {tool = "pw-link"; name = "input-rich";}
+      {tool = "pw-link"; name = "output-rich";}
+      {tool = "pw-link"; name = "input-id-rich";}
     ];
 
     # Daemon-comparison tests — spawn a real C pipewire daemon and run both
@@ -292,6 +295,9 @@
       {tool = "pw-cli"; name = "usage-get-permissions";}
       {tool = "pw-cli"; name = "usage-create-link";}
       {tool = "pw-cli"; name = "usage-export-node";}
+      {tool = "pw-link"; name = "empty-input";}
+      {tool = "pw-link"; name = "empty-output";}
+      {tool = "pw-link"; name = "empty-links";}
       {tool = "pw-dump"; name = "structural";}
     ];
   in
