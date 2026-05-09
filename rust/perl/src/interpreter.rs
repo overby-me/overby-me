@@ -59,6 +59,12 @@ pub struct Interpreter {
     /// case where the body returns a single ScalarVar / ArrayElement /
     /// HashElement / etc.
     lvalue_subs: std::collections::HashSet<String>,
+    /// Names of subs declared with `my sub NAME { … }` (the
+    /// `lexical_subs` feature). When DB-magic eval STRING walks back
+    /// to a my-sub caller, the caller's captured lexical chain is
+    /// NOT exposed — replays reference perl's known-broken behaviour
+    /// (op/eval TODO tests 98–101).
+    my_subs: std::collections::HashSet<String>,
     // BEGIN blocks (already executed)
     // END blocks (deferred). Each entry is (body, origin_file). Origin lets us
     // push the file's persistent scope before running so test.pl's END block
@@ -516,6 +522,7 @@ impl Interpreter {
             sub_def_loc: HashMap::new(),
             sub_def_package: HashMap::new(),
             lvalue_subs: std::collections::HashSet::new(),
+            my_subs: std::collections::HashSet::new(),
             current_sub_stack: Vec::new(),
             current_sub_scope_start: Vec::new(),
             loading_files: Vec::new(),
@@ -632,11 +639,15 @@ impl Interpreter {
                     params,
                     body,
                     is_lvalue,
+                    is_my_sub,
                 } if !name.is_empty() => {
                     self.subs
                         .insert(name.clone(), (params.clone(), body.clone()));
                     if *is_lvalue {
                         self.lvalue_subs.insert(name.clone());
+                    }
+                    if *is_my_sub {
+                        self.my_subs.insert(name.clone());
                     }
                     // Record top-level subs definition file so caller()
                     // sees op/foo.t even when dispatched through an
@@ -1734,6 +1745,7 @@ impl Interpreter {
                 params,
                 body,
                 is_lvalue,
+                is_my_sub,
             } => {
                 if !name.is_empty() {
                     // Qualify unqualified names with the current package
@@ -1750,6 +1762,9 @@ impl Interpreter {
                         .insert(qualified.clone(), (params.clone(), body.clone()));
                     if *is_lvalue {
                         self.lvalue_subs.insert(qualified.clone());
+                    }
+                    if *is_my_sub {
+                        self.my_subs.insert(qualified.clone());
                     }
                     // Named subs declared inside an `eval STRING` (or any
                     // dynamic body — `eval_depth > 0`) close over the
@@ -9514,6 +9529,7 @@ impl Interpreter {
                     params,
                     body,
                     is_lvalue: _,
+                    is_my_sub: _,
                 } if !name.is_empty() => {
                     let qualified = if name.contains("::") || current_pkg == "main" {
                         name.clone()
@@ -13209,9 +13225,13 @@ impl Interpreter {
                     params,
                     body,
                     is_lvalue,
+                    is_my_sub,
                 } if !name.is_empty() => {
                     if *is_lvalue {
                         self.lvalue_subs.insert(name.clone());
+                    }
+                    if *is_my_sub {
+                        self.my_subs.insert(name.clone());
                     }
                     self.subs
                         .insert(name.clone(), (params.clone(), body.clone()));
@@ -13318,14 +13338,36 @@ impl Interpreter {
             .and_then(|n| self.sub_def_package.get(n))
             .map(|p| p == "DB" || p.starts_with("DB::"))
             .unwrap_or(false);
-        let db_added: usize =
-            if in_db_sub && let Some(frames) = self.sub_scope_stack.last().cloned() {
-                let n = frames.len();
-                self.scopes.extend(frames);
-                n
-            } else {
-                0
-            };
+        // Reference perl bug: when the immediate caller of the DB sub
+        // is a closure-bearing sub (anon sub, or `my sub` declared
+        // via the `lexical_subs` feature), the DB-magic eval STRING
+        // does NOT find that caller's lexicals. Replays the bug for
+        // byte-for-byte parity with op/eval TODO tests 98–101
+        // (`outside not available when needed`,
+        // `eval from DB outside chain is broken`). The "regular sub"
+        // path is unaffected — db1/db3/db5 etc. still resolve through
+        // the caller's lex chain via the DB-magic frame extension.
+        let caller_is_my_sub = self
+            .current_sub_stack
+            .iter()
+            .rev()
+            .nth(1)
+            .map(|n| {
+                self.my_subs.contains(n)
+                    || n.starts_with("__anon_")
+                    || self.closure_envs.contains_key(n)
+            })
+            .unwrap_or(false);
+        let db_added: usize = if in_db_sub
+            && !caller_is_my_sub
+            && let Some(frames) = self.sub_scope_stack.last().cloned()
+        {
+            let n = frames.len();
+            self.scopes.extend(frames);
+            n
+        } else {
+            0
+        };
 
         // Lexical-scope termination at sub boundaries: when `eval
         // STRING` runs inside a top-level NAMED sub (no closure
@@ -13336,12 +13378,14 @@ impl Interpreter {
         // _start at call entry) and the file scope. Stash the
         // dynamic frames between scopes[0] and that index for the
         // eval duration.
-        let lex_term_stash: Option<(usize, Vec<Scope>)> = if !in_db_sub
+        let want_lex_term = (!in_db_sub
             && self
                 .current_sub_stack
                 .last()
                 .map(|n| !n.starts_with("__anon_") && !self.closure_envs.contains_key(n))
-                .unwrap_or(false)
+                .unwrap_or(false))
+            || (in_db_sub && caller_is_my_sub);
+        let lex_term_stash: Option<(usize, Vec<Scope>)> = if want_lex_term
             && let Some(&start) = self.current_sub_scope_start.last()
             && start > 1
             && start < self.scopes.len()

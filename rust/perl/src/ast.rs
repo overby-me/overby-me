@@ -271,6 +271,16 @@ pub enum Stmt {
         /// last expression is a simple lvalue (ScalarVar, ArrayElement,
         /// HashElement, etc.).
         is_lvalue: bool,
+        /// True if declared with `my sub NAME { … }` (lexically-scoped
+        /// sub via the `lexical_subs` feature). Reference perl has a
+        /// known bug where `eval STRING` inside a sub defined in
+        /// package DB does NOT walk a my-sub caller's captured lexical
+        /// chain — it stops at the file scope. We replay that bug for
+        /// byte-for-byte parity with op/eval's TODO-marked tests
+        /// 98–101 (`outside not available when needed`,
+        /// `eval from DB outside chain is broken`). Otherwise treated
+        /// like a regular named sub.
+        is_my_sub: bool,
     },
     My(Vec<(String, Option<Expr>)>, bool), // my ($a, $b) = ...; bool = is list-context destructure (parens used)
     Local(Vec<(String, Option<Expr>)>, bool),

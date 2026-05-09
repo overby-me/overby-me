@@ -852,6 +852,10 @@ impl Parser {
     }
 
     fn parse_sub_decl(&mut self) -> Stmt {
+        self.parse_sub_decl_inner(false)
+    }
+
+    fn parse_sub_decl_inner(&mut self, is_my_sub: bool) -> Stmt {
         let name = if let Token::Ident(name) = self.tok() {
             let n = name.clone();
             self.pos += 1;
@@ -928,10 +932,22 @@ impl Parser {
             params: proto,
             body,
             is_lvalue,
+            is_my_sub,
         }
     }
 
     fn parse_my_decl(&mut self) -> Stmt {
+        // `my sub NAME { ... }` — the `lexical_subs` feature. We don't
+        // model true lexical scoping (the sub stays globally callable
+        // for simplicity), but we DO record the my-sub flag so DB-magic
+        // eval skips the my-sub caller's lexical chain. That replays
+        // reference perl's known bug where `my sub f { DB::do_eval(...) }`
+        // can't reach f's captured lexicals from inside DB::do_eval's
+        // eval STRING — exercised by op/eval TODO tests 98–101.
+        if matches!(self.tok(), Token::Sub) {
+            self.pos += 1;
+            return self.parse_sub_decl_inner(true);
+        }
         // Reject `my $$x`, `my @$x`, `my %$x`, `my $$$x`, etc.
         // Reference perl errors: `Can't declare scalar dereference in
         // "my" at FILE line N`. Detect a deref token (ScalarDeref /
