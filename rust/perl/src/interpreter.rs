@@ -12286,6 +12286,23 @@ impl Interpreter {
                 let (pat, flags) = unwrap_qr(&pat, flags);
                 let case_i = flags.contains('i');
                 let global = flags.contains('g');
+                // Track pos for /g and /gc — by var name for ScalarVar,
+                // by alias Rc pointer for defelem (sub-arg alias to a
+                // caller's `$h{k}` etc.). op/pos defelem tests.
+                let var_name: Option<String> = match expr.as_ref() {
+                    Expr::ScalarVar(n) => Some(n.clone()),
+                    _ => None,
+                };
+                let alias_rc_ptr: Option<usize> = if var_name.is_none() {
+                    let slot = self.lvalue_alias_slot(expr);
+                    if let Value::Alias(rc) = slot {
+                        Some(std::rc::Rc::as_ptr(&rc) as usize)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
                 let compile_pat = if case_i {
                     format!("(?i){pat}")
                 } else {
@@ -12295,7 +12312,11 @@ impl Interpreter {
                     Ok(re) => {
                         if global {
                             let mut out = Vec::new();
+                            let mut last_end: Option<usize> = None;
                             for caps in re.captures_iter(&text) {
+                                if let Some(m0) = caps.get(0) {
+                                    last_end = Some(m0.end());
+                                }
                                 if caps.len() > 1 {
                                     for i in 1..caps.len() {
                                         out.push(
@@ -12306,6 +12327,22 @@ impl Interpreter {
                                     }
                                 } else if let Some(m) = caps.get(0) {
                                     out.push(Value::Str(m.as_str().to_string()));
+                                }
+                            }
+                            // Update pos for /g (advance to last match
+                            // end) or clear (failed match without /c).
+                            // /gc keeps the prior pos on failure.
+                            if let Some(end) = last_end {
+                                if let Some(n) = &var_name {
+                                    self.pos_offsets.insert(n.clone(), end);
+                                } else if let Some(p) = alias_rc_ptr {
+                                    self.pos_offsets_by_rc.insert(p, end);
+                                }
+                            } else if !flags.contains('c') {
+                                if let Some(n) = &var_name {
+                                    self.pos_offsets.remove(n);
+                                } else if let Some(p) = alias_rc_ptr {
+                                    self.pos_offsets_by_rc.remove(&p);
                                 }
                             }
                             out
