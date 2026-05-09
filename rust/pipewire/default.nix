@@ -447,6 +447,8 @@
       {tool = "pw-link"; name = "links-empty-verbose-id";}
       {tool = "pw-link"; name = "connect-fail";}
       {tool = "pw-metadata"; name = "list-empty";}
+      {tool = "pw-metadata"; name = "connect-fail";}
+      {tool = "pw-dump"; name = "connect-fail";}
       {tool = "pw-dump"; name = "structural";}
       {tool = "pw-dump"; name = "structural-indent4";}
       {tool = "pw-dump"; name = "structural-indent0";}

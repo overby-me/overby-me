@@ -69,8 +69,14 @@ pub fn main(args: &[String]) -> i32 {
     let globals = match collect_globals(remote.as_deref()) {
         Ok(g) => g,
         Err(e) => {
-            eprintln!("{argv0}: {e}");
-            return 1;
+            // C pw-dump prints `can't connect: Host is down` (no `Error:`
+            // wrapper) and exits 255.
+            if e.contains("connect:") || e.starts_with("connect:") {
+                eprintln!("can't connect: Host is down");
+            } else {
+                eprintln!("{argv0}: {e}");
+            }
+            return 255;
         }
     };
 

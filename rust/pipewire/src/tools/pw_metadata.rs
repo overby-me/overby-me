@@ -64,8 +64,15 @@ pub fn main(args: &[String]) -> i32 {
     let globals = match collect_globals(remote.as_deref(), "rust-pipewire-meta") {
         Ok(g) => g,
         Err(e) => {
-            eprintln!("{argv0}: {e}");
-            return 1;
+            // C pw-metadata uses pw-link / pw-dump's `can't connect: %m`
+            // pattern (no `Error:` wrapper), with errno mapped through
+            // EHOSTDOWN.
+            if e.contains("connect:") || e.starts_with("connect:") {
+                eprintln!("can't connect: Host is down");
+            } else {
+                eprintln!("{argv0}: {e}");
+            }
+            return 255;
         }
     };
 
