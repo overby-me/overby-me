@@ -11700,6 +11700,7 @@ impl Interpreter {
         let pattern = strip_unicode_boundary_types(&pattern);
         let pattern = translate_octal_escapes(&pattern);
         let pattern = escape_literal_bracket_in_class(&pattern);
+        let pattern = translate_posix_classes(&pattern);
         let pattern = translate_g_anchor(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
@@ -11729,6 +11730,7 @@ impl Interpreter {
             let p = strip_unicode_boundary_types(&p);
             let p = translate_octal_escapes(&p);
             let p = escape_literal_bracket_in_class(&p);
+            let p = translate_posix_classes(&p);
             let p = translate_g_anchor(&p);
             let p = perl_dollar_anchor(&p, flags.contains('m'));
             if !prefix.is_empty() {
@@ -11918,6 +11920,7 @@ impl Interpreter {
         let pattern = strip_unicode_boundary_types(&pattern);
         let pattern = translate_octal_escapes(&pattern);
         let pattern = escape_literal_bracket_in_class(&pattern);
+        let pattern = translate_posix_classes(&pattern);
         let pattern = translate_g_anchor(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
@@ -17249,6 +17252,115 @@ fn rewrite_nonexistent_group_conditionals(pattern: &str) -> String {
 /// when it's followed by a known name and `:]` later. Bare `[[:]` (a
 /// class containing literal `[` and `:`) is accepted by Perl as
 /// the class `[:`. Rust's `regex` parser unconditionally treats
+/// Translate Perl's Unicode-aware POSIX character classes
+/// (`[:alpha:]`, `[:^digit:]`, …) inside `[...]` to the equivalent
+/// `\p{…}` / `\P{…}` form. fancy_regex / rust regex's bare POSIX
+/// classes are ASCII-only; Perl's are Unicode-wide. re/regexp tests
+/// 1742-1756.
+fn translate_posix_classes(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == '[' && i + 1 < chars.len() && chars[i + 1] == ':' {
+            let mut k = i + 2;
+            let negate = k < chars.len() && chars[k] == '^';
+            if negate {
+                k += 1;
+            }
+            let name_start = k;
+            while k + 1 < chars.len() && !(chars[k] == ':' && chars[k + 1] == ']') {
+                k += 1;
+            }
+            if k + 1 < chars.len() {
+                let name: String = chars[name_start..k].iter().collect();
+                let prop: Option<&str> = match name.as_str() {
+                    "alpha" => Some("Alphabetic"),
+                    "alnum" => None, // emit composite below
+                    "digit" => Some("Nd"),
+                    "lower" => Some("Lowercase"),
+                    "upper" => Some("Uppercase"),
+                    "space" => Some("Whitespace"),
+                    "blank" => None, // composite
+                    "cntrl" => Some("Cc"),
+                    "print" => None, // composite
+                    "graph" => None, // composite
+                    "punct" => Some("P"),
+                    "word" => None, // composite
+                    "xdigit" => None, // ascii hex digits
+                    "ascii" => None,
+                    _ => None,
+                };
+                let replacement: Option<String> = if let Some(p) = prop {
+                    Some(if negate {
+                        format!("\\P{{{p}}}")
+                    } else {
+                        format!("\\p{{{p}}}")
+                    })
+                } else {
+                    let pos = match name.as_str() {
+                        "alnum" => Some("\\p{Alphabetic}\\p{Nd}"),
+                        "blank" => Some("\\t\\p{Zs}"),
+                        "print" => {
+                            Some("\\p{Alphabetic}\\p{Nd}\\p{P}\\p{S}\\p{Zs}")
+                        }
+                        "graph" => Some("\\p{Alphabetic}\\p{Nd}\\p{P}\\p{S}"),
+                        "word" => Some("\\p{Alphabetic}\\p{Nd}\\p{Pc}\\p{M}_"),
+                        "xdigit" => Some("0-9A-Fa-f"),
+                        "ascii" => Some("\\x00-\\x7f"),
+                        _ => None,
+                    };
+                    pos.map(|body| {
+                        if negate {
+                            // Negation requires nesting which neither
+                            // engine supports inside another class. Use
+                            // intersection-style trick where possible by
+                            // emitting `[^...]` only when the *outer*
+                            // class is the only consumer — since we
+                            // can't reliably know that here, fall
+                            // through to the simple positive form and
+                            // let the outer class context handle [^…].
+                            // For composites this is best-effort.
+                            let _ = negate;
+                            format!("[^{body}]")
+                        } else {
+                            body.to_string()
+                        }
+                    })
+                };
+                if let Some(repl) = replacement {
+                    out.push_str(&repl);
+                    i = k + 2;
+                    continue;
+                }
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 /// `[:` inside a class as the start of a POSIX class and rejects
 /// the pattern when no `:]` follows. Escape such literal `[` chars
 /// so the engine sees `[\[:]` instead. re/regexp tests 658-663.
