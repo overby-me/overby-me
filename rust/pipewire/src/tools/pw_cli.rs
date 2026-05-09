@@ -101,9 +101,26 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
+            s if s.starts_with('-') && !s.starts_with("--") => {
+                // Mixed cluster like `-hxx`. Process char-by-char per
+                // getopt; stop at first unknown.
+                let ch = s.chars().nth(1).unwrap_or('?');
+                if ch == 'h' {
+                    print_help(argv0);
+                    return 0;
+                }
+                if ch == 'V' {
+                    println!("{argv0}");
+                    println!("Compiled with libpipewire {PIPEWIRE_API_VERSION}");
+                    println!("Linked with libpipewire {PIPEWIRE_API_VERSION}");
+                    return 0;
+                }
+                eprintln!("{argv0}: invalid option -- '{ch}'");
+                print_help(argv0);
+                return 0;
+            }
             s if s.starts_with('-') => {
-                // Other unrecognized cluster (e.g. -ab) — fall back to
-                // unrecognized.
+                // Long unrecognized.
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);
                 return 0;
