@@ -14887,6 +14887,91 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
     while i < chars.len() {
         let c = chars[i];
         if c == '\\' {
+            // `\N{...}` — named character / codepoint escape.
+            // Reference perl validates the body before passing to
+            // the regex engine. Rejected forms:
+            //   - inside `[...]` without a name (bare `\N` is "any
+            //     non-newline" and isn't allowed in char class)
+            //   - empty body after `U+` → "Invalid hexadecimal number"
+            //   - non-hex char after `U+` → "Invalid hexadecimal number"
+            //   - missing `}` → "Missing right brace on \N{}"
+            //   - unknown name (no `U+` prefix, not a valid charname) →
+            //     "Unknown charname 'NAME'"
+            // re/regexp tests 1499/1507-1525.
+            if i + 1 < chars.len() && chars[i + 1] == 'N' {
+                // Walk a `\N` followed by optional whitespace then `{...}`.
+                let mut j = i + 2;
+                while j < chars.len() && chars[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                let in_class = {
+                    // Quick scan back to see if we're inside an unclosed `[`.
+                    let mut depth = 0i32;
+                    let mut p = 0usize;
+                    while p < i {
+                        if chars[p] == '\\' {
+                            p += 2;
+                            continue;
+                        }
+                        if chars[p] == '[' {
+                            depth += 1;
+                        } else if chars[p] == ']' && depth > 0 {
+                            depth -= 1;
+                        }
+                        p += 1;
+                    }
+                    depth > 0
+                };
+                if j >= chars.len() || chars[j] != '{' {
+                    if in_class {
+                        let prefix: String = chars[..=i + 1].iter().collect();
+                        return Some(format!(
+                            "\\N in a character class must be a named character in regex; marked by <-- HERE in m/{prefix} <-- HERE /"
+                        ));
+                    }
+                } else {
+                    // Body starts at j+1.
+                    let body_start = j + 1;
+                    let mut k = body_start;
+                    while k < chars.len() && chars[k] != '}' {
+                        k += 1;
+                    }
+                    if k >= chars.len() {
+                        let prefix: String = chars[..body_start].iter().collect();
+                        return Some(format!(
+                            "Missing right brace on \\N{{}} in regex; marked by <-- HERE in m/{prefix} <-- HERE /"
+                        ));
+                    }
+                    let body: String = chars[body_start..k].iter().collect();
+                    let trimmed = body.trim();
+                    // Counts (`\N{N}` / `\N{N,M}`) are valid.
+                    let is_count =
+                        !trimmed.is_empty() && trimmed.chars().all(|c| c.is_ascii_digit() || c == ',');
+                    if !is_count {
+                        let prefix: String = chars[..=k].iter().collect();
+                        let suffix: String = if k + 1 < chars.len() {
+                            chars[k + 1..].iter().collect()
+                        } else {
+                            String::new()
+                        };
+                        if let Some(rest) = trimmed.strip_prefix("U+") {
+                            // `\N{U+HEX}`: validate the hex digits.
+                            if rest.is_empty() || !rest.chars().all(|c| c.is_ascii_hexdigit()) {
+                                return Some(format!(
+                                    "Invalid hexadecimal number in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                                ));
+                            }
+                        } else if !trimmed.is_empty() {
+                            // Named character. We don't load unicore/Name.pm,
+                            // so any name is "unknown". Reference perl's
+                            // diagnostic uses the literal trimmed name.
+                            return Some(format!(
+                                "Unknown charname '{trimmed}' in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                            ));
+                        }
+                    }
+                }
+            }
             // `\k<NAME>` / `\k'NAME'` / `\k{NAME}` — named-group
             // backref. Validate name shape (must start with non-digit
             // word char) and that the name actually refers to an
@@ -15098,6 +15183,24 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
             while i < chars.len() {
                 let cc = chars[i];
                 if cc == '\\' && i + 1 < chars.len() {
+                    // `\N` inside a character class must be a NAMED
+                    // character (`\N{...}`), not the bare "any non-
+                    // newline" form. Reference perl emits "\N in a
+                    // character class must be a named character".
+                    // Only fire for bare `\N` (no `{...}`); `\N{name}`
+                    // is OK and gets validated separately.
+                    if chars[i + 1] == 'N' {
+                        let mut p = i + 2;
+                        while p < chars.len() && chars[p].is_ascii_whitespace() {
+                            p += 1;
+                        }
+                        if p >= chars.len() || chars[p] != '{' {
+                            let prefix: String = chars[..=i + 1].iter().collect();
+                            return Some(format!(
+                                "\\N in a character class must be a named character in regex; marked by <-- HERE in m/{prefix} <-- HERE /"
+                            ));
+                        }
+                    }
                     i += 2;
                     continue;
                 }
