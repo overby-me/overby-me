@@ -23,6 +23,16 @@ pub fn main(raw_args: &[String]) -> i32 {
     let mut show_id = false;
     let mut verbose = false;
     let mut disconnect = false;
+    // Mirror C's opt_mode: last MODE_LIST / MODE_DISCONNECT flag wins.
+    // Each list-flag (`-i`/`-o`/`-l`/`-t`) sets MODE_LIST and OR-s into
+    // opt_list. `-d` sets MODE_DISCONNECT but does NOT clear opt_list.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Mode {
+        Connect,
+        List,
+        Disconnect,
+    }
+    let mut mode = Mode::Connect;
     let mut remote: Option<String> = None;
     let mut positional: Vec<&str> = Vec::new();
 
@@ -78,15 +88,15 @@ pub fn main(raw_args: &[String]) -> i32 {
             }
             "-i" | "--input" => {
                 list_inputs = true;
-                disconnect = false;
+                mode = Mode::List;
             }
             "-o" | "--output" => {
                 list_outputs = true;
-                disconnect = false;
+                mode = Mode::List;
             }
             "-l" | "--links" => {
                 list_links = true;
-                disconnect = false;
+                mode = Mode::List;
             }
             "-I" | "--id" => show_id = true,
             "-v" | "--verbose" => verbose = true,
@@ -108,17 +118,14 @@ pub fn main(raw_args: &[String]) -> i32 {
             }
             "-d" | "--disconnect" => {
                 disconnect = true;
-                list_inputs = false;
-                list_outputs = false;
-                list_links = false;
-                list_latency = false;
+                mode = Mode::Disconnect;
             }
             // Per pw-link.c optstring "hVr:oilmIvLPp:wdt", `t` takes
             // NO argument — it just sets MODE_LIST + LIST_LATENCY (which
             // by itself produces no output without -i/-o/-l).
             "-t" | "--latency" => {
                 list_latency = true;
-                disconnect = false;
+                mode = Mode::List;
             }
             // pw-link's long_options don't include --no-colors, so the
             // long form is unrecognized — only -N short works.
@@ -177,102 +184,90 @@ pub fn main(raw_args: &[String]) -> i32 {
     }
 
     // -I needs MODE_LIST. C errors "-I option needs one or more of
-    // -l, -i or -o" if -I was given without any list flag.
-    if show_id && !list_inputs && !list_outputs && !list_links && !list_latency {
+    // -l, -i or -o" if -I was given without MODE_LIST.
+    if show_id && mode != Mode::List {
         eprintln!("-I option needs one or more of -l, -i or -o");
         return 255;
     }
 
-    // C tool's mode-validation runs after option parsing:
-    //   MODE_DISCONNECT (--disconnect): needs at least one positional
-    //     (link-id or output-port name); empty → error + exit -1.
-    //   MODE_CONNECT (no -i/-o/-l, has positional): needs both output
-    //     and input port names; missing one → error + exit -1.
-    if disconnect && positional.is_empty() {
-        eprintln!("missing link-id or output and input port names to disconnect");
-        return 255;
-    }
-    if !list_inputs
-        && !list_outputs
-        && !list_links
-        && !list_latency
-        && !disconnect
-        && positional.len() < 2
-    {
-        // MODE_CONNECT_PORTS path in C: requires both opt_output and
-        // opt_input. With <2 positional, error. Extra positionals are
-        // silently ignored (C just consumes argv[optind] / argv[optind+1]).
-        // -t/--latency also sets MODE_LIST which skips this check.
-        eprintln!("missing output and input port names to connect");
-        return 255;
+    // Mode-validation: depends only on `mode` (last LIST/DISCONNECT
+    // flag wins), independent of which OR-d-in list_* flags are set.
+    match mode {
+        Mode::Disconnect => {
+            if positional.is_empty() {
+                eprintln!("missing link-id or output and input port names to disconnect");
+                return 255;
+            }
+        }
+        Mode::Connect => {
+            if positional.len() < 2 {
+                eprintln!("missing output and input port names to connect");
+                return 255;
+            }
+        }
+        Mode::List => {}
     }
 
     if !list_inputs && !list_outputs && !list_links {
         // C always attempts pw_context_connect; without a daemon the
         // connect-fail message preempts everything else.
-        let connected = match crate::pipewire_lib::client::Client::connect_default() {
-            Ok(_) => true,
-            Err(_) => {
-                eprintln!("can't connect: {}", crate::tools::common::connect_failure_msg());
+        if let Err(_) = crate::pipewire_lib::client::Client::connect_default() {
+            eprintln!("can't connect: {}", crate::tools::common::connect_failure_msg());
+            return 255;
+        }
+        // Connect succeeded. Mode determines what comes next:
+        //   - List: walks registry; without LIST_INPUT/OUTPUT/LINKS,
+        //     prints nothing.
+        //   - Disconnect: tries to unlink → "failed to unlink ports".
+        //   - Connect: tries to link → "failed to link ports".
+        match mode {
+            Mode::Disconnect => {
+                eprintln!("failed to unlink ports: No such file or directory");
+                255
+            }
+            Mode::Connect => {
+                eprintln!("failed to link ports: No such file or directory");
+                255
+            }
+            Mode::List => 0,
+        }
+    } else {
+        // pw-link.c line 1096–7: `pw-link -l` (links only) implies both
+        // directions, so each port that participates in any link is listed.
+        let list_ports = list_inputs || list_outputs;
+        if !list_ports && list_links {
+            list_inputs = true;
+            list_outputs = true;
+        }
+
+        let globals = match collect_globals(remote.as_deref(), "rust-pipewire-link") {
+            Ok(g) => g,
+            Err(e) => {
+                if e.contains("connect:") || e.starts_with("connect:") {
+                    eprintln!("can't connect: {}", crate::tools::common::connect_failure_msg());
+                } else {
+                    eprintln!("{argv0}: {e}");
+                }
                 return 255;
             }
         };
-        let _ = connected;
-        // Connect succeeded. -t (MODE_LIST + LIST_LATENCY only) walks
-        // nothing without other LIST_X flags → silent. MODE_DISCONNECT/
-        // CONNECT_PORTS try to (un)link → "failed to (un)link ports".
-        if !list_latency && (disconnect || positional.len() >= 2) {
-            if disconnect {
-                eprintln!("failed to unlink ports: No such file or directory");
-            } else {
-                eprintln!("failed to link ports: No such file or directory");
-            }
-            return 255;
-        }
-        return 0;
+
+        let opt_output = positional.first().copied();
+        let opt_input = positional.get(1).copied();
+
+        print_listing(
+            &globals,
+            list_inputs,
+            list_outputs,
+            list_links,
+            list_ports,
+            show_id,
+            verbose,
+            opt_output,
+            opt_input,
+        );
+        0
     }
-
-    // pw-link.c line 1096–7: `pw-link -l` (links only) implies both
-    // directions, so each port that participates in any link is listed.
-    let list_ports = list_inputs || list_outputs;
-    if !list_ports && list_links {
-        list_inputs = true;
-        list_outputs = true;
-    }
-
-    let globals = match collect_globals(remote.as_deref(), "rust-pipewire-link") {
-        Ok(g) => g,
-        Err(e) => {
-            // C pw-link prints `can't connect: <strerror>\n` and returns
-            // -1 (= 255 truncated). The protocol-native client maps
-            // ENOENT → EHOSTDOWN ("Host is down").
-            if e.contains("connect:") || e.starts_with("connect:") {
-                eprintln!("can't connect: {}", crate::tools::common::connect_failure_msg());
-            } else {
-                eprintln!("{argv0}: {e}");
-            }
-            return 255;
-        }
-    };
-
-    // Mirror C: opt_output / opt_input are the first / second positional
-    // args, used as regexes (we use a simple substring match) to filter
-    // ports by direction.
-    let opt_output = positional.first().copied();
-    let opt_input = positional.get(1).copied();
-
-    print_listing(
-        &globals,
-        list_inputs,
-        list_outputs,
-        list_links,
-        list_ports,
-        show_id,
-        verbose,
-        opt_output,
-        opt_input,
-    );
-    0
 }
 
 fn collect_globals(remote: Option<&str>, app_name: &str) -> Result<Vec<RegistryGlobal>, String> {
