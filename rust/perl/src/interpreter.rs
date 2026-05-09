@@ -11485,9 +11485,22 @@ impl Interpreter {
                 let body_open = if chars[i + 2] == '?' { i + 3 } else { i + 2 };
                 let mut depth = 1;
                 let mut j = body_open + 1;
+                let mut quote: Option<char> = None;
                 while j < chars.len() && depth > 0 {
                     if chars[j] == '\\' && j + 1 < chars.len() {
                         j += 2;
+                        continue;
+                    }
+                    if let Some(q) = quote {
+                        if chars[j] == q {
+                            quote = None;
+                        }
+                        j += 1;
+                        continue;
+                    }
+                    if chars[j] == '"' || chars[j] == '\'' {
+                        quote = Some(chars[j]);
+                        j += 1;
                         continue;
                     }
                     if chars[j] == '{' {
@@ -15220,8 +15233,10 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
         let c = chars[i];
         // Skip past `(?{...})` / `(??{...})` regex code blocks: their
         // body is Perl source and may contain regex metachars (`[`,
-        // `(`, …) that mustn't be parsed as regex syntax. re/regexp
-        // tests 1701-1707.
+        // `(`, …) that mustn't be parsed as regex syntax. The body
+        // can also have `{`/`}` *inside strings* (`(?{"{"})`); we
+        // honour `"…"` and `'…'` so quoted braces don't unbalance
+        // the depth. re/regexp tests 1701-1707, 577.
         if c == '('
             && i + 2 < chars.len()
             && chars[i + 1] == '?'
@@ -15231,9 +15246,22 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
             let body_open = if chars[i + 2] == '?' { i + 3 } else { i + 2 };
             let mut depth = 1;
             let mut j = body_open + 1;
+            let mut quote: Option<char> = None;
             while j < chars.len() && depth > 0 {
                 if chars[j] == '\\' && j + 1 < chars.len() {
                     j += 2;
+                    continue;
+                }
+                if let Some(q) = quote {
+                    if chars[j] == q {
+                        quote = None;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if chars[j] == '"' || chars[j] == '\'' {
+                    quote = Some(chars[j]);
+                    j += 1;
                     continue;
                 }
                 if chars[j] == '{' {
@@ -15847,7 +15875,8 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
         let cc = chars[k];
         // Skip past `(?{...})` / `(??{...})` blocks so their Perl-
         // source body's metachars don't unbalance the paren counter.
-        // re/regexp tests 1701-1707.
+        // Honour `"…"`/`'…'` strings so quoted braces inside the
+        // body don't count. re/regexp tests 1701-1707, 577.
         if cc == '('
             && k + 2 < chars.len()
             && chars[k + 1] == '?'
@@ -15857,9 +15886,22 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
             let body_open = if chars[k + 2] == '?' { k + 3 } else { k + 2 };
             let mut bdepth = 1;
             let mut j = body_open + 1;
+            let mut quote: Option<char> = None;
             while j < chars.len() && bdepth > 0 {
                 if chars[j] == '\\' && j + 1 < chars.len() {
                     j += 2;
+                    continue;
+                }
+                if let Some(q) = quote {
+                    if chars[j] == q {
+                        quote = None;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if chars[j] == '"' || chars[j] == '\'' {
+                    quote = Some(chars[j]);
+                    j += 1;
                     continue;
                 }
                 if chars[j] == '{' {
@@ -17806,12 +17848,27 @@ fn extract_regex_code_blocks(pattern: &str) -> (String, Vec<String>) {
             let mut depth = 1;
             let mut j = body_start;
             let mut code = String::new();
+            let mut quote: Option<char> = None;
             while j < chars.len() && depth > 0 {
                 let cc = chars[j];
                 if cc == '\\' && j + 1 < chars.len() {
                     code.push(cc);
                     code.push(chars[j + 1]);
                     j += 2;
+                    continue;
+                }
+                if let Some(q) = quote {
+                    if cc == q {
+                        quote = None;
+                    }
+                    code.push(cc);
+                    j += 1;
+                    continue;
+                }
+                if cc == '"' || cc == '\'' {
+                    quote = Some(cc);
+                    code.push(cc);
+                    j += 1;
                     continue;
                 }
                 if cc == '{' {
