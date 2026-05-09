@@ -197,6 +197,12 @@ pub struct Interpreter {
     /// the byte offset where the last match ended; `pos()` reads it; a
     /// failed `/g` match without `/c` clears it.
     pos_offsets: HashMap<String, usize>,
+    /// Pos offsets keyed by an aliased-slot Rc pointer. When `pos $_[0]`
+    /// is set on a sub argument that aliases a caller's `$h{k}`, the
+    /// offset must follow the underlying slot, not the synthesised
+    /// `$_[0]` name. Stored alongside `pos_offsets`; lookups walk
+    /// the alias chain to find the right key. op/pos defelem tests.
+    pos_offsets_by_rc: HashMap<usize, usize>,
     /// Names whose write should die with "Modification of a read-only
     /// value attempted at FILE line N." — used by `for (!0) { … }`,
     /// where the iterator variable aliases Perl's PL_sv_yes / PL_sv_no
@@ -488,6 +494,7 @@ impl Interpreter {
             local_aliased_array_saves: Vec::new(),
             deleted_slots: HashMap::new(),
             pos_offsets: HashMap::new(),
+            pos_offsets_by_rc: HashMap::new(),
             readonly_vars: std::collections::HashSet::new(),
             last_popped_underscore: None,
             underscore_arg_sources: Vec::new(),
@@ -3360,6 +3367,38 @@ impl Interpreter {
                         }
                         return Value::Num(n);
                     }
+                    // `pos $_[0] = N` / `pos $h{k} = N` — defelem PVLV
+                    // Perl semantics: pos follows the underlying lvalue
+                    // slot. Read the raw array/hash slot (preserving
+                    // any `Value::Alias` so the Rc is available) and
+                    // key pos by the Rc pointer. Both the sub-arg
+                    // alias (`$_[0]`) and the original `$h{k}` share
+                    // the same Rc, so a later `pos $h{k}` finds the
+                    // offset through the same Rc. op/pos defelem tests.
+                    let val_eval = self.lvalue_alias_slot(first);
+                    if let Value::Alias(rc) = &val_eval {
+                        let p = std::rc::Rc::as_ptr(rc) as usize;
+                        let n = self.eval_expr(value).to_num();
+                        if n.is_nan() || n < 0.0 {
+                            self.pos_offsets_by_rc.remove(&p);
+                        } else {
+                            let s = rc.borrow().to_str();
+                            let target_chars = n as usize;
+                            let byte_off = s
+                                .char_indices()
+                                .nth(target_chars)
+                                .map(|(b, _)| b)
+                                .unwrap_or_else(|| {
+                                    if target_chars > s.chars().count() {
+                                        target_chars
+                                    } else {
+                                        s.len()
+                                    }
+                                });
+                            self.pos_offsets_by_rc.insert(p, byte_off);
+                        }
+                        return Value::Num(n);
+                    }
                 }
                 // `substr($s, OFFS, [LEN]) = REPL` — Perl's lvalue substr.
                 // Equivalent to `substr($s, OFFS, LEN, REPL)`. The 2-arg
@@ -6090,6 +6129,29 @@ impl Interpreter {
                     let prefix = std::str::from_utf8(&bytes[..off_bytes]).unwrap_or("");
                     return Value::Num(prefix.chars().count() as f64);
                 }
+                // Defelem fallback: when called on `$_[0]` / `$h{k}`
+                // / arrow-deref, read the raw alias slot and look up
+                // the pos via the underlying Rc pointer. op/pos
+                // defelem tests.
+                if let Some(arg) = args.first() {
+                    let v = self.lvalue_alias_slot(arg);
+                    if let Value::Alias(rc) = &v {
+                        let p = std::rc::Rc::as_ptr(rc) as usize;
+                        if let Some(&off_bytes) = self.pos_offsets_by_rc.get(&p) {
+                            let s = rc.borrow().to_str();
+                            let bytes = s.as_bytes();
+                            if off_bytes > bytes.len() {
+                                return Value::Num(off_bytes as f64);
+                            }
+                            if off_bytes == bytes.len() {
+                                return Value::Num(s.chars().count() as f64);
+                            }
+                            let prefix =
+                                std::str::from_utf8(&bytes[..off_bytes]).unwrap_or("");
+                            return Value::Num(prefix.chars().count() as f64);
+                        }
+                    }
+                }
                 Value::Undef
             }
             "exit" => {
@@ -8352,6 +8414,68 @@ impl Interpreter {
     /// caller and survive `unshift`/`shift`/`splice` on the source array
     /// (op/array tests 191-194). For non-lvalue shapes, falls back to
     /// regular evaluation.
+    /// Read the raw slot value of an lvalue-shaped expression
+    /// WITHOUT resolving `Value::Alias`. Used by `pos` (defelem PVLV)
+    /// to find the Rc pointer for `pos_offsets_by_rc` keying. Returns
+    /// `Value::Undef` when the target isn't an alias-bearing slot.
+    fn lvalue_alias_slot(&mut self, expr: &Expr) -> Value {
+        match expr {
+            Expr::ArrayElement(name, idx_expr) => {
+                let i = self.eval_expr(idx_expr).to_num() as i64;
+                // Walk lexical scopes for the array.
+                for scope in self.scopes.iter().rev() {
+                    if let Some(arr) = scope.arrays.get(name) {
+                        let len = arr.len() as i64;
+                        let real = if i < 0 { len + i } else { i };
+                        if real >= 0 && (real as usize) < arr.len() {
+                            return arr[real as usize].clone();
+                        }
+                        return Value::Undef;
+                    }
+                }
+                if let Some(rc) = self.aliased_arrays.get(name) {
+                    let arr = rc.borrow();
+                    let len = arr.len() as i64;
+                    let real = if i < 0 { len + i } else { i };
+                    if real >= 0 && (real as usize) < arr.len() {
+                        return arr[real as usize].clone();
+                    }
+                }
+                if let Some(arr) = self.globals.arrays.get(name) {
+                    let len = arr.len() as i64;
+                    let real = if i < 0 { len + i } else { i };
+                    if real >= 0 && (real as usize) < arr.len() {
+                        return arr[real as usize].clone();
+                    }
+                }
+                Value::Undef
+            }
+            Expr::HashElement(name, key_expr) => {
+                let key = self.eval_expr(key_expr).to_str();
+                for scope in self.scopes.iter().rev() {
+                    if let Some(h) = scope.hashes.get(name) {
+                        if let Some(v) = h.get(&key) {
+                            return v.clone();
+                        }
+                        return Value::Undef;
+                    }
+                }
+                if let Some(rc) = self.aliased_hashes.get(name) {
+                    if let Some(v) = rc.borrow().get(&key) {
+                        return v.clone();
+                    }
+                }
+                if let Some(h) = self.globals.hashes.get(name) {
+                    if let Some(v) = h.get(&key) {
+                        return v.clone();
+                    }
+                }
+                Value::Undef
+            }
+            _ => self.eval_expr(expr),
+        }
+    }
+
     fn eval_expr_for_arg(&mut self, expr: &Expr) -> Value {
         match expr {
             // `$_[i]` aliasing is already handled by `underscore_arg_sources`
