@@ -161,7 +161,8 @@ pub fn main(raw_args: &[String]) -> i32 {
                     return 1;
                 }
             }
-            s if !s.starts_with('-') => {
+            s if !s.starts_with('-') || s == "-" => {
+                // C treats lone `-` as a positional filename (stdin).
                 positional_count += 1;
             }
             _ => {}

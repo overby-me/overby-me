@@ -14,12 +14,20 @@ pub fn main(raw_args: &[String]) -> i32 {
     let args = expand_short_clusters(raw_args, &['h', 'V', 'N', 'R', 's', 'm']);
 
     let mut indent: usize = 2;
+    // Note: -- terminator is handled in the loop below.
     let mut remote: Option<String> = None;
     let mut filter: Option<String> = None;
     let mut i = 1;
     while i < args.len() {
         let a = args[i].as_str();
         match a {
+            "--" => {
+                // End of options; rest are positional id/interface filters.
+                if let Some(v) = args.get(i + 1) {
+                    filter = Some(v.clone());
+                }
+                break;
+            }
             "-h" | "--help" => {
                 print_help(argv0);
                 return 0;

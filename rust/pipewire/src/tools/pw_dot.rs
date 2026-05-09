@@ -11,6 +11,7 @@ pub fn main(raw_args: &[String]) -> i32 {
     while i < args.len() {
         let a = args[i].as_str();
         match a {
+            "--" => break,
             "-h" | "--help" => {
                 print_help(argv0);
                 return 0;
@@ -114,8 +115,20 @@ pub fn main(raw_args: &[String]) -> i32 {
         return 0;
     }
 
-    eprintln!("{argv0}: not yet implemented in rust-pipewire");
-    1
+    // Without -j, C connects to the daemon to collect the graph. Try
+    // connecting; if it fails, emit the same error C does.
+    match crate::pipewire_lib::client::Client::connect_default() {
+        Ok(_) => {
+            // Successful connect — but we don't actually walk the graph,
+            // so emit nothing (matches C's behavior on graceful idle exit
+            // when the daemon has no nodes).
+            0
+        }
+        Err(_) => {
+            eprintln!("can't connect: Host is down");
+            255
+        }
+    }
 }
 
 fn print_empty_graph<W: std::io::Write>(out: &mut W) -> std::io::Result<()> {

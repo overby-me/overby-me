@@ -901,6 +901,12 @@
       { tool = "pw-cli"; name = "info-bad-exit-code"; }
       { tool = "pw-cli"; name = "info-multi-arg"; }
       { tool = "pw-cli"; name = "cmd-connect-bad"; }
+      { tool = "pw-link"; name = "dash-dash-only"; }
+      { tool = "pw-link"; name = "dash-dash-then-flag"; }
+      { tool = "pw-top"; name = "dash-dash-only"; }
+      { tool = "pw-dot"; name = "dash-dash-only"; }
+      { tool = "pw-dump"; name = "dash-dash-only"; }
+      { tool = "pw-metadata"; name = "dash-dash-only"; }
       { tool = "pw-link"; name = "connect-three-args"; }
       { tool = "pw-link"; name = "connect-one-arg"; }
       { tool = "pw-link"; name = "disconnect-with-id"; }

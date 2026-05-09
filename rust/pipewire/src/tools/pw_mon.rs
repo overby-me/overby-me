@@ -6,14 +6,12 @@ pub fn main(raw_args: &[String]) -> i32 {
     let argv0 = raw_args.first().map(String::as_str).unwrap_or("pw-mon");
     // Expand `-hV` / `-Vh` etc. into separate flags so getopt-cluster
     // semantics match the C tool.
-    let args = expand_short_clusters(
-        raw_args,
-        &['h', 'V', 'N', 'o', 'a', 'p'],
-    );
+    let args = expand_short_clusters(raw_args, &['h', 'V', 'N', 'o', 'a', 'p']);
     let mut i = 1;
     while i < args.len() {
         let a = args[i].as_str();
         match a {
+            "--" => break, // End of options; rest are positional and we ignore them.
             "-h" | "--help" => {
                 print_help(argv0);
                 return 0;
