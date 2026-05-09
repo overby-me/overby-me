@@ -901,6 +901,10 @@
       { tool = "pw-v4l2"; name = "missing-arg-r"; }
       { tool = "pw-v4l2"; name = "cluster-vh"; }
       { tool = "pw-v4l2"; name = "no-args"; }
+      { tool = "spa-inspect"; name = "help-flag"; }
+      { tool = "spa-inspect"; name = "two-args"; }
+      { tool = "spa-monitor"; name = "help-flag"; }
+      { tool = "spa-monitor"; name = "two-args"; }
 
       # --- per-tool --help byte-identical parity ---
       {
