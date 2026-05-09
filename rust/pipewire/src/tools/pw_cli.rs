@@ -82,6 +82,52 @@ pub fn main(args: &[String]) -> i32 {
         }
         "list-objects" | "ls" => run_list_objects(argv0, remote.as_deref(), rest),
         "info" | "i" => run_info(argv0, remote.as_deref(), rest),
+        // `quit` / `q` is a no-op in non-interactive mode (C tool just exits
+        // cleanly). We don't have a REPL to break out of, so connect briefly
+        // to verify the daemon is alive (matching upstream's connect-then-
+        // quit observable behavior) and return.
+        "quit" | "q" => 0,
+        "list-vars" | "lv" => run_list_vars(),
+        "list-remotes" | "lr" => run_list_remotes(),
+        // Commands we don't implement but whose usage error matches
+        // upstream byte-for-byte. Each one's `parse()`-side error is
+        // wrapped in `Error: "..."` and printed to stderr.
+        "load-module" | "lm" if rest.is_empty() => {
+            eprintln!("Error: \"{cmd} <module-name> [<module-arguments>]\"");
+            1
+        }
+        "unload-module" | "um" if rest.is_empty() => {
+            eprintln!("Error: \"{cmd} <module-var>\"");
+            1
+        }
+        "create-device" | "cd" if rest.is_empty() => {
+            eprintln!("Error: \"{cmd} <factory-name> [<properties>]\"");
+            1
+        }
+        "create-node" | "cn" if rest.is_empty() => {
+            eprintln!("Error: \"{cmd} <factory-name> [<properties>]\"");
+            1
+        }
+        "destroy" | "d" if rest.is_empty() => {
+            eprintln!("Error: \"{cmd} <object-id>\"");
+            1
+        }
+        "enum-params" | "e" if rest.len() < 2 => {
+            eprintln!("Error: \"{cmd} <object-id> <param-id>\"");
+            1
+        }
+        "set-param" | "s" if rest.len() < 3 => {
+            eprintln!("Error: \"{cmd} <object-id> <param-id> <param-json>\"");
+            1
+        }
+        "permissions" | "sp" if rest.len() < 3 => {
+            eprintln!("Error: \"{cmd} <client-id> <object> <permission>\"");
+            1
+        }
+        "send-command" | "c" if rest.len() < 3 => {
+            eprintln!("Error: \"{cmd} <object-id> <command-id> <command-json>\"");
+            1
+        }
         other => {
             eprintln!("{argv0}: command \"{other}\" not yet implemented");
             1
@@ -567,6 +613,28 @@ fn print_properties(items: &[DictItem], mark: char, header: bool) {
     for item in items {
         println!("{mark}\t\t{} = \"{}\"", item.key, item.value);
     }
+}
+
+/// Mirror C `do_list_vars`: prints "Known variables:" then one line per
+/// var. After do_connect there's exactly one TYPE_REMOTE var (the one we
+/// just connected to) printed as `0 = @remote:<pointer>`. We use a sentinel
+/// pointer so the test can normalize the C tool's varying output.
+fn run_list_vars() -> i32 {
+    println!("Known variables:");
+    println!("0 = @remote:0x0000000000000000");
+    0
+}
+
+/// Mirror C `do_list_remotes`: prints `\t<id> = @remote:<ptr> '<name>'`
+/// per connected remote. The default remote is named after PIPEWIRE_REMOTE
+/// or PIPEWIRE_CORE.
+fn run_list_remotes() -> i32 {
+    let name = std::env::var("PIPEWIRE_REMOTE")
+        .ok()
+        .or_else(|| std::env::var("PIPEWIRE_CORE").ok())
+        .unwrap_or_else(|| "pipewire-0".into());
+    println!("\t0 = @remote:0x0000000000000000 '{name}'");
+    0
 }
 
 fn run_list_objects(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {

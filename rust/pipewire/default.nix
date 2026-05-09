@@ -274,6 +274,18 @@
       {tool = "pw-cli"; name = "info-bad-id";}
       {tool = "pw-cli"; name = "info-securitycontext";}
       {tool = "pw-cli"; name = "help-cmd";}
+      {tool = "pw-cli"; name = "list-vars";}
+      {tool = "pw-cli"; name = "list-remotes";}
+      {tool = "pw-cli"; name = "quit";}
+      {tool = "pw-cli"; name = "usage-load-module";}
+      {tool = "pw-cli"; name = "usage-unload-module";}
+      {tool = "pw-cli"; name = "usage-create-device";}
+      {tool = "pw-cli"; name = "usage-create-node";}
+      {tool = "pw-cli"; name = "usage-destroy";}
+      {tool = "pw-cli"; name = "usage-enum-params";}
+      {tool = "pw-cli"; name = "usage-set-param";}
+      {tool = "pw-cli"; name = "usage-permissions";}
+      {tool = "pw-cli"; name = "usage-send-command";}
       {tool = "pw-dump"; name = "structural";}
     ];
   in
