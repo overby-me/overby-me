@@ -6,11 +6,12 @@ aimed at passing the upstream PipeWire test suite.
 
 ## Status
 
-- **52/56 Nix-level tests passing** (the 4 still-failing SMF tests have a
+- **75/79 Nix-level tests passing** (the 4 still-failing SMF tests have a
   null-byte / shell-quoting issue in their fixtures, unrelated to the
   parser)
-- **34 internal Rust unit tests passing** (POD round-trip, SMF parsing,
-  protocol framing, dict encode/decode, JSON formatting)
+- **39 internal Rust unit tests passing** (POD round-trip, SMF parsing,
+  protocol framing, dict encode/decode, JSON formatting, decoders for
+  every Info-event type)
 - **18/18 byte-identical POD encode comparisons** vs the C `spa_pod_builder_*`
   API
 - Native protocol client round-trips with a real C `pipewire` daemon

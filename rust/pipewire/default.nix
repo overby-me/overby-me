@@ -248,6 +248,8 @@
       {tool = "pw-cli"; name = "ls-port-rich";}
       {tool = "pw-cli"; name = "info-node-rich";}
       {tool = "pw-cli"; name = "info-all-rich";}
+      {tool = "pw-cli"; name = "ls-substring-rich";}
+      {tool = "pw-cli"; name = "info-by-name-rich";}
     ];
 
     # Daemon-comparison tests — spawn a real C pipewire daemon and run both

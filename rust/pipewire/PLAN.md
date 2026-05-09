@@ -15,7 +15,7 @@ Nix checks comparing rust-pipewire output against the reference C
 
 ## Current Status
 
-**52/56 Nix-level tests passing**, plus 34 internal Rust unit tests:
+**75/79 Nix-level tests passing**, plus 39 internal Rust unit tests:
 
 - 25 byte-identical comparison tests (`spa-json-dump`, every `pw-*`/`pipewire`
   tool's `--help` output)
@@ -28,17 +28,24 @@ Nix checks comparing rust-pipewire output against the reference C
 - 1 daemon-interop test (`proto-test-hello-info`) that spawns a real C
   pipewire daemon and confirms rust-pipewire's protocol-native client
   gets back `Core.Info` + `Registry.Global` events
-- **17 daemon-comparison tests** (`daemon-test-*`): both the C `pw-cli`
+- **35 daemon-comparison tests** (`daemon-test-*`): both the C `pw-cli`
   and rust-pipewire's `pw-cli` are run against the same daemon and the
   outputs `diff`ed. Covers `ls Core | Module | Factory | SecurityContext
   | Metadata`, the empty cases for `Node | Link | Port | Device`, full
-  `ls` (with the connecting client stripped), `info 0` (Core),
-  `info <module-id>`, `info <factory-id>`, `info all`, plus a structural
-  `pw-dump` test that exercises the JSON output
-- **3 rich-daemon-comparison tests** (`rich-daemon-test-*`): same setup
+  `ls` (with the connecting client stripped), `ls Pi` (substring filter),
+  `info 0` (Core), `info <module-id>`, `info <factory-id>`, `info all`,
+  the byte-by-byte error cases (`info 9999`, `info <SecurityContext>`),
+  by-name lookup (`info Core`), `help`, `list-vars`, `list-remotes`,
+  `quit`, and 12 usage-error variants for the commands we don't yet
+  implement (load-module, unload-module, create-device, create-node,
+  destroy, enum-params, set-param, permissions, send-command,
+  get-permissions, create-link, export-node), plus a structural pw-dump
+  test that exercises the JSON output
+- **5 rich-daemon-comparison tests** (`rich-daemon-test-*`): same setup
   with a pre-loaded `support.null-audio-sink` Node, so we exercise
-  Node/Port code paths — `ls Node`, `ls Port`, `info <node-id>` (with
-  ports/state/params/props all rendering byte-for-byte identical)
+  Node/Port code paths — `ls Node`, `ls Port`, `ls Pi` (substring),
+  `info <node-id>` (with ports/state/params/props rendering
+  byte-for-byte identical), `info Node` (by-name), and `info all`
 - 22 POD round-trip + 2 SMF + 4 dict / JSON unit tests in-tree
 
 The reference upstream is `pkgs.pipewire` (currently 1.6.3). The Nix
@@ -574,8 +581,8 @@ rust-pipewire" message and exit 0 (so package install scripts that probe
 | M4 ✓ | +4 conf | `pw-config paths` action with drop-in overrides |
 | M5 ✓ | +1 POD | POD encoder byte-compatible with libspa (18 sub-cases) |
 | M6 ✓ | +1 daemon | Native protocol client round-trips with live C daemon |
-| M7 ✓ | +20 daemon-comparison | `pw-cli list-objects` / `info` / `pw-dump` byte-match against same daemon (incl. Node/Port/Device with params + state) |
-| **Now** | **52/56** | All of the above (4 SMF tests have pre-existing fixture quoting issues) |
+| M7 ✓ | +40 daemon-comparison | `pw-cli list-objects` / `info` / `pw-dump` / 12 usage paths byte-match against same daemon (incl. Node/Port/Device with params + state) |
+| **Now** | **75/79** | All of the above (4 SMF tests have pre-existing fixture quoting issues) |
 | M8 | ~80 | `pw-cli` / `pw-mon` / `pw-link` more commands, full pw-dump info-blocks |
 | M9 | ~180 | Stream API + `pw-cat` for WAV |
 | M10 | ~220 | Daemon hosts C clients |
