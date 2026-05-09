@@ -24,13 +24,9 @@ pub fn main(args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
-            "--version" => {
-                let v = crate::pipewire_lib::version::PIPEWIRE_API_VERSION;
-                println!("{argv0}");
-                println!("Compiled with libpipewire {v}");
-                println!("Linked with libpipewire {v}");
-                return 0;
-            }
+            // spa-json-dump's getopt_long doesn't include --version or -V.
+            // Long unknowns trip the standard `unrecognized option` path;
+            // short unknowns trip `invalid option -- 'X'`.
             "-s" | "--spa" => simple = true,
             "-i" | "--indent" => {
                 i += 1;
@@ -54,6 +50,17 @@ pub fn main(args: &[String]) -> i32 {
                 filename = s.to_string();
                 // Anything after the filename is currently ignored.
                 break;
+            }
+            s if s.starts_with("--") => {
+                eprintln!("{argv0}: unrecognized option '{s}'");
+                print_help_to(argv0, true);
+                return 1;
+            }
+            s if s.starts_with('-') && s.len() == 2 => {
+                let ch = s.chars().nth(1).unwrap_or('?');
+                eprintln!("{argv0}: invalid option -- '{ch}'");
+                print_help_to(argv0, true);
+                return 1;
             }
             _ => {
                 print_help_to(argv0, true);

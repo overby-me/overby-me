@@ -127,6 +127,14 @@
       }
       {
         tool = "spa-json-dump";
+        name = "bad-flag";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "invalid-V";
+      }
+      {
+        tool = "spa-json-dump";
         name = "nested";
       }
       {
