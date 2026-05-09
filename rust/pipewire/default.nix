@@ -799,191 +799,754 @@
         tool = "pw-top";
         name = "short-bad-flag";
       }
-      { tool = "pw-cli"; name = "missing-arg-r"; }
-      { tool = "pw-link"; name = "missing-arg-r"; }
-      { tool = "pw-link"; name = "missing-arg-p"; }
-      { tool = "pw-mon"; name = "missing-arg-r"; }
-      { tool = "pw-top"; name = "missing-arg-r"; }
-      { tool = "pw-top"; name = "missing-arg-n"; }
-      { tool = "pw-dump"; name = "missing-arg-r"; }
-      { tool = "pw-dump"; name = "missing-arg-i"; }
-      { tool = "pw-dot"; name = "missing-arg-r"; }
-      { tool = "pw-dot"; name = "missing-arg-j"; }
-      { tool = "pw-dot"; name = "missing-arg-o"; }
-      { tool = "pw-metadata"; name = "missing-arg-r"; }
-      { tool = "pw-metadata"; name = "missing-arg-n"; }
-      { tool = "pw-cat"; name = "missing-arg-R"; }
-      { tool = "pw-cat"; name = "missing-arg-P"; }
-      { tool = "pw-cat"; name = "missing-arg-q"; }
-      { tool = "pw-cat"; name = "missing-arg-M"; }
-      { tool = "pw-cat"; name = "missing-arg-n"; }
-      { tool = "pw-cat"; name = "missing-arg-rate"; }
-      { tool = "pw-cat"; name = "missing-arg-target"; }
-      { tool = "pw-cat"; name = "missing-arg-media-type"; }
-      { tool = "pw-cat"; name = "playback-no-file"; }
-      { tool = "pw-cat"; name = "record-no-file"; }
-      { tool = "pw-cli"; name = "cluster-hV"; }
-      { tool = "pw-mon"; name = "cluster-hV"; }
-      { tool = "pw-link"; name = "cluster-hV"; }
-      { tool = "pw-top"; name = "cluster-hV"; }
-      { tool = "pw-dump"; name = "cluster-hV"; }
-      { tool = "pw-dot"; name = "cluster-hV"; }
-      { tool = "pw-metadata"; name = "cluster-hV"; }
-      { tool = "pw-profiler"; name = "cluster-hV"; }
-      { tool = "pw-config"; name = "cluster-hV"; }
-      { tool = "pw-mididump"; name = "cluster-hV"; }
-      { tool = "pw-cat"; name = "cluster-hp"; }
-      { tool = "pw-cat"; name = "cluster-Vh"; }
-      { tool = "pw-cli"; name = "help-with-arg"; }
-      { tool = "pw-cli"; name = "version-with-arg"; }
-      { tool = "pw-mon"; name = "help-with-arg"; }
-      { tool = "pw-mon"; name = "version-with-arg"; }
-      { tool = "pw-link"; name = "help-with-arg"; }
-      { tool = "pw-link"; name = "version-with-arg"; }
-      { tool = "pw-top"; name = "help-with-arg"; }
-      { tool = "pw-top"; name = "version-with-arg"; }
-      { tool = "pw-dump"; name = "help-with-arg"; }
-      { tool = "pw-dump"; name = "version-with-arg"; }
-      { tool = "pw-dot"; name = "help-with-arg"; }
-      { tool = "pw-dot"; name = "version-with-arg"; }
-      { tool = "pw-metadata"; name = "help-with-arg"; }
-      { tool = "pw-metadata"; name = "version-with-arg"; }
-      { tool = "pw-profiler"; name = "help-with-arg"; }
-      { tool = "pw-profiler"; name = "version-with-arg"; }
-      { tool = "pw-cat"; name = "help-with-arg"; }
-      { tool = "pw-cat"; name = "version-with-arg"; }
-      { tool = "pw-play"; name = "help-with-arg"; }
-      { tool = "pw-play"; name = "version-with-arg"; }
-      { tool = "pw-record"; name = "help-with-arg"; }
-      { tool = "pw-record"; name = "version-with-arg"; }
-      { tool = "pw-midiplay"; name = "help-with-arg"; }
-      { tool = "pw-midiplay"; name = "version-with-arg"; }
-      { tool = "pw-midirecord"; name = "help-with-arg"; }
-      { tool = "pw-midirecord"; name = "version-with-arg"; }
-      { tool = "pw-midi2play"; name = "help-with-arg"; }
-      { tool = "pw-midi2play"; name = "version-with-arg"; }
-      { tool = "pw-midi2record"; name = "help-with-arg"; }
-      { tool = "pw-midi2record"; name = "version-with-arg"; }
-      { tool = "pw-sysex"; name = "help-with-arg"; }
-      { tool = "pw-sysex"; name = "version-with-arg"; }
-      { tool = "pw-dsdplay"; name = "help-with-arg"; }
-      { tool = "pw-dsdplay"; name = "version-with-arg"; }
-      { tool = "pw-encplay"; name = "help-with-arg"; }
-      { tool = "pw-encplay"; name = "version-with-arg"; }
-      { tool = "pw-config"; name = "help-with-arg"; }
-      { tool = "pw-config"; name = "version-with-arg"; }
-      { tool = "pw-mididump"; name = "help-with-arg"; }
-      { tool = "pw-mididump"; name = "version-with-arg"; }
-      { tool = "pw-loopback"; name = "help-with-arg"; }
-      { tool = "pw-loopback"; name = "version-with-arg"; }
-      { tool = "pw-reserve"; name = "help-with-arg"; }
-      { tool = "pw-reserve"; name = "version-with-arg"; }
-      { tool = "pw-container"; name = "help-with-arg"; }
-      { tool = "pw-container"; name = "version-with-arg"; }
-      { tool = "pipewire"; name = "help-with-arg"; }
-      { tool = "pipewire"; name = "version-with-arg"; }
-      { tool = "pipewire-pulse"; name = "help-with-arg"; }
-      { tool = "pipewire-pulse"; name = "version-with-arg"; }
-      { tool = "pipewire-aes67"; name = "help-with-arg"; }
-      { tool = "pipewire-aes67"; name = "version-with-arg"; }
-      { tool = "pipewire-avb"; name = "help-with-arg"; }
-      { tool = "pipewire-avb"; name = "version-with-arg"; }
-      { tool = "pipewire-vulkan"; name = "help-with-arg"; }
-      { tool = "pipewire-vulkan"; name = "version-with-arg"; }
-      { tool = "spa-json-dump"; name = "help-with-arg"; }
-      { tool = "spa-acp-tool"; name = "help-with-arg"; }
-      { tool = "spa-resample"; name = "help-with-arg"; }
-      { tool = "pw-config"; name = "merge-no-section"; }
-      { tool = "pw-config"; name = "paths-recurse"; }
-      { tool = "pw-config"; name = "paths-prefix"; }
-      { tool = "pw-config"; name = "paths-prefix-inline"; }
-      { tool = "pw-cli"; name = "info-alias-i-bad"; }
-      { tool = "pw-cli"; name = "info-bad-exit-code"; }
-      { tool = "pw-cli"; name = "info-multi-arg"; }
-      { tool = "pw-cli"; name = "destroy-bad"; }
-      { tool = "pw-cli"; name = "destroy-alias-bad"; }
-      { tool = "pw-cli"; name = "load-module-bad"; }
-      { tool = "pw-cli"; name = "unload-module-bad"; }
-      { tool = "pw-cli"; name = "um-alias-bad"; }
-      { tool = "pw-cli"; name = "create-device-bad"; }
-      { tool = "pw-cli"; name = "create-node-bad"; }
-      { tool = "pw-cli"; name = "enum-params-bad"; }
-      { tool = "pw-cli"; name = "set-param-bad"; }
-      { tool = "pw-cli"; name = "send-command-bad"; }
-      { tool = "pw-cli"; name = "get-permissions-bad"; }
-      { tool = "pw-cli"; name = "create-link-bad"; }
-      { tool = "pw-cli"; name = "export-node-bad"; }
-      { tool = "pw-mon"; name = "invalid-color"; }
-      { tool = "pw-link"; name = "color-rejected"; }
-      { tool = "pw-dump"; name = "invalid-color"; }
-      { tool = "pw-link"; name = "latency-with-arg"; }
-      { tool = "pw-link"; name = "input-with-arg"; }
-      { tool = "pw-mon"; name = "no-colors-with-arg"; }
-      { tool = "pw-dump"; name = "no-colors-with-arg"; }
-      { tool = "pw-dump"; name = "monitor-with-arg"; }
-      { tool = "pw-top"; name = "batch-mode-with-arg"; }
-      { tool = "pw-dot"; name = "all-with-arg"; }
-      { tool = "pw-dot"; name = "lr-with-arg"; }
-      { tool = "pw-metadata"; name = "monitor-with-arg"; }
-      { tool = "pw-metadata"; name = "list-with-arg"; }
-      { tool = "pw-cat"; name = "raw-with-arg"; }
-      { tool = "pw-cat"; name = "verbose-with-arg"; }
-      { tool = "pw-play"; name = "raw-with-arg"; }
-      { tool = "pw-play"; name = "verbose-with-arg"; }
-      { tool = "pw-record"; name = "raw-with-arg"; }
-      { tool = "pw-record"; name = "verbose-with-arg"; }
-      { tool = "pw-config"; name = "recurse-with-arg"; }
-      { tool = "pw-config"; name = "no-newline-with-arg"; }
-      { tool = "pw-loopback"; name = "remote-with-arg"; }
-      { tool = "spa-acp-tool"; name = "verbose-with-arg"; }
-      { tool = "spa-resample"; name = "verbose-with-arg"; }
-      { tool = "spa-resample"; name = "rate-inline"; }
-      { tool = "pw-mididump"; name = "multi-track"; }
-      { tool = "pw-mididump"; name = "key-signature"; }
-      { tool = "pw-mididump"; name = "smpte-offset"; }
-      { tool = "pw-mididump"; name = "midi-channel-prefix"; }
-      { tool = "spa-json-dump"; name = "escaped-strings"; }
-      { tool = "spa-json-dump"; name = "deep-nesting"; }
-      { tool = "spa-json-dump"; name = "array-of-arrays"; }
-      { tool = "pw-cli"; name = "cmd-connect-bad"; }
-      { tool = "pw-mon"; name = "connect-fail"; }
-      { tool = "pw-profiler"; name = "connect-fail"; }
-      { tool = "pw-container"; name = "connect-fail"; }
-      { tool = "pw-loopback"; name = "connect-fail"; }
-      { tool = "pw-reserve"; name = "no-name"; }
-      { tool = "pw-reserve"; name = "positional-bad"; }
-      { tool = "pw-link"; name = "dash-dash-only"; }
-      { tool = "pw-link"; name = "dash-dash-then-flag"; }
-      { tool = "pw-top"; name = "dash-dash-only"; }
-      { tool = "pw-dot"; name = "dash-dash-only"; }
-      { tool = "pw-dump"; name = "dash-dash-only"; }
-      { tool = "pw-metadata"; name = "dash-dash-only"; }
-      { tool = "pw-link"; name = "connect-three-args"; }
-      { tool = "pw-link"; name = "connect-one-arg"; }
-      { tool = "pw-link"; name = "disconnect-with-id"; }
-      { tool = "pw-link"; name = "connect-two-args"; }
-      { tool = "pw-mididump"; name = "force-midi-bad-value"; }
-      { tool = "spa-resample"; name = "cluster-hh"; }
-      { tool = "spa-resample"; name = "double-v"; }
-      { tool = "pw-mididump"; name = "empty-file"; }
-      { tool = "pw-mididump"; name = "positional-then-bad"; }
-      { tool = "pw-v4l2"; name = "missing-arg-r"; }
-      { tool = "pw-v4l2"; name = "cluster-vh"; }
-      { tool = "pw-v4l2"; name = "no-args"; }
-      { tool = "spa-inspect"; name = "help-flag"; }
-      { tool = "spa-inspect"; name = "two-args"; }
-      { tool = "spa-monitor"; name = "help-flag"; }
-      { tool = "spa-monitor"; name = "two-args"; }
-      { tool = "spa-acp-tool"; name = "missing-arg-c"; }
-      { tool = "spa-acp-tool"; name = "missing-arg-p"; }
-      { tool = "pw-mididump"; name = "sysex"; }
-      { tool = "pw-mididump"; name = "poly-pressure"; }
-      { tool = "pw-mididump"; name = "copyright-meta"; }
-      { tool = "spa-json-dump"; name = "array-mixed"; }
-      { tool = "spa-json-dump"; name = "empty-object"; }
-      { tool = "spa-json-dump"; name = "special-keys"; }
-      { tool = "spa-json-dump"; name = "dash-stdin"; }
-      { tool = "spa-json-dump"; name = "booleans"; }
+      {
+        tool = "pw-cli";
+        name = "missing-arg-r";
+      }
+      {
+        tool = "pw-link";
+        name = "missing-arg-r";
+      }
+      {
+        tool = "pw-link";
+        name = "missing-arg-p";
+      }
+      {
+        tool = "pw-mon";
+        name = "missing-arg-r";
+      }
+      {
+        tool = "pw-top";
+        name = "missing-arg-r";
+      }
+      {
+        tool = "pw-top";
+        name = "missing-arg-n";
+      }
+      {
+        tool = "pw-dump";
+        name = "missing-arg-r";
+      }
+      {
+        tool = "pw-dump";
+        name = "missing-arg-i";
+      }
+      {
+        tool = "pw-dot";
+        name = "missing-arg-r";
+      }
+      {
+        tool = "pw-dot";
+        name = "missing-arg-j";
+      }
+      {
+        tool = "pw-dot";
+        name = "missing-arg-o";
+      }
+      {
+        tool = "pw-metadata";
+        name = "missing-arg-r";
+      }
+      {
+        tool = "pw-metadata";
+        name = "missing-arg-n";
+      }
+      {
+        tool = "pw-cat";
+        name = "missing-arg-R";
+      }
+      {
+        tool = "pw-cat";
+        name = "missing-arg-P";
+      }
+      {
+        tool = "pw-cat";
+        name = "missing-arg-q";
+      }
+      {
+        tool = "pw-cat";
+        name = "missing-arg-M";
+      }
+      {
+        tool = "pw-cat";
+        name = "missing-arg-n";
+      }
+      {
+        tool = "pw-cat";
+        name = "missing-arg-rate";
+      }
+      {
+        tool = "pw-cat";
+        name = "missing-arg-target";
+      }
+      {
+        tool = "pw-cat";
+        name = "missing-arg-media-type";
+      }
+      {
+        tool = "pw-cat";
+        name = "playback-no-file";
+      }
+      {
+        tool = "pw-cat";
+        name = "record-no-file";
+      }
+      {
+        tool = "pw-cli";
+        name = "cluster-hV";
+      }
+      {
+        tool = "pw-mon";
+        name = "cluster-hV";
+      }
+      {
+        tool = "pw-link";
+        name = "cluster-hV";
+      }
+      {
+        tool = "pw-top";
+        name = "cluster-hV";
+      }
+      {
+        tool = "pw-dump";
+        name = "cluster-hV";
+      }
+      {
+        tool = "pw-dot";
+        name = "cluster-hV";
+      }
+      {
+        tool = "pw-metadata";
+        name = "cluster-hV";
+      }
+      {
+        tool = "pw-profiler";
+        name = "cluster-hV";
+      }
+      {
+        tool = "pw-config";
+        name = "cluster-hV";
+      }
+      {
+        tool = "pw-mididump";
+        name = "cluster-hV";
+      }
+      {
+        tool = "pw-cat";
+        name = "cluster-hp";
+      }
+      {
+        tool = "pw-cat";
+        name = "cluster-Vh";
+      }
+      {
+        tool = "pw-cli";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-cli";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-mon";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-mon";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-link";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-link";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-top";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-top";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-dump";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-dump";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-dot";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-dot";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-metadata";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-metadata";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-profiler";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-profiler";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-cat";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-cat";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-play";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-play";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-record";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-record";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-midiplay";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-midiplay";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-midirecord";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-midirecord";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-midi2play";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-midi2play";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-midi2record";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-midi2record";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-sysex";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-sysex";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-dsdplay";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-dsdplay";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-encplay";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-encplay";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-config";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-config";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-mididump";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-mididump";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-loopback";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-loopback";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-reserve";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-reserve";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pw-container";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-container";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pipewire";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pipewire";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pipewire-pulse";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pipewire-pulse";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pipewire-aes67";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pipewire-aes67";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pipewire-avb";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pipewire-avb";
+        name = "version-with-arg";
+      }
+      {
+        tool = "pipewire-vulkan";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pipewire-vulkan";
+        name = "version-with-arg";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "help-with-arg";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "help-with-arg";
+      }
+      {
+        tool = "spa-resample";
+        name = "help-with-arg";
+      }
+      {
+        tool = "pw-config";
+        name = "merge-no-section";
+      }
+      {
+        tool = "pw-config";
+        name = "paths-recurse";
+      }
+      {
+        tool = "pw-config";
+        name = "paths-prefix";
+      }
+      {
+        tool = "pw-config";
+        name = "paths-prefix-inline";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-alias-i-bad";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-bad-exit-code";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-multi-arg";
+      }
+      {
+        tool = "pw-cli";
+        name = "destroy-bad";
+      }
+      {
+        tool = "pw-cli";
+        name = "destroy-alias-bad";
+      }
+      {
+        tool = "pw-cli";
+        name = "load-module-bad";
+      }
+      {
+        tool = "pw-cli";
+        name = "unload-module-bad";
+      }
+      {
+        tool = "pw-cli";
+        name = "um-alias-bad";
+      }
+      {
+        tool = "pw-cli";
+        name = "create-device-bad";
+      }
+      {
+        tool = "pw-cli";
+        name = "create-node-bad";
+      }
+      {
+        tool = "pw-cli";
+        name = "enum-params-bad";
+      }
+      {
+        tool = "pw-cli";
+        name = "set-param-bad";
+      }
+      {
+        tool = "pw-cli";
+        name = "send-command-bad";
+      }
+      {
+        tool = "pw-cli";
+        name = "get-permissions-bad";
+      }
+      {
+        tool = "pw-cli";
+        name = "create-link-bad";
+      }
+      {
+        tool = "pw-cli";
+        name = "export-node-bad";
+      }
+      {
+        tool = "pw-mon";
+        name = "invalid-color";
+      }
+      {
+        tool = "pw-link";
+        name = "color-rejected";
+      }
+      {
+        tool = "pw-dump";
+        name = "invalid-color";
+      }
+      {
+        tool = "pw-link";
+        name = "latency-with-arg";
+      }
+      {
+        tool = "pw-link";
+        name = "input-with-arg";
+      }
+      {
+        tool = "pw-mon";
+        name = "no-colors-with-arg";
+      }
+      {
+        tool = "pw-dump";
+        name = "no-colors-with-arg";
+      }
+      {
+        tool = "pw-dump";
+        name = "monitor-with-arg";
+      }
+      {
+        tool = "pw-top";
+        name = "batch-mode-with-arg";
+      }
+      {
+        tool = "pw-dot";
+        name = "all-with-arg";
+      }
+      {
+        tool = "pw-dot";
+        name = "lr-with-arg";
+      }
+      {
+        tool = "pw-metadata";
+        name = "monitor-with-arg";
+      }
+      {
+        tool = "pw-metadata";
+        name = "list-with-arg";
+      }
+      {
+        tool = "pw-cat";
+        name = "raw-with-arg";
+      }
+      {
+        tool = "pw-cat";
+        name = "verbose-with-arg";
+      }
+      {
+        tool = "pw-play";
+        name = "raw-with-arg";
+      }
+      {
+        tool = "pw-play";
+        name = "verbose-with-arg";
+      }
+      {
+        tool = "pw-record";
+        name = "raw-with-arg";
+      }
+      {
+        tool = "pw-record";
+        name = "verbose-with-arg";
+      }
+      {
+        tool = "pw-config";
+        name = "recurse-with-arg";
+      }
+      {
+        tool = "pw-config";
+        name = "no-newline-with-arg";
+      }
+      {
+        tool = "pw-loopback";
+        name = "remote-with-arg";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "verbose-with-arg";
+      }
+      {
+        tool = "spa-resample";
+        name = "verbose-with-arg";
+      }
+      {
+        tool = "spa-resample";
+        name = "rate-inline";
+      }
+      {
+        tool = "pw-mididump";
+        name = "multi-track";
+      }
+      {
+        tool = "pw-mididump";
+        name = "key-signature";
+      }
+      {
+        tool = "pw-mididump";
+        name = "smpte-offset";
+      }
+      {
+        tool = "pw-mididump";
+        name = "midi-channel-prefix";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "escaped-strings";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "deep-nesting";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "array-of-arrays";
+      }
+      {
+        tool = "pw-mididump";
+        name = "sequence-number";
+      }
+      {
+        tool = "pw-mididump";
+        name = "pitch-wheel";
+      }
+      {
+        tool = "pw-cli";
+        name = "cmd-connect-bad";
+      }
+      {
+        tool = "pw-mon";
+        name = "connect-fail";
+      }
+      {
+        tool = "pw-profiler";
+        name = "connect-fail";
+      }
+      {
+        tool = "pw-container";
+        name = "connect-fail";
+      }
+      {
+        tool = "pw-loopback";
+        name = "connect-fail";
+      }
+      {
+        tool = "pw-reserve";
+        name = "no-name";
+      }
+      {
+        tool = "pw-reserve";
+        name = "positional-bad";
+      }
+      {
+        tool = "pw-link";
+        name = "dash-dash-only";
+      }
+      {
+        tool = "pw-link";
+        name = "dash-dash-then-flag";
+      }
+      {
+        tool = "pw-top";
+        name = "dash-dash-only";
+      }
+      {
+        tool = "pw-dot";
+        name = "dash-dash-only";
+      }
+      {
+        tool = "pw-dump";
+        name = "dash-dash-only";
+      }
+      {
+        tool = "pw-metadata";
+        name = "dash-dash-only";
+      }
+      {
+        tool = "pw-link";
+        name = "connect-three-args";
+      }
+      {
+        tool = "pw-link";
+        name = "connect-one-arg";
+      }
+      {
+        tool = "pw-link";
+        name = "disconnect-with-id";
+      }
+      {
+        tool = "pw-link";
+        name = "connect-two-args";
+      }
+      {
+        tool = "pw-mididump";
+        name = "force-midi-bad-value";
+      }
+      {
+        tool = "spa-resample";
+        name = "cluster-hh";
+      }
+      {
+        tool = "spa-resample";
+        name = "double-v";
+      }
+      {
+        tool = "pw-mididump";
+        name = "empty-file";
+      }
+      {
+        tool = "pw-mididump";
+        name = "positional-then-bad";
+      }
+      {
+        tool = "pw-v4l2";
+        name = "missing-arg-r";
+      }
+      {
+        tool = "pw-v4l2";
+        name = "cluster-vh";
+      }
+      {
+        tool = "pw-v4l2";
+        name = "no-args";
+      }
+      {
+        tool = "spa-inspect";
+        name = "help-flag";
+      }
+      {
+        tool = "spa-inspect";
+        name = "two-args";
+      }
+      {
+        tool = "spa-monitor";
+        name = "help-flag";
+      }
+      {
+        tool = "spa-monitor";
+        name = "two-args";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "missing-arg-c";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "missing-arg-p";
+      }
+      {
+        tool = "pw-mididump";
+        name = "sysex";
+      }
+      {
+        tool = "pw-mididump";
+        name = "poly-pressure";
+      }
+      {
+        tool = "pw-mididump";
+        name = "copyright-meta";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "array-mixed";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "empty-object";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "special-keys";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "dash-stdin";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "booleans";
+      }
 
       # --- per-tool --help byte-identical parity ---
       {
@@ -1163,9 +1726,18 @@
         tool = "pw-link";
         name = "all-flags-rich";
       }
-      { tool = "pw-link"; name = "output-verbose-rich"; }
-      { tool = "pw-link"; name = "all-flags-verbose-rich"; }
-      { tool = "pw-link"; name = "input-id-verbose-rich"; }
+      {
+        tool = "pw-link";
+        name = "output-verbose-rich";
+      }
+      {
+        tool = "pw-link";
+        name = "all-flags-verbose-rich";
+      }
+      {
+        tool = "pw-link";
+        name = "input-id-verbose-rich";
+      }
       {
         tool = "pw-link";
         name = "pattern-output-empty";
