@@ -1426,6 +1426,24 @@
       { tool = "pw-cli"; name = "pipewire-remote-bad"; }
       { tool = "pw-cli"; name = "cluster-hxx"; }
       { tool = "pw-cli"; name = "cluster-Vxx"; }
+      { tool = "pw-link"; name = "cluster-hxx"; }
+      { tool = "pw-link"; name = "cluster-Vxx"; }
+      { tool = "pw-mon"; name = "cluster-hxx"; }
+      { tool = "pw-mon"; name = "cluster-Vxx"; }
+      { tool = "pw-dump"; name = "cluster-hxx"; }
+      { tool = "pw-dump"; name = "cluster-Vxx"; }
+      { tool = "pw-dot"; name = "cluster-hxx"; }
+      { tool = "pw-dot"; name = "cluster-Vxx"; }
+      { tool = "pw-metadata"; name = "cluster-hxx"; }
+      { tool = "pw-metadata"; name = "cluster-Vxx"; }
+      { tool = "pw-top"; name = "cluster-hxx"; }
+      { tool = "pw-top"; name = "cluster-Vxx"; }
+      { tool = "pw-profiler"; name = "cluster-hxx"; }
+      { tool = "pw-profiler"; name = "cluster-Vxx"; }
+      { tool = "pw-config"; name = "cluster-hxx"; }
+      { tool = "pw-config"; name = "cluster-Vxx"; }
+      { tool = "pw-mididump"; name = "cluster-hxx"; }
+      { tool = "pw-mididump"; name = "cluster-Vxx"; }
       { tool = "pw-config"; name = "list-empty-no-newline"; }
       {
         tool = "pw-cli";

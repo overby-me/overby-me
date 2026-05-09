@@ -48,20 +48,25 @@ pub fn print_version(argv0: &str) {
 /// Expand short-option clusters like `-hV` → [`-h`, `-V`], emulating
 /// getopt's character-by-character cluster handling.
 ///
-/// Only splits clusters whose every character appears in `no_arg`. If
-/// any character is unknown or required-arg, the cluster is left intact
-/// so the caller can produce the usual error or consume the rest as an
-/// inline value.
+/// Splits the cluster greedily: for each char that's in `no_arg`, emit
+/// `-<char>`. If we encounter a char NOT in `no_arg`, emit `-<char>`
+/// (the caller's match arms will produce the standard "invalid option"
+/// or consume rest as a value) and stop. This lets `-hxx` short-circuit
+/// at -h (which prints help and exits) before -x triggers an error,
+/// matching getopt's processing order.
 pub fn expand_short_clusters(args: &[String], no_arg: &[char]) -> Vec<String> {
     let mut out = Vec::with_capacity(args.len());
     for a in args {
-        if a.len() > 2
-            && a.starts_with('-')
-            && !a.starts_with("--")
-            && a.chars().skip(1).all(|c| no_arg.contains(&c))
-        {
-            for c in a.chars().skip(1) {
+        if a.len() > 2 && a.starts_with('-') && !a.starts_with("--") {
+            let chars: Vec<char> = a.chars().skip(1).collect();
+            for (i, c) in chars.iter().enumerate() {
                 out.push(format!("-{c}"));
+                if !no_arg.contains(c) {
+                    // Stop here; the caller's match handles this char.
+                    // Drop the rest of the cluster.
+                    let _ = i;
+                    break;
+                }
             }
         } else {
             out.push(a.clone());
