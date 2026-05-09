@@ -938,6 +938,10 @@
       { tool = "spa-acp-tool"; name = "verbose-with-arg"; }
       { tool = "spa-resample"; name = "verbose-with-arg"; }
       { tool = "spa-resample"; name = "rate-inline"; }
+      { tool = "pw-mididump"; name = "multi-track"; }
+      { tool = "pw-mididump"; name = "key-signature"; }
+      { tool = "pw-mididump"; name = "smpte-offset"; }
+      { tool = "pw-mididump"; name = "midi-channel-prefix"; }
       { tool = "pw-cli"; name = "cmd-connect-bad"; }
       { tool = "pw-mon"; name = "connect-fail"; }
       { tool = "pw-profiler"; name = "connect-fail"; }
