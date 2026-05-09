@@ -210,6 +210,7 @@
       { tool = "pw-dsdplay"; name = "invalid-V"; }
       { tool = "pw-encplay"; name = "invalid-V"; }
       { tool = "pw-cat"; name = "list-formats"; }
+      { tool = "pw-dot"; name = "empty-json"; }
       { tool = "pw-cat"; name = "list-channel-names"; }
       { tool = "pw-cat"; name = "list-layouts"; }
       { tool = "pw-cat"; name = "list-containers"; }
