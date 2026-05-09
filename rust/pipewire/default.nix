@@ -1391,6 +1391,9 @@
         tool = "pw-mididump";
         name = "pitch-wheel";
       }
+      { tool = "pw-cli"; name = "remote-inline-eq"; }
+      { tool = "pw-cli"; name = "remote-short-eq"; }
+      { tool = "pw-cli"; name = "remote-short-attached"; }
       {
         tool = "pw-cli";
         name = "cmd-connect-bad";

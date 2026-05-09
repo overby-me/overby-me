@@ -69,6 +69,10 @@ pub fn main(raw_args: &[String]) -> i32 {
             s if s.starts_with("--remote=") => {
                 remote = Some(s["--remote=".len()..].to_string());
             }
+            s if s.starts_with("-r") && s.len() > 2 => {
+                // `-r<value>` (no space) — getopt treats rest as inline.
+                remote = Some(s[2..].to_string());
+            }
             "-m" | "--monitor" | "-d" | "--daemon" => {
                 // Flags consumed by the C tool; ignored at this stage.
             }
@@ -106,11 +110,30 @@ pub fn main(raw_args: &[String]) -> i32 {
     }
 
     if positional.is_empty() {
-        // C tool drops into a REPL here. Until we have one, mirror the help
-        // output and exit cleanly so callers don't hang.
-        print_help(argv0);
-        return 0;
+        // C tool drops into a REPL here, attempting an initial connect.
+        // If --remote was given (even with a bad name), the connect
+        // happens before the REPL prompt. Mirror that: try to connect,
+        // emit C's error if it fails. With the default remote name and
+        // no daemon, falls through to the help dump (preserves the
+        // original "no-daemon" sandbox behaviour).
+        if remote.is_some() {
+            match open_client(remote.as_deref(), "pw-cli") {
+                Ok(_) => 0,
+                Err(e) => {
+                    print_open_error(argv0, &e);
+                    1
+                }
+            }
+        } else {
+            print_help(argv0);
+            0
+        }
+    } else {
+        run_positional(argv0, remote, positional)
     }
+}
+
+fn run_positional(argv0: &str, remote: Option<String>, positional: Vec<&str>) -> i32 {
 
     // The C tool joins every positional arg with spaces into a single
     // buffer, then splits on whitespace. So `pw-cli "ls Core"` and
