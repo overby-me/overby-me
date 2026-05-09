@@ -1416,6 +1416,7 @@
       { tool = "pw-link"; name = "props-attached"; }
       { tool = "pw-link"; name = "props-empty"; }
       { tool = "pw-config"; name = "invalid-color"; }
+      { tool = "pw-link"; name = "latency-with-pos"; }
       {
         tool = "pw-cli";
         name = "cmd-connect-bad";
