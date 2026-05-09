@@ -17153,7 +17153,12 @@ fn perl_dollar_anchor(pattern: &str, multiline: bool) -> String {
             // pass through untouched. Skip inside character classes,
             // since `\Z` there is a literal `Z`.
             if !in_class && chars[i + 1] == 'Z' {
-                out.push_str("(?:\\n?\\z)");
+                // `\Z` is zero-width: it matches AT the position
+                // before the final newline (or at end-of-string),
+                // without consuming the `\n`. Use a lookahead so a
+                // preceding `.*` doesn't have to swallow the newline
+                // to satisfy `\Z`. re/regexp tests 1455/1456.
+                out.push_str("(?=\\n?\\z)");
                 i += 2;
                 continue;
             }
