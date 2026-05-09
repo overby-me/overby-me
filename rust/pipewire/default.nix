@@ -508,6 +508,8 @@
       {tool = "pw-cli"; name = "usage-alias-c";}
       {tool = "pw-link"; name = "empty-input";}
       {tool = "pw-link"; name = "latency-only";}
+      {tool = "pw-link"; name = "disconnect-no-args";}
+      {tool = "pw-link"; name = "connect-missing-input";}
       {tool = "pw-link"; name = "empty-output";}
       {tool = "pw-link"; name = "empty-links";}
       {tool = "pw-link"; name = "links-empty-verbose-id";}

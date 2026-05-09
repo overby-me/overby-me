@@ -16,6 +16,7 @@ pub fn main(args: &[String]) -> i32 {
     let mut list_links = false;
     let mut show_id = false;
     let mut verbose = false;
+    let mut disconnect = false;
     let mut remote: Option<String> = None;
     let mut positional: Vec<&str> = Vec::new();
 
@@ -45,9 +46,10 @@ pub fn main(args: &[String]) -> i32 {
                 eprintln!("{argv0}: --remote needs an argument");
                 return 2;
             }
+            "-d" | "--disconnect" => disconnect = true,
             // Flags we don't yet implement; ignore so they don't trip parser.
             "-t" | "--latency" | "-m" | "--monitor" | "-L" | "--linger"
-            | "-P" | "--passive" | "-w" | "--wait" | "-d" | "--disconnect"
+            | "-P" | "--passive" | "-w" | "--wait"
             | "-N" | "--no-colors" => {}
             s if s.starts_with("--props") || s.starts_with("-p") => {
                 // -p / --props=PROPS — skip with optional next arg.
@@ -70,6 +72,27 @@ pub fn main(args: &[String]) -> i32 {
         print_help(argv0);
         return 0;
     }
+
+    // C tool's mode-validation runs after option parsing:
+    //   MODE_DISCONNECT (--disconnect): needs at least one positional
+    //     (link-id or output-port name); empty → error + exit -1.
+    //   MODE_CONNECT (no -i/-o/-l, has positional): needs both output
+    //     and input port names; missing one → error + exit -1.
+    if disconnect && positional.is_empty() {
+        eprintln!("missing link-id or output and input port names to disconnect");
+        return 255;
+    }
+    if !list_inputs
+        && !list_outputs
+        && !list_links
+        && !disconnect
+        && !positional.is_empty()
+        && positional.len() < 2
+    {
+        eprintln!("missing output and input port names to connect");
+        return 255;
+    }
+
     if !list_inputs && !list_outputs && !list_links {
         // Some flags were given (e.g. -t) but no list mode; the C tool
         // walks nothing in MODE_LIST, producing no output. Match that.
