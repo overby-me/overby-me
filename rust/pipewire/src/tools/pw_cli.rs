@@ -179,7 +179,17 @@ fn run_positional(argv0: &str, remote: Option<String>, positional: Vec<&str>) ->
         // quit observable behavior) and return.
         "quit" | "q" => 0,
         "list-vars" | "lv" => run_list_vars(),
-        "list-remotes" | "lr" => run_list_remotes(),
+        "list-remotes" | "lr" => {
+            // C connects on REPL startup before listing remotes;
+            // without daemon → connect-fail.
+            match open_client(remote.as_deref(), "pw-cli") {
+                Ok(_) => run_list_remotes(),
+                Err(e) => {
+                    print_open_error(argv0, &e);
+                    1
+                }
+            }
+        }
         // No-op interactive commands. The C tool's
         // do_connect/do_disconnect/do_switch_remote mutate the REPL's
         // remote table but produce no output in non-interactive mode
