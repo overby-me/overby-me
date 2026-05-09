@@ -6,10 +6,10 @@ aimed at passing the upstream PipeWire test suite.
 
 ## Status
 
-- **270/270 Nix-level tests passing**
-- **39 internal Rust unit tests passing** (POD round-trip, SMF parsing,
+- **303/303 Nix-level tests passing**
+- **43 internal Rust unit tests passing** (POD round-trip, SMF parsing,
   protocol framing, dict encode/decode, JSON formatting, decoders for
-  every Info-event type)
+  every Info-event type, simplified-regex pattern matching for pw-link)
 - **18/18 byte-identical POD encode comparisons** vs the C `spa_pod_builder_*`
   API
 - Native protocol client round-trips with a real C `pipewire` daemon

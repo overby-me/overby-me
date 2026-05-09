@@ -15,7 +15,7 @@ Nix checks comparing rust-pipewire output against the reference C
 
 ## Current Status
 
-**270/270 Nix-level tests passing**, plus 39 internal Rust unit tests:
+**303/303 Nix-level tests passing**, plus 43 internal Rust unit tests:
 
 - 25 byte-identical comparison tests (`spa-json-dump`, every `pw-*`/`pipewire`
   tool's `--help` output)
@@ -584,7 +584,7 @@ rust-pipewire" message and exit 0 (so package install scripts that probe
 | M7 ✓ | +40 daemon-comparison | `pw-cli list-objects` / `info` / `pw-dump` / 12 usage paths byte-match against same daemon (incl. Node/Port/Device with params + state) |
 | M8 ✓ | +30 stub helps | All 35 user-facing tools have byte-identical `--help` / `--version` / `-h` / `-V` parity, including the pw-cat multicall family and the SPA support tools |
 | M9 ✓ | +35 bad-flag/no-args | Every tool's getopt error path matches upstream's exact message and exit code — pw-cat → `invalid option -- 'V'`, pipewire daemons → 234 truncated -EINVAL, pw-v4l2 → BSD-style `illegal option`, spa-acp-tool → both messages |
-| **Now** | **270/270** | Every test passes; every user-facing tool has byte-identical option parity, including every short-alias of pw-cli's commands and rich-daemon variants of every ls/info subtest |
+| **Now** | **303/303** | Every test passes; every user-facing tool has byte-identical option parity, including every short-alias of pw-cli's commands, rich-daemon variants of every ls/info subtest, pattern filtering for pw-link, and mode-error messages (connect/disconnect) |
 | M8 | ~80 | `pw-cli` / `pw-mon` / `pw-link` more commands, full pw-dump info-blocks |
 | M9 | ~180 | Stream API + `pw-cat` for WAV |
 | M10 | ~220 | Daemon hosts C clients |
