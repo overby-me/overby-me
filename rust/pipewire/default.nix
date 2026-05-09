@@ -905,6 +905,8 @@
       { tool = "pw-profiler"; name = "connect-fail"; }
       { tool = "pw-container"; name = "connect-fail"; }
       { tool = "pw-loopback"; name = "connect-fail"; }
+      { tool = "pw-reserve"; name = "no-name"; }
+      { tool = "pw-reserve"; name = "positional-bad"; }
       { tool = "pw-link"; name = "dash-dash-only"; }
       { tool = "pw-link"; name = "dash-dash-then-flag"; }
       { tool = "pw-top"; name = "dash-dash-only"; }

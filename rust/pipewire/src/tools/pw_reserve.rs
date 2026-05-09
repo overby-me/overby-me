@@ -9,8 +9,11 @@ pub fn main(args: &[String]) -> i32 {
     // Tests normalize that path to `TOOL` before diffing.
     let argv0 = args.first().map(String::as_str).unwrap_or("pw-reserve");
 
-    for a in args.iter().skip(1) {
-        match a.as_str() {
+    let mut name: Option<String> = None;
+    let mut i = 1;
+    while i < args.len() {
+        let a = args[i].as_str();
+        match a {
             "-h" | "--help" => {
                 print_help(argv0);
                 return 0;
@@ -29,28 +32,37 @@ pub fn main(args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
-            s if s.starts_with('-')
-                && !matches!(
-                    s,
-                    "-n" | "--name"
-                        | "-a"
-                        | "--appname"
-                        | "-p"
-                        | "--priority"
-                        | "-m"
-                        | "--monitor"
-                        | "-r"
-                        | "--release"
-                ) =>
-            {
+            "-n" | "--name" => {
+                if let Some(v) = args.get(i + 1) {
+                    name = Some(v.clone());
+                    i += 2;
+                    continue;
+                }
+            }
+            s if s.starts_with("--name=") => {
+                name = Some(s["--name=".len()..].to_string());
+            }
+            "-a" | "--appname" | "-p" | "--priority" => {
+                i += 2;
+                continue;
+            }
+            "-m" | "--monitor" | "-r" | "--release" => {}
+            s if s.starts_with('-') => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);
                 return 0;
             }
             _ => {}
         }
+        i += 1;
     }
 
+    // C's pw-reserve checks for a valid name (Audio0, Midi0, Video0, ..)
+    // before doing anything else.
+    if name.is_none() {
+        eprintln!("valid name must be given");
+        return 0;
+    }
     eprintln!("{argv0}: not yet implemented in rust-pipewire");
     1
 }
