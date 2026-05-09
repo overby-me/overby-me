@@ -334,6 +334,10 @@
       {tool = "pw-cli"; name = "info-by-name-Metadata";}
       {tool = "pw-cli"; name = "unknown-command";}
       {tool = "pw-cli"; name = "ls-core-quoted";}
+      {tool = "pw-cli"; name = "bad-flag";}
+      {tool = "pw-link"; name = "bad-flag";}
+      {tool = "pw-metadata"; name = "bad-flag";}
+      {tool = "pw-dump"; name = "bad-flag";}
       {tool = "pw-cli"; name = "help-cmd";}
       {tool = "pw-cli"; name = "list-vars";}
       {tool = "pw-cli"; name = "list-remotes";}

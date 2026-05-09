@@ -55,9 +55,11 @@ pub fn main(args: &[String]) -> i32 {
                 break;
             }
             s if s.starts_with('-') => {
-                // Unrecognized; mirror the C tool's "show help, exit -1".
+                // Unrecognized; mirror getopt_long's "unrecognized option"
+                // message followed by the help dump.
+                eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);
-                return 1;
+                return 0;
             }
             s => positional.push(s),
         }
