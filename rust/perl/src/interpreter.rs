@@ -15901,14 +15901,20 @@ fn validate_conditional_groups(
                 } else {
                     None
                 }
-            } else if chars[cond_start] == '?'
+            } else if (chars[cond_start] == '?'
                 && cond_start + 1 < chars.len()
                 && (chars[cond_start + 1] == '='
                     || chars[cond_start + 1] == '!'
                     || chars[cond_start + 1] == '<'
-                    || chars[cond_start + 1] == '{')
+                    || chars[cond_start + 1] == '{'))
+                || (chars.len() >= cond_start + 7
+                    && chars[cond_start..cond_start + 6].iter().collect::<String>() == "DEFINE"
+                    && chars[cond_start + 6] == ')')
             {
-                None // Skip — handled by rewrite layer.
+                // Lookaround / code conditions handled by rewrite
+                // layer; `(?(DEFINE)...)` is the named-subroutine
+                // container — accept both.
+                None
             } else {
                 let prefix: String = chars[..cond_start].iter().collect();
                 let suffix: String = chars[cond_start..].iter().collect();
@@ -16514,7 +16520,8 @@ fn translate_control_escapes(pattern: &str) -> String {
 
 /// Normalise `\k{NAME}` / `\k'NAME'` named-backref forms to the
 /// angle-bracket form `\k<NAME>` that fancy_regex's parser accepts.
-/// Whitespace inside `\k{ NAME }` is trimmed.
+/// Whitespace inside `\k{ NAME }` is trimmed. Also handles `\g{NAME}`
+/// (named) — but leaves `\g{N}` (numeric) untouched.
 fn normalize_named_backref(pattern: &str) -> String {
     let chars: Vec<char> = pattern.chars().collect();
     let mut out = String::with_capacity(pattern.len());
@@ -16540,6 +16547,40 @@ fn normalize_named_backref(pattern: &str) -> String {
                 out.push_str(&format!("\\k<{name}>"));
                 i = k + 1;
                 continue;
+            }
+        }
+        // `\g{NAME}` → `\k<NAME>` for named, `\g{N}` → `\N` for
+        // numeric (fancy_regex handles bare-digit backrefs but not the
+        // braced `\g{...}` form).
+        if !in_class
+            && c == '\\'
+            && i + 3 < chars.len()
+            && chars[i + 1] == 'g'
+            && chars[i + 2] == '{'
+        {
+            let name_start = i + 3;
+            let mut k = name_start;
+            while k < chars.len() && chars[k] != '}' {
+                k += 1;
+            }
+            if k < chars.len() {
+                let raw: String = chars[name_start..k].iter().collect();
+                let name = raw.trim();
+                let first_meaningful = name.chars().next();
+                let is_numeric =
+                    matches!(first_meaningful, Some('0'..='9') | Some('-') | Some('+'));
+                if name.is_empty() {
+                    // Leave malformed `\g{}` alone — let the engine
+                    // produce its own error.
+                } else if is_numeric {
+                    out.push_str(&format!("\\{name}"));
+                    i = k + 1;
+                    continue;
+                } else {
+                    out.push_str(&format!("\\k<{name}>"));
+                    i = k + 1;
+                    continue;
+                }
             }
         }
         if c == '\\' && i + 1 < chars.len() {
