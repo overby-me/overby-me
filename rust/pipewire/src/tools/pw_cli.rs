@@ -206,6 +206,20 @@ pub fn main(raw_args: &[String]) -> i32 {
             eprintln!("Error: \"{cmd} <factory-name> [<properties>]\"");
             1
         }
+        "create-device" | "cd" | "create-node" | "cn" => {
+            // C connects to the daemon and asks for factory creation.
+            // Without daemon → connect-fail; with daemon and unknown
+            // factory → "remote 0: error id:N seq:N res:-2 ... unknown
+            // factory name <name>" (which we can't replicate without
+            // tracking the daemon's id/seq state).
+            match open_client(remote.as_deref(), "pw-cli") {
+                Ok(_) => 0,
+                Err(e) => {
+                    print_open_error(argv0, &e);
+                    1
+                }
+            }
+        }
         "create-node" | "cn" if rest.is_empty() => {
             eprintln!("Error: \"{cmd} <factory-name> [<properties>]\"");
             1
