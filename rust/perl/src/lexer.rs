@@ -2799,7 +2799,29 @@ impl Lexer {
 
     fn read_substitution(&mut self, subst_token_idx: usize) -> (String, String, String) {
         // s/pattern/replacement/flags
-        // The delimiter can be any non-alphanumeric character
+        // The delimiter can be any non-alphanumeric character. Skip
+        // whitespace and `#`-style comments first so `s # comment\n
+        // /pat/repl/` works (base/lex tests 97-99).
+        loop {
+            while self.pos < self.input.len()
+                && (self.ch() == ' ' || self.ch() == '\t' || self.ch() == '\n')
+            {
+                if self.ch() == '\n' {
+                    self.current_line += 1;
+                }
+                self.pos += 1;
+            }
+            if self.pos < self.input.len() && self.ch() == '#' {
+                let next = self.input.get(self.pos + 1).copied().unwrap_or('\0');
+                if next == ' ' || next == '\t' || next == '\n' || next == '\0' {
+                    while self.pos < self.input.len() && self.ch() != '\n' {
+                        self.pos += 1;
+                    }
+                    continue;
+                }
+            }
+            break;
+        }
         let start_line = self.current_line;
         let open = self.advance();
         let close = Self::find_matching_delim(open);
