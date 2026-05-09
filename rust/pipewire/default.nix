@@ -902,6 +902,9 @@
       { tool = "pw-cli"; name = "info-multi-arg"; }
       { tool = "pw-cli"; name = "destroy-bad"; }
       { tool = "pw-cli"; name = "destroy-alias-bad"; }
+      { tool = "pw-cli"; name = "load-module-bad"; }
+      { tool = "pw-cli"; name = "unload-module-bad"; }
+      { tool = "pw-cli"; name = "um-alias-bad"; }
       { tool = "pw-cli"; name = "cmd-connect-bad"; }
       { tool = "pw-mon"; name = "connect-fail"; }
       { tool = "pw-profiler"; name = "connect-fail"; }

@@ -167,9 +167,40 @@ pub fn main(raw_args: &[String]) -> i32 {
             eprintln!("Error: \"{cmd} <module-name> [<module-arguments>]\"");
             1
         }
+        "load-module" | "lm" => {
+            // C calls pw_module_load which first connects to the daemon.
+            // Without daemon → "failed to connect: Host is down".
+            // With daemon but unknown module → "Could not load module".
+            match open_client(remote.as_deref(), "pw-cli") {
+                Ok(_) => {
+                    eprintln!("Error: \"Could not load module\"");
+                    1
+                }
+                Err(e) => {
+                    print_open_error(argv0, &e);
+                    1
+                }
+            }
+        }
         "unload-module" | "um" if rest.is_empty() => {
             eprintln!("Error: \"{cmd} <module-var>\"");
             1
+        }
+        "unload-module" | "um" => {
+            // C unload-module also goes through the daemon connection
+            // first. Without daemon → connect-fail; with daemon and
+            // unknown module → "<cmd>: unknown module '<name>'".
+            match open_client(remote.as_deref(), "pw-cli") {
+                Ok(_) => {
+                    let target = rest.join(" ");
+                    eprintln!("Error: \"{cmd}: unknown module '{target}'\"");
+                    0
+                }
+                Err(e) => {
+                    print_open_error(argv0, &e);
+                    1
+                }
+            }
         }
         "create-device" | "cd" if rest.is_empty() => {
             eprintln!("Error: \"{cmd} <factory-name> [<properties>]\"");
