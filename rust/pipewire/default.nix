@@ -185,6 +185,7 @@
       { tool = "pipewire-avb"; name = "version"; }
       { tool = "pipewire-vulkan"; name = "help"; }
       { tool = "pipewire-vulkan"; name = "version"; }
+      { tool = "spa-resample"; name = "help"; }
       { tool = "pw-cli"; name = "version-short"; }
       { tool = "pw-mon"; name = "version-short"; }
       { tool = "pw-link"; name = "version-short"; }

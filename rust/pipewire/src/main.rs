@@ -23,6 +23,7 @@ fn dispatch(name: &str, args: &[String]) -> i32 {
     match name {
         // SPA tools
         "spa-json-dump" => spa_tools::spa_json_dump::main(args),
+        "spa-resample" => spa_tools::spa_resample::main(args),
 
         // PipeWire tools — full help-output parity, real behavior follows.
         "pw-cli" => tools::pw_cli::main(args),
@@ -59,7 +60,7 @@ fn dispatch(name: &str, args: &[String]) -> i32 {
         "pw-container" => tools::pw_container::main(args),
 
         "pw-loopback" | "pw-v4l2" | "spa-inspect" | "spa-monitor"
-        | "spa-acp-tool" | "spa-resample" => stub_main(name, args),
+        | "spa-acp-tool" => stub_main(name, args),
 
         "rust-pipewire" => {
             eprintln!(
