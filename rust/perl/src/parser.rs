@@ -2753,6 +2753,19 @@ impl Parser {
                 // Bare s/// applies to $_
                 Expr::Substitution(Box::new(Expr::ScalarVar("_".to_string())), pat, repl, flags)
             }
+            Token::Transliterate(from, to, flags) => {
+                self.pos += 1;
+                // Bare tr/// (and y///) applies to $_.
+                Expr::Call(
+                    "_tr_apply".to_string(),
+                    vec![
+                        Expr::ScalarVar("_".to_string()),
+                        Expr::StringLit(from),
+                        Expr::StringLit(to),
+                        Expr::StringLit(flags),
+                    ],
+                )
+            }
             Token::QW(words) => {
                 self.pos += 1;
                 Expr::QW(words)
