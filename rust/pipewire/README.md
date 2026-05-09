@@ -6,9 +6,7 @@ aimed at passing the upstream PipeWire test suite.
 
 ## Status
 
-- **75/79 Nix-level tests passing** (the 4 still-failing SMF tests have a
-  null-byte / shell-quoting issue in their fixtures, unrelated to the
-  parser)
+- **186/186 Nix-level tests passing**
 - **39 internal Rust unit tests passing** (POD round-trip, SMF parsing,
   protocol framing, dict encode/decode, JSON formatting, decoders for
   every Info-event type)

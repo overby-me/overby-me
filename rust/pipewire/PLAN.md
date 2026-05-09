@@ -15,7 +15,7 @@ Nix checks comparing rust-pipewire output against the reference C
 
 ## Current Status
 
-**75/79 Nix-level tests passing**, plus 39 internal Rust unit tests:
+**186/186 Nix-level tests passing**, plus 39 internal Rust unit tests:
 
 - 25 byte-identical comparison tests (`spa-json-dump`, every `pw-*`/`pipewire`
   tool's `--help` output)
@@ -582,7 +582,8 @@ rust-pipewire" message and exit 0 (so package install scripts that probe
 | M5 ✓ | +1 POD | POD encoder byte-compatible with libspa (18 sub-cases) |
 | M6 ✓ | +1 daemon | Native protocol client round-trips with live C daemon |
 | M7 ✓ | +40 daemon-comparison | `pw-cli list-objects` / `info` / `pw-dump` / 12 usage paths byte-match against same daemon (incl. Node/Port/Device with params + state) |
-| **Now** | **75/79** | All of the above (4 SMF tests have pre-existing fixture quoting issues) |
+| M8 ✓ | +30 stub helps | All 35 user-facing tools have byte-identical `--help` / `--version` / `-h` / `-V` parity, including the pw-cat multicall family and the SPA support tools |
+| **Now** | **186/186** | All of the above; every SMF fixture test fixed |
 | M8 | ~80 | `pw-cli` / `pw-mon` / `pw-link` more commands, full pw-dump info-blocks |
 | M9 | ~180 | Stream API + `pw-cat` for WAV |
 | M10 | ~220 | Daemon hosts C clients |
