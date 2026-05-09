@@ -13,6 +13,7 @@ pub mod pw_mon;
 pub mod pw_profiler;
 pub mod pw_reserve;
 pub mod pw_top;
+pub mod pw_v4l2;
 
 pub mod pod_test_helper;
 pub mod proto_test_helper;

@@ -186,6 +186,9 @@
       { tool = "pipewire-vulkan"; name = "help"; }
       { tool = "pipewire-vulkan"; name = "version"; }
       { tool = "spa-resample"; name = "help"; }
+      { tool = "pw-v4l2"; name = "help"; }
+      { tool = "spa-inspect"; name = "usage"; }
+      { tool = "spa-monitor"; name = "usage"; }
       { tool = "pw-cli"; name = "version-short"; }
       { tool = "pw-mon"; name = "version-short"; }
       { tool = "pw-link"; name = "version-short"; }
