@@ -197,6 +197,16 @@
       { tool = "pw-sysex"; name = "no-args"; }
       { tool = "pw-dsdplay"; name = "no-args"; }
       { tool = "pw-encplay"; name = "no-args"; }
+      { tool = "pw-cat"; name = "bad-flag"; }
+      { tool = "pw-play"; name = "bad-flag"; }
+      { tool = "pw-record"; name = "bad-flag"; }
+      { tool = "pw-midiplay"; name = "bad-flag"; }
+      { tool = "pw-midirecord"; name = "bad-flag"; }
+      { tool = "pw-midi2play"; name = "bad-flag"; }
+      { tool = "pw-midi2record"; name = "bad-flag"; }
+      { tool = "pw-sysex"; name = "bad-flag"; }
+      { tool = "pw-dsdplay"; name = "bad-flag"; }
+      { tool = "pw-encplay"; name = "bad-flag"; }
       { tool = "pw-cat"; name = "help-short"; }
       { tool = "pw-play"; name = "help-short"; }
       { tool = "pw-record"; name = "help-short"; }
