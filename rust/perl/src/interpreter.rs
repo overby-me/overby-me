@@ -16785,6 +16785,9 @@ fn translate_perl_whitespace_escapes(pattern: &str) -> String {
                 }
             } else {
                 // Inside `[...]`: splice the char-set body inline.
+                // `\V`/`\H` need negation: insert the *positive*
+                // body since negating inside a class doesn't compose
+                // (would need a nested class or alternation).
                 match nxt {
                     'v' => {
                         out.push_str(VWS);
@@ -16796,7 +16799,7 @@ fn translate_perl_whitespace_escapes(pattern: &str) -> String {
                         i += 2;
                         continue;
                     }
-                    // `\R`/`\V`/`\H` inside class are unusual; pass through.
+                    // `\R` inside class is unusual; pass through.
                     _ => {}
                 }
             }
@@ -17543,17 +17546,15 @@ fn perl_dollar_anchor(pattern: &str, multiline: bool) -> String {
             continue;
         }
         if !in_class && c == '$' {
-            // Look at the next non-`\\` char (if any). If it's end-of-
-            // pattern, `|`, or `)`, treat as Perl end-of-line.
+            // `$` is always an anchor in a parsed regex pattern (any
+            // variable interpolation has already happened). Translate
+            // to a zero-width lookahead `(?=\n?\z)` so a following
+            // pattern atom (e.g. `\n` literal) can still consume the
+            // newline. re/regexp tests 1463-1467.
             let next = chars.get(i + 1).copied();
-            let is_anchor = match next {
-                None => true,
-                Some('|') => true,
-                Some(')') => true,
-                _ => false,
-            };
-            if is_anchor {
-                out.push_str("(?:\\n?$)");
+            let is_quantifier = matches!(next, Some('?') | Some('+') | Some('*') | Some('{'));
+            if !is_quantifier {
+                out.push_str("(?=\\n?\\z)");
                 i += 1;
                 continue;
             }
