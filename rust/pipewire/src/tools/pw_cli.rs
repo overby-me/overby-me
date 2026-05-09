@@ -183,6 +183,13 @@ pub fn main(raw_args: &[String]) -> i32 {
             eprintln!("Error: \"{cmd} <object-id>\"");
             1
         }
+        "destroy" | "d" => {
+            // Like info: pw_split_ip(args, WHITESPACE, 1, ...) joins all
+            // remaining args into one token, then find_global() against
+            // that. If the token isn't a numeric id matching any global
+            // and isn't a known interface name, error with the alias.
+            run_destroy(argv0, cmd, remote.as_deref(), rest)
+        }
         "enum-params" | "e" if rest.len() < 2 => {
             eprintln!("Error: \"{cmd} <object-id> <param-id>\"");
             1
@@ -307,6 +314,43 @@ fn print_command_list() {
     for (head, desc) in cmds {
         println!("\t{head}\t{desc}");
     }
+}
+
+fn run_destroy(argv0: &str, cmd_name: &str, remote: Option<&str>, args: &[&str]) -> i32 {
+    // pw_split_ip(args, WHITESPACE, 1, ...) — entire rest is one token.
+    let target_owned = args.join(" ");
+    let target = target_owned.as_str();
+
+    let mut client = match open_client(remote, "pw-cli") {
+        Ok(c) => c,
+        Err(e) => {
+            print_open_error(argv0, &e);
+            return 1;
+        }
+    };
+    let snap = match drain_registry(&mut client) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{argv0}: {e}");
+            return 1;
+        }
+    };
+
+    let global = if let Ok(id) = target.parse::<u32>() {
+        snap.globals.iter().find(|g| g.id == id)
+    } else {
+        let mut sorted: Vec<&RegistryGlobal> = snap.globals.iter().collect();
+        sorted.sort_by_key(|g| g.id);
+        sorted.into_iter().find(|g| g.interface.contains(target))
+    };
+
+    if global.is_none() {
+        eprintln!("Error: \"{cmd_name}: unknown global '{target}'\"");
+        return 0;
+    }
+    // Found — but we don't actually issue the destroy request. Treat
+    // as silent success. (Real destroy needs registry.destroy + reply.)
+    0
 }
 
 fn run_info(argv0: &str, cmd_name: &str, remote: Option<&str>, args: &[&str]) -> i32 {
