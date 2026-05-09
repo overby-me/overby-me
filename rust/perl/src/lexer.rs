@@ -2454,8 +2454,20 @@ impl Lexer {
                         self.pos += 1;
                     }
                     _ => {
-                        s.push('\\');
-                        s.push(self.ch());
+                        // Unrecognised escape: Perl emits an
+                        // "Unrecognized escape \X passed through"
+                        // warning and drops the backslash for
+                        // non-alphabetic characters (`"\{"` → `{`).
+                        // For alphabetic escapes we preserve `\X`
+                        // so case-conversion / quotemeta sentinels
+                        // we haven't covered yet (`\F`, `\a` already
+                        // handled above) still see them.
+                        if self.ch().is_ascii_alphabetic() {
+                            s.push('\\');
+                            s.push(self.ch());
+                        } else {
+                            s.push(self.ch());
+                        }
                         self.pos += 1;
                     }
                 }
@@ -3583,8 +3595,19 @@ fn process_escapes(s: &str) -> String {
                     continue;
                 }
                 _ => {
-                    result.push('\\');
-                    result.push(chars[i]);
+                    // Unrecognised escape: Perl emits a "Unrecognized
+                    // escape \X passed through" warning and drops the
+                    // backslash for non-alphabetic characters
+                    // (`"\{"` → `{`, `"\("` → `(`, etc.). For
+                    // alphabetic escapes we preserve `\X` so later
+                    // processing (case-conversion `\l`/`\u`/`\L`/`\U`/
+                    // `\E`, quotemeta `\Q…\E`, etc.) still sees them.
+                    if chars[i].is_ascii_alphabetic() {
+                        result.push('\\');
+                        result.push(chars[i]);
+                    } else {
+                        result.push(chars[i]);
+                    }
                 }
             }
         } else {
