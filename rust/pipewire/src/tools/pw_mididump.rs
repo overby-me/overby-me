@@ -84,7 +84,11 @@ pub fn main(raw_args: &[String]) -> i32 {
                 // fails with "Invalid argument" because "-" isn't a real
                 // path on disk). C's getopt permutes argv so options
                 // after positionals are still processed; we don't break.
-                filename = Some(s.to_string());
+                // Only the FIRST positional is the filename — later ones
+                // are silently ignored.
+                if filename.is_none() {
+                    filename = Some(s.to_string());
+                }
             }
             s => {
                 eprintln!("{argv0}: unrecognized option '{s}'");

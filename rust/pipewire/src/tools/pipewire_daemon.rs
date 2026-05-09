@@ -43,9 +43,23 @@ pub fn main(args: &[String]) -> i32 {
             eprintln!("{argv0}: not yet implemented in rust-pipewire");
             1
         }
+        // Inline-value forms for required-arg flags.
+        Some(s) if s.starts_with("--config=") || s.starts_with("--properties=") => {
+            eprintln!("{argv0}: not yet implemented in rust-pipewire");
+            1
+        }
         Some(s) if s.starts_with("--") => {
             eprintln!("{argv0}: unrecognized option '{s}'");
             234
+        }
+        Some(s) if s.starts_with("-c") && s.len() > 2 => {
+            // -cfoo (attached value)
+            eprintln!("{argv0}: not yet implemented in rust-pipewire");
+            1
+        }
+        Some(s) if s.starts_with("-P") && s.len() > 2 => {
+            eprintln!("{argv0}: not yet implemented in rust-pipewire");
+            1
         }
         Some(s) if s.starts_with('-') && s.len() == 2 => {
             let ch = s.chars().nth(1).unwrap_or('?');

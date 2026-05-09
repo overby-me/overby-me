@@ -1402,6 +1402,7 @@
       { tool = "pw-cli"; name = "help-with-bad-remote"; }
       { tool = "spa-acp-tool"; name = "cluster-hv"; }
       { tool = "pw-cat"; name = "dash-dash-only"; }
+      { tool = "pw-mididump"; name = "multi-positional"; }
       {
         tool = "pw-cli";
         name = "cmd-connect-bad";
