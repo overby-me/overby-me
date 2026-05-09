@@ -11638,6 +11638,7 @@ impl Interpreter {
         let pattern = strip_unicode_boundary_types(&pattern);
         let pattern = translate_octal_escapes(&pattern);
         let pattern = escape_literal_bracket_in_class(&pattern);
+        let pattern = rewrite_nonexistent_group_conditionals(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -11827,6 +11828,7 @@ impl Interpreter {
         let pattern = strip_unicode_boundary_types(&pattern);
         let pattern = translate_octal_escapes(&pattern);
         let pattern = escape_literal_bracket_in_class(&pattern);
+        let pattern = rewrite_nonexistent_group_conditionals(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -16293,6 +16295,110 @@ fn strip_regex_comments(pattern: &str) -> String {
             continue;
         }
         out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Resolve `(?(N)yes|no)` conditional groups when N exceeds the
+/// pattern's capturing-group count: replace with the false-branch
+/// (or empty `(?:)` if there's no false branch). Reference perl
+/// treats a backref to a nonexistent group as a false condition;
+/// fancy_regex treats it as TRUE, so without this rewrite tests
+/// like `(?(1)a|b):a:n:-:-` (re/regexp test 608) wrongly match.
+fn rewrite_nonexistent_group_conditionals(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    // Count capturing groups, skipping over `(?(N)` conditional
+    // introducers (the inner `(N)` is part of the syntax, not a
+    // capturing group).
+    let mut total_groups: usize = 0;
+    let mut j = 0;
+    while j < chars.len() {
+        if chars[j] == '\\' {
+            j += 2;
+            continue;
+        }
+        // Skip past `(?(N)` — those 5+ chars don't introduce a group.
+        if j + 3 < chars.len()
+            && chars[j] == '('
+            && chars[j + 1] == '?'
+            && chars[j + 2] == '('
+        {
+            // Skip past the inner `(...)` by seeking matching `)`.
+            let mut k = j + 3;
+            while k < chars.len() && chars[k] != ')' {
+                k += 1;
+            }
+            // Now at the closing `)` of the conditional name, advance.
+            j = k.saturating_add(1);
+            continue;
+        }
+        if chars[j] == '(' && !(j + 1 < chars.len() && chars[j + 1] == '?') {
+            total_groups += 1;
+        }
+        j += 1;
+    }
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            out.push(chars[i]);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if i + 3 < chars.len()
+            && chars[i] == '('
+            && chars[i + 1] == '?'
+            && chars[i + 2] == '('
+            && chars[i + 3].is_ascii_digit()
+        {
+            let digits_start = i + 3;
+            let mut k = digits_start;
+            while k < chars.len() && chars[k].is_ascii_digit() {
+                k += 1;
+            }
+            let n: usize = chars[digits_start..k]
+                .iter()
+                .collect::<String>()
+                .parse()
+                .unwrap_or(0);
+            if k < chars.len() && chars[k] == ')' {
+                let body_start = k + 1;
+                let mut depth = 1;
+                let mut alt_pos: Option<usize> = None;
+                let mut p = body_start;
+                while p < chars.len() && depth > 0 {
+                    if chars[p] == '\\' {
+                        p += 2;
+                        continue;
+                    }
+                    if chars[p] == '(' {
+                        depth += 1;
+                    } else if chars[p] == ')' {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    } else if chars[p] == '|' && depth == 1 && alt_pos.is_none() {
+                        alt_pos = Some(p);
+                    }
+                    p += 1;
+                }
+                if depth == 0 && (n == 0 || n > total_groups) {
+                    let replacement: String = if let Some(alt) = alt_pos {
+                        let no_branch: String = chars[alt + 1..p].iter().collect();
+                        format!("(?:{no_branch})")
+                    } else {
+                        "(?:)".to_string()
+                    };
+                    out.push_str(&replacement);
+                    i = p + 1;
+                    continue;
+                }
+            }
+        }
+        out.push(chars[i]);
         i += 1;
     }
     out
