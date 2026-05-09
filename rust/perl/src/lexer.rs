@@ -2777,11 +2777,53 @@ impl Lexer {
             // Only neutralise `$VAR` and `@VAR` interpolation; bare
             // `$` / `@` (regex anchor / array context) and backslash
             // escapes (`\d`, `\w`, …) remain meaningful as Perl expects.
+            // `(?{...})` / `(??{...})` code-block bodies are passed
+            // through untouched — they are evaluated as Perl source
+            // post-match and need their `$x` references intact.
             let chars: Vec<char> = raw_pat.chars().collect();
             let mut out = String::with_capacity(raw_pat.len());
             let mut i = 0;
             while i < chars.len() {
                 let c = chars[i];
+                // Skip `(?{...})` / `(??{...})` body verbatim.
+                if c == '('
+                    && i + 2 < chars.len()
+                    && chars[i + 1] == '?'
+                    && (chars[i + 2] == '{'
+                        || (chars[i + 2] == '?'
+                            && i + 3 < chars.len()
+                            && chars[i + 3] == '{'))
+                {
+                    let body_open = if chars[i + 2] == '?' { i + 3 } else { i + 2 };
+                    let mut depth = 1;
+                    let mut j = body_open + 1;
+                    while j < chars.len() && depth > 0 {
+                        if chars[j] == '\\' && j + 1 < chars.len() {
+                            j += 2;
+                            continue;
+                        }
+                        if chars[j] == '{' {
+                            depth += 1;
+                        } else if chars[j] == '}' {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        j += 1;
+                    }
+                    let after = if j + 1 < chars.len() && chars[j + 1] == ')' {
+                        j + 2
+                    } else if j < chars.len() {
+                        j + 1
+                    } else {
+                        chars.len()
+                    };
+                    let chunk: String = chars[i..after].iter().collect();
+                    out.push_str(&chunk);
+                    i = after;
+                    continue;
+                }
                 if (c == '$' || c == '@')
                     && i + 1 < chars.len()
                     && (chars[i + 1] == '_'

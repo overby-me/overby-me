@@ -11472,6 +11472,49 @@ impl Interpreter {
         let mut in_q = false;
         while i < chars.len() {
             let c = chars[i];
+            // Skip past `(?{...})` and `(??{...})` regex code blocks so
+            // their Perl-source body isn't variable-interpolated. The
+            // body is evaluated *after* the regex matches; preserving
+            // it as-is lets the eval see the runtime values.
+            if c == '('
+                && i + 2 < chars.len()
+                && chars[i + 1] == '?'
+                && (chars[i + 2] == '{'
+                    || (chars[i + 2] == '?' && i + 3 < chars.len() && chars[i + 3] == '{'))
+            {
+                let body_open = if chars[i + 2] == '?' { i + 3 } else { i + 2 };
+                let mut depth = 1;
+                let mut j = body_open + 1;
+                while j < chars.len() && depth > 0 {
+                    if chars[j] == '\\' && j + 1 < chars.len() {
+                        j += 2;
+                        continue;
+                    }
+                    if chars[j] == '{' {
+                        depth += 1;
+                    } else if chars[j] == '}' {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    j += 1;
+                }
+                // After the `}` we expect `)` to close the construct.
+                // Guard against truncated input (no matching `)` left).
+                let close = if j + 1 < chars.len() && chars[j + 1] == ')' {
+                    j + 1
+                } else if j < chars.len() {
+                    j
+                } else {
+                    chars.len() - 1
+                };
+                let end_excl = (close + 1).min(chars.len());
+                let chunk: String = chars[i..end_excl].iter().collect();
+                out.push_str(&chunk);
+                i = end_excl;
+                continue;
+            }
             if c == '\\' && i + 1 < chars.len() {
                 let nxt = chars[i + 1];
                 if nxt == 'Q' {
