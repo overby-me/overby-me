@@ -1,9 +1,10 @@
 // pw-top: real-time PipeWire performance viewer.
 
-use crate::tools::common::print_version;
+use crate::tools::common::{expand_short_clusters, print_version};
 
-pub fn main(args: &[String]) -> i32 {
-    let argv0 = args.first().map(String::as_str).unwrap_or("pw-top");
+pub fn main(raw_args: &[String]) -> i32 {
+    let argv0 = raw_args.first().map(String::as_str).unwrap_or("pw-top");
+    let args = expand_short_clusters(raw_args, &['h', 'V', 'b']);
     let mut i = 1;
     while i < args.len() {
         let a = args[i].as_str();

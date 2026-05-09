@@ -822,6 +822,18 @@
       { tool = "pw-cat"; name = "missing-arg-media-type"; }
       { tool = "pw-cat"; name = "playback-no-file"; }
       { tool = "pw-cat"; name = "record-no-file"; }
+      { tool = "pw-cli"; name = "cluster-hV"; }
+      { tool = "pw-mon"; name = "cluster-hV"; }
+      { tool = "pw-link"; name = "cluster-hV"; }
+      { tool = "pw-top"; name = "cluster-hV"; }
+      { tool = "pw-dump"; name = "cluster-hV"; }
+      { tool = "pw-dot"; name = "cluster-hV"; }
+      { tool = "pw-metadata"; name = "cluster-hV"; }
+      { tool = "pw-profiler"; name = "cluster-hV"; }
+      { tool = "pw-config"; name = "cluster-hV"; }
+      { tool = "pw-mididump"; name = "cluster-hV"; }
+      { tool = "pw-cat"; name = "cluster-hp"; }
+      { tool = "pw-cat"; name = "cluster-Vh"; }
 
       # --- per-tool --help byte-identical parity ---
       {

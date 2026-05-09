@@ -1,9 +1,10 @@
 // pw-profiler: collect profiler events.
 
-use crate::tools::common::print_version;
+use crate::tools::common::{expand_short_clusters, print_version};
 
-pub fn main(args: &[String]) -> i32 {
-    let argv0 = args.first().map(String::as_str).unwrap_or("pw-profiler");
+pub fn main(raw_args: &[String]) -> i32 {
+    let argv0 = raw_args.first().map(String::as_str).unwrap_or("pw-profiler");
+    let args = expand_short_clusters(raw_args, &['h', 'V', 'J']);
     match args.get(1).map(String::as_str) {
         Some("-h") | Some("--help") => {
             print_help(argv0);

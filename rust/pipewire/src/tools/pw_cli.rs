@@ -14,9 +14,11 @@ use crate::pipewire_lib::client::{
 };
 use crate::pipewire_lib::interfaces;
 use crate::pipewire_lib::version::PIPEWIRE_API_VERSION;
+use crate::tools::common::expand_short_clusters;
 
-pub fn main(args: &[String]) -> i32 {
-    let argv0 = args.first().map(String::as_str).unwrap_or("pw-cli");
+pub fn main(raw_args: &[String]) -> i32 {
+    let argv0 = raw_args.first().map(String::as_str).unwrap_or("pw-cli");
+    let args = expand_short_clusters(raw_args, &['h', 'V', 'm', 'd']);
     let mut remote: Option<String> = None;
     let mut positional: Vec<&str> = Vec::new();
     let mut i = 1;

@@ -1,9 +1,15 @@
 // pw-mon: PipeWire registry monitor.
 
-use crate::tools::common::print_version;
+use crate::tools::common::{expand_short_clusters, print_version};
 
-pub fn main(args: &[String]) -> i32 {
-    let argv0 = args.first().map(String::as_str).unwrap_or("pw-mon");
+pub fn main(raw_args: &[String]) -> i32 {
+    let argv0 = raw_args.first().map(String::as_str).unwrap_or("pw-mon");
+    // Expand `-hV` / `-Vh` etc. into separate flags so getopt-cluster
+    // semantics match the C tool.
+    let args = expand_short_clusters(
+        raw_args,
+        &['h', 'V', 'N', 'o', 'a', 'p'],
+    );
     let mut i = 1;
     while i < args.len() {
         let a = args[i].as_str();

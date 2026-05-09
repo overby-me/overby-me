@@ -6,10 +6,15 @@
 
 use crate::pipewire_lib::client::{Client, RegistryGlobal};
 use crate::pipewire_lib::interfaces;
-use crate::tools::common::print_version;
+use crate::tools::common::{expand_short_clusters, print_version};
 
-pub fn main(args: &[String]) -> i32 {
-    let argv0 = args.first().map(String::as_str).unwrap_or("pw-link");
+pub fn main(raw_args: &[String]) -> i32 {
+    let argv0 = raw_args.first().map(String::as_str).unwrap_or("pw-link");
+    // Expand short clusters like `-hV`, `-iol`, `-ioI` etc.
+    let args = expand_short_clusters(
+        raw_args,
+        &['h', 'V', 'd', 'i', 'o', 'l', 'm', 'I', 'v', 'L', 'P', 'w', 't', 'N'],
+    );
 
     let mut list_inputs = false;
     let mut list_outputs = false;

@@ -5,14 +5,19 @@
 // Phase 8 will implement actual capture/playback. For now we just emit
 // the help text byte-identical to upstream so installers and probes work.
 
-use crate::tools::common::print_version;
+use crate::tools::common::{expand_short_clusters, print_version};
 
-pub fn main(args: &[String]) -> i32 {
+pub fn main(raw_args: &[String]) -> i32 {
     // C's pw-cat basenames argv[0] for `prog` (used in the help text),
     // but uses the raw argv[0] (full path) in getopt's error messages.
-    let raw0 = args.first().map(String::as_str).unwrap_or("pw-cat");
+    let raw0 = raw_args.first().map(String::as_str).unwrap_or("pw-cat");
     let argv0 = raw0.rsplit('/').next().unwrap_or("pw-cat");
     let getopt_argv0 = raw0;
+    // Per OPTIONS = "hvprmdsR:P:q:aM:n:c": these short flags take no arg.
+    let args = expand_short_clusters(
+        raw_args,
+        &['h', 'v', 'p', 'r', 'm', 'd', 's', 'a', 'c', 'o'],
+    );
 
     // Short required-argument flags per OPTIONS = "hvprmdsR:P:q:aM:n:c"
     // (the `:`-marked entries).

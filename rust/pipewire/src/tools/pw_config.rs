@@ -2,13 +2,14 @@
 
 use crate::pipewire_lib::conf;
 use crate::pipewire_lib::properties::{Properties, SerializeFlags};
-use crate::tools::common::print_version;
+use crate::tools::common::{expand_short_clusters, print_version};
 
 const DEFAULT_NAME: &str = "pipewire.conf";
 const DEFAULT_PREFIX: &str = "";
 
-pub fn main(args: &[String]) -> i32 {
-    let argv0 = args.first().map(String::as_str).unwrap_or("pw-config");
+pub fn main(raw_args: &[String]) -> i32 {
+    let argv0 = raw_args.first().map(String::as_str).unwrap_or("pw-config");
+    let args = expand_short_clusters(raw_args, &['h', 'V', 'r', 'L', 'N', 'n']);
 
     let mut opt_name = DEFAULT_NAME.to_string();
     let mut opt_prefix: String = DEFAULT_PREFIX.into();

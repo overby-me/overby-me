@@ -1,9 +1,10 @@
 // pw-dot: dump the PipeWire graph as graphviz.
 
-use crate::tools::common::print_version;
+use crate::tools::common::{expand_short_clusters, print_version};
 
-pub fn main(args: &[String]) -> i32 {
-    let argv0 = args.first().map(String::as_str).unwrap_or("pw-dot");
+pub fn main(raw_args: &[String]) -> i32 {
+    let argv0 = raw_args.first().map(String::as_str).unwrap_or("pw-dot");
+    let args = expand_short_clusters(raw_args, &['h', 'V', 'a', 's', 'd', 'L', '9']);
     let mut output: Option<String> = None;
     let mut json_input: Option<String> = None;
     let mut i = 1;
