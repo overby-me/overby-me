@@ -9,7 +9,7 @@ const DEFAULT_PREFIX: &str = "";
 
 pub fn main(raw_args: &[String]) -> i32 {
     let argv0 = raw_args.first().map(String::as_str).unwrap_or("pw-config");
-    let args = expand_short_clusters(raw_args, &['h', 'V', 'r', 'L', 'N', 'n']);
+    let args = expand_short_clusters(raw_args, &['h', 'V', 'r', 'L', 'N', 'C']);
 
     let mut opt_name = DEFAULT_NAME.to_string();
     let mut opt_prefix: String = DEFAULT_PREFIX.into();
@@ -94,7 +94,12 @@ pub fn main(raw_args: &[String]) -> i32 {
                 // Color output is already off by default in non-tty mode.
             }
             s if s.starts_with("--color=") => {
-                // We don't emit color codes regardless of the value.
+                let val = &s["--color=".len()..];
+                if !matches!(val, "" | "never" | "always" | "auto") {
+                    eprintln!("Unknown color: {val}");
+                    print_help(argv0);
+                    return u8::MAX as i32;
+                }
             }
             s if !s.starts_with('-') => {
                 if command == "paths" && !command_set(&mut command, s) {

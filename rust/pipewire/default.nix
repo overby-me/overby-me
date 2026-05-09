@@ -1415,6 +1415,7 @@
       { tool = "spa-acp-tool"; name = "unknown-cmd"; }
       { tool = "pw-link"; name = "props-attached"; }
       { tool = "pw-link"; name = "props-empty"; }
+      { tool = "pw-config"; name = "invalid-color"; }
       {
         tool = "pw-cli";
         name = "cmd-connect-bad";
