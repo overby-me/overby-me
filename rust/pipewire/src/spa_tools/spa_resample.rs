@@ -15,6 +15,12 @@ pub fn main(args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
+            s if s.starts_with("--help=") => {
+                eprintln!("{argv0}: option '--help' doesn't allow an argument");
+                eprintln!("error: unknown option '?'");
+                print_help(argv0);
+                return 1;
+            }
             "-v" | "--verbose" => {
                 consumed_flags += 1;
                 i += 1;

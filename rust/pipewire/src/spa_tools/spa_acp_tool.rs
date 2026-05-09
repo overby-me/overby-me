@@ -11,6 +11,14 @@ pub fn main(args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
+            s if s.starts_with("--help=") => {
+                eprintln!("{argv0}: option '--help' doesn't allow an argument");
+                eprintln!("error: unknown option '?'");
+                print_options(argv0);
+                println!("Available commands:");
+                print_commands();
+                return 0;
+            }
             // spa-acp-tool's getopt has no --version or -V — both fall
             // through to the unrecognized-option branch.
             // Long unknown:

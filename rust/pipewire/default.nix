@@ -890,6 +890,9 @@
       { tool = "pipewire-avb"; name = "version-with-arg"; }
       { tool = "pipewire-vulkan"; name = "help-with-arg"; }
       { tool = "pipewire-vulkan"; name = "version-with-arg"; }
+      { tool = "spa-json-dump"; name = "help-with-arg"; }
+      { tool = "spa-acp-tool"; name = "help-with-arg"; }
+      { tool = "spa-resample"; name = "help-with-arg"; }
 
       # --- per-tool --help byte-identical parity ---
       {
