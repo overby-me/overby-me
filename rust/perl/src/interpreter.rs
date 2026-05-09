@@ -15175,6 +15175,16 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
         ));
     }
     if depth > 0 {
+        // If the LAST unmatched `(` is part of a `(?#…` regex
+        // comment that was never closed, reference perl reports
+        // "Sequence (?#... not terminated".
+        if let Some(&last) = unmatched_starts.last()
+            && last + 2 < chars.len()
+            && chars[last + 1] == '?'
+            && chars[last + 2] == '#'
+        {
+            return Some("Sequence (?#... not terminated".to_string());
+        }
         // If the LAST unmatched `(` is part of a `(?{…` code-block
         // form, reference perl reports "Missing right curly or
         // square bracket" — the missing `}` closing the code body.
