@@ -11630,6 +11630,10 @@ impl Interpreter {
         let (pattern, flags) = unwrap_qr(&pattern, flags);
         let pattern = perl_backslash_n(&pattern);
         let pattern = strip_regex_comments(&pattern);
+        // Rewrite conditional groups BEFORE extracting code blocks
+        // so `(?(?{0})...)` / `(?(?{1})...)` can see the code-block
+        // body and pick the right branch.
+        let pattern = rewrite_nonexistent_group_conditionals(&pattern);
         let (pattern, code_blocks) = extract_regex_code_blocks(&pattern);
         let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_atomic_groups(&pattern);
@@ -11638,7 +11642,6 @@ impl Interpreter {
         let pattern = strip_unicode_boundary_types(&pattern);
         let pattern = translate_octal_escapes(&pattern);
         let pattern = escape_literal_bracket_in_class(&pattern);
-        let pattern = rewrite_nonexistent_group_conditionals(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -11820,6 +11823,10 @@ impl Interpreter {
         let (pattern, flags) = unwrap_qr(&pattern, flags);
         let pattern = perl_backslash_n(&pattern);
         let pattern = strip_regex_comments(&pattern);
+        // Rewrite conditional groups BEFORE extracting code blocks
+        // so `(?(?{0})...)` / `(?(?{1})...)` can see the code-block
+        // body and pick the right branch.
+        let pattern = rewrite_nonexistent_group_conditionals(&pattern);
         let (pattern, code_blocks) = extract_regex_code_blocks(&pattern);
         let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_atomic_groups(&pattern);
@@ -11828,7 +11835,6 @@ impl Interpreter {
         let pattern = strip_unicode_boundary_types(&pattern);
         let pattern = translate_octal_escapes(&pattern);
         let pattern = escape_literal_bracket_in_class(&pattern);
-        let pattern = rewrite_nonexistent_group_conditionals(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
         if flags.contains('i') {
@@ -16300,12 +16306,16 @@ fn strip_regex_comments(pattern: &str) -> String {
     out
 }
 
-/// Resolve `(?(N)yes|no)` conditional groups when N exceeds the
-/// pattern's capturing-group count: replace with the false-branch
-/// (or empty `(?:)` if there's no false branch). Reference perl
-/// treats a backref to a nonexistent group as a false condition;
-/// fancy_regex treats it as TRUE, so without this rewrite tests
-/// like `(?(1)a|b):a:n:-:-` (re/regexp test 608) wrongly match.
+/// Rewrite Perl conditional regex `(?(COND)yes|no)` forms that
+/// fancy_regex doesn't natively handle:
+///   - `(?(N)yes|no)` where N exceeds the pattern's capturing-group
+///     count: replace with the false branch (`(?:no)` or `(?:)`),
+///     since reference perl treats nonexistent group as false.
+///   - `(?(?=PAT)yes|no)` → `(?:(?=PAT)yes|(?!PAT)no)`.
+///   - `(?(?!PAT)yes|no)` → `(?:(?!PAT)yes|(?=PAT)no)`.
+///   - `(?(?{0})yes|no)` → `(?:no)`.
+///   - `(?(?{1})yes|no)` → `(?:yes)`.
+/// re/regexp tests 608, 626, 628, 630, 632.
 fn rewrite_nonexistent_group_conditionals(pattern: &str) -> String {
     let chars: Vec<char> = pattern.chars().collect();
     // Count capturing groups, skipping over `(?(N)` conditional
@@ -16347,24 +16357,116 @@ fn rewrite_nonexistent_group_conditionals(pattern: &str) -> String {
             i += 2;
             continue;
         }
-        if i + 3 < chars.len()
-            && chars[i] == '('
-            && chars[i + 1] == '?'
-            && chars[i + 2] == '('
-            && chars[i + 3].is_ascii_digit()
-        {
-            let digits_start = i + 3;
-            let mut k = digits_start;
-            while k < chars.len() && chars[k].is_ascii_digit() {
-                k += 1;
+        // Generic conditional (?(COND)yes|no): COND can be `N` (group
+        // backref), `?=PAT`/`?!PAT` (lookahead), or `?{CODE}` (code).
+        if i + 3 < chars.len() && chars[i] == '(' && chars[i + 1] == '?' && chars[i + 2] == '(' {
+            // Determine the condition type and its end position (the
+            // `)` that closes `(?(COND)`).
+            #[derive(Debug)]
+            enum Cond {
+                NumExists(usize),
+                NumNotExists,
+                Lookahead(String, bool), // (pattern, positive?)
+                CodeBool(bool),          // `(?{0})` / `(?{1})`
+                Other,
             }
-            let n: usize = chars[digits_start..k]
-                .iter()
-                .collect::<String>()
-                .parse()
-                .unwrap_or(0);
-            if k < chars.len() && chars[k] == ')' {
-                let body_start = k + 1;
+            let cond_start = i + 3;
+            let (cond, cond_close): (Cond, usize) = if chars[cond_start].is_ascii_digit() {
+                let mut k = cond_start;
+                while k < chars.len() && chars[k].is_ascii_digit() {
+                    k += 1;
+                }
+                let n: usize = chars[cond_start..k]
+                    .iter()
+                    .collect::<String>()
+                    .parse()
+                    .unwrap_or(0);
+                if k < chars.len() && chars[k] == ')' {
+                    if n == 0 || n > total_groups {
+                        (Cond::NumNotExists, k)
+                    } else {
+                        (Cond::NumExists(n), k)
+                    }
+                } else {
+                    (Cond::Other, cond_start)
+                }
+            } else if chars[cond_start] == '?'
+                && cond_start + 1 < chars.len()
+                && (chars[cond_start + 1] == '=' || chars[cond_start + 1] == '!')
+            {
+                let positive = chars[cond_start + 1] == '=';
+                let pat_start = cond_start + 2;
+                let mut k = pat_start;
+                let mut depth = 1;
+                while k < chars.len() && depth > 0 {
+                    if chars[k] == '\\' {
+                        k += 2;
+                        continue;
+                    }
+                    if chars[k] == '(' {
+                        depth += 1;
+                    } else if chars[k] == ')' {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    k += 1;
+                }
+                if depth == 0 {
+                    let pat: String = chars[pat_start..k].iter().collect();
+                    (Cond::Lookahead(pat, positive), k)
+                } else {
+                    (Cond::Other, cond_start)
+                }
+            } else if chars[cond_start] == '?'
+                && cond_start + 1 < chars.len()
+                && chars[cond_start + 1] == '{'
+            {
+                let code_start = cond_start + 2;
+                let mut k = code_start;
+                let mut depth = 1;
+                while k < chars.len() && depth > 0 {
+                    if chars[k] == '\\' {
+                        k += 2;
+                        continue;
+                    }
+                    if chars[k] == '{' {
+                        depth += 1;
+                    } else if chars[k] == '}' {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    k += 1;
+                }
+                if depth == 0 {
+                    let code: String = chars[code_start..k].iter().collect();
+                    let trimmed = code.trim();
+                    let cond = if trimmed == "0" {
+                        Cond::CodeBool(false)
+                    } else if trimmed == "1" {
+                        Cond::CodeBool(true)
+                    } else {
+                        Cond::Other
+                    };
+                    // After `}`, we expect `)` closing the conditional name.
+                    let after_brace = k + 1;
+                    if after_brace < chars.len() && chars[after_brace] == ')' {
+                        (cond, after_brace)
+                    } else {
+                        (Cond::Other, cond_start)
+                    }
+                } else {
+                    (Cond::Other, cond_start)
+                }
+            } else {
+                (Cond::Other, cond_start)
+            };
+            if !matches!(cond, Cond::Other | Cond::NumExists(_)) {
+                // Walk body to find `|` and the closing `)`.
+                let body_start = cond_close + 1;
                 let mut depth = 1;
                 let mut alt_pos: Option<usize> = None;
                 let mut p = body_start;
@@ -16385,14 +16487,28 @@ fn rewrite_nonexistent_group_conditionals(pattern: &str) -> String {
                     }
                     p += 1;
                 }
-                if depth == 0 && (n == 0 || n > total_groups) {
-                    let replacement: String = if let Some(alt) = alt_pos {
-                        let no_branch: String = chars[alt + 1..p].iter().collect();
-                        format!("(?:{no_branch})")
-                    } else {
-                        "(?:)".to_string()
+                if depth == 0 {
+                    let yes_branch: String = match alt_pos {
+                        Some(a) => chars[body_start..a].iter().collect(),
+                        None => chars[body_start..p].iter().collect(),
                     };
-                    out.push_str(&replacement);
+                    let no_branch: String = match alt_pos {
+                        Some(a) => chars[a + 1..p].iter().collect(),
+                        None => String::new(),
+                    };
+                    let rewritten = match cond {
+                        Cond::NumNotExists => format!("(?:{no_branch})"),
+                        Cond::CodeBool(true) => format!("(?:{yes_branch})"),
+                        Cond::CodeBool(false) => format!("(?:{no_branch})"),
+                        Cond::Lookahead(pat, true) => {
+                            format!("(?:(?={pat}){yes_branch}|(?!{pat}){no_branch})")
+                        }
+                        Cond::Lookahead(pat, false) => {
+                            format!("(?:(?!{pat}){yes_branch}|(?={pat}){no_branch})")
+                        }
+                        _ => unreachable!(),
+                    };
+                    out.push_str(&rewritten);
                     i = p + 1;
                     continue;
                 }
