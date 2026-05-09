@@ -1403,6 +1403,7 @@
       { tool = "spa-acp-tool"; name = "cluster-hv"; }
       { tool = "pw-cat"; name = "dash-dash-only"; }
       { tool = "pw-mididump"; name = "multi-positional"; }
+      { tool = "spa-resample"; name = "two-positional-fail"; }
       {
         tool = "pw-cli";
         name = "cmd-connect-bad";

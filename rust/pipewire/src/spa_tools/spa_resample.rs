@@ -101,7 +101,18 @@ pub fn main(raw_args: &[String]) -> i32 {
         return 0;
     }
 
-    eprintln!("{argv0}: not yet implemented in rust-pipewire");
+    // C tries to open the input file via sndfile; without that, mirror
+    // the error format. We need to find the first positional in raw_args
+    // (since args was potentially expanded).
+    let infile = raw_args
+        .iter()
+        .skip(1)
+        .find(|a| !a.starts_with('-'))
+        .map(|s| s.as_str())
+        .unwrap_or("");
+    eprintln!(
+        "error: failed to open input file \"{infile}\": System error : No such file or directory."
+    );
     1
 }
 
