@@ -15095,6 +15095,25 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                 "Nested quantifiers in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
             ));
         }
+        // `{N}??` / `{N}?+` etc. — `?` or `+` already applied as a
+        // greedy/possessive modifier, then ANOTHER modifier appears.
+        // Reference perl emits "Nested quantifiers". re/regexp tests
+        // 2007/2008 (`.{1}??`, `.{1}?+`).
+        if c == '}'
+            && i + 2 < chars.len()
+            && (chars[i + 1] == '?' || chars[i + 1] == '+')
+            && (chars[i + 2] == '?' || chars[i + 2] == '+' || chars[i + 2] == '*')
+        {
+            let prefix: String = chars[..=i + 2].iter().collect();
+            let suffix: String = if i + 3 < chars.len() {
+                chars[i + 3..].iter().collect()
+            } else {
+                String::new()
+            };
+            return Some(format!(
+                "Nested quantifiers in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+            ));
+        }
         // `*` / `+` at the very start of the pattern (or right after
         // `(` or `|`) has no preceding atom — reference perl emits
         // "Quantifier follows nothing". `?` is also a quantifier, but
