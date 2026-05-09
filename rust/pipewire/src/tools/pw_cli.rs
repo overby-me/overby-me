@@ -135,7 +135,7 @@ pub fn main(raw_args: &[String]) -> i32 {
             0
         }
         "list-objects" | "ls" => run_list_objects(argv0, remote.as_deref(), rest),
-        "info" | "i" => run_info(argv0, remote.as_deref(), rest),
+        "info" | "i" => run_info(argv0, cmd, remote.as_deref(), rest),
         // `quit` / `q` is a no-op in non-interactive mode (C tool just exits
         // cleanly). We don't have a REPL to break out of, so connect briefly
         // to verify the daemon is alive (matching upstream's connect-then-
@@ -297,7 +297,7 @@ fn print_command_list() {
     }
 }
 
-fn run_info(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {
+fn run_info(argv0: &str, cmd_name: &str, remote: Option<&str>, args: &[&str]) -> i32 {
     let target = match args.first() {
         Some(s) => *s,
         None => {
@@ -306,7 +306,7 @@ fn run_info(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {
         }
     };
 
-    let mut client = match open_client(remote, "rust-pipewire-cli") {
+    let mut client = match open_client(remote, "pw-cli") {
         Ok(c) => c,
         Err(e) => {
             print_open_error(argv0, &e);
@@ -344,7 +344,7 @@ fn run_info(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {
     if globals.is_empty() {
         // Match the C tool's error format: parse() wraps the inner message
         // in `Error: "..."` and writes to stderr.
-        eprintln!("Error: \"info: unknown global '{target}'\"");
+        eprintln!("Error: \"{cmd_name}: unknown global '{target}'\"");
         return 1;
     }
 
@@ -808,7 +808,7 @@ fn run_list_objects(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {
     let joined = args.join(" ");
     let filter: Option<&str> = if args.is_empty() { None } else { Some(&joined) };
 
-    let globals = match collect_globals(remote, "rust-pipewire-cli") {
+    let globals = match collect_globals(remote, "pw-cli") {
         Ok(g) => g,
         Err(e) => {
             print_open_error(argv0, &e);

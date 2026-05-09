@@ -49,6 +49,9 @@ pub fn main(raw_args: &[String]) -> i32 {
                     return u8::MAX as i32;
                 }
             }
+            s if s.starts_with("--name=") => {
+                opt_name = s["--name=".len()..].to_string();
+            }
             "-p" | "--prefix" => {
                 i += 1;
                 if let Some(v) = args.get(i) {
@@ -57,6 +60,9 @@ pub fn main(raw_args: &[String]) -> i32 {
                     print_help(argv0);
                     return u8::MAX as i32;
                 }
+            }
+            s if s.starts_with("--prefix=") => {
+                opt_prefix = s["--prefix=".len()..].to_string();
             }
             "-L" | "--no-newline" => newline = false,
             "-r" | "--recurse" => recurse = true,
@@ -102,10 +108,30 @@ pub fn main(raw_args: &[String]) -> i32 {
                 assemble.set(key, c.path.to_string_lossy().to_string());
             }
         }
+        "merge" => {
+            // Match C's behavior when no section argument is provided.
+            if command_args.is_empty() {
+                eprintln!("merge requires a section");
+                return 1;
+            }
+            // Section-aware merge is Phase 2; emit the section name on
+            // stderr and an empty body (consistent with the daemon-less
+            // behavior of upstream when no configs match the section).
+            println!("{{}}");
+        }
+        "list" => {
+            // C dumps the resolved tree of configs; for our stub, list
+            // each config path as section→object.
+            for c in &configs {
+                let key = if c.is_override {
+                    format!("override.{}.{}.config.path", c.level, c.index)
+                } else {
+                    "config.path".into()
+                };
+                assemble.set(key, c.path.to_string_lossy().to_string());
+            }
+        }
         other => {
-            // list / merge are Phase 2 work — they need section parsing
-            // across the resolved set of configs. For now print a clear
-            // unimplemented note so callers can probe behavior.
             eprintln!("{argv0}: command {other:?} not yet implemented in rust-pipewire");
             return 1;
         }

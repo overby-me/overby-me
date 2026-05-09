@@ -893,6 +893,8 @@
       { tool = "spa-json-dump"; name = "help-with-arg"; }
       { tool = "spa-acp-tool"; name = "help-with-arg"; }
       { tool = "spa-resample"; name = "help-with-arg"; }
+      { tool = "pw-config"; name = "merge-no-section"; }
+      { tool = "pw-cli"; name = "info-alias-i-bad"; }
 
       # --- per-tool --help byte-identical parity ---
       {
