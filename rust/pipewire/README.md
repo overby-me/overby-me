@@ -6,7 +6,7 @@ aimed at passing the upstream PipeWire test suite.
 
 ## Status
 
-- **259/259 Nix-level tests passing**
+- **270/270 Nix-level tests passing**
 - **39 internal Rust unit tests passing** (POD round-trip, SMF parsing,
   protocol framing, dict encode/decode, JSON formatting, decoders for
   every Info-event type)

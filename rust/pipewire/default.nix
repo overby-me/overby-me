@@ -424,6 +424,9 @@
       {tool = "pw-cli"; name = "info-module-3-rich";}
       {tool = "pw-cli"; name = "info-module-5-rich";}
       {tool = "pw-cli"; name = "info-factory-rich";}
+      {tool = "pw-cli"; name = "info-bad-id-rich";}
+      {tool = "pw-cli"; name = "info-securitycontext-rich";}
+      {tool = "pw-cli"; name = "help-cmd-rich";}
       {tool = "pw-metadata"; name = "list-rich";}
       {tool = "pw-metadata"; name = "list-byname";}
     ];
