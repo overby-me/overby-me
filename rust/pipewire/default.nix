@@ -921,6 +921,7 @@
       { tool = "pw-mon"; name = "no-colors-with-arg"; }
       { tool = "pw-dump"; name = "no-colors-with-arg"; }
       { tool = "pw-dump"; name = "monitor-with-arg"; }
+      { tool = "pw-top"; name = "batch-mode-with-arg"; }
       { tool = "pw-cli"; name = "cmd-connect-bad"; }
       { tool = "pw-mon"; name = "connect-fail"; }
       { tool = "pw-profiler"; name = "connect-fail"; }

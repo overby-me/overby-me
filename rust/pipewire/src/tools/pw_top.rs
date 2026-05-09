@@ -28,6 +28,11 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
+            s if s.starts_with("--batch-mode=") => {
+                eprintln!("{argv0}: option '--batch-mode' doesn't allow an argument");
+                print_help(argv0);
+                return 0;
+            }
             "-b" | "--batch-mode" => {}
             "-n" | "--iterations" => {
                 if i + 1 >= args.len() {
