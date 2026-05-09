@@ -11653,6 +11653,14 @@ impl Interpreter {
         let pattern = rewrite_nonexistent_group_conditionals(&pattern);
         let (pattern, code_blocks) = extract_regex_code_blocks(&pattern);
         let pattern = strip_unsupported_regex_flags(&pattern);
+        // If the pattern uses atomic groups `(?>...)` or possessive
+        // quantifiers (`X++`, `X*+`, `X?+`, `X{N,M}+`), rust regex
+        // either rejects them or silently mishandles (treats `++`
+        // as plain `+` and over-matches). Skip rust regex and route
+        // to fancy_regex which supports both. re/regexp tests
+        // 1185-1201 (possessive) and atomic-group tests.
+        let needs_fancy = pattern_uses_atomic_or_possessive(&pattern);
+        let fancy_pattern = pattern.clone();
         let pattern = translate_atomic_groups(&pattern);
         let pattern = fix_inverted_quantifiers(&pattern);
         let pattern = neutralise_false_ranges(&pattern);
@@ -11679,6 +11687,25 @@ impl Interpreter {
         } else {
             pattern.clone()
         };
+        // For atomic/possessive patterns, build a fancy-regex pattern
+        // that ran a SEPARATE light pre-process pipeline (skipping
+        // translate_atomic_groups so `(?>...)` is preserved).
+        let fancy_pat = if needs_fancy {
+            let p = fix_inverted_quantifiers(&fancy_pattern);
+            let p = neutralise_false_ranges(&p);
+            let p = strip_unicode_boundary_types(&p);
+            let p = translate_octal_escapes(&p);
+            let p = escape_literal_bracket_in_class(&p);
+            let p = translate_g_anchor(&p);
+            let p = perl_dollar_anchor(&p, flags.contains('m'));
+            if !prefix.is_empty() {
+                format!("(?{prefix}){p}")
+            } else {
+                p
+            }
+        } else {
+            pat.clone()
+        };
         let slice = if start <= text.len() {
             &text[start..]
         } else {
@@ -11688,7 +11715,7 @@ impl Interpreter {
         // refuses the pattern (typical for `\1`/`\10` backrefs,
         // lookaround, conditional groups), fall back to fancy-regex
         // which supports them at the cost of NFA-style runtime.
-        if let Ok(re) = regex::Regex::new(&pat) {
+        if !needs_fancy && let Ok(re) = regex::Regex::new(&pat) {
             if let Some(caps) = re.captures(slice) {
                 let m0 = caps.get(0).unwrap();
                 let mut group_starts: Vec<Option<usize>> = vec![Some(m0.start())];
@@ -11726,7 +11753,7 @@ impl Interpreter {
             }
             return (false, start);
         }
-        match fancy_regex::Regex::new(&pat) {
+        match fancy_regex::Regex::new(&fancy_pat) {
             Ok(re) => match re.captures(slice) {
                 Ok(Some(caps)) => {
                     let m0 = caps.get(0).unwrap();
@@ -16323,6 +16350,52 @@ fn strip_regex_comments(pattern: &str) -> String {
         i += 1;
     }
     out
+}
+
+/// Detect whether `pattern` uses atomic groups `(?>...)` or
+/// possessive quantifiers (`X++`, `X*+`, `X?+`, `X{N,M}+`). If yes,
+/// the rust `regex` crate either silently mishandles or rejects
+/// these, so we route through fancy_regex instead. Skips inside
+/// character classes and respects backslash escapes.
+fn pattern_uses_atomic_or_possessive(pattern: &str) -> bool {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            i += 1;
+            continue;
+        }
+        if !in_class
+            && c == '('
+            && i + 2 < chars.len()
+            && chars[i + 1] == '?'
+            && chars[i + 2] == '>'
+        {
+            return true;
+        }
+        // Possessive: `*+`, `++`, `?+`, `}+`.
+        if !in_class
+            && (c == '*' || c == '+' || c == '?' || c == '}')
+            && i + 1 < chars.len()
+            && chars[i + 1] == '+'
+        {
+            return true;
+        }
+        i += 1;
+    }
+    false
 }
 
 /// Translate Perl's `\G` (match-anchored-at-pos) into `\A`. The
