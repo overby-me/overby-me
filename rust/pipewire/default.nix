@@ -215,6 +215,11 @@
       { tool = "pipewire-avb"; name = "version"; }
       { tool = "pipewire-vulkan"; name = "help"; }
       { tool = "pipewire-vulkan"; name = "version"; }
+      { tool = "pipewire"; name = "bad-flag"; }
+      { tool = "pipewire-pulse"; name = "bad-flag"; }
+      { tool = "pipewire-aes67"; name = "bad-flag"; }
+      { tool = "pipewire-avb"; name = "bad-flag"; }
+      { tool = "pipewire-vulkan"; name = "bad-flag"; }
       { tool = "spa-resample"; name = "help"; }
       { tool = "pw-v4l2"; name = "help"; }
       { tool = "spa-inspect"; name = "usage"; }
