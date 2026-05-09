@@ -4450,6 +4450,15 @@ impl Interpreter {
                             }
                             r.borrow().clone()
                         }
+                        // `$$re` for `$re = qr/.../` — the underlying
+                        // scalar of a Regexp object is its stringified
+                        // pattern, e.g. `(?^:abc)`. opbasic/concat
+                        // test 236 reads `$$re` after `$$re = "ab"`
+                        // (handled in assign_to: assignment replaces
+                        // `$re` with a ScalarRef to the new value).
+                        Value::Regex(pat, flags) => {
+                            return Value::Str(format!("(?^{flags}:{pat})"));
+                        }
                         Value::Str(s) if !s.is_empty() => self.get_var(&s),
                         other => {
                             if extras == 0 {
@@ -9101,12 +9110,12 @@ impl Interpreter {
             }
         }
 
-        let result = if return_val.is_some() {
+        let result = if let Some(rv) = return_val {
             // Check if the return also set a list value
             if let Some(list) = self.last_list_val.take() {
                 list
             } else {
-                vec![return_val.unwrap()]
+                vec![rv]
             }
         } else if let Some(list) = implicit_list {
             list
@@ -10672,6 +10681,15 @@ impl Interpreter {
                     Value::Str(s) if !s.is_empty() => {
                         let vname = normalize_ctrl_var_name(&s);
                         self.set_var(&vname, val);
+                    }
+                    // `$$re = NEW` where `$re = qr/.../` — Perl replaces
+                    // the Regexp object's underlying scalar with NEW.
+                    // We model this by converting `$re` into a
+                    // `ScalarRef` to a fresh cell holding NEW; subsequent
+                    // `$$re` reads return NEW. opbasic/concat test 236.
+                    Value::Regex(_, _) => {
+                        let rc = std::rc::Rc::new(std::cell::RefCell::new(val));
+                        self.set_var(base, Value::ScalarRef(rc));
                     }
                     _ => {}
                 }
