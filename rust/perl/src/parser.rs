@@ -2459,9 +2459,46 @@ impl Parser {
                         Token::StringLit(_)
                             | Token::InterpString(_)
                             | Token::ScalarVar(_)
+                            | Token::ArrayVar(_)
+                            | Token::HashVar(_)
                             | Token::Integer(_)
                             | Token::Float(_)
                             | Token::Ident(_)
+                            // Named-unary / list-op builtins as the
+                            // first token of a hash key. Without these,
+                            // `$h{ord("a")} = …` was treated as a block
+                            // (since the heuristic only recognised
+                            // value-shaped first tokens), so the hash
+                            // assignment silently no-op'd.
+                            | Token::Ord
+                            | Token::Chr
+                            | Token::Length
+                            | Token::Lc
+                            | Token::Uc
+                            | Token::Lcfirst
+                            | Token::Ucfirst
+                            | Token::Hex
+                            | Token::Oct
+                            | Token::Int
+                            | Token::Abs
+                            | Token::Ref
+                            | Token::Defined
+                            | Token::Exists
+                            | Token::Sprintf
+                            | Token::Substr
+                            | Token::Index
+                            | Token::Rindex
+                            | Token::Join
+                            | Token::Eval
+                            | Token::Caller
+                            | Token::Wantarray
+                            // Unary `-EXPR`, `+EXPR`, `!EXPR`, `\EXPR`
+                            // as the first token of a hash key.
+                            | Token::Minus
+                            | Token::Plus
+                            | Token::LogNot
+                            | Token::Not
+                            | Token::Backslash
                     );
                     let is_subscript = if first_is_value {
                         // Scan forward to find the matching } and check for block indicators

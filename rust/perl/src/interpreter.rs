@@ -65,6 +65,12 @@ pub struct Interpreter {
     /// NOT exposed — replays reference perl's known-broken behaviour
     /// (op/eval TODO tests 98–101).
     my_subs: std::collections::HashSet<String>,
+    /// When true, `get_var` skips the bare-name fallback for
+    /// package-qualified globals: `$x` in package DB returns undef
+    /// rather than $main::x. Set transiently during the DB-magic +
+    /// my-sub-bug eval STRING so the eval can't reach a file-scope
+    /// `our $x` global it shouldn't see (op/eval TODO tests 98–101).
+    eval_strict_pkg: bool,
     // BEGIN blocks (already executed)
     // END blocks (deferred). Each entry is (body, origin_file). Origin lets us
     // push the file's persistent scope before running so test.pl's END block
@@ -523,6 +529,7 @@ impl Interpreter {
             sub_def_package: HashMap::new(),
             lvalue_subs: std::collections::HashSet::new(),
             my_subs: std::collections::HashSet::new(),
+            eval_strict_pkg: false,
             current_sub_stack: Vec::new(),
             current_sub_scope_start: Vec::new(),
             loading_files: Vec::new(),
@@ -5189,6 +5196,47 @@ impl Interpreter {
             "__PACKAGE__" => return Value::Str(self.package.clone()),
             _ => {}
         }
+        // `use builtin qw(ceil floor …)` is a LEXICAL pragma — its
+        // imports are visible only in the scope where `use builtin`
+        // ran. Our interpreter exposes them as unqualified globals
+        // for simplicity, which is fine in normal flow but breaks the
+        // DB-magic + my-sub-bug path: `eval 'ceil(1.1)'` from a
+        // `package DB` context with `eval_strict_pkg` set should NOT
+        // resolve the bare name to a main-scope import. Emit
+        // reference perl's diagnostic instead. op/eval TODO 100/101.
+        if self.eval_strict_pkg
+            && self.package != "main"
+            && matches!(
+                name,
+                "ceil"
+                    | "floor"
+                    | "trim"
+                    | "true"
+                    | "false"
+                    | "is_bool"
+                    | "blessed"
+                    | "refaddr"
+                    | "reftype"
+                    | "weaken"
+                    | "unweaken"
+                    | "is_weak"
+                    | "created_as_string"
+                    | "created_as_number"
+            )
+            && !self.subs.contains_key(&format!("{}::{}", self.package, name))
+        {
+            let file = if self.current_file.is_empty() {
+                "-e".to_string()
+            } else {
+                self.current_file.clone()
+            };
+            let line = self.current_line;
+            self.pending_flow = Some(Flow::Die(format!(
+                "Undefined subroutine &{}::{name} called at {file} line {line}.\n",
+                self.package
+            )));
+            return Value::Undef;
+        }
         match name {
             "print" => {
                 // print in expression context
@@ -9335,7 +9383,8 @@ impl Interpreter {
         if let Some(rc) = self.aliased_vars.get(qkey.as_str()) {
             return rc.borrow().clone();
         }
-        if qkey != key
+        if !self.eval_strict_pkg
+            && qkey != key
             && let Some(rc) = self.aliased_vars.get(key)
         {
             return rc.borrow().clone();
@@ -9346,7 +9395,12 @@ impl Interpreter {
         if let Some(v) = self.globals.vars.get(qkey.as_str()) {
             return v.clone();
         }
-        if let Some(v) = self.globals.vars.get(key) {
+        // When `eval_strict_pkg` is set (DB-magic + my-sub bug case),
+        // skip the bare fallback: `$x` in package DB resolves only to
+        // `$DB::x`, not `$main::x` via the legacy bare slot.
+        if !self.eval_strict_pkg
+            && let Some(v) = self.globals.vars.get(key)
+        {
             return v.clone();
         }
         Value::Undef
@@ -13403,18 +13457,32 @@ impl Interpreter {
                 .map(|n| !n.starts_with("__anon_") && !self.closure_envs.contains_key(n))
                 .unwrap_or(false))
             || (in_db_sub && caller_is_my_sub);
+        // For the my-sub-bug variant, also drain scopes[0] (the file
+        // scope) so `our $x` lexical aliases at file scope aren't
+        // visible to the eval — matches reference perl's behaviour
+        // that the eval can't reach a non-package-qualified $x.
+        let drain_from = if in_db_sub && caller_is_my_sub { 0 } else { 1 };
         let lex_term_stash: Option<(usize, Vec<Scope>)> = if want_lex_term
             && let Some(&start) = self.current_sub_scope_start.last()
-            && start > 1
-            && start < self.scopes.len()
+            && start > drain_from
+            && start <= self.scopes.len()
         {
-            let stashed: Vec<Scope> = self.scopes.drain(1..start).collect();
-            Some((1, stashed))
+            let stashed: Vec<Scope> = self.scopes.drain(drain_from..start).collect();
+            Some((drain_from, stashed))
         } else {
             None
         };
 
+        // For the DB-magic + my-sub-bug case, also strip the bare
+        // global fallback so `$x` in package DB context resolves to
+        // `$DB::x` (undef) rather than the file-scope `$main::x = 1`
+        // — matches reference perl's behaviour for op/eval TODO 98–101.
+        let prev_strict_pkg = self.eval_strict_pkg;
+        if in_db_sub && caller_is_my_sub {
+            self.eval_strict_pkg = true;
+        }
         let result = self.eval_string_inner(code);
+        self.eval_strict_pkg = prev_strict_pkg;
         if let Some((idx, stashed)) = lex_term_stash {
             for (i, frame) in stashed.into_iter().enumerate() {
                 self.scopes.insert(idx + i, frame);
@@ -13493,10 +13561,22 @@ impl Interpreter {
                     .chain(s.arrays.keys().map(|n| format!("@{n}")))
                     .chain(s.hashes.keys().map(|n| format!("%{n}")))
             })
-            .chain(self.globals.vars.keys().cloned())
-            .chain(self.globals.arrays.keys().map(|n| format!("@{n}")))
-            .chain(self.globals.hashes.keys().map(|n| format!("%{n}")))
-            .chain(self.aliased_vars.keys().cloned())
+            .chain(if self.eval_strict_pkg {
+                // DB-magic + my-sub-bug eval: unqualified globals from
+                // package main are NOT visible to strict-vars in a
+                // package DB context, so omit them entirely.
+                Box::new(std::iter::empty()) as Box<dyn Iterator<Item = String>>
+            } else {
+                Box::new(
+                    self.globals
+                        .vars
+                        .keys()
+                        .cloned()
+                        .chain(self.globals.arrays.keys().map(|n| format!("@{n}")))
+                        .chain(self.globals.hashes.keys().map(|n| format!("%{n}")))
+                        .chain(self.aliased_vars.keys().cloned()),
+                ) as Box<dyn Iterator<Item = String>>
+            })
             .collect();
         let inner_uses_strict = stmts
             .iter()
