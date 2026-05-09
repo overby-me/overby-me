@@ -11749,6 +11749,7 @@ impl Interpreter {
         let xx = flags.matches('x').count() >= 2;
         let needs_fancy = pattern_uses_atomic_or_possessive(&pattern)
             || (flags.contains('x') && !xx);
+        let pattern = translate_branch_reset_groups(&pattern);
         let fancy_pattern = pattern.clone();
         let pattern = translate_atomic_groups(&pattern);
         let pattern = fix_inverted_quantifiers(&pattern);
@@ -16908,6 +16909,46 @@ fn named_captures_from_pattern(
         seen.insert(name.clone());
         let val = group_strs.get(idx).cloned().unwrap_or(None);
         out.push((name, val));
+    }
+    out
+}
+
+/// Translate Perl branch-reset groups `(?|…)` into plain
+/// non-capturing groups `(?:…)`. The branch-reset semantics
+/// (overlapping capture-group numbers across branches) aren't
+/// preserved, but at least the pattern compiles, named-group lookups
+/// work, and single-branch forms behave identically. re/regexp 1398
+/// (single branch) and 1399-1401 (named groups across branches).
+fn translate_branch_reset_groups(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+        } else if in_class && c == ']' {
+            in_class = false;
+        }
+        if !in_class
+            && c == '('
+            && i + 2 < chars.len()
+            && chars[i + 1] == '?'
+            && chars[i + 2] == '|'
+        {
+            out.push_str("(?:");
+            i += 3;
+            continue;
+        }
+        out.push(c);
+        i += 1;
     }
     out
 }
