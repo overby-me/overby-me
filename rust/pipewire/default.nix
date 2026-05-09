@@ -926,6 +926,12 @@
       { tool = "pw-dot"; name = "lr-with-arg"; }
       { tool = "pw-metadata"; name = "monitor-with-arg"; }
       { tool = "pw-metadata"; name = "list-with-arg"; }
+      { tool = "pw-cat"; name = "raw-with-arg"; }
+      { tool = "pw-cat"; name = "verbose-with-arg"; }
+      { tool = "pw-play"; name = "raw-with-arg"; }
+      { tool = "pw-play"; name = "verbose-with-arg"; }
+      { tool = "pw-record"; name = "raw-with-arg"; }
+      { tool = "pw-record"; name = "verbose-with-arg"; }
       { tool = "pw-cli"; name = "cmd-connect-bad"; }
       { tool = "pw-mon"; name = "connect-fail"; }
       { tool = "pw-profiler"; name = "connect-fail"; }

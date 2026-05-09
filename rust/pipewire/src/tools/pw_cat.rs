@@ -110,6 +110,12 @@ pub fn main(raw_args: &[String]) -> i32 {
                     None => (s, false),
                 };
                 if known_long_no_arg.contains(&name) {
+                    if has_inline {
+                        // No-arg long flag with `=value` → getopt error.
+                        eprintln!("{getopt_argv0}: option '{name}' doesn't allow an argument");
+                        print_help(argv0);
+                        return 1;
+                    }
                     if matches!(
                         name,
                         "--playback"
