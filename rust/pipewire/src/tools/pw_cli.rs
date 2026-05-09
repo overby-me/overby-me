@@ -740,11 +740,17 @@ fn run_list_remotes() -> i32 {
 }
 
 fn run_list_objects(argv0: &str, remote: Option<&str>, args: &[&str]) -> i32 {
-    // Mirror the C tool's `global_matches`: it uses `strstr(g->type, pattern)`
-    // — a substring match against the raw user input. So `ls Node` also lists
-    // any `PipeWire:Interface:ClientNode` etc. (and `ls Pi` matches every
-    // global since they all contain "PipeWire").
-    let filter: Option<&str> = args.first().copied();
+    // Mirror the C tool's `do_list_objects`: it joins every remaining
+    // positional arg with spaces into a single filter string, then
+    // checks `strstr(g->type, pattern)`. So `ls Node Foo` searches for
+    // the literal substring "Node Foo" (which never matches any type),
+    // unlike `ls Node` which matches all Node-typed globals.
+    let joined = args.join(" ");
+    let filter: Option<&str> = if args.is_empty() {
+        None
+    } else {
+        Some(&joined)
+    };
 
     let globals = match collect_globals(remote, "rust-pipewire-cli") {
         Ok(g) => g,
