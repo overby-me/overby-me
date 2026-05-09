@@ -8,11 +8,11 @@
 use crate::tools::common::print_version;
 
 pub fn main(args: &[String]) -> i32 {
-    // C's pw-cat basenames argv[0] (`prog = strrchr(argv[0], '/')`),
-    // so the help/usage text shows just `pw-play` not the full
-    // /nix/store/.../bin/pw-play path.
+    // C's pw-cat basenames argv[0] for `prog` (used in the help text),
+    // but uses the raw argv[0] (full path) in getopt's error messages.
     let raw0 = args.first().map(String::as_str).unwrap_or("pw-cat");
     let argv0 = raw0.rsplit('/').next().unwrap_or("pw-cat");
+    let getopt_argv0 = raw0;
 
     for a in args.iter().skip(1) {
         match a.as_str() {
@@ -20,31 +20,50 @@ pub fn main(args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
-            "--version" | "-V" => {
+            // pw-cat's getopt_long has no `-V` short alias (it only takes
+            // the long `--version`).
+            "--version" => {
                 print_version(argv0);
                 return 0;
             }
-            s if s.starts_with('-')
+            // Long flag we don't recognize → standard `unrecognized
+            // option` then help.
+            s if s.starts_with("--")
                 && !matches!(
                     s,
-                    "-v" | "--verbose"
-                        | "-p" | "--playback"
-                        | "-r" | "--record"
-                        | "-m" | "--midi"
-                        | "-d" | "--dsd"
-                        | "-o" | "--encoded"
-                        | "-s" | "--sysex"
-                        | "-c" | "--midi-clip"
-                        | "-a" | "--raw"
+                    "--verbose"
+                        | "--playback"
+                        | "--record"
+                        | "--midi"
+                        | "--dsd"
+                        | "--encoded"
+                        | "--sysex"
+                        | "--midi-clip"
+                        | "--raw"
                         | "--list-layouts"
                         | "--list-channel-names"
                         | "--list-formats"
                         | "--list-containers"
                 ) =>
             {
-                eprintln!("{argv0}: unrecognized option '{s}'");
+                eprintln!("{getopt_argv0}: unrecognized option '{s}'");
                 print_help(argv0);
-                return 0;
+                return 1;
+            }
+            // Short flag we don't recognize → `invalid option -- 'X'`
+            // (note the singly-quoted single character, not the full
+            // `-X` token like for long options).
+            s if s.starts_with('-')
+                && s.len() == 2
+                && !matches!(
+                    s,
+                    "-v" | "-p" | "-r" | "-m" | "-d" | "-o" | "-s" | "-c" | "-a"
+                ) =>
+            {
+                let ch = s.chars().nth(1).unwrap_or('?');
+                eprintln!("{getopt_argv0}: invalid option -- '{ch}'");
+                print_help(argv0);
+                return 1;
             }
             _ => {}
         }

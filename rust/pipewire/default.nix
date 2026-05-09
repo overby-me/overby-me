@@ -185,6 +185,26 @@
       { tool = "pw-sysex"; name = "no-args"; }
       { tool = "pw-dsdplay"; name = "no-args"; }
       { tool = "pw-encplay"; name = "no-args"; }
+      { tool = "pw-cat"; name = "help-short"; }
+      { tool = "pw-play"; name = "help-short"; }
+      { tool = "pw-record"; name = "help-short"; }
+      { tool = "pw-midiplay"; name = "help-short"; }
+      { tool = "pw-midirecord"; name = "help-short"; }
+      { tool = "pw-midi2play"; name = "help-short"; }
+      { tool = "pw-midi2record"; name = "help-short"; }
+      { tool = "pw-sysex"; name = "help-short"; }
+      { tool = "pw-dsdplay"; name = "help-short"; }
+      { tool = "pw-encplay"; name = "help-short"; }
+      { tool = "pw-cat"; name = "invalid-V"; }
+      { tool = "pw-play"; name = "invalid-V"; }
+      { tool = "pw-record"; name = "invalid-V"; }
+      { tool = "pw-midiplay"; name = "invalid-V"; }
+      { tool = "pw-midirecord"; name = "invalid-V"; }
+      { tool = "pw-midi2play"; name = "invalid-V"; }
+      { tool = "pw-midi2record"; name = "invalid-V"; }
+      { tool = "pw-sysex"; name = "invalid-V"; }
+      { tool = "pw-dsdplay"; name = "invalid-V"; }
+      { tool = "pw-encplay"; name = "invalid-V"; }
       { tool = "pw-reserve"; name = "help"; }
       { tool = "pw-reserve"; name = "version"; }
       { tool = "pw-container"; name = "help"; }
