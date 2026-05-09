@@ -18100,7 +18100,9 @@ fn extract_regex_code_blocks(pattern: &str) -> (String, Vec<String>) {
     let mut in_class = false;
     while i < chars.len() {
         let c = chars[i];
-        if !in_class && c == '\\' && i + 1 < chars.len() {
+        if c == '\\' && i + 1 < chars.len() {
+            // Honour escapes both outside and inside `[...]` so that
+            // `\]` in a class doesn't close it. re/regexp test 1700.
             out.push(c);
             out.push(chars[i + 1]);
             i += 2;
