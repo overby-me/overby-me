@@ -19199,7 +19199,21 @@ fn perl_dollar_anchor(pattern: &str, multiline: bool) -> String {
             continue;
         }
         if multiline {
-            // In /m mode `$` already means "end of any line"; leave it
+            // In /m mode rust regex's `^` matches at end-of-string-
+            // after-final-newline; reference perl does not. Replace
+            // bare `^` with `(?:\A|(?<=\n))(?!\z)` to exclude that
+            // position. Skip inside class. re/regexp 984.
+            if !in_class && c == '^' {
+                let prev_is_escape = i > 0
+                    && chars[i - 1] == '\\'
+                    && (i < 2 || chars[i - 2] != '\\');
+                if !prev_is_escape {
+                    out.push_str("(?:\\A|(?<=\\n))(?!\\z)");
+                    i += 1;
+                    continue;
+                }
+            }
+            // `$` already means "end of any line" under /m; leave it
             // alone but still iterate so `\Z` translation above runs.
             out.push(c);
             i += 1;
