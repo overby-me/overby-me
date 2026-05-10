@@ -1438,6 +1438,9 @@
       { tool = "pw-reserve"; name = "short-bad-cluster"; }
       { tool = "pw-mon"; name = "C-cluster-attached"; }
       { tool = "pw-top"; name = "short-bad-cluster"; }
+      { tool = "pw-cli"; name = "pipewire-remote-bad-info"; }
+      { tool = "pw-cli"; name = "pipewire-remote-bad-quit"; }
+      { tool = "pw-cli"; name = "pipewire-remote-bad-listvars"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }
