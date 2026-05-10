@@ -18589,6 +18589,39 @@ fn translate_octal_escapes(pattern: &str) -> String {
 /// `pattern`. Returns `(cleaned_pattern, code_blocks)` — each `(?{...})`
 /// is replaced with `(?:)` (always-matching empty group) so the regex
 /// crate accepts the pattern, and the inner code is collected so the
+/// Convert capturing groups `(…)` to non-capturing `(?:…)` in a
+/// regex fragment, leaving `(?…)` introducers and `\(` escapes alone.
+/// Used so a runtime `(??{"(.)(.)"})` body doesn't shift outer group
+/// numbers when substituted inline. re/regexp 1117.
+fn neutralise_captures(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len() + 8);
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+        } else if in_class && c == ']' {
+            in_class = false;
+        }
+        if !in_class && c == '(' && i + 1 < chars.len() && chars[i + 1] != '?' {
+            out.push_str("(?:");
+            i += 1;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 /// Substitute simple constant `(??{"PAT"})` and `(??{q(PAT)})`
 /// runtime-regex-eval blocks with their literal pattern. Only handles
 /// the common case where the body is a constant string literal — no
@@ -18682,8 +18715,15 @@ fn substitute_constant_runtime_regex(pattern: &str) -> String {
                     } else {
                         j + 1
                     };
+                    // Capturing groups inside the runtime regex's body
+                    // are NOT visible to the outer regex (per perlre).
+                    // Convert each `(` to `(?:` so they don't shift
+                    // outer group numbering. Skip `(?…)` forms which
+                    // are already non-capturing introducers. re/regexp
+                    // 1117.
+                    let pat_neutralised = neutralise_captures(&pat);
                     out.push_str("(?:");
-                    out.push_str(&pat);
+                    out.push_str(&pat_neutralised);
                     out.push(')');
                     i = after;
                     continue;
