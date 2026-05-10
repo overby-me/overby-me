@@ -4057,7 +4057,204 @@ impl Interpreter {
                             Value::Num(count as f64)
                         }
                     }
-                    Err(_) => Value::Num(0.0),
+                    Err(_) => {
+                        // Pattern uses features the rust regex crate
+                        // doesn't support (lookahead, backref, etc.).
+                        // Fall back to fancy_regex. Without this fallback,
+                        // s/PAT_WITH_LOOKAHEAD/REPL/g silently no-ops,
+                        // breaking re/regexp_normal.t's pattern-normalize
+                        // pass (and any user code that uses lookarounds
+                        // in s///).
+                        let Ok(re) = fancy_regex::Regex::new(&pat_str) else {
+                            return Value::Num(0.0);
+                        };
+                        // Decode \-escapes in the replacement (mirrors
+                        // the regex-crate path above).
+                        let mut replacement = String::new();
+                        let repl_bytes: Vec<char> = repl.chars().collect();
+                        let mut ri = 0;
+                        while ri < repl_bytes.len() {
+                            if repl_bytes[ri] == '\\' && ri + 1 < repl_bytes.len() {
+                                match repl_bytes[ri + 1] {
+                                    'n' => {
+                                        replacement.push('\n');
+                                        ri += 2;
+                                    }
+                                    't' => {
+                                        replacement.push('\t');
+                                        ri += 2;
+                                    }
+                                    '\\' => {
+                                        replacement.push('\\');
+                                        ri += 2;
+                                    }
+                                    '#' => {
+                                        replacement.push('#');
+                                        ri += 2;
+                                    }
+                                    _ => {
+                                        replacement.push(repl_bytes[ri]);
+                                        ri += 1;
+                                    }
+                                }
+                            } else {
+                                replacement.push(repl_bytes[ri]);
+                                ri += 1;
+                            }
+                        }
+                        let want_eval_pre = flags.contains('e') || inner_flags.contains('e');
+                        let replacement = if want_eval_pre {
+                            replacement
+                        } else {
+                            self.interp_regex_pattern(&replacement)
+                        };
+                        let want_eval = inner_flags.contains('e');
+                        let eval_count = inner_flags.matches('e').count();
+                        let target_name: Option<String> = match target.as_ref() {
+                            Expr::ScalarVar(n) => Some(n.clone()),
+                            _ => None,
+                        };
+                        let expand_replacement_fr =
+                            |caps: &fancy_regex::Captures, replacement: &str| -> String {
+                                let mut result = String::new();
+                                let repl_chars: Vec<char> = replacement.chars().collect();
+                                let mut i = 0;
+                                while i < repl_chars.len() {
+                                    if repl_chars[i] == '$' && i + 1 < repl_chars.len() {
+                                        if repl_chars[i + 1] == '{' {
+                                            let mut num_str = String::new();
+                                            i += 2;
+                                            while i < repl_chars.len() && repl_chars[i] != '}' {
+                                                num_str.push(repl_chars[i]);
+                                                i += 1;
+                                            }
+                                            if i < repl_chars.len() {
+                                                i += 1;
+                                            }
+                                            if let Ok(n) = num_str.parse::<usize>() {
+                                                if let Some(m) = caps.get(n) {
+                                                    result.push_str(m.as_str());
+                                                }
+                                            }
+                                        } else if repl_chars[i + 1].is_ascii_digit() {
+                                            let mut num_str = String::new();
+                                            i += 1;
+                                            while i < repl_chars.len()
+                                                && repl_chars[i].is_ascii_digit()
+                                            {
+                                                num_str.push(repl_chars[i]);
+                                                i += 1;
+                                            }
+                                            if let Ok(n) = num_str.parse::<usize>() {
+                                                if let Some(m) = caps.get(n) {
+                                                    result.push_str(m.as_str());
+                                                }
+                                            }
+                                        } else {
+                                            result.push(repl_chars[i]);
+                                            i += 1;
+                                        }
+                                    } else if repl_chars[i] == '&' {
+                                        if let Some(m) = caps.get(0) {
+                                            result.push_str(m.as_str());
+                                        }
+                                        i += 1;
+                                    } else {
+                                        result.push(repl_chars[i]);
+                                        i += 1;
+                                    }
+                                }
+                                result
+                            };
+                        let (new_text, count) = if global {
+                            let mut out = String::new();
+                            let mut count = 0u64;
+                            let mut start = 0usize;
+                            loop {
+                                let caps_res = re.captures_from_pos(&text, start);
+                                let m = match caps_res {
+                                    Ok(Some(m)) => m,
+                                    _ => break,
+                                };
+                                let m0 = m.get(0).unwrap();
+                                out.push_str(&text[start..m0.start()]);
+                                for j in 1..m.len() {
+                                    if let Some(c) = m.get(j) {
+                                        self.set_global_var(
+                                            &j.to_string(),
+                                            Value::Str(c.as_str().to_string()),
+                                        );
+                                    } else {
+                                        self.set_global_var(&j.to_string(), Value::Undef);
+                                    }
+                                }
+                                if let Some(n) = &target_name {
+                                    self.pos_offsets.insert(n.clone(), m0.start());
+                                }
+                                let r = if want_eval {
+                                    let mut current = replacement.clone();
+                                    for _ in 0..eval_count {
+                                        current = self.eval_string(&current).to_str();
+                                    }
+                                    current
+                                } else {
+                                    expand_replacement_fr(&m, &replacement)
+                                };
+                                if let Some(n) = &target_name {
+                                    self.pos_offsets.insert(n.clone(), m0.end());
+                                }
+                                out.push_str(&r);
+                                count += 1;
+                                if m0.end() == start {
+                                    if let Some(c) = text[start..].chars().next() {
+                                        out.push(c);
+                                        start += c.len_utf8();
+                                    } else {
+                                        break;
+                                    }
+                                } else {
+                                    start = m0.end();
+                                }
+                            }
+                            out.push_str(&text[start..]);
+                            (out, count)
+                        } else if let Ok(Some(m)) = re.captures(&text) {
+                            let m0 = m.get(0).unwrap();
+                            for j in 1..m.len() {
+                                if let Some(c) = m.get(j) {
+                                    self.set_global_var(
+                                        &j.to_string(),
+                                        Value::Str(c.as_str().to_string()),
+                                    );
+                                } else {
+                                    self.set_global_var(&j.to_string(), Value::Undef);
+                                }
+                            }
+                            let r = if want_eval {
+                                let mut current = replacement.clone();
+                                for _ in 0..eval_count {
+                                    current = self.eval_string(&current).to_str();
+                                }
+                                current
+                            } else {
+                                expand_replacement_fr(&m, &replacement)
+                            };
+                            let mut out = String::new();
+                            out.push_str(&text[..m0.start()]);
+                            out.push_str(&r);
+                            out.push_str(&text[m0.end()..]);
+                            (out, 1)
+                        } else {
+                            (text, 0)
+                        };
+                        if flags.contains('r') || inner_flags.contains('r') {
+                            let _ = count;
+                            Value::Str(new_text)
+                        } else {
+                            self.assign_to(target, Value::Str(new_text));
+                            Value::Num(count as f64)
+                        }
+                    }
                 }
             }
 
