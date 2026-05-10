@@ -1540,6 +1540,9 @@
       { tool = "pw-container"; name = "connect-fail-exit"; }
       { tool = "pw-cat"; name = "perm-denied-file"; }
       { tool = "spa-resample"; name = "perm-denied-input"; }
+      { tool = "pw-midiplay"; name = "missing-file"; }
+      { tool = "pw-sysex"; name = "missing-file"; }
+      { tool = "pw-dsdplay"; name = "missing-file"; }
       { tool = "spa-acp-tool"; name = "bogus-flag-exit"; }
       { tool = "spa-inspect"; name = "no-args-exit"; }
       { tool = "spa-monitor"; name = "no-args-exit"; }

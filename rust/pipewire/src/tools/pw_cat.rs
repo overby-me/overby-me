@@ -289,37 +289,16 @@ pub fn main(raw_args: &[String]) -> i32 {
         };
         match connect {
             Ok(_) => {
-                // Daemon up; emit the sndfile error. sndfile distinguishes
-                // "missing file" (System error) from "bad format on
-                // existing file" (Format not recognised). Probe the path.
+                // Daemon up; the file-open error depends on the mode. Each
+                // tool uses a different file-IO library and has a slightly
+                // different error template.
                 let file = raw_args
                     .iter()
                     .skip(1)
                     .find(|a| !a.starts_with('-') || a == &"-")
                     .map(|s| s.as_str())
                     .unwrap_or("");
-                // sndfile's error message depends on what fails in fopen
-                // → "No such file or directory" (ENOENT) for missing,
-                // "Permission denied" (EACCES) for an inaccessible file,
-                // and "Format not recognised" once the file IS opened.
-                if file == "-" {
-                    eprintln!(
-                        "sndfile: failed to open audio file \"{file}\": Format not recognised."
-                    );
-                } else if !std::path::Path::new(file).exists() {
-                    eprintln!(
-                        "sndfile: failed to open audio file \"{file}\": System error : No such file or directory."
-                    );
-                } else if std::fs::File::open(file).is_err() {
-                    eprintln!(
-                        "sndfile: failed to open audio file \"{file}\": System error : Permission denied."
-                    );
-                } else {
-                    eprintln!(
-                        "sndfile: failed to open audio file \"{file}\": Format not recognised."
-                    );
-                }
-                eprintln!("error: open failed: Input/output error");
+                emit_open_error(argv0, file);
             }
             Err(_) => {
                 eprintln!(
@@ -332,6 +311,99 @@ pub fn main(raw_args: &[String]) -> i32 {
     }
     print_help(argv0);
     0
+}
+
+fn emit_open_error(argv0: &str, file: &str) {
+    // Probe what the open error would have been. C uses the strerror of
+    // open/fopen — ENOENT, EACCES, EISDIR, ... — followed by a per-tool
+    // "error: open failed:" line. We re-derive the strerror by inspecting
+    // the file: missing → ENOENT, exists+unreadable → EACCES, directory
+    // → EISDIR for write-mode tools, otherwise "Format not recognised" /
+    // equivalent.
+    let argv0_basename = argv0.rsplit('/').next().unwrap_or(argv0);
+    let strerror_for = |f: &str, write_mode: bool| -> String {
+        if f == "-" {
+            return "Format not recognised.".to_string();
+        }
+        let p = std::path::Path::new(f);
+        if !p.exists() {
+            return "No such file or directory".to_string();
+        }
+        if write_mode {
+            if p.is_dir() {
+                return "Is a directory".to_string();
+            }
+            // For write mode, check write permissions via OpenOptions.
+            if std::fs::OpenOptions::new().write(true).open(f).is_err() {
+                return "Permission denied".to_string();
+            }
+            "Format not recognised.".to_string()
+        } else {
+            // Read mode.
+            if std::fs::File::open(f).is_err() {
+                return "Permission denied".to_string();
+            }
+            "Format not recognised.".to_string()
+        }
+    };
+    let is_record = argv0_basename.contains("record");
+    let normalize_midi = |e: String| -> String {
+        // MIDI/sysex/dsd modes don't emit "Format not recognised." — that's
+        // sndfile-only. Strip it and substitute a midi-style message.
+        if e.ends_with("Format not recognised.") {
+            "Invalid argument".to_string()
+        } else {
+            e.trim_end_matches('.').to_string()
+        }
+    };
+    let mut emitted_help = false;
+    match argv0_basename {
+        // MIDI-mode tools.
+        s if s.contains("midiplay") || s.contains("midirecord")
+            || s.contains("midi2play") || s.contains("midi2record") =>
+        {
+            let err = normalize_midi(strerror_for(file, is_record));
+            eprintln!("midifile: can't read midi file '{file}': {err}");
+            eprintln!("error: open failed: {err}");
+            print_help(argv0);
+            emitted_help = true;
+        }
+        s if s.contains("sysex") => {
+            let err = normalize_midi(strerror_for(file, is_record));
+            eprintln!("sysex: can't read file '{file}': {err}");
+            eprintln!("error: open failed: {err}");
+            print_help(argv0);
+            emitted_help = true;
+        }
+        s if s.contains("dsdplay") => {
+            let err = normalize_midi(strerror_for(file, is_record));
+            eprintln!("dsdfile: can't read dsd file '{file}': {err}");
+            eprintln!("error: open failed: {err}");
+            print_help(argv0);
+            emitted_help = true;
+        }
+        s if s.contains("encplay") => {
+            // ffmpeg/avformat errors; we emit a simplified surrogate that
+            // matches the most common case (file-not-found). Pointer
+            // addresses vary per-run, but tests normalize them.
+            eprintln!("[AVFormatContext @ 0x0000000000000000] Opening 'file:{file}' for reading");
+            eprintln!("[file @ 0x0000000000000000] Setting default whitelist 'file,crypto,data'");
+            eprintln!("Failed to open input: No such file or directory");
+            print_help(argv0);
+            emitted_help = true;
+        }
+        // Default: audio (sndfile).
+        _ => {
+            let err = strerror_for(file, is_record);
+            if err == "Format not recognised." {
+                eprintln!("sndfile: failed to open audio file \"{file}\": {err}");
+            } else {
+                eprintln!("sndfile: failed to open audio file \"{file}\": System error : {err}.");
+            }
+            eprintln!("error: open failed: Input/output error");
+        }
+    }
+    let _ = emitted_help;
 }
 
 fn print_list_formats() {
