@@ -12002,6 +12002,11 @@ impl Interpreter {
         // we can renumber captures post-match. re/regexp 1389+.
         let branch_reset_blocks = extract_branch_reset_blocks(&pattern);
         let pattern = translate_branch_reset_groups(&pattern);
+        // After branch reset translation, `\N` backrefs to a group
+        // inside a branch reset must match WHICHEVER branch captured.
+        // Rewrite `\N` to `(?:\N1|\N2|...)` covering every group in
+        // the same block. re/regexp 2115.
+        let pattern = expand_branch_reset_backrefs(&pattern, &branch_reset_blocks);
         // Under `/aa /i`, case folding is restricted to ASCII letters.
         // fancy_regex's `(?i)` is Unicode-aware so `s` would also match
         // `\x{17F}`. Pre-expand each ASCII letter to `[Aa]` so dropping
@@ -18447,6 +18452,97 @@ fn body_has_recursion_ref(body: &str) -> bool {
         i += 1;
     }
     false
+}
+
+/// Rewrite numeric backrefs `\N` that target groups inside a branch
+/// reset block so they match WHICHEVER alternation captured. The
+/// branch reset semantics mean groups 1, 2 (etc.) inside `(?|...)`
+/// are conceptually the same slot; fancy_regex sees them as
+/// distinct, so `\1` only matches when group 1 captured. Rewrite as
+/// `(?:\1|\2|...|\K)` covering all groups in the block.
+/// re/regexp 2115.
+fn expand_branch_reset_backrefs(pattern: &str, blocks: &[Vec<Vec<usize>>]) -> String {
+    if blocks.is_empty() {
+        return pattern.to_string();
+    }
+    // Build map: group_idx → vec of sibling indices in the same
+    // branch reset block (including itself).
+    let max_idx = blocks
+        .iter()
+        .flat_map(|b| b.iter().flatten().copied())
+        .max()
+        .unwrap_or(0);
+    let mut siblings: Vec<Option<Vec<usize>>> = vec![None; max_idx + 1];
+    for branches in blocks {
+        // Group up "slot N" siblings: branch.get(slot) across all
+        // branches.
+        let max_size = branches.iter().map(|b| b.len()).max().unwrap_or(0);
+        for slot in 0..max_size {
+            let group: Vec<usize> = branches
+                .iter()
+                .filter_map(|b| b.get(slot).copied())
+                .collect();
+            for &g in &group {
+                if g < siblings.len() {
+                    siblings[g] = Some(group.clone());
+                }
+            }
+        }
+    }
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class
+            && c == '\\'
+            && i + 1 < chars.len()
+            && chars[i + 1].is_ascii_digit()
+            && chars[i + 1] != '0'
+        {
+            let mut k = i + 1;
+            while k < chars.len() && chars[k].is_ascii_digit() {
+                k += 1;
+            }
+            let num_str: String = chars[i + 1..k].iter().collect();
+            if let Ok(n) = num_str.parse::<usize>()
+                && n < siblings.len()
+                && let Some(sibs) = &siblings[n]
+                && sibs.len() > 1
+            {
+                let alts: Vec<String> = sibs.iter().map(|s| format!("\\{s}")).collect();
+                out.push_str(&format!("(?:{})", alts.join("|")));
+                i = k;
+                continue;
+            }
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
 }
 
 fn translate_branch_reset_groups(pattern: &str) -> String {
