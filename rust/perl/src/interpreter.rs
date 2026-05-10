@@ -12161,7 +12161,8 @@ impl Interpreter {
                 );
                 let end = start + group_ends[0].unwrap();
                 for code in &code_blocks {
-                    self.eval_string(code);
+                    let v = self.eval_string(code);
+                    self.set_global_var("^R", v);
                 }
                 return (true, end);
             }
@@ -12270,7 +12271,8 @@ impl Interpreter {
                     );
                     let end = start + group_ends[0].unwrap();
                     for code in &code_blocks {
-                        self.eval_string(code);
+                        let v = self.eval_string(code);
+                        self.set_global_var("^R", v);
                     }
                     (true, end)
                 }
@@ -12430,7 +12432,8 @@ impl Interpreter {
                     self.set_array("-", minus_arr);
                     self.set_array("+", plus_arr);
                     for code in &code_blocks {
-                        self.eval_string(code);
+                        let v = self.eval_string(code);
+                        self.set_global_var("^R", v);
                     }
                     true
                 } else {
