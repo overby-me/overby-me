@@ -12029,6 +12029,7 @@ impl Interpreter {
         // (non-recursive) case. Truly recursive patterns are left
         // unchanged. re/regexp 1167-1185.
         let pattern = inline_simple_recursion(&pattern);
+        let pattern = prune_alternations_after_prune(&pattern);
         let pattern = strip_control_verbs(&pattern);
         let pattern = eliminate_zero_quantifier(&pattern);
         let pattern = strip_xx_class_whitespace(&pattern);
@@ -12441,6 +12442,7 @@ impl Interpreter {
         let pattern = translate_named_char_escapes(&pattern);
         let pattern = normalize_named_backref(&pattern);
         let pattern = inline_simple_recursion(&pattern);
+        let pattern = prune_alternations_after_prune(&pattern);
         let pattern = strip_control_verbs(&pattern);
         let pattern = eliminate_zero_quantifier(&pattern);
         let pattern = strip_xx_class_whitespace(&pattern);
@@ -20189,6 +20191,133 @@ fn escape_literal_bracket_in_class(pattern: &str) -> String {
 /// don't match Perl exactly (e.g. ACCEPT short-circuit lost), but
 /// most tests then complete with the structural match. re/regexp
 /// 1302-1303, 1897-1904, 1994-1995, 2082-2111.
+/// `(X(*PRUNE)Y|...|X(*PRUNE)Z)` style patterns rely on `(*PRUNE)`
+/// to prevent the engine from trying subsequent alternatives once
+/// past the prune point. Since we strip `(*PRUNE)` to `(?:)` (no
+/// backtrack control), the alternation falls back to all branches
+/// — wrong for these tests. Drop all branches after a `(*PRUNE)`
+/// occurrence inside a `(?:...)` group's alternation so the
+/// first-branch-only semantics survive. re/regexp 1890-1895.
+fn prune_alternations_after_prune(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    // Find each `(...)` group; check if it contains `|` at depth-0
+    // within AND any branch (before second `|`) contains `(*PRUNE)`.
+    // If so, keep only the first branch.
+    let mut keep_only_first: Vec<(usize, usize)> = Vec::new(); // (group_open, alt_pos)
+    let mut stack: Vec<(usize, Option<usize>, bool)> = Vec::new();
+    // (group_open, first_alt_pos_if_any, has_prune)
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            i += 1;
+            continue;
+        }
+        if !in_class && c == '(' && i + 1 < chars.len() && chars[i + 1] == '*' {
+            // `(*VERB)` — check for PRUNE.
+            let mut k = i + 2;
+            while k < chars.len() && chars[k] != ')' {
+                k += 1;
+            }
+            let body: String = chars[i + 2..k].iter().collect();
+            if body == "PRUNE" || body.starts_with("PRUNE:") {
+                if let Some(top) = stack.last_mut() {
+                    top.2 = true;
+                }
+            }
+            i = k.saturating_add(1);
+            continue;
+        }
+        if !in_class && c == '(' {
+            stack.push((i, None, false));
+            i += 1;
+            continue;
+        }
+        if !in_class && c == ')' {
+            if let Some((open, alt, has_prune)) = stack.pop()
+                && has_prune
+                && let Some(a) = alt
+            {
+                keep_only_first.push((open, a));
+            }
+            i += 1;
+            continue;
+        }
+        if !in_class && c == '|' && let Some(top) = stack.last_mut() {
+            if top.1.is_none() {
+                top.1 = Some(i);
+            }
+        }
+        i += 1;
+    }
+    if keep_only_first.is_empty() {
+        return pattern.to_string();
+    }
+    // Build a "skip these char-index ranges" set: [first_alt..close].
+    // Group ends are tracked via paren matching again.
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    let mut stack2: Vec<usize> = Vec::new();
+    let mut in_cls = false;
+    let mut j = 0;
+    while j < chars.len() {
+        let c = chars[j];
+        if c == '\\' && j + 1 < chars.len() {
+            j += 2;
+            continue;
+        }
+        if !in_cls && c == '[' {
+            in_cls = true;
+            j += 1;
+            continue;
+        }
+        if in_cls && c == ']' {
+            in_cls = false;
+            j += 1;
+            continue;
+        }
+        if !in_cls && c == '(' {
+            stack2.push(j);
+        } else if !in_cls && c == ')' {
+            if let Some(open) = stack2.pop()
+                && let Some(&(_, alt)) =
+                    keep_only_first.iter().find(|(o, _)| *o == open)
+            {
+                ranges.push((alt, j));
+            }
+        }
+        j += 1;
+    }
+    if ranges.is_empty() {
+        return pattern.to_string();
+    }
+    ranges.sort_by_key(|r| r.0);
+    let mut out = String::with_capacity(pattern.len());
+    let mut k = 0;
+    let mut r_idx = 0;
+    while k < chars.len() {
+        if r_idx < ranges.len() && k == ranges[r_idx].0 {
+            // Skip from alt_pos to close-1 (don't skip the close itself).
+            k = ranges[r_idx].1;
+            r_idx += 1;
+            continue;
+        }
+        out.push(chars[k]);
+        k += 1;
+    }
+    out
+}
+
 fn strip_control_verbs(pattern: &str) -> String {
     let chars: Vec<char> = pattern.chars().collect();
     let mut out = String::with_capacity(pattern.len());
