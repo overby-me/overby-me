@@ -12030,6 +12030,7 @@ impl Interpreter {
         // unchanged. re/regexp 1167-1185.
         let pattern = inline_simple_recursion(&pattern);
         let pattern = truncate_at_first_accept(&pattern);
+        let pattern = collapse_lazy_plus_then(&pattern);
         let pattern = prune_alternations_after_prune(&pattern);
         let pattern = strip_control_verbs(&pattern);
         let pattern = eliminate_zero_quantifier(&pattern);
@@ -12444,6 +12445,7 @@ impl Interpreter {
         let pattern = normalize_named_backref(&pattern);
         let pattern = inline_simple_recursion(&pattern);
         let pattern = truncate_at_first_accept(&pattern);
+        let pattern = collapse_lazy_plus_then(&pattern);
         let pattern = prune_alternations_after_prune(&pattern);
         let pattern = strip_control_verbs(&pattern);
         let pattern = eliminate_zero_quantifier(&pattern);
@@ -20193,6 +20195,68 @@ fn escape_literal_bracket_in_class(pattern: &str) -> String {
 /// don't match Perl exactly (e.g. ACCEPT short-circuit lost), but
 /// most tests then complete with the structural match. re/regexp
 /// 1302-1303, 1897-1904, 1994-1995, 2082-2111.
+/// `X+?(*THEN)Y` / `X+?(*PRUNE)Y` matches just a single X at each
+/// position (the THEN/PRUNE prevents lazy-plus from growing). Drop
+/// the `+?` so the simple `XY` semantic survives. re/regexp 1897,
+/// 1898, 1901, 1902.
+fn collapse_lazy_plus_then(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut to_strip: Vec<(usize, usize)> = Vec::new();
+    // Walk pattern looking for `+?(*THEN)` or `+?(*PRUNE)` or `+?(*MARK:…)`-immediate.
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            i += 1;
+            continue;
+        }
+        if !in_class
+            && c == '+'
+            && i + 1 < chars.len()
+            && chars[i + 1] == '?'
+            && i + 2 < chars.len()
+            && chars[i + 2] == '('
+            && i + 3 < chars.len()
+            && chars[i + 3] == '*'
+        {
+            // Look for `(*THEN)` or `(*PRUNE)` after the `+?`.
+            let mut k = i + 4;
+            while k < chars.len() && chars[k] != ')' {
+                k += 1;
+            }
+            let verb_body: String = chars[i + 4..k].iter().collect();
+            let verb = verb_body.splitn(2, ':').next().unwrap_or("").to_uppercase();
+            if verb == "THEN" || verb == "PRUNE" {
+                to_strip.push((i, i + 2));
+            }
+        }
+        i += 1;
+    }
+    if to_strip.is_empty() {
+        return pattern.to_string();
+    }
+    let skip_set: std::collections::HashSet<usize> =
+        to_strip.iter().flat_map(|(s, e)| *s..*e).collect();
+    let mut out = String::with_capacity(pattern.len());
+    for (idx, ch) in chars.iter().enumerate() {
+        if !skip_set.contains(&idx) {
+            out.push(*ch);
+        }
+    }
+    out
+}
+
 /// When `(*ACCEPT)` appears, the engine completes the match
 /// immediately — anything after is irrelevant. Approximate by
 /// truncating the pattern at the first `(*ACCEPT)` and closing all
