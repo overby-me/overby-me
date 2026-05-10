@@ -1447,6 +1447,7 @@
       { tool = "pw-cat"; name = "playback-stdin-marker"; }
       { tool = "spa-resample"; name = "existing-bad-format"; }
       { tool = "spa-resample"; name = "dash-stdin-marker"; }
+      { tool = "pw-mididump"; name = "directory-arg"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }

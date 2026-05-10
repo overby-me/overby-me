@@ -171,12 +171,20 @@ pub fn main(raw_args: &[String]) -> i32 {
         }
         Err(e) => {
             // Match the C tool's `%m` output, which is just strerror(errno)
-            // without Rust's `(os error N)` parenthetical.
+            // without Rust's `(os error N)` parenthetical. C's fopen
+            // succeeds on directories then read_mthd returns -EINVAL
+            // because fread can't read 14 header bytes; mirror that as
+            // "Invalid argument" instead of Rust's "Is a directory".
             let msg = e
                 .to_string()
                 .rsplit_once(" (os error ")
                 .map(|(m, _)| m.to_string())
                 .unwrap_or_else(|| e.to_string());
+            let msg = if msg == "Is a directory" {
+                "Invalid argument".to_string()
+            } else {
+                msg
+            };
             eprintln!("error opening {filename}: {msg}");
             // C tool returns -1 from main, which truncates to 255.
             255
