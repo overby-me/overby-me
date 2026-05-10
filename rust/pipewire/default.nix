@@ -1587,6 +1587,7 @@
       { tool = "pw-cat"; name = "env-pipewire-runtime-dir"; }
       { tool = "pw-mididump"; name = "dev-zero"; }
       { tool = "spa-json-dump"; name = "dev-zero"; }
+      { tool = "pw-cli"; name = "env-pipewire-runtime-dir-exit"; }
       { tool = "pw-dump"; name = "indent-equals"; }
       { tool = "pipewire"; name = "short-c-no-arg"; }
       { tool = "pipewire"; name = "long-config-no-arg"; }

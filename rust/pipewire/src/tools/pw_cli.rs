@@ -142,7 +142,12 @@ pub fn main(raw_args: &[String]) -> i32 {
     // env var also supplies the *value* used for the connect attempt
     // when -r wasn't given.
     let env_remote = std::env::var("PIPEWIRE_REMOTE").ok();
-    let force_connect = remote.is_some() || env_remote.is_some();
+    // Any user-directed connection setting forces a hard exit on
+    // connect failure (255 instead of 0). C treats PIPEWIRE_RUNTIME_DIR
+    // the same way since it changes the resolved socket path.
+    let force_connect = remote.is_some()
+        || env_remote.is_some()
+        || std::env::var("PIPEWIRE_RUNTIME_DIR").is_ok();
     let connect_remote = remote.clone().or(env_remote);
     if positional.is_empty() {
         // Bare `pw-cli` (no command, no flags): C attempts to connect to
