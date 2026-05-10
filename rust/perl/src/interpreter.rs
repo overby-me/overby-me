@@ -12025,6 +12025,7 @@ impl Interpreter {
         let pattern = strip_unicode_boundary_types(&pattern);
         let pattern = translate_octal_escapes(&pattern);
         let pattern = strip_hex_underscores(&pattern);
+        let pattern = normalize_quantifier_braces(&pattern);
         let pattern = escape_literal_bracket_in_class(&pattern);
         let pattern = translate_posix_classes(&pattern, ascii_posix);
         let pattern = translate_g_anchor(&pattern);
@@ -12056,6 +12057,7 @@ impl Interpreter {
             let p = strip_unicode_boundary_types(&p);
             let p = translate_octal_escapes(&p);
             let p = strip_hex_underscores(&p);
+            let p = normalize_quantifier_braces(&p);
             let p = escape_literal_bracket_in_class(&p);
             let p = translate_posix_classes(&p, ascii_posix);
             let p = translate_g_anchor(&p);
@@ -12393,6 +12395,7 @@ impl Interpreter {
         let pattern = strip_unicode_boundary_types(&pattern);
         let pattern = translate_octal_escapes(&pattern);
         let pattern = strip_hex_underscores(&pattern);
+        let pattern = normalize_quantifier_braces(&pattern);
         let pattern = escape_literal_bracket_in_class(&pattern);
         let pattern = translate_posix_classes(&pattern, ascii_posix);
         let pattern = translate_g_anchor(&pattern);
@@ -19543,6 +19546,86 @@ fn escape_literal_bracket_in_class(pattern: &str) -> String {
 /// (a single digit with that capture group present); we approximate
 /// by treating `\0` and `\NNN` (≥ 2 leading zeros / 3-digit) as
 /// octal, leaving `\1`..`\9` alone for backref handling.
+/// Normalise quantifier braces `{N,M}` so leading whitespace and
+/// `{,N}` (implicit `0`) are accepted. Reference perl treats
+/// `.{, 2 }` as `.{0,2}`; rust regex / fancy_regex don't accept the
+/// leading comma. re/regexp 2059-2061.
+fn normalize_quantifier_braces(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+        } else if in_class && c == ']' {
+            in_class = false;
+        }
+        if !in_class && c == '{' {
+            // Check whether this is a quantifier: `{<digits or whitespace>
+            // ,<digits or whitespace>}` — bail out otherwise.
+            let mut k = i + 1;
+            let mut saw_comma = false;
+            let mut min_str = String::new();
+            let mut max_str = String::new();
+            let mut valid = true;
+            while k < chars.len() && chars[k] != '}' {
+                let cc = chars[k];
+                if cc.is_ascii_digit() {
+                    if saw_comma {
+                        max_str.push(cc);
+                    } else {
+                        min_str.push(cc);
+                    }
+                } else if cc == ',' {
+                    if saw_comma {
+                        valid = false;
+                        break;
+                    }
+                    saw_comma = true;
+                } else if cc.is_whitespace() {
+                    // ignore
+                } else {
+                    valid = false;
+                    break;
+                }
+                k += 1;
+            }
+            if valid
+                && k < chars.len()
+                && chars[k] == '}'
+                && (saw_comma || !min_str.is_empty())
+                && (!min_str.is_empty() || saw_comma)
+            {
+                // Build canonical form.
+                let canonical = if saw_comma {
+                    let mn = if min_str.is_empty() { "0" } else { &min_str };
+                    if max_str.is_empty() {
+                        format!("{{{mn},}}")
+                    } else {
+                        format!("{{{mn},{max_str}}}")
+                    }
+                } else {
+                    format!("{{{min_str}}}")
+                };
+                out.push_str(&canonical);
+                i = k + 1;
+                continue;
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 /// Strip underscores from `\x{...}` hex escape bodies. Reference
 /// perl allows `\x{_1_0000_}` as a hex literal; fancy_regex/regex
 /// reject the underscores. re/regexp 2046.
