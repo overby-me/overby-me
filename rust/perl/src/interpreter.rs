@@ -15664,6 +15664,16 @@ fn check_unbounded_lookbehind(chars: &[char]) -> Option<String> {
                 } else if in_class && chars[j] == ']' {
                     in_class = false;
                 } else if !in_class && chars[j] == '(' {
+                    // Skip past `(*VERB)` constructs — the `*` is a
+                    // verb introducer, not an unbounded quantifier.
+                    if j + 1 < chars.len() && chars[j + 1] == '*' {
+                        let mut m = j + 2;
+                        while m < chars.len() && chars[m] != ')' {
+                            m += 1;
+                        }
+                        j = m.saturating_add(1);
+                        continue;
+                    }
                     depth += 1;
                 } else if !in_class && chars[j] == ')' {
                     depth -= 1;
