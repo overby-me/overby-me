@@ -111,7 +111,7 @@ pub fn main(args: &[String]) -> i32 {
         "can't load module: {}",
         crate::tools::common::connect_failure_msg()
     );
-    0
+    u8::MAX as i32
 }
 
 fn print_help(argv0: &str) {
