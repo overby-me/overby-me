@@ -36,6 +36,16 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
+            "--" => {
+                // getopt_long: end-of-options marker. Remaining args are
+                // positional filenames; only the first is used.
+                for s in args.iter().skip(i + 1) {
+                    if filename.is_none() {
+                        filename = Some(s.to_string());
+                    }
+                }
+                break;
+            }
             "-r" | "--remote" => {
                 i += 1;
             }

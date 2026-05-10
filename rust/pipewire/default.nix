@@ -1456,6 +1456,8 @@
       { tool = "pw-cat"; name = "bad-rate-zero"; }
       { tool = "pw-cat"; name = "bad-rate-negative"; }
       { tool = "pw-cat"; name = "bad-channels-string"; }
+      { tool = "pw-mididump"; name = "dash-dash-terminator"; }
+      { tool = "pw-mididump"; name = "dash-dash-empty"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }
