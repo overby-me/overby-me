@@ -1458,6 +1458,8 @@
       { tool = "pw-cat"; name = "bad-channels-string"; }
       { tool = "pw-mididump"; name = "dash-dash-terminator"; }
       { tool = "pw-mididump"; name = "dash-dash-empty"; }
+      { tool = "spa-resample"; name = "dash-dash-only"; }
+      { tool = "spa-resample"; name = "dash-dash-args"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }

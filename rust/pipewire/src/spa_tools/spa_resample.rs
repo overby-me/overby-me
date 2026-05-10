@@ -14,6 +14,12 @@ pub fn main(raw_args: &[String]) -> i32 {
     while i < args.len() {
         let a = &args[i];
         match a.as_str() {
+            "--" => {
+                // getopt_long: end-of-options marker. Remaining args are
+                // positional filenames.
+                positional_count += args.len().saturating_sub(i + 1);
+                break;
+            }
             "-h" | "--help" => {
                 print_help(argv0);
                 return 0;
