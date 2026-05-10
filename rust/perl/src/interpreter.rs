@@ -11977,7 +11977,8 @@ impl Interpreter {
         // is set OR an inline `(?a)` flag was detected.
         let ascii_posix = flags.contains('a') || inline_ascii;
         let needs_fancy = pattern_uses_atomic_or_possessive(&pattern)
-            || (flags.contains('x') && !xx);
+            || (flags.contains('x') && !xx)
+            || pattern_has_inline_single_x(&pattern);
         // Inline non-recursive `(?N)` / `(?&NAME)` / `(?P>NAME)`
         // references. fancy_regex doesn't support these natively;
         // substituting the referenced group's body wrapped in `(?:…)`
@@ -19323,6 +19324,46 @@ fn rewrite_nonexistent_group_conditionals(pattern: &str) -> String {
 /// 1742-1756.
 /// Walk `pattern` looking for an inline `(?a)` / `(?aa)` flag (no
 /// body — `(?aa-i)` etc. count too). Returns true if found.
+/// Detect inline `(?x...)` flag groups where /x appears exactly once
+/// (i.e. single x, not /xx). Inside `/xx` outer scope, `(?x:...)`
+/// downgrades to single /x where class whitespace is preserved —
+/// rust regex's `(?x)` always strips class whitespace, so we must
+/// route to fancy_regex. re/regexp 2024-2028.
+fn pattern_has_inline_single_x(pattern: &str) -> bool {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+        } else if in_class && c == ']' {
+            in_class = false;
+        }
+        if !in_class && c == '(' && i + 1 < chars.len() && chars[i + 1] == '?' {
+            let mut k = i + 2;
+            let mut x_count = 0;
+            while k < chars.len()
+                && (chars[k].is_ascii_alphabetic() || chars[k] == '-')
+            {
+                if chars[k] == 'x' {
+                    x_count += 1;
+                }
+                k += 1;
+            }
+            if x_count == 1 && k < chars.len() && (chars[k] == ':' || chars[k] == ')') {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
 fn pattern_has_inline_ascii_flag(pattern: &str) -> bool {
     let chars: Vec<char> = pattern.chars().collect();
     let mut i = 0;
