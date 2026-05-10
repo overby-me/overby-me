@@ -1531,6 +1531,15 @@
       { tool = "pw-mididump"; name = "no-args"; }
       { tool = "pw-dump"; name = "no-args"; }
       { tool = "pw-loopback"; name = "no-args"; }
+      { tool = "pw-dot"; name = "bogus-flag-exit"; }
+      { tool = "pw-metadata"; name = "bogus-flag-exit"; }
+      { tool = "pw-profiler"; name = "bogus-flag-exit"; }
+      { tool = "pw-top"; name = "bogus-flag-exit"; }
+      { tool = "pw-reserve"; name = "bogus-flag-exit"; }
+      { tool = "pw-container"; name = "bogus-flag-exit"; }
+      { tool = "spa-acp-tool"; name = "bogus-flag-exit"; }
+      { tool = "spa-inspect"; name = "no-args-exit"; }
+      { tool = "spa-monitor"; name = "no-args-exit"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }

@@ -21,25 +21,25 @@ pub fn main(args: &[String]) -> i32 {
             s if s.starts_with("--help=") => {
                 eprintln!("{argv0}: option '--help' doesn't allow an argument");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with("--version=") => {
                 eprintln!("{argv0}: option '--version' doesn't allow an argument");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with("--")
                 && !matches!(s, "--remote" | "--properties") =>
             {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with('-') && !matches!(s, "-r" | "-P") => {
                 let ch = s.chars().nth(1).unwrap_or('?');
                 eprintln!("{argv0}: invalid option -- '{ch}'");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             _ => {}
         }

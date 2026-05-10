@@ -21,24 +21,24 @@ pub fn main(raw_args: &[String]) -> i32 {
             s if s.starts_with("--help=") => {
                 eprintln!("{argv0}: option '--help' doesn't allow an argument");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with("--version=") => {
                 eprintln!("{argv0}: option '--version' doesn't allow an argument");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with("--batch-mode=") => {
                 eprintln!("{argv0}: option '--batch-mode' doesn't allow an argument");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             "-b" | "--batch-mode" => {}
             "-n" | "--iterations" => {
                 if i + 1 >= args.len() {
                     eprintln!("{argv0}: option requires an argument -- 'n'");
                     print_help(argv0);
-                    return 0;
+                    return u8::MAX as i32;
                 }
                 i += 2;
                 continue;
@@ -47,7 +47,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                 if i + 1 >= args.len() {
                     eprintln!("{argv0}: option requires an argument -- 'r'");
                     print_help(argv0);
-                    return 0;
+                    return u8::MAX as i32;
                 }
                 i += 2;
                 continue;
@@ -55,24 +55,24 @@ pub fn main(raw_args: &[String]) -> i32 {
             s if s.starts_with("--") => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with('-') && s.len() == 2 => {
                 let ch = s.chars().nth(1).unwrap_or('?');
                 eprintln!("{argv0}: invalid option -- '{ch}'");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with('-') && !s.starts_with("--") => {
                 let ch = s.chars().nth(1).unwrap_or('?');
                 eprintln!("{argv0}: invalid option -- '{ch}'");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with('-') => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             _ => {}
         }

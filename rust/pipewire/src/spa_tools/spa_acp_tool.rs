@@ -22,7 +22,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_options(argv0);
                 println!("Available commands:");
                 print_commands();
-                return 0;
+                return 1;
             }
             s if s.starts_with("--verbose=") => {
                 eprintln!("{argv0}: option '--verbose' doesn't allow an argument");
@@ -30,7 +30,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_options(argv0);
                 println!("Available commands:");
                 print_commands();
-                return 0;
+                return 1;
             }
             "-v" | "--verbose" => {}
             // Inline-value forms for required-arg flags.
@@ -43,7 +43,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                     print_options(argv0);
                     println!("Available commands:");
                     print_commands();
-                    return 0;
+                    return 1;
                 }
                 i += 2;
                 continue;
@@ -55,7 +55,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                     print_options(argv0);
                     println!("Available commands:");
                     print_commands();
-                    return 0;
+                    return 1;
                 }
                 i += 2;
                 continue;
@@ -68,7 +68,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_options(argv0);
                 println!("Available commands:");
                 print_commands();
-                return 0;
+                return 1;
             }
             s if s.starts_with('-') && s.len() == 2 => {
                 let ch = s.chars().nth(1).unwrap_or('?');
@@ -77,7 +77,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_options(argv0);
                 println!("Available commands:");
                 print_commands();
-                return 0;
+                return 1;
             }
             // Mixed short cluster like `-bx`: getopt errors on first
             // unknown char.
@@ -88,7 +88,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_options(argv0);
                 println!("Available commands:");
                 print_commands();
-                return 0;
+                return 1;
             }
             // Positional: first is command, rest are command args.
             s => {

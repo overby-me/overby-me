@@ -17,34 +17,34 @@ pub fn main(raw_args: &[String]) -> i32 {
         Some(s) if s.starts_with("--help=") => {
             eprintln!("{argv0}: option '--help' doesn't allow an argument");
             print_help(argv0);
-            0
+            u8::MAX as i32
         }
         Some(s) if s.starts_with("--version=") => {
             eprintln!("{argv0}: option '--version' doesn't allow an argument");
             print_help(argv0);
-            0
+            u8::MAX as i32
         }
         Some(s) if s.starts_with("--") => {
             eprintln!("{argv0}: unrecognized option '{s}'");
             print_help(argv0);
-            0
+            u8::MAX as i32
         }
         Some(s) if s.starts_with('-') && s.len() == 2 => {
             let ch = s.chars().nth(1).unwrap_or('?');
             eprintln!("{argv0}: invalid option -- '{ch}'");
             print_help(argv0);
-            0
+            u8::MAX as i32
         }
         Some(s) if s.starts_with('-') && !s.starts_with("--") => {
             let ch = s.chars().nth(1).unwrap_or('?');
             eprintln!("{argv0}: invalid option -- '{ch}'");
             print_help(argv0);
-            0
+            u8::MAX as i32
         }
         Some(s) if s.starts_with('-') => {
             eprintln!("{argv0}: unrecognized option '{s}'");
             print_help(argv0);
-            0
+            u8::MAX as i32
         }
         _ => {
             // C connects to the daemon to collect profiler events. Try

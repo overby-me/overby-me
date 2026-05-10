@@ -6,7 +6,7 @@ pub fn main(args: &[String]) -> i32 {
     let argv0 = args.first().map(String::as_str).unwrap_or("spa-inspect");
     if args.len() < 2 {
         println!("usage: {argv0} <plugin.so>");
-        return 0;
+        return u8::MAX as i32;
     }
     let plugin = &args[1];
     // Mirror the C tool's dlopen-failure shape: `can't load <path>:
@@ -15,5 +15,5 @@ pub fn main(args: &[String]) -> i32 {
     println!(
         "can't load {plugin}: {plugin}: cannot open shared object file: No such file or directory"
     );
-    0
+    u8::MAX as i32
 }

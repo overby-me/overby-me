@@ -23,12 +23,12 @@ pub fn main(raw_args: &[String]) -> i32 {
             s if s.starts_with("--help=") => {
                 eprintln!("{argv0}: option '--help' doesn't allow an argument");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with("--version=") => {
                 eprintln!("{argv0}: option '--version' doesn't allow an argument");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with("--all=")
                 || s.starts_with("--smart=")
@@ -39,13 +39,13 @@ pub fn main(raw_args: &[String]) -> i32 {
                 let name = s.split_once('=').map(|(n, _)| n).unwrap_or(s);
                 eprintln!("{argv0}: option '{name}' doesn't allow an argument");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             "-o" | "--output" => {
                 if i + 1 >= args.len() {
                     eprintln!("{argv0}: option requires an argument -- 'o'");
                     print_help(argv0);
-                    return 0;
+                    return u8::MAX as i32;
                 }
                 output = args.get(i + 1).cloned();
                 i += 2;
@@ -55,7 +55,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                 if i + 1 >= args.len() {
                     eprintln!("{argv0}: option requires an argument -- 'j'");
                     print_help(argv0);
-                    return 0;
+                    return u8::MAX as i32;
                 }
                 json_input = args.get(i + 1).cloned();
                 i += 2;
@@ -65,7 +65,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                 if i + 1 >= args.len() {
                     eprintln!("{argv0}: option requires an argument -- 'r'");
                     print_help(argv0);
-                    return 0;
+                    return u8::MAX as i32;
                 }
                 let val = args.get(i + 1).cloned().unwrap_or_default();
                 println!("set remote to {val}");
@@ -85,24 +85,24 @@ pub fn main(raw_args: &[String]) -> i32 {
             s if s.starts_with("--") => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with('-') && s.len() == 2 => {
                 let ch = s.chars().nth(1).unwrap_or('?');
                 eprintln!("{argv0}: invalid option -- '{ch}'");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with('-') && !s.starts_with("--") => {
                 let ch = s.chars().nth(1).unwrap_or('?');
                 eprintln!("{argv0}: invalid option -- '{ch}'");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with('-') => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             _ => {}
         }

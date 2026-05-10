@@ -25,12 +25,12 @@ pub fn main(args: &[String]) -> i32 {
             s if s.starts_with("--help=") => {
                 eprintln!("{argv0}: option '--help' doesn't allow an argument");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with("--version=") => {
                 eprintln!("{argv0}: option '--version' doesn't allow an argument");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             "-n" | "--name" => {
                 if let Some(v) = args.get(i + 1) {
@@ -50,13 +50,13 @@ pub fn main(args: &[String]) -> i32 {
             s if s.starts_with("--") => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with('-') => {
                 let ch = s.chars().nth(1).unwrap_or('?');
                 eprintln!("{argv0}: invalid option -- '{ch}'");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             _ => {}
         }
@@ -67,7 +67,7 @@ pub fn main(args: &[String]) -> i32 {
     // before doing anything else.
     if name.is_none() {
         eprintln!("valid name must be given");
-        return 0;
+        return u8::MAX as i32;
     }
     eprintln!("{argv0}: not yet implemented in rust-pipewire");
     1
