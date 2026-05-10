@@ -19716,7 +19716,14 @@ fn strip_control_verbs(pattern: &str) -> String {
                         | ""
                 );
                 if known {
-                    out.push_str("(?:)");
+                    let replacement = if verb_name == "FAIL" || verb_name == "F" {
+                        // `(*FAIL)` / `(*F)` always fail. Map to a
+                        // negative lookahead that's never satisfiable.
+                        "(?!)"
+                    } else {
+                        "(?:)"
+                    };
+                    out.push_str(replacement);
                     i = k + 1;
                     continue;
                 }
