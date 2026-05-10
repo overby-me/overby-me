@@ -1498,6 +1498,10 @@
       { tool = "pw-link"; name = "env-pipewire-remote"; }
       { tool = "pw-link"; name = "env-pipewire-remote-list"; }
       { tool = "pw-cat"; name = "env-pipewire-remote"; }
+      { tool = "pw-cat"; name = "midi-no-primary-mode"; }
+      { tool = "pw-cat"; name = "dsd-no-primary-mode"; }
+      { tool = "pw-cat"; name = "sysex-no-primary-mode"; }
+      { tool = "pw-cat"; name = "encoded-no-primary-mode"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }

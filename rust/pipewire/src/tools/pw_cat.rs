@@ -150,15 +150,11 @@ pub fn main(raw_args: &[String]) -> i32 {
                         print_help(argv0);
                         return 1;
                     }
-                    if matches!(
-                        name,
-                        "--playback"
-                            | "--record"
-                            | "--midi"
-                            | "--dsd"
-                            | "--sysex"
-                            | "--encoded"
-                    ) {
+                    // Only --playback / --record satisfy the post-getopt
+                    // playback/record check. `--midi`, `--dsd`, `--sysex`,
+                    // `--encoded` are *sub-mode* selectors and still need
+                    // a primary mode flag.
+                    if matches!(name, "--playback" | "--record") {
                         mode_set = true;
                     }
                 } else if let Some(&long) = long_required.iter().find(|&&l| l == name) {
@@ -197,7 +193,9 @@ pub fn main(raw_args: &[String]) -> i32 {
                     // Mode-selector flags cause `mode_set = true` so the
                     // post-loop error is `filename or - argument missing`
                     // instead of `one of the playback/record options...`.
-                    if matches!(ch, 'p' | 'r' | 'm' | 'd' | 's' | 'o') {
+                    // -m, -d, -s, -o are sub-modes and don't satisfy the
+                    // primary playback/record requirement on their own.
+                    if matches!(ch, 'p' | 'r') {
                         mode_set = true;
                     }
                 } else if let Some(&(_, name)) = short_required.iter().find(|(c, _)| *c == ch) {
@@ -237,8 +235,8 @@ pub fn main(raw_args: &[String]) -> i32 {
                 // First char is a known no-arg flag (other than h). Apply
                 // its mode-setter side effect, then fall through (we
                 // don't currently handle inline values for required-arg
-                // clusters in pw-cat).
-                if matches!(ch, 'p' | 'r' | 'm' | 'd' | 's' | 'o') {
+                // clusters in pw-cat). Only -p/-r are primary modes.
+                if matches!(ch, 'p' | 'r') {
                     mode_set = true;
                 }
             }
