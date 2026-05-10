@@ -218,6 +218,13 @@ impl<'a> Parser<'a> {
                         self.pos += 1;
                     }
                     self.skip_ws_and_comments();
+                    // If we hit end-of-input before a value, C's spa_json
+                    // drops the partial entry and yields an empty object.
+                    // Mirror that for the implicit-top-level (closer=None).
+                    if self.peek().is_none() && closer.is_none() {
+                        let _ = key;
+                        return Ok(Value::Object(entries));
+                    }
                     let value = self.parse_value()?;
                     entries.push((key, value));
                 }

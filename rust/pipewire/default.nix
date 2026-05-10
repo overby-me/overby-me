@@ -1467,6 +1467,9 @@
       { tool = "spa-json-dump"; name = "stdin-content"; }
       { tool = "spa-json-dump"; name = "stdin-whitespace-only"; }
       { tool = "spa-json-dump"; name = "stdin-comment-only"; }
+      { tool = "spa-json-dump"; name = "bare-number-stdin"; }
+      { tool = "spa-json-dump"; name = "bare-string-stdin"; }
+      { tool = "spa-json-dump"; name = "bare-bool-stdin"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }
