@@ -1460,6 +1460,9 @@
       { tool = "pw-mididump"; name = "dash-dash-empty"; }
       { tool = "spa-resample"; name = "dash-dash-only"; }
       { tool = "spa-resample"; name = "dash-dash-args"; }
+      { tool = "spa-json-dump"; name = "dash-dash-only"; }
+      { tool = "spa-json-dump"; name = "dash-dash-missing-file"; }
+      { tool = "spa-json-dump"; name = "dash-dash-directory"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }

@@ -20,6 +20,14 @@ pub fn main(args: &[String]) -> i32 {
     while i < args.len() {
         let a = args[i].as_str();
         match a {
+            "--" => {
+                // getopt_long: end-of-options marker. Next arg (if any)
+                // is the positional filename; default stays "-" if none.
+                if let Some(s) = args.get(i + 1) {
+                    filename = s.clone();
+                }
+                break;
+            }
             "-h" | "--help" => {
                 print_help(argv0);
                 return 0;
