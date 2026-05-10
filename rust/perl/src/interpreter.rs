@@ -11962,6 +11962,15 @@ impl Interpreter {
         start: usize,
     ) -> (bool, usize) {
         let pattern = self.interp_regex_pattern(pattern);
+        // Under /x, `#`-to-EOL is a comment; strip BEFORE validation
+        // and the code-block extractor so `a# (?{1+\n` doesn't trip
+        // either with brace-counter or runtime-regex parsing.
+        // re/regexp 1698.
+        let pattern = if flags.contains('x') {
+            strip_x_comments_for_validation(&pattern)
+        } else {
+            pattern
+        };
         if let Some(err) = validate_regex_pattern(&pattern) {
             let file = if self.current_file.is_empty() {
                 "-e".to_string()
@@ -15756,6 +15765,82 @@ fn check_unbounded_lookbehind(chars: &[char]) -> Option<String> {
         i += 1;
     }
     None
+}
+
+/// Replace `#`-to-EOL /x-style comments with spaces so the regex
+/// validator doesn't think a `#` line is part of the active regex
+/// (the comment may contain `(?{` etc. that would otherwise trip
+/// brace-counting). Keeps the rest of the pattern at the same
+/// character positions so error markers still line up. Skips inside
+/// `[...]` classes (where `#` is a literal char even under /x) and
+/// `(?#...)` regex comments (where `#` is part of the construct, not
+/// a /x comment). re/regexp 1698.
+fn strip_x_comments_for_validation(pat: &str) -> String {
+    let chars: Vec<char> = pat.chars().collect();
+    let mut out = String::with_capacity(pat.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        // `(?#…)` is a regex comment — keep its contents intact so
+        // the comment-extractor downstream still sees the construct.
+        if !in_class
+            && c == '('
+            && i + 2 < chars.len()
+            && chars[i + 1] == '?'
+            && chars[i + 2] == '#'
+        {
+            out.push(c);
+            out.push(chars[i + 1]);
+            out.push(chars[i + 2]);
+            let mut j = i + 3;
+            while j < chars.len() && chars[j] != ')' {
+                if chars[j] == '\\' && j + 1 < chars.len() {
+                    out.push(chars[j]);
+                    out.push(chars[j + 1]);
+                    j += 2;
+                } else {
+                    out.push(chars[j]);
+                    j += 1;
+                }
+            }
+            if j < chars.len() {
+                out.push(chars[j]);
+                j += 1;
+            }
+            i = j;
+            continue;
+        }
+        if !in_class && c == '#' {
+            // Replace `#`-to-EOL (or end-of-pattern) with spaces.
+            while i < chars.len() && chars[i] != '\n' {
+                out.push(' ');
+                i += 1;
+            }
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
 }
 
 fn validate_regex_pattern(pat: &str) -> Option<String> {
