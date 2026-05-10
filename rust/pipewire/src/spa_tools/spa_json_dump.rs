@@ -84,7 +84,23 @@ pub fn main(args: &[String]) -> i32 {
         i += 1;
     }
 
+    // Mirror C's spa-json-dump.c flow:
+    //   - filename == "" or "-": "not a valid file '<name>': Success"
+    //     (errno is 0 since the C path doesn't call any libc that sets it)
+    //   - open(...) fails: "error opening file '<name>': <strerror>"
+    //   - mmap(fd, st_size) fails: "error mmapping file '<name>': <strerror>"
+    //     - empty regular file (size=0):     EINVAL → "Invalid argument"
+    //     - directory:                       ENODEV → "No such device"
+    if filename.is_empty() || filename == "-" {
+        eprintln!("not a valid file '{filename}': Success");
+        return 1;
+    }
     let input = match read_input(&filename) {
+        Ok(s) if s.is_empty() => {
+            // Mirror mmap(size=0) → EINVAL.
+            eprintln!("error mmapping file '{filename}': Invalid argument");
+            return 1;
+        }
         Ok(s) => s,
         Err(e) => {
             // Match the C tool's error wording closely. Strip Rust's
@@ -95,7 +111,13 @@ pub fn main(args: &[String]) -> i32 {
                 .rsplit_once(" (os error ")
                 .map(|(m, _)| m.to_string())
                 .unwrap_or_else(|| e.to_string());
-            eprintln!("error opening file '{filename}': {msg}");
+            // Directories: open succeeds in C, mmap fails with ENODEV
+            // (Rust's File::open returns "Is a directory" upfront).
+            if msg == "Is a directory" {
+                eprintln!("error mmapping file '{filename}': No such device");
+            } else {
+                eprintln!("error opening file '{filename}': {msg}");
+            }
             return 1;
         }
     };

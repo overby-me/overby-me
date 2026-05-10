@@ -1448,6 +1448,10 @@
       { tool = "spa-resample"; name = "existing-bad-format"; }
       { tool = "spa-resample"; name = "dash-stdin-marker"; }
       { tool = "pw-mididump"; name = "directory-arg"; }
+      { tool = "spa-json-dump"; name = "stdin-marker"; }
+      { tool = "spa-json-dump"; name = "no-args"; }
+      { tool = "spa-json-dump"; name = "empty-file"; }
+      { tool = "spa-json-dump"; name = "directory"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }
