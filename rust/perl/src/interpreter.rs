@@ -11845,6 +11845,63 @@ impl Interpreter {
                         group_strs.push(None);
                     }
                 }
+                // Capture-reset post-process (rust regex branch) —
+                // mirrors fancy_regex branch. re/regexp 481, 504,
+                // 967-968, 2140+.
+                {
+                    let parents = extract_quantified_parents(&pat);
+                    for idx in 1..group_starts.len() {
+                        let parent = parents.get(idx).copied().unwrap_or(0);
+                        if parent == 0 {
+                            continue;
+                        }
+                        let (Some(child_start), Some(parent_start)) = (
+                            group_starts[idx],
+                            group_starts.get(parent).copied().flatten(),
+                        ) else {
+                            continue;
+                        };
+                        if child_start < parent_start {
+                            group_starts[idx] = None;
+                            group_ends[idx] = None;
+                            group_strs[idx] = None;
+                        }
+                    }
+                    let info = extract_quantified_branches(&pat);
+                    use std::collections::HashMap;
+                    let mut clusters: HashMap<usize, Vec<usize>> = HashMap::new();
+                    for idx in 1..group_starts.len() {
+                        if group_starts[idx].is_none() {
+                            continue;
+                        }
+                        let (parent, _branch) =
+                            info.get(idx).copied().unwrap_or((0, 0));
+                        if parent == 0 {
+                            continue;
+                        }
+                        clusters.entry(parent).or_default().push(idx);
+                    }
+                    for (_parent, sibs) in clusters {
+                        let mut max_end: usize = 0;
+                        let mut winning_branch: Option<usize> = None;
+                        for &idx in &sibs {
+                            let end = group_ends[idx].unwrap_or(0);
+                            if end > max_end || winning_branch.is_none() {
+                                max_end = end;
+                                winning_branch = Some(info[idx].1);
+                            }
+                        }
+                        if let Some(win) = winning_branch {
+                            for idx in sibs {
+                                if info[idx].1 != win {
+                                    group_starts[idx] = None;
+                                    group_ends[idx] = None;
+                                    group_strs[idx] = None;
+                                }
+                            }
+                        }
+                    }
+                }
                 let named: Vec<(String, Option<String>)> = re
                     .capture_names()
                     .flatten()
@@ -11884,31 +11941,71 @@ impl Interpreter {
                             group_strs.push(None);
                         }
                     }
-                    // Capture-reset post-process: for each group whose
-                    // ancestor is `*`/`+`/`{N,}`-quantified, if the
-                    // group's match span sits BEFORE the ancestor's
-                    // last-iter span (i.e. group is from an earlier
-                    // iteration), clear it. fancy_regex preserves
+                    // Capture-reset post-process: groups inside a
+                    // `*`/`+`/`{N,}`-quantified ancestor and not part
+                    // of the last iteration's matching alternation
+                    // branch get cleared. fancy_regex preserves
                     // captures across iterations; reference perl
-                    // resets them. Only handles capturing-group
-                    // parents — non-capturing `(?:...)*` cases need
-                    // alternation-aware analysis which is harder.
-                    // re/regexp 481, 967-968.
-                    let parents = extract_quantified_parents(&fancy_pat);
-                    for idx in 1..group_starts.len() {
-                        let parent = parents.get(idx).copied().unwrap_or(0);
-                        if parent == 0 {
-                            continue;
+                    // returns only the last iter's. re/regexp 481,
+                    // 504, 967-968, 2140+.
+                    {
+                        let parents = extract_quantified_parents(&fancy_pat);
+                        for idx in 1..group_starts.len() {
+                            let parent = parents.get(idx).copied().unwrap_or(0);
+                            if parent == 0 {
+                                continue;
+                            }
+                            let (Some(child_start), Some(parent_start)) = (
+                                group_starts[idx],
+                                group_starts.get(parent).copied().flatten(),
+                            ) else {
+                                continue;
+                            };
+                            if child_start < parent_start {
+                                group_starts[idx] = None;
+                                group_ends[idx] = None;
+                                group_strs[idx] = None;
+                            }
                         }
-                        let (Some(child_start), Some(parent_start)) =
-                            (group_starts[idx], group_starts.get(parent).copied().flatten())
-                        else {
-                            continue;
-                        };
-                        if child_start < parent_start {
-                            group_starts[idx] = None;
-                            group_ends[idx] = None;
-                            group_strs[idx] = None;
+                        // Now handle non-capturing-parent / branch case:
+                        // group siblings under same quantified parent
+                        // by branch. Find branch with max group end —
+                        // that's "last-iter winning branch". Reset
+                        // groups in OTHER branches.
+                        let info = extract_quantified_branches(&fancy_pat);
+                        use std::collections::HashMap;
+                        let mut clusters: HashMap<usize, Vec<usize>> = HashMap::new();
+                        for idx in 1..group_starts.len() {
+                            if group_starts[idx].is_none() {
+                                continue;
+                            }
+                            let (parent, _branch) =
+                                info.get(idx).copied().unwrap_or((0, 0));
+                            if parent == 0 {
+                                continue;
+                            }
+                            clusters.entry(parent).or_default().push(idx);
+                        }
+                        for (_parent, sibs) in clusters {
+                            // Find branch of the group with max end.
+                            let mut max_end: usize = 0;
+                            let mut winning_branch: Option<usize> = None;
+                            for &idx in &sibs {
+                                let end = group_ends[idx].unwrap_or(0);
+                                if end > max_end || winning_branch.is_none() {
+                                    max_end = end;
+                                    winning_branch = Some(info[idx].1);
+                                }
+                            }
+                            if let Some(win) = winning_branch {
+                                for idx in sibs {
+                                    if info[idx].1 != win {
+                                        group_starts[idx] = None;
+                                        group_ends[idx] = None;
+                                        group_strs[idx] = None;
+                                    }
+                                }
+                            }
                         }
                     }
                     let named: Vec<(String, Option<String>)> =
@@ -17062,6 +17159,140 @@ fn expand_ascii_case_insensitive(pattern: &str) -> String {
         i += 1;
     }
     out
+}
+
+/// Walk `pattern` and return, for each capture group index, a pair
+/// `(parent_open_pos, branch_within_parent)` where `parent_open_pos`
+/// is the OPEN-PAREN position of the nearest enclosing
+/// `+`/`*`/`{N,…}`-quantified ancestor (capturing OR not, +1-encoded
+/// so 0=none) and `branch_within_parent` is the alt-branch index
+/// inside that parent (0 if no `|`). Used to reset captures from
+/// non-winning alternation branches under quantified parents.
+/// re/regexp 504, 2140+.
+fn extract_quantified_branches(pattern: &str) -> Vec<(usize, usize)> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut group_indices: Vec<Option<usize>> = vec![None; chars.len()];
+    let mut close_of_open: Vec<Option<usize>> = vec![None; chars.len()];
+    let mut group_count: usize = 0;
+    let mut stack: Vec<usize> = Vec::new();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            i += 1;
+            continue;
+        }
+        if !in_class && c == '(' {
+            let is_named_angle = i + 3 < chars.len()
+                && chars[i + 1] == '?'
+                && chars[i + 2] == '<'
+                && chars[i + 3] != '='
+                && chars[i + 3] != '!';
+            let is_named_p = i + 3 < chars.len()
+                && chars[i + 1] == '?'
+                && chars[i + 2] == 'P'
+                && chars[i + 3] == '<';
+            let is_named_quote = i + 2 < chars.len()
+                && chars[i + 1] == '?'
+                && chars[i + 2] == '\'';
+            let is_capturing = !(i + 1 < chars.len() && chars[i + 1] == '?')
+                || is_named_angle
+                || is_named_p
+                || is_named_quote;
+            if is_capturing {
+                group_count += 1;
+                group_indices[i] = Some(group_count);
+            }
+            stack.push(i);
+            i += 1;
+            continue;
+        }
+        if !in_class && c == ')' {
+            if let Some(open_pos) = stack.pop() {
+                close_of_open[open_pos] = Some(i);
+            }
+            i += 1;
+            continue;
+        }
+        i += 1;
+    }
+    let mut info: Vec<(usize, usize)> = vec![(0, 0); group_count + 1];
+    for (open_pos, group_opt) in group_indices.iter().enumerate() {
+        let Some(idx) = (*group_opt).filter(|&v| v > 0) else {
+            continue;
+        };
+        // Walk through pattern up to `open_pos`, tracking ancestor
+        // opens. Track per-ancestor current-branch counter (incremented
+        // on `|` at depth one inside that ancestor).
+        let mut depth_stack: Vec<(usize, usize)> = Vec::new(); // (open_pos, branch)
+        let mut in_class2 = false;
+        let mut j = 0;
+        while j <= open_pos {
+            let cc = chars[j];
+            if cc == '\\' && j + 1 < chars.len() {
+                j += 2;
+                continue;
+            }
+            if !in_class2 && cc == '[' {
+                in_class2 = true;
+                j += 1;
+                continue;
+            }
+            if in_class2 && cc == ']' {
+                in_class2 = false;
+                j += 1;
+                continue;
+            }
+            if j == open_pos {
+                break;
+            }
+            if !in_class2 && cc == '(' {
+                depth_stack.push((j, 0));
+            } else if !in_class2 && cc == ')' {
+                depth_stack.pop();
+            } else if !in_class2 && cc == '|' {
+                if let Some(top) = depth_stack.last_mut() {
+                    top.1 += 1;
+                }
+            }
+            j += 1;
+        }
+        // Find nearest quantified ancestor.
+        for &(ancestor_open, branch) in depth_stack.iter().rev() {
+            let Some(close) = close_of_open[ancestor_open] else {
+                continue;
+            };
+            let after = close + 1;
+            let is_quantified = after < chars.len()
+                && (chars[after] == '+'
+                    || chars[after] == '*'
+                    || (chars[after] == '{' && {
+                        let mut k = after + 1;
+                        while k < chars.len() && chars[k] != '}' {
+                            k += 1;
+                        }
+                        let body: String =
+                            chars[after + 1..k.min(chars.len())].iter().collect();
+                        body.contains(',')
+                    }));
+            if is_quantified {
+                info[idx] = (ancestor_open + 1, branch);
+                break;
+            }
+        }
+    }
+    info
 }
 
 /// (Unused stub kept for future sibling-cluster reset work.) Walk
