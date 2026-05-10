@@ -72,6 +72,16 @@ pub fn main(raw_args: &[String]) -> i32 {
                 i += 2;
                 continue;
             }
+            s if s.starts_with("--indent=") => {
+                if let Ok(v) = s["--indent=".len()..].parse::<usize>() {
+                    indent = v;
+                }
+            }
+            s if s.starts_with("-i") && s.len() > 2 => {
+                if let Ok(v) = s[2..].parse::<usize>() {
+                    indent = v;
+                }
+            }
             opt @ ("-r" | "--remote") => {
                 if i + 1 >= args.len() {
                     if opt == "--remote" {
