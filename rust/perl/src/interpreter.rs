@@ -20461,6 +20461,23 @@ fn perl_dollar_anchor(pattern: &str, multiline: bool) -> String {
             i += 2;
             continue;
         }
+        // Track character-class boundaries unconditionally so `^`/`$`
+        // translation skips literal `^`/`$` inside `[...]` regardless
+        // of /m mode. Without this, `[^z]` in /m mode would have its
+        // `^` (negation) replaced with `(?:\A|(?<=\n))(?!\z)`, which
+        // would render the class garbage. re/regexp 1830.
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
         if multiline {
             // In /m mode rust regex's `^` matches at end-of-string-
             // after-final-newline; reference perl does not. Replace
@@ -20478,18 +20495,6 @@ fn perl_dollar_anchor(pattern: &str, multiline: bool) -> String {
             }
             // `$` already means "end of any line" under /m; leave it
             // alone but still iterate so `\Z` translation above runs.
-            out.push(c);
-            i += 1;
-            continue;
-        }
-        if !in_class && c == '[' {
-            in_class = true;
-            out.push(c);
-            i += 1;
-            continue;
-        }
-        if in_class && c == ']' {
-            in_class = false;
             out.push(c);
             i += 1;
             continue;
