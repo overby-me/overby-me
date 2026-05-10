@@ -85,7 +85,9 @@ pub fn parse(bytes: &[u8]) -> Result<(FileInfo, Vec<Event>), ParseError> {
     let mut p = 14;
     for id in 0..ntracks {
         if p + 8 > bytes.len() || &bytes[p..p + 4] != b"MTrk" {
-            return err(format!("missing MTrk for track {id}"));
+            // C's read_mtrk returns -EINVAL when fread can't read the
+            // 8-byte MTrk header; pw-mididump prints `Invalid argument`.
+            return err("Invalid argument".to_string());
         }
         let size = be32(&bytes[p + 4..p + 8]) as usize;
         let start = p + 8;
