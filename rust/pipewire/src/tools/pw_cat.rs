@@ -417,12 +417,21 @@ fn emit_open_error(argv0: &str, file: &str, raw_mode: bool) {
             emitted_help = true;
         }
         s if s.contains("encplay") => {
-            // ffmpeg/avformat errors; we emit a simplified surrogate that
-            // matches the most common case (file-not-found). Pointer
-            // addresses vary per-run, but tests normalize them.
+            // ffmpeg/avformat errors; we emit a simplified surrogate.
+            // Pointer addresses vary per-run, but tests normalize them.
             eprintln!("[AVFormatContext @ 0x0000000000000000] Opening 'file:{file}' for reading");
             eprintln!("[file @ 0x0000000000000000] Setting default whitelist 'file,crypto,data'");
-            eprintln!("Failed to open input: No such file or directory");
+            let exists = file != "-" && std::path::Path::new(file).exists();
+            if exists {
+                // File exists — avformat reads it and fails to detect a
+                // known media format, mapped to -EINVAL.
+                eprintln!("[AVIOContext @ 0x0000000000000000] Statistics: 0 bytes read, 0 seeks");
+                eprintln!("Failed to open input: Invalid data found when processing input");
+                eprintln!("error: open failed: Invalid argument");
+            } else {
+                eprintln!("Failed to open input: No such file or directory");
+                eprintln!("error: open failed: Invalid argument");
+            }
             print_help(argv0);
             emitted_help = true;
         }

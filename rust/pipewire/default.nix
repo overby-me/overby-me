@@ -1570,6 +1570,8 @@
       { tool = "pw-config"; name = "lone-dash-cmd"; }
       { tool = "pw-cat"; name = "short-R-remote"; }
       { tool = "pw-cat"; name = "short-R-attached"; }
+      { tool = "pw-encplay"; name = "missing-file"; }
+      { tool = "pw-encplay"; name = "existing-bad-format"; }
       { tool = "pw-dump"; name = "indent-equals"; }
       { tool = "pipewire"; name = "short-c-no-arg"; }
       { tool = "pipewire"; name = "long-config-no-arg"; }
