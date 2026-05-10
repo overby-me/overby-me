@@ -36,14 +36,40 @@ pub fn main(args: &[String]) -> i32 {
             eprintln!("{argv0}: option '--version' doesn't allow an argument");
             234
         }
-        // Recognized flags we don't yet implement — running the daemon
-        // is Phase 9. Just print "not implemented" so callers know.
-        Some("-v") | Some("--verbose") | Some("-c") | Some("--config") | Some("-P")
-        | Some("--properties") => {
+        // -v / --verbose are no-arg.
+        Some("-v") | Some("--verbose") => {
             eprintln!("{argv0}: not yet implemented in rust-pipewire");
             1
         }
-        // Inline-value forms for required-arg flags.
+        // -c / --config / -P / --properties REQUIRE a value. With no
+        // following arg getopt errors. C maps the -EINVAL fallthrough to
+        // exit 234 (= -22 truncated).
+        Some(opt @ ("-c" | "--config")) => {
+            if args.len() > 2 {
+                // Has value but daemon not yet implemented.
+                eprintln!("{argv0}: not yet implemented in rust-pipewire");
+                1
+            } else if opt == "--config" {
+                eprintln!("{argv0}: option '--config' requires an argument");
+                234
+            } else {
+                eprintln!("{argv0}: option requires an argument -- 'c'");
+                234
+            }
+        }
+        Some(opt @ ("-P" | "--properties")) => {
+            if args.len() > 2 {
+                eprintln!("{argv0}: not yet implemented in rust-pipewire");
+                1
+            } else if opt == "--properties" {
+                eprintln!("{argv0}: option '--properties' requires an argument");
+                234
+            } else {
+                eprintln!("{argv0}: option requires an argument -- 'P'");
+                234
+            }
+        }
+        // Inline-value forms — accepted, daemon not yet implemented.
         Some(s) if s.starts_with("--config=") || s.starts_with("--properties=") => {
             eprintln!("{argv0}: not yet implemented in rust-pipewire");
             1

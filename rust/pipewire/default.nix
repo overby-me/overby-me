@@ -1549,6 +1549,10 @@
       { tool = "pw-mididump"; name = "truncated-header"; }
       { tool = "pw-mididump"; name = "bad-magic"; }
       { tool = "pw-dump"; name = "indent-equals"; }
+      { tool = "pipewire"; name = "short-c-no-arg"; }
+      { tool = "pipewire"; name = "long-config-no-arg"; }
+      { tool = "pipewire"; name = "short-P-no-arg"; }
+      { tool = "pipewire"; name = "long-properties-no-arg"; }
       { tool = "spa-acp-tool"; name = "bogus-flag-exit"; }
       { tool = "spa-inspect"; name = "no-args-exit"; }
       { tool = "spa-monitor"; name = "no-args-exit"; }
