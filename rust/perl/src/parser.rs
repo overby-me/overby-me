@@ -2615,8 +2615,16 @@ impl Parser {
                         // Perl auto-quotes a sole bareword inside `{...}`
                         // when used as a hash key — `$h{foo}` means
                         // `$h{"foo"}` regardless of whether `foo` names
-                        // a sub. Detect the simple bareword case.
-                        let key = if let Token::Ident(n) = self.tok().clone()
+                        // a sub. Detect the simple bareword case. Also
+                        // accept named-operator tokens (e.g. `length`,
+                        // `pos`) that lex as their own token so
+                        // `$h{length}` etc. work. re/regexp op/pos
+                        // tests 29-32.
+                        let bareword_name: Option<String> = match self.tok() {
+                            Token::Ident(n) => Some(n.clone()),
+                            tok => named_op_token_name(tok),
+                        };
+                        let key = if let Some(n) = bareword_name
                             && matches!(self.tokens.get(self.pos + 1), Some(Token::RBrace))
                         {
                             self.pos += 1;
@@ -2726,7 +2734,21 @@ impl Parser {
                         }
                         Token::LBrace => {
                             self.pos += 1;
-                            let key = self.parse_expr();
+                            // Auto-quote a sole bareword inside `->{...}`
+                            // so `$r->{length}` etc. work even when
+                            // `length` lexes as a named-operator token.
+                            let bareword_name: Option<String> = match self.tok() {
+                                Token::Ident(n) => Some(n.clone()),
+                                tok => named_op_token_name(tok),
+                            };
+                            let key = if let Some(n) = bareword_name
+                                && matches!(self.tokens.get(self.pos + 1), Some(Token::RBrace))
+                            {
+                                self.pos += 1;
+                                Expr::StringLit(n)
+                            } else {
+                                self.parse_expr()
+                            };
                             self.expect(&Token::RBrace);
                             expr =
                                 Expr::ArrowElement(Box::new(expr), Box::new(key), ArrowKind::Hash);
@@ -3894,6 +3916,49 @@ impl Parser {
 /// Perl builtins with prototype `$` — they take exactly one scalar-context
 /// argument. Without this, something like `is(scalar @b, 1, "msg")` would
 /// parse as `is(scalar(@b, 1, "msg"))`, swallowing the outer call's args.
+/// Map a named-operator token back to its identifier so it can be
+/// used as a bareword hash key inside `{...}`. Returns None for
+/// tokens that aren't named operators (i.e. that have no bareword
+/// equivalent). op/pos test #29-32 with `{length}`.
+fn named_op_token_name(tok: &Token) -> Option<String> {
+    let s: &str = match tok {
+        Token::Length => "length",
+        Token::Print => "print",
+        Token::Say => "say",
+        Token::Printf => "printf",
+        Token::Return => "return",
+        Token::My => "my",
+        Token::Our => "our",
+        Token::Local => "local",
+        Token::Sub => "sub",
+        Token::If => "if",
+        Token::Unless => "unless",
+        Token::Else => "else",
+        Token::Elsif => "elsif",
+        Token::While => "while",
+        Token::Until => "until",
+        Token::For => "for",
+        Token::Foreach => "foreach",
+        Token::Do => "do",
+        Token::Last => "last",
+        Token::Next => "next",
+        Token::Redo => "redo",
+        Token::Use => "use",
+        Token::Package => "package",
+        Token::Require => "require",
+        Token::Die => "die",
+        Token::Warn => "warn",
+        Token::Eval => "eval",
+        Token::Goto => "goto",
+        Token::Not => "not",
+        Token::And => "and",
+        Token::Or => "or",
+        Token::Xor => "xor",
+        _ => return None,
+    };
+    Some(s.to_string())
+}
+
 fn is_unary_builtin(name: &str) -> bool {
     matches!(
         name,
