@@ -99,9 +99,23 @@ pub fn main(args: &[String]) -> i32 {
     //   - mmap(fd, st_size) fails: "error mmapping file '<name>': <strerror>"
     //     - empty regular file (size=0):     EINVAL → "Invalid argument"
     //     - directory:                       ENODEV → "No such device"
-    if filename.is_empty() || filename == "-" {
+    if filename.is_empty() {
         eprintln!("not a valid file '{filename}': Success");
         return 1;
+    }
+    // Stdin path: C reads stdin into a buffer, then if the buffer is
+    // empty (e.g. </dev/null) reports "not a valid file '-': Success".
+    // Non-empty stdin is parsed normally.
+    if filename == "-" {
+        let mut buf = String::new();
+        let _ = io::stdin().read_to_string(&mut buf);
+        // C reports "not a valid file" when the buffer contains nothing
+        // parseable — empty or whitespace-only input.
+        if buf.trim().is_empty() {
+            eprintln!("not a valid file '{filename}': Success");
+            return 1;
+        }
+        return parse_and_dump(&filename, &buf, indent, simple);
     }
     // Probe stat() size up-front: C's mmap(size) fails with EINVAL when
     // st_size == 0. Files in /proc and /sys report size 0 even though
@@ -140,9 +154,13 @@ pub fn main(args: &[String]) -> i32 {
         }
     };
 
+    parse_and_dump(&filename, &input, indent, simple)
+}
+
+fn parse_and_dump(filename: &str, input: &str, indent: usize, simple: bool) -> i32 {
     let opts = DumpOptions { indent, simple };
 
-    let value = match parse(&input) {
+    let value = match parse(input) {
         Ok(v) => v,
         Err(e) => {
             eprintln!(

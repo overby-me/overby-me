@@ -1464,6 +1464,8 @@
       { tool = "spa-json-dump"; name = "dash-dash-missing-file"; }
       { tool = "spa-json-dump"; name = "dash-dash-directory"; }
       { tool = "spa-json-dump"; name = "proc-zero-size"; }
+      { tool = "spa-json-dump"; name = "stdin-content"; }
+      { tool = "spa-json-dump"; name = "stdin-whitespace-only"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }
