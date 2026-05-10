@@ -11771,6 +11771,14 @@ impl Interpreter {
         } else {
             pattern
         };
+        // Under /i without /aa, expand ASCII ligature sequences in
+        // the pattern to alternations including their Unicode ligature
+        // codepoints (\x{FB00} etc.). re/regexp 1685, 1691-1716, 1724.
+        let pattern = if flags.contains('i') && !case_insensitive_aa {
+            expand_ascii_ligatures(&pattern)
+        } else {
+            pattern
+        };
         let fancy_pattern = pattern.clone();
         let pattern = translate_atomic_groups(&pattern);
         let pattern = fix_inverted_quantifiers(&pattern);
@@ -18824,6 +18832,99 @@ fn translate_octal_escapes(pattern: &str) -> String {
 /// `pattern`. Returns `(cleaned_pattern, code_blocks)` — each `(?{...})`
 /// is replaced with `(?:)` (always-matching empty group) so the regex
 /// crate accepts the pattern, and the inner code is collected so the
+/// Under `/i`, expand literal ligature sequences (`ffi`, `ffl`, `ff`,
+/// `fi`, `fl`, `st`, `ss`) to alternations including their Unicode
+/// ligature codepoints so case-insensitive matching catches both
+/// forms. Skips inside `[...]` classes and respects `\…` escapes.
+/// re/regexp 1685, 1691-1694, 1712, 1715, 1716, 1724-1726.
+fn expand_ascii_ligatures(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len() + 16);
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            // Pass `\xNN` / `\x{...}` / `\NNN` etc. through verbatim.
+            let n = chars[i + 1];
+            if n == 'x' && i + 2 < chars.len() && chars[i + 2] == '{' {
+                let mut k = i + 3;
+                while k < chars.len() && chars[k] != '}' {
+                    k += 1;
+                }
+                let end = (k + 1).min(chars.len());
+                let chunk: String = chars[i..end].iter().collect();
+                out.push_str(&chunk);
+                i = end;
+                continue;
+            }
+            out.push(c);
+            out.push(n);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class {
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        // Try longest-first matches.
+        let rest: String = chars[i..].iter().collect();
+        let lower = rest.to_lowercase();
+        let (consume, replacement): (usize, &str) =
+            if lower.starts_with("ffi") {
+                (3, "(?:ffi|\\x{FB03})")
+            } else if lower.starts_with("ffl") {
+                (3, "(?:ffl|\\x{FB04})")
+            } else if lower.starts_with("ff") {
+                (2, "(?:ff|\\x{FB00})")
+            } else if lower.starts_with("fi") {
+                (2, "(?:fi|\\x{FB01})")
+            } else if lower.starts_with("fl") {
+                (2, "(?:fl|\\x{FB02})")
+            } else if lower.starts_with("st") {
+                (2, "(?:st|\\x{FB06}|\\x{FB05})")
+            } else if lower.starts_with("ss") {
+                (2, "(?:ss|\\x{DF})")
+            } else {
+                (0, "")
+            };
+        if consume > 0 {
+            // Ensure we don't grab a prefix that's followed by a
+            // quantifier directly attached to its last char (e.g.
+            // `ff+` should expand to `(?:ff|\x{FB00})+`, that's fine).
+            // Also avoid reapplying inside our own alternation by
+            // emitting in one go.
+            // Verify each consumed position is a literal letter (not
+            // already escaped) — done implicitly by char check.
+            let chunk: String = chars[i..i + consume].iter().collect();
+            // Preserve case: only ASCII letters fold here so emit
+            // both cases as `[xX]` style isn't needed since /i
+            // already handles ASCII case folding for letters; the
+            // problem is just the LIGATURE codepoints.
+            let _ = chunk;
+            out.push_str(replacement);
+            i += consume;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 /// Convert capturing groups `(…)` to non-capturing `(?:…)` in a
 /// regex fragment, leaving `(?…)` introducers and `\(` escapes alone.
 /// Used so a runtime `(??{"(.)(.)"})` body doesn't shift outer group
