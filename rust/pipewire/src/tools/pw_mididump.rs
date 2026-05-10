@@ -104,6 +104,19 @@ pub fn main(raw_args: &[String]) -> i32 {
                     filename = Some(s.to_string());
                 }
             }
+            s if s.starts_with("--") => {
+                eprintln!("{argv0}: unrecognized option '{s}'");
+                print_help(argv0);
+                return u8::MAX as i32;
+            }
+            // Short options not handled above (single char or cluster):
+            // getopt prints `invalid option -- 'X'`.
+            s if s.starts_with('-') => {
+                let ch = s.chars().nth(1).unwrap_or('?');
+                eprintln!("{argv0}: invalid option -- '{ch}'");
+                print_help(argv0);
+                return u8::MAX as i32;
+            }
             s => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);

@@ -1426,6 +1426,16 @@
       { tool = "spa-resample"; name = "short-bad-cluster"; }
       { tool = "spa-acp-tool"; name = "short-bad-cluster"; }
       { tool = "spa-json-dump"; name = "short-bad-cluster"; }
+      { tool = "pw-link"; name = "short-bad-cluster"; }
+      { tool = "pw-mon"; name = "short-bad-cluster"; }
+      { tool = "pw-dump"; name = "short-bad-cluster"; }
+      { tool = "pw-dot"; name = "short-bad-cluster"; }
+      { tool = "pw-metadata"; name = "short-bad-cluster"; }
+      { tool = "pw-profiler"; name = "short-bad-cluster"; }
+      { tool = "pw-mididump"; name = "short-bad-cluster"; }
+      { tool = "pw-loopback"; name = "short-bad-cluster"; }
+      { tool = "pw-container"; name = "short-bad-cluster"; }
+      { tool = "pw-reserve"; name = "short-bad-cluster"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }
