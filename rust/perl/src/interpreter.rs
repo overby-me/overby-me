@@ -14117,9 +14117,12 @@ impl Interpreter {
             i.saturating_sub(1)
         };
 
-        for (idx, stmt) in stmts.iter().enumerate() {
+        let mut idx = 0;
+        while idx < stmts.len() {
+            let stmt = &stmts[idx];
             // BEGIN blocks were already executed in the first pass.
             if matches!(stmt, Stmt::Begin(_, _)) {
+                idx += 1;
                 continue;
             }
             // Tail-position: propagate the eval's caller context so
@@ -14152,9 +14155,28 @@ impl Interpreter {
                     self.current_line = saved_line;
                     return Value::Undef;
                 }
+                Flow::Goto(label) => {
+                    // Search the eval'd stmts for a matching label so
+                    // `goto LBL` defined in the same eval works. Without
+                    // this the Goto silently drops. base/lex 87, 88.
+                    if let Some(target) = stmts
+                        .iter()
+                        .position(|s| matches!(s, Stmt::Label(n) if n == &label))
+                    {
+                        idx = target + 1;
+                        continue;
+                    }
+                    // Label not in this eval — propagate up.
+                    self.pending_flow = Some(Flow::Goto(label));
+                    self.pop_scope();
+                    self.current_file = saved_file;
+                    self.current_line = saved_line;
+                    return Value::Undef;
+                }
                 Flow::None => {}
                 _ => {}
             }
+            idx += 1;
         }
 
         let result = self.last_expr_val.clone();
