@@ -16084,6 +16084,51 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                     depth > 0
                 };
                 if j >= chars.len() || chars[j] != '{' {
+                    // If we have `\N(?#...){...}`, the user likely
+                    // intended `\N{...}`; reference perl emits
+                    // "Missing braces on \N{}". re/regexp 1998.
+                    if !in_class
+                        && j + 2 < chars.len()
+                        && chars[j] == '('
+                        && chars[j + 1] == '?'
+                        && chars[j + 2] == '#'
+                    {
+                        let mut after_comment = j + 3;
+                        while after_comment < chars.len() && chars[after_comment] != ')' {
+                            after_comment += 1;
+                        }
+                        if after_comment < chars.len() {
+                            after_comment += 1;
+                        }
+                        // Skip whitespace.
+                        while after_comment < chars.len()
+                            && chars[after_comment].is_ascii_whitespace()
+                        {
+                            after_comment += 1;
+                        }
+                        if after_comment < chars.len() && chars[after_comment] == '{' {
+                            // Check body is non-count (i.e. likely a
+                            // misplaced `\N{NAME}` attempt).
+                            let mut k2 = after_comment + 1;
+                            while k2 < chars.len() && chars[k2] != '}' {
+                                k2 += 1;
+                            }
+                            if k2 < chars.len() {
+                                let body: String = chars[after_comment + 1..k2].iter().collect();
+                                let stripped: String =
+                                    body.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+                                let is_count = !stripped.is_empty()
+                                    && stripped.chars().all(|c| c.is_ascii_digit() || c == ',');
+                                if !is_count {
+                                    let prefix: String = chars[..=i + 1].iter().collect();
+                                    let suffix: String = chars[i + 2..].iter().collect();
+                                    return Some(format!(
+                                        "Missing braces on \\N{{}} in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
+                                    ));
+                                }
+                            }
+                        }
+                    }
                     if in_class {
                         let prefix: String = chars[..=i + 1].iter().collect();
                         return Some(format!(
