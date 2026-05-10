@@ -32,17 +32,46 @@ pub fn main(args: &[String]) -> i32 {
                 print_help(argv0);
                 return u8::MAX as i32;
             }
-            "-n" | "--name" => {
+            opt @ ("-n" | "--name") => {
                 if let Some(v) = args.get(i + 1) {
                     name = Some(v.clone());
                     i += 2;
                     continue;
                 }
+                if opt == "--name" {
+                    eprintln!("{argv0}: option '--name' requires an argument");
+                } else {
+                    eprintln!("{argv0}: option requires an argument -- 'n'");
+                }
+                print_help(argv0);
+                return u8::MAX as i32;
             }
             s if s.starts_with("--name=") => {
                 name = Some(s["--name=".len()..].to_string());
             }
-            "-a" | "--appname" | "-p" | "--priority" => {
+            opt @ ("-a" | "--appname") => {
+                if args.get(i + 1).is_none() {
+                    if opt == "--appname" {
+                        eprintln!("{argv0}: option '--appname' requires an argument");
+                    } else {
+                        eprintln!("{argv0}: option requires an argument -- 'a'");
+                    }
+                    print_help(argv0);
+                    return u8::MAX as i32;
+                }
+                i += 2;
+                continue;
+            }
+            opt @ ("-p" | "--priority") => {
+                if args.get(i + 1).is_none() {
+                    if opt == "--priority" {
+                        eprintln!("{argv0}: option '--priority' requires an argument");
+                    } else {
+                        eprintln!("{argv0}: option requires an argument -- 'p'");
+                    }
+                    print_help(argv0);
+                    return u8::MAX as i32;
+                }
                 i += 2;
                 continue;
             }

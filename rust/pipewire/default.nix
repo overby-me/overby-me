@@ -1550,6 +1550,16 @@
       { tool = "pw-mididump"; name = "bad-magic"; }
       { tool = "pw-mididump"; name = "stdin-valid-smf"; }
       { tool = "pw-link"; name = "long-props-no-arg"; }
+      { tool = "pw-dot"; name = "long-remote-no-arg"; }
+      { tool = "pw-dot"; name = "long-json-no-arg"; }
+      { tool = "pw-dot"; name = "long-output-no-arg"; }
+      { tool = "pw-metadata"; name = "long-name-no-arg"; }
+      { tool = "pw-metadata"; name = "long-remote-no-arg"; }
+      { tool = "pw-profiler"; name = "long-remote-no-arg"; }
+      { tool = "pw-profiler"; name = "long-output-no-arg"; }
+      { tool = "pw-top"; name = "long-remote-no-arg"; }
+      { tool = "pw-reserve"; name = "long-name-no-arg"; }
+      { tool = "spa-acp-tool"; name = "long-properties-no-arg"; }
       { tool = "pw-dump"; name = "indent-equals"; }
       { tool = "pipewire"; name = "short-c-no-arg"; }
       { tool = "pipewire"; name = "long-config-no-arg"; }

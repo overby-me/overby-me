@@ -36,9 +36,13 @@ pub fn main(raw_args: &[String]) -> i32 {
             // Inline-value forms for required-arg flags.
             s if s.starts_with("--card=") || s.starts_with("--properties=") => {}
             // -c, -p require an argument per spa-acp-tool's optstring.
-            "-c" | "--card" => {
+            opt @ ("-c" | "--card") => {
                 if i + 1 >= args.len() {
-                    eprintln!("{argv0}: option requires an argument -- 'c'");
+                    if opt == "--card" {
+                        eprintln!("{argv0}: option '--card' requires an argument");
+                    } else {
+                        eprintln!("{argv0}: option requires an argument -- 'c'");
+                    }
                     eprintln!("error: unknown option '?'");
                     print_options(argv0);
                     println!("Available commands:");
@@ -48,9 +52,13 @@ pub fn main(raw_args: &[String]) -> i32 {
                 i += 2;
                 continue;
             }
-            "-p" | "--properties" => {
+            opt @ ("-p" | "--properties") => {
                 if i + 1 >= args.len() {
-                    eprintln!("{argv0}: option requires an argument -- 'p'");
+                    if opt == "--properties" {
+                        eprintln!("{argv0}: option '--properties' requires an argument");
+                    } else {
+                        eprintln!("{argv0}: option requires an argument -- 'p'");
+                    }
                     eprintln!("error: unknown option '?'");
                     print_options(argv0);
                     println!("Available commands:");

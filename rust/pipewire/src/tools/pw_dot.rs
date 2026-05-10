@@ -41,9 +41,13 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_help(argv0);
                 return u8::MAX as i32;
             }
-            "-o" | "--output" => {
+            opt @ ("-o" | "--output") => {
                 if i + 1 >= args.len() {
-                    eprintln!("{argv0}: option requires an argument -- 'o'");
+                    if opt == "--output" {
+                        eprintln!("{argv0}: option '--output' requires an argument");
+                    } else {
+                        eprintln!("{argv0}: option requires an argument -- 'o'");
+                    }
                     print_help(argv0);
                     return u8::MAX as i32;
                 }
@@ -51,9 +55,13 @@ pub fn main(raw_args: &[String]) -> i32 {
                 i += 2;
                 continue;
             }
-            "-j" | "--json" => {
+            opt @ ("-j" | "--json") => {
                 if i + 1 >= args.len() {
-                    eprintln!("{argv0}: option requires an argument -- 'j'");
+                    if opt == "--json" {
+                        eprintln!("{argv0}: option '--json' requires an argument");
+                    } else {
+                        eprintln!("{argv0}: option requires an argument -- 'j'");
+                    }
                     print_help(argv0);
                     return u8::MAX as i32;
                 }
@@ -61,9 +69,13 @@ pub fn main(raw_args: &[String]) -> i32 {
                 i += 2;
                 continue;
             }
-            "-r" | "--remote" => {
+            opt @ ("-r" | "--remote") => {
                 if i + 1 >= args.len() {
-                    eprintln!("{argv0}: option requires an argument -- 'r'");
+                    if opt == "--remote" {
+                        eprintln!("{argv0}: option '--remote' requires an argument");
+                    } else {
+                        eprintln!("{argv0}: option requires an argument -- 'r'");
+                    }
                     print_help(argv0);
                     return u8::MAX as i32;
                 }

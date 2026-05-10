@@ -34,18 +34,26 @@ pub fn main(raw_args: &[String]) -> i32 {
                 return u8::MAX as i32;
             }
             "-b" | "--batch-mode" => {}
-            "-n" | "--iterations" => {
+            opt @ ("-n" | "--iterations") => {
                 if i + 1 >= args.len() {
-                    eprintln!("{argv0}: option requires an argument -- 'n'");
+                    if opt == "--iterations" {
+                        eprintln!("{argv0}: option '--iterations' requires an argument");
+                    } else {
+                        eprintln!("{argv0}: option requires an argument -- 'n'");
+                    }
                     print_help(argv0);
                     return u8::MAX as i32;
                 }
                 i += 2;
                 continue;
             }
-            "-r" | "--remote" => {
+            opt @ ("-r" | "--remote") => {
                 if i + 1 >= args.len() {
-                    eprintln!("{argv0}: option requires an argument -- 'r'");
+                    if opt == "--remote" {
+                        eprintln!("{argv0}: option '--remote' requires an argument");
+                    } else {
+                        eprintln!("{argv0}: option requires an argument -- 'r'");
+                    }
                     print_help(argv0);
                     return u8::MAX as i32;
                 }
