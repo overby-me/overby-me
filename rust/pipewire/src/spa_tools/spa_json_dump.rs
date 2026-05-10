@@ -78,13 +78,13 @@ pub fn main(args: &[String]) -> i32 {
             s if s.starts_with("--") => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help_to(argv0, true);
-                return 1;
+                return u8::MAX as i32;
             }
             s if s.starts_with('-') && s.len() == 2 => {
                 let ch = s.chars().nth(1).unwrap_or('?');
                 eprintln!("{argv0}: invalid option -- '{ch}'");
                 print_help_to(argv0, true);
-                return 1;
+                return u8::MAX as i32;
             }
             // Mixed cluster like `-bx`: getopt processes char-by-char,
             // so a cluster starting with `-h` short-circuits to help
@@ -122,7 +122,7 @@ pub fn main(args: &[String]) -> i32 {
                     } else {
                         eprintln!("{argv0}: invalid option -- '{c}'");
                         print_help_to(argv0, true);
-                        return 1;
+                        return u8::MAX as i32;
                     }
                 }
             }

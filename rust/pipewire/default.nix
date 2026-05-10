@@ -1508,6 +1508,12 @@
       { tool = "pw-loopback"; name = "long-capture-no-arg"; }
       { tool = "pw-loopback"; name = "unknown-flag"; }
       { tool = "spa-json-dump"; name = "empty-filename"; }
+      { tool = "pw-cli"; name = "bogus-flag-exit"; }
+      { tool = "pw-cli"; name = "bad-short-exit"; }
+      { tool = "pw-link"; name = "bogus-flag-exit"; }
+      { tool = "pw-mon"; name = "bogus-flag-exit"; }
+      { tool = "pw-dump"; name = "bogus-flag-exit"; }
+      { tool = "spa-json-dump"; name = "bogus-flag-exit"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }

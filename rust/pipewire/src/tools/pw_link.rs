@@ -58,12 +58,12 @@ pub fn main(raw_args: &[String]) -> i32 {
             s if s.starts_with("--help=") => {
                 eprintln!("{argv0}: option '--help' doesn't allow an argument");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with("--version=") => {
                 eprintln!("{argv0}: option '--version' doesn't allow an argument");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             // Long no-arg flags: input/output/links/latency/monitor/etc.
             // reject `--FOO=value` form.
@@ -84,7 +84,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                 let name = s.split_once('=').map(|(n, _)| n).unwrap_or(s);
                 eprintln!("{argv0}: option '{name}' doesn't allow an argument");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             "-i" | "--input" => {
                 list_inputs = true;
@@ -112,7 +112,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                     eprintln!("{argv0}: option requires an argument -- 'r'");
                 }
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with("--remote=") => {
                 remote = Some(s["--remote=".len()..].to_string());
@@ -140,7 +140,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                 if i + 1 >= args.len() {
                     eprintln!("{argv0}: option requires an argument -- 'p'");
                     print_help(argv0);
-                    return 0;
+                    return u8::MAX as i32;
                 }
                 i += 2;
                 continue;
@@ -156,7 +156,7 @@ pub fn main(raw_args: &[String]) -> i32 {
             s if s.starts_with("--") => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             "-" => {
                 // Lone `-` is a positional argument, not an option.
@@ -166,19 +166,19 @@ pub fn main(raw_args: &[String]) -> i32 {
                 let ch = s.chars().nth(1).unwrap_or('?');
                 eprintln!("{argv0}: invalid option -- '{ch}'");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             // Mixed cluster like `-bx`: getopt errors on first unknown.
             s if s.starts_with('-') && !s.starts_with("--") => {
                 let ch = s.chars().nth(1).unwrap_or('?');
                 eprintln!("{argv0}: invalid option -- '{ch}'");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with('-') => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s => positional.push(s),
         }
