@@ -12024,6 +12024,7 @@ impl Interpreter {
         let pattern = neutralise_false_ranges(&pattern);
         let pattern = strip_unicode_boundary_types(&pattern);
         let pattern = translate_octal_escapes(&pattern);
+        let pattern = strip_hex_underscores(&pattern);
         let pattern = escape_literal_bracket_in_class(&pattern);
         let pattern = translate_posix_classes(&pattern, ascii_posix);
         let pattern = translate_g_anchor(&pattern);
@@ -12054,6 +12055,7 @@ impl Interpreter {
             let p = neutralise_false_ranges(&p);
             let p = strip_unicode_boundary_types(&p);
             let p = translate_octal_escapes(&p);
+            let p = strip_hex_underscores(&p);
             let p = escape_literal_bracket_in_class(&p);
             let p = translate_posix_classes(&p, ascii_posix);
             let p = translate_g_anchor(&p);
@@ -12390,6 +12392,7 @@ impl Interpreter {
         let pattern = neutralise_false_ranges(&pattern);
         let pattern = strip_unicode_boundary_types(&pattern);
         let pattern = translate_octal_escapes(&pattern);
+        let pattern = strip_hex_underscores(&pattern);
         let pattern = escape_literal_bracket_in_class(&pattern);
         let pattern = translate_posix_classes(&pattern, ascii_posix);
         let pattern = translate_g_anchor(&pattern);
@@ -19540,6 +19543,46 @@ fn escape_literal_bracket_in_class(pattern: &str) -> String {
 /// (a single digit with that capture group present); we approximate
 /// by treating `\0` and `\NNN` (≥ 2 leading zeros / 3-digit) as
 /// octal, leaving `\1`..`\9` alone for backref handling.
+/// Strip underscores from `\x{...}` hex escape bodies. Reference
+/// perl allows `\x{_1_0000_}` as a hex literal; fancy_regex/regex
+/// reject the underscores. re/regexp 2046.
+fn strip_hex_underscores(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\'
+            && i + 2 < chars.len()
+            && chars[i + 1] == 'x'
+            && chars[i + 2] == '{'
+        {
+            let body_start = i + 3;
+            let mut k = body_start;
+            while k < chars.len() && chars[k] != '}' {
+                k += 1;
+            }
+            if k < chars.len() {
+                let body: String = chars[body_start..k]
+                    .iter()
+                    .filter(|c| !c.is_whitespace() && **c != '_')
+                    .collect();
+                out.push_str(&format!("\\x{{{body}}}"));
+                i = k + 1;
+                continue;
+            }
+        }
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            out.push(chars[i]);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
 fn translate_octal_escapes(pattern: &str) -> String {
     let chars: Vec<char> = pattern.chars().collect();
     // Pre-count capturing groups so `\Nd...` falls back to octal
@@ -19586,7 +19629,8 @@ fn translate_octal_escapes(pattern: &str) -> String {
                 continue;
             }
             // `\o{NNN}` braced octal — translate to `\xHH` / `\x{HHHH}`.
-            // re/regexp tests 1567-1572.
+            // re/regexp tests 1567-1572. Underscores between/around
+            // digits are allowed and stripped (re/regexp 2047).
             if nxt == 'o' && i + 2 < chars.len() && chars[i + 2] == '{' {
                 let body_start = i + 3;
                 let mut k = body_start;
@@ -19595,7 +19639,10 @@ fn translate_octal_escapes(pattern: &str) -> String {
                 }
                 if k < chars.len() {
                     let raw: String = chars[body_start..k].iter().collect();
-                    let body = raw.trim();
+                    let trimmed = raw.trim();
+                    let body_owned: String =
+                        trimmed.chars().filter(|c| *c != '_').collect();
+                    let body = body_owned.as_str();
                     if !body.is_empty() && body.chars().all(|c| c.is_digit(8)) {
                         let n: u32 = u32::from_str_radix(body, 8).unwrap_or(0);
                         if n <= 0xff {
