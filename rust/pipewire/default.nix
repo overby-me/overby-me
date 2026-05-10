@@ -1443,6 +1443,8 @@
       { tool = "pw-cli"; name = "pipewire-remote-bad-listvars"; }
       { tool = "pw-cli"; name = "connect-refused-info"; }
       { tool = "pw-cli"; name = "connect-refused-help"; }
+      { tool = "pw-cat"; name = "playback-existing-bad-format"; }
+      { tool = "pw-cat"; name = "playback-stdin-marker"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }

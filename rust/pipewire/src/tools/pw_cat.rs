@@ -223,16 +223,25 @@ pub fn main(raw_args: &[String]) -> i32 {
         // Without daemon → connect-fail. With daemon → sndfile error.
         match crate::pipewire_lib::client::Client::connect_default() {
             Ok(_) => {
-                // Daemon up; emit the sndfile error.
+                // Daemon up; emit the sndfile error. sndfile distinguishes
+                // "missing file" (System error) from "bad format on
+                // existing file" (Format not recognised). Probe the path.
                 let file = raw_args
                     .iter()
                     .skip(1)
                     .find(|a| !a.starts_with('-') || a == &"-")
                     .map(|s| s.as_str())
                     .unwrap_or("");
-                eprintln!(
-                    "sndfile: failed to open audio file \"{file}\": System error : No such file or directory."
-                );
+                let exists = file == "-" || std::path::Path::new(file).exists();
+                if exists {
+                    eprintln!(
+                        "sndfile: failed to open audio file \"{file}\": Format not recognised."
+                    );
+                } else {
+                    eprintln!(
+                        "sndfile: failed to open audio file \"{file}\": System error : No such file or directory."
+                    );
+                }
                 eprintln!("error: open failed: Input/output error");
             }
             Err(_) => {
