@@ -12029,6 +12029,7 @@ impl Interpreter {
         // (non-recursive) case. Truly recursive patterns are left
         // unchanged. re/regexp 1167-1185.
         let pattern = inline_simple_recursion(&pattern);
+        let pattern = truncate_at_first_accept(&pattern);
         let pattern = prune_alternations_after_prune(&pattern);
         let pattern = strip_control_verbs(&pattern);
         let pattern = eliminate_zero_quantifier(&pattern);
@@ -12442,6 +12443,7 @@ impl Interpreter {
         let pattern = translate_named_char_escapes(&pattern);
         let pattern = normalize_named_backref(&pattern);
         let pattern = inline_simple_recursion(&pattern);
+        let pattern = truncate_at_first_accept(&pattern);
         let pattern = prune_alternations_after_prune(&pattern);
         let pattern = strip_control_verbs(&pattern);
         let pattern = eliminate_zero_quantifier(&pattern);
@@ -20191,6 +20193,88 @@ fn escape_literal_bracket_in_class(pattern: &str) -> String {
 /// don't match Perl exactly (e.g. ACCEPT short-circuit lost), but
 /// most tests then complete with the structural match. re/regexp
 /// 1302-1303, 1897-1904, 1994-1995, 2082-2111.
+/// When `(*ACCEPT)` appears, the engine completes the match
+/// immediately — anything after is irrelevant. Approximate by
+/// truncating the pattern at the first `(*ACCEPT)` and closing all
+/// open groups, so the truncated regex stops at the ACCEPT position.
+/// Preserves the prefix's capturing groups so `$1..$N` carry the
+/// expected values. re/regexp 1302-1303, 2086-2111.
+fn truncate_at_first_accept(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    // Find the first `(*ACCEPT)` / `(*ACCEPT:...)` occurrence,
+    // skipping inside `[...]` classes.
+    let mut accept_at: Option<usize> = None;
+    let mut paren_starts: Vec<usize> = Vec::new();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            i += 1;
+            continue;
+        }
+        if !in_class
+            && c == '('
+            && i + 1 < chars.len()
+            && chars[i + 1] == '*'
+        {
+            let mut k = i + 2;
+            while k < chars.len() && chars[k] != ')' {
+                k += 1;
+            }
+            let body: String = chars[i + 2..k].iter().collect();
+            let name = body.splitn(2, ':').next().unwrap_or("").to_uppercase();
+            if name == "ACCEPT" {
+                accept_at = Some(i);
+                break;
+            }
+            i = k.saturating_add(1);
+            continue;
+        }
+        if !in_class && c == '(' {
+            paren_starts.push(i);
+            i += 1;
+            continue;
+        }
+        if !in_class && c == ')' {
+            paren_starts.pop();
+            i += 1;
+            continue;
+        }
+        i += 1;
+    }
+    let Some(accept_pos) = accept_at else {
+        return pattern.to_string();
+    };
+    // Find end of ACCEPT construct.
+    let mut accept_end = accept_pos + 2;
+    while accept_end < chars.len() && chars[accept_end] != ')' {
+        accept_end += 1;
+    }
+    accept_end = accept_end.saturating_add(1); // past the `)`
+    // Build truncated pattern: prefix (chars 0..accept_pos) + close
+    // parens to balance paren_starts.
+    let mut out: String = chars[..accept_pos].iter().collect();
+    // Replace `(*ACCEPT...)` itself with `(?:)` so the prefix doesn't
+    // end in a dangling expression.
+    out.push_str("(?:)");
+    let _ = accept_end;
+    for _ in 0..paren_starts.len() {
+        out.push(')');
+    }
+    out
+}
+
 /// `(X(*PRUNE)Y|...|X(*PRUNE)Z)` style patterns rely on `(*PRUNE)`
 /// to prevent the engine from trying subsequent alternatives once
 /// past the prune point. Since we strip `(*PRUNE)` to `(?:)` (no
