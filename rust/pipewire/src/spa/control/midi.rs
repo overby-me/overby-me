@@ -159,20 +159,23 @@ pub fn parse(bytes: &[u8]) -> Result<(FileInfo, Vec<Event>), ParseError> {
         let id = tracks[i].id;
 
         let event_start = tracks[i].pos;
+        // Check the first byte of the upcoming event. If it's 0xFF (the
+        // start of a meta event) but the rest is truncated, C synthesizes
+        // an End-of-Track marker. If it's a non-status byte (running
+        // status with no prior status), C silently terminates.
+        let leading = tracks[i].body.get(tracks[i].pos).copied();
         let event = match read_event(&mut tracks[i]) {
             Ok(e) => e,
             Err(_) => {
-                // C's midifile is tolerant of partial events at the end
-                // of a track buffer — it emits a synthetic End-of-Track
-                // and moves on. Mirror that to avoid spurious failures on
-                // fixtures with off-by-N MTrk size headers.
-                events.push(Event {
-                    track: id,
-                    sec: current_sec,
-                    data: vec![0xff, 0x2f],
-                    meta_offset: 2,
-                    meta_tempo_uspqn: 0,
-                });
+                if leading == Some(0xff) {
+                    events.push(Event {
+                        track: id,
+                        sec: current_sec,
+                        data: vec![0xff, 0x2f],
+                        meta_offset: 2,
+                        meta_tempo_uspqn: 0,
+                    });
+                }
                 tracks[i].eof = true;
                 continue;
             }
