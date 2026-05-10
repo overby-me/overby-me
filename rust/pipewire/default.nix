@@ -1537,6 +1537,7 @@
       { tool = "pw-top"; name = "bogus-flag-exit"; }
       { tool = "pw-reserve"; name = "bogus-flag-exit"; }
       { tool = "pw-container"; name = "bogus-flag-exit"; }
+      { tool = "pw-container"; name = "connect-fail-exit"; }
       { tool = "spa-acp-tool"; name = "bogus-flag-exit"; }
       { tool = "spa-inspect"; name = "no-args-exit"; }
       { tool = "spa-monitor"; name = "no-args-exit"; }
