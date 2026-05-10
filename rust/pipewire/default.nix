@@ -1517,6 +1517,8 @@
       { tool = "pw-config"; name = "help-with-value-exit"; }
       { tool = "pw-mididump"; name = "help-with-value-exit"; }
       { tool = "spa-json-dump"; name = "help-with-value-exit"; }
+      { tool = "pw-cat"; name = "missing-file-exit"; }
+      { tool = "pw-cat"; name = "midi-no-mode-exit"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }

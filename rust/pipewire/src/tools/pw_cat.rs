@@ -267,8 +267,12 @@ pub fn main(raw_args: &[String]) -> i32 {
     }
     if is_cat_master(argv0) && !mode_set {
         eprintln!("error: one of the playback/record options must be provided");
+        print_help(argv0);
+        return 1;
     } else if positional_count == 0 {
         eprintln!("error: filename or - argument missing");
+        print_help(argv0);
+        return 1;
     } else {
         // C tries to connect first, then open the file via sndfile.
         // Without daemon → connect-fail. With daemon → sndfile error.
