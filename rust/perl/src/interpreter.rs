@@ -17846,7 +17846,71 @@ fn inline_simple_recursion(pattern: &str) -> String {
         }
         current = next;
     }
-    current
+    // After inlining references, strip `(?(DEFINE)…)` blocks. The
+    // DEFINE block's purpose is to declare groups that other parts of
+    // the pattern reference recursively; once those references have
+    // been inlined, the block itself shouldn't try to match anything.
+    // re/regexp 1164.
+    strip_define_blocks(&current)
+}
+
+/// Remove `(?(DEFINE)body)` constructs by replacing them with an
+/// empty non-capturing group. The DEFINE block declares groups but
+/// doesn't try to match them at its source position; inlining
+/// substitutes their bodies elsewhere, so leaving the block in place
+/// would cause a spurious failure.
+fn strip_define_blocks(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            out.push(chars[i]);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        // Match `(?(DEFINE)`.
+        if i + 9 < chars.len()
+            && chars[i] == '('
+            && chars[i + 1] == '?'
+            && chars[i + 2] == '('
+            && chars[i + 3] == 'D'
+            && chars[i + 4] == 'E'
+            && chars[i + 5] == 'F'
+            && chars[i + 6] == 'I'
+            && chars[i + 7] == 'N'
+            && chars[i + 8] == 'E'
+            && chars[i + 9] == ')'
+        {
+            // Find the matching closing `)` of the outer `(?(DEFINE)…)`.
+            let mut depth = 1;
+            let mut k = i + 10;
+            while k < chars.len() && depth > 0 {
+                if chars[k] == '\\' {
+                    k += 2;
+                    continue;
+                }
+                if chars[k] == '(' {
+                    depth += 1;
+                } else if chars[k] == ')' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                k += 1;
+            }
+            if depth == 0 {
+                out.push_str("(?:)");
+                i = k + 1;
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
 }
 
 fn inline_simple_recursion_pass(pattern: &str) -> String {
@@ -18032,6 +18096,17 @@ fn collect_capture_group_bodies(pattern: &str) -> Vec<(usize, String)> {
             continue;
         }
         if c == '(' {
+            // `(?(COND)…)` conditional: skip past the `(COND)` part —
+            // it's syntax, not a capturing group.
+            if i + 2 < chars.len() && chars[i + 1] == '?' && chars[i + 2] == '(' {
+                let mut k = i + 3;
+                while k < chars.len() && chars[k] != ')' {
+                    k += 1;
+                }
+                stack.push((0, 0));
+                i = k.saturating_add(1);
+                continue;
+            }
             // Determine if this is a capturing group.
             let is_capturing = if i + 1 < chars.len() && chars[i + 1] == '?' {
                 // `(?<NAME>…)` / `(?'NAME'…)` / `(?P<NAME>…)` are capturing.
