@@ -41,13 +41,22 @@ pub fn main(args: &[String]) -> i32 {
             // Long unknowns trip the standard `unrecognized option` path;
             // short unknowns trip `invalid option -- 'X'`.
             "-s" | "--spa" => simple = true,
-            "-i" | "--indent" => {
+            opt @ ("-i" | "--indent") => {
                 i += 1;
                 let arg = match args.get(i) {
                     Some(a) => a,
                     None => {
+                        if opt == "--indent" {
+                            eprintln!(
+                                "{argv0}: option '--indent' requires an argument"
+                            );
+                        } else {
+                            eprintln!(
+                                "{argv0}: option requires an argument -- 'i'"
+                            );
+                        }
                         print_help_to(argv0, true);
-                        return u8::MAX as i32; // C tool returns -1 → 255
+                        return u8::MAX as i32;
                     }
                 };
                 indent = arg.parse::<usize>().unwrap_or(DEFAULT_INDENT);

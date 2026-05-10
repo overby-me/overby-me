@@ -1479,6 +1479,8 @@
       { tool = "spa-resample"; name = "long-rate-no-arg"; }
       { tool = "spa-resample"; name = "long-format-no-arg"; }
       { tool = "spa-resample"; name = "long-quality-no-arg"; }
+      { tool = "spa-json-dump"; name = "indent-no-arg"; }
+      { tool = "spa-json-dump"; name = "i-short-no-arg"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }
