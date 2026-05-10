@@ -18810,6 +18810,24 @@ fn translate_perl_whitespace_escapes(pattern: &str) -> String {
     let mut in_class = false;
     while i < chars.len() {
         let c = chars[i];
+        // `[\H]` / `[\V]` — single-element class containing a negated
+        // whitespace escape. fancy_regex's `\H`/`\V` definitions don't
+        // include `\xA0` and other Unicode horiz/vert ws Perl includes,
+        // so unwrap and let the `\H`/`\V` translation expand to our
+        // explicit negated set. re/regexp 1835.
+        if !in_class
+            && c == '['
+            && i + 3 < chars.len()
+            && chars[i + 1] == '\\'
+            && (chars[i + 2] == 'H' || chars[i + 2] == 'V')
+            && chars[i + 3] == ']'
+        {
+            let esc = chars[i + 2];
+            let body = if esc == 'H' { HWS } else { VWS };
+            out.push_str(&format!("[^{body}]"));
+            i += 4;
+            continue;
+        }
         if c == '\\' && i + 1 < chars.len() {
             let nxt = chars[i + 1];
             if !in_class {
