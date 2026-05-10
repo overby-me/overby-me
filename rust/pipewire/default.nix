@@ -1523,6 +1523,8 @@
       { tool = "pw-cli"; name = "connect-fail-exit"; }
       { tool = "pw-mididump"; name = "connect-fail-exit"; }
       { tool = "pw-dump"; name = "env-pipewire-remote"; }
+      { tool = "spa-resample"; name = "cluster-with-required-arg"; }
+      { tool = "spa-resample"; name = "no-args-exit"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }

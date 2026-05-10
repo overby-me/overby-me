@@ -9,7 +9,7 @@ pub fn main(raw_args: &[String]) -> i32 {
     // OPTIONS = "hvc:r:f:w:q:u:t:p:": h, v are no-arg; rest take values.
     let args = expand_short_clusters(raw_args, &['h', 'v']);
 
-    let mut positional_count = 0;
+    let mut positionals: Vec<String> = Vec::new();
     let mut i = 1;
     while i < args.len() {
         let a = &args[i];
@@ -17,7 +17,9 @@ pub fn main(raw_args: &[String]) -> i32 {
             "--" => {
                 // getopt_long: end-of-options marker. Remaining args are
                 // positional filenames.
-                positional_count += args.len().saturating_sub(i + 1);
+                for s in args.iter().skip(i + 1) {
+                    positionals.push(s.clone());
+                }
                 break;
             }
             "-h" | "--help" => {
@@ -180,33 +182,28 @@ pub fn main(raw_args: &[String]) -> i32 {
                 return 1;
             }
             _ => {
-                positional_count += 1;
+                positionals.push(a.to_string());
                 i += 1;
             }
         }
     }
 
-    if positional_count < 2 {
+    if positionals.len() < 2 {
         // C: prints `error: filename arguments missing (<optind> <argc>)`.
         // optind / argc are based on the ORIGINAL argv (before cluster
         // expansion), since getopt advances optind once per argv slot,
         // not once per char in a cluster.
         let argc = raw_args.len();
-        let optind = argc - positional_count;
+        let optind = argc - positionals.len();
         eprintln!("error: filename arguments missing ({optind} {argc})");
         print_help(argv0);
-        return 0;
+        return 1;
     }
 
     // C tries to open the input file via sndfile; without that, mirror
     // the error format. sndfile distinguishes "missing file" (System
     // error) from "bad format on existing file" (Format not recognised).
-    let infile = raw_args
-        .iter()
-        .skip(1)
-        .find(|a| !a.starts_with('-') || a.as_str() == "-")
-        .map(|s| s.as_str())
-        .unwrap_or("");
+    let infile = positionals.first().map(String::as_str).unwrap_or("");
     let exists = infile == "-" || std::path::Path::new(infile).exists();
     if exists {
         eprintln!(
