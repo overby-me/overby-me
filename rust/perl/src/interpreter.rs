@@ -94,6 +94,11 @@ pub struct Interpreter {
     /// has the matching handler, the handler is dispatched instead of
     /// the default `Class=TYPE(0xADDR)` form.
     overload_handlers: HashMap<String, HashMap<String, String>>,
+    /// Highest index of `$N` ever written by a successful match. Used
+    /// to clear stale captures when a subsequent match has fewer
+    /// groups, so `$5` from an old match doesn't leak into a new
+    /// match that only set `$1..$4`.
+    max_capture_seen: usize,
     /// Non-string die payload — Perl's `die $ref` stores the REF in `$@`,
     /// not its stringification. `Flow::Die` still carries a String for the
     /// stderr message / `$@` string fallback, but this slot lets us
@@ -550,6 +555,22 @@ impl Interpreter {
             blessed_refs: HashMap::new(),
             overload_handlers: HashMap::new(),
             pending_die_value: None,
+            max_capture_seen: 0,
+        }
+    }
+
+    /// Reset numbered capture globals `$N` for `N > max_groups` up
+    /// through the highest index ever populated. Each successful regex
+    /// match should call this so stale captures from a prior match
+    /// don't leak when the new pattern has fewer groups. re/regexp
+    /// 1396-1397 (branch-reset patterns where the post-match remap
+    /// produces fewer effective groups than the prior match).
+    fn clear_stale_captures(&mut self, max_groups: usize) {
+        for i in (max_groups + 1)..=self.max_capture_seen {
+            self.globals.vars.insert(i.to_string(), Value::Undef);
+        }
+        if max_groups > self.max_capture_seen {
+            self.max_capture_seen = max_groups;
         }
     }
 
@@ -3931,6 +3952,8 @@ impl Interpreter {
 
                         // Store capture groups from first match
                         if let Some(caps) = re.captures(&text) {
+                            let new_max = caps.len().saturating_sub(1);
+                            self.clear_stale_captures(new_max);
                             for i in 1..caps.len() {
                                 if let Some(m) = caps.get(i) {
                                     self.set_global_var(
@@ -12262,6 +12285,8 @@ impl Interpreter {
         group_strs: &[Option<String>],
         named: &[(String, Option<String>)],
     ) {
+        let new_max = group_strs.len().saturating_sub(1);
+        self.clear_stale_captures(new_max);
         for i in 1..group_strs.len() {
             if let Some(s) = &group_strs[i] {
                 self.set_global_var(&i.to_string(), Value::Str(s.clone()));
@@ -12366,6 +12391,8 @@ impl Interpreter {
         match regex::Regex::new(&pat) {
             Ok(re) => {
                 if let Some(caps) = re.captures(text) {
+                    let new_max = caps.len().saturating_sub(1);
+                    self.clear_stale_captures(new_max);
                     // Store capture groups as $1, $2, etc.
                     for i in 1..caps.len() {
                         if let Some(m) = caps.get(i) {
