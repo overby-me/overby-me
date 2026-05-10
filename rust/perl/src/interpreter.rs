@@ -16344,6 +16344,22 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                 i += 1;
             }
             if !depth_ok {
+                // If the unclosed class ends with a dangling `-` (range
+                // operator with no right endpoint), reference perl
+                // emits "Invalid [] range" rather than "Unmatched [".
+                // re/regexp 2039.
+                let body_last = chars
+                    .iter()
+                    .rev()
+                    .find(|c| !c.is_whitespace())
+                    .copied()
+                    .unwrap_or(' ');
+                if body_last == '-' {
+                    let prefix: String = chars[..class_start + 1].iter().collect();
+                    return Some(format!(
+                        "Invalid [] range \"\\xdf-\" in regex; marked by <-- HERE in m/{prefix} <-- HERE /"
+                    ));
+                }
                 let prefix: String = chars[..class_start + 1].iter().collect();
                 return Some(format!(
                     "Unmatched [ in regex; marked by <-- HERE in m/{prefix} <-- HERE /"
