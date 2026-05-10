@@ -66,6 +66,31 @@ pub fn main(raw_args: &[String]) -> i32 {
 
     let mut mode_set = false;
     let mut positional_count: usize = 0;
+    // Track --rate / --channels for C's atoi-then-validate flow:
+    //   C parses the value with `atoi` (returning 0 on non-numeric input)
+    //   and then errors `bad rate 0` / `bad channels 0` BEFORE the
+    //   playback/record check. Use Option<i64> so `None` means "not given".
+    let mut rate: Option<i64> = None;
+    let mut channels: Option<i64> = None;
+    let parse_atoi = |s: &str| -> i64 {
+        // Mirror libc's atoi: skip leading whitespace, optional sign,
+        // collect leading digits, return 0 if no digits.
+        let mut chars = s.trim_start().chars().peekable();
+        let neg = match chars.peek() {
+            Some('-') => { chars.next(); true }
+            Some('+') => { chars.next(); false }
+            _ => false,
+        };
+        let mut n: i64 = 0;
+        let mut any = false;
+        for c in chars {
+            if let Some(d) = c.to_digit(10) {
+                n = n.saturating_mul(10).saturating_add(d as i64);
+                any = true;
+            } else { break; }
+        }
+        if !any { 0 } else if neg { -n } else { n }
+    };
     let mut i = 1;
     while i < args.len() {
         let a = args[i].as_str();
@@ -138,12 +163,25 @@ pub fn main(raw_args: &[String]) -> i32 {
                     }
                 } else if let Some(&long) = long_required.iter().find(|&&l| l == name) {
                     if has_inline {
-                        // --foo=val (consumed inline)
+                        // --foo=val (consumed inline). Capture the value
+                        // for fields the post-loop validator inspects.
+                        let val = s.split_once('=').map(|(_, v)| v).unwrap_or("");
+                        match long {
+                            "--rate" => rate = Some(parse_atoi(val)),
+                            "--channels" => channels = Some(parse_atoi(val)),
+                            _ => {}
+                        }
                     } else if i + 1 >= args.len() {
                         eprintln!("{getopt_argv0}: option '{long}' requires an argument");
                         print_help(argv0);
                         return 1;
                     } else {
+                        let val = args[i + 1].as_str();
+                        match long {
+                            "--rate" => rate = Some(parse_atoi(val)),
+                            "--channels" => channels = Some(parse_atoi(val)),
+                            _ => {}
+                        }
                         i += 2;
                         continue;
                     }
@@ -209,11 +247,26 @@ pub fn main(raw_args: &[String]) -> i32 {
         i += 1;
     }
 
-    // C: post-getopt validation:
-    //   - master `pw-cat` with no mode flag → "playback/record options"
-    //     error
-    //   - any path with mode set (or pw-play/pw-record/etc) but no file →
-    //     "filename or - argument missing"
+    // C: post-getopt validation. The order matters because each step
+    // exits before the next is reached:
+    //   1. rate <= 0       → "error: bad rate <n>"
+    //   2. channels <= 0   → "error: bad channels <n>"
+    //   3. master pw-cat with no mode flag → "playback/record options"
+    //   4. mode set but no positional → "filename or - argument missing"
+    if let Some(r) = rate {
+        if r <= 0 {
+            eprintln!("error: bad rate {r}");
+            print_help(argv0);
+            return 1;
+        }
+    }
+    if let Some(c) = channels {
+        if c <= 0 {
+            eprintln!("error: bad channels {c}");
+            print_help(argv0);
+            return 1;
+        }
+    }
     if is_cat_master(argv0) && !mode_set {
         eprintln!("error: one of the playback/record options must be provided");
     } else if positional_count == 0 {

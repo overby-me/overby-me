@@ -1452,6 +1452,10 @@
       { tool = "spa-json-dump"; name = "no-args"; }
       { tool = "spa-json-dump"; name = "empty-file"; }
       { tool = "spa-json-dump"; name = "directory"; }
+      { tool = "pw-cat"; name = "bad-rate-string"; }
+      { tool = "pw-cat"; name = "bad-rate-zero"; }
+      { tool = "pw-cat"; name = "bad-rate-negative"; }
+      { tool = "pw-cat"; name = "bad-channels-string"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }
