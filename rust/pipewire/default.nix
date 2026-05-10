@@ -1576,6 +1576,7 @@
       { tool = "pw-metadata"; name = "connect-fail-exit"; }
       { tool = "pw-top"; name = "connect-fail-exit"; }
       { tool = "pw-loopback"; name = "explicit-remote"; }
+      { tool = "pw-loopback"; name = "cluster-help"; }
       { tool = "pw-dump"; name = "indent-equals"; }
       { tool = "pipewire"; name = "short-c-no-arg"; }
       { tool = "pipewire"; name = "long-config-no-arg"; }

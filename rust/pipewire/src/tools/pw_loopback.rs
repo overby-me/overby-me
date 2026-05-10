@@ -87,8 +87,15 @@ pub fn main(args: &[String]) -> i32 {
                 print_help(argv0);
                 return u8::MAX as i32;
             }
-            // Short attached-value form `-r<value>` etc.
+            // Short attached-value form `-r<value>` etc., or short
+            // cluster `-hh` / `-hX` (where -h short-circuits to help).
             s if s.starts_with('-') && !s.starts_with("--") && s.len() > 2 => {
+                // Cluster starts with -h: getopt processes char-by-char,
+                // so -h fires before remaining chars.
+                if s.starts_with("-h") {
+                    print_help(argv0);
+                    return 0;
+                }
                 let short = &s[..2];
                 if required_args.iter().any(|(sh, _, _)| *sh == short) {
                     if short == "-r" {
