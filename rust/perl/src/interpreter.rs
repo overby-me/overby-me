@@ -18963,6 +18963,41 @@ fn substitute_constant_runtime_regex(pattern: &str) -> String {
                     } else {
                         j + 1
                     };
+                    // Empty body: drop the entire `(??{""})` AND any
+                    // following quantifier. `(??{""})+` would compile
+                    // to `(?:)+` which fancy_regex rejects as
+                    // "target of repeat operator is invalid".
+                    // re/regexp 1121.
+                    if pat.is_empty() {
+                        let mut next = after;
+                        if next < chars.len()
+                            && (chars[next] == '+'
+                                || chars[next] == '*'
+                                || chars[next] == '?'
+                                || chars[next] == '{')
+                        {
+                            // Consume quantifier (and possibly its
+                            // braces / lazy modifier).
+                            if chars[next] == '{' {
+                                while next < chars.len() && chars[next] != '}' {
+                                    next += 1;
+                                }
+                                if next < chars.len() {
+                                    next += 1; // skip `}`
+                                }
+                            } else {
+                                next += 1;
+                            }
+                            // Lazy / possessive marker.
+                            if next < chars.len()
+                                && (chars[next] == '?' || chars[next] == '+')
+                            {
+                                next += 1;
+                            }
+                        }
+                        i = next;
+                        continue;
+                    }
                     // Capturing groups inside the runtime regex's body
                     // are NOT visible to the outer regex (per perlre).
                     // Convert each `(` to `(?:` so they don't shift
