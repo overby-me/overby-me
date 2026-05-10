@@ -1495,6 +1495,8 @@
       { tool = "pw-cli"; name = "env-pipewire-remote"; }
       { tool = "pw-mon"; name = "env-pipewire-remote"; }
       { tool = "pw-mididump"; name = "env-pipewire-remote"; }
+      { tool = "pw-link"; name = "env-pipewire-remote"; }
+      { tool = "pw-link"; name = "env-pipewire-remote-list"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }

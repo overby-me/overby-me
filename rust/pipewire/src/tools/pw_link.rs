@@ -221,8 +221,25 @@ pub fn main(raw_args: &[String]) -> i32 {
 
     if !list_inputs && !list_outputs && !list_links {
         // C always attempts pw_context_connect; without a daemon the
-        // connect-fail message preempts everything else.
-        if let Err(_) = crate::pipewire_lib::client::Client::connect_default() {
+        // connect-fail message preempts everything else. The socket
+        // name comes from -r if given, then PIPEWIRE_REMOTE, then default.
+        let env_remote = std::env::var("PIPEWIRE_REMOTE").ok();
+        let chosen: Option<String> = remote.clone().or(env_remote);
+        let connect = match chosen.as_deref() {
+            Some(name) if name.starts_with('/') => {
+                crate::pipewire_lib::client::Client::connect_path(std::path::Path::new(name))
+            }
+            Some(name) => {
+                let runtime = std::env::var("PIPEWIRE_RUNTIME_DIR")
+                    .or_else(|_| std::env::var("XDG_RUNTIME_DIR"))
+                    .unwrap_or_else(|_| "/tmp".to_string());
+                crate::pipewire_lib::client::Client::connect_path(
+                    &std::path::PathBuf::from(runtime).join(name),
+                )
+            }
+            None => crate::pipewire_lib::client::Client::connect_default(),
+        };
+        if connect.is_err() {
             eprintln!("can't connect: {}", crate::tools::common::connect_failure_msg());
             return 255;
         }
@@ -282,7 +299,10 @@ pub fn main(raw_args: &[String]) -> i32 {
 }
 
 fn collect_globals(remote: Option<&str>, app_name: &str) -> Result<Vec<RegistryGlobal>, String> {
-    let mut client = match remote {
+    // PIPEWIRE_REMOTE supplies the socket name when -r wasn't given.
+    let env_remote = std::env::var("PIPEWIRE_REMOTE").ok();
+    let chosen: Option<String> = remote.map(String::from).or(env_remote);
+    let mut client = match chosen.as_deref() {
         Some(name) if name.starts_with('/') => Client::connect_path(std::path::Path::new(name)),
         Some(name) => {
             let runtime = std::env::var("PIPEWIRE_RUNTIME_DIR")
