@@ -1526,6 +1526,11 @@
       { tool = "spa-resample"; name = "cluster-with-required-arg"; }
       { tool = "spa-resample"; name = "no-args-exit"; }
       { tool = "pw-cli"; name = "no-args"; }
+      { tool = "pw-mon"; name = "no-args"; }
+      { tool = "pw-link"; name = "no-args"; }
+      { tool = "pw-mididump"; name = "no-args"; }
+      { tool = "pw-dump"; name = "no-args"; }
+      { tool = "pw-loopback"; name = "no-args"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }
