@@ -82,6 +82,16 @@ pub fn main(args: &[String]) -> i32 {
                 return u8::MAX as i32;
             }
             s if s.starts_with('-') => {
+                // Cluster `-h<...>` short-circuits to help, `-V<...>` to
+                // version (matches getopt's char-by-char processing).
+                if s.starts_with("-h") {
+                    print_help(argv0);
+                    return 0;
+                }
+                if s.starts_with("-V") {
+                    print_version(argv0);
+                    return 0;
+                }
                 let ch = s.chars().nth(1).unwrap_or('?');
                 eprintln!("{argv0}: invalid option -- '{ch}'");
                 print_help(argv0);

@@ -1578,6 +1578,8 @@
       { tool = "pw-loopback"; name = "explicit-remote"; }
       { tool = "pw-loopback"; name = "cluster-help"; }
       { tool = "pw-loopback"; name = "cluster-version"; }
+      { tool = "pw-reserve"; name = "cluster-help"; }
+      { tool = "pw-container"; name = "cluster-help"; }
       { tool = "pw-dump"; name = "indent-equals"; }
       { tool = "pipewire"; name = "short-c-no-arg"; }
       { tool = "pipewire"; name = "long-config-no-arg"; }
