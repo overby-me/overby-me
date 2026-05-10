@@ -1566,6 +1566,8 @@
       { tool = "pw-cat"; name = "raw-mode-missing-file"; }
       { tool = "pw-mididump"; name = "empty-mtrk"; }
       { tool = "pw-mididump"; name = "oversized-mtrk"; }
+      { tool = "pw-cli"; name = "lone-dash-cmd"; }
+      { tool = "pw-config"; name = "lone-dash-cmd"; }
       { tool = "pw-dump"; name = "indent-equals"; }
       { tool = "pipewire"; name = "short-c-no-arg"; }
       { tool = "pipewire"; name = "long-config-no-arg"; }

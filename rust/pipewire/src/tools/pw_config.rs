@@ -111,7 +111,8 @@ pub fn main(raw_args: &[String]) -> i32 {
                     return u8::MAX as i32;
                 }
             }
-            s if !s.starts_with('-') => {
+            // Lone `-` is a positional, not an option.
+            s if !s.starts_with('-') || s == "-" => {
                 // First positional becomes the command (if recognized);
                 // later ones become arguments to that command.
                 if command == "paths" && command_set(&mut command, s) {

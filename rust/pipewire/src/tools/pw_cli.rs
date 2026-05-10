@@ -160,11 +160,14 @@ pub fn main(raw_args: &[String]) -> i32 {
             }
         }
     } else {
-        if force_connect {
-            if let Err(e) = open_client(connect_remote.as_deref(), "pw-cli") {
-                print_open_error(argv0, &e);
-                return u8::MAX as i32;
-            }
+        // C always tries to connect before running a positional command —
+        // even local ones like `help`. Connect failure short-circuits the
+        // command dispatch with the standard "failed to connect" error.
+        if let Err(e) = open_client(connect_remote.as_deref(), "pw-cli") {
+            print_open_error(argv0, &e);
+            // Exit 255 only when the user explicitly asked for a remote;
+            // otherwise the failure is "soft" (REPL would have started).
+            return if force_connect { u8::MAX as i32 } else { 0 };
         }
         run_positional(argv0, remote, positional)
     }
@@ -350,8 +353,10 @@ fn run_positional(argv0: &str, remote: Option<String>, positional: Vec<&str>) ->
             // Match the C tool's exact "unknown command" error format. C
             // wraps the parse error in `Error: "..."` and uses literal
             // (unescaped) double-quotes around the unknown command name.
+            // Exit code matches C: 0 (the error is "soft" since the REPL
+            // would otherwise have continued).
             eprintln!("Error: \"Command \"{other}\" does not exist. Type 'help' for usage.\"");
-            1
+            0
         }
     }
 }
