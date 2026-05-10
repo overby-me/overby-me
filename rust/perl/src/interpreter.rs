@@ -18821,6 +18821,28 @@ fn translate_perl_whitespace_escapes(pattern: &str) -> String {
     let mut in_class = false;
     while i < chars.len() {
         let c = chars[i];
+        // `\cX` is a 3-char escape (where X may be `\`). Pass through
+        // verbatim so a following `X` isn't misinterpreted as `\X`.
+        if c == '\\'
+            && i + 2 < chars.len()
+            && chars[i + 1] == 'c'
+        {
+            out.push(c);
+            out.push(chars[i + 1]);
+            out.push(chars[i + 2]);
+            i += 3;
+            continue;
+        }
+        // `\X` — extended grapheme cluster. Approximate as a non-mark
+        // base followed by zero or more combining marks. fancy_regex
+        // doesn't ship a true `\X`, but `\PM\pM*` captures the
+        // common case. Skip inside character classes (where `\X`
+        // would be a literal `X`). re/regexp 1871.
+        if !in_class && c == '\\' && i + 1 < chars.len() && chars[i + 1] == 'X' {
+            out.push_str("(?:\\PM\\pM*)");
+            i += 2;
+            continue;
+        }
         // `[\H]` / `[\V]` — single-element class containing a negated
         // whitespace escape. fancy_regex's `\H`/`\V` definitions don't
         // include `\xA0` and other Unicode horiz/vert ws Perl includes,
