@@ -11889,7 +11889,10 @@ impl Interpreter {
                     // last-iter span (i.e. group is from an earlier
                     // iteration), clear it. fancy_regex preserves
                     // captures across iterations; reference perl
-                    // resets them. re/regexp 481, 967-968, 2140+.
+                    // resets them. Only handles capturing-group
+                    // parents — non-capturing `(?:...)*` cases need
+                    // alternation-aware analysis which is harder.
+                    // re/regexp 481, 967-968.
                     let parents = extract_quantified_parents(&fancy_pat);
                     for idx in 1..group_starts.len() {
                         let parent = parents.get(idx).copied().unwrap_or(0);
@@ -17057,6 +17060,127 @@ fn expand_ascii_case_insensitive(pattern: &str) -> String {
         i += 1;
     }
     out
+}
+
+/// (Unused stub kept for future sibling-cluster reset work.) Walk
+/// `pattern` and return, for each capture group index, the OPEN-PAREN
+/// position of its nearest enclosing quantified ancestor (capturing
+/// or not).
+#[allow(dead_code)]
+fn extract_quantified_parent_positions(pattern: &str) -> Vec<usize> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut group_indices: Vec<Option<usize>> = vec![None; chars.len()];
+    let mut close_of_open: Vec<Option<usize>> = vec![None; chars.len()];
+    let mut group_count: usize = 0;
+    let mut stack: Vec<usize> = Vec::new();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            i += 1;
+            continue;
+        }
+        if !in_class && c == '(' {
+            let is_named_angle = i + 3 < chars.len()
+                && chars[i + 1] == '?'
+                && chars[i + 2] == '<'
+                && chars[i + 3] != '='
+                && chars[i + 3] != '!';
+            let is_named_p = i + 3 < chars.len()
+                && chars[i + 1] == '?'
+                && chars[i + 2] == 'P'
+                && chars[i + 3] == '<';
+            let is_named_quote = i + 2 < chars.len()
+                && chars[i + 1] == '?'
+                && chars[i + 2] == '\'';
+            let is_capturing = !(i + 1 < chars.len() && chars[i + 1] == '?')
+                || is_named_angle
+                || is_named_p
+                || is_named_quote;
+            if is_capturing {
+                group_count += 1;
+                group_indices[i] = Some(group_count);
+            }
+            stack.push(i);
+            i += 1;
+            continue;
+        }
+        if !in_class && c == ')' {
+            if let Some(open_pos) = stack.pop() {
+                close_of_open[open_pos] = Some(i);
+            }
+            i += 1;
+            continue;
+        }
+        i += 1;
+    }
+    let mut parent_pos: Vec<usize> = vec![0; group_count + 1];
+    for (open_pos, group_opt) in group_indices.iter().enumerate() {
+        let Some(idx) = (*group_opt).filter(|&v| v > 0) else {
+            continue;
+        };
+        // Walk through pattern building ancestor stack up to `open_pos`.
+        let mut depth_stack: Vec<usize> = Vec::new();
+        let mut in_class2 = false;
+        let mut j = 0;
+        while j < open_pos {
+            let cc = chars[j];
+            if cc == '\\' && j + 1 < chars.len() {
+                j += 2;
+                continue;
+            }
+            if !in_class2 && cc == '[' {
+                in_class2 = true;
+                j += 1;
+                continue;
+            }
+            if in_class2 && cc == ']' {
+                in_class2 = false;
+                j += 1;
+                continue;
+            }
+            if !in_class2 && cc == '(' {
+                depth_stack.push(j);
+            } else if !in_class2 && cc == ')' {
+                depth_stack.pop();
+            }
+            j += 1;
+        }
+        for ancestor_open in depth_stack.iter().rev() {
+            let Some(close) = close_of_open[*ancestor_open] else {
+                continue;
+            };
+            let after = close + 1;
+            let is_quantified = after < chars.len()
+                && (chars[after] == '+'
+                    || chars[after] == '*'
+                    || (chars[after] == '{' && {
+                        let mut k = after + 1;
+                        while k < chars.len() && chars[k] != '}' {
+                            k += 1;
+                        }
+                        let body: String =
+                            chars[after + 1..k.min(chars.len())].iter().collect();
+                        body.contains(',')
+                    }));
+            if is_quantified {
+                parent_pos[idx] = *ancestor_open + 1; // +1 to avoid 0=none ambiguity
+                break;
+            }
+        }
+    }
+    parent_pos
 }
 
 /// Walk `pattern` and return, for each capture group index, the
