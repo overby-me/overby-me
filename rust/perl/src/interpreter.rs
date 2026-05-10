@@ -16172,11 +16172,15 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                     "Missing right curly or square bracket in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
                 ));
             }
-            if j + 1 < chars.len() && chars[j + 1] == ')' {
-                k = j + 2;
-            } else {
-                k = j + 1;
+            // After body's `}` we must have `)` immediately. If not,
+            // reference emits "Sequence (?{...}) not terminated with
+            // ')'". re/regexp 579.
+            if !(j + 1 < chars.len() && chars[j + 1] == ')') {
+                return Some(
+                    "Sequence (?{...}) not terminated with ')'".to_string(),
+                );
             }
+            k = j + 2;
             continue;
         }
         if cc == '\\' {
