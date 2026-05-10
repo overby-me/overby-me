@@ -150,15 +150,17 @@ pub struct LinkInfo {
 }
 
 /// Resolve `$XDG_RUNTIME_DIR/$PIPEWIRE_CORE` (with the standard fallbacks
-/// used by `pw-cli`).
+/// used by `pw-cli`). C's pw_protocol_native checks PIPEWIRE_RUNTIME_DIR
+/// before falling back to XDG_RUNTIME_DIR.
 pub fn resolve_socket() -> io::Result<PathBuf> {
     if let Ok(remote) = env::var("PIPEWIRE_REMOTE")
         && remote.starts_with('/')
     {
         return Ok(PathBuf::from(remote));
     }
-    let runtime = env::var("XDG_RUNTIME_DIR")
-        .map_err(|_| io::Error::new(io::ErrorKind::NotFound, "XDG_RUNTIME_DIR unset"))?;
+    let runtime = env::var("PIPEWIRE_RUNTIME_DIR")
+        .or_else(|_| env::var("XDG_RUNTIME_DIR"))
+        .map_err(|_| io::Error::new(io::ErrorKind::NotFound, "no runtime dir"))?;
     let core_name = env::var("PIPEWIRE_CORE").unwrap_or_else(|_| "pipewire-0".into());
     Ok(PathBuf::from(runtime).join(core_name))
 }

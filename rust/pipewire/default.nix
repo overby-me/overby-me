@@ -1584,6 +1584,7 @@
       { tool = "pw-config"; name = "missing-config"; }
       { tool = "pw-config"; name = "missing-name"; }
       { tool = "pw-config"; name = "missing-prefix-path"; }
+      { tool = "pw-cat"; name = "env-pipewire-runtime-dir"; }
       { tool = "pw-dump"; name = "indent-equals"; }
       { tool = "pipewire"; name = "short-c-no-arg"; }
       { tool = "pipewire"; name = "long-config-no-arg"; }
