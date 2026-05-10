@@ -113,7 +113,13 @@ pub fn parse(bytes: &[u8]) -> Result<(FileInfo, Vec<Event>), ParseError> {
     }
 
     // Prime each track with its first delta-time so we know its tick.
+    // An empty MTrk (size=0) has no events — mark it eof rather than
+    // erroring on the varlen read.
     for t in tracks.iter_mut() {
+        if t.body.is_empty() {
+            t.eof = true;
+            continue;
+        }
         let dt = read_varlen(t)?;
         t.tick += dt as i64;
     }
