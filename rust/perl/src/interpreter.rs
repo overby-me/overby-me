@@ -16561,10 +16561,16 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                             "Group name must start with a non-digit word character in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
                         ));
                     }
-                } else if after_p != '<' && after_p != '=' && after_p != '\'' {
-                    // `(?PX…)` for any X other than `<`/`=`/`'` is
-                    // unrecognised. Reference perl's diagnostic uses
-                    // a `(?PX)` prefix (3 chars) marker.
+                } else if after_p != '<'
+                    && after_p != '='
+                    && after_p != '\''
+                    && after_p != '>'
+                {
+                    // `(?PX…)` for any X other than `<`/`=`/`'`/`>`
+                    // is unrecognised. `(?P>NAME)` is the Python-style
+                    // recursion ref handled later by the inline-recursion
+                    // pass. Reference perl's diagnostic uses a `(?PX)`
+                    // prefix (3 chars) marker.
                     let prefix: String = chars[..=k + 3].iter().collect();
                     return Some(format!(
                         "Sequence (?P{after_p}...) not recognized in regex; marked by <-- HERE in m/{prefix} <-- HERE /"
@@ -17852,6 +17858,7 @@ fn inline_simple_recursion_pass(pattern: &str) -> String {
     let mut out = String::with_capacity(pattern.len());
     let mut i = 0;
     let mut in_class = false;
+    let mut groups_seen: usize = 0;
     while i < chars.len() {
         let c = chars[i];
         if c == '\\' && i + 1 < chars.len() {
@@ -17897,6 +17904,39 @@ fn inline_simple_recursion_pass(pattern: &str) -> String {
                     continue;
                 }
             }
+            // `(?-N)` / `(?+N)` — relative numeric reference.
+            if (chars[i + 2] == '-' || chars[i + 2] == '+')
+                && i + 3 < chars.len()
+                && chars[i + 3].is_ascii_digit()
+            {
+                let sign = chars[i + 2];
+                let mut k = i + 3;
+                let mut num_str = String::new();
+                while k < chars.len() && chars[k].is_ascii_digit() {
+                    num_str.push(chars[k]);
+                    k += 1;
+                }
+                if k < chars.len() && chars[k] == ')'
+                    && let Ok(n) = num_str.parse::<i64>()
+                {
+                    let target = if sign == '-' {
+                        groups_seen as i64 - n + 1
+                    } else {
+                        groups_seen as i64 + n
+                    };
+                    if target > 0
+                        && let Some((_, body)) =
+                            groups.iter().find(|(num, _)| *num as i64 == target)
+                        && !body_has_recursion_ref(body)
+                    {
+                        out.push_str("(?:");
+                        out.push_str(body);
+                        out.push(')');
+                        i = k + 1;
+                        continue;
+                    }
+                }
+            }
             // `(?&NAME)` or `(?P>NAME)` — named group reference.
             let name_start = if i + 3 < chars.len() && chars[i + 2] == '&' {
                 Some(i + 3)
@@ -17925,6 +17965,30 @@ fn inline_simple_recursion_pass(pattern: &str) -> String {
                         continue;
                     }
                 }
+            }
+        }
+        // Track top-level capturing-group count for relative refs.
+        if !in_class && c == '(' {
+            // Only count capturing forms.
+            let is_capturing = if i + 1 < chars.len() && chars[i + 1] == '?' {
+                if i + 2 < chars.len() && chars[i + 2] == '<' {
+                    !(i + 3 < chars.len()
+                        && (chars[i + 3] == '=' || chars[i + 3] == '!'))
+                } else if i + 2 < chars.len() && chars[i + 2] == '\'' {
+                    true
+                } else if i + 3 < chars.len()
+                    && chars[i + 2] == 'P'
+                    && chars[i + 3] == '<'
+                {
+                    true
+                } else {
+                    false
+                }
+            } else {
+                true
+            };
+            if is_capturing {
+                groups_seen += 1;
             }
         }
         out.push(c);
@@ -18466,6 +18530,27 @@ fn normalize_named_backref(pattern: &str) -> String {
                     i = k;
                     continue;
                 }
+            }
+        }
+        // `(?P=NAME)` — Python-style named backref. Translate to
+        // `\k<NAME>` for fancy_regex.
+        if !in_class
+            && c == '('
+            && i + 4 < chars.len()
+            && chars[i + 1] == '?'
+            && chars[i + 2] == 'P'
+            && chars[i + 3] == '='
+        {
+            let name_start = i + 4;
+            let mut k = name_start;
+            while k < chars.len() && chars[k] != ')' {
+                k += 1;
+            }
+            if k < chars.len() {
+                let name: String = chars[name_start..k].iter().collect();
+                out.push_str(&format!("\\k<{name}>"));
+                i = k + 1;
+                continue;
             }
         }
         if !in_class
