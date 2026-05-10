@@ -11988,6 +11988,7 @@ impl Interpreter {
         let pattern = inline_simple_recursion(&pattern);
         let pattern = strip_control_verbs(&pattern);
         let pattern = eliminate_zero_quantifier(&pattern);
+        let pattern = strip_xx_class_whitespace(&pattern);
         // Under `/a`, restrict `\d`/`\w`/`\s` and their negations to
         // ASCII-only forms. fancy_regex's defaults are Unicode-aware,
         // and the regex crate likewise — both would match `\x{660}`
@@ -12389,6 +12390,7 @@ impl Interpreter {
         let pattern = inline_simple_recursion(&pattern);
         let pattern = strip_control_verbs(&pattern);
         let pattern = eliminate_zero_quantifier(&pattern);
+        let pattern = strip_xx_class_whitespace(&pattern);
         let pattern = if ascii_posix {
             restrict_word_classes_ascii(&pattern)
         } else {
@@ -19346,6 +19348,97 @@ fn rewrite_nonexistent_group_conditionals(pattern: &str) -> String {
 /// 1742-1756.
 /// Walk `pattern` looking for an inline `(?a)` / `(?aa)` flag (no
 /// body — `(?aa-i)` etc. count too). Returns true if found.
+/// Pre-strip whitespace inside `[...]` classes whose enclosing inline
+/// flag group requests `/xx` (e.g. `(?xx:[a b])`). fancy_regex
+/// preserves class whitespace under /xx; reference perl strips it.
+/// We track the inline-flag scope manually. re/regexp 2025, 2027.
+fn strip_xx_class_whitespace(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    // Stack: per-group xx state (whether /xx is in effect for this
+    // scope's contents).
+    let mut xx_stack: Vec<bool> = vec![false];
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class {
+            let current_xx = *xx_stack.last().unwrap_or(&false);
+            if current_xx && c.is_whitespace() {
+                i += 1;
+                continue;
+            }
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if c == '(' {
+            let parent_xx = *xx_stack.last().unwrap_or(&false);
+            let mut new_xx = parent_xx;
+            if i + 1 < chars.len() && chars[i + 1] == '?' {
+                let mut k = i + 2;
+                let mut has_neg = false;
+                let mut x_count = 0;
+                let mut minus_x = false;
+                while k < chars.len()
+                    && (chars[k].is_ascii_alphabetic() || chars[k] == '-')
+                {
+                    if chars[k] == '-' {
+                        has_neg = true;
+                    } else if chars[k] == 'x' {
+                        if has_neg {
+                            minus_x = true;
+                        } else {
+                            x_count += 1;
+                        }
+                    }
+                    k += 1;
+                }
+                if k < chars.len() && (chars[k] == ':' || chars[k] == ')') {
+                    if x_count >= 2 {
+                        new_xx = true;
+                    } else if x_count == 1 || minus_x {
+                        new_xx = false;
+                    }
+                }
+            }
+            xx_stack.push(new_xx);
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if c == ')' {
+            if xx_stack.len() > 1 {
+                xx_stack.pop();
+            }
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 /// Detect inline `(?x...)` flag groups where /x appears exactly once
 /// (i.e. single x, not /xx). Inside `/xx` outer scope, `(?x:...)`
 /// downgrades to single /x where class whitespace is preserved —
