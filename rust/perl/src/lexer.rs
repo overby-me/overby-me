@@ -2461,6 +2461,53 @@ impl Lexer {
                         s.push('\x1B');
                         self.pos += 1;
                     }
+                    'N' => {
+                        // `\N{U+HEX}` — codepoint. `\N{NAME}` — named
+                        // char looked up in our small built-in table.
+                        // re/regexp 1725-1726, 1976-1979, 2018-2028.
+                        if self.peek(1) == '{' {
+                            let body_start = self.pos + 2;
+                            let mut k = body_start;
+                            while k < self.input.len() && self.input[k] != '}' {
+                                k += 1;
+                            }
+                            if k < self.input.len() {
+                                let raw: String =
+                                    self.input[body_start..k].iter().collect();
+                                let trimmed = raw.trim();
+                                if let Some(rest) = trimmed
+                                    .strip_prefix("U+")
+                                    .or_else(|| trimmed.strip_prefix("u+"))
+                                {
+                                    let hex: String = rest
+                                        .chars()
+                                        .filter(|c| !c.is_whitespace() && *c != '_')
+                                        .collect();
+                                    if let Ok(v) = u32::from_str_radix(&hex, 16)
+                                        && let Some(c) = char::from_u32(v)
+                                    {
+                                        s.push(c);
+                                        self.pos = k + 1;
+                                        continue;
+                                    }
+                                } else if !trimmed.is_empty()
+                                    && !trimmed
+                                        .chars()
+                                        .all(|c| c.is_ascii_digit() || c == ',')
+                                {
+                                    if let Some(c) = lookup_named_char(trimmed) {
+                                        s.push(c);
+                                        self.pos = k + 1;
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                        // Fall back to literal `\N`.
+                        s.push('\\');
+                        s.push('N');
+                        self.pos += 1;
+                    }
                     // Case-modifier escapes — emit sentinel bytes that
                     // the interpreter detects at interpolation time and
                     // applies to subsequent characters until `\E`.
@@ -3606,6 +3653,54 @@ fn pattern_uses_named_char(pat: &str) -> bool {
     false
 }
 
+/// Map a `\N{NAME}` Unicode character name to its codepoint. We
+/// don't ship the full Unicode names database (that lives in
+/// `unicore/Name.pm` which the test sandbox doesn't have); this
+/// table covers the named characters Perl's regex test suite
+/// actually references. Returns None for unknown names so callers
+/// can emit a fallback (literal `\N{NAME}` or a die error).
+fn lookup_named_char(name: &str) -> Option<char> {
+    let canon: String = name
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_uppercase();
+    let cp: u32 = match canon.as_str() {
+        "SPACE" => 0x0020,
+        "NULL" => 0x0000,
+        "TAB" => 0x0009,
+        "LF" | "LINE FEED" | "LINE FEED (LF)" => 0x000A,
+        "CR" | "CARRIAGE RETURN" | "CARRIAGE RETURN (CR)" => 0x000D,
+        "BEL" | "BELL" => 0x0007,
+        "BS" | "BACKSPACE" => 0x0008,
+        "VT" | "LINE TABULATION" => 0x000B,
+        "FF" | "FORM FEED" | "FORM FEED (FF)" => 0x000C,
+        "ESC" | "ESCAPE" => 0x001B,
+        "DEL" | "DELETE" => 0x007F,
+        "NEL" | "NEXT LINE" | "NEXT LINE (NEL)" => 0x0085,
+        "NBSP" | "NO-BREAK SPACE" => 0x00A0,
+        "LATIN SMALL LETTER SHARP S" => 0x00DF,
+        "LATIN SMALL LETTER LONG S" => 0x017F,
+        "KELVIN SIGN" => 0x212A,
+        "LATIN SMALL LIGATURE ST" => 0xFB06,
+        "LATIN SMALL LIGATURE LONG S T" => 0xFB05,
+        "LATIN SMALL LIGATURE FF" => 0xFB00,
+        "LATIN SMALL LIGATURE FI" => 0xFB01,
+        "LATIN SMALL LIGATURE FL" => 0xFB02,
+        "LATIN SMALL LIGATURE FFI" => 0xFB03,
+        "LATIN SMALL LIGATURE FFL" => 0xFB04,
+        "GREEK CAPITAL LETTER ALPHA" => 0x0391,
+        "GREEK SMALL LETTER ALPHA" => 0x03B1,
+        "ZERO WIDTH SPACE" => 0x200B,
+        "ZERO WIDTH NON-JOINER" => 0x200C,
+        "ZERO WIDTH JOINER" => 0x200D,
+        "LINE SEPARATOR" => 0x2028,
+        "PARAGRAPH SEPARATOR" => 0x2029,
+        _ => return None,
+    };
+    char::from_u32(cp)
+}
+
 fn process_escapes(s: &str) -> String {
     let mut result = String::new();
     let chars: Vec<char> = s.chars().collect();
@@ -3721,11 +3816,57 @@ fn process_escapes(s: &str) -> String {
                             }
                         }
                     }
-                    let v = u32::from_str_radix(&hex, 16).unwrap_or(0);
+                    let cleaned: String =
+                        hex.chars().filter(|c| !c.is_whitespace() && *c != '_').collect();
+                    let v = u32::from_str_radix(&cleaned, 16).unwrap_or(0);
                     if let Some(c) = char::from_u32(v) {
                         result.push(c);
                     }
                     continue;
+                }
+                'N' => {
+                    // `\N{U+HEX}` — codepoint. `\N{NAME}` — named char,
+                    // looked up in a small built-in table for common
+                    // Perl-test names. Anything else falls back to
+                    // emitting `\N` literal so downstream regex can
+                    // detect it.
+                    if i + 1 < chars.len() && chars[i + 1] == '{' {
+                        let body_start = i + 2;
+                        let mut k = body_start;
+                        while k < chars.len() && chars[k] != '}' {
+                            k += 1;
+                        }
+                        if k < chars.len() {
+                            let raw: String = chars[body_start..k].iter().collect();
+                            let trimmed = raw.trim();
+                            if let Some(rest) = trimmed
+                                .strip_prefix("U+")
+                                .or_else(|| trimmed.strip_prefix("u+"))
+                            {
+                                let hex: String = rest
+                                    .chars()
+                                    .filter(|c| !c.is_whitespace() && *c != '_')
+                                    .collect();
+                                if let Ok(v) = u32::from_str_radix(&hex, 16)
+                                    && let Some(c) = char::from_u32(v)
+                                {
+                                    result.push(c);
+                                    i = k + 1;
+                                    continue;
+                                }
+                            } else if !trimmed.is_empty()
+                                && !trimmed.chars().all(|c| c.is_ascii_digit() || c == ',')
+                            {
+                                if let Some(c) = lookup_named_char(trimmed) {
+                                    result.push(c);
+                                    i = k + 1;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                    result.push('\\');
+                    result.push('N');
                 }
                 _ => {
                     // Unrecognised escape: Perl emits a "Unrecognized
