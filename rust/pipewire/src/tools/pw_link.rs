@@ -135,10 +135,14 @@ pub fn main(raw_args: &[String]) -> i32 {
             // long form is unrecognized — only -N short works.
             "-m" | "--monitor" | "-L" | "--linger"
             | "-P" | "--passive" | "-w" | "--wait" | "-N" => {}
-            "-p" | "--props" => {
+            opt @ ("-p" | "--props") => {
                 // -p / --props requires an argument.
                 if i + 1 >= args.len() {
-                    eprintln!("{argv0}: option requires an argument -- 'p'");
+                    if opt == "--props" {
+                        eprintln!("{argv0}: option '--props' requires an argument");
+                    } else {
+                        eprintln!("{argv0}: option requires an argument -- 'p'");
+                    }
                     print_help(argv0);
                     return u8::MAX as i32;
                 }
