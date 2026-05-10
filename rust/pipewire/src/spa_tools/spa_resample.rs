@@ -82,6 +82,14 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_help(argv0);
                 return 1;
             }
+            // Mixed cluster like `-bx`: getopt errors on first unknown.
+            s if s.starts_with('-') && s != "-" => {
+                let ch = s.chars().nth(1).unwrap_or('?');
+                eprintln!("{argv0}: invalid option -- '{ch}'");
+                eprintln!("error: unknown option '?'");
+                print_help(argv0);
+                return 1;
+            }
             _ => {
                 positional_count += 1;
                 i += 1;
