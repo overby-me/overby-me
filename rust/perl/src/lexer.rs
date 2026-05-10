@@ -1109,6 +1109,24 @@ impl Lexer {
                         // can match it after `->`.
                         self.pos += 1;
                         tokens.push(Token::ScalarVar("*".to_string()));
+                    } else if self.ch() == '~' {
+                        // `$~` — current format name for the selected
+                        // output channel. Treated as a regular global.
+                        self.pos += 1;
+                        tokens.push(Token::ScalarVar("~".to_string()));
+                    } else if self.ch() == '%' {
+                        // `$%` — page number for selected output channel.
+                        self.pos += 1;
+                        tokens.push(Token::ScalarVar("%".to_string()));
+                    } else if self.ch() == '=' {
+                        // `$=` — page length for selected output channel.
+                        self.pos += 1;
+                        tokens.push(Token::ScalarVar("=".to_string()));
+                    } else if self.ch() == ':' && self.peek(1) != ':' {
+                        // `$:` — set of chars for line-break ($FORMAT_LINE_BREAK_CHARS).
+                        // Don't consume `$::name` (package main::name).
+                        self.pos += 1;
+                        tokens.push(Token::ScalarVar(":".to_string()));
                     } else {
                         // Unknown special var, just treat as $_
                         tokens.push(Token::ScalarVar("_".to_string()));

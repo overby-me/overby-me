@@ -3911,9 +3911,11 @@ fn parse_interp_string(s: &str) -> Expr {
             // $| (autoflush), $& $` $' (regex matches).
             let is_punct_special = matches!(
                 chars[i + 1],
-                '@' | '!' | '/' | '\\' | ',' | '"' | ';' | '|' | '&' | '`' | '\'' | '?' | '-' | '+'
+                '@' | '!' | '/' | '\\' | ',' | '"' | ';' | '|' | '&' | '`' | '\'' | '?' | '-' | '+' | '~' | '%' | '='
             ) || (chars[i + 1] == '.'
-                && (i + 2 >= chars.len() || !chars[i + 2].is_ascii_digit()));
+                && (i + 2 >= chars.len() || !chars[i + 2].is_ascii_digit()))
+                || (chars[i + 1] == ':'
+                    && (i + 2 >= chars.len() || chars[i + 2] != ':'));
             // `$$name` — scalar deref interpolation. Detect `$$` followed
             // by an ident (otherwise `$$` is the pid var or literal).
             let is_scalar_deref = chars[i + 1] == '$'
@@ -4113,8 +4115,13 @@ fn parse_interp_string(s: &str) -> Expr {
                         | '?'
                         | '-'
                         | '+'
+                        | '~'
+                        | '%'
+                        | '='
                 ) || (chars[i] == '.'
                     && (i + 1 >= chars.len() || !chars[i + 1].is_ascii_digit()))
+                    || (chars[i] == ':'
+                        && (i + 1 >= chars.len() || chars[i + 1] != ':'))
                 {
                     // Single-char punctuation special variable.
                     // May be followed by an arrow-chain: `$@->{k}`, `$!->[0]`.
