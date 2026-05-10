@@ -11731,6 +11731,7 @@ impl Interpreter {
         // so `(?(?{0})...)` / `(?(?{1})...)` can see the code-block
         // body and pick the right branch.
         let pattern = rewrite_nonexistent_group_conditionals(&pattern);
+        let pattern = substitute_constant_runtime_regex(&pattern);
         let (pattern, code_blocks) = extract_regex_code_blocks(&pattern);
         let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_inline_flag_groups(&pattern);
@@ -12010,6 +12011,7 @@ impl Interpreter {
         // so `(?(?{0})...)` / `(?(?{1})...)` can see the code-block
         // body and pick the right branch.
         let pattern = rewrite_nonexistent_group_conditionals(&pattern);
+        let pattern = substitute_constant_runtime_regex(&pattern);
         let (pattern, code_blocks) = extract_regex_code_blocks(&pattern);
         let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_inline_flag_groups(&pattern);
@@ -18587,6 +18589,113 @@ fn translate_octal_escapes(pattern: &str) -> String {
 /// `pattern`. Returns `(cleaned_pattern, code_blocks)` — each `(?{...})`
 /// is replaced with `(?:)` (always-matching empty group) so the regex
 /// crate accepts the pattern, and the inner code is collected so the
+/// Substitute simple constant `(??{"PAT"})` and `(??{q(PAT)})`
+/// runtime-regex-eval blocks with their literal pattern. Only handles
+/// the common case where the body is a constant string literal — no
+/// variable interpolation. Used by re/regexp tests 1110-1116 etc.
+fn substitute_constant_runtime_regex(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        // `(??{...})` introducer — try to extract a constant string body.
+        if !in_class
+            && c == '('
+            && i + 3 < chars.len()
+            && chars[i + 1] == '?'
+            && chars[i + 2] == '?'
+            && chars[i + 3] == '{'
+        {
+            let body_start = i + 4;
+            // Find the matching `}`.
+            let mut depth = 1;
+            let mut j = body_start;
+            let mut quote: Option<char> = None;
+            while j < chars.len() && depth > 0 {
+                if chars[j] == '\\' && j + 1 < chars.len() {
+                    j += 2;
+                    continue;
+                }
+                if let Some(q) = quote {
+                    if chars[j] == q {
+                        quote = None;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if chars[j] == '"' || chars[j] == '\'' {
+                    quote = Some(chars[j]);
+                    j += 1;
+                    continue;
+                }
+                if chars[j] == '{' {
+                    depth += 1;
+                } else if chars[j] == '}' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                j += 1;
+            }
+            if depth == 0 && j < chars.len() {
+                let body: String = chars[body_start..j].iter().collect();
+                let trimmed = body.trim();
+                // Handle `"..."` constant.
+                let extracted: Option<String> =
+                    if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+                        Some(trimmed[1..trimmed.len() - 1].to_string())
+                    } else if trimmed.starts_with("q(") && trimmed.ends_with(')') {
+                        Some(trimmed[2..trimmed.len() - 1].to_string())
+                    } else if trimmed.starts_with('\'')
+                        && trimmed.ends_with('\'')
+                        && trimmed.len() >= 2
+                    {
+                        Some(trimmed[1..trimmed.len() - 1].to_string())
+                    } else {
+                        None
+                    };
+                if let Some(pat) = extracted {
+                    // After `}` we expect `)`.
+                    let after = if j + 1 < chars.len() && chars[j + 1] == ')' {
+                        j + 2
+                    } else {
+                        j + 1
+                    };
+                    out.push_str("(?:");
+                    out.push_str(&pat);
+                    out.push(')');
+                    i = after;
+                    continue;
+                }
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 /// caller can `eval_string` it after a successful match. We only treat
 /// these as zero-width side-effects: every captured block runs once
 /// per successful match, regardless of which alternation branch matched.
