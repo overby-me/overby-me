@@ -95,11 +95,24 @@ pub fn main(raw_args: &[String]) -> i32 {
     // C connects to the daemon to collect profiler events. Try
     // connecting; emit C's "Can't connect" error if it fails
     // (capital C, matches pw-profiler.c's show_error).
-    match crate::pipewire_lib::client::Client::connect_default() {
+    let env_remote = std::env::var("PIPEWIRE_REMOTE").ok().filter(|s| !s.is_empty());
+    let connect = if let Some(name) = &env_remote {
+        let runtime = std::env::var("PIPEWIRE_RUNTIME_DIR")
+            .or_else(|_| std::env::var("XDG_RUNTIME_DIR"))
+            .unwrap_or_else(|_| "/tmp".to_string());
+        let path = std::path::PathBuf::from(runtime).join(name);
+        crate::pipewire_lib::client::Client::connect_path(&path)
+    } else {
+        crate::pipewire_lib::client::Client::connect_default()
+    };
+    match connect {
         Ok(_) => 0,
         Err(_) => {
-            eprintln!("Can't connect: {}", crate::tools::common::connect_failure_msg());
-            0
+            eprintln!(
+                "Can't connect: {}",
+                crate::tools::common::connect_failure_msg_for(env_remote.as_deref())
+            );
+            u8::MAX as i32
         }
     }
 }
