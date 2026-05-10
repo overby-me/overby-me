@@ -11985,6 +11985,7 @@ impl Interpreter {
         // (non-recursive) case. Truly recursive patterns are left
         // unchanged. re/regexp 1167-1185.
         let pattern = inline_simple_recursion(&pattern);
+        let pattern = eliminate_zero_quantifier(&pattern);
         // Under `/a`, restrict `\d`/`\w`/`\s` and their negations to
         // ASCII-only forms. fancy_regex's defaults are Unicode-aware,
         // and the regex crate likewise — both would match `\x{660}`
@@ -12384,6 +12385,7 @@ impl Interpreter {
         let pattern = translate_named_char_escapes(&pattern);
         let pattern = normalize_named_backref(&pattern);
         let pattern = inline_simple_recursion(&pattern);
+        let pattern = eliminate_zero_quantifier(&pattern);
         let pattern = if ascii_posix {
             restrict_word_classes_ascii(&pattern)
         } else {
@@ -19580,6 +19582,71 @@ fn escape_literal_bracket_in_class(pattern: &str) -> String {
 /// (a single digit with that capture group present); we approximate
 /// by treating `\0` and `\NNN` (≥ 2 leading zeros / 3-digit) as
 /// octal, leaving `\1`..`\9` alone for backref handling.
+/// Eliminate `(...){0}` constructs — fancy_regex rejects
+/// `(?=...){0}` and similar with "Target of repeat operator is
+/// invalid". Since `{0}` matches zero times, the construct is
+/// equivalent to an empty match. Replace with `(?:)`.
+/// re/regexp 1919.
+fn eliminate_zero_quantifier(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    // First pass: for each `(`, find matching `)`, then check if
+    // immediately followed by `{0}`. Build a map of (open, end_of_zero_quant).
+    let mut zero_ranges: Vec<(usize, usize)> = Vec::new();
+    let mut stack: Vec<usize> = Vec::new();
+    let mut in_class = false;
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+        } else if in_class && c == ']' {
+            in_class = false;
+        }
+        if !in_class && c == '(' {
+            stack.push(i);
+        } else if !in_class && c == ')' {
+            if let Some(open) = stack.pop() {
+                let after = i + 1;
+                if after < chars.len() && chars[after] == '{' {
+                    let mut k = after + 1;
+                    let mut body = String::new();
+                    while k < chars.len() && chars[k] != '}' {
+                        body.push(chars[k]);
+                        k += 1;
+                    }
+                    if k < chars.len() && body.trim() == "0" {
+                        zero_ranges.push((open, k));
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    if zero_ranges.is_empty() {
+        return pattern.to_string();
+    }
+    // Second pass: rebuild, replacing each (open..=end) range with `(?:)`.
+    zero_ranges.sort_by_key(|(o, _)| *o);
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut zr_idx = 0;
+    while i < chars.len() {
+        if zr_idx < zero_ranges.len() && i == zero_ranges[zr_idx].0 {
+            out.push_str("(?:)");
+            i = zero_ranges[zr_idx].1 + 1;
+            zr_idx += 1;
+            continue;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
 /// Normalise quantifier braces `{N,M}` so leading whitespace and
 /// `{,N}` (implicit `0`) are accepted. Reference perl treats
 /// `.{, 2 }` as `.{0,2}`; rust regex / fancy_regex don't accept the
