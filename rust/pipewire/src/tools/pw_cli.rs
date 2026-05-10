@@ -150,7 +150,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                 Ok(_) => 0,
                 Err(e) => {
                     print_open_error(argv0, &e);
-                    1
+                    u8::MAX as i32
                 }
             }
         } else {
@@ -161,7 +161,7 @@ pub fn main(raw_args: &[String]) -> i32 {
         if force_connect {
             if let Err(e) = open_client(connect_remote.as_deref(), "pw-cli") {
                 print_open_error(argv0, &e);
-                return 1;
+                return u8::MAX as i32;
             }
         }
         run_positional(argv0, remote, positional)
