@@ -1556,6 +1556,7 @@
       { tool = "pipewire"; name = "c-not-dot-conf"; }
       { tool = "pipewire"; name = "c-missing-conf"; }
       { tool = "pipewire"; name = "cluster-help"; }
+      { tool = "pipewire"; name = "multiple-flags"; }
       { tool = "spa-acp-tool"; name = "bogus-flag-exit"; }
       { tool = "spa-inspect"; name = "no-args-exit"; }
       { tool = "spa-monitor"; name = "no-args-exit"; }

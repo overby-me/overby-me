@@ -19,114 +19,104 @@ pub fn main(args: &[String]) -> i32 {
         "pipewire.conf"
     };
 
-    match args.get(1).map(String::as_str) {
-        Some("-h") | Some("--help") => {
-            print_help(argv0, default_config);
-            0
-        }
-        Some("--version") | Some("-V") => {
-            print_version(argv0);
-            0
-        }
-        Some(s) if s.starts_with("--help=") => {
-            eprintln!("{argv0}: option '--help' doesn't allow an argument");
-            234
-        }
-        Some(s) if s.starts_with("--version=") => {
-            eprintln!("{argv0}: option '--version' doesn't allow an argument");
-            234
-        }
-        // -v / --verbose are no-arg.
-        Some("-v") | Some("--verbose") => {
-            eprintln!("{argv0}: not yet implemented in rust-pipewire");
-            1
-        }
-        // -c / --config / -P / --properties REQUIRE a value. With no
-        // following arg getopt errors. C maps the -EINVAL fallthrough to
-        // exit 234 (= -22 truncated).
-        Some(opt @ ("-c" | "--config")) => {
-            if let Some(value) = args.get(2) {
-                // C validates the config name: must end with `.conf`
-                // (otherwise -EINVAL → 234), then tries to load the
-                // file (which fails with -ENOENT → 254 in our stub).
-                pipewire_load_config(argv0, value)
-            } else if opt == "--config" {
-                eprintln!("{argv0}: option '--config' requires an argument");
-                234
-            } else {
-                eprintln!("{argv0}: option requires an argument -- 'c'");
-                234
+    let mut config_value: Option<String> = None;
+    let mut i = 1;
+    while i < args.len() {
+        let s = args[i].as_str();
+        match s {
+            "-h" | "--help" => {
+                print_help(argv0, default_config);
+                return 0;
             }
-        }
-        Some(opt @ ("-P" | "--properties")) => {
-            if args.len() > 2 {
-                eprintln!("{argv0}: not yet implemented in rust-pipewire");
-                1
-            } else if opt == "--properties" {
-                eprintln!("{argv0}: option '--properties' requires an argument");
-                234
-            } else {
-                eprintln!("{argv0}: option requires an argument -- 'P'");
-                234
+            "--version" | "-V" => {
+                print_version(argv0);
+                return 0;
             }
-        }
-        // Inline-value forms.
-        Some(s) if s.starts_with("--config=") => {
-            let value = &s["--config=".len()..];
-            pipewire_load_config(argv0, value)
-        }
-        Some(s) if s.starts_with("--properties=") => {
-            eprintln!("{argv0}: not yet implemented in rust-pipewire");
-            1
-        }
-        Some(s) if s.starts_with("--") => {
-            eprintln!("{argv0}: unrecognized option '{s}'");
-            234
-        }
-        Some(s) if s.starts_with("-c") && s.len() > 2 => {
-            // -cfoo (attached value)
-            eprintln!("{argv0}: not yet implemented in rust-pipewire");
-            1
-        }
-        Some(s) if s.starts_with("-P") && s.len() > 2 => {
-            eprintln!("{argv0}: not yet implemented in rust-pipewire");
-            1
-        }
-        Some(s) if s.starts_with('-') && s.len() == 2 => {
-            let ch = s.chars().nth(1).unwrap_or('?');
-            eprintln!("{argv0}: invalid option -- '{ch}'");
-            234
-        }
-        // Mixed cluster like `-hh` or `-hX`: getopt processes char-by-char,
-        // so a cluster starting with `-h` short-circuits to help.
-        Some(s) if s.starts_with('-') && !s.starts_with("--") && s.len() > 2 => {
-            let mut chars = s[1..].chars();
-            while let Some(c) = chars.next() {
-                if c == 'h' {
-                    print_help(argv0, default_config);
-                    return 0;
-                } else if c == 'V' {
-                    print_version(argv0);
-                    return 0;
-                } else if c == 'v' {
-                    // verbose, no-arg, continue cluster
+            s if s.starts_with("--help=") => {
+                eprintln!("{argv0}: option '--help' doesn't allow an argument");
+                return 234;
+            }
+            s if s.starts_with("--version=") => {
+                eprintln!("{argv0}: option '--version' doesn't allow an argument");
+                return 234;
+            }
+            "-v" | "--verbose" => {
+                // No-arg, continue.
+            }
+            opt @ ("-c" | "--config") => {
+                if let Some(value) = args.get(i + 1) {
+                    config_value = Some(value.clone());
+                    i += 2;
+                    continue;
+                } else if opt == "--config" {
+                    eprintln!("{argv0}: option '--config' requires an argument");
+                    return 234;
                 } else {
-                    eprintln!("{argv0}: invalid option -- '{c}'");
+                    eprintln!("{argv0}: option requires an argument -- 'c'");
                     return 234;
                 }
             }
-            eprintln!("{argv0}: not yet implemented in rust-pipewire");
-            1
+            opt @ ("-P" | "--properties") => {
+                if args.get(i + 1).is_some() {
+                    i += 2;
+                    continue;
+                } else if opt == "--properties" {
+                    eprintln!("{argv0}: option '--properties' requires an argument");
+                    return 234;
+                } else {
+                    eprintln!("{argv0}: option requires an argument -- 'P'");
+                    return 234;
+                }
+            }
+            s if s.starts_with("--config=") => {
+                config_value = Some(s["--config=".len()..].to_string());
+            }
+            s if s.starts_with("--properties=") => {}
+            s if s.starts_with("--") => {
+                eprintln!("{argv0}: unrecognized option '{s}'");
+                return 234;
+            }
+            s if s.starts_with("-c") && s.len() > 2 => {
+                config_value = Some(s[2..].to_string());
+            }
+            s if s.starts_with("-P") && s.len() > 2 => {}
+            s if s.starts_with('-') && s.len() == 2 => {
+                let ch = s.chars().nth(1).unwrap_or('?');
+                eprintln!("{argv0}: invalid option -- '{ch}'");
+                return 234;
+            }
+            // Mixed cluster like `-hh` or `-hX`: getopt processes char-by-char,
+            // so a cluster starting with `-h` short-circuits to help.
+            s if s.starts_with('-') && !s.starts_with("--") && s.len() > 2 => {
+                for c in s[1..].chars() {
+                    if c == 'h' {
+                        print_help(argv0, default_config);
+                        return 0;
+                    } else if c == 'V' {
+                        print_version(argv0);
+                        return 0;
+                    } else if c == 'v' {
+                        // verbose, no-arg, continue cluster
+                    } else {
+                        eprintln!("{argv0}: invalid option -- '{c}'");
+                        return 234;
+                    }
+                }
+            }
+            _ => {
+                // Positional argument; daemon doesn't accept any but
+                // since we don't run the daemon we just stop processing
+                // and fall through to the "not implemented" path.
+                break;
+            }
         }
-        Some(s) if s.starts_with('-') => {
-            eprintln!("{argv0}: unrecognized option '{s}'");
-            234
-        }
-        _ => {
-            eprintln!("{argv0}: not yet implemented in rust-pipewire");
-            1
-        }
+        i += 1;
     }
+    if let Some(value) = config_value {
+        return pipewire_load_config(argv0, &value);
+    }
+    eprintln!("{argv0}: not yet implemented in rust-pipewire");
+    1
 }
 
 // Mirror upstream's pw_conf_load_conf_for_context: validate the
