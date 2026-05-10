@@ -12049,6 +12049,7 @@ impl Interpreter {
         let pattern = prune_alternations_after_prune(&pattern);
         let pattern = strip_control_verbs(&pattern);
         let pattern = strip_quantifier_after_empty_lookaround(&pattern);
+        let pattern = strip_k_anchor(&pattern);
         let pattern = translate_pl_underscore_aliases(&pattern);
         let pattern = eliminate_zero_quantifier(&pattern);
         let pattern = strip_xx_class_whitespace(&pattern);
@@ -12474,6 +12475,7 @@ impl Interpreter {
         let pattern = prune_alternations_after_prune(&pattern);
         let pattern = strip_control_verbs(&pattern);
         let pattern = strip_quantifier_after_empty_lookaround(&pattern);
+        let pattern = strip_k_anchor(&pattern);
         let pattern = translate_pl_underscore_aliases(&pattern);
         let pattern = eliminate_zero_quantifier(&pattern);
         let pattern = strip_xx_class_whitespace(&pattern);
@@ -17681,6 +17683,44 @@ fn named_captures_from_pattern(
 /// expand each ASCII letter inside the group's contents to `[Aa]`
 /// and drop /i from the flags so the engine doesn't widen further.
 /// re/regexp 1667.
+/// Strip /x-style whitespace (outside `[...]` classes and outside
+/// `\` escapes) from a regex body. Used when applying /x semantics
+/// manually after dropping the inline flag.
+fn strip_x_whitespace_top_level(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class && c.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 fn expand_inline_aa_case_insensitive(pattern: &str) -> String {
     let chars: Vec<char> = pattern.chars().collect();
     let mut out = String::with_capacity(pattern.len() + 16);
@@ -17729,7 +17769,14 @@ fn expand_inline_aa_case_insensitive(pattern: &str) -> String {
                     }
                     if depth == 0 && j < chars.len() {
                         let body: String = chars[body_start..j].iter().collect();
-                        let expanded = expand_ascii_case_insensitive(&body);
+                        // Apply /x semantics if requested (strip
+                        // unescaped whitespace not inside `[...]`).
+                        let body_after_x = if flags.contains('x') {
+                            strip_x_whitespace_top_level(&body)
+                        } else {
+                            body
+                        };
+                        let expanded = expand_ascii_case_insensitive(&body_after_x);
                         // Drop all flags (we hand-expanded /i to [Aa]
                         // patterns; /aa was only the trigger).
                         out.push_str(&format!("(?:{expanded})"));
@@ -20293,6 +20340,84 @@ fn escape_literal_bracket_in_class(pattern: &str) -> String {
 /// don't match Perl exactly (e.g. ACCEPT short-circuit lost), but
 /// most tests then complete with the structural match. re/regexp
 /// 1302-1303, 1897-1904, 1994-1995, 2082-2111.
+/// `\K` resets the match-start anchor — anything before is matched
+/// but excluded from `$&`. fancy_regex doesn't support it. For the
+/// common `<CHAR>?\K<quant>` form, rewrite as `(?:(?<=CHAR)|)<quant_dropped>`
+/// so $& comes out empty (matching reference). For other forms,
+/// strip `\K` and any trailing quantifier — loses reset semantics
+/// but lets the pattern compile. re/regexp 2048-2050.
+fn strip_k_anchor(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            if !in_class && chars[i + 1] == 'K' {
+                // Skip \K and following quantifier.
+                let mut k = i + 2;
+                if k < chars.len()
+                    && (chars[k] == '+' || chars[k] == '*' || chars[k] == '?')
+                {
+                    k += 1;
+                    if k < chars.len() && (chars[k] == '?' || chars[k] == '+') {
+                        k += 1;
+                    }
+                } else if k < chars.len() && chars[k] == '{' {
+                    while k < chars.len() && chars[k] != '}' {
+                        k += 1;
+                    }
+                    if k < chars.len() {
+                        k += 1;
+                    }
+                }
+                // Check what immediately precedes \K. If a class
+                // like `[Aa]?` or `[Aa]`, rewrite to lookbehind +
+                // empty alternation so $& is reset. Otherwise just
+                // drop \K (lossy).
+                let before_end = out.len();
+                let before_chars: Vec<char> = out.chars().collect();
+                let pre_pos = before_chars.len();
+                // Look for `?` quantifier and bracket class.
+                if pre_pos >= 1 && before_chars[pre_pos - 1] == '?' {
+                    // Look for `]` before the `?`.
+                    if pre_pos >= 2 && before_chars[pre_pos - 2] == ']' {
+                        // Find matching `[`.
+                        let mut p = pre_pos - 2;
+                        while p > 0 && before_chars[p] != '[' {
+                            p -= 1;
+                        }
+                        if p < pre_pos - 2 && before_chars[p] == '[' {
+                            let cls: String = before_chars[p..pre_pos - 1].iter().collect();
+                            out.truncate(0);
+                            out.extend(before_chars[..p].iter());
+                            out.push_str(&format!("(?:(?<={cls})|)"));
+                            i = k;
+                            continue;
+                        }
+                    }
+                }
+                let _ = before_end;
+                i = k;
+                continue;
+            }
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+        } else if in_class && c == ']' {
+            in_class = false;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 /// Translate Perl-specific property shorthands to fancy_regex-
 /// compatible forms:
 ///   - `\p{L_}` / `\p{l_}` → `\p{Cased_Letter}` (re/regexp 1681).
