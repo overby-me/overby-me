@@ -12009,6 +12009,7 @@ impl Interpreter {
         let pattern = rewrite_nonexistent_group_conditionals(&pattern);
         let pattern = substitute_constant_runtime_regex(&pattern);
         let (pattern, code_blocks) = extract_regex_code_blocks(&pattern);
+        let pattern = expand_inline_aa_case_insensitive(&pattern);
         let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_inline_flag_groups(&pattern);
         let pattern = translate_perl_whitespace_escapes(&pattern);
@@ -12459,6 +12460,7 @@ impl Interpreter {
         let pattern = rewrite_nonexistent_group_conditionals(&pattern);
         let pattern = substitute_constant_runtime_regex(&pattern);
         let (pattern, code_blocks) = extract_regex_code_blocks(&pattern);
+        let pattern = expand_inline_aa_case_insensitive(&pattern);
         let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_inline_flag_groups(&pattern);
         let pattern = translate_perl_whitespace_escapes(&pattern);
@@ -17672,6 +17674,77 @@ fn named_captures_from_pattern(
 /// non-ASCII code points (which `/aa` forbids). Skips inside
 /// `\xNN` / `\x{N…}` / `\NNN` / `\cX` / `\Q…\E` and re-emits class
 /// shorthand letters (`\d`, `\w`, …) untouched. re/regexp 1665, 1667.
+/// Apply ASCII-only case folding to the contents of inline
+/// `(?<flags>:...)` groups whose flags include both `/aa` and `/i`.
+/// fancy_regex's /i is Unicode-aware, so `s` would also match
+/// `\x{17F}` (long s); /aa restricts case folding to ASCII. Pre-
+/// expand each ASCII letter inside the group's contents to `[Aa]`
+/// and drop /i from the flags so the engine doesn't widen further.
+/// re/regexp 1667.
+fn expand_inline_aa_case_insensitive(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len() + 16);
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            out.push(chars[i]);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if chars[i] == '(' && i + 1 < chars.len() && chars[i + 1] == '?' {
+            // Parse flag chars.
+            let mut k = i + 2;
+            let mut flags = String::new();
+            while k < chars.len()
+                && (chars[k].is_ascii_alphabetic() || chars[k] == '-')
+            {
+                flags.push(chars[k]);
+                k += 1;
+            }
+            // Must end with `:` for an inline-flag group that has
+            // contents.
+            if k < chars.len() && chars[k] == ':' {
+                let aa_count = flags.matches('a').count();
+                let has_i = flags.contains('i');
+                if aa_count >= 2 && has_i {
+                    // Find matching `)`.
+                    let body_start = k + 1;
+                    let mut depth = 1;
+                    let mut j = body_start;
+                    while j < chars.len() && depth > 0 {
+                        if chars[j] == '\\' && j + 1 < chars.len() {
+                            j += 2;
+                            continue;
+                        }
+                        if chars[j] == '(' {
+                            depth += 1;
+                        } else if chars[j] == ')' {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        j += 1;
+                    }
+                    if depth == 0 && j < chars.len() {
+                        let body: String = chars[body_start..j].iter().collect();
+                        let expanded = expand_ascii_case_insensitive(&body);
+                        // Drop all flags (we hand-expanded /i to [Aa]
+                        // patterns; /aa was only the trigger).
+                        out.push_str(&format!("(?:{expanded})"));
+                        i = j + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
 fn expand_ascii_case_insensitive(pattern: &str) -> String {
     let chars: Vec<char> = pattern.chars().collect();
     let mut out = String::with_capacity(pattern.len() + 16);
