@@ -1507,6 +1507,7 @@
       { tool = "pw-loopback"; name = "short-remote-no-arg"; }
       { tool = "pw-loopback"; name = "long-capture-no-arg"; }
       { tool = "pw-loopback"; name = "unknown-flag"; }
+      { tool = "spa-json-dump"; name = "empty-filename"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }

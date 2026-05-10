@@ -142,7 +142,9 @@ pub fn main(args: &[String]) -> i32 {
     //     - empty regular file (size=0):     EINVAL → "Invalid argument"
     //     - directory:                       ENODEV → "No such device"
     if filename.is_empty() {
-        eprintln!("not a valid file '{filename}': Success");
+        // C's fopen("", "r") fails with ENOENT — not the "not a valid
+        // file" path which only triggers for stdin (filename == "-").
+        eprintln!("error opening file '': No such file or directory");
         return 1;
     }
     // Stdin path: C reads stdin into a buffer, then if the buffer is
