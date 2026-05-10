@@ -180,6 +180,16 @@ impl Parser {
                 self.pos += 1;
                 return Some(Stmt::Nop);
             }
+            // `...` (yada-yada) — Perl 5.12+ placeholder operator that
+            // dies "Unimplemented" when reached. Recognise it as a
+            // statement and emit a die call. base/lex tests 107, 108.
+            Token::Ident(name) if name.as_str() == "..." => {
+                self.pos += 1;
+                self.eat(&Token::Semi);
+                return Some(Stmt::Die(vec![Expr::StringLit(
+                    "Unimplemented".to_string(),
+                )]));
+            }
             Token::LBrace => {
                 // Bare block
                 self.pos += 1;
