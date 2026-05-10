@@ -19364,6 +19364,57 @@ fn rewrite_nonexistent_group_conditionals(pattern: &str) -> String {
 /// 1742-1756.
 /// Walk `pattern` looking for an inline `(?a)` / `(?aa)` flag (no
 /// body — `(?aa-i)` etc. count too). Returns true if found.
+/// Wrap single-POSIX-class brackets `[[:NAME:]]` in `(?-i:...)` so
+/// fancy_regex's /i case folding doesn't widen them. Reference perl's
+/// `[[:ascii:]]/i` matches strictly ASCII (no fold-to-ASCII Unicode
+/// chars); fancy_regex's /i case-folds the input before testing the
+/// class. Same for `[[:lower:]]/i` and `[[:upper:]]/i` — /i shouldn't
+/// expand them to all "cased" chars. re/regexp 1729, 1733, 1734.
+fn isolate_posix_class_from_case_fold(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            out.push(chars[i]);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        // Match `[[:NAME:]]` or `[[:^NAME:]]` — a bracket class whose
+        // body is exactly one POSIX class (no other elements).
+        if chars[i] == '['
+            && i + 2 < chars.len()
+            && chars[i + 1] == '['
+            && chars[i + 2] == ':'
+        {
+            // Walk to find `:]]`.
+            let body_start = i + 3;
+            let mut k = body_start;
+            // Optional leading `^` for negation.
+            if k < chars.len() && chars[k] == '^' {
+                k += 1;
+            }
+            while k < chars.len() && chars[k].is_ascii_alphabetic() {
+                k += 1;
+            }
+            if k + 2 < chars.len()
+                && chars[k] == ':'
+                && chars[k + 1] == ']'
+                && chars[k + 2] == ']'
+            {
+                let span: String = chars[i..=k + 2].iter().collect();
+                out.push_str(&format!("(?-i:{span})"));
+                i = k + 3;
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
 /// Pre-strip whitespace inside `[...]` classes whose enclosing inline
 /// flag group requests `/xx` (e.g. `(?xx:[a b])`). fancy_regex
 /// preserves class whitespace under /xx; reference perl strips it.
@@ -20716,7 +20767,15 @@ fn substitute_constant_runtime_regex(pattern: &str) -> String {
             }
             if depth == 0 && j < chars.len() {
                 let body: String = chars[body_start..j].iter().collect();
-                let trimmed = body.trim();
+                // Strip leading `return ` so `(??{return "xyz"})` is
+                // treated the same as `(??{"xyz"})`. re/regexp 1796.
+                let mut trimmed = body.trim();
+                if let Some(after_return) = trimmed.strip_prefix("return") {
+                    let rest = after_return.trim_start();
+                    if rest.len() < after_return.len() {
+                        trimmed = rest;
+                    }
+                }
                 // Handle `"..."` constant.
                 let extracted: Option<String> =
                     if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
