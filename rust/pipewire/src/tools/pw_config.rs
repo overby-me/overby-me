@@ -165,19 +165,29 @@ pub fn main(raw_args: &[String]) -> i32 {
     // explicitly directed the search and nothing turned up.
     let user_directed = !opt_prefix.is_empty() || opt_name != "pipewire.conf";
     if user_directed && configs.is_empty() {
-        // Mirror C's three-line log preamble. The `0x...` pointer in the
-        // first W line varies per-run, but tests normalize it via sed.
+        // Mirror C's log preamble. With a prefix set, an extra W line
+        // from conf_load() appears (it tries to fopen the prefixed path
+        // directly). The `0x...` pointer in that W line varies per-run,
+        // but tests normalize it via sed.
         let attempted = if opt_prefix.is_empty() {
             opt_name.clone()
         } else {
             format!("{}/{}", opt_prefix, opt_name)
         };
-        eprintln!(
-            "[W][TIME] pw.conf      | [          conf.c:  425 conf_load()] 0x5555555609d0: error loading config '{attempted}': No such file or directory"
-        );
+        if !opt_prefix.is_empty() {
+            eprintln!(
+                "[W][TIME] pw.conf      | [          conf.c:  425 conf_load()] 0x5555555609d0: error loading config '{attempted}': No such file or directory"
+            );
+        }
         eprintln!(
             "[W][TIME] pw.conf      | [          conf.c: 1182 try_load_conf()] can't load config {attempted}: No such file or directory"
         );
+        // The `1215` line uses the original opt_name (without prefix)
+        // when a prefix was given but the prefixed path could be loaded;
+        // however when prefixed-load fails the line uses the prefixed
+        // name. Match what C emits in our two distinct cases:
+        //   * with prefix: `pw_conf_load_conf_for_context() can't load config <opt_name>:`
+        //   * without prefix: `... can't load config <opt_name>:`
         eprintln!(
             "[E][TIME] pw.conf      | [          conf.c: 1215 pw_conf_load_conf_for_context()] can't load config {opt_name}: No such file or directory"
         );

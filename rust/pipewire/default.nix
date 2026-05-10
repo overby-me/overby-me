@@ -1582,6 +1582,8 @@
       { tool = "pw-container"; name = "cluster-help"; }
       { tool = "pw-mididump"; name = "undersized-mtrk"; }
       { tool = "pw-config"; name = "missing-config"; }
+      { tool = "pw-config"; name = "missing-name"; }
+      { tool = "pw-config"; name = "missing-prefix-path"; }
       { tool = "pw-dump"; name = "indent-equals"; }
       { tool = "pipewire"; name = "short-c-no-arg"; }
       { tool = "pipewire"; name = "long-config-no-arg"; }
