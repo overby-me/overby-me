@@ -20823,6 +20823,12 @@ fn substitute_constant_runtime_regex(pattern: &str) -> String {
                         && trimmed.len() >= 2
                     {
                         Some(trimmed[1..trimmed.len() - 1].to_string())
+                    } else if !trimmed.is_empty()
+                        && trimmed.chars().all(|c| c.is_ascii_digit())
+                    {
+                        // Numeric literal — stringified value is the
+                        // pattern. re/regexp 1703, 1705.
+                        Some(trimmed.to_string())
                     } else if let Some(rest) = trimmed.strip_prefix("chr ") {
                         // `chr N` — codepoint literal. re/regexp 1112+.
                         let arg = rest.trim();
