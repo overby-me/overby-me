@@ -12029,6 +12029,7 @@ impl Interpreter {
         // (non-recursive) case. Truly recursive patterns are left
         // unchanged. re/regexp 1167-1185.
         let pattern = inline_simple_recursion(&pattern);
+        let regmark = extract_first_mark_label(&pattern);
         let pattern = truncate_at_first_accept(&pattern);
         let pattern = collapse_lazy_plus_then(&pattern);
         let pattern = prune_alternations_after_prune(&pattern);
@@ -12232,6 +12233,9 @@ impl Interpreter {
                     &group_strs,
                     &named,
                 );
+                if let Some(mark) = &regmark {
+                    self.set_global_var("REGMARK", Value::Str(mark.clone()));
+                }
                 let end = start + group_ends[0].unwrap();
                 for code in &code_blocks {
                     let v = self.eval_string(code);
@@ -12342,6 +12346,9 @@ impl Interpreter {
                         &group_strs,
                         &named,
                     );
+                    if let Some(mark) = &regmark {
+                        self.set_global_var("REGMARK", Value::Str(mark.clone()));
+                    }
                     let end = start + group_ends[0].unwrap();
                     for code in &code_blocks {
                         let v = self.eval_string(code);
@@ -12444,6 +12451,7 @@ impl Interpreter {
         let pattern = translate_named_char_escapes(&pattern);
         let pattern = normalize_named_backref(&pattern);
         let pattern = inline_simple_recursion(&pattern);
+        let regmark = extract_first_mark_label(&pattern);
         let pattern = truncate_at_first_accept(&pattern);
         let pattern = collapse_lazy_plus_then(&pattern);
         let pattern = prune_alternations_after_prune(&pattern);
@@ -20255,6 +20263,55 @@ fn collapse_lazy_plus_then(pattern: &str) -> String {
         }
     }
     out
+}
+
+/// Extract the first `(*MARK:NAME)`, `(*:NAME)`, or `(*ACCEPT:NAME)`
+/// label so we can set `$REGMARK` post-match. Approximate — we set
+/// the label even if the matched path didn't traverse the marker.
+/// re/regexp 1994-1995.
+fn extract_first_mark_label(pattern: &str) -> Option<String> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            i += 1;
+            continue;
+        }
+        if !in_class
+            && c == '('
+            && i + 1 < chars.len()
+            && chars[i + 1] == '*'
+        {
+            let mut k = i + 2;
+            while k < chars.len() && chars[k] != ')' {
+                k += 1;
+            }
+            let body: String = chars[i + 2..k].iter().collect();
+            let mut parts = body.splitn(2, ':');
+            let verb = parts.next().unwrap_or("").to_uppercase();
+            if let Some(name) = parts.next()
+                && (verb == "MARK" || verb == "ACCEPT" || verb.is_empty())
+            {
+                return Some(name.to_string());
+            }
+            i = k.saturating_add(1);
+            continue;
+        }
+        i += 1;
+    }
+    None
 }
 
 /// When `(*ACCEPT)` appears, the engine completes the match
