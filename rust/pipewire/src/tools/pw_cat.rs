@@ -248,6 +248,16 @@ pub fn main(raw_args: &[String]) -> i32 {
                     print_help(argv0);
                     return 1;
                 }
+                // If the first char takes a required value, the rest of
+                // the cluster is the inline value.
+                if let Some(&(_, _name)) = short_required.iter().find(|(c, _)| *c == ch) {
+                    let val = &s[2..];
+                    if ch == 'R' {
+                        explicit_remote = Some(val.to_string());
+                    }
+                    // Other required-arg attached values (-PJSON, -qN,
+                    // -MFOO, -nN) are accepted and consumed as the value.
+                }
                 // First char is a known no-arg flag (other than h). Apply
                 // its mode-setter side effect, then fall through (we
                 // don't currently handle inline values for required-arg
