@@ -86,12 +86,45 @@ pub fn main(args: &[String]) -> i32 {
                 print_help_to(argv0, true);
                 return 1;
             }
-            // Mixed cluster like `-bx`: getopt errors on first unknown.
+            // Mixed cluster like `-bx`: getopt processes char-by-char,
+            // so a cluster starting with `-h` short-circuits to help
+            // before scanning the remaining chars.
             s if s.starts_with('-') && !s.starts_with("--") => {
                 let ch = s.chars().nth(1).unwrap_or('?');
-                eprintln!("{argv0}: invalid option -- '{ch}'");
-                print_help_to(argv0, true);
-                return 1;
+                if ch == 'h' {
+                    print_help(argv0);
+                    return 0;
+                }
+                // Iterate over each char in the cluster. `-s` is no-arg,
+                // `-h` short-circuits to help. Anything else errors.
+                let mut chars = s[1..].chars();
+                while let Some(c) = chars.next() {
+                    if c == 'h' {
+                        print_help(argv0);
+                        return 0;
+                    } else if c == 's' {
+                        simple = true;
+                    } else if c == 'i' {
+                        // -i takes the rest of the cluster as the value
+                        // (or the next argv if cluster ends).
+                        let remaining: String = chars.collect();
+                        if !remaining.is_empty() {
+                            indent = remaining.parse::<usize>().unwrap_or(DEFAULT_INDENT);
+                        } else if let Some(v) = args.get(i + 1) {
+                            indent = v.parse::<usize>().unwrap_or(DEFAULT_INDENT);
+                            i += 1;
+                        } else {
+                            eprintln!("{argv0}: option requires an argument -- 'i'");
+                            print_help_to(argv0, true);
+                            return u8::MAX as i32;
+                        }
+                        break;
+                    } else {
+                        eprintln!("{argv0}: invalid option -- '{c}'");
+                        print_help_to(argv0, true);
+                        return 1;
+                    }
+                }
             }
             _ => {
                 print_help_to(argv0, true);

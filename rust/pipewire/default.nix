@@ -1490,6 +1490,8 @@
       { tool = "pw-config"; name = "short-name-no-arg"; }
       { tool = "pw-config"; name = "long-prefix-no-arg"; }
       { tool = "pw-config"; name = "short-prefix-no-arg"; }
+      { tool = "spa-json-dump"; name = "cluster-help-shortcircuit"; }
+      { tool = "spa-json-dump"; name = "cluster-s-then-h"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }
