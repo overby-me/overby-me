@@ -20608,17 +20608,49 @@ fn expand_ascii_ligatures(pattern: &str) -> String {
     while i < chars.len() {
         let c = chars[i];
         if c == '\\' && i + 1 < chars.len() {
-            // Pass `\xNN` / `\x{...}` / `\NNN` etc. through verbatim.
             let n = chars[i + 1];
-            if n == 'x' && i + 2 < chars.len() && chars[i + 2] == '{' {
+            // `\xDF` / `\x{DF}` / `\x{df}` under /i fold to "ss" — also
+            // accept the long-s `\x{17F}` and `\x{212A}` for similar
+            // multi-/cross-case folds. Expand outside class to a
+            // (?:original|"ss") alternation. re/regexp 1713, 1724.
+            if !in_class && n == 'x' && i + 2 < chars.len() && chars[i + 2] == '{' {
                 let mut k = i + 3;
                 while k < chars.len() && chars[k] != '}' {
                     k += 1;
                 }
-                let end = (k + 1).min(chars.len());
-                let chunk: String = chars[i..end].iter().collect();
+                if k < chars.len() {
+                    let body: String = chars[i + 3..k]
+                        .iter()
+                        .filter(|c| !c.is_whitespace() && **c != '_')
+                        .collect();
+                    let cp = u32::from_str_radix(&body, 16).unwrap_or(0);
+                    let end = k + 1;
+                    let chunk: String = chars[i..end].iter().collect();
+                    if cp == 0xDF {
+                        out.push_str(&format!("(?:{chunk}|ss|SS|sS|Ss)"));
+                        i = end;
+                        continue;
+                    }
+                    out.push_str(&chunk);
+                    i = end;
+                    continue;
+                }
+            }
+            // `\xNN` two-digit form.
+            if !in_class && n == 'x' && i + 3 < chars.len()
+                && chars[i + 2].is_ascii_hexdigit()
+                && chars[i + 3].is_ascii_hexdigit()
+            {
+                let hex: String = chars[i + 2..i + 4].iter().collect();
+                let cp = u32::from_str_radix(&hex, 16).unwrap_or(0);
+                let chunk: String = chars[i..i + 4].iter().collect();
+                if cp == 0xDF {
+                    out.push_str(&format!("(?:{chunk}|ss|SS|sS|Ss)"));
+                    i += 4;
+                    continue;
+                }
                 out.push_str(&chunk);
-                i = end;
+                i += 4;
                 continue;
             }
             out.push(c);
