@@ -97,10 +97,24 @@ pub fn parse(bytes: &[u8]) -> Result<(FileInfo, Vec<Event>), ParseError> {
         let size = be32(&bytes[p + 4..p + 8]) as usize;
         let start = p + 8;
         // Upstream `midifile.c` doesn't validate the MTrk size header — it
-        // just reads bytes until EOT (end-of-track). Some test fixtures
-        // (and a few real-world tools) get the size off by one or two.
-        // Clamp to the actual file length to match upstream tolerance.
-        let end = (start + size).min(bytes.len());
+        // reads bytes until EOT (end-of-track) or the next MTrk chunk.
+        // Some test fixtures (and a few real-world tools) get the size off
+        // by one or two. Use the larger of (declared size) or (the byte
+        // range up to the next MTrk / end-of-file) so we can always reach
+        // the EOT marker.
+        let mut end = (start + size).min(bytes.len());
+        // Look for the next MTrk after `end`. If none, extend to end of file.
+        let scan_from = end;
+        let mut next_mtrk = bytes.len();
+        let mut j = scan_from;
+        while j + 4 <= bytes.len() {
+            if &bytes[j..j + 4] == b"MTrk" {
+                next_mtrk = j;
+                break;
+            }
+            j += 1;
+        }
+        end = next_mtrk;
         tracks.push(Track {
             id,
             body: &bytes[start..end],
