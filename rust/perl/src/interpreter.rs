@@ -11985,6 +11985,7 @@ impl Interpreter {
         // (non-recursive) case. Truly recursive patterns are left
         // unchanged. re/regexp 1167-1185.
         let pattern = inline_simple_recursion(&pattern);
+        let pattern = strip_control_verbs(&pattern);
         let pattern = eliminate_zero_quantifier(&pattern);
         // Under `/a`, restrict `\d`/`\w`/`\s` and their negations to
         // ASCII-only forms. fancy_regex's defaults are Unicode-aware,
@@ -12385,6 +12386,7 @@ impl Interpreter {
         let pattern = translate_named_char_escapes(&pattern);
         let pattern = normalize_named_backref(&pattern);
         let pattern = inline_simple_recursion(&pattern);
+        let pattern = strip_control_verbs(&pattern);
         let pattern = eliminate_zero_quantifier(&pattern);
         let pattern = if ascii_posix {
             restrict_word_classes_ascii(&pattern)
@@ -19582,6 +19584,81 @@ fn escape_literal_bracket_in_class(pattern: &str) -> String {
 /// (a single digit with that capture group present); we approximate
 /// by treating `\0` and `\NNN` (≥ 2 leading zeros / 3-digit) as
 /// octal, leaving `\1`..`\9` alone for backref handling.
+/// Strip Perl regex control verbs `(*ACCEPT)`, `(*FAIL)`, `(*F)`,
+/// `(*PRUNE)`, `(*SKIP)`, `(*THEN)`, `(*COMMIT)`, `(*MARK:NAME)`,
+/// `(*:NAME)` etc. fancy_regex rejects them entirely. Replace with
+/// `(?:)` so the surrounding pattern still compiles. Semantics
+/// don't match Perl exactly (e.g. ACCEPT short-circuit lost), but
+/// most tests then complete with the structural match. re/regexp
+/// 1302-1303, 1897-1904, 1994-1995, 2082-2111.
+fn strip_control_verbs(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class
+            && c == '('
+            && i + 1 < chars.len()
+            && chars[i + 1] == '*'
+        {
+            // Find matching `)`. Body ends at `)` (no nesting in
+            // verbs).
+            let mut k = i + 2;
+            while k < chars.len() && chars[k] != ')' {
+                k += 1;
+            }
+            if k < chars.len() {
+                let body: String = chars[i + 2..k].iter().collect();
+                let verb_name = body
+                    .splitn(2, ':')
+                    .next()
+                    .unwrap_or("")
+                    .to_uppercase();
+                let known = matches!(
+                    verb_name.as_str(),
+                    "ACCEPT"
+                        | "FAIL"
+                        | "F"
+                        | "PRUNE"
+                        | "SKIP"
+                        | "THEN"
+                        | "COMMIT"
+                        | "MARK"
+                        | ""
+                );
+                if known {
+                    out.push_str("(?:)");
+                    i = k + 1;
+                    continue;
+                }
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 /// Eliminate `(...){0}` constructs — fancy_regex rejects
 /// `(?=...){0}` and similar with "Target of repeat operator is
 /// invalid". Since `{0}` matches zero times, the construct is
