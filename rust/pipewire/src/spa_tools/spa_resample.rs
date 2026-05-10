@@ -39,15 +39,74 @@ pub fn main(raw_args: &[String]) -> i32 {
             "-v" | "--verbose" => {
                 i += 1;
             }
-            // Inline-value forms for required-arg long flags.
+            // Long inline-value forms.
+            s if s.starts_with("--rate=") => {
+                if let Some(c) = bad_rate(&s["--rate=".len()..]) {
+                    eprintln!("error: bad rate {c}");
+                    print_help(argv0);
+                    return 0;
+                }
+                i += 1;
+            }
+            s if s.starts_with("--format=") => {
+                let v = &s["--format=".len()..];
+                if !is_valid_format(v) {
+                    eprintln!("error: bad format {v}");
+                    print_help(argv0);
+                    return 0;
+                }
+                i += 1;
+            }
+            s if s.starts_with("--quality=") => {
+                let v = &s["--quality=".len()..];
+                if let Some(c) = bad_quality(v) {
+                    eprintln!("error: bad quality {c}");
+                    print_help(argv0);
+                    return 0;
+                }
+                i += 1;
+            }
             s if s.starts_with("--cpuflags=")
-                || s.starts_with("--rate=")
-                || s.starts_with("--format=")
                 || s.starts_with("--window=")
-                || s.starts_with("--quality=")
                 || s.starts_with("--cutoff=")
                 || s.starts_with("--taps=")
                 || s.starts_with("--param=") =>
+            {
+                i += 1;
+            }
+            // Short attached-value forms `-r<val>`, `-f<val>`, `-q<val>`.
+            // (Required-arg short flags can take their value with no space.)
+            s if s.starts_with("-r") && s.len() > 2 => {
+                let v = &s[2..];
+                if let Some(c) = bad_rate(v) {
+                    eprintln!("error: bad rate {c}");
+                    print_help(argv0);
+                    return 0;
+                }
+                i += 1;
+            }
+            s if s.starts_with("-f") && s.len() > 2 => {
+                let v = &s[2..];
+                if !is_valid_format(v) {
+                    eprintln!("error: bad format {v}");
+                    print_help(argv0);
+                    return 0;
+                }
+                i += 1;
+            }
+            s if s.starts_with("-q") && s.len() > 2 => {
+                let v = &s[2..];
+                if let Some(c) = bad_quality(v) {
+                    eprintln!("error: bad quality {c}");
+                    print_help(argv0);
+                    return 0;
+                }
+                i += 1;
+            }
+            s if (s.starts_with("-c") || s.starts_with("-w")
+                || s.starts_with("-u") || s.starts_with("-t")
+                || s.starts_with("-p"))
+                && s.len() > 2 =>
             {
                 i += 1;
             }
@@ -72,6 +131,31 @@ pub fn main(raw_args: &[String]) -> i32 {
                     eprintln!("error: unknown option '?'");
                     print_help(argv0);
                     return 1;
+                }
+                let val = args[i + 1].as_str();
+                match opt {
+                    "-r" | "--rate" => {
+                        if let Some(c) = bad_rate(val) {
+                            eprintln!("error: bad rate {c}");
+                            print_help(argv0);
+                            return 0;
+                        }
+                    }
+                    "-f" | "--format" => {
+                        if !is_valid_format(val) {
+                            eprintln!("error: bad format {val}");
+                            print_help(argv0);
+                            return 0;
+                        }
+                    }
+                    "-q" | "--quality" => {
+                        if let Some(c) = bad_quality(val) {
+                            eprintln!("error: bad quality {c}");
+                            print_help(argv0);
+                            return 0;
+                        }
+                    }
+                    _ => {}
                 }
                 i += 2;
             }
@@ -135,6 +219,31 @@ pub fn main(raw_args: &[String]) -> i32 {
         );
     }
     1
+}
+
+// Returns `Some(orig)` to signal "bad rate <orig>" — only when the
+// value cannot be parsed as a full integer (C uses spa_atoi32 which
+// requires the entire string to be consumed).
+fn bad_rate(v: &str) -> Option<&str> {
+    if v.parse::<i64>().is_ok() {
+        None
+    } else {
+        Some(v)
+    }
+}
+
+fn is_valid_format(v: &str) -> bool {
+    matches!(v, "s8" | "s16" | "s32" | "f32" | "f64")
+}
+
+// `bad quality` only triggers when the value parses but is < 0; the C
+// tool tolerates non-numeric strings (atoi → 0, valid).
+fn bad_quality(v: &str) -> Option<&str> {
+    if let Ok(n) = v.parse::<i64>() {
+        if n < 0 { Some(v) } else { None }
+    } else {
+        None
+    }
 }
 
 fn print_help(argv0: &str) {

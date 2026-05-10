@@ -1470,6 +1470,12 @@
       { tool = "spa-json-dump"; name = "bare-number-stdin"; }
       { tool = "spa-json-dump"; name = "bare-string-stdin"; }
       { tool = "spa-json-dump"; name = "bare-bool-stdin"; }
+      { tool = "spa-resample"; name = "bad-rate-string"; }
+      { tool = "spa-resample"; name = "bad-rate-long"; }
+      { tool = "spa-resample"; name = "bad-format"; }
+      { tool = "spa-resample"; name = "bad-format-long"; }
+      { tool = "spa-resample"; name = "bad-quality-negative"; }
+      { tool = "spa-resample"; name = "attached-rate"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }
