@@ -12090,9 +12090,14 @@ impl Interpreter {
         };
         // Under /i without /aa, expand ASCII ligature sequences in
         // the pattern to alternations including their Unicode ligature
-        // codepoints (\x{FB00} etc.). re/regexp 1685, 1691-1716, 1724.
-        let pattern = if flags.contains('i') && !case_insensitive_aa {
-            expand_ascii_ligatures(&pattern)
+        // codepoints (\x{FB00} etc.). Also expand when the pattern
+        // contains an inline `(?i...)` flag — fancy_regex sees the
+        // flag but won't perform multi-char ligature folds. re/regexp
+        // 1685, 1691-1716, 1724, 2042.
+        let has_any_i_flag = flags.contains('i') || pattern_has_inline_i_flag(&pattern);
+        let pattern = if has_any_i_flag && !case_insensitive_aa {
+            let p = expand_ascii_ligatures(&pattern);
+            split_variable_lookbehind(&p)
         } else {
             pattern
         };
@@ -20089,6 +20094,40 @@ fn pattern_has_inline_single_x(pattern: &str) -> bool {
     false
 }
 
+/// Detect an inline `(?i...)` flag (case-insensitive). Used so
+/// expansions that normally trigger on outer /i also fire when /i
+/// is only set via an inline flag group. re/regexp 2042.
+fn pattern_has_inline_i_flag(pattern: &str) -> bool {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+        } else if in_class && c == ']' {
+            in_class = false;
+        }
+        if !in_class && c == '(' && i + 1 < chars.len() && chars[i + 1] == '?' {
+            let mut k = i + 2;
+            while k < chars.len()
+                && (chars[k].is_ascii_alphabetic() || chars[k] == '-')
+            {
+                if chars[k] == 'i' {
+                    return true;
+                }
+                k += 1;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
 fn pattern_has_inline_ascii_flag(pattern: &str) -> bool {
     let chars: Vec<char> = pattern.chars().collect();
     let mut i = 0;
@@ -21845,6 +21884,104 @@ fn ligature_parses(run: &str) -> Vec<String> {
     // Dedup
     out.sort();
     out.dedup();
+    out
+}
+
+/// Split `(?<=alt1|alt2|...)` / `(?<!alt1|alt2|...)` into
+/// `(?:(?<=alt1)|(?<=alt2)|...)` when the alternatives have varying
+/// lengths. fancy_regex requires fixed-width lookbehind; each split
+/// alternative has its own width. Only handles simple cases where
+/// the lookbehind body is a `(?:...|...)` form (the typical shape
+/// after `\xdf` /i expansion). re/regexp 2042.
+fn split_variable_lookbehind(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            out.push(chars[i]);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        // Detect `(?<=` or `(?<!`.
+        if i + 3 < chars.len()
+            && chars[i] == '('
+            && chars[i + 1] == '?'
+            && chars[i + 2] == '<'
+            && (chars[i + 3] == '=' || chars[i + 3] == '!')
+        {
+            let positive = chars[i + 3] == '=';
+            let body_start = i + 4;
+            // Body must start with `(?:` for the simple form.
+            if body_start + 2 < chars.len()
+                && chars[body_start] == '('
+                && chars[body_start + 1] == '?'
+                && chars[body_start + 2] == ':'
+            {
+                // Find matching `)` for the inner `(?:...)`.
+                let inner_body_start = body_start + 3;
+                let mut depth = 1;
+                let mut j = inner_body_start;
+                while j < chars.len() && depth > 0 {
+                    if chars[j] == '\\' && j + 1 < chars.len() {
+                        j += 2;
+                        continue;
+                    }
+                    if chars[j] == '(' {
+                        depth += 1;
+                    } else if chars[j] == ')' {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    j += 1;
+                }
+                if depth == 0 && j + 1 < chars.len() && chars[j + 1] == ')' {
+                    // Body is `(?:alt1|alt2|...)`. Split at `|` at
+                    // depth 0 of the body.
+                    let body: Vec<char> = chars[inner_body_start..j].to_vec();
+                    let mut alts: Vec<String> = Vec::new();
+                    let mut cur = String::new();
+                    let mut d = 0;
+                    let mut p = 0;
+                    while p < body.len() {
+                        if body[p] == '\\' && p + 1 < body.len() {
+                            cur.push(body[p]);
+                            cur.push(body[p + 1]);
+                            p += 2;
+                            continue;
+                        }
+                        if body[p] == '(' {
+                            d += 1;
+                        } else if body[p] == ')' {
+                            d -= 1;
+                        } else if body[p] == '|' && d == 0 {
+                            alts.push(std::mem::take(&mut cur));
+                            p += 1;
+                            continue;
+                        }
+                        cur.push(body[p]);
+                        p += 1;
+                    }
+                    alts.push(cur);
+                    if alts.len() > 1 {
+                        let kind = if positive { "=" } else { "!" };
+                        let pieces: Vec<String> = alts
+                            .iter()
+                            .map(|a| format!("(?<{kind}{a})"))
+                            .collect();
+                        out.push_str(&format!("(?:{})", pieces.join("|")));
+                        i = j + 2; // past inner `)` and outer `)`
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
     out
 }
 
