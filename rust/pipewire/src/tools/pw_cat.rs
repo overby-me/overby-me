@@ -274,7 +274,18 @@ pub fn main(raw_args: &[String]) -> i32 {
     } else {
         // C tries to connect first, then open the file via sndfile.
         // Without daemon → connect-fail. With daemon → sndfile error.
-        match crate::pipewire_lib::client::Client::connect_default() {
+        // PIPEWIRE_REMOTE supplies the socket name when -R wasn't given.
+        let env_remote = std::env::var("PIPEWIRE_REMOTE").ok();
+        let connect = if let Some(name) = &env_remote {
+            let runtime = std::env::var("PIPEWIRE_RUNTIME_DIR")
+                .or_else(|_| std::env::var("XDG_RUNTIME_DIR"))
+                .unwrap_or_else(|_| "/tmp".to_string());
+            let path = std::path::PathBuf::from(runtime).join(name);
+            crate::pipewire_lib::client::Client::connect_path(&path)
+        } else {
+            crate::pipewire_lib::client::Client::connect_default()
+        };
+        match connect {
             Ok(_) => {
                 // Daemon up; emit the sndfile error. sndfile distinguishes
                 // "missing file" (System error) from "bad format on
