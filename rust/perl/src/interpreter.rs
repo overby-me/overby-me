@@ -11747,9 +11747,22 @@ impl Interpreter {
         // whitespace, which rust regex already does. re/regexp
         // 2018-2028.
         let xx = flags.matches('x').count() >= 2;
+        let aa = flags.matches('a').count() >= 2;
         let needs_fancy = pattern_uses_atomic_or_possessive(&pattern)
             || (flags.contains('x') && !xx);
         let pattern = translate_branch_reset_groups(&pattern);
+        // Under `/aa /i`, case folding is restricted to ASCII letters.
+        // fancy_regex's `(?i)` is Unicode-aware so `s` would also match
+        // `\x{17F}`. Pre-expand each ASCII letter to `[Aa]` so dropping
+        // `/i` from the engine still gives ASCII-case-insensitive
+        // matching, without folding the high-Unicode equivalents.
+        // re/regexp 1665, 1667.
+        let case_insensitive_aa = aa && flags.contains('i');
+        let pattern = if case_insensitive_aa {
+            expand_ascii_case_insensitive(&pattern)
+        } else {
+            pattern
+        };
         let fancy_pattern = pattern.clone();
         let pattern = translate_atomic_groups(&pattern);
         let pattern = fix_inverted_quantifiers(&pattern);
@@ -11761,7 +11774,7 @@ impl Interpreter {
         let pattern = translate_g_anchor(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
-        if flags.contains('i') {
+        if flags.contains('i') && !case_insensitive_aa {
             prefix.push('i');
         }
         if flags.contains('s') {
@@ -16909,6 +16922,84 @@ fn named_captures_from_pattern(
         seen.insert(name.clone());
         let val = group_strs.get(idx).cloned().unwrap_or(None);
         out.push((name, val));
+    }
+    out
+}
+
+/// Expand each literal ASCII letter in `pattern` to its `[Aa]`
+/// case-pair so dropping the engine-level `/i` flag still gives
+/// case-insensitive matching for that letter — without folding
+/// non-ASCII code points (which `/aa` forbids). Skips inside
+/// `\xNN` / `\x{N…}` / `\NNN` / `\cX` / `\Q…\E` and re-emits class
+/// shorthand letters (`\d`, `\w`, …) untouched. re/regexp 1665, 1667.
+fn expand_ascii_case_insensitive(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len() + 16);
+    let mut i = 0;
+    let mut in_q = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            let n = chars[i + 1];
+            if n == 'Q' {
+                in_q = true;
+                out.push(c);
+                out.push(n);
+                i += 2;
+                continue;
+            }
+            if n == 'E' {
+                in_q = false;
+                out.push(c);
+                out.push(n);
+                i += 2;
+                continue;
+            }
+            // `\x{HEX}` / `\x..` — copy whole escape.
+            if n == 'x' {
+                if i + 2 < chars.len() && chars[i + 2] == '{' {
+                    let mut k = i + 3;
+                    while k < chars.len() && chars[k] != '}' {
+                        k += 1;
+                    }
+                    let end = (k + 1).min(chars.len());
+                    let chunk: String = chars[i..end].iter().collect();
+                    out.push_str(&chunk);
+                    i = end;
+                    continue;
+                }
+                let end = (i + 4).min(chars.len());
+                let chunk: String = chars[i..end].iter().collect();
+                out.push_str(&chunk);
+                i = end;
+                continue;
+            }
+            // `\cX` 3-char control.
+            if n == 'c' && i + 2 < chars.len() {
+                let end = i + 3;
+                let chunk: String = chars[i..end].iter().collect();
+                out.push_str(&chunk);
+                i = end;
+                continue;
+            }
+            // Any other backslash escape: copy verbatim.
+            out.push(c);
+            out.push(n);
+            i += 2;
+            continue;
+        }
+        if !in_q && c.is_ascii_alphabetic() {
+            let upper = c.to_ascii_uppercase();
+            let lower = c.to_ascii_lowercase();
+            out.push('[');
+            out.push(upper);
+            out.push(lower);
+            out.push(']');
+            i += 1;
+            continue;
+        }
+        out.push(c);
+        i += 1;
     }
     out
 }
