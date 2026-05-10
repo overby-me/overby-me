@@ -96,25 +96,9 @@ pub fn parse(bytes: &[u8]) -> Result<(FileInfo, Vec<Event>), ParseError> {
         }
         let size = be32(&bytes[p + 4..p + 8]) as usize;
         let start = p + 8;
-        // Upstream `midifile.c` doesn't validate the MTrk size header — it
-        // reads bytes until EOT (end-of-track) or the next MTrk chunk.
-        // Some test fixtures (and a few real-world tools) get the size off
-        // by one or two. Use the larger of (declared size) or (the byte
-        // range up to the next MTrk / end-of-file) so we can always reach
-        // the EOT marker.
-        let mut end = (start + size).min(bytes.len());
-        // Look for the next MTrk after `end`. If none, extend to end of file.
-        let scan_from = end;
-        let mut next_mtrk = bytes.len();
-        let mut j = scan_from;
-        while j + 4 <= bytes.len() {
-            if &bytes[j..j + 4] == b"MTrk" {
-                next_mtrk = j;
-                break;
-            }
-            j += 1;
-        }
-        end = next_mtrk;
+        // Upstream `midifile.c` reads exactly `size` bytes for the body.
+        // Clamp to file length in case the header lies (preventing OOB).
+        let end = (start + size).min(bytes.len());
         tracks.push(Track {
             id,
             body: &bytes[start..end],
@@ -311,9 +295,18 @@ fn read_event(t: &mut Track) -> Result<DecodedEvent, ParseError> {
         return Ok(DecodedEvent::SysEx { data });
     } else if status == 0xff {
         let meta_type = read_byte(t)?;
+        // Meta event needs a varlen length byte. C's midifile is tolerant
+        // of truncated EOT — `FF 2F` at end-of-buffer (no length byte) is
+        // accepted as End-of-Track with empty payload.
+        if t.pos >= t.body.len() {
+            return Ok(DecodedEvent::Meta { meta_type, payload: Vec::new() });
+        }
         let len = read_varlen(t)? as usize;
         if t.pos + len > t.body.len() {
-            return err("meta payload truncated");
+            // Truncated payload — clamp to available bytes.
+            let payload = t.body[t.pos..].to_vec();
+            t.pos = t.body.len();
+            return Ok(DecodedEvent::Meta { meta_type, payload });
         }
         let payload = t.body[t.pos..t.pos + len].to_vec();
         t.pos += len;
