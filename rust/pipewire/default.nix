@@ -1591,6 +1591,7 @@
       { tool = "pw-cli"; name = "env-pipewire-runtime-dir-exit"; }
       { tool = "pw-cat"; name = "bad-rate-overflow"; }
       { tool = "spa-resample"; name = "bad-rate-overflow"; }
+      { tool = "spa-resample"; name = "bad-quality-overflow"; }
       { tool = "pw-dump"; name = "indent-equals"; }
       { tool = "pipewire"; name = "short-c-no-arg"; }
       { tool = "pipewire"; name = "long-config-no-arg"; }

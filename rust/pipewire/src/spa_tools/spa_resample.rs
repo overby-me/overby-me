@@ -240,13 +240,21 @@ fn is_valid_format(v: &str) -> bool {
     matches!(v, "s8" | "s16" | "s32" | "f32" | "f64")
 }
 
-// `bad quality` only triggers when the value parses but is < 0; the C
-// tool tolerates non-numeric strings (atoi → 0, valid).
+// `bad quality` triggers when the value parses as a full i32 but is
+// negative, OR when the value is outside the i32 range (spa_atoi32
+// rejects overflow). Non-numeric values pass through (C's atoi gives 0).
 fn bad_quality(v: &str) -> Option<&str> {
-    if let Ok(n) = v.parse::<i64>() {
-        if n < 0 { Some(v) } else { None }
-    } else {
-        None
+    match v.parse::<i32>() {
+        Ok(n) if n < 0 => Some(v),
+        Ok(_) => None,
+        Err(_) => {
+            // Could be overflow (all digits, out of range) or non-numeric.
+            if v.trim_start_matches('-').chars().all(|c| c.is_ascii_digit()) {
+                Some(v)
+            } else {
+                None
+            }
+        }
     }
 }
 
