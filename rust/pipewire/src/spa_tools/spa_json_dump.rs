@@ -103,6 +103,16 @@ pub fn main(args: &[String]) -> i32 {
         eprintln!("not a valid file '{filename}': Success");
         return 1;
     }
+    // Probe stat() size up-front: C's mmap(size) fails with EINVAL when
+    // st_size == 0. Files in /proc and /sys report size 0 even though
+    // read() returns data, so we have to check stat directly rather than
+    // relying on the read result.
+    if let Ok(meta) = std::fs::metadata(&filename) {
+        if meta.is_file() && meta.len() == 0 {
+            eprintln!("error mmapping file '{filename}': Invalid argument");
+            return 1;
+        }
+    }
     let input = match read_input(&filename) {
         Ok(s) if s.is_empty() => {
             // Mirror mmap(size=0) → EINVAL.

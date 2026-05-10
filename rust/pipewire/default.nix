@@ -1463,6 +1463,7 @@
       { tool = "spa-json-dump"; name = "dash-dash-only"; }
       { tool = "spa-json-dump"; name = "dash-dash-missing-file"; }
       { tool = "spa-json-dump"; name = "dash-dash-directory"; }
+      { tool = "spa-json-dump"; name = "proc-zero-size"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }
