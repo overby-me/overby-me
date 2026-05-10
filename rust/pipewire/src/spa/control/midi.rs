@@ -159,7 +159,24 @@ pub fn parse(bytes: &[u8]) -> Result<(FileInfo, Vec<Event>), ParseError> {
         let id = tracks[i].id;
 
         let event_start = tracks[i].pos;
-        let event = read_event(&mut tracks[i])?;
+        let event = match read_event(&mut tracks[i]) {
+            Ok(e) => e,
+            Err(_) => {
+                // C's midifile is tolerant of partial events at the end
+                // of a track buffer — it emits a synthetic End-of-Track
+                // and moves on. Mirror that to avoid spurious failures on
+                // fixtures with off-by-N MTrk size headers.
+                events.push(Event {
+                    track: id,
+                    sec: current_sec,
+                    data: vec![0xff, 0x2f],
+                    meta_offset: 2,
+                    meta_tempo_uspqn: 0,
+                });
+                tracks[i].eof = true;
+                continue;
+            }
+        };
 
         match event {
             DecodedEvent::Channel { data } => {

@@ -1586,6 +1586,7 @@
       { tool = "pw-config"; name = "missing-prefix-path"; }
       { tool = "pw-cat"; name = "env-pipewire-runtime-dir"; }
       { tool = "pw-mididump"; name = "dev-zero"; }
+      { tool = "pw-mididump"; name = "smpte-offset-with-eot-cut"; }
       { tool = "spa-json-dump"; name = "dev-zero"; }
       { tool = "pw-cli"; name = "env-pipewire-runtime-dir-exit"; }
       { tool = "pw-dump"; name = "indent-equals"; }
