@@ -7,16 +7,24 @@ use crate::pipewire_lib::version::PIPEWIRE_API_VERSION;
 /// ECONNREFUSED → "Connection refused", everything else → native
 /// to_string().
 pub fn connect_failure_msg() -> String {
-    // Try probing the default socket once to find out *why* connect
+    connect_failure_msg_for(None)
+}
+
+/// Like `connect_failure_msg` but for an explicitly chosen remote name.
+/// Use this when -R / --remote was given so the strerror reflects the
+/// actual socket path that failed (rather than re-probing the default).
+pub fn connect_failure_msg_for(remote: Option<&str>) -> String {
+    // Try probing the chosen socket once to find out *why* connect
     // failed; we accept that this is a second attempt vs. plumbing the
-    // original error through, but every tool that needs this only calls
-    // connect_default() once and returns immediately on failure.
+    // original error through.
     let runtime = std::env::var("PIPEWIRE_RUNTIME_DIR")
         .or_else(|_| std::env::var("XDG_RUNTIME_DIR"))
         .unwrap_or_else(|_| "/tmp".to_string());
-    let core = std::env::var("PIPEWIRE_REMOTE")
-        .or_else(|_| std::env::var("PIPEWIRE_CORE"))
-        .unwrap_or_else(|_| "pipewire-0".to_string());
+    let core: String = remote
+        .map(|s| s.to_string())
+        .or_else(|| std::env::var("PIPEWIRE_REMOTE").ok().filter(|s| !s.is_empty()))
+        .or_else(|| std::env::var("PIPEWIRE_CORE").ok().filter(|s| !s.is_empty()))
+        .unwrap_or_else(|| "pipewire-0".to_string());
     let path = if core.starts_with('/') {
         std::path::PathBuf::from(&core)
     } else {

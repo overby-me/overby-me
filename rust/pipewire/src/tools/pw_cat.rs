@@ -66,6 +66,7 @@ pub fn main(raw_args: &[String]) -> i32 {
 
     let mut mode_set = false;
     let mut raw_mode = false;
+    let mut explicit_remote: Option<String> = None;
     let mut positional_count: usize = 0;
     let mut positional_files: Vec<String> = Vec::new();
     // Track --rate / --channels for C's atoi-then-validate flow:
@@ -171,6 +172,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                         match long {
                             "--rate" => rate = Some(parse_atoi(val)),
                             "--channels" => channels = Some(parse_atoi(val)),
+                            "--remote" => explicit_remote = Some(val.to_string()),
                             _ => {}
                         }
                     } else if i + 1 >= args.len() {
@@ -182,6 +184,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                         match long {
                             "--rate" => rate = Some(parse_atoi(val)),
                             "--channels" => channels = Some(parse_atoi(val)),
+                            "--remote" => explicit_remote = Some(val.to_string()),
                             _ => {}
                         }
                         i += 2;
@@ -212,6 +215,9 @@ pub fn main(raw_args: &[String]) -> i32 {
                         eprintln!("{getopt_argv0}: option requires an argument -- '{name}'");
                         print_help(argv0);
                         return 1;
+                    }
+                    if ch == 'R' {
+                        explicit_remote = Some(args[i + 1].clone());
                     }
                     i += 2;
                     continue;
@@ -289,9 +295,10 @@ pub fn main(raw_args: &[String]) -> i32 {
     } else {
         // C tries to connect first, then open the file via sndfile.
         // Without daemon → connect-fail. With daemon → sndfile error.
-        // PIPEWIRE_REMOTE supplies the socket name when -R wasn't given.
+        // -R / --remote takes precedence over PIPEWIRE_REMOTE env var.
         let env_remote = std::env::var("PIPEWIRE_REMOTE").ok();
-        let connect = if let Some(name) = &env_remote {
+        let chosen: Option<String> = explicit_remote.clone().or(env_remote);
+        let connect = if let Some(name) = chosen.as_deref() {
             let runtime = std::env::var("PIPEWIRE_RUNTIME_DIR")
                 .or_else(|_| std::env::var("XDG_RUNTIME_DIR"))
                 .unwrap_or_else(|_| "/tmp".to_string());
@@ -311,7 +318,7 @@ pub fn main(raw_args: &[String]) -> i32 {
             Err(_) => {
                 eprintln!(
                     "error: pw_context_connect() failed: {}",
-                    crate::tools::common::connect_failure_msg()
+                    crate::tools::common::connect_failure_msg_for(chosen.as_deref())
                 );
             }
         }
