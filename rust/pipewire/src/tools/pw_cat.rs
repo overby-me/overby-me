@@ -77,22 +77,23 @@ pub fn main(raw_args: &[String]) -> i32 {
     let mut channels: Option<i64> = None;
     let parse_atoi = |s: &str| -> i64 {
         // Mirror libc's atoi: skip leading whitespace, optional sign,
-        // collect leading digits, return 0 if no digits.
+        // collect leading digits, wrapping in i32 (so 999999999999 →
+        // -727379969 like C's atoi). Return 0 if no digits.
         let mut chars = s.trim_start().chars().peekable();
         let neg = match chars.peek() {
             Some('-') => { chars.next(); true }
             Some('+') => { chars.next(); false }
             _ => false,
         };
-        let mut n: i64 = 0;
+        let mut n: i32 = 0;
         let mut any = false;
         for c in chars {
             if let Some(d) = c.to_digit(10) {
-                n = n.saturating_mul(10).saturating_add(d as i64);
+                n = n.wrapping_mul(10).wrapping_add(d as i32);
                 any = true;
             } else { break; }
         }
-        if !any { 0 } else if neg { -n } else { n }
+        if !any { 0 } else if neg { (n.wrapping_neg()) as i64 } else { n as i64 }
     };
     let mut i = 1;
     while i < args.len() {

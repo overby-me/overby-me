@@ -1589,6 +1589,7 @@
       { tool = "pw-mididump"; name = "smpte-offset-with-eot-cut"; }
       { tool = "spa-json-dump"; name = "dev-zero"; }
       { tool = "pw-cli"; name = "env-pipewire-runtime-dir-exit"; }
+      { tool = "pw-cat"; name = "bad-rate-overflow"; }
       { tool = "pw-dump"; name = "indent-equals"; }
       { tool = "pipewire"; name = "short-c-no-arg"; }
       { tool = "pipewire"; name = "long-config-no-arg"; }
