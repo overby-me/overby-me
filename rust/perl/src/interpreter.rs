@@ -16517,6 +16517,60 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                 j += 1;
             }
             if bdepth != 0 {
+                // Unterminated brace counting suggests something in the
+                // body throws balance off. If the FIRST `})` sequence
+                // in the body would close `(?{…)` cleanly but the body
+                // up to that point has unbalanced parens, reference
+                // perl's Perl-code parser emits "syntax error" instead
+                // of the brace-counter's "Missing right curly".
+                // re/regexp 575 (` (?{(^{})`).
+                let mut pidx = body_open + 1;
+                let mut found_close = None;
+                while pidx + 1 < chars.len() {
+                    if chars[pidx] == '\\' {
+                        pidx += 2;
+                        continue;
+                    }
+                    if chars[pidx] == '}' && chars[pidx + 1] == ')' {
+                        found_close = Some(pidx);
+                        break;
+                    }
+                    pidx += 1;
+                }
+                if let Some(close) = found_close {
+                    let body: &[char] = &chars[body_open + 1..close];
+                    let mut pdepth: i32 = 0;
+                    let mut q: Option<char> = None;
+                    let mut p = 0;
+                    while p < body.len() {
+                        let cc2 = body[p];
+                        if cc2 == '\\' && p + 1 < body.len() {
+                            p += 2;
+                            continue;
+                        }
+                        if let Some(quot) = q {
+                            if cc2 == quot {
+                                q = None;
+                            }
+                            p += 1;
+                            continue;
+                        }
+                        if cc2 == '"' || cc2 == '\'' {
+                            q = Some(cc2);
+                            p += 1;
+                            continue;
+                        }
+                        if cc2 == '(' {
+                            pdepth += 1;
+                        } else if cc2 == ')' {
+                            pdepth -= 1;
+                        }
+                        p += 1;
+                    }
+                    if pdepth != 0 {
+                        return Some("syntax error".to_string());
+                    }
+                }
                 // Unterminated `(?{…)` — reference perl emits the
                 // "Missing right curly" diagnostic. re/regexp 573-574.
                 let prefix: String = chars[..body_open + 1].iter().collect();
