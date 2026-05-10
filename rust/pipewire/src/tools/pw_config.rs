@@ -158,6 +158,32 @@ pub fn main(raw_args: &[String]) -> i32 {
         Some(opt_prefix.as_str())
     };
     let configs = conf::discover(&opt_name, prefix);
+    // C's pw-config errors when neither the main config file nor any
+    // drop-in is found AFTER an explicit -n / -p was given. The default
+    // search may still produce results from /usr/share/pipewire even if
+    // -p points elsewhere; we only emit the error when the user
+    // explicitly directed the search and nothing turned up.
+    let user_directed = !opt_prefix.is_empty() || opt_name != "pipewire.conf";
+    if user_directed && configs.is_empty() {
+        // Mirror C's three-line log preamble. The `0x...` pointer in the
+        // first W line varies per-run, but tests normalize it via sed.
+        let attempted = if opt_prefix.is_empty() {
+            opt_name.clone()
+        } else {
+            format!("{}/{}", opt_prefix, opt_name)
+        };
+        eprintln!(
+            "[W][TIME] pw.conf      | [          conf.c:  425 conf_load()] 0x5555555609d0: error loading config '{attempted}': No such file or directory"
+        );
+        eprintln!(
+            "[W][TIME] pw.conf      | [          conf.c: 1182 try_load_conf()] can't load config {attempted}: No such file or directory"
+        );
+        eprintln!(
+            "[E][TIME] pw.conf      | [          conf.c: 1215 pw_conf_load_conf_for_context()] can't load config {opt_name}: No such file or directory"
+        );
+        eprintln!("error loading config: No such file or directory");
+        return 254;
+    }
 
     let mut assemble = Properties::new();
 
