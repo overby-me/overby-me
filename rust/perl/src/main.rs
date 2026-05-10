@@ -241,6 +241,7 @@ fn run_interpreter() -> i32 {
     }
     if !script_file.is_empty() {
         interp.set_current_file(&script_file);
+        interp.set_special_var("0", &script_file);
     }
     if let Some(data) = data_section {
         interp.set_data_section(data);
