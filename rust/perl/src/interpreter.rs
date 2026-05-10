@@ -11978,6 +11978,13 @@ impl Interpreter {
         let ascii_posix = flags.contains('a') || inline_ascii;
         let needs_fancy = pattern_uses_atomic_or_possessive(&pattern)
             || (flags.contains('x') && !xx);
+        // Inline non-recursive `(?N)` / `(?&NAME)` / `(?P>NAME)`
+        // references. fancy_regex doesn't support these natively;
+        // substituting the referenced group's body wrapped in `(?:…)`
+        // keeps capture numbering intact for the simple
+        // (non-recursive) case. Truly recursive patterns are left
+        // unchanged. re/regexp 1167-1185.
+        let pattern = inline_simple_recursion(&pattern);
         // Capture branch-reset structure BEFORE we strip `(?|...)` so
         // we can renumber captures post-match. re/regexp 1389+.
         let branch_reset_blocks = extract_branch_reset_blocks(&pattern);
@@ -12361,6 +12368,7 @@ impl Interpreter {
         let pattern = translate_control_escapes(&pattern);
         let pattern = translate_named_char_escapes(&pattern);
         let pattern = normalize_named_backref(&pattern);
+        let pattern = inline_simple_recursion(&pattern);
         let pattern = translate_atomic_groups(&pattern);
         let pattern = fix_inverted_quantifiers(&pattern);
         let pattern = neutralise_false_ranges(&pattern);
@@ -17814,6 +17822,388 @@ fn extract_quantified_parents(pattern: &str) -> Vec<usize> {
 /// preserved, but at least the pattern compiles, named-group lookups
 /// work, and single-branch forms behave identically. re/regexp 1398
 /// (single branch) and 1399-1401 (named groups across branches).
+/// Inline non-recursive `(?N)` / `(?&NAME)` / `(?P>NAME)` references
+/// by substituting the referenced group's body wrapped in `(?:…)`.
+/// Only applies when the substitution wouldn't introduce a cycle —
+/// i.e. the body itself doesn't contain another recursion ref. Truly
+/// recursive patterns are left alone (they need a real recursive
+/// engine; fancy_regex doesn't support them).
+///
+/// re/regexp 1167-1185 (`(a)?((?1))(fox)` and friends).
+fn inline_simple_recursion(pattern: &str) -> String {
+    // Repeat until stable so chains like `(a)((?1))((?2))` resolve.
+    let mut current = pattern.to_string();
+    for _ in 0..8 {
+        let next = inline_simple_recursion_pass(&current);
+        if next == current {
+            break;
+        }
+        current = next;
+    }
+    current
+}
+
+fn inline_simple_recursion_pass(pattern: &str) -> String {
+    let groups = collect_capture_group_bodies(pattern);
+    if groups.is_empty() {
+        return pattern.to_string();
+    }
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class
+            && c == '('
+            && i + 2 < chars.len()
+            && chars[i + 1] == '?'
+        {
+            // `(?N)` — numeric group reference.
+            if chars[i + 2].is_ascii_digit() {
+                let mut k = i + 2;
+                let mut num_str = String::new();
+                while k < chars.len() && chars[k].is_ascii_digit() {
+                    num_str.push(chars[k]);
+                    k += 1;
+                }
+                if k < chars.len() && chars[k] == ')'
+                    && let Ok(n) = num_str.parse::<usize>()
+                    && let Some((_, body)) = groups.iter().find(|(num, _)| *num == n)
+                    && !body_has_recursion_ref(body)
+                {
+                    out.push_str("(?:");
+                    out.push_str(body);
+                    out.push(')');
+                    i = k + 1;
+                    continue;
+                }
+            }
+            // `(?&NAME)` or `(?P>NAME)` — named group reference.
+            let name_start = if i + 3 < chars.len() && chars[i + 2] == '&' {
+                Some(i + 3)
+            } else if i + 4 < chars.len()
+                && chars[i + 2] == 'P'
+                && chars[i + 3] == '>'
+            {
+                Some(i + 4)
+            } else {
+                None
+            };
+            if let Some(start) = name_start {
+                let mut k = start;
+                while k < chars.len() && chars[k] != ')' {
+                    k += 1;
+                }
+                if k < chars.len() {
+                    let name: String = chars[start..k].iter().collect();
+                    if let Some((_, body)) = lookup_named_group(pattern, &name)
+                        && !body_has_recursion_ref(&body)
+                    {
+                        out.push_str("(?:");
+                        out.push_str(&body);
+                        out.push(')');
+                        i = k + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Collect (group_number, body) pairs for each capturing group in the
+/// pattern (top-level depth), in source order. Group bodies don't
+/// include the surrounding parens. Skips non-capturing forms `(?:…)`,
+/// `(?…:…)` flag groups, lookarounds, etc. Also skips `(?<NAME>…)` /
+/// `(?'NAME'…)` capturing — those are *also* numbered, but we count
+/// them along with bare `(...)` so the numbering matches Perl's.
+fn collect_capture_group_bodies(pattern: &str) -> Vec<(usize, String)> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut groups: Vec<(usize, String)> = Vec::new();
+    let mut group_no: usize = 0;
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+    // Each stack entry: (start_idx_of_body, group_num_or_0)
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            i += 1;
+            continue;
+        }
+        if in_class {
+            i += 1;
+            continue;
+        }
+        if c == '(' {
+            // Determine if this is a capturing group.
+            let is_capturing = if i + 1 < chars.len() && chars[i + 1] == '?' {
+                // `(?<NAME>…)` / `(?'NAME'…)` / `(?P<NAME>…)` are capturing.
+                if i + 2 < chars.len() && chars[i + 2] == '<' {
+                    // Distinguish lookbehind `(?<=…)` / `(?<!…)`.
+                    if i + 3 < chars.len()
+                        && (chars[i + 3] == '=' || chars[i + 3] == '!')
+                    {
+                        false
+                    } else {
+                        true
+                    }
+                } else if i + 2 < chars.len() && chars[i + 2] == '\'' {
+                    true
+                } else if i + 3 < chars.len()
+                    && chars[i + 2] == 'P'
+                    && chars[i + 3] == '<'
+                {
+                    true
+                } else {
+                    false
+                }
+            } else {
+                true
+            };
+            // Compute body start (after the opening sequence).
+            let body_start = if is_capturing && i + 1 < chars.len() && chars[i + 1] == '?'
+            {
+                // Skip past `(?<NAME>` / `(?'NAME'` / `(?P<NAME>`.
+                let mut k = i + 2;
+                if chars[k] == '<' || chars[k] == '\'' {
+                    let close = if chars[k] == '<' { '>' } else { '\'' };
+                    k += 1;
+                    while k < chars.len() && chars[k] != close {
+                        k += 1;
+                    }
+                    if k < chars.len() {
+                        k += 1;
+                    }
+                    k
+                } else if chars[k] == 'P' && k + 1 < chars.len() && chars[k + 1] == '<' {
+                    k += 2;
+                    while k < chars.len() && chars[k] != '>' {
+                        k += 1;
+                    }
+                    if k < chars.len() {
+                        k += 1;
+                    }
+                    k
+                } else {
+                    i + 1
+                }
+            } else {
+                i + 1
+            };
+            if is_capturing {
+                group_no += 1;
+                stack.push((body_start, group_no));
+            } else {
+                stack.push((0, 0));
+            }
+            i = body_start;
+            continue;
+        }
+        if c == ')' {
+            if let Some((body_start, num)) = stack.pop()
+                && num > 0
+            {
+                let body: String = chars[body_start..i].iter().collect();
+                groups.push((num, body));
+            }
+            i += 1;
+            continue;
+        }
+        i += 1;
+    }
+    groups
+}
+
+/// Find a named capture group's body in the pattern. Returns
+/// (group_number, body_without_parens) if found.
+fn lookup_named_group(pattern: &str, name: &str) -> Option<(usize, String)> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut group_no: usize = 0;
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            i += 1;
+            continue;
+        }
+        if in_class {
+            i += 1;
+            continue;
+        }
+        if c == '(' && i + 1 < chars.len() {
+            // Identify the kind of group.
+            let nxt = chars[i + 1];
+            let is_capturing;
+            let body_start;
+            let mut found_name: Option<String> = None;
+            if nxt == '?' && i + 2 < chars.len() {
+                let p2 = chars[i + 2];
+                if p2 == '<' {
+                    if i + 3 < chars.len()
+                        && (chars[i + 3] == '=' || chars[i + 3] == '!')
+                    {
+                        is_capturing = false;
+                        body_start = i + 1;
+                    } else {
+                        let mut k = i + 3;
+                        let nstart = k;
+                        while k < chars.len() && chars[k] != '>' {
+                            k += 1;
+                        }
+                        let n: String = chars[nstart..k].iter().collect();
+                        found_name = Some(n);
+                        if k < chars.len() {
+                            k += 1;
+                        }
+                        is_capturing = true;
+                        body_start = k;
+                    }
+                } else if p2 == '\'' {
+                    let mut k = i + 3;
+                    let nstart = k;
+                    while k < chars.len() && chars[k] != '\'' {
+                        k += 1;
+                    }
+                    let n: String = chars[nstart..k].iter().collect();
+                    found_name = Some(n);
+                    if k < chars.len() {
+                        k += 1;
+                    }
+                    is_capturing = true;
+                    body_start = k;
+                } else if p2 == 'P' && i + 3 < chars.len() && chars[i + 3] == '<' {
+                    let mut k = i + 4;
+                    let nstart = k;
+                    while k < chars.len() && chars[k] != '>' {
+                        k += 1;
+                    }
+                    let n: String = chars[nstart..k].iter().collect();
+                    found_name = Some(n);
+                    if k < chars.len() {
+                        k += 1;
+                    }
+                    is_capturing = true;
+                    body_start = k;
+                } else {
+                    is_capturing = false;
+                    body_start = i + 1;
+                }
+            } else {
+                is_capturing = true;
+                body_start = i + 1;
+            }
+            if is_capturing {
+                group_no += 1;
+            }
+            // Find matching close paren respecting nesting.
+            let mut depth = 1;
+            let mut k = body_start;
+            let mut local_in_class = false;
+            while k < chars.len() && depth > 0 {
+                let cc = chars[k];
+                if cc == '\\' && k + 1 < chars.len() {
+                    k += 2;
+                    continue;
+                }
+                if !local_in_class && cc == '[' {
+                    local_in_class = true;
+                } else if local_in_class && cc == ']' {
+                    local_in_class = false;
+                } else if !local_in_class && cc == '(' {
+                    depth += 1;
+                } else if !local_in_class && cc == ')' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                k += 1;
+            }
+            if let Some(n) = found_name
+                && n == name
+            {
+                let body: String = chars[body_start..k].iter().collect();
+                return Some((group_no, body));
+            }
+            i = body_start;
+            continue;
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Check whether a regex body contains a recursion reference
+/// `(?N)` / `(?&NAME)` / `(?P>NAME)` / `(?R)` / `(?-N)` / `(?+N)`.
+fn body_has_recursion_ref(body: &str) -> bool {
+    let chars: Vec<char> = body.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if chars[i] == '('
+            && i + 2 < chars.len()
+            && chars[i + 1] == '?'
+        {
+            let p2 = chars[i + 2];
+            if p2.is_ascii_digit() || p2 == 'R' || p2 == '&' || p2 == '-' || p2 == '+' {
+                return true;
+            }
+            if p2 == 'P' && i + 3 < chars.len() && chars[i + 3] == '>' {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
 fn translate_branch_reset_groups(pattern: &str) -> String {
     let chars: Vec<char> = pattern.chars().collect();
     let mut out = String::with_capacity(pattern.len());
