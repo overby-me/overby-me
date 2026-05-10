@@ -42,12 +42,12 @@ pub fn main(raw_args: &[String]) -> i32 {
             s if s.starts_with("--help=") => {
                 eprintln!("{argv0}: option '--help' doesn't allow an argument");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with("--version=") => {
                 eprintln!("{argv0}: option '--version' doesn't allow an argument");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with("--recurse=")
                 || s.starts_with("--no-newline=")
@@ -56,7 +56,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                 let name = s.split_once('=').map(|(n, _)| n).unwrap_or(s);
                 eprintln!("{argv0}: option '{name}' doesn't allow an argument");
                 print_help(argv0);
-                return 0;
+                return u8::MAX as i32;
             }
             s if s.starts_with("-n") && s.len() > 2 => {
                 opt_name = s[2..].to_string();

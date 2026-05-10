@@ -35,7 +35,7 @@ pub fn main(args: &[String]) -> i32 {
             s if s.starts_with("--help=") => {
                 eprintln!("{argv0}: option '--help' doesn't allow an argument");
                 print_help_to(argv0, true);
-                return 0;
+                return u8::MAX as i32;
             }
             // spa-json-dump's getopt_long doesn't include --version or -V.
             // Long unknowns trip the standard `unrecognized option` path;
