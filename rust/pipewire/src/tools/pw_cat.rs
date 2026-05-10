@@ -66,6 +66,7 @@ pub fn main(raw_args: &[String]) -> i32 {
 
     let mut mode_set = false;
     let mut positional_count: usize = 0;
+    let mut positional_files: Vec<String> = Vec::new();
     // Track --rate / --channels for C's atoi-then-validate flow:
     //   C parses the value with `atoi` (returning 0 on non-numeric input)
     //   and then errors `bad rate 0` / `bad channels 0` BEFORE the
@@ -100,6 +101,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                 for s in args.iter().skip(i + 1) {
                     if !s.starts_with('-') || s == "-" {
                         positional_count += 1;
+                        positional_files.push(s.clone());
                     }
                 }
                 break;
@@ -215,6 +217,7 @@ pub fn main(raw_args: &[String]) -> i32 {
             s if !s.starts_with('-') || s == "-" => {
                 // C treats lone `-` as a positional filename (stdin).
                 positional_count += 1;
+                positional_files.push(s.to_string());
             }
             s if s.starts_with('-') && s.len() > 2 && !s.starts_with("--") => {
                 // Short cluster like `-hV` or `-Vh`. Process char-by-char
@@ -292,12 +295,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                 // Daemon up; the file-open error depends on the mode. Each
                 // tool uses a different file-IO library and has a slightly
                 // different error template.
-                let file = raw_args
-                    .iter()
-                    .skip(1)
-                    .find(|a| !a.starts_with('-') || a == &"-")
-                    .map(|s| s.as_str())
-                    .unwrap_or("");
+                let file = positional_files.first().map(String::as_str).unwrap_or("");
                 emit_open_error(argv0, file);
             }
             Err(_) => {
