@@ -19247,7 +19247,32 @@ fn rewrite_nonexistent_group_conditionals(pattern: &str) -> String {
                 }
                 if depth == 0 {
                     let code: String = chars[code_start..k].iter().collect();
-                    let trimmed = code.trim();
+                    let mut trimmed = code.trim();
+                    // Strip `return ` and `{ ... return EXPR }` / `{ EXPR }`
+                    // so `(?{return 1})` / `(?{ 1; return 1 })` are
+                    // recognised as constant booleans. re/regexp
+                    // 1799-1800, 1805-1806.
+                    let unwrapped: String;
+                    if trimmed.starts_with('{') && trimmed.ends_with('}') {
+                        let inner = trimmed[1..trimmed.len() - 1].trim();
+                        // If inner has multiple statements, take the
+                        // last `return X` expression.
+                        let last = inner
+                            .rsplit(';')
+                            .next()
+                            .unwrap_or(inner)
+                            .trim();
+                        unwrapped = last
+                            .strip_prefix("return")
+                            .map(|r| r.trim_start().to_string())
+                            .unwrap_or_else(|| last.to_string());
+                        trimmed = unwrapped.as_str();
+                    } else if let Some(rest) = trimmed.strip_prefix("return") {
+                        let r = rest.trim_start();
+                        if r.len() < rest.len() {
+                            trimmed = r;
+                        }
+                    }
                     let cond = if trimmed == "0" {
                         Cond::CodeBool(false)
                     } else if trimmed == "1" {
