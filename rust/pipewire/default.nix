@@ -1419,6 +1419,9 @@
       { tool = "spa-json-dump"; name = "conf-fc-demonic"; }
       { tool = "spa-json-dump"; name = "conf-fc-sink-dolby-pro-logic-ii"; }
       { tool = "spa-json-dump"; name = "conf-fc-sink-eq6"; }
+      { tool = "pw-mididump"; name = "M-attached-bad"; }
+      { tool = "pw-mididump"; name = "M-equals-ump"; }
+      { tool = "pw-mididump"; name = "M-ump-file"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }

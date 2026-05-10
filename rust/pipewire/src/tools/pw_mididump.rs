@@ -66,6 +66,20 @@ pub fn main(raw_args: &[String]) -> i32 {
                     }
                 }
             }
+            s if s.starts_with("-M") && s.len() > 2 => {
+                // `-M<value>` attached form (getopt doesn't strip a
+                // leading `=`, so `-M=ump` validates the literal "=ump").
+                let val = &s[2..];
+                match val {
+                    "midi" => force_ump = false,
+                    "ump" => force_ump = true,
+                    _ => {
+                        eprintln!("error: bad force-midi {val}");
+                        print_help(argv0);
+                        return 0;
+                    }
+                }
+            }
             s if s.starts_with("--force-midi=") => {
                 let val = &s["--force-midi=".len()..];
                 match val {
