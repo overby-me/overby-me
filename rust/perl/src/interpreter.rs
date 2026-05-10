@@ -20469,15 +20469,76 @@ fn truncate_at_first_accept(pattern: &str) -> String {
     accept_end = accept_end.saturating_add(1); // past the `)`
     // Build truncated pattern: prefix (chars 0..accept_pos) + close
     // parens to balance paren_starts.
-    let mut out: String = chars[..accept_pos].iter().collect();
-    // Replace `(*ACCEPT...)` itself with `(?:)` so the prefix doesn't
-    // end in a dangling expression.
-    out.push_str("(?:)");
-    let _ = accept_end;
+    let mut truncated: String = chars[..accept_pos].iter().collect();
+    truncated.push_str("(?:)");
     for _ in 0..paren_starts.len() {
-        out.push(')');
+        truncated.push(')');
     }
-    out
+    // If ACCEPT is at the top of the pattern (no surrounding
+    // alternation), the truncated form alone is enough — the engine
+    // would have accepted there. If ACCEPT is inside an alternation
+    // (other branches don't accept), the full pattern is also valid
+    // when those branches match. Combine via `(?|TRUNCATED|FULL)` so
+    // the engine tries the short-circuit form first, then falls back
+    // to the full pattern. re/regexp 1302-1303.
+    //
+    // Detect "ACCEPT in alternation": is there a `|` at the same
+    // paren-depth as ACCEPT, within the immediate enclosing group?
+    let mut in_alt = false;
+    if !paren_starts.is_empty() {
+        let outer_open = *paren_starts.last().unwrap();
+        let mut depth = 0;
+        let mut j = outer_open + 1;
+        while j < accept_pos {
+            if chars[j] == '\\' {
+                j += 2;
+                continue;
+            }
+            if chars[j] == '(' {
+                depth += 1;
+            } else if chars[j] == ')' {
+                depth -= 1;
+            } else if chars[j] == '|' && depth == 0 {
+                in_alt = true;
+                break;
+            }
+            j += 1;
+        }
+        if !in_alt {
+            // Also check forward.
+            depth = 0;
+            j = accept_end;
+            while j < chars.len() {
+                if chars[j] == '\\' {
+                    j += 2;
+                    continue;
+                }
+                if chars[j] == '(' {
+                    depth += 1;
+                } else if chars[j] == ')' {
+                    if depth == 0 {
+                        break;
+                    }
+                    depth -= 1;
+                } else if chars[j] == '|' && depth == 0 {
+                    in_alt = true;
+                    break;
+                }
+                j += 1;
+            }
+        }
+    }
+    if !in_alt {
+        return truncated;
+    }
+    // Build the FULL form with ACCEPT replaced by `(?:)` so the
+    // engine compiles. Capture-numbers in the full form match the
+    // original pattern's intended numbering.
+    let mut full = String::with_capacity(pattern.len());
+    full.push_str(&chars[..accept_pos].iter().collect::<String>());
+    full.push_str("(?:)");
+    full.push_str(&chars[accept_end..].iter().collect::<String>());
+    format!("(?|{truncated}|{full})")
 }
 
 /// `(X(*PRUNE)Y|...|X(*PRUNE)Z)` style patterns rely on `(*PRUNE)`
