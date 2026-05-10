@@ -11758,6 +11758,9 @@ impl Interpreter {
         let ascii_posix = flags.contains('a') || inline_ascii;
         let needs_fancy = pattern_uses_atomic_or_possessive(&pattern)
             || (flags.contains('x') && !xx);
+        // Capture branch-reset structure BEFORE we strip `(?|...)` so
+        // we can renumber captures post-match. re/regexp 1389+.
+        let branch_reset_blocks = extract_branch_reset_blocks(&pattern);
         let pattern = translate_branch_reset_groups(&pattern);
         // Under `/aa /i`, case folding is restricted to ASCII letters.
         // fancy_regex's `(?i)` is Unicode-aware so `s` would also match
@@ -11853,6 +11856,12 @@ impl Interpreter {
                         group_strs.push(None);
                     }
                 }
+                apply_branch_reset_renumber(
+                    &branch_reset_blocks,
+                    &mut group_starts,
+                    &mut group_ends,
+                    &mut group_strs,
+                );
                 // Capture-reset post-process (rust regex branch) —
                 // mirrors fancy_regex branch. re/regexp 481, 504,
                 // 967-968, 2140+.
@@ -11949,6 +11958,12 @@ impl Interpreter {
                             group_strs.push(None);
                         }
                     }
+                    apply_branch_reset_renumber(
+                        &branch_reset_blocks,
+                        &mut group_starts,
+                        &mut group_ends,
+                        &mut group_strs,
+                    );
                     // Capture-reset post-process: groups inside a
                     // `*`/`+`/`{N,}`-quantified ancestor and not part
                     // of the last iteration's matching alternation
@@ -18832,6 +18847,191 @@ fn translate_octal_escapes(pattern: &str) -> String {
 /// `pattern`. Returns `(cleaned_pattern, code_blocks)` — each `(?{...})`
 /// is replaced with `(?:)` (always-matching empty group) so the regex
 /// crate accepts the pattern, and the inner code is collected so the
+/// Apply branch-reset capture renumbering. Each block in `blocks` is
+/// a list of branches; each branch is a list of group indices in the
+/// pre-translation pattern. After fancy_regex's flat numbering, only
+/// one branch per block matched. Move that branch's captures to the
+/// "logical" slots (block_first..block_first+max_branch_size) and
+/// clear the others, then shift later groups down. re/regexp 1389+.
+fn apply_branch_reset_renumber(
+    blocks: &[Vec<Vec<usize>>],
+    starts: &mut Vec<Option<usize>>,
+    ends: &mut Vec<Option<usize>>,
+    strs: &mut Vec<Option<String>>,
+) {
+    if blocks.is_empty() {
+        return;
+    }
+    // Build a map from group_idx → block_idx (or None).
+    let max_idx = starts.len().saturating_sub(1);
+    let mut block_of: Vec<Option<usize>> = vec![None; max_idx + 1];
+    for (b_idx, branches) in blocks.iter().enumerate() {
+        for branch in branches {
+            for &g in branch {
+                if g < block_of.len() {
+                    block_of[g] = Some(b_idx);
+                }
+            }
+        }
+    }
+    // Walk old group indices and produce new index sequence.
+    let mut new_starts: Vec<Option<usize>> = vec![starts[0]];
+    let mut new_ends: Vec<Option<usize>> = vec![ends[0]];
+    let mut new_strs: Vec<Option<String>> = vec![strs[0].clone()];
+    let mut handled_blocks = std::collections::HashSet::new();
+    let mut old = 1;
+    while old <= max_idx {
+        if let Some(b_idx) = block_of[old] {
+            if handled_blocks.insert(b_idx) {
+                let branches = &blocks[b_idx];
+                let max_size = branches.iter().map(|b| b.len()).max().unwrap_or(0);
+                // Find matched branch: the one with any non-None group.
+                let matched = branches
+                    .iter()
+                    .find(|b| b.iter().any(|&g| starts.get(g).and_then(|s| *s).is_some()));
+                if let Some(branch) = matched {
+                    for slot in 0..max_size {
+                        if let Some(&g) = branch.get(slot) {
+                            new_starts.push(starts[g]);
+                            new_ends.push(ends[g]);
+                            new_strs.push(strs[g].clone());
+                        } else {
+                            new_starts.push(None);
+                            new_ends.push(None);
+                            new_strs.push(None);
+                        }
+                    }
+                } else {
+                    for _ in 0..max_size {
+                        new_starts.push(None);
+                        new_ends.push(None);
+                        new_strs.push(None);
+                    }
+                }
+                // Advance old past all groups in this block (which are
+                // contiguous: block_first..=block_last).
+                let block_first = branches
+                    .iter()
+                    .flatten()
+                    .copied()
+                    .min()
+                    .unwrap_or(old);
+                let block_last = branches
+                    .iter()
+                    .flatten()
+                    .copied()
+                    .max()
+                    .unwrap_or(old);
+                let _ = block_first;
+                old = block_last + 1;
+                continue;
+            }
+        }
+        // Plain group, copy.
+        new_starts.push(starts[old]);
+        new_ends.push(ends[old]);
+        new_strs.push(strs[old].clone());
+        old += 1;
+    }
+    *starts = new_starts;
+    *ends = new_ends;
+    *strs = new_strs;
+}
+
+/// Walk `pattern` (BEFORE `(?|...)` → `(?:...)` translation) and
+/// extract branch-reset blocks. Returns a list of `(branches,
+/// max_size)` where each `branches` is a `Vec<Vec<usize>>` listing
+/// the absolute group indices in each alt branch, and `max_size`
+/// is the max number of groups across branches. Used to renumber
+/// captures so `$N` reflects branch-reset semantics. re/regexp 1389+.
+fn extract_branch_reset_blocks(pattern: &str) -> Vec<Vec<Vec<usize>>> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out: Vec<Vec<Vec<usize>>> = Vec::new();
+    let mut group_count: usize = 0;
+    // Stack: each entry is (is_branch_reset, current_branches, current_branch_groups, depth_at_open).
+    let mut stack: Vec<(bool, Vec<Vec<usize>>, Vec<usize>)> = Vec::new();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            i += 1;
+            continue;
+        }
+        if in_class {
+            i += 1;
+            continue;
+        }
+        if c == '(' {
+            let is_br = i + 2 < chars.len() && chars[i + 1] == '?' && chars[i + 2] == '|';
+            let is_named_angle = i + 3 < chars.len()
+                && chars[i + 1] == '?'
+                && chars[i + 2] == '<'
+                && chars[i + 3] != '='
+                && chars[i + 3] != '!';
+            let is_named_p = i + 3 < chars.len()
+                && chars[i + 1] == '?'
+                && chars[i + 2] == 'P'
+                && chars[i + 3] == '<';
+            let is_named_quote = i + 2 < chars.len()
+                && chars[i + 1] == '?'
+                && chars[i + 2] == '\'';
+            let is_capturing = !(i + 1 < chars.len() && chars[i + 1] == '?')
+                || is_named_angle
+                || is_named_p
+                || is_named_quote;
+            if is_capturing {
+                group_count += 1;
+                if let Some(top) = stack.last_mut() {
+                    top.2.push(group_count);
+                }
+            }
+            stack.push((is_br, Vec::new(), Vec::new()));
+            i += if is_br { 3 } else { 1 };
+            continue;
+        }
+        if c == '|' {
+            // Top-level alt within current group: if current group is
+            // a branch_reset, snapshot the current branch groups.
+            if let Some(top) = stack.last_mut() {
+                if top.0 {
+                    let branch = std::mem::take(&mut top.2);
+                    top.1.push(branch);
+                }
+            }
+            i += 1;
+            continue;
+        }
+        if c == ')' {
+            if let Some((is_br, mut branches, branch_groups)) = stack.pop() {
+                if is_br {
+                    branches.push(branch_groups);
+                    out.push(branches);
+                } else {
+                    // Propagate this group's accumulated groups to parent.
+                    if let Some(parent) = stack.last_mut() {
+                        parent.2.extend(branch_groups);
+                    }
+                }
+            }
+            i += 1;
+            continue;
+        }
+        i += 1;
+    }
+    out
+}
+
 /// Under `/i`, expand literal ligature sequences (`ffi`, `ffl`, `ff`,
 /// `fi`, `fl`, `st`, `ss`) to alternations including their Unicode
 /// ligature codepoints so case-insensitive matching catches both
