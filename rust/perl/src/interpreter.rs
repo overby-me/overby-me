@@ -20325,9 +20325,13 @@ fn extract_first_mark_label(pattern: &str) -> Option<String> {
 fn truncate_at_first_accept(pattern: &str) -> String {
     let chars: Vec<char> = pattern.chars().collect();
     // Find the first `(*ACCEPT)` / `(*ACCEPT:...)` occurrence,
-    // skipping inside `[...]` classes.
+    // skipping inside `[...]` classes and lookarounds. Lookarounds
+    // (`(?=…)`, `(?!…)`, `(?<=…)`, `(?<!…)`) have separate match
+    // semantics, so truncating from an inner ACCEPT would silently
+    // damage the outer pattern.
     let mut accept_at: Option<usize> = None;
     let mut paren_starts: Vec<usize> = Vec::new();
+    let mut lookaround_depth: usize = 0;
     let mut i = 0;
     let mut in_class = false;
     while i < chars.len() {
@@ -20357,7 +20361,7 @@ fn truncate_at_first_accept(pattern: &str) -> String {
             }
             let body: String = chars[i + 2..k].iter().collect();
             let name = body.splitn(2, ':').next().unwrap_or("").to_uppercase();
-            if name == "ACCEPT" {
+            if name == "ACCEPT" && lookaround_depth == 0 {
                 accept_at = Some(i);
                 break;
             }
@@ -20365,12 +20369,36 @@ fn truncate_at_first_accept(pattern: &str) -> String {
             continue;
         }
         if !in_class && c == '(' {
-            paren_starts.push(i);
+            // Detect lookaround openers `(?=`, `(?!`, `(?<=`, `(?<!`.
+            let is_lookaround = i + 2 < chars.len()
+                && chars[i + 1] == '?'
+                && (chars[i + 2] == '='
+                    || chars[i + 2] == '!'
+                    || (chars[i + 2] == '<'
+                        && i + 3 < chars.len()
+                        && (chars[i + 3] == '=' || chars[i + 3] == '!')));
+            if is_lookaround {
+                lookaround_depth += 1;
+                paren_starts.push(i);
+            } else {
+                paren_starts.push(i);
+            }
             i += 1;
             continue;
         }
         if !in_class && c == ')' {
-            paren_starts.pop();
+            if let Some(open) = paren_starts.pop() {
+                let is_lookaround = open + 2 < chars.len()
+                    && chars[open + 1] == '?'
+                    && (chars[open + 2] == '='
+                        || chars[open + 2] == '!'
+                        || (chars[open + 2] == '<'
+                            && open + 3 < chars.len()
+                            && (chars[open + 3] == '=' || chars[open + 3] == '!')));
+                if is_lookaround {
+                    lookaround_depth = lookaround_depth.saturating_sub(1);
+                }
+            }
             i += 1;
             continue;
         }
