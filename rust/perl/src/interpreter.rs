@@ -19282,6 +19282,7 @@ fn pattern_has_inline_ascii_flag(pattern: &str) -> bool {
     false
 }
 
+
 fn translate_posix_classes(pattern: &str, ascii_only_outer: bool) -> String {
     let chars: Vec<char> = pattern.chars().collect();
     let mut out = String::with_capacity(pattern.len());
@@ -19699,18 +19700,81 @@ fn apply_branch_reset_renumber(
     if blocks.is_empty() {
         return;
     }
-    // Build a map from group_idx → block_idx (or None).
+    // Find each group's *outermost* enclosing block: walk blocks
+    // largest-first by group span and assign on first hit. Without
+    // this, nested `(?|...)` (re/regexp 1393, 1395) sees a group both
+    // in the inner BR (block 0) and the outer BR (block 2), and the
+    // last-write-wins would always pick the OUTER block, but we
+    // want the per-block inner-first logic to skip a group already
+    // owned by an outer block. Here we want the OPPOSITE — outer
+    // first — so that nested branches collapse correctly.
     let max_idx = starts.len().saturating_sub(1);
     let mut block_of: Vec<Option<usize>> = vec![None; max_idx + 1];
-    for (b_idx, branches) in blocks.iter().enumerate() {
-        for branch in branches {
+    // Order blocks largest-span first (outer blocks contain more
+    // groups and thus larger span).
+    let mut order: Vec<usize> = (0..blocks.len()).collect();
+    order.sort_by_key(|&i| {
+        let mn = blocks[i].iter().flatten().copied().min().unwrap_or(0);
+        let mx = blocks[i].iter().flatten().copied().max().unwrap_or(0);
+        std::cmp::Reverse(mx - mn)
+    });
+    for b_idx in &order {
+        for branch in &blocks[*b_idx] {
             for &g in branch {
-                if g < block_of.len() {
-                    block_of[g] = Some(b_idx);
+                if g < block_of.len() && block_of[g].is_none() {
+                    block_of[g] = Some(*b_idx);
                 }
             }
         }
     }
+    // For each block, compute the EFFECTIVE size of each branch.
+    // Without nesting, this is just `branch.len()`. With nesting,
+    // a branch whose groups all belong to a SINGLE inner BR collapses
+    // to the inner BR's effective size. Here we track per-block
+    // effective size (max across branches).
+    fn effective_branch_size(
+        blocks: &[Vec<Vec<usize>>],
+        block_idx: usize,
+        branch: &[usize],
+    ) -> usize {
+        // Find any inner BR whose groups exactly cover a contiguous
+        // prefix/suffix of `branch`. We assume nested BRs fully
+        // contain their groups — so iterate inner blocks and shrink.
+        let mut remaining: Vec<usize> = branch.to_vec();
+        let mut size = 0;
+        let mut progress = true;
+        while progress && !remaining.is_empty() {
+            progress = false;
+            for (i, inner) in blocks.iter().enumerate() {
+                if i == block_idx {
+                    continue;
+                }
+                let inner_groups: std::collections::HashSet<usize> =
+                    inner.iter().flatten().copied().collect();
+                // Does the start of `remaining` consist entirely of
+                // groups from `inner`?
+                let prefix_len = remaining
+                    .iter()
+                    .take_while(|g| inner_groups.contains(g))
+                    .count();
+                if prefix_len > 0 {
+                    let inner_size =
+                        inner.iter().map(|b| b.len()).max().unwrap_or(0);
+                    size += inner_size;
+                    remaining.drain(..prefix_len);
+                    progress = true;
+                    break;
+                }
+            }
+            if !progress {
+                // Consume one group as a non-BR slot.
+                size += 1;
+                remaining.remove(0);
+            }
+        }
+        size.max(branch.len())
+    }
+    let _ = effective_branch_size;
     // Walk old group indices and produce new index sequence.
     let mut new_starts: Vec<Option<usize>> = vec![starts[0]];
     let mut new_ends: Vec<Option<usize>> = vec![ends[0]];
@@ -19721,14 +19785,34 @@ fn apply_branch_reset_renumber(
         if let Some(b_idx) = block_of[old] {
             if handled_blocks.insert(b_idx) {
                 let branches = &blocks[b_idx];
-                let max_size = branches.iter().map(|b| b.len()).max().unwrap_or(0);
+                // Effective max_size: if a branch contains an inner BR,
+                // the inner BR collapses to its own max_size. So compute
+                // sum of (each segment's effective size) per branch and
+                // take max.
+                let max_size = branches
+                    .iter()
+                    .map(|b| compute_effective_branch_size(blocks, b_idx, b))
+                    .max()
+                    .unwrap_or(0);
                 // Find matched branch: the one with any non-None group.
                 let matched = branches
                     .iter()
                     .find(|b| b.iter().any(|&g| starts.get(g).and_then(|s| *s).is_some()));
                 if let Some(branch) = matched {
+                    // Within the matched branch, find the groups whose
+                    // values are set. If a group is part of an inner
+                    // BR, only the active inner branch's group(s) will
+                    // be set. Emit those values into slots.
+                    let set_groups: Vec<usize> = branch
+                        .iter()
+                        .filter(|&&g| starts.get(g).and_then(|s| *s).is_some())
+                        .copied()
+                        .collect();
+                    // Emit one slot per logical position. Use up to
+                    // max_size slots, populated from set_groups in
+                    // order.
                     for slot in 0..max_size {
-                        if let Some(&g) = branch.get(slot) {
+                        if let Some(&g) = set_groups.get(slot) {
                             new_starts.push(starts[g]);
                             new_ends.push(ends[g]);
                             new_strs.push(strs[g].clone());
@@ -19747,19 +19831,12 @@ fn apply_branch_reset_renumber(
                 }
                 // Advance old past all groups in this block (which are
                 // contiguous: block_first..=block_last).
-                let block_first = branches
-                    .iter()
-                    .flatten()
-                    .copied()
-                    .min()
-                    .unwrap_or(old);
                 let block_last = branches
                     .iter()
                     .flatten()
                     .copied()
                     .max()
                     .unwrap_or(old);
-                let _ = block_first;
                 old = block_last + 1;
                 continue;
             }
@@ -19773,6 +19850,46 @@ fn apply_branch_reset_renumber(
     *starts = new_starts;
     *ends = new_ends;
     *strs = new_strs;
+}
+
+fn compute_effective_branch_size(
+    blocks: &[Vec<Vec<usize>>],
+    self_idx: usize,
+    branch: &[usize],
+) -> usize {
+    if branch.is_empty() {
+        return 0;
+    }
+    let mut remaining: Vec<usize> = branch.to_vec();
+    let mut size = 0;
+    while !remaining.is_empty() {
+        let mut consumed_inner = false;
+        for (i, inner) in blocks.iter().enumerate() {
+            if i == self_idx {
+                continue;
+            }
+            let inner_groups: std::collections::HashSet<usize> =
+                inner.iter().flatten().copied().collect();
+            let prefix_len = remaining
+                .iter()
+                .take_while(|g| inner_groups.contains(g))
+                .count();
+            if prefix_len == remaining.len()
+                || (prefix_len > 0 && prefix_len == inner_groups.len())
+            {
+                let inner_size = inner.iter().map(|b| b.len()).max().unwrap_or(0);
+                size += inner_size;
+                remaining.drain(..prefix_len);
+                consumed_inner = true;
+                break;
+            }
+        }
+        if !consumed_inner {
+            size += 1;
+            remaining.remove(0);
+        }
+    }
+    size
 }
 
 /// Walk `pattern` (BEFORE `(?|...)` → `(?:...)` translation) and
