@@ -164,9 +164,13 @@ pub fn main(args: &[String]) -> i32 {
     // Probe stat() size up-front: C's mmap(size) fails with EINVAL when
     // st_size == 0. Files in /proc and /sys report size 0 even though
     // read() returns data, so we have to check stat directly rather than
-    // relying on the read result.
+    // relying on the read result. Character / block special files (/dev/
+    // zero, /dev/null, ...) also report size 0; they take the same path.
     if let Ok(meta) = std::fs::metadata(&filename) {
-        if meta.is_file() && meta.len() == 0 {
+        use std::os::unix::fs::FileTypeExt;
+        let ft = meta.file_type();
+        let is_special = ft.is_char_device() || ft.is_block_device() || ft.is_fifo() || ft.is_socket();
+        if (meta.is_file() && meta.len() == 0) || is_special {
             eprintln!("error mmapping file '{filename}': Invalid argument");
             return 1;
         }
