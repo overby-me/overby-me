@@ -11985,6 +11985,15 @@ impl Interpreter {
         // (non-recursive) case. Truly recursive patterns are left
         // unchanged. re/regexp 1167-1185.
         let pattern = inline_simple_recursion(&pattern);
+        // Under `/a`, restrict `\d`/`\w`/`\s` and their negations to
+        // ASCII-only forms. fancy_regex's defaults are Unicode-aware,
+        // and the regex crate likewise — both would match `\x{660}`
+        // (Arabic-Indic 0) for `\d` without this. re/regexp 1815.
+        let pattern = if ascii_posix {
+            restrict_word_classes_ascii(&pattern)
+        } else {
+            pattern
+        };
         // Capture branch-reset structure BEFORE we strip `(?|...)` so
         // we can renumber captures post-match. re/regexp 1389+.
         let branch_reset_blocks = extract_branch_reset_blocks(&pattern);
@@ -12371,6 +12380,11 @@ impl Interpreter {
         let pattern = translate_named_char_escapes(&pattern);
         let pattern = normalize_named_backref(&pattern);
         let pattern = inline_simple_recursion(&pattern);
+        let pattern = if ascii_posix {
+            restrict_word_classes_ascii(&pattern)
+        } else {
+            pattern
+        };
         let pattern = translate_atomic_groups(&pattern);
         let pattern = fix_inverted_quantifiers(&pattern);
         let pattern = neutralise_false_ranges(&pattern);
@@ -17831,6 +17845,52 @@ fn extract_quantified_parents(pattern: &str) -> Vec<usize> {
 /// preserved, but at least the pattern compiles, named-group lookups
 /// work, and single-branch forms behave identically. re/regexp 1398
 /// (single branch) and 1399-1401 (named groups across branches).
+/// Under `/a`, restrict `\d` / `\D` / `\w` / `\W` / `\s` / `\S` to
+/// their ASCII-only forms. Without this, fancy_regex's `\d` is
+/// Unicode-aware (matches `\x{660}` etc.), but Perl's /a forces
+/// ASCII semantics. Skips inside character classes — POSIX class
+/// translation handles class context separately. re/regexp 1815.
+fn restrict_word_classes_ascii(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            let n = chars[i + 1];
+            if !in_class {
+                let repl = match n {
+                    'd' => Some("[0-9]"),
+                    'D' => Some("[^0-9]"),
+                    'w' => Some("[a-zA-Z0-9_]"),
+                    'W' => Some("[^a-zA-Z0-9_]"),
+                    's' => Some("[\\t\\n\\f\\r ]"),
+                    'S' => Some("[^\\t\\n\\f\\r ]"),
+                    _ => None,
+                };
+                if let Some(r) = repl {
+                    out.push_str(r);
+                    i += 2;
+                    continue;
+                }
+            }
+            out.push(c);
+            out.push(n);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+        } else if in_class && c == ']' {
+            in_class = false;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 /// Inline non-recursive `(?N)` / `(?&NAME)` / `(?P>NAME)` references
 /// by substituting the referenced group's body wrapped in `(?:…)`.
 /// Only applies when the substitution wouldn't introduce a cycle —
