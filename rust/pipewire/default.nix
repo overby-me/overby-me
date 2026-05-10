@@ -1445,6 +1445,8 @@
       { tool = "pw-cli"; name = "connect-refused-help"; }
       { tool = "pw-cat"; name = "playback-existing-bad-format"; }
       { tool = "pw-cat"; name = "playback-stdin-marker"; }
+      { tool = "spa-resample"; name = "existing-bad-format"; }
+      { tool = "spa-resample"; name = "dash-stdin-marker"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }
