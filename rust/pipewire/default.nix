@@ -1482,6 +1482,8 @@
       { tool = "spa-json-dump"; name = "indent-no-arg"; }
       { tool = "spa-json-dump"; name = "i-short-no-arg"; }
       { tool = "pw-cli"; name = "long-remote-no-arg"; }
+      { tool = "pw-link"; name = "long-remote-no-arg"; }
+      { tool = "pw-mon"; name = "long-remote-no-arg"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }

@@ -100,13 +100,17 @@ pub fn main(raw_args: &[String]) -> i32 {
             }
             "-I" | "--id" => show_id = true,
             "-v" | "--verbose" => verbose = true,
-            "-r" | "--remote" => {
+            opt @ ("-r" | "--remote") => {
                 if let Some(v) = args.get(i + 1) {
                     remote = Some(v.clone());
                     i += 2;
                     continue;
                 }
-                eprintln!("{argv0}: option requires an argument -- 'r'");
+                if opt == "--remote" {
+                    eprintln!("{argv0}: option '--remote' requires an argument");
+                } else {
+                    eprintln!("{argv0}: option requires an argument -- 'r'");
+                }
                 print_help(argv0);
                 return 0;
             }
