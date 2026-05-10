@@ -19772,35 +19772,45 @@ fn translate_octal_escapes(pattern: &str) -> String {
                     }
                 }
             }
-            // Octal-disambiguation: `\Nd...` where N is followed by
-            // another digit AND group N doesn't exist falls back to
+            // Octal-disambiguation: `\NN…` where the FULL decimal value
+            // exceeds the number of capture groups falls back to
             // octal (1-3 octal digits, leftmost wins). Reference perl
             // matches `(.)\4294967296` against `b\042…` because `\42`
-            // is octal `"`. re/regexp 1613-1620.
+            // is octal `"`. Also handles `\10` against a 9-group pattern
+            // — group 10 doesn't exist, so `\10` is octal `\010` =
+            // char 0x08. re/regexp 1613-1620, 1963-1966.
             if nxt.is_digit(8)
                 && nxt != '0'
                 && i + 2 < chars.len()
                 && chars[i + 2].is_ascii_digit()
-                && (nxt.to_digit(10).unwrap_or(0) as usize) > total_groups
             {
-                let mut n = nxt.to_digit(8).unwrap_or(0);
-                let mut consumed = 1;
-                while consumed < 3 && i + 1 + consumed < chars.len() {
-                    let d = chars[i + 1 + consumed];
-                    if let Some(v) = d.to_digit(8) {
-                        n = n * 8 + v;
-                        consumed += 1;
-                    } else {
-                        break;
+                // Read full decimal number to compare against group count.
+                let mut decimal_end = i + 1;
+                while decimal_end < chars.len() && chars[decimal_end].is_ascii_digit() {
+                    decimal_end += 1;
+                }
+                let decimal_str: String = chars[i + 1..decimal_end].iter().collect();
+                let decimal_val: usize = decimal_str.parse().unwrap_or(0);
+                if decimal_val > total_groups {
+                    let mut n = nxt.to_digit(8).unwrap_or(0);
+                    let mut consumed = 1;
+                    while consumed < 3 && i + 1 + consumed < chars.len() {
+                        let d = chars[i + 1 + consumed];
+                        if let Some(v) = d.to_digit(8) {
+                            n = n * 8 + v;
+                            consumed += 1;
+                        } else {
+                            break;
+                        }
                     }
+                    if n <= 0xff {
+                        out.push_str(&format!("\\x{n:02x}"));
+                    } else {
+                        out.push_str(&format!("\\x{{{n:x}}}"));
+                    }
+                    i += 1 + consumed;
+                    continue;
                 }
-                if n <= 0xff {
-                    out.push_str(&format!("\\x{n:02x}"));
-                } else {
-                    out.push_str(&format!("\\x{{{n:x}}}"));
-                }
-                i += 1 + consumed;
-                continue;
             }
             // `\0NN` / `\NNN` — octal escape. We only treat as octal
             // when:
