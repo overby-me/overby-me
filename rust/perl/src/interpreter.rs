@@ -12032,6 +12032,11 @@ impl Interpreter {
         let pattern = strip_control_verbs(&pattern);
         let pattern = eliminate_zero_quantifier(&pattern);
         let pattern = strip_xx_class_whitespace(&pattern);
+        let pattern = if flags.contains('i') {
+            isolate_posix_class_from_case_fold(&pattern)
+        } else {
+            pattern
+        };
         // Under `/a`, restrict `\d`/`\w`/`\s` and their negations to
         // ASCII-only forms. fancy_regex's defaults are Unicode-aware,
         // and the regex crate likewise — both would match `\x{660}`
@@ -12439,6 +12444,11 @@ impl Interpreter {
         let pattern = strip_control_verbs(&pattern);
         let pattern = eliminate_zero_quantifier(&pattern);
         let pattern = strip_xx_class_whitespace(&pattern);
+        let pattern = if flags.contains('i') {
+            isolate_posix_class_from_case_fold(&pattern)
+        } else {
+            pattern
+        };
         let pattern = if ascii_posix {
             restrict_word_classes_ascii(&pattern)
         } else {
@@ -19697,12 +19707,13 @@ fn rewrite_nonexistent_group_conditionals(pattern: &str) -> String {
 /// 1742-1756.
 /// Walk `pattern` looking for an inline `(?a)` / `(?aa)` flag (no
 /// body — `(?aa-i)` etc. count too). Returns true if found.
-/// Wrap single-POSIX-class brackets `[[:NAME:]]` in `(?-i:...)` so
-/// fancy_regex's /i case folding doesn't widen them. Reference perl's
-/// `[[:ascii:]]/i` matches strictly ASCII (no fold-to-ASCII Unicode
-/// chars); fancy_regex's /i case-folds the input before testing the
-/// class. Same for `[[:lower:]]/i` and `[[:upper:]]/i` — /i shouldn't
-/// expand them to all "cased" chars. re/regexp 1729, 1733, 1734.
+/// Wrap `[[:ascii:]]` in `(?-i:...)` so fancy_regex's /i case folding
+/// doesn't widen the codepoint range to include non-ASCII chars
+/// whose fold falls in [0, 127] (e.g. Kelvin sign U+212A folds to
+/// 'k'). Reference perl's `[[:ascii:]]` is a strict codepoint check;
+/// /i doesn't extend it. `[[:lower:]]/i` and `[[:upper:]]/i` DO
+/// extend to all "cased" chars in Perl (matching their property
+/// behaviour), so we leave those alone. re/regexp 1729.
 fn isolate_posix_class_from_case_fold(pattern: &str) -> String {
     let chars: Vec<char> = pattern.chars().collect();
     let mut out = String::with_capacity(pattern.len());
@@ -19714,24 +19725,27 @@ fn isolate_posix_class_from_case_fold(pattern: &str) -> String {
             i += 2;
             continue;
         }
-        // Match `[[:NAME:]]` or `[[:^NAME:]]` — a bracket class whose
-        // body is exactly one POSIX class (no other elements).
+        // Match `[[:ascii:]]` or `[[:^ascii:]]` — only the `ascii`
+        // POSIX class needs the (?-i:) wrapper, since other POSIX
+        // classes' /i behaviour (e.g. [[:lower:]]/i matching \x{100})
+        // is what reference perl does.
         if chars[i] == '['
             && i + 2 < chars.len()
             && chars[i + 1] == '['
             && chars[i + 2] == ':'
         {
-            // Walk to find `:]]`.
             let body_start = i + 3;
             let mut k = body_start;
-            // Optional leading `^` for negation.
             if k < chars.len() && chars[k] == '^' {
                 k += 1;
             }
+            let name_start = k;
             while k < chars.len() && chars[k].is_ascii_alphabetic() {
                 k += 1;
             }
-            if k + 2 < chars.len()
+            let name: String = chars[name_start..k].iter().collect();
+            if name == "ascii"
+                && k + 2 < chars.len()
                 && chars[k] == ':'
                 && chars[k + 1] == ']'
                 && chars[k + 2] == ']'
