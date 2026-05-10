@@ -1346,6 +1346,41 @@ impl Parser {
         // Can also be: print +(...) to force list context
         let has_plus = self.eat(&Token::Plus);
 
+        // `print(LIST)` — explicit function-call form. The parens
+        // delimit args; anything after `)` (e.g. `, exit`) belongs to
+        // the enclosing comma expression, not print's arg list.
+        if !has_plus && matches!(self.tok(), Token::LParen) {
+            self.pos += 1;
+            let args = self.parse_list_expr();
+            self.eat(&Token::RParen);
+            // `, exit` (or any other comma-chained expression) after
+            // print's `)` must still execute. Park it as a tail
+            // expression on this statement so exec_print returning
+            // signals propagation.
+            let mut tail: Vec<Expr> = Vec::new();
+            while self.eat(&Token::Comma) || self.eat(&Token::FatComma) {
+                if self.at(&Token::Semi) || self.at(&Token::EOF) {
+                    break;
+                }
+                tail.push(self.parse_expr());
+            }
+            let stmt = if is_say {
+                Stmt::Say(None, args)
+            } else {
+                Stmt::Print(None, args)
+            };
+            if tail.is_empty() {
+                return self.maybe_postfix(stmt);
+            }
+            // Wrap into a block: print first, then evaluate tail
+            // expressions in order so a trailing `exit` etc. fires.
+            let mut block: Vec<Stmt> = vec![stmt];
+            for t in tail {
+                block.push(Stmt::Expr(t));
+            }
+            return self.maybe_postfix(Stmt::Block(block));
+        }
+
         let filehandle = if !has_plus {
             // Check if first token is a bareword (filehandle)
             if let Token::Ident(name) = self.tok() {

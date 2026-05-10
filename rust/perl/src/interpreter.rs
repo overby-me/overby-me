@@ -1855,6 +1855,13 @@ impl Interpreter {
                 if has_list_init {
                     let init_expr = vars[0].1.as_ref().unwrap();
                     let items = self.eval_list(init_expr);
+                    // If init evaluation triggered `exit` / `die` etc.,
+                    // propagate the flow rather than assigning a half-
+                    // populated list (e.g. `my @args = ("hello", exit)`
+                    // should exit before reaching the next statement).
+                    if let Some(flow) = self.pending_flow.take() {
+                        return flow;
+                    }
                     let mut idx = 0usize;
                     for (name, _) in vars.iter() {
                         let var_name = name
@@ -1895,6 +1902,9 @@ impl Interpreter {
                             } else {
                                 Vec::new()
                             };
+                            if let Some(flow) = self.pending_flow.take() {
+                                return flow;
+                            }
                             self.set_my_array(var_name, items);
                         } else if name.starts_with('%') {
                             let items = if init.is_some() {
@@ -1902,12 +1912,18 @@ impl Interpreter {
                             } else {
                                 Vec::new()
                             };
+                            if let Some(flow) = self.pending_flow.take() {
+                                return flow;
+                            }
                             self.set_hash_from_list(var_name, items);
                         } else {
                             let val = init
                                 .as_ref()
                                 .map(|e| self.eval_expr(e))
                                 .unwrap_or(Value::Undef);
+                            if let Some(flow) = self.pending_flow.take() {
+                                return flow;
+                            }
                             self.set_my_var(var_name, val);
                         }
                     }
@@ -3104,6 +3120,13 @@ impl Interpreter {
                         }
                         values.push(self.stringify_value(&v));
                     }
+                }
+                // If an arg triggered `exit` / `die`, stop printing
+                // mid-list (mirroring Perl's `print(LIST), exit`
+                // pattern where the exit fires partway through the
+                // list). re/regexp_nonull skip-path.
+                if self.pending_flow.is_some() {
+                    return;
                 }
             }
             let mut output = String::new();
@@ -4986,6 +5009,17 @@ impl Interpreter {
                             self.scopes = saved_scopes;
                             self.current_file = saved_file;
                             self.current_line = saved_line;
+                            return Value::Undef;
+                        }
+                        Flow::Exit(code) => {
+                            // `exit` inside a do-file propagates up to
+                            // terminate the whole program — re-raise it
+                            // via pending_flow so the caller sees the
+                            // termination. re/regexp_nonull skip-path.
+                            self.scopes = saved_scopes;
+                            self.current_file = saved_file;
+                            self.current_line = saved_line;
+                            self.pending_flow = Some(Flow::Exit(code));
                             return Value::Undef;
                         }
                         _ => {}
@@ -12790,6 +12824,9 @@ impl Interpreter {
                     let (last, head) = current.split_last().unwrap();
                     for item in head {
                         out.extend(self.eval_list(item));
+                        if self.pending_flow.is_some() {
+                            return out;
+                        }
                     }
                     if let Expr::ArrayLit(inner) = last {
                         current = inner.as_slice();
