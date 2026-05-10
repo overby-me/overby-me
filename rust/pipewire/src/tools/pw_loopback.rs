@@ -96,6 +96,10 @@ pub fn main(args: &[String]) -> i32 {
                     print_help(argv0);
                     return 0;
                 }
+                if s.starts_with("-V") {
+                    print_version(argv0);
+                    return 0;
+                }
                 let short = &s[..2];
                 if required_args.iter().any(|(sh, _, _)| *sh == short) {
                     if short == "-r" {
