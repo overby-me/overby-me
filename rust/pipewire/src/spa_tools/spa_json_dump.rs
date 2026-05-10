@@ -110,8 +110,8 @@ pub fn main(args: &[String]) -> i32 {
         let mut buf = String::new();
         let _ = io::stdin().read_to_string(&mut buf);
         // C reports "not a valid file" when the buffer contains nothing
-        // parseable — empty or whitespace-only input.
-        if buf.trim().is_empty() {
+        // parseable — empty / whitespace-only / comment-only input.
+        if has_no_content(&buf) {
             eprintln!("not a valid file '{filename}': Success");
             return 1;
         }
@@ -155,6 +155,26 @@ pub fn main(args: &[String]) -> i32 {
     };
 
     parse_and_dump(&filename, &input, indent, simple)
+}
+
+fn has_no_content(input: &str) -> bool {
+    // Strip whitespace and `#`-style line comments; if nothing
+    // substantial remains, C considers the input to have no content.
+    let mut chars = input.chars().peekable();
+    while let Some(&c) = chars.peek() {
+        if c.is_whitespace() {
+            chars.next();
+        } else if c == '#' {
+            for c in chars.by_ref() {
+                if c == '\n' {
+                    break;
+                }
+            }
+        } else {
+            return false;
+        }
+    }
+    true
 }
 
 fn parse_and_dump(filename: &str, input: &str, indent: usize, simple: bool) -> i32 {

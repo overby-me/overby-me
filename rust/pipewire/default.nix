@@ -1466,6 +1466,7 @@
       { tool = "spa-json-dump"; name = "proc-zero-size"; }
       { tool = "spa-json-dump"; name = "stdin-content"; }
       { tool = "spa-json-dump"; name = "stdin-whitespace-only"; }
+      { tool = "spa-json-dump"; name = "stdin-comment-only"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }
