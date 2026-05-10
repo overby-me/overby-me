@@ -138,12 +138,15 @@ pub fn main(raw_args: &[String]) -> i32 {
     //   * --remote was explicitly given, OR
     //   * PIPEWIRE_REMOTE env is set (any name).
     // Mirror that: a bad remote produces the connect error even for
-    // commands like `help` that wouldn't otherwise need a daemon.
-    let force_connect =
-        remote.is_some() || std::env::var("PIPEWIRE_REMOTE").is_ok();
+    // commands like `help` that wouldn't otherwise need a daemon. The
+    // env var also supplies the *value* used for the connect attempt
+    // when -r wasn't given.
+    let env_remote = std::env::var("PIPEWIRE_REMOTE").ok();
+    let force_connect = remote.is_some() || env_remote.is_some();
+    let connect_remote = remote.clone().or(env_remote);
     if positional.is_empty() {
         if force_connect {
-            match open_client(remote.as_deref(), "pw-cli") {
+            match open_client(connect_remote.as_deref(), "pw-cli") {
                 Ok(_) => 0,
                 Err(e) => {
                     print_open_error(argv0, &e);
@@ -156,7 +159,7 @@ pub fn main(raw_args: &[String]) -> i32 {
         }
     } else {
         if force_connect {
-            if let Err(e) = open_client(remote.as_deref(), "pw-cli") {
+            if let Err(e) = open_client(connect_remote.as_deref(), "pw-cli") {
                 print_open_error(argv0, &e);
                 return 1;
             }
