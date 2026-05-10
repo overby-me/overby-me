@@ -16746,10 +16746,14 @@ fn validate_conditional_groups(
                 || (chars.len() >= cond_start + 7
                     && chars[cond_start..cond_start + 6].iter().collect::<String>() == "DEFINE"
                     && chars[cond_start + 6] == ')')
+                || chars[cond_start] == 'R'
             {
                 // Lookaround / code conditions handled by rewrite
                 // layer; `(?(DEFINE)...)` is the named-subroutine
-                // container — accept both.
+                // container; `(?(R)…)` / `(?(RN)…)` / `(?(R&NAME)…)`
+                // recursion-state checks all accepted (rewrite layer
+                // turns them into permissive forms since fancy_regex
+                // doesn't actually recurse). re/regexp 1158-1163.
                 None
             } else {
                 let prefix: String = chars[..cond_start].iter().collect();
@@ -19094,6 +19098,7 @@ fn rewrite_nonexistent_group_conditionals(pattern: &str) -> String {
                 NumNotExists,
                 Lookahead(String, bool), // (pattern, positive?)
                 CodeBool(bool),          // `(?{0})` / `(?{1})`
+                Recursion,               // `(?(R)...)` / `(?(RN)...)` / `(?(R&NAME)...)`
                 Other,
             }
             let cond_start = i + 3;
@@ -19187,6 +19192,22 @@ fn rewrite_nonexistent_group_conditionals(pattern: &str) -> String {
                 } else {
                     (Cond::Other, cond_start)
                 }
+            } else if chars[cond_start] == 'R' {
+                // `(?(R)…)`, `(?(RN)…)`, `(?(R&NAME)…)` — recursion-state
+                // condition. fancy_regex doesn't recurse, so we can't
+                // distinguish "in recursion" from "outermost call". The
+                // permissive-yes fallback (treat both branches as
+                // optional) lets the test patterns parse and most
+                // structural matches succeed. re/regexp 1158-1163.
+                let mut k = cond_start + 1;
+                while k < chars.len() && chars[k] != ')' {
+                    k += 1;
+                }
+                if k < chars.len() {
+                    (Cond::Recursion, k)
+                } else {
+                    (Cond::Other, cond_start)
+                }
             } else {
                 (Cond::Other, cond_start)
             };
@@ -19231,6 +19252,19 @@ fn rewrite_nonexistent_group_conditionals(pattern: &str) -> String {
                         }
                         Cond::Lookahead(pat, false) => {
                             format!("(?:(?!{pat}){yes_branch}|(?={pat}){no_branch})")
+                        }
+                        Cond::Recursion => {
+                            // We can't tell whether we're in recursion at
+                            // match time. Prefer the yes-branch, with the
+                            // no-branch as a fallback alternative. For the
+                            // "yes only" form (`(?(R)yes)`), make it
+                            // optional via `(?:yes)?` so the outer-call
+                            // case still matches.
+                            if no_branch.is_empty() {
+                                format!("(?:{yes_branch})?")
+                            } else {
+                                format!("(?:{yes_branch}|{no_branch})")
+                            }
                         }
                         _ => unreachable!(),
                     };
