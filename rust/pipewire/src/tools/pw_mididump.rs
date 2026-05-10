@@ -177,7 +177,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                 }
                 Err(_) => {
                     eprintln!("can't connect");
-                    return 0;
+                    return u8::MAX as i32;
                 }
             }
         }

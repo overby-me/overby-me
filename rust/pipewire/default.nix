@@ -1521,6 +1521,8 @@
       { tool = "pw-cat"; name = "midi-no-mode-exit"; }
       { tool = "pw-loopback"; name = "connect-fail-exit"; }
       { tool = "pw-cli"; name = "connect-fail-exit"; }
+      { tool = "pw-mididump"; name = "connect-fail-exit"; }
+      { tool = "pw-dump"; name = "env-pipewire-remote"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }

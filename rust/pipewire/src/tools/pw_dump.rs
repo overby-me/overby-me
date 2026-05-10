@@ -208,7 +208,10 @@ fn print_help(argv0: &str) {
 }
 
 fn collect_globals(remote: Option<&str>) -> Result<Vec<RegistryGlobal>, String> {
-    let mut client = match remote {
+    // PIPEWIRE_REMOTE supplies the socket name when -r wasn't given.
+    let env_remote = std::env::var("PIPEWIRE_REMOTE").ok();
+    let chosen: Option<String> = remote.map(String::from).or(env_remote);
+    let mut client = match chosen.as_deref() {
         Some(name) if name.starts_with('/') => Client::connect_path(std::path::Path::new(name)),
         Some(name) => {
             let runtime = std::env::var("PIPEWIRE_RUNTIME_DIR")
