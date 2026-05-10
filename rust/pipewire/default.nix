@@ -1553,6 +1553,8 @@
       { tool = "pipewire"; name = "long-config-no-arg"; }
       { tool = "pipewire"; name = "short-P-no-arg"; }
       { tool = "pipewire"; name = "long-properties-no-arg"; }
+      { tool = "pipewire"; name = "c-not-dot-conf"; }
+      { tool = "pipewire"; name = "c-missing-conf"; }
       { tool = "spa-acp-tool"; name = "bogus-flag-exit"; }
       { tool = "spa-inspect"; name = "no-args-exit"; }
       { tool = "spa-monitor"; name = "no-args-exit"; }
