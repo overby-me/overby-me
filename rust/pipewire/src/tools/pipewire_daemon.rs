@@ -97,6 +97,27 @@ pub fn main(args: &[String]) -> i32 {
             eprintln!("{argv0}: invalid option -- '{ch}'");
             234
         }
+        // Mixed cluster like `-hh` or `-hX`: getopt processes char-by-char,
+        // so a cluster starting with `-h` short-circuits to help.
+        Some(s) if s.starts_with('-') && !s.starts_with("--") && s.len() > 2 => {
+            let mut chars = s[1..].chars();
+            while let Some(c) = chars.next() {
+                if c == 'h' {
+                    print_help(argv0, default_config);
+                    return 0;
+                } else if c == 'V' {
+                    print_version(argv0);
+                    return 0;
+                } else if c == 'v' {
+                    // verbose, no-arg, continue cluster
+                } else {
+                    eprintln!("{argv0}: invalid option -- '{c}'");
+                    return 234;
+                }
+            }
+            eprintln!("{argv0}: not yet implemented in rust-pipewire");
+            1
+        }
         Some(s) if s.starts_with('-') => {
             eprintln!("{argv0}: unrecognized option '{s}'");
             234
