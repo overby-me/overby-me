@@ -201,17 +201,24 @@ pub fn main(raw_args: &[String]) -> i32 {
     }
 
     // C tries to open the input file via sndfile; without that, mirror
-    // the error format. sndfile distinguishes "missing file" (System
-    // error) from "bad format on existing file" (Format not recognised).
+    // the error format. sndfile distinguishes ENOENT vs EACCES vs
+    // "Format not recognised" once the file is successfully opened.
     let infile = positionals.first().map(String::as_str).unwrap_or("");
-    let exists = infile == "-" || std::path::Path::new(infile).exists();
-    if exists {
+    if infile == "-" {
         eprintln!(
             "error: failed to open input file \"{infile}\": Format not recognised."
         );
-    } else {
+    } else if !std::path::Path::new(infile).exists() {
         eprintln!(
             "error: failed to open input file \"{infile}\": System error : No such file or directory."
+        );
+    } else if std::fs::File::open(infile).is_err() {
+        eprintln!(
+            "error: failed to open input file \"{infile}\": System error : Permission denied."
+        );
+    } else {
+        eprintln!(
+            "error: failed to open input file \"{infile}\": Format not recognised."
         );
     }
     1

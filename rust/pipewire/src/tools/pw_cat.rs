@@ -298,14 +298,25 @@ pub fn main(raw_args: &[String]) -> i32 {
                     .find(|a| !a.starts_with('-') || a == &"-")
                     .map(|s| s.as_str())
                     .unwrap_or("");
-                let exists = file == "-" || std::path::Path::new(file).exists();
-                if exists {
+                // sndfile's error message depends on what fails in fopen
+                // → "No such file or directory" (ENOENT) for missing,
+                // "Permission denied" (EACCES) for an inaccessible file,
+                // and "Format not recognised" once the file IS opened.
+                if file == "-" {
                     eprintln!(
                         "sndfile: failed to open audio file \"{file}\": Format not recognised."
                     );
-                } else {
+                } else if !std::path::Path::new(file).exists() {
                     eprintln!(
                         "sndfile: failed to open audio file \"{file}\": System error : No such file or directory."
+                    );
+                } else if std::fs::File::open(file).is_err() {
+                    eprintln!(
+                        "sndfile: failed to open audio file \"{file}\": System error : Permission denied."
+                    );
+                } else {
+                    eprintln!(
+                        "sndfile: failed to open audio file \"{file}\": Format not recognised."
                     );
                 }
                 eprintln!("error: open failed: Input/output error");
