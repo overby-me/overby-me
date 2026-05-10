@@ -21256,6 +21256,69 @@ fn extract_branch_reset_blocks(pattern: &str) -> Vec<Vec<Vec<usize>>> {
 /// ligature codepoints so case-insensitive matching catches both
 /// forms. Skips inside `[...]` classes and respects `\…` escapes.
 /// re/regexp 1685, 1691-1694, 1712, 1715, 1716, 1724-1726.
+/// Enumerate all ligature-substitution parses of `run` (a run of
+/// "simple" pattern chars — letters, with no regex metachars).
+/// Returns a list of alternative strings, one per parse. Each
+/// alternative replaces some subset of digraphs/trigraphs with
+/// their Unicode-ligature codepoints. Used to build a `(?:alt|alt|…)`
+/// when more than one parse exists. re/regexp 1725, 1726.
+fn ligature_parses(run: &str) -> Vec<String> {
+    fn rec(s: &[char], out: &mut Vec<String>, acc: &mut String) {
+        if s.is_empty() {
+            out.push(acc.clone());
+            return;
+        }
+        // Trigraphs.
+        if s.len() >= 3 {
+            let trig: String = s[..3].iter().collect();
+            let lower = trig.to_lowercase();
+            let lig: Option<&str> = match lower.as_str() {
+                "ffi" => Some("\\x{FB03}"),
+                "ffl" => Some("\\x{FB04}"),
+                _ => None,
+            };
+            if let Some(l) = lig {
+                let save = acc.len();
+                acc.push_str(l);
+                rec(&s[3..], out, acc);
+                acc.truncate(save);
+            }
+        }
+        // Digraphs.
+        if s.len() >= 2 {
+            let dig: String = s[..2].iter().collect();
+            let lower = dig.to_lowercase();
+            let ligs: &[&str] = match lower.as_str() {
+                "ff" => &["\\x{FB00}"],
+                "fi" => &["\\x{FB01}"],
+                "fl" => &["\\x{FB02}"],
+                "st" => &["\\x{FB06}", "\\x{FB05}"],
+                "ss" => &["\\x{DF}"],
+                _ => &[],
+            };
+            for l in ligs {
+                let save = acc.len();
+                acc.push_str(l);
+                rec(&s[2..], out, acc);
+                acc.truncate(save);
+            }
+        }
+        // Single char.
+        acc.push(s[0]);
+        let save = acc.len();
+        rec(&s[1..], out, acc);
+        acc.truncate(save - 1);
+    }
+    let chars: Vec<char> = run.chars().collect();
+    let mut out = Vec::new();
+    let mut acc = String::new();
+    rec(&chars, &mut out, &mut acc);
+    // Dedup
+    out.sort();
+    out.dedup();
+    out
+}
+
 fn expand_ascii_ligatures(pattern: &str) -> String {
     let chars: Vec<char> = pattern.chars().collect();
     let mut out = String::with_capacity(pattern.len() + 16);
@@ -21331,7 +21394,37 @@ fn expand_ascii_ligatures(pattern: &str) -> String {
             i += 1;
             continue;
         }
-        // Try longest-first matches.
+        // Find a "run" of letters/letter-like that could contain
+        // overlapping ligature digraphs (e.g. "sst" → ss-lig or
+        // st-lig). Enumerate all parses and emit as alternation.
+        // Bail to single-char on non-letters or regex metachars.
+        if c.is_ascii_alphabetic() {
+            let mut k = i;
+            while k < chars.len() && chars[k].is_ascii_alphabetic() {
+                k += 1;
+            }
+            let run: String = chars[i..k].iter().collect();
+            // Enumerate parses only if run is short enough (cap at 8
+            // to avoid combinatorial blowup) AND contains at least
+            // one ligature-eligible substring.
+            let lower = run.to_lowercase();
+            let has_ligature = lower.contains("ff")
+                || lower.contains("fi")
+                || lower.contains("fl")
+                || lower.contains("st")
+                || lower.contains("ss");
+            if has_ligature && run.chars().count() <= 8 {
+                let parses = ligature_parses(&run);
+                if parses.len() > 1 {
+                    let alt_body = parses.join("|");
+                    out.push_str(&format!("(?:{alt_body})"));
+                    i = k;
+                    continue;
+                }
+            }
+        }
+        // Try longest-first matches (legacy single-position
+        // substitution — kept for non-letter runs).
         let rest: String = chars[i..].iter().collect();
         let lower = rest.to_lowercase();
         let (consume, replacement): (usize, &str) =
