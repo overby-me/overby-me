@@ -15845,6 +15845,42 @@ fn strip_x_comments_for_validation(pat: &str) -> String {
 
 fn validate_regex_pattern(pat: &str) -> Option<String> {
     let chars: Vec<char> = pat.chars().collect();
+    // `\cX` where the resulting control char is printable ASCII —
+    // reference perl emits a "\"\\cX\" is more clearly written simply
+    // as \"Y\"" warning, which `use warnings FATAL=>"all"` (re/regexp's
+    // pragma) escalates to a die. Without this, `\c\`` (→ SPACE) and
+    // `\c1` (→ 'q') compile silently and re/regexp 1537-1538 fail.
+    {
+        let mut p = 0;
+        while p < chars.len() {
+            if chars[p] == '\\' && p + 2 < chars.len() && chars[p + 1] == 'c' {
+                let source = chars[p + 2];
+                if source.is_ascii() {
+                    let byte = (source as u32) ^ 0x40;
+                    if (0x20..=0x7E).contains(&byte) {
+                        let result_char = char::from_u32(byte).unwrap_or(' ');
+                        let clearer = if result_char.is_ascii_alphanumeric()
+                            || result_char == '_'
+                        {
+                            format!("{result_char}")
+                        } else {
+                            format!("\\{result_char}")
+                        };
+                        return Some(format!(
+                            "\"\\c{source}\" is more clearly written simply as \"{clearer}\""
+                        ));
+                    }
+                }
+                p += 3;
+                continue;
+            }
+            if chars[p] == '\\' && p + 1 < chars.len() {
+                p += 2;
+                continue;
+            }
+            p += 1;
+        }
+    }
     // First pass: count capturing groups so we can validate `\N`
     // backrefs against actually existing groups, plus collect named
     // group names so `\k<NAME>` / `\k'NAME'` references can be
