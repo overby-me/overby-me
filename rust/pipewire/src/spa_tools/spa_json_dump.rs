@@ -69,6 +69,13 @@ pub fn main(args: &[String]) -> i32 {
                 print_help_to(argv0, true);
                 return 1;
             }
+            // Mixed cluster like `-bx`: getopt errors on first unknown.
+            s if s.starts_with('-') && !s.starts_with("--") => {
+                let ch = s.chars().nth(1).unwrap_or('?');
+                eprintln!("{argv0}: invalid option -- '{ch}'");
+                print_help_to(argv0, true);
+                return 1;
+            }
             _ => {
                 print_help_to(argv0, true);
                 return u8::MAX as i32;

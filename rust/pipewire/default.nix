@@ -1425,6 +1425,7 @@
       { tool = "pw-config"; name = "short-bad-flag"; }
       { tool = "spa-resample"; name = "short-bad-cluster"; }
       { tool = "spa-acp-tool"; name = "short-bad-cluster"; }
+      { tool = "spa-json-dump"; name = "short-bad-cluster"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }
