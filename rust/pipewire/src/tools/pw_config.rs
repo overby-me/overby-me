@@ -110,9 +110,29 @@ pub fn main(raw_args: &[String]) -> i32 {
                     command_args.push(s.to_string());
                 }
             }
+            // Long unknown: getopt prints `unrecognized option '<full>'`.
+            s if s.starts_with("--") => {
+                eprintln!("{argv0}: unrecognized option '{s}'");
+                print_help(argv0);
+                return u8::MAX as i32;
+            }
+            // Short unknown (single char): getopt prints
+            // `invalid option -- 'X'`.
+            s if s.starts_with('-') && s.len() == 2 => {
+                let ch = s.chars().nth(1).unwrap_or('?');
+                eprintln!("{argv0}: invalid option -- '{ch}'");
+                print_help(argv0);
+                return u8::MAX as i32;
+            }
+            // Mixed cluster like `-bx`: getopt processes char-by-char,
+            // erroring on the first unknown char.
+            s if s.starts_with('-') => {
+                let ch = s.chars().nth(1).unwrap_or('?');
+                eprintln!("{argv0}: invalid option -- '{ch}'");
+                print_help(argv0);
+                return u8::MAX as i32;
+            }
             _ => {
-                // Match getopt_long's "unrecognized option" message. The
-                // C tool then falls through to show_help on stdout.
                 eprintln!("{argv0}: unrecognized option '{a}'");
                 print_help(argv0);
                 return u8::MAX as i32;
