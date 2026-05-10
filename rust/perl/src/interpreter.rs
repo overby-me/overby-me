@@ -21256,6 +21256,77 @@ fn extract_branch_reset_blocks(pattern: &str) -> Vec<Vec<Vec<usize>>> {
 /// ligature codepoints so case-insensitive matching catches both
 /// forms. Skips inside `[...]` classes and respects `\…` escapes.
 /// re/regexp 1685, 1691-1694, 1712, 1715, 1716, 1724-1726.
+/// If a bracket class contains `\xDF` (sharp s) or its hex-escape
+/// form, lift the class to a `(?:[other_chars]|\xDF|ss|SS|sS|Ss)`
+/// alternation so the multi-char fold can match. Only handles the
+/// simple case where the class doesn't contain ranges or negation.
+/// re/regexp 1685.
+fn lift_xdf_class_to_alternation(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len() + 32);
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if c == '[' {
+            // Find matching `]`.
+            let mut k = i + 1;
+            // Skip leading `^` for negated class.
+            let is_neg = k < chars.len() && chars[k] == '^';
+            if is_neg {
+                k += 1;
+            }
+            // Skip leading `]` (literal `]` as first char).
+            if k < chars.len() && chars[k] == ']' {
+                k += 1;
+            }
+            while k < chars.len() && chars[k] != ']' {
+                if chars[k] == '\\' && k + 1 < chars.len() {
+                    k += 2;
+                } else {
+                    k += 1;
+                }
+            }
+            if k < chars.len() {
+                let body: String = chars[i + 1..k].iter().collect();
+                // Detect literal `\xDF` / `\x{DF}` / `\x{df}` in body.
+                let has_xdf = body.contains("\\xDF")
+                    || body.contains("\\xdf")
+                    || body.contains("\\x{DF}")
+                    || body.contains("\\x{df}");
+                if has_xdf && !is_neg && !body.contains('-') {
+                    // Strip `\xDF` references from the class body.
+                    let stripped = body
+                        .replace("\\x{DF}", "")
+                        .replace("\\x{df}", "")
+                        .replace("\\xDF", "")
+                        .replace("\\xdf", "");
+                    let cls = if stripped.is_empty() {
+                        String::new()
+                    } else {
+                        format!("[{stripped}]")
+                    };
+                    if cls.is_empty() {
+                        out.push_str("(?:\\xDF|ss|SS|sS|Ss)");
+                    } else {
+                        out.push_str(&format!("(?:{cls}|\\xDF|ss|SS|sS|Ss)"));
+                    }
+                    i = k + 1;
+                    continue;
+                }
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 /// Enumerate all ligature-substitution parses of `run` (a run of
 /// "simple" pattern chars — letters, with no regex metachars).
 /// Returns a list of alternative strings, one per parse. Each
@@ -21320,6 +21391,12 @@ fn ligature_parses(run: &str) -> Vec<String> {
 }
 
 fn expand_ascii_ligatures(pattern: &str) -> String {
+    // First pass: lift `[...]` classes containing `\xDF` (sharp s)
+    // into alternations so the multi-char fold "ss" can match.
+    // E.g. `[s\xDF]a` → `(?:[s]|\xDF|ss|SS|sS|Ss)a` so the regex
+    // engine can consume two chars for the sharp-s fold under /i.
+    // re/regexp 1685.
+    let pattern = lift_xdf_class_to_alternation(pattern);
     let chars: Vec<char> = pattern.chars().collect();
     let mut out = String::with_capacity(pattern.len() + 16);
     let mut i = 0;
