@@ -12034,6 +12034,7 @@ impl Interpreter {
         let pattern = collapse_lazy_plus_then(&pattern);
         let pattern = prune_alternations_after_prune(&pattern);
         let pattern = strip_control_verbs(&pattern);
+        let pattern = strip_quantifier_after_empty_lookaround(&pattern);
         let pattern = eliminate_zero_quantifier(&pattern);
         let pattern = strip_xx_class_whitespace(&pattern);
         let pattern = if flags.contains('i') {
@@ -12456,6 +12457,7 @@ impl Interpreter {
         let pattern = collapse_lazy_plus_then(&pattern);
         let pattern = prune_alternations_after_prune(&pattern);
         let pattern = strip_control_verbs(&pattern);
+        let pattern = strip_quantifier_after_empty_lookaround(&pattern);
         let pattern = eliminate_zero_quantifier(&pattern);
         let pattern = strip_xx_class_whitespace(&pattern);
         let pattern = if flags.contains('i') {
@@ -20593,6 +20595,63 @@ fn strip_control_verbs(pattern: &str) -> String {
             }
         }
         out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Replace `(?!)` followed by any quantifier with bare `(?!)`.
+/// fancy_regex rejects "target of repeat operator is invalid" when
+/// a lookaround has a quantifier, but `(?!)+?` / `(?!)*` etc. all
+/// reduce to the failing lookaround itself (or empty for 0-required
+/// variants). re/regexp 1070.
+fn strip_quantifier_after_empty_lookaround(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    while i < chars.len() {
+        // Detect literal `(?!)` (4 chars).
+        if i + 3 < chars.len()
+            && chars[i] == '('
+            && chars[i + 1] == '?'
+            && chars[i + 2] == '!'
+            && chars[i + 3] == ')'
+        {
+            out.push_str("(?!)");
+            let mut k = i + 4;
+            // Skip following quantifier so fancy_regex doesn't see it.
+            if k < chars.len()
+                && (chars[k] == '+' || chars[k] == '*' || chars[k] == '?')
+            {
+                k += 1;
+                if k < chars.len()
+                    && (chars[k] == '?' || chars[k] == '+')
+                {
+                    k += 1;
+                }
+            } else if k < chars.len() && chars[k] == '{' {
+                while k < chars.len() && chars[k] != '}' {
+                    k += 1;
+                }
+                if k < chars.len() {
+                    k += 1;
+                }
+                if k < chars.len()
+                    && (chars[k] == '?' || chars[k] == '+')
+                {
+                    k += 1;
+                }
+            }
+            i = k;
+            continue;
+        }
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            out.push(chars[i]);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        out.push(chars[i]);
         i += 1;
     }
     out
