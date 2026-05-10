@@ -1441,6 +1441,8 @@
       { tool = "pw-cli"; name = "pipewire-remote-bad-info"; }
       { tool = "pw-cli"; name = "pipewire-remote-bad-quit"; }
       { tool = "pw-cli"; name = "pipewire-remote-bad-listvars"; }
+      { tool = "pw-cli"; name = "connect-refused-info"; }
+      { tool = "pw-cli"; name = "connect-refused-help"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }
