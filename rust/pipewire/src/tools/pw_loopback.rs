@@ -23,6 +23,7 @@ pub fn main(args: &[String]) -> i32 {
         ("-P", "--playback", 'P'),
         ("-o", "--playback-props", 'o'),
     ];
+    let mut explicit_remote: Option<String> = None;
     let mut i = 1;
     while i < args.len() {
         let a = args[i].as_str();
@@ -49,6 +50,9 @@ pub fn main(args: &[String]) -> i32 {
             s if s.starts_with("--") && s.contains('=') => {
                 let name = s.split_once('=').map(|(n, _)| n).unwrap_or(s);
                 if required_args.iter().any(|(_, l, _)| *l == name) {
+                    if name == "--remote" {
+                        explicit_remote = Some(s["--remote=".len()..].to_string());
+                    }
                     i += 1;
                     continue;
                 }
@@ -71,6 +75,9 @@ pub fn main(args: &[String]) -> i32 {
                     print_help(argv0);
                     return u8::MAX as i32;
                 }
+                if s == "-r" || s == "--remote" {
+                    explicit_remote = Some(args[i + 1].clone());
+                }
                 i += 2;
                 continue;
             }
@@ -84,6 +91,9 @@ pub fn main(args: &[String]) -> i32 {
             s if s.starts_with('-') && !s.starts_with("--") && s.len() > 2 => {
                 let short = &s[..2];
                 if required_args.iter().any(|(sh, _, _)| *sh == short) {
+                    if short == "-r" {
+                        explicit_remote = Some(s[2..].to_string());
+                    }
                     i += 1;
                     continue;
                 }
@@ -107,9 +117,11 @@ pub fn main(args: &[String]) -> i32 {
     // on failure. (The C tool also errors when the daemon is up but the
     // module path doesn't include libpipewire-module-loopback in our
     // sandbox, hence the consistent error in both cases.)
+    let env_remote = std::env::var("PIPEWIRE_REMOTE").ok().filter(|s| !s.is_empty());
+    let chosen: Option<String> = explicit_remote.or(env_remote);
     eprintln!(
         "can't load module: {}",
-        crate::tools::common::connect_failure_msg()
+        crate::tools::common::connect_failure_msg_for(chosen.as_deref())
     );
     u8::MAX as i32
 }
