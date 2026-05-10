@@ -46,8 +46,23 @@ pub fn main(raw_args: &[String]) -> i32 {
                 }
                 break;
             }
-            "-r" | "--remote" => {
+            opt @ ("-r" | "--remote") => {
+                if i + 1 >= args.len() {
+                    if opt == "--remote" {
+                        eprintln!("{argv0}: option '--remote' requires an argument");
+                    } else {
+                        eprintln!("{argv0}: option requires an argument -- 'r'");
+                    }
+                    print_help(argv0);
+                    return u8::MAX as i32;
+                }
                 i += 1;
+            }
+            s if s.starts_with("--remote=") => {
+                // Inline value (including empty `--remote=`); accepted.
+            }
+            s if s.starts_with("-r") && s.len() > 2 => {
+                // `-r<value>` (no space) — accepted, value is consumed.
             }
             "-M" | "--force-midi" => {
                 i += 1;
