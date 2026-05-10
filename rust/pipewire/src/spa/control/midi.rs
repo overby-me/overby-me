@@ -31,13 +31,19 @@ pub struct Event {
 }
 
 pub fn read_file(path: &str) -> io::Result<(FileInfo, Vec<Event>)> {
+    // C's open_read does fread(buf, 14, 1, fp) for the MThd header,
+    // then loops reading MTrk chunks. Mirror that bounded behavior so
+    // unbounded sources like /dev/zero produce a parse error rather
+    // than hanging. We cap at 16 MiB which is well above any realistic
+    // SMF.
+    const MAX_BYTES: usize = 16 * 1024 * 1024;
     let mut bytes = Vec::new();
     if path == "-" {
         // SMF from stdin (matches C's pw-mididump open_read for "-").
-        io::stdin().read_to_end(&mut bytes)?;
+        io::Read::take(io::stdin(), MAX_BYTES as u64).read_to_end(&mut bytes)?;
     } else {
-        let mut f = File::open(path)?;
-        f.read_to_end(&mut bytes)?;
+        let f = File::open(path)?;
+        io::Read::take(f, MAX_BYTES as u64).read_to_end(&mut bytes)?;
     }
 
     parse(&bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
