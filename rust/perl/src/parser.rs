@@ -2787,6 +2787,17 @@ impl Parser {
     }
 
     fn parse_primary(&mut self) -> Expr {
+        // `...` (yada-yada) operator as an expression — dies
+        // "Unimplemented" when evaluated. base/lex 107.
+        if let Token::Ident(name) = self.tok()
+            && name == "..."
+        {
+            self.pos += 1;
+            return Expr::Call(
+                "_yada_yada".to_string(),
+                vec![Expr::StringLit("Unimplemented".to_string())],
+            );
+        }
         match self.tok().clone() {
             Token::Integer(n) => {
                 self.pos += 1;

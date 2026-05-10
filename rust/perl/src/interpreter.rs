@@ -6469,6 +6469,19 @@ impl Interpreter {
                 }
                 Value::Undef
             }
+            "_yada_yada" => {
+                // `...` operator — die "Unimplemented at FILE line LINE.\n".
+                let file = if self.current_file.is_empty() {
+                    "-e".to_string()
+                } else {
+                    self.current_file.clone()
+                };
+                let line = self.current_line;
+                let msg = format!("Unimplemented at {file} line {line}.\n");
+                self.pending_flow = Some(Flow::Die(msg.clone()));
+                self.set_global_var("@", Value::Str(msg));
+                return Value::Undef;
+            }
             "exit" => {
                 // `exit N` — terminate the program with status N (default 0).
                 let code = if args.is_empty() {
