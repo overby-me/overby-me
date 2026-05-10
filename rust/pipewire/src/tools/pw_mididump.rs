@@ -183,13 +183,9 @@ pub fn main(raw_args: &[String]) -> i32 {
         }
     };
 
-    if filename == "-" {
-        // C tool's open_read for "-" sets file=stdin then read_mthd
-        // returns -EINVAL because no header is present (empty input).
-        // Mirror the error text byte-for-byte.
-        eprintln!("error opening -: Invalid argument");
-        return 255;
-    }
+    // Note: filename == "-" reads from stdin (handled by midi::read_file).
+    // Empty stdin yields a parse error → "Invalid argument" via the
+    // generic Err path below.
 
     match midi::read_file(&filename) {
         Ok((info, events)) => {

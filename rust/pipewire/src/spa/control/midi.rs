@@ -31,9 +31,14 @@ pub struct Event {
 }
 
 pub fn read_file(path: &str) -> io::Result<(FileInfo, Vec<Event>)> {
-    let mut f = File::open(path)?;
     let mut bytes = Vec::new();
-    f.read_to_end(&mut bytes)?;
+    if path == "-" {
+        // SMF from stdin (matches C's pw-mididump open_read for "-").
+        io::stdin().read_to_end(&mut bytes)?;
+    } else {
+        let mut f = File::open(path)?;
+        f.read_to_end(&mut bytes)?;
+    }
 
     parse(&bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }

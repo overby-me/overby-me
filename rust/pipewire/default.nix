@@ -1548,6 +1548,7 @@
       { tool = "pw-config"; name = "merge-no-section-exit"; }
       { tool = "pw-mididump"; name = "truncated-header"; }
       { tool = "pw-mididump"; name = "bad-magic"; }
+      { tool = "pw-mididump"; name = "stdin-valid-smf"; }
       { tool = "pw-dump"; name = "indent-equals"; }
       { tool = "pipewire"; name = "short-c-no-arg"; }
       { tool = "pipewire"; name = "long-config-no-arg"; }
