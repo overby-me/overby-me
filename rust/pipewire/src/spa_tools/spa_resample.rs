@@ -116,18 +116,17 @@ pub fn main(raw_args: &[String]) -> i32 {
             | "--window" | "-q" | "--quality" | "-u" | "--cutoff" | "-t" | "--taps"
             | "-p" | "--param") => {
                 if i + 1 >= args.len() {
-                    let ch = match opt {
-                        "-c" | "--cpuflags" => 'c',
-                        "-r" | "--rate" => 'r',
-                        "-f" | "--format" => 'f',
-                        "-w" | "--window" => 'w',
-                        "-q" | "--quality" => 'q',
-                        "-u" | "--cutoff" => 'u',
-                        "-t" | "--taps" => 't',
-                        "-p" | "--param" => 'p',
-                        _ => '?',
-                    };
-                    eprintln!("{argv0}: option requires an argument -- '{ch}'");
+                    if opt.starts_with("--") {
+                        eprintln!("{argv0}: option '{opt}' requires an argument");
+                    } else {
+                        let ch = match opt {
+                            "-c" => 'c', "-r" => 'r', "-f" => 'f',
+                            "-w" => 'w', "-q" => 'q', "-u" => 'u',
+                            "-t" => 't', "-p" => 'p',
+                            _ => '?',
+                        };
+                        eprintln!("{argv0}: option requires an argument -- '{ch}'");
+                    }
                     eprintln!("error: unknown option '?'");
                     print_help(argv0);
                     return 1;
