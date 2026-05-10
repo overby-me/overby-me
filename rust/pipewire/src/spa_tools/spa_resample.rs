@@ -225,10 +225,11 @@ pub fn main(raw_args: &[String]) -> i32 {
 }
 
 // Returns `Some(orig)` to signal "bad rate <orig>" — only when the
-// value cannot be parsed as a full integer (C uses spa_atoi32 which
-// requires the entire string to be consumed).
+// value cannot be parsed as a full i32 (C uses spa_atoi32 which both
+// requires the entire string to be consumed AND rejects values outside
+// the i32 range).
 fn bad_rate(v: &str) -> Option<&str> {
-    if v.parse::<i64>().is_ok() {
+    if v.parse::<i32>().is_ok() {
         None
     } else {
         Some(v)
