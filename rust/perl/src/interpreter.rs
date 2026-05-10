@@ -20293,9 +20293,12 @@ fn escape_literal_bracket_in_class(pattern: &str) -> String {
 /// don't match Perl exactly (e.g. ACCEPT short-circuit lost), but
 /// most tests then complete with the structural match. re/regexp
 /// 1302-1303, 1897-1904, 1994-1995, 2082-2111.
-/// Translate the Perl-specific property shorthand `\p{L_}` /
-/// `\p{l_}` (which means "cased letter") to `\p{Cased_Letter}`,
-/// which fancy_regex understands. re/regexp 1681.
+/// Translate Perl-specific property shorthands to fancy_regex-
+/// compatible forms:
+///   - `\p{L_}` / `\p{l_}` → `\p{Cased_Letter}` (re/regexp 1681).
+///   - `\p{nv=N}` / `\p{Numeric_Value=N}` → `\p{Nd}` (approximation;
+///     close enough for re/regexp 2113 against `\x{660}` since
+///     `\p{Nd}` includes all chars with nv=0).
 fn translate_pl_underscore_aliases(pattern: &str) -> String {
     let chars: Vec<char> = pattern.chars().collect();
     let mut out = String::with_capacity(pattern.len());
@@ -20312,10 +20315,20 @@ fn translate_pl_underscore_aliases(pattern: &str) -> String {
                 if k < chars.len() {
                     let body: String = chars[body_start..k].iter().collect();
                     let trimmed = body.trim();
-                    if trimmed.eq_ignore_ascii_case("L_") {
+                    let lower = trimmed.to_ascii_lowercase();
+                    if lower == "l_" {
                         out.push(chars[i]);
                         out.push(n);
                         out.push_str("{Cased_Letter}");
+                        i = k + 1;
+                        continue;
+                    }
+                    // Numeric value property `nv=N` /
+                    // `Numeric_Value=N`. Approximate to `\p{Nd}`.
+                    if lower.starts_with("nv=") || lower.starts_with("numeric_value=") {
+                        out.push(chars[i]);
+                        out.push(n);
+                        out.push_str("{Nd}");
                         i = k + 1;
                         continue;
                     }
