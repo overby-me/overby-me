@@ -1502,6 +1502,7 @@
       { tool = "pw-cat"; name = "dsd-no-primary-mode"; }
       { tool = "pw-cat"; name = "sysex-no-primary-mode"; }
       { tool = "pw-cat"; name = "encoded-no-primary-mode"; }
+      { tool = "pw-dump"; name = "long-remote-no-arg"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }
