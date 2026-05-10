@@ -20792,10 +20792,21 @@ fn substitute_constant_runtime_regex(pattern: &str) -> String {
             }
             if depth == 0 && j < chars.len() {
                 let body: String = chars[body_start..j].iter().collect();
-                // Strip leading `return ` so `(??{return "xyz"})` is
-                // treated the same as `(??{"xyz"})`. re/regexp 1796.
+                // Strip leading `return ` and `{ stmts; return EXPR }`
+                // wrappers so `(??{return "xyz"})` and
+                // `(??{ { 1; return "xyz" } })` are treated the same as
+                // `(??{"xyz"})`. re/regexp 1796, 1804.
+                let unwrapped: String;
                 let mut trimmed = body.trim();
-                if let Some(after_return) = trimmed.strip_prefix("return") {
+                if trimmed.starts_with('{') && trimmed.ends_with('}') {
+                    let inner = trimmed[1..trimmed.len() - 1].trim();
+                    let last = inner.rsplit(';').next().unwrap_or(inner).trim();
+                    unwrapped = last
+                        .strip_prefix("return")
+                        .map(|r| r.trim_start().to_string())
+                        .unwrap_or_else(|| last.to_string());
+                    trimmed = unwrapped.as_str();
+                } else if let Some(after_return) = trimmed.strip_prefix("return") {
                     let rest = after_return.trim_start();
                     if rest.len() < after_return.len() {
                         trimmed = rest;
