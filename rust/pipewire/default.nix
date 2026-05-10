@@ -1573,6 +1573,8 @@
       { tool = "pw-encplay"; name = "missing-file"; }
       { tool = "pw-encplay"; name = "existing-bad-format"; }
       { tool = "pw-profiler"; name = "connect-fail-exit"; }
+      { tool = "pw-metadata"; name = "connect-fail-exit"; }
+      { tool = "pw-top"; name = "connect-fail-exit"; }
       { tool = "pw-dump"; name = "indent-equals"; }
       { tool = "pipewire"; name = "short-c-no-arg"; }
       { tool = "pipewire"; name = "long-config-no-arg"; }
