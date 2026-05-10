@@ -19016,9 +19016,17 @@ fn extract_branch_reset_blocks(pattern: &str) -> Vec<Vec<Vec<usize>>> {
             if let Some((is_br, mut branches, branch_groups)) = stack.pop() {
                 if is_br {
                     branches.push(branch_groups);
+                    let all_groups: Vec<usize> =
+                        branches.iter().flatten().copied().collect();
                     out.push(branches);
+                    // Propagate ALL nested groups (from every branch) to
+                    // parent so outer branch_reset sees them.
+                    if let Some(parent) = stack.last_mut() {
+                        parent.2.extend(all_groups);
+                    }
                 } else {
-                    // Propagate this group's accumulated groups to parent.
+                    // Non-branch-reset group: propagate its accumulated
+                    // groups to parent.
                     if let Some(parent) = stack.last_mut() {
                         parent.2.extend(branch_groups);
                     }
