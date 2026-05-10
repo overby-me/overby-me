@@ -106,8 +106,11 @@ pub fn main(raw_args: &[String]) -> i32 {
     }
     // C connects to the daemon and dumps the registry. Use the remote
     // path if --remote was given (so a bad remote yields the connect-fail
-    // error). Otherwise the default socket.
-    let connect = if let Some(name) = &remote {
+    // error). Otherwise PIPEWIRE_REMOTE picks up the env-supplied name,
+    // and falls back to the default socket.
+    let env_remote = std::env::var("PIPEWIRE_REMOTE").ok();
+    let chosen = remote.clone().or(env_remote);
+    let connect = if let Some(name) = &chosen {
         let runtime = std::env::var("PIPEWIRE_RUNTIME_DIR")
             .or_else(|_| std::env::var("XDG_RUNTIME_DIR"))
             .unwrap_or_else(|_| "/tmp".to_string());

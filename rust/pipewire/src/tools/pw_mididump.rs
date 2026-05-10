@@ -158,8 +158,18 @@ pub fn main(raw_args: &[String]) -> i32 {
             // Live-filter mode connects to the daemon. Without one,
             // C's pw_context_connect fails and pw-mididump prints
             // "can't connect" then a segfault on null deref. We just
-            // emit the error.
-            match crate::pipewire_lib::client::Client::connect_default() {
+            // emit the error. PIPEWIRE_REMOTE supplies the socket name.
+            let env_remote = std::env::var("PIPEWIRE_REMOTE").ok();
+            let connect = if let Some(name) = &env_remote {
+                let runtime = std::env::var("PIPEWIRE_RUNTIME_DIR")
+                    .or_else(|_| std::env::var("XDG_RUNTIME_DIR"))
+                    .unwrap_or_else(|_| "/tmp".to_string());
+                let path = std::path::PathBuf::from(runtime).join(name);
+                crate::pipewire_lib::client::Client::connect_path(&path)
+            } else {
+                crate::pipewire_lib::client::Client::connect_default()
+            };
+            match connect {
                 Ok(_) => {
                     // Daemon up; we don't yet stream events. Exit 0
                     // silently to avoid spurious hangs on host machines.
