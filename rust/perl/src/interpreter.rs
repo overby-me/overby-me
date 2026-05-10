@@ -11883,6 +11883,30 @@ impl Interpreter {
                             group_strs.push(None);
                         }
                     }
+                    // Capture-reset post-process: for each group whose
+                    // ancestor is `*`/`+`/`{N,}`-quantified, if the
+                    // group's match span sits BEFORE the ancestor's
+                    // last-iter span (i.e. group is from an earlier
+                    // iteration), clear it. fancy_regex preserves
+                    // captures across iterations; reference perl
+                    // resets them. re/regexp 481, 967-968, 2140+.
+                    let parents = extract_quantified_parents(&fancy_pat);
+                    for idx in 1..group_starts.len() {
+                        let parent = parents.get(idx).copied().unwrap_or(0);
+                        if parent == 0 {
+                            continue;
+                        }
+                        let (Some(child_start), Some(parent_start)) =
+                            (group_starts[idx], group_starts.get(parent).copied().flatten())
+                        else {
+                            continue;
+                        };
+                        if child_start < parent_start {
+                            group_starts[idx] = None;
+                            group_ends[idx] = None;
+                            group_strs[idx] = None;
+                        }
+                    }
                     let named: Vec<(String, Option<String>)> =
                         named_captures_from_pattern(&fancy_pat, &group_strs);
                     self.populate_match_vars(
@@ -17033,6 +17057,147 @@ fn expand_ascii_case_insensitive(pattern: &str) -> String {
         i += 1;
     }
     out
+}
+
+/// Walk `pattern` and return, for each capture group index, the
+/// index of its nearest enclosing `+`/`*`/`{N,…}`-quantified capture
+/// group ancestor (or 0 if none). Used to post-process captures so an
+/// inner group whose match span sits BEFORE its quantified parent's
+/// last iteration gets reset to `None`. Reference perl resets such
+/// groups; fancy_regex preserves them. re/regexp 481, 967-968, 2140+.
+fn extract_quantified_parents(pattern: &str) -> Vec<usize> {
+    let chars: Vec<char> = pattern.chars().collect();
+    // First pass: assign each `(` a group index (or 0 for non-capturing)
+    // and find each `)`'s match.
+    let mut group_indices: Vec<Option<usize>> = vec![None; chars.len()];
+    let mut close_of_open: Vec<Option<usize>> = vec![None; chars.len()];
+    let mut open_of_close: Vec<Option<usize>> = vec![None; chars.len()];
+    let mut group_count: usize = 0;
+    let mut stack: Vec<usize> = Vec::new();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            i += 1;
+            continue;
+        }
+        if !in_class && c == '(' {
+            let is_named_angle = i + 3 < chars.len()
+                && chars[i + 1] == '?'
+                && chars[i + 2] == '<'
+                && chars[i + 3] != '='
+                && chars[i + 3] != '!';
+            let is_named_p = i + 3 < chars.len()
+                && chars[i + 1] == '?'
+                && chars[i + 2] == 'P'
+                && chars[i + 3] == '<';
+            let is_named_quote = i + 2 < chars.len()
+                && chars[i + 1] == '?'
+                && chars[i + 2] == '\'';
+            let is_capturing = !(i + 1 < chars.len() && chars[i + 1] == '?')
+                || is_named_angle
+                || is_named_p
+                || is_named_quote;
+            if is_capturing {
+                group_count += 1;
+                group_indices[i] = Some(group_count);
+            } else {
+                group_indices[i] = Some(0);
+            }
+            stack.push(i);
+            i += 1;
+            continue;
+        }
+        if !in_class && c == ')' {
+            if let Some(open_pos) = stack.pop() {
+                close_of_open[open_pos] = Some(i);
+                open_of_close[i] = Some(open_pos);
+            }
+            i += 1;
+            continue;
+        }
+        i += 1;
+    }
+    // Second pass: for each capture group, find the nearest enclosing
+    // group whose `)` is followed by a `*`/`+`/`{N,…}` quantifier.
+    let mut parents: Vec<usize> = vec![0; group_count + 1];
+    for (open_pos, group_opt) in group_indices.iter().enumerate() {
+        let Some(idx) = (*group_opt).filter(|&v| v > 0) else {
+            continue;
+        };
+        // Walk ancestor opens leftwards through close_of_open data.
+        // We can identify ancestors by stacking again: rebuild a simple
+        // ancestor list by walking the pattern up to `open_pos` and
+        // tracking active `(`s.
+        let mut ancestors: Vec<usize> = Vec::new();
+        let mut depth_stack: Vec<usize> = Vec::new();
+        let mut in_class2 = false;
+        let mut j = 0;
+        while j < open_pos {
+            let cc = chars[j];
+            if cc == '\\' && j + 1 < chars.len() {
+                j += 2;
+                continue;
+            }
+            if !in_class2 && cc == '[' {
+                in_class2 = true;
+                j += 1;
+                continue;
+            }
+            if in_class2 && cc == ']' {
+                in_class2 = false;
+                j += 1;
+                continue;
+            }
+            if !in_class2 && cc == '(' {
+                depth_stack.push(j);
+            } else if !in_class2 && cc == ')' {
+                depth_stack.pop();
+            }
+            j += 1;
+        }
+        ancestors.extend(depth_stack);
+        for ancestor_open in ancestors.iter().rev() {
+            let Some(g_idx) = group_indices[*ancestor_open] else {
+                continue;
+            };
+            if g_idx == 0 {
+                continue;
+            }
+            let Some(close) = close_of_open[*ancestor_open] else {
+                continue;
+            };
+            let after = close + 1;
+            let is_quantified = after < chars.len()
+                && (chars[after] == '+'
+                    || chars[after] == '*'
+                    || (chars[after] == '{' && {
+                        let mut k = after + 1;
+                        while k < chars.len() && chars[k] != '}' {
+                            k += 1;
+                        }
+                        let body: String =
+                            chars[after + 1..k.min(chars.len())].iter().collect();
+                        body.contains(',')
+                    }));
+            if is_quantified {
+                parents[idx] = g_idx;
+                break;
+            }
+        }
+    }
+    parents
 }
 
 /// Translate Perl branch-reset groups `(?|…)` into plain
