@@ -64,11 +64,16 @@ pub fn main(raw_args: &[String]) -> i32 {
             s if s.starts_with("-p") && s.len() > 2 => {
                 opt_prefix = s[2..].to_string();
             }
-            "-n" | "--name" => {
+            opt @ ("-n" | "--name") => {
                 i += 1;
                 if let Some(v) = args.get(i) {
                     opt_name = v.clone();
                 } else {
+                    if opt == "--name" {
+                        eprintln!("{argv0}: option '--name' requires an argument");
+                    } else {
+                        eprintln!("{argv0}: option requires an argument -- 'n'");
+                    }
                     print_help(argv0);
                     return u8::MAX as i32;
                 }
@@ -76,11 +81,16 @@ pub fn main(raw_args: &[String]) -> i32 {
             s if s.starts_with("--name=") => {
                 opt_name = s["--name=".len()..].to_string();
             }
-            "-p" | "--prefix" => {
+            opt @ ("-p" | "--prefix") => {
                 i += 1;
                 if let Some(v) = args.get(i) {
                     opt_prefix = v.clone();
                 } else {
+                    if opt == "--prefix" {
+                        eprintln!("{argv0}: option '--prefix' requires an argument");
+                    } else {
+                        eprintln!("{argv0}: option requires an argument -- 'p'");
+                    }
                     print_help(argv0);
                     return u8::MAX as i32;
                 }

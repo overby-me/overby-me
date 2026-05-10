@@ -1486,6 +1486,10 @@
       { tool = "pw-mon"; name = "long-remote-no-arg"; }
       { tool = "pw-mididump"; name = "long-remote-no-arg"; }
       { tool = "pw-mididump"; name = "short-remote-no-arg"; }
+      { tool = "pw-config"; name = "long-name-no-arg"; }
+      { tool = "pw-config"; name = "short-name-no-arg"; }
+      { tool = "pw-config"; name = "long-prefix-no-arg"; }
+      { tool = "pw-config"; name = "short-prefix-no-arg"; }
       { tool = "pw-cli"; name = "connect-refused"; }
       { tool = "pw-link"; name = "connect-refused"; }
       { tool = "pw-mon"; name = "connect-refused"; }
