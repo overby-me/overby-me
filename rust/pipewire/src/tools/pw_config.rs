@@ -173,9 +173,11 @@ pub fn main(raw_args: &[String]) -> i32 {
         }
         "merge" => {
             // Match C's behavior when no section argument is provided.
+            // C maps -EINVAL → 234 (= 256 - 22) via main's truncated
+            // negative-errno return.
             if command_args.is_empty() {
                 eprintln!("merge requires a section");
-                return 1;
+                return 234;
             }
             // Section-aware merge is Phase 2; without a real merge, the
             // body is empty. Fall through to the assemble.serialize

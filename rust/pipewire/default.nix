@@ -1545,6 +1545,7 @@
       { tool = "pw-dsdplay"; name = "missing-file"; }
       { tool = "pw-v4l2"; name = "help"; }
       { tool = "pw-v4l2"; name = "illegal-flag"; }
+      { tool = "pw-config"; name = "merge-no-section-exit"; }
       { tool = "spa-acp-tool"; name = "bogus-flag-exit"; }
       { tool = "spa-inspect"; name = "no-args-exit"; }
       { tool = "spa-monitor"; name = "no-args-exit"; }
