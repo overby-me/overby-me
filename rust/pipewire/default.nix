@@ -1683,11 +1683,22 @@
         tool = "pw-mididump";
         name = "basic";
       }
-      # Note: controllers/tempo-meta/text-meta/running-status fixtures
-      # use bash command-substitution which strips NUL bytes (e.g.
-      # `body=$(printf '\x00...')`), so the .mid file ends up
-      # truncated and parsing fails for both REF and RUST. The other
-      # SMF fixtures avoid this by writing bytes directly via printf.
+      {
+        tool = "pw-mididump";
+        name = "controllers";
+      }
+      {
+        tool = "pw-mididump";
+        name = "tempo-meta";
+      }
+      {
+        tool = "pw-mididump";
+        name = "text-meta";
+      }
+      {
+        tool = "pw-mididump";
+        name = "running-status";
+      }
       {
         tool = "pw-mididump";
         name = "bad-file";

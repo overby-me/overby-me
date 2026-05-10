@@ -1,23 +1,18 @@
-# SMF using running status: status byte 0x90 (NoteOn ch 0) is sent once,
-# then subsequent events omit it. The parser must apply the running status.
+# SMF using running status: status byte 0x90 (NoteOn ch 0) sent once,
+# subsequent events omit it.
 printf '\x4d\x54\x68\x64\x00\x00\x00\x06\x00\x00\x00\x01\x01\xe0' > "$TMPDIR/in.mid"
 
 # Track body:
-# - delta 0, status 0x90, note 60, vel 100
-# - delta 120, no status (running), note 64, vel 100  (NoteOn ch 0 E4 vel 100)
-# - delta 0, no status (running), note 60, vel 0  (NoteOn ch 0 C4 vel 0 — equivalent NoteOff)
-# - delta 0, EndOfTrack
-body=$(printf '\x00\x90\x3c\x64')
-body="$body$(printf '\x78\x40\x64')"
-body="$body$(printf '\x00\x3c\x00')"
-body="$body$(printf '\x00\xff\x2f\x00')"
-
-len=$(printf "%s" "$body" | wc -c)
-printf '\x4d\x54\x72\x6b' >> "$TMPDIR/in.mid"
-printf "$(printf '\\x%02x\\x%02x\\x%02x\\x%02x' \
-  $(( (len >> 24) & 0xff )) $(( (len >> 16) & 0xff )) \
-  $(( (len >>  8) & 0xff )) $(( (len      ) & 0xff )))" >> "$TMPDIR/in.mid"
-printf "%s" "$body" >> "$TMPDIR/in.mid"
+#   delta=0, 0x90 60 100   = 4 bytes (NoteOn full)
+#   delta=120, 64 100      = 3 bytes (running status)
+#   delta=0, 60 0          = 3 bytes (running status)
+#   delta=0, EndOfTrack    = 4 bytes
+# Total = 14 bytes (0x0e).
+printf '\x4d\x54\x72\x6b\x00\x00\x00\x0e' >> "$TMPDIR/in.mid"
+printf '\x00\x90\x3c\x64' >> "$TMPDIR/in.mid"
+printf '\x78\x40\x64'     >> "$TMPDIR/in.mid"
+printf '\x00\x3c\x00'     >> "$TMPDIR/in.mid"
+printf '\x00\xff\x2f\x00' >> "$TMPDIR/in.mid"
 
 "$REF" "$TMPDIR/in.mid" > "$TMPDIR/expected" 2>&1
 "$RUST" "$TMPDIR/in.mid" > "$TMPDIR/actual" 2>&1
