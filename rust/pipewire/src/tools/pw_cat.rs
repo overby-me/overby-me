@@ -65,6 +65,7 @@ pub fn main(raw_args: &[String]) -> i32 {
     let known_short_no_arg = ['v', 'p', 'r', 'm', 'd', 'o', 's', 'c', 'a'];
 
     let mut mode_set = false;
+    let mut raw_mode = false;
     let mut positional_count: usize = 0;
     let mut positional_files: Vec<String> = Vec::new();
     // Track --rate / --channels for C's atoi-then-validate flow:
@@ -159,6 +160,9 @@ pub fn main(raw_args: &[String]) -> i32 {
                     if matches!(name, "--playback" | "--record") {
                         mode_set = true;
                     }
+                    if matches!(name, "--raw") {
+                        raw_mode = true;
+                    }
                 } else if let Some(&long) = long_required.iter().find(|&&l| l == name) {
                     if has_inline {
                         // --foo=val (consumed inline). Capture the value
@@ -199,6 +203,9 @@ pub fn main(raw_args: &[String]) -> i32 {
                     // primary playback/record requirement on their own.
                     if matches!(ch, 'p' | 'r') {
                         mode_set = true;
+                    }
+                    if ch == 'a' {
+                        raw_mode = true;
                     }
                 } else if let Some(&(_, name)) = short_required.iter().find(|(c, _)| *c == ch) {
                     if i + 1 >= args.len() {
@@ -241,6 +248,9 @@ pub fn main(raw_args: &[String]) -> i32 {
                 // clusters in pw-cat). Only -p/-r are primary modes.
                 if matches!(ch, 'p' | 'r') {
                     mode_set = true;
+                }
+                if ch == 'a' {
+                    raw_mode = true;
                 }
             }
             _ => {}
@@ -296,7 +306,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                 // tool uses a different file-IO library and has a slightly
                 // different error template.
                 let file = positional_files.first().map(String::as_str).unwrap_or("");
-                emit_open_error(argv0, file);
+                emit_open_error(argv0, file, raw_mode);
             }
             Err(_) => {
                 eprintln!(
@@ -311,7 +321,7 @@ pub fn main(raw_args: &[String]) -> i32 {
     0
 }
 
-fn emit_open_error(argv0: &str, file: &str) {
+fn emit_open_error(argv0: &str, file: &str, raw_mode: bool) {
     // Probe what the open error would have been. C uses the strerror of
     // open/fopen — ENOENT, EACCES, EISDIR, ... — followed by a per-tool
     // "error: open failed:" line. We re-derive the strerror by inspecting
@@ -355,6 +365,15 @@ fn emit_open_error(argv0: &str, file: &str) {
         }
     };
     let mut emitted_help = false;
+    if raw_mode {
+        // RAW mode (--raw / -a): C uses fopen+read directly without
+        // sndfile. Error format: "raw: can't open file '<path>': <err>"
+        let err = normalize_midi(strerror_for(file, is_record));
+        eprintln!("raw: can't open file '{file}': {err}");
+        eprintln!("error: open failed: {err}");
+        print_help(argv0);
+        return;
+    }
     match argv0_basename {
         // MIDI-mode tools.
         s if s.contains("midiplay") || s.contains("midirecord")

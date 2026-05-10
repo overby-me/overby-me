@@ -1563,6 +1563,7 @@
       { tool = "pw-dot"; name = "output-empty"; }
       { tool = "pw-dot"; name = "json-empty"; }
       { tool = "pw-dot"; name = "json-missing"; }
+      { tool = "pw-cat"; name = "raw-mode-missing-file"; }
       { tool = "pw-dump"; name = "indent-equals"; }
       { tool = "pipewire"; name = "short-c-no-arg"; }
       { tool = "pipewire"; name = "long-config-no-arg"; }
