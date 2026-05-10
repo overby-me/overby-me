@@ -145,17 +145,19 @@ pub fn main(raw_args: &[String]) -> i32 {
     let force_connect = remote.is_some() || env_remote.is_some();
     let connect_remote = remote.clone().or(env_remote);
     if positional.is_empty() {
-        if force_connect {
-            match open_client(connect_remote.as_deref(), "pw-cli") {
-                Ok(_) => 0,
-                Err(e) => {
-                    print_open_error(argv0, &e);
-                    u8::MAX as i32
-                }
+        // Bare `pw-cli` (no command, no flags): C attempts to connect to
+        // the daemon and enters its REPL. We don't have a REPL yet, but
+        // we can still mirror the connect-fail path. If `force_connect`
+        // is set OR the default daemon isn't reachable, the connect-fail
+        // error is what users see; treat both branches the same. C exits
+        // 0 from the connect-fail path (the error is printed but it's a
+        // "soft" failure since the REPL would otherwise have continued).
+        match open_client(connect_remote.as_deref(), "pw-cli") {
+            Ok(_) => 0,
+            Err(e) => {
+                print_open_error(argv0, &e);
+                if force_connect { u8::MAX as i32 } else { 0 }
             }
-        } else {
-            print_help(argv0);
-            0
         }
     } else {
         if force_connect {
