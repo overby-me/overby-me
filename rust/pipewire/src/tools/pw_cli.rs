@@ -56,9 +56,13 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_help(argv0);
                 return 0;
             }
-            "-r" | "--remote" => {
+            opt @ ("-r" | "--remote") => {
                 if i + 1 >= args.len() {
-                    eprintln!("{argv0}: option requires an argument -- 'r'");
+                    if opt == "--remote" {
+                        eprintln!("{argv0}: option '--remote' requires an argument");
+                    } else {
+                        eprintln!("{argv0}: option requires an argument -- 'r'");
+                    }
                     print_help(argv0);
                     return 0;
                 }
