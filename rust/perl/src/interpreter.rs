@@ -20784,6 +20784,12 @@ fn perl_dollar_anchor(pattern: &str, multiline: bool) -> String {
     let mut out = String::new();
     let mut i = 0;
     let mut in_class = false;
+    // Stack of `(m_in_scope, was_capturing_group_start_index)` entries
+    // — pushed when entering `(...`, popped at `)`. The boolean is the
+    // /m flag state for the contents of that group, which inherits the
+    // enclosing scope unless an inline `(?-m:...)` / `(?m:...)` flag
+    // group overrides it. re/regexp 1942.
+    let mut scope_m: Vec<bool> = vec![multiline];
     while i < chars.len() {
         let c = chars[i];
         if c == '\\' && i + 1 < chars.len() {
@@ -20824,7 +20830,59 @@ fn perl_dollar_anchor(pattern: &str, multiline: bool) -> String {
             i += 1;
             continue;
         }
-        if multiline {
+        // Track scope on `(...)` boundaries so inline `(?-m:...)` /
+        // `(?m:...)` flag groups override the outer /m state for their
+        // contents. fancy_regex still applies the flags itself; we just
+        // need to know whether to pre-translate `^`/`$` inside.
+        if !in_class && c == '(' {
+            let parent_m = *scope_m.last().unwrap_or(&multiline);
+            let mut new_m = parent_m;
+            // Look for inline flag group form `(?<flags>:...)` /
+            // `(?<flags>)` (positional flags only — full flag groups end
+            // with `:` or `)`). Walk past `?` and any `[a-zA-Z-]` chars.
+            if i + 1 < chars.len() && chars[i + 1] == '?' {
+                let mut k = i + 2;
+                let mut has_neg = false;
+                let mut saw_m = false;
+                let mut saw_minus_m = false;
+                while k < chars.len()
+                    && (chars[k].is_ascii_alphabetic() || chars[k] == '-')
+                {
+                    if chars[k] == '-' {
+                        has_neg = true;
+                    } else if chars[k] == 'm' {
+                        if has_neg {
+                            saw_minus_m = true;
+                        } else {
+                            saw_m = true;
+                        }
+                    }
+                    k += 1;
+                }
+                if k < chars.len() && (chars[k] == ':' || chars[k] == ')') {
+                    if saw_m {
+                        new_m = true;
+                    }
+                    if saw_minus_m {
+                        new_m = false;
+                    }
+                }
+            }
+            scope_m.push(new_m);
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class && c == ')' {
+            if scope_m.len() > 1 {
+                scope_m.pop();
+            }
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        let current_multiline = *scope_m.last().unwrap_or(&multiline);
+        if current_multiline {
             // In /m mode rust regex's `^` matches at end-of-string-
             // after-final-newline; reference perl does not. Replace
             // bare `^` with `(?:\A|(?<=\n))(?!\z)` to exclude that
