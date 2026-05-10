@@ -1560,6 +1560,9 @@
       { tool = "pw-top"; name = "long-remote-no-arg"; }
       { tool = "pw-reserve"; name = "long-name-no-arg"; }
       { tool = "spa-acp-tool"; name = "long-properties-no-arg"; }
+      { tool = "pw-dot"; name = "output-empty"; }
+      { tool = "pw-dot"; name = "json-empty"; }
+      { tool = "pw-dot"; name = "json-missing"; }
       { tool = "pw-dump"; name = "indent-equals"; }
       { tool = "pipewire"; name = "short-c-no-arg"; }
       { tool = "pipewire"; name = "long-config-no-arg"; }

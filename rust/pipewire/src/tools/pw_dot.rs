@@ -88,9 +88,23 @@ pub fn main(raw_args: &[String]) -> i32 {
                 let val = &s["--remote=".len()..];
                 println!("set remote to {val}");
             }
+            s if s.starts_with("--output=") => {
+                let val = &s["--output=".len()..];
+                output = Some(val.to_string());
+            }
+            s if s.starts_with("--json=") => {
+                let val = &s["--json=".len()..];
+                json_input = Some(val.to_string());
+            }
             s if s.starts_with("-r") && s.len() > 2 => {
                 let val = &s[2..];
                 println!("set remote to {val}");
+            }
+            s if s.starts_with("-o") && s.len() > 2 => {
+                output = Some(s[2..].to_string());
+            }
+            s if s.starts_with("-j") && s.len() > 2 => {
+                json_input = Some(s[2..].to_string());
             }
             "-a" | "--all" | "-s" | "--smart" | "-d" | "--detail" | "-L"
             | "--lr" | "-9" | "--90" => {}
@@ -121,6 +135,13 @@ pub fn main(raw_args: &[String]) -> i32 {
         i += 1;
     }
 
+    // If -o given, announce it before opening anything (C does this in
+    // option parsing; with empty value the announce still fires).
+    if let Some(out_path) = output.as_deref() {
+        if out_path != "-" {
+            println!("set output file {out_path}");
+        }
+    }
     if let Some(path) = json_input {
         // C tool prints `Using JSON file <path> as input` on stdout when
         // -j is used.
@@ -128,7 +149,13 @@ pub fn main(raw_args: &[String]) -> i32 {
         let content = match std::fs::read_to_string(&path) {
             Ok(s) => s,
             Err(_) => {
-                eprintln!("can't open JSON file: {path}");
+                // C uses fopen+strerror: "error opening file '<path>': <strerror>".
+                let strerror = if path.is_empty() || !std::path::Path::new(&path).exists() {
+                    "No such file or directory"
+                } else {
+                    "Permission denied"
+                };
+                eprintln!("error opening file '{path}': {strerror}");
                 return 1;
             }
         };
@@ -139,28 +166,44 @@ pub fn main(raw_args: &[String]) -> i32 {
             println!("set output file -");
             print_empty_graph(&mut std::io::stdout()).ok();
         } else {
-            // Default: write to pw.dot file. Print "set output file <path>"
-            // when -o is given explicitly.
-            if output.is_some() {
-                println!("set output file {dest}");
-            }
             if let Ok(mut f) = std::fs::File::create(dest) {
                 use std::io::Write;
                 let mut buf = Vec::new();
                 print_empty_graph(&mut buf).ok();
                 let _ = f.write_all(&buf);
+            } else {
+                eprintln!("open error: could not open {dest} for writing");
             }
         }
         return 0;
     }
+    // Without -j, C connects to the daemon first. Only if that succeeds
+    // does it attempt to open the output file. So an unreachable daemon
+    // hides the open-error.
 
     // Without -j, C connects to the daemon to collect the graph. Try
-    // connecting; if it fails, emit the same error C does.
-    match crate::pipewire_lib::client::Client::connect_default() {
+    // connecting; if it fails, emit the same error C does. PIPEWIRE_REMOTE
+    // env supplies the socket name when -r wasn't given.
+    let env_remote = std::env::var("PIPEWIRE_REMOTE").ok();
+    let connect = if let Some(name) = &env_remote {
+        let runtime = std::env::var("PIPEWIRE_RUNTIME_DIR")
+            .or_else(|_| std::env::var("XDG_RUNTIME_DIR"))
+            .unwrap_or_else(|_| "/tmp".to_string());
+        let path = std::path::PathBuf::from(runtime).join(name);
+        crate::pipewire_lib::client::Client::connect_path(&path)
+    } else {
+        crate::pipewire_lib::client::Client::connect_default()
+    };
+    match connect {
         Ok(_) => {
-            // Successful connect — but we don't actually walk the graph,
-            // so emit nothing (matches C's behavior on graceful idle exit
-            // when the daemon has no nodes).
+            // Successful connect — try opening the output file (if -o
+            // given with an unwritable path, this is where C errors).
+            if let Some(out_path) = output.as_deref() {
+                if out_path != "-" && std::fs::File::create(out_path).is_err() {
+                    eprintln!("open error: could not open {out_path} for writing");
+                    return 0;
+                }
+            }
             0
         }
         Err(_) => {

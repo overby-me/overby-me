@@ -15,7 +15,7 @@ Nix checks comparing rust-pipewire output against the reference C
 
 ## Current Status
 
-**729/729 Nix-level tests passing**, plus 43 internal Rust unit tests:
+**732/732 Nix-level tests passing**, plus 43 internal Rust unit tests:
 
 - 25 byte-identical comparison tests (`spa-json-dump`, every `pw-*`/`pipewire`
   tool's `--help` output)
