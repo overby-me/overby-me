@@ -79,6 +79,17 @@ pub fn main(raw_args: &[String]) -> i32 {
                 print_commands();
                 return 0;
             }
+            // Mixed short cluster like `-bx`: getopt errors on first
+            // unknown char.
+            s if s.starts_with('-') && !s.starts_with("--") && s.len() > 2 => {
+                let ch = s.chars().nth(1).unwrap_or('?');
+                eprintln!("{argv0}: invalid option -- '{ch}'");
+                eprintln!("error: unknown option '?'");
+                print_options(argv0);
+                println!("Available commands:");
+                print_commands();
+                return 0;
+            }
             // Positional: first is command, rest are command args.
             s => {
                 if command.is_none() {
