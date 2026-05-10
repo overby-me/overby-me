@@ -11723,6 +11723,10 @@ impl Interpreter {
         let (pattern, flags) = unwrap_qr(&pattern, flags);
         let pattern = perl_backslash_n(&pattern);
         let pattern = strip_regex_comments(&pattern);
+        // Detect `(?a)` / `(?aa)` inline-flag groups before they get
+        // stripped — POSIX class translation needs to know whether
+        // /a is in scope. Re/regexp 679, 685, 688.
+        let inline_ascii = pattern_has_inline_ascii_flag(&pattern);
         // Rewrite conditional groups BEFORE extracting code blocks
         // so `(?(?{0})...)` / `(?(?{1})...)` can see the code-block
         // body and pick the right branch.
@@ -11748,6 +11752,9 @@ impl Interpreter {
         // 2018-2028.
         let xx = flags.matches('x').count() >= 2;
         let aa = flags.matches('a').count() >= 2;
+        // Pattern uses ASCII-restricted POSIX semantics if outer `/a`
+        // is set OR an inline `(?a)` flag was detected.
+        let ascii_posix = flags.contains('a') || inline_ascii;
         let needs_fancy = pattern_uses_atomic_or_possessive(&pattern)
             || (flags.contains('x') && !xx);
         let pattern = translate_branch_reset_groups(&pattern);
@@ -11770,7 +11777,7 @@ impl Interpreter {
         let pattern = strip_unicode_boundary_types(&pattern);
         let pattern = translate_octal_escapes(&pattern);
         let pattern = escape_literal_bracket_in_class(&pattern);
-        let pattern = translate_posix_classes(&pattern);
+        let pattern = translate_posix_classes(&pattern, ascii_posix);
         let pattern = translate_g_anchor(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
@@ -11800,7 +11807,7 @@ impl Interpreter {
             let p = strip_unicode_boundary_types(&p);
             let p = translate_octal_escapes(&p);
             let p = escape_literal_bracket_in_class(&p);
-            let p = translate_posix_classes(&p);
+            let p = translate_posix_classes(&p, ascii_posix);
             let p = translate_g_anchor(&p);
             let p = perl_dollar_anchor(&p, flags.contains('m'));
             if !prefix.is_empty() {
@@ -11970,6 +11977,8 @@ impl Interpreter {
         let (pattern, flags) = unwrap_qr(&pattern, flags);
         let pattern = perl_backslash_n(&pattern);
         let pattern = strip_regex_comments(&pattern);
+        let inline_ascii = pattern_has_inline_ascii_flag(&pattern);
+        let ascii_posix = flags.contains('a') || inline_ascii;
         // Rewrite conditional groups BEFORE extracting code blocks
         // so `(?(?{0})...)` / `(?(?{1})...)` can see the code-block
         // body and pick the right branch.
@@ -11987,7 +11996,7 @@ impl Interpreter {
         let pattern = strip_unicode_boundary_types(&pattern);
         let pattern = translate_octal_escapes(&pattern);
         let pattern = escape_literal_bracket_in_class(&pattern);
-        let pattern = translate_posix_classes(&pattern);
+        let pattern = translate_posix_classes(&pattern, ascii_posix);
         let pattern = translate_g_anchor(&pattern);
         let pattern = perl_dollar_anchor(&pattern, flags.contains('m'));
         let mut prefix = String::new();
@@ -17832,11 +17841,54 @@ fn rewrite_nonexistent_group_conditionals(pattern: &str) -> String {
 /// `\p{…}` / `\P{…}` form. fancy_regex / rust regex's bare POSIX
 /// classes are ASCII-only; Perl's are Unicode-wide. re/regexp tests
 /// 1742-1756.
-fn translate_posix_classes(pattern: &str) -> String {
+/// Walk `pattern` looking for an inline `(?a)` / `(?aa)` flag (no
+/// body — `(?aa-i)` etc. count too). Returns true if found.
+fn pattern_has_inline_ascii_flag(pattern: &str) -> bool {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+        } else if in_class && c == ']' {
+            in_class = false;
+        }
+        if !in_class && c == '(' && i + 1 < chars.len() && chars[i + 1] == '?' {
+            let mut k = i + 2;
+            while k < chars.len()
+                && (chars[k].is_ascii_alphabetic() || chars[k] == '-')
+            {
+                if chars[k] == 'a' {
+                    return true;
+                }
+                k += 1;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+fn translate_posix_classes(pattern: &str, ascii_only_outer: bool) -> String {
     let chars: Vec<char> = pattern.chars().collect();
     let mut out = String::with_capacity(pattern.len());
     let mut i = 0;
     let mut in_class = false;
+    // Track whether a `(?a)` / `(?aa)` inline flag is in scope.
+    // Scope starts at the flag and runs to the next `)` at depth 0
+    // (or end of pattern). Reset when we leave an enclosing group
+    // that contained the flag — best-effort: we just track a depth
+    // and unset on `)` at the recorded depth. For tests 679, 685,
+    // 688 (`((?a)[[:^alnum:]]+)`), the `(?a)` applies to the rest
+    // of the enclosing group.
+    let mut ascii_only = ascii_only_outer;
+    let mut depth: i32 = 0;
+    let mut ascii_set_depth: i32 = -1;
     while i < chars.len() {
         let c = chars[i];
         if c == '\\' && i + 1 < chars.len() {
@@ -17844,6 +17896,35 @@ fn translate_posix_classes(pattern: &str) -> String {
             out.push(chars[i + 1]);
             i += 2;
             continue;
+        }
+        if !in_class && c == '(' {
+            depth += 1;
+            // Detect `(?a)` / `(?aa)` flag-only group (no body, ends
+            // with `)`). Must be `(?` + only a/i/s/m/x/-/etc. chars
+            // + `)`.
+            if i + 2 < chars.len() && chars[i + 1] == '?' {
+                let mut k = i + 2;
+                let mut saw_a = false;
+                while k < chars.len()
+                    && (chars[k].is_ascii_alphabetic() || chars[k] == '-')
+                {
+                    if chars[k] == 'a' {
+                        saw_a = true;
+                    }
+                    k += 1;
+                }
+                if k < chars.len() && chars[k] == ')' && saw_a {
+                    ascii_only = true;
+                    ascii_set_depth = depth - 1; // unset when leaving outer
+                }
+            }
+        }
+        if !in_class && c == ')' {
+            if depth - 1 <= ascii_set_depth {
+                ascii_only = false;
+                ascii_set_depth = -1;
+            }
+            depth -= 1;
         }
         if !in_class && c == '[' {
             in_class = true;
@@ -17869,59 +17950,77 @@ fn translate_posix_classes(pattern: &str) -> String {
             }
             if k + 1 < chars.len() {
                 let name: String = chars[name_start..k].iter().collect();
-                let prop: Option<&str> = match name.as_str() {
-                    "alpha" => Some("Alphabetic"),
-                    "alnum" => None, // emit composite below
-                    "digit" => Some("Nd"),
-                    "lower" => Some("Lowercase"),
-                    "upper" => Some("Uppercase"),
-                    "space" => Some("Whitespace"),
-                    "blank" => None, // composite
-                    "cntrl" => Some("Cc"),
-                    "print" => None, // composite
-                    "graph" => None, // composite
-                    "punct" => Some("P"),
-                    "word" => None, // composite
-                    "xdigit" => None, // ascii hex digits
-                    "ascii" => None,
-                    _ => None,
-                };
-                let replacement: Option<String> = if let Some(p) = prop {
-                    Some(if negate {
-                        format!("\\P{{{p}}}")
-                    } else {
-                        format!("\\p{{{p}}}")
-                    })
-                } else {
-                    let pos = match name.as_str() {
-                        "alnum" => Some("\\p{Alphabetic}\\p{Nd}"),
-                        "blank" => Some("\\t\\p{Zs}"),
-                        "print" => {
-                            Some("\\p{Alphabetic}\\p{Nd}\\p{P}\\p{S}\\p{Zs}")
-                        }
-                        "graph" => Some("\\p{Alphabetic}\\p{Nd}\\p{P}\\p{S}"),
-                        "word" => Some("\\p{Alphabetic}\\p{Nd}\\p{Pc}\\p{M}_"),
+                let replacement: Option<String> = if ascii_only {
+                    // ASCII-only POSIX equivalents.
+                    let body = match name.as_str() {
+                        "alpha" => Some("A-Za-z"),
+                        "alnum" => Some("A-Za-z0-9"),
+                        "digit" => Some("0-9"),
+                        "lower" => Some("a-z"),
+                        "upper" => Some("A-Z"),
+                        "space" => Some(" \\t\\n\\r\\x0B\\x0C"),
+                        "blank" => Some(" \\t"),
+                        "cntrl" => Some("\\x00-\\x1F\\x7F"),
+                        "print" => Some("\\x20-\\x7E"),
+                        "graph" => Some("\\x21-\\x7E"),
+                        "punct" => Some("!-/:-@\\[-`{-~"),
+                        "word" => Some("A-Za-z0-9_"),
                         "xdigit" => Some("0-9A-Fa-f"),
-                        "ascii" => Some("\\x00-\\x7f"),
+                        "ascii" => Some("\\x00-\\x7F"),
                         _ => None,
                     };
-                    pos.map(|body| {
+                    body.map(|b| {
                         if negate {
-                            // Negation requires nesting which neither
-                            // engine supports inside another class. Use
-                            // intersection-style trick where possible by
-                            // emitting `[^...]` only when the *outer*
-                            // class is the only consumer — since we
-                            // can't reliably know that here, fall
-                            // through to the simple positive form and
-                            // let the outer class context handle [^…].
-                            // For composites this is best-effort.
-                            let _ = negate;
-                            format!("[^{body}]")
+                            format!("[^{b}]")
                         } else {
-                            body.to_string()
+                            b.to_string()
                         }
                     })
+                } else {
+                    let prop: Option<&str> = match name.as_str() {
+                        "alpha" => Some("Alphabetic"),
+                        "alnum" => None, // composite
+                        "digit" => Some("Nd"),
+                        "lower" => Some("Lowercase"),
+                        "upper" => Some("Uppercase"),
+                        "space" => Some("Whitespace"),
+                        "blank" => None,
+                        "cntrl" => Some("Cc"),
+                        "print" => None,
+                        "graph" => None,
+                        "punct" => Some("P"),
+                        "word" => None,
+                        "xdigit" => None,
+                        "ascii" => None,
+                        _ => None,
+                    };
+                    if let Some(p) = prop {
+                        Some(if negate {
+                            format!("\\P{{{p}}}")
+                        } else {
+                            format!("\\p{{{p}}}")
+                        })
+                    } else {
+                        let pos = match name.as_str() {
+                            "alnum" => Some("\\p{Alphabetic}\\p{Nd}"),
+                            "blank" => Some("\\t\\p{Zs}"),
+                            "print" => {
+                                Some("\\p{Alphabetic}\\p{Nd}\\p{P}\\p{S}\\p{Zs}")
+                            }
+                            "graph" => Some("\\p{Alphabetic}\\p{Nd}\\p{P}\\p{S}"),
+                            "word" => Some("\\p{Alphabetic}\\p{Nd}\\p{Pc}\\p{M}_"),
+                            "xdigit" => Some("0-9A-Fa-f"),
+                            "ascii" => Some("\\x00-\\x7f"),
+                            _ => None,
+                        };
+                        pos.map(|body| {
+                            if negate {
+                                format!("[^{body}]")
+                            } else {
+                                body.to_string()
+                            }
+                        })
+                    }
                 };
                 if let Some(repl) = replacement {
                     out.push_str(&repl);
