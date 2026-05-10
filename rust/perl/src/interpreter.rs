@@ -18936,6 +18936,19 @@ fn substitute_constant_runtime_regex(pattern: &str) -> String {
                         && trimmed.len() >= 2
                     {
                         Some(trimmed[1..trimmed.len() - 1].to_string())
+                    } else if let Some(rest) = trimmed.strip_prefix("chr ") {
+                        // `chr N` — codepoint literal. re/regexp 1112+.
+                        let arg = rest.trim();
+                        let n: Option<u32> = if let Some(hex) = arg.strip_prefix("0x") {
+                            u32::from_str_radix(hex, 16).ok()
+                        } else if let Some(hex) = arg.strip_prefix("0X") {
+                            u32::from_str_radix(hex, 16).ok()
+                        } else if let Some(oct) = arg.strip_prefix("0o") {
+                            u32::from_str_radix(oct, 8).ok()
+                        } else {
+                            arg.parse().ok()
+                        };
+                        n.map(|v| format!("\\x{{{v:x}}}"))
                     } else {
                         None
                     };
