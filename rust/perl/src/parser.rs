@@ -2908,6 +2908,24 @@ impl Parser {
                         expr = Expr::Call("_hash_block_deref".to_string(), vec![inner]);
                         continue;
                     }
+                    // `->&*` — postfix code deref / invoke. Same as
+                    // `&$coderef` (call coderef with empty args). For
+                    // `$cref->&*(args)` we'd need explicit parens, which
+                    // becomes `->&*(args)` — fold subsequent parens into
+                    // a CodeCall on the inner.
+                    if matches!(self.tok(), Token::BitAnd) && matches!(self.peek(1), Token::Star) {
+                        self.pos += 2;
+                        let inner = expr;
+                        let call_args = if self.eat(&Token::LParen) {
+                            let a = self.parse_list_expr();
+                            self.expect(&Token::RParen);
+                            a
+                        } else {
+                            Vec::new()
+                        };
+                        expr = Expr::CodeCall(Box::new(inner), call_args);
+                        continue;
+                    }
                     // `->%[i1,i2]` — array key/value slice through ref.
                     // `->%{k1,k2}` — hash key/value slice through ref.
                     if matches!(self.tok(), Token::Percent)
