@@ -2134,14 +2134,26 @@ impl Parser {
                 if let Token::Ident(name) = self.tok() {
                     let name = name.clone();
                     self.pos += 1;
-                    let args = if self.eat(&Token::LParen) {
+                    let (had_parens, args) = if self.eat(&Token::LParen) {
                         let a = self.parse_list_expr();
                         self.expect(&Token::RParen);
-                        a
+                        (true, a)
                     } else {
-                        Vec::new()
+                        (false, Vec::new())
                     };
-                    Expr::Call(name, args)
+                    // Distinguish `&NAME` from `&NAME()` (empty parens
+                    // is still a call). Tag empty-parens calls with a
+                    // sentinel `_amp_call_parens` first-arg so `exists`
+                    // can reject `exists &NAME()` while still allowing
+                    // `exists &NAME`. op/exists_sub.
+                    if had_parens && args.is_empty() {
+                        Expr::Call(
+                            name,
+                            vec![Expr::Call("_amp_call_parens".to_string(), Vec::new())],
+                        )
+                    } else {
+                        Expr::Call(name, args)
+                    }
                 } else if let Token::ScalarVar(name) = self.tok() {
                     // `&$subref(args)` / `&$subref` — invoke the code ref
                     // in `$subref`. Maps to `$subref->(args)`; with no args

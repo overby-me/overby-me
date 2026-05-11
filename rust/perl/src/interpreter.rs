@@ -5665,6 +5665,24 @@ impl Interpreter {
     }
 
     fn eval_call(&mut self, name: &str, args: &[Expr]) -> Value {
+        // Strip the `_amp_call_parens` sentinel emitted by the parser
+        // for `&NAME()` (empty parens), so the actual call gets an
+        // empty args list. The sentinel exists only to let `exists
+        // &NAME()` distinguish between `&NAME` and `&NAME()`.
+        let filtered: Vec<Expr>;
+        let args = if args
+            .iter()
+            .any(|a| matches!(a, Expr::Call(n, _) if n == "_amp_call_parens"))
+        {
+            filtered = args
+                .iter()
+                .filter(|a| !matches!(a, Expr::Call(n, _) if n == "_amp_call_parens"))
+                .cloned()
+                .collect();
+            &filtered[..]
+        } else {
+            args
+        };
         // Accept a few fully-qualified builtins from special namespaces
         // that appear in the upstream test suite. We only stub enough for
         // the tests to progress.
@@ -7205,6 +7223,27 @@ impl Interpreter {
                             let q = format!("{}::{}", self.package, name);
                             let here = self.subs.contains_key(name) || self.subs.contains_key(&q);
                             return Value::Num(if here { 1.0 } else { 0.0 });
+                        }
+                        // `exists &name(args)` — `()` after the name is
+                        // a syntax error: exists requires a bare sub
+                        // name. The parser tags the empty-parens form
+                        // `&NAME()` with a `_amp_call_parens` sentinel
+                        // arg so we can detect it. op/exists_sub.
+                        Expr::Call(_, sub_args)
+                            if sub_args.iter().any(|a| {
+                                matches!(a, Expr::Call(n, _) if n == "_amp_call_parens")
+                            }) =>
+                        {
+                            let file = if self.current_file.is_empty() {
+                                "-e".to_string()
+                            } else {
+                                self.current_file.clone()
+                            };
+                            let line = self.current_line;
+                            self.pending_flow = Some(Flow::Die(format!(
+                                "exists argument is not a subroutine name at {file} line {line}.\n"
+                            )));
+                            return Value::Undef;
                         }
                         // `exists &{EXPR}` / `exists &$ref` — evaluate
                         // EXPR/$ref without calling it; true iff it
