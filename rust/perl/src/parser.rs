@@ -2805,6 +2805,24 @@ impl Parser {
                             };
                             expr = Expr::MethodCall(Box::new(expr), method, args);
                         }
+                        // `$obj->$method` — method name from scalar var.
+                        // Stringify at runtime via a marker method name
+                        // and pass the var as the first arg. op/method.
+                        Token::ScalarVar(name) => {
+                            let var_name = name.clone();
+                            self.pos += 1;
+                            let mut args = vec![Expr::ScalarVar(var_name)];
+                            if self.eat(&Token::LParen) {
+                                let extra = self.parse_list_expr();
+                                self.expect(&Token::RParen);
+                                args.extend(extra);
+                            }
+                            expr = Expr::MethodCall(
+                                Box::new(expr),
+                                "_dynamic_method".to_string(),
+                                args,
+                            );
+                        }
                         _ => break,
                     }
                 }

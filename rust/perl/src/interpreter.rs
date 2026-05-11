@@ -4339,6 +4339,19 @@ impl Interpreter {
             Expr::Call(name, args) => self.eval_call(name, args),
 
             Expr::MethodCall(recv, method, args) => {
+                // `_dynamic_method` is the parser's encoding of
+                // `$obj->$var` — the first arg is the var holding the
+                // method name. Resolve it at runtime then re-dispatch.
+                if method == "_dynamic_method"
+                    && let Some((name_expr, rest)) = args.split_first()
+                {
+                    let name = self.eval_expr(name_expr).to_str();
+                    return self.eval_expr(&Expr::MethodCall(
+                        recv.clone(),
+                        name,
+                        rest.to_vec(),
+                    ));
+                }
                 // Resolve the invocant's class name. For `Class->method`
                 // the receiver parses as an ident/string; for an object
                 // ref, take its blessed class via `ref_class`. We also
@@ -4424,6 +4437,17 @@ impl Interpreter {
                 } else {
                     format!("{class}::{method}")
                 };
+                // `Class->import` / `Class->unimport` with no actual
+                // method anywhere in the @ISA chain → Perl's "fake
+                // method" placeholder returns an empty list (so
+                // `use Foo;` doesn't barf when Foo has no import).
+                // op/method tests 1-4.
+                if (method == "import" || method == "unimport")
+                    && !self.subs.contains_key(&qualified)
+                {
+                    self.last_list_val = Some(Vec::new());
+                    return Value::Undef;
+                }
                 let mut all_args: Vec<Expr> = Vec::with_capacity(args.len() + 1);
                 all_args.push(Expr::StringLit(class));
                 all_args.extend(args.iter().cloned());
@@ -13728,6 +13752,18 @@ impl Interpreter {
                     out.push(v);
                 }
                 out
+            }
+            // Method calls in list context: evaluate via eval_expr but
+            // prefer last_list_val when the dispatcher populated it
+            // (e.g. fake `->import` returning empty list). op/method 1.
+            Expr::MethodCall(_, _, _) => {
+                self.last_list_val = None;
+                let scalar = self.eval_expr(expr);
+                if let Some(list) = self.last_list_val.take() {
+                    list
+                } else {
+                    vec![scalar]
+                }
             }
             _ => vec![self.eval_expr(expr)],
         }
