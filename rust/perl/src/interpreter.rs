@@ -53,6 +53,12 @@ pub struct Interpreter {
     globals: Scope,
     // Subroutines
     subs: HashMap<String, (Vec<String>, Vec<Stmt>)>,
+    /// Subs declared via `sub NAME;` / `sub NAME (PROTO);` with no body
+    /// — these exist (`exists &NAME` is true) but are NOT defined
+    /// (`defined &NAME` is false). They share storage with `subs` (with
+    /// an empty body) for simplicity; this set is the discriminator.
+    /// op/exists_sub.
+    declared_only_subs: std::collections::HashSet<String>,
     /// Names of subs declared with `: lvalue`. When such a sub is the
     /// target of an assignment (`get_st = 7`), we look up the body's
     /// last expression and assign to it instead — supports the simple
@@ -540,6 +546,7 @@ impl Interpreter {
             sub_def_loc: HashMap::new(),
             sub_def_package: HashMap::new(),
             lvalue_subs: std::collections::HashSet::new(),
+            declared_only_subs: std::collections::HashSet::new(),
             my_subs: std::collections::HashSet::new(),
             eval_strict_pkg: false,
             current_sub_stack: Vec::new(),
@@ -678,6 +685,14 @@ impl Interpreter {
                 } if !name.is_empty() => {
                     self.subs
                         .insert(name.clone(), (params.clone(), body.clone()));
+                    // Forward-only declaration (`sub NAME;`) — track so
+                    // `defined &NAME` returns false while `exists &NAME`
+                    // returns true. op/exists_sub.
+                    if body.is_empty() {
+                        self.declared_only_subs.insert(name.clone());
+                    } else {
+                        self.declared_only_subs.remove(name);
+                    }
                     if *is_lvalue {
                         self.lvalue_subs.insert(name.clone());
                     }
@@ -1795,6 +1810,15 @@ impl Interpreter {
                     };
                     self.subs
                         .insert(qualified.clone(), (params.clone(), body.clone()));
+                    // Forward-only declaration (`sub NAME;`) — track so
+                    // `defined &NAME` returns false while `exists &NAME`
+                    // returns true. A later `sub NAME { … }` overwrites
+                    // body (non-empty) and clears the declared-only flag.
+                    if body.is_empty() {
+                        self.declared_only_subs.insert(qualified.clone());
+                    } else {
+                        self.declared_only_subs.remove(&qualified);
+                    }
                     if *is_lvalue {
                         self.lvalue_subs.insert(qualified.clone());
                     }
@@ -4417,6 +4441,11 @@ impl Interpreter {
                     let here = self.subs.contains_key(name);
                     let q = format!("{}::{}", self.package, name);
                     let qualified = self.subs.contains_key(&q);
+                    // Forward-only declarations (`sub name;`) are NOT
+                    // defined: `exists &name` is true but `defined &name`
+                    // must be false. op/exists_sub.
+                    let declared_only = self.declared_only_subs.contains(name)
+                        || self.declared_only_subs.contains(&q);
                     // Builtin subs we implement in Rust (e.g. `re::is_regexp`,
                     // `Internals::stack_refcounted`) aren't in self.subs but
                     // are still "defined" from a Perl-program perspective.
@@ -4426,7 +4455,7 @@ impl Interpreter {
                             | "Internals::stack_refcounted"
                             | "DynaLoader::boot_DynaLoader"
                     );
-                    return Value::Num(if here || qualified || builtin {
+                    return Value::Num(if ((here || qualified) && !declared_only) || builtin {
                         1.0
                     } else {
                         0.0
@@ -7003,6 +7032,15 @@ impl Interpreter {
             "exists" => {
                 if let Some(a) = args.first() {
                     match a {
+                        // `exists &name` — true iff sub is declared or
+                        // defined (parser emits this as a no-arg Call).
+                        // op/exists_sub.
+                        Expr::Call(name, sub_args) if sub_args.is_empty() => {
+                            let q = format!("{}::{}", self.package, name);
+                            let here = self.subs.contains_key(name)
+                                || self.subs.contains_key(&q);
+                            return Value::Num(if here { 1.0 } else { 0.0 });
+                        }
                         Expr::HashElement(name, key_e) => {
                             let key = self.eval_expr(key_e).to_str();
                             let exists = self
@@ -7421,14 +7459,16 @@ impl Interpreter {
                 }
             }
             "defined" => {
-                // `defined &name` — check sub existence, don't invoke it.
+                // `defined &name` — true iff sub has a body (i.e. is not
+                // just forward-declared via `sub name;`).
                 if let Some(Expr::Call(name, sub_args)) = args.first()
                     && sub_args.is_empty()
                 {
-                    let here = self.subs.contains_key(name);
                     let q = format!("{}::{}", self.package, name);
-                    let qualified = self.subs.contains_key(&q);
-                    return Value::Num(if here || qualified { 1.0 } else { 0.0 });
+                    let in_subs = self.subs.contains_key(name) || self.subs.contains_key(&q);
+                    let declared_only = self.declared_only_subs.contains(name)
+                        || self.declared_only_subs.contains(&q);
+                    return Value::Num(if in_subs && !declared_only { 1.0 } else { 0.0 });
                 }
                 let val = if args.is_empty() {
                     self.get_var("_")
