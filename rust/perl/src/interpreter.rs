@@ -3794,6 +3794,23 @@ impl Interpreter {
                             let v = self.get_var(name);
                             match v {
                                 Value::HashRef(r) => r,
+                                // Any other ref kind (ArrayRef/CodeRef/...)
+                                // dies — Perl rejects the deref through the
+                                // wrong type. op/hashwarn pseudo-hash 1/2.
+                                Value::ArrayRef(_)
+                                | Value::CodeRef(_)
+                                | Value::ScalarRef(_) => {
+                                    let file = if self.current_file.is_empty() {
+                                        "-e".to_string()
+                                    } else {
+                                        self.current_file.clone()
+                                    };
+                                    let line = self.current_line;
+                                    self.pending_flow = Some(Flow::Die(format!(
+                                        "Not a HASH reference at {file} line {line}.\n"
+                                    )));
+                                    return Value::Undef;
+                                }
                                 _ => {
                                     let r =
                                         std::rc::Rc::new(std::cell::RefCell::new(HashMap::new()));
