@@ -3154,7 +3154,25 @@ impl Parser {
             }
             Token::ArrayDeref(name) => {
                 self.pos += 1;
-                Expr::ArrayDerefVar(name)
+                // `@$h[1,2]` — array slice through arrayref $h.
+                // `@$h{k1,k2}` — hash slice through hashref $h.
+                if matches!(self.tok(), Token::LBracket) {
+                    self.pos += 1;
+                    let keys = self.parse_list_expr();
+                    self.expect(&Token::RBracket);
+                    let mut args = vec![Expr::ScalarVar(name)];
+                    args.extend(keys);
+                    Expr::Call("_postfix_array_slice".to_string(), args)
+                } else if matches!(self.tok(), Token::LBrace) {
+                    self.pos += 1;
+                    let keys = self.parse_list_expr();
+                    self.expect(&Token::RBrace);
+                    let mut args = vec![Expr::ScalarVar(name)];
+                    args.extend(keys);
+                    Expr::Call("_postfix_hash_slice".to_string(), args)
+                } else {
+                    Expr::ArrayDerefVar(name)
+                }
             }
             Token::ArrayBlockDerefOpen => {
                 // `@{ EXPR }` — evaluate EXPR, treat its result as an

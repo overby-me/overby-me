@@ -3921,6 +3921,58 @@ impl Interpreter {
                     }
                     return Value::Num(items.len() as f64);
                 }
+                // `@$h{k1,k2} = (v1, v2)` — hash slice assignment through
+                // a hashref. Parser emits a `_postfix_hash_slice` call
+                // with $h as args[0] and keys as args[1..].
+                if let Expr::Call(fname, call_args) = unwrapped_target
+                    && fname == "_postfix_hash_slice"
+                    && !call_args.is_empty()
+                {
+                    let items = self.eval_list(value);
+                    let ref_val = self.eval_expr(&call_args[0]);
+                    if let Value::HashRef(rc) = ref_val {
+                        let keys_v: Vec<String> = call_args[1..]
+                            .iter()
+                            .flat_map(|e| self.eval_list(e))
+                            .map(|v| v.to_str())
+                            .collect();
+                        let mut h = rc.borrow_mut();
+                        for (i, k) in keys_v.iter().enumerate() {
+                            let v = items.get(i).cloned().unwrap_or(Value::Undef);
+                            h.insert(k.clone(), v);
+                        }
+                    }
+                    return Value::Num(items.len() as f64);
+                }
+                // `@$h[i1,i2] = (v1, v2)` — array slice assignment
+                // through an arrayref.
+                if let Expr::Call(fname, call_args) = unwrapped_target
+                    && fname == "_postfix_array_slice"
+                    && !call_args.is_empty()
+                {
+                    let items = self.eval_list(value);
+                    let ref_val = self.eval_expr(&call_args[0]);
+                    if let Value::ArrayRef(rc) = ref_val {
+                        let indices: Vec<i64> = call_args[1..]
+                            .iter()
+                            .flat_map(|e| self.eval_list(e))
+                            .map(|v| v.to_num() as i64)
+                            .collect();
+                        let mut a = rc.borrow_mut();
+                        for (i, idx) in indices.iter().enumerate() {
+                            let v = items.get(i).cloned().unwrap_or(Value::Undef);
+                            let resolved = if *idx < 0 { a.len() as i64 + idx } else { *idx };
+                            if resolved >= 0 {
+                                let r = resolved as usize;
+                                if r >= a.len() {
+                                    a.resize(r + 1, Value::Undef);
+                                }
+                                a[r] = v;
+                            }
+                        }
+                    }
+                    return Value::Num(items.len() as f64);
+                }
                 let val = self.eval_expr(value);
                 self.assign_to(target, val.clone());
                 val
