@@ -12060,6 +12060,7 @@ impl Interpreter {
         // (non-recursive) case. Truly recursive patterns are left
         // unchanged. re/regexp 1167-1185.
         let pattern = inline_simple_recursion(&pattern);
+        let pattern = rewrite_self_conditional_iteration(&pattern);
         let regmark = extract_first_mark_label(&pattern);
         let pattern = truncate_at_first_accept(&pattern);
         let pattern = collapse_lazy_plus_then(&pattern);
@@ -12496,6 +12497,7 @@ impl Interpreter {
         let pattern = translate_named_char_escapes(&pattern);
         let pattern = normalize_named_backref(&pattern);
         let pattern = inline_simple_recursion(&pattern);
+        let pattern = rewrite_self_conditional_iteration(&pattern);
         let regmark = extract_first_mark_label(&pattern);
         let pattern = truncate_at_first_accept(&pattern);
         let pattern = collapse_lazy_plus_then(&pattern);
@@ -20646,6 +20648,159 @@ fn translate_pl_underscore_aliases(pattern: &str) -> String {
         i += 1;
     }
     out
+}
+
+/// Detect `((?(N)YES|NO))+` where N refers to the very group being
+/// quantified — Perl's per-iteration capture-state semantics: on the
+/// first iteration, group N hasn't been set, so the NO branch runs;
+/// subsequent iterations see N set and take the YES branch. fancy_regex
+/// doesn't track inter-iteration capture state, so the first iteration
+/// also chooses YES and the overall match drops the leading NO portion.
+/// Rewrite to `(NO)(YES)*` — same observable $&, with a small loss of
+/// fidelity on group numbering (the YES becomes group N+1 instead of
+/// being re-stored into group N). re/regexp 499, 500 (GH 7754).
+fn rewrite_self_conditional_iteration(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    // Track which capture-group number we'd open at each position so
+    // we can match `((?(N)…))+` only when N == that opening group's
+    // number. Simple left-to-right counter that mirrors Perl/fancy.
+    let mut next_group: usize = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class
+            && c == '('
+            && i + 1 < chars.len()
+            && chars[i + 1] != '?'
+            && chars[i + 1] != '*'
+        {
+            // Plain capturing group starts here.
+            let opening_group_num = next_group + 1;
+            // Look for `((?(N)YES|NO))+` form.
+            // chars[i..] = `(` then `(?(<digits>)YES|NO)` then `)` then `+`.
+            if let Some(transformed) = try_rewrite_self_cond(&chars, i, opening_group_num) {
+                let (consumed, replacement) = transformed;
+                out.push_str(&replacement);
+                // Two capturing groups are introduced by the replacement
+                // — `(NO)` becomes group N, `(YES)` becomes group N+1.
+                next_group += 2;
+                i += consumed;
+                continue;
+            }
+            // No transform — count this as a regular capturing group.
+            next_group += 1;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Helper: try to match `((?(N)YES|NO))+` starting at `chars[at]`.
+/// Returns `Some((consumed_chars, replacement_string))` or `None`.
+/// `expected_n` is the group number the conditional must refer to.
+fn try_rewrite_self_cond(
+    chars: &[char],
+    at: usize,
+    expected_n: usize,
+) -> Option<(usize, String)> {
+    // chars[at] must be `(`. We need `((?(`.
+    if chars.get(at).copied()? != '(' {
+        return None;
+    }
+    if chars.get(at + 1).copied()? != '(' {
+        return None;
+    }
+    if chars.get(at + 2).copied()? != '?' {
+        return None;
+    }
+    if chars.get(at + 3).copied()? != '(' {
+        return None;
+    }
+    // Read digits for N.
+    let mut p = at + 4;
+    let mut n_str = String::new();
+    while p < chars.len() && chars[p].is_ascii_digit() {
+        n_str.push(chars[p]);
+        p += 1;
+    }
+    if n_str.is_empty() {
+        return None;
+    }
+    if chars.get(p).copied()? != ')' {
+        return None;
+    }
+    let n: usize = n_str.parse().ok()?;
+    if n != expected_n {
+        return None;
+    }
+    p += 1; // past the `)` of `(?(N)`
+    // Now scan YES|NO body up to the matching `)` of the outer `(?(...)...)`.
+    // The body has alternation at top level (depth 0 within this group).
+    let body_start = p;
+    let mut depth: i32 = 1; // depth of `(?(...)body` — closes at matching `)`
+    let mut alt_idx: Option<usize> = None;
+    while p < chars.len() && depth > 0 {
+        let ch = chars[p];
+        if ch == '\\' && p + 1 < chars.len() {
+            p += 2;
+            continue;
+        }
+        if ch == '(' {
+            depth += 1;
+        } else if ch == ')' {
+            depth -= 1;
+            if depth == 0 {
+                break;
+            }
+        } else if ch == '|' && depth == 1 && alt_idx.is_none() {
+            alt_idx = Some(p);
+        }
+        p += 1;
+    }
+    if depth != 0 || alt_idx.is_none() {
+        return None;
+    }
+    let cond_close = p; // index of `)` closing `(?(N)YES|NO)`
+    let alt = alt_idx?;
+    let yes_part: String = chars[body_start..alt].iter().collect();
+    let no_part: String = chars[alt + 1..cond_close].iter().collect();
+    // After cond_close should come `)` (closing outer `(...)`) and `+`.
+    let outer_close = cond_close + 1;
+    if chars.get(outer_close).copied()? != ')' {
+        return None;
+    }
+    let plus = outer_close + 1;
+    if chars.get(plus).copied()? != '+' {
+        return None;
+    }
+    let consumed = plus + 1 - at;
+    // Build replacement: `(NO)(YES)*`.
+    let replacement = format!("({no_part})({yes_part})*");
+    Some((consumed, replacement))
 }
 
 /// `X+?(*THEN)Y` / `X+?(*PRUNE)Y` matches just a single X at each
