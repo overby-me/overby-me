@@ -7622,6 +7622,11 @@ impl Interpreter {
                     .unwrap_or(Value::Undef);
                 match v {
                     Value::ScalarRef(r) => r.borrow().clone(),
+                    // `${qr/…/}` — dereferencing a regex yields its
+                    // stringified pattern (`(?^:…)`). op/qr 24-25.
+                    Value::Regex(pat, flags, _) => {
+                        Value::Str(format!("(?^{flags}:{pat})"))
+                    }
                     // Symbolic ref: `${EXPR}` where EXPR is a string names
                     // the global scalar. Matches Perl under `no strict 'refs'`.
                     Value::Str(s) if !s.is_empty() => {
