@@ -2113,6 +2113,52 @@ impl Interpreter {
                         // its `@` as the variable name, not as another sigil.
                         let raw = name.strip_prefix(['$', '@', '%']).unwrap_or(name);
                         let var_name = canon_var(raw);
+                        // `local $lexical` is a compile-error in Perl —
+                        // you can only localize package globals (or
+                        // their hash/array elements). `our`-declared
+                        // names appear in the lexical chain too but are
+                        // really aliases to package globals, so we
+                        // exclude them via `aliased_vars`/`aliased_arrays`/
+                        // `aliased_hashes`. op/fresh_perl_utf8.
+                        if !var_name.is_empty()
+                            && var_name.chars().next().is_some_and(|c| c == '_' || c.is_alphabetic())
+                        {
+                            let qualified = format!("{}::{}", self.package, var_name);
+                            let is_our = self.aliased_vars.contains_key(var_name)
+                                || self.aliased_vars.contains_key(&qualified)
+                                || self.aliased_arrays.contains_key(var_name)
+                                || self.aliased_arrays.contains_key(&qualified)
+                                || self.aliased_hashes.contains_key(var_name)
+                                || self.aliased_hashes.contains_key(&qualified);
+                            let lexical = !is_our
+                                && match name.chars().next() {
+                                    Some('$') => self
+                                        .scopes
+                                        .iter()
+                                        .any(|s| s.vars.contains_key(var_name)),
+                                    Some('@') => self
+                                        .scopes
+                                        .iter()
+                                        .any(|s| s.arrays.contains_key(var_name)),
+                                    Some('%') => self
+                                        .scopes
+                                        .iter()
+                                        .any(|s| s.hashes.contains_key(var_name)),
+                                    _ => false,
+                                };
+                            if lexical {
+                                let file = if self.current_file.is_empty() {
+                                    "-e".to_string()
+                                } else {
+                                    self.current_file.clone()
+                                };
+                                let line = self.current_line;
+                                self.pending_flow = Some(Flow::Die(format!(
+                                    "Can't localize lexical variable {name} at {file} line {line}.\n"
+                                )));
+                                return Flow::None;
+                            }
+                        }
                         if name.starts_with('@') {
                             let prev_arr = self.get_array(var_name);
                             if let Some(saves) = self.local_array_saves.last_mut() {
