@@ -1802,7 +1802,25 @@ impl Lexer {
                 '/' => {
                     // Division or regex?
                     let is_regex = tokens.last().map(|t| t.expects_operand()).unwrap_or(true);
-                    if is_regex {
+                    // Heuristic: after a built-in operator that returns a
+                    // scalar (`shift`, `pop`, `return`, …), `//` is much
+                    // more likely the defined-or operator than an empty
+                    // m// (reuse-last-pattern). op/dor tests `shift // 7`,
+                    // `pop() // 7`, etc.
+                    let prev_is_dor_source = matches!(
+                        tokens.last(),
+                        Some(Token::Shift | Token::Pop)
+                    );
+                    if is_regex && prev_is_dor_source && self.peek(1) == '/' {
+                        // `<op> //` — treat as DefOr / DefOrAssign.
+                        self.pos += 2;
+                        if self.ch() == '=' {
+                            self.pos += 1;
+                            tokens.push(Token::DefOrAssign);
+                        } else {
+                            tokens.push(Token::DefOr);
+                        }
+                    } else if is_regex {
                         self.pos += 1;
                         let (pat, flags) = self.read_regex('/');
                         tokens.push(Token::RegexLit(pat, flags));

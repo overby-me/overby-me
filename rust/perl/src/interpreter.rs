@@ -6808,25 +6808,38 @@ impl Interpreter {
                 }
             }
             "pop" => {
-                if let Some(Expr::ArrayVar(name)) = args.first() {
-                    let mut arr = self.get_array(name);
-                    let val = arr.pop().unwrap_or(Value::Undef);
-                    self.set_array(name, arr);
-                    val
+                let name_owned = if args.is_empty() {
+                    // pop defaults: @_ inside a sub, @ARGV at top level.
+                    if self.current_sub_stack.is_empty() {
+                        "ARGV".to_string()
+                    } else {
+                        "_".to_string()
+                    }
+                } else if let Some(Expr::ArrayVar(n)) = args.first() {
+                    n.clone()
                 } else {
-                    Value::Undef
-                }
+                    return Value::Undef;
+                };
+                let mut arr = self.get_array(&name_owned);
+                let val = arr.pop().unwrap_or(Value::Undef);
+                self.set_array(&name_owned, arr);
+                val
             }
             "shift" => {
                 if args.is_empty() {
-                    // shift @_
-                    let mut arr = self.get_array("_");
+                    // shift defaults: @_ inside a sub, @ARGV at top level.
+                    let target = if self.current_sub_stack.is_empty() {
+                        "ARGV"
+                    } else {
+                        "_"
+                    };
+                    let mut arr = self.get_array(target);
                     let val = if arr.is_empty() {
                         Value::Undef
                     } else {
                         arr.remove(0)
                     };
-                    self.set_array("_", arr);
+                    self.set_array(target, arr);
                     val
                 } else if let Some(Expr::ArrayVar(name)) = args.first() {
                     let mut arr = self.get_array(name);

@@ -3158,6 +3158,7 @@ impl Parser {
                             | Token::LogOr
                             | Token::And
                             | Token::Or
+                            | Token::DefOr
                             | Token::NumEq
                             | Token::NumNe
                             | Token::NumLt
