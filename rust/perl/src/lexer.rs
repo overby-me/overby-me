@@ -2654,11 +2654,13 @@ impl Lexer {
     /// diagnostics (`m//`, `s///`) need this distinction.
     fn read_delimited_string_term(&mut self) -> (char, char, String, bool) {
         // Skip whitespace and `#`-style comments before the delimiter.
-        // Bare `#` followed by another non-whitespace char is a valid
-        // delimiter (`q#foo#`); only treat `#` as a comment when it
-        // appears after a whitespace separator, mirroring Perl's
-        // `q # comment\n /body/` form. base/lex tests 92–99.
+        // `#` is a comment only when preceded by whitespace (or the
+        // operator itself was just matched and we're skipping it). If
+        // `#` immediately follows `q`/`qq`/etc. with no whitespace
+        // between, treat it as the delimiter (`q#body#`). base/lex
+        // tests 92–99 and op/dor `q# sub f ($) { } #`.
         loop {
+            let mut consumed_ws = false;
             while self.pos < self.input.len()
                 && (self.ch() == ' ' || self.ch() == '\t' || self.ch() == '\n')
             {
@@ -2666,12 +2668,13 @@ impl Lexer {
                     self.current_line += 1;
                 }
                 self.pos += 1;
+                consumed_ws = true;
             }
-            // After whitespace, a `#` introduces a line comment if it's
-            // followed by space/tab/newline OR EOF — that disambiguates
-            // from `q#foo#` where the `#` is immediately followed by
-            // body chars.
-            if self.pos < self.input.len() && self.ch() == '#' {
+            // A `#` is a comment when followed by space/tab/newline/EOF
+            // AND we've already passed whitespace (so the `#` is in
+            // standalone form: `q # comment\n /body/`). Bare `q#body#`
+            // (no leading whitespace) keeps `#` as the delimiter.
+            if consumed_ws && self.pos < self.input.len() && self.ch() == '#' {
                 let next = self.input.get(self.pos + 1).copied().unwrap_or('\0');
                 if next == ' ' || next == '\t' || next == '\n' || next == '\0' {
                     while self.pos < self.input.len() && self.ch() != '\n' {
