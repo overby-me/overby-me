@@ -125,6 +125,11 @@ pub struct Interpreter {
     local_saves: Vec<Vec<(String, Value)>>,
     // Local array saves
     local_array_saves: Vec<Vec<(String, Vec<Value>)>>,
+    /// Per-scope saves of `each` cursors that were displaced by a
+    /// `local @name`. The cursor key (e.g. `@arr`) and its prior
+    /// state, or None if there was no cursor. On scope exit the
+    /// saved cursor is reinstated. op/each_array localization tests.
+    local_each_cursor_saves: Vec<Vec<(String, Option<(Vec<String>, usize)>)>>,
     // Local hash-element saves: each entry is (hash_name, key, prior_value
     // or None if the key was absent). Restored at sub / block scope exit.
     local_hash_elem_saves: Vec<Vec<(String, String, Option<Value>)>>,
@@ -511,6 +516,7 @@ impl Interpreter {
             eval_error: String::new(),
             local_saves: Vec::new(),
             local_array_saves: Vec::new(),
+            local_each_cursor_saves: Vec::new(),
             local_fh_alias_saves: Vec::new(),
             read_handles: HashMap::new(),
             string_read_handles: HashMap::new(),
@@ -2141,6 +2147,15 @@ impl Interpreter {
                             if let Some(saves) = self.local_array_saves.last_mut() {
                                 saves.push((var_name.to_string(), prev_arr));
                             }
+                            // Save (and clear) any `each` cursor pointing
+                            // at the array we're displacing — Perl resets
+                            // iteration when the array is localised, and
+                            // restores the cursor on scope exit.
+                            let cursor_key = format!("@{var_name}");
+                            let prev_cursor = self.each_cursors.remove(&cursor_key);
+                            if let Some(saves) = self.local_each_cursor_saves.last_mut() {
+                                saves.push((cursor_key, prev_cursor));
+                            }
                             let start = i.min(items.len());
                             self.globals
                                 .arrays
@@ -2262,6 +2277,14 @@ impl Interpreter {
                             let prev_arr = self.get_array(var_name);
                             if let Some(saves) = self.local_array_saves.last_mut() {
                                 saves.push((var_name.to_string(), prev_arr));
+                            }
+                            // Save+clear any `each` cursor pointing at
+                            // the displaced array (same as the list-init
+                            // path above). op/each_array local tests.
+                            let cursor_key = format!("@{var_name}");
+                            let prev_cursor = self.each_cursors.remove(&cursor_key);
+                            if let Some(saves) = self.local_each_cursor_saves.last_mut() {
+                                saves.push((cursor_key, prev_cursor));
                             }
                             // If the array has been ref'd (it has an
                             // entry in `aliased_arrays`), swap the Rc
@@ -10329,6 +10352,20 @@ impl Interpreter {
                 }
             }
         }
+        // Pair with local_array_saves: restore any `each` cursors that
+        // were displaced by `local @arr`. Tests in op/each_array.
+        if let Some(saves) = self.local_each_cursor_saves.pop() {
+            for (key, prev) in saves.into_iter().rev() {
+                match prev {
+                    Some(c) => {
+                        self.each_cursors.insert(key, c);
+                    }
+                    None => {
+                        self.each_cursors.remove(&key);
+                    }
+                }
+            }
+        }
         // Restore any aliased-array Rc swaps `local @name` made.
         if let Some(saves) = self.local_aliased_array_saves.pop() {
             for (name, orig_rc) in saves.into_iter().rev() {
@@ -11530,6 +11567,7 @@ impl Interpreter {
         // when that block exits — not only when the enclosing sub returns.
         self.local_saves.push(Vec::new());
         self.local_array_saves.push(Vec::new());
+        self.local_each_cursor_saves.push(Vec::new());
         self.local_aliased_array_saves.push(Vec::new());
         self.local_fh_alias_saves.push(Vec::new());
         self.local_hash_elem_saves.push(Vec::new());
