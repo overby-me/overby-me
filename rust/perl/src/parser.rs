@@ -1802,57 +1802,38 @@ impl Parser {
 
     fn parse_comparison(&mut self) -> Expr {
         let left = self.parse_relational();
-        match self.tok() {
-            Token::NumEq => {
-                self.pos += 1;
-                Expr::BinOp(
-                    BinOp::NumEq,
-                    Box::new(left),
-                    Box::new(self.parse_relational()),
-                )
-            }
-            Token::NumNe => {
-                self.pos += 1;
-                Expr::BinOp(
-                    BinOp::NumNe,
-                    Box::new(left),
-                    Box::new(self.parse_relational()),
-                )
-            }
-            Token::Spaceship => {
-                self.pos += 1;
-                Expr::BinOp(
-                    BinOp::Spaceship,
-                    Box::new(left),
-                    Box::new(self.parse_relational()),
-                )
-            }
-            Token::Eq => {
-                self.pos += 1;
-                Expr::BinOp(
-                    BinOp::StrEq,
-                    Box::new(left),
-                    Box::new(self.parse_relational()),
-                )
-            }
-            Token::Ne => {
-                self.pos += 1;
-                Expr::BinOp(
-                    BinOp::StrNe,
-                    Box::new(left),
-                    Box::new(self.parse_relational()),
-                )
-            }
-            Token::Cmp => {
-                self.pos += 1;
-                Expr::BinOp(
-                    BinOp::StrCmp,
-                    Box::new(left),
-                    Box::new(self.parse_relational()),
-                )
-            }
-            _ => left,
+        let (op, op_name) = match self.tok() {
+            Token::NumEq => (Some(BinOp::NumEq), "=="),
+            Token::NumNe => (Some(BinOp::NumNe), "!="),
+            Token::Spaceship => (Some(BinOp::Spaceship), "<=>"),
+            Token::Eq => (Some(BinOp::StrEq), "eq"),
+            Token::Ne => (Some(BinOp::StrNe), "ne"),
+            Token::Cmp => (Some(BinOp::StrCmp), "cmp"),
+            _ => (None, ""),
+        };
+        let Some(op) = op else { return left };
+        self.pos += 1;
+        let right = self.parse_relational();
+        // Detect chained non-associative comparisons (`$a <=> $b cmp
+        // $c`, `$a == $b != $c`, etc.) — these are syntax errors in
+        // Perl 5.32+. The right-hand side already absorbed one
+        // comparison; if another follows immediately, the chain is
+        // illegal. op/cmpchain.
+        if matches!(
+            self.tok(),
+            Token::Spaceship
+                | Token::Cmp
+                | Token::NumEq
+                | Token::NumNe
+                | Token::Eq
+                | Token::Ne
+        ) {
+            let line = self.current_line();
+            self.error = Some(format!(
+                "syntax error at {{FILE}} line {line}, near \"{op_name}\"\n"
+            ));
         }
+        Expr::BinOp(op, Box::new(left), Box::new(right))
     }
 
     fn parse_relational(&mut self) -> Expr {
