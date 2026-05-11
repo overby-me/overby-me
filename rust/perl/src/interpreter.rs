@@ -11242,9 +11242,18 @@ impl Interpreter {
                     // We model this by converting `$re` into a
                     // `ScalarRef` to a fresh cell holding NEW; subsequent
                     // `$$re` reads return NEW. opbasic/concat test 236.
-                    Value::Regex(_, _, _) => {
+                    // Preserve the regex's bless class (defaults to
+                    // "Regexp") on the new ScalarRef so `ref()` keeps
+                    // returning "Regexp" and `"$re"` stringifies as
+                    // `Regexp=SCALAR(0x…)`. op/qr 12-14.
+                    Value::Regex(_, _, id) => {
+                        let prior_class = self.blessed_refs.remove(&id);
                         let rc = std::rc::Rc::new(std::cell::RefCell::new(val));
-                        self.set_var(base, Value::ScalarRef(rc));
+                        let new_ref = Value::ScalarRef(rc.clone());
+                        let new_ptr = std::rc::Rc::as_ptr(&rc) as usize;
+                        let class = prior_class.unwrap_or_else(|| "Regexp".to_string());
+                        self.blessed_refs.insert(new_ptr, class);
+                        self.set_var(base, new_ref);
                     }
                     _ => {}
                 }
