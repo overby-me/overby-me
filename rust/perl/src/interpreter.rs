@@ -7068,6 +7068,14 @@ impl Interpreter {
                 }
             }
             "keys" => {
+                // `keys @array` / `keys @$ref` returns list of indices
+                // 0..N-1. op/each_array.
+                if let Some(arr) = self.resolve_array_arg(args.first()) {
+                    self.last_list_val = Some(
+                        (0..arr.len()).map(|i| Value::Num(i as f64)).collect(),
+                    );
+                    return Value::Num(arr.len() as f64);
+                }
                 let (cursor_key, hash) = match self.resolve_hash_arg(args.first()) {
                     Some(p) => p,
                     None => return Value::Undef,
@@ -7076,6 +7084,11 @@ impl Interpreter {
                 Value::Num(hash.len() as f64) // scalar context
             }
             "values" => {
+                if let Some(arr) = self.resolve_array_arg(args.first()) {
+                    let len = arr.len();
+                    self.last_list_val = Some(arr);
+                    return Value::Num(len as f64);
+                }
                 let (cursor_key, hash) = match self.resolve_hash_arg(args.first()) {
                     Some(p) => p,
                     None => return Value::Undef,
@@ -7085,10 +7098,38 @@ impl Interpreter {
             }
             "each" => {
                 // `each @array` returns (index, value) pairs and shares
-                // the same cursor mechanism as `each %hash`.
-                if let Some(Expr::ArrayVar(name)) = args.first() {
-                    let cursor_key = format!("@{name}");
-                    let arr = self.get_array(name);
+                // the same cursor mechanism as `each %hash`. Also handles
+                // `each @$ref` / `each @{EXPR}` by resolving to the
+                // underlying array ref and keying the cursor by the
+                // ref's pointer. op/each_array.
+                let (arr_owned, cursor_key) = if let Some(Expr::ArrayVar(name)) = args.first() {
+                    (Some(self.get_array(name)), format!("@{name}"))
+                } else if let Some(Expr::ArrayDerefVar(name)) = args.first() {
+                    let v = self.get_var(name);
+                    if let Value::ArrayRef(r) = v {
+                        let ptr = std::rc::Rc::as_ptr(&r) as usize;
+                        (Some(r.borrow().clone()), format!("@${ptr:x}"))
+                    } else {
+                        (None, String::new())
+                    }
+                } else if let Some(Expr::Call(n, inner)) = args.first()
+                    && n == "_array_block_deref"
+                {
+                    let last = inner
+                        .iter()
+                        .flat_map(|a| self.eval_list(a))
+                        .last()
+                        .unwrap_or(Value::Undef);
+                    if let Value::ArrayRef(r) = last {
+                        let ptr = std::rc::Rc::as_ptr(&r) as usize;
+                        (Some(r.borrow().clone()), format!("@${ptr:x}"))
+                    } else {
+                        (None, String::new())
+                    }
+                } else {
+                    (None, String::new())
+                };
+                if let Some(arr) = arr_owned {
                     let entry = self
                         .each_cursors
                         .entry(cursor_key.clone())
@@ -10732,6 +10773,38 @@ impl Interpreter {
         }
     }
 
+    /// Resolve an `ArrayVar` / `ArrayDerefVar` / `@{EXPR}` arg to the
+    /// underlying Vec. Returns `None` if the argument doesn't name an
+    /// array. Used by `keys` / `values` (and similar) to support array
+    /// arguments alongside the legacy hash path.
+    fn resolve_array_arg(&mut self, arg: Option<&Expr>) -> Option<Vec<Value>> {
+        let a = arg?;
+        match a {
+            Expr::ArrayVar(name) => Some(self.get_array(name)),
+            Expr::ArrayDerefVar(name) => {
+                let v = self.get_var(name);
+                if let Value::ArrayRef(r) = v {
+                    Some(r.borrow().clone())
+                } else {
+                    None
+                }
+            }
+            Expr::Call(n, inner_args) if n == "_array_block_deref" => {
+                let last = inner_args
+                    .iter()
+                    .flat_map(|e| self.eval_list(e))
+                    .last()
+                    .unwrap_or(Value::Undef);
+                if let Value::ArrayRef(r) = last {
+                    Some(r.borrow().clone())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
     fn get_hash_element(&self, name: &str, key: &str) -> Value {
         for scope in self.scopes.iter().rev() {
             if let Some(hash) = scope.hashes.get(name) {
@@ -13465,6 +13538,9 @@ impl Interpreter {
                         Self::unpack_list(&fmt, &data)
                     }
                     "keys" => {
+                        if let Some(arr) = self.resolve_array_arg(args.first()) {
+                            return (0..arr.len()).map(|i| Value::Num(i as f64)).collect();
+                        }
                         let Some((cursor_key, hash)) = self.resolve_hash_arg(args.first()) else {
                             return Vec::new();
                         };
@@ -13472,6 +13548,9 @@ impl Interpreter {
                         hash.keys().map(|k| Value::Str(k.clone())).collect()
                     }
                     "values" => {
+                        if let Some(arr) = self.resolve_array_arg(args.first()) {
+                            return arr;
+                        }
                         let Some((cursor_key, hash)) = self.resolve_hash_arg(args.first()) else {
                             return Vec::new();
                         };
