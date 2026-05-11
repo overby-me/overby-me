@@ -5906,13 +5906,20 @@ impl Interpreter {
                     match arg {
                         Expr::ArrayVar(name) => self.set_array(name, Vec::new()),
                         Expr::HashVar(name) => self.set_hash_from_list(name, Vec::new()),
-                        // `undef &name` — remove the sub from the symbol
-                        // table so `defined &name` reports false.
+                        // `undef &name` — clear the sub's body so
+                        // `defined &name` reports false, but `exists
+                        // &name` stays true (matches reference perl:
+                        // the slot remains, just without a body).
+                        // op/exists_sub.
                         Expr::Call(name, sub_args) if sub_args.is_empty() => {
-                            self.subs.remove(name);
-                            // Also try the package-qualified form.
                             let q = format!("{}::{}", self.package, name);
-                            self.subs.remove(&q);
+                            for key in [name.clone(), q.clone()] {
+                                if self.subs.contains_key(&key) {
+                                    self.subs
+                                        .insert(key.clone(), (Vec::new(), Vec::new()));
+                                    self.declared_only_subs.insert(key);
+                                }
+                            }
                         }
                         _ => self.assign_to(arg, Value::Undef),
                     }
