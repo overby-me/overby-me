@@ -5086,7 +5086,7 @@ impl Interpreter {
                         b
                     }
                     Err(e) => {
-                        self.set_global_var("!", Value::Str(e.to_string()));
+                        self.set_global_var("!", Value::Str(perl_io_err(&e)));
                         return Value::Undef;
                     }
                 };
@@ -6668,7 +6668,7 @@ impl Interpreter {
                 match Command::new(&prog).args(&prog_args).status() {
                     Ok(s) => std::process::exit(s.code().unwrap_or(0)),
                     Err(e) => {
-                        self.set_global_var("!", Value::Str(e.to_string()));
+                        self.set_global_var("!", Value::Str(perl_io_err(&e)));
                         Value::Num(0.0)
                     }
                 }
@@ -14179,7 +14179,7 @@ impl Interpreter {
                     Value::Num(1.0)
                 }
                 Err(e) => {
-                    self.set_global_var("!", Value::Str(e.to_string()));
+                    self.set_global_var("!", Value::Str(perl_io_err(&e)));
                     Value::Undef
                 }
             }
@@ -14191,7 +14191,7 @@ impl Interpreter {
                     Value::Num(1.0)
                 }
                 Err(e) => {
-                    self.set_global_var("!", Value::Str(e.to_string()));
+                    self.set_global_var("!", Value::Str(perl_io_err(&e)));
                     Value::Undef
                 }
             }
@@ -17354,6 +17354,18 @@ fn is_main_special_var(name: &str) -> bool {
             | "0"
             | "DATA"
     )
+}
+
+/// Strip Rust's trailing `(os error N)` from a `std::io::Error` display
+/// so `$!`/`die` messages match reference perl's terser format.
+/// e.g. `"No such device or address (os error 6)"` → `"No such device or address"`.
+fn perl_io_err(e: &std::io::Error) -> String {
+    let s = e.to_string();
+    if let Some(idx) = s.find(" (os error ") {
+        s[..idx].to_string()
+    } else {
+        s
+    }
 }
 
 /// Perl's `oct()` — interpret a string as octal by default, or as the base
