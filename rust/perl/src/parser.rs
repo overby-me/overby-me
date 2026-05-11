@@ -703,11 +703,18 @@ impl Parser {
         // `while (defined($_ = <FH>))` — without this, the loop body
         // runs once per line but `$_` is never set. Rewrite it here
         // so existing line-iter idioms work. comp/multiline.
+        // Same idiom for `while (each HASH/ARRAY)` and `while (readline FH)`
+        // — Perl auto-wraps the sole condition in `defined()` so the
+        // loop exits only when each returns end-of-iteration.
+        // op/each_array test 28+.
         let cond = match cond {
             Expr::Diamond(name) => Expr::Defined(Box::new(Expr::Assign(
                 Box::new(Expr::ScalarVar("_".to_string())),
                 Box::new(Expr::Diamond(name)),
             ))),
+            Expr::Call(ref name, _) if name == "each" || name == "readline" => {
+                Expr::Defined(Box::new(cond))
+            }
             other => other,
         };
         let body = self.parse_brace_block();
