@@ -89,11 +89,14 @@ impl Value {
             Value::Str(s) => parse_number(s),
             // References stringify then parse as "ARRAY(0x..)" etc. — the
             // numeric coercion returns 0 since there are no leading digits.
-            Value::ArrayRef(_)
-            | Value::HashRef(_)
-            | Value::ScalarRef(_)
-            | Value::CodeRef(_)
-            | Value::Glob(_) => 0.0,
+            // References numerify to their pointer address (the same
+            // value that appears in `ARRAY(0x…)` stringification). This
+            // matches reference perl and lets `0+$ref == $ref` hold,
+            // which several tests rely on (op/bless).
+            Value::ArrayRef(r) => Rc::as_ptr(r) as usize as f64,
+            Value::HashRef(r) => Rc::as_ptr(r) as usize as f64,
+            Value::ScalarRef(r) => Rc::as_ptr(r) as usize as f64,
+            Value::CodeRef(_) | Value::Glob(_) => 0.0,
             // qr// objects yield a unique id when numerified — Perl uses
             // the object's address, but a monotonic id is enough for the
             // `$qr_a + 0 != $qr_b + 0` identity test (op/qr 3).
