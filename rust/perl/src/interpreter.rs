@@ -2768,20 +2768,23 @@ impl Interpreter {
                 // there's a `$SIG{__DIE__}` handler, pass it through as-is
                 // — Perl lets handlers mutate array refs via `$_[0]->[..]`.
                 // Check for ref before stringifying.
-                let ref_arg = if args.len() == 1 {
-                    let v = self.eval_expr(&args[0]);
-                    if matches!(
-                        v,
+                // Evaluate args once and reuse the values for both the
+                // ref-detection and the message build. Double-evaluation
+                // had a nasty side effect: `die shift @arr` would call
+                // shift twice — the second call returning Undef after
+                // the first had emptied the array. op/eval, op/die_goto.
+                let arg_vals: Vec<Value> = args.iter().map(|a| self.eval_expr(a)).collect();
+                let ref_arg = if arg_vals.len() == 1
+                    && matches!(
+                        arg_vals[0],
                         Value::ArrayRef(_)
                             | Value::HashRef(_)
                             | Value::ScalarRef(_)
                             | Value::CodeRef(_)
                             | Value::Regex(_, _, _)
-                    ) {
-                        Some(v)
-                    } else {
-                        None
-                    }
+                    )
+                {
+                    Some(arg_vals[0].clone())
                 } else {
                     None
                 };
@@ -2804,8 +2807,9 @@ impl Interpreter {
                     // refs look like `ARRAY(0x…)` — good enough for `$@`.
                     v.to_str()
                 } else {
-                    args.iter()
-                        .map(|a| self.eval_expr(a).to_str())
+                    arg_vals
+                        .iter()
+                        .map(|v| v.to_str())
                         .collect::<Vec<_>>()
                         .join("")
                 };
@@ -2813,6 +2817,7 @@ impl Interpreter {
                 // handler mutate/replace the error and then returns to the
                 // normal die-propagation (the sub's return value is ignored).
                 let handler = self.get_hash_element("SIG", "__DIE__");
+                let mut msg = msg;
                 if self.in_die_handler == 0
                     && let Value::CodeRef(name) = handler
                     && let Some((_params, body)) = self.subs.get(&name).cloned()
@@ -2833,6 +2838,14 @@ impl Interpreter {
                     self.in_die_handler += 1;
                     self.call_sub_named(&body, &[arg], Some(&name));
                     self.in_die_handler -= 1;
+                    // If the handler itself re-died with a different
+                    // message, that becomes the new die value. The
+                    // call_sub_named path sets `pending_flow` to the
+                    // inner Flow::Die and leaves `$@` populated.
+                    // op/die_goto, op/eval test 41.
+                    if let Some(Flow::Die(new_msg)) = self.pending_flow.take() {
+                        msg = new_msg;
+                    }
                 }
                 // Bare `die;` re-raises $@. After the __DIE__ handler has
                 // had a chance to inspect/mutate the value, if $@ is a
@@ -2949,6 +2962,10 @@ impl Interpreter {
                             } else {
                                 self.set_global_var("@", Value::Str(msg));
                             }
+                            // Clear any leftover pending_flow from
+                            // sub-die unwinding inside the eval body.
+                            // op/eval, op/die_goto.
+                            self.pending_flow = None;
                             Flow::None
                         }
                         Flow::Goto(label) => {
@@ -9712,12 +9729,11 @@ impl Interpreter {
                     }
                     self.call_context.pop();
                     self.set_global_var("@", Value::Str(msg.clone()));
-                    if self.eval_depth > 0 {
-                        // Inside eval — re-raise so eval sets $@.
-                        return Value::Undef;
-                    }
                     self.pending_return = None;
-                    // Bubble up as a die from the caller.
+                    // Bubble up as a die from the caller. Inside eval,
+                    // the eval block stops on Flow::Die and sets $@.
+                    // Outside eval, the enclosing exec_stmts propagates
+                    // it to die the program.
                     self.pending_flow = Some(Flow::Die(msg));
                     return Value::Undef;
                 }
