@@ -991,13 +991,27 @@ impl Parser {
         // `sub NAME;` or `sub NAME (PROTO);` — forward declaration with no
         // body. Accept that by consuming the trailing semicolon and emitting
         // an empty-body Sub. We still install the name so later calls parse
-        // as sub calls.
+        // as sub calls. `sub;` / `sub ($) ;` / `sub` followed by anything
+        // that isn't a block when the sub is anonymous → "Illegal
+        // declaration of anonymous subroutine". op/anonsub 1-4.
         let body = if self.at(&Token::Semi) {
+            if name.is_empty() {
+                let line = self.current_line();
+                self.error = Some(format!(
+                    "Illegal declaration of anonymous subroutine at {{FILE}} line {line}.\n"
+                ));
+            }
             self.pos += 1;
             Vec::new()
         } else if self.at(&Token::LBrace) {
             self.parse_brace_block()
         } else {
+            if name.is_empty() {
+                let line = self.current_line();
+                self.error = Some(format!(
+                    "Illegal declaration of anonymous subroutine at {{FILE}} line {line}.\n"
+                ));
+            }
             Vec::new()
         };
         Stmt::Sub {
