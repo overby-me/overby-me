@@ -467,6 +467,24 @@ impl Interpreter {
                     .unwrap_or_else(|| "perl".to_string()),
             ),
         );
+        // $] — Perl version as a decimal: "5.042000" for Perl 5.42.0.
+        // Tests use this to gate features by version. We claim parity
+        // with Perl 5.42.0 since that's the reference version we
+        // target byte-for-byte.
+        globals
+            .vars
+            .insert("]".to_string(), Value::Str("5.042000".to_string()));
+        // $^V — version object (v5.42.0). Some tests check this in
+        // string context, so we provide the v-string. Comparison with
+        // version() objects isn't supported.
+        globals
+            .vars
+            .insert("^V".to_string(), Value::Str("v5.42.0".to_string()));
+        // $; — already set above.
+        // $^W — warnings flag (0 by default).
+        globals.vars.insert("^W".to_string(), Value::Num(0.0));
+        // $[ — array base index, always 0 in modern Perl.
+        globals.vars.insert("[".to_string(), Value::Num(0.0));
 
         // Pretend DynaLoader is loaded so test.pl's `is_miniperl`
         // (which checks `defined &DynaLoader::boot_DynaLoader`) returns

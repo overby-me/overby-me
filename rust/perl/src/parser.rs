@@ -4372,6 +4372,8 @@ fn parse_interp_string(s: &str) -> Expr {
                     | '~'
                     | '%'
                     | '='
+                    | ']'
+                    | '['
             ) || (chars[i + 1] == '.'
                 && (i + 2 >= chars.len() || !chars[i + 2].is_ascii_digit()))
                 || (chars[i + 1] == ':' && (i + 2 >= chars.len() || chars[i + 2] != ':'));
@@ -4577,6 +4579,8 @@ fn parse_interp_string(s: &str) -> Expr {
                         | '~'
                         | '%'
                         | '='
+                        | ']'
+                        | '['
                 ) || (chars[i] == '.'
                     && (i + 1 >= chars.len() || !chars[i + 1].is_ascii_digit()))
                     || (chars[i] == ':' && (i + 1 >= chars.len() || chars[i + 1] != ':'))

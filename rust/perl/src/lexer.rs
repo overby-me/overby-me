@@ -1129,6 +1129,14 @@ impl Lexer {
                         // Don't consume `$::name` (package main::name).
                         self.pos += 1;
                         tokens.push(Token::ScalarVar(":".to_string()));
+                    } else if self.ch() == ']' {
+                        // `$]` — Perl version as a decimal (e.g. "5.042000").
+                        self.pos += 1;
+                        tokens.push(Token::ScalarVar("]".to_string()));
+                    } else if self.ch() == '[' {
+                        // `$[` — array base index (always 0 in modern Perl).
+                        self.pos += 1;
+                        tokens.push(Token::ScalarVar("[".to_string()));
                     } else {
                         // Unknown special var, just treat as $_
                         tokens.push(Token::ScalarVar("_".to_string()));
