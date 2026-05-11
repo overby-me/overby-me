@@ -1135,7 +1135,16 @@ impl Lexer {
 
                 '@' => {
                     self.pos += 1;
-                    if self.ch().is_ascii_digit() {
+                    if self.ch() == '+' || self.ch() == '-' {
+                        // `@+` / `@-` — match-position special arrays
+                        // (end / start offsets of last regex match).
+                        // Only recognised when the next char isn't a
+                        // continuation of an operator (so `@a + 1`
+                        // still parses normally). op/magic-27839.
+                        let name = self.ch().to_string();
+                        self.pos += 1;
+                        tokens.push(Token::ArrayVar(name));
+                    } else if self.ch().is_ascii_digit() {
                         // `@4`, `@123` — digit-named array (Perl
                         // treats this as a symbolic ref to a global
                         // array with the given numeric name).
