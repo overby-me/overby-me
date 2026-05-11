@@ -7074,8 +7074,11 @@ impl Interpreter {
             }
             "keys" => {
                 // `keys @array` / `keys @$ref` returns list of indices
-                // 0..N-1. op/each_array.
+                // 0..N-1 and resets the `each` cursor. op/each_array.
                 if let Some(arr) = self.resolve_array_arg(args.first()) {
+                    if let Some(key) = self.array_each_cursor_key(args.first()) {
+                        self.each_cursors.remove(&key);
+                    }
                     self.last_list_val = Some(
                         (0..arr.len()).map(|i| Value::Num(i as f64)).collect(),
                     );
@@ -7090,6 +7093,9 @@ impl Interpreter {
             }
             "values" => {
                 if let Some(arr) = self.resolve_array_arg(args.first()) {
+                    if let Some(key) = self.array_each_cursor_key(args.first()) {
+                        self.each_cursors.remove(&key);
+                    }
                     let len = arr.len();
                     self.last_list_val = Some(arr);
                     return Value::Num(len as f64);
@@ -10778,6 +10784,40 @@ impl Interpreter {
         }
     }
 
+    /// Compute the `each_cursors` key for an array-shaped argument so
+    /// `keys` / `values` can reset the cursor consistently with how
+    /// `each` itself stored it. Mirrors the keys produced inside the
+    /// `each` builtin.
+    fn array_each_cursor_key(&mut self, arg: Option<&Expr>) -> Option<String> {
+        let a = arg?;
+        match a {
+            Expr::ArrayVar(name) => Some(format!("@{name}")),
+            Expr::ArrayDerefVar(name) => {
+                let v = self.get_var(name);
+                if let Value::ArrayRef(r) = v {
+                    let ptr = std::rc::Rc::as_ptr(&r) as usize;
+                    Some(format!("@${ptr:x}"))
+                } else {
+                    None
+                }
+            }
+            Expr::Call(n, inner_args) if n == "_array_block_deref" => {
+                let last = inner_args
+                    .iter()
+                    .flat_map(|e| self.eval_list(e))
+                    .last()
+                    .unwrap_or(Value::Undef);
+                if let Value::ArrayRef(r) = last {
+                    let ptr = std::rc::Rc::as_ptr(&r) as usize;
+                    Some(format!("@${ptr:x}"))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
     /// Resolve an `ArrayVar` / `ArrayDerefVar` / `@{EXPR}` arg to the
     /// underlying Vec. Returns `None` if the argument doesn't name an
     /// array. Used by `keys` / `values` (and similar) to support array
@@ -13544,6 +13584,9 @@ impl Interpreter {
                     }
                     "keys" => {
                         if let Some(arr) = self.resolve_array_arg(args.first()) {
+                            if let Some(key) = self.array_each_cursor_key(args.first()) {
+                                self.each_cursors.remove(&key);
+                            }
                             return (0..arr.len()).map(|i| Value::Num(i as f64)).collect();
                         }
                         let Some((cursor_key, hash)) = self.resolve_hash_arg(args.first()) else {
@@ -13554,6 +13597,9 @@ impl Interpreter {
                     }
                     "values" => {
                         if let Some(arr) = self.resolve_array_arg(args.first()) {
+                            if let Some(key) = self.array_each_cursor_key(args.first()) {
+                                self.each_cursors.remove(&key);
+                            }
                             return arr;
                         }
                         let Some((cursor_key, hash)) = self.resolve_hash_arg(args.first()) else {
