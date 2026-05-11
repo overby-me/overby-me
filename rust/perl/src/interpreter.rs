@@ -9024,6 +9024,9 @@ impl Interpreter {
             Value::ArrayRef(r) => std::rc::Rc::as_ptr(r) as usize,
             Value::HashRef(r) => std::rc::Rc::as_ptr(r) as usize,
             Value::ScalarRef(r) => std::rc::Rc::as_ptr(r) as usize,
+            // qr// objects: use the per-object id so `bless` can tag
+            // them and `ref()` reports the bless class. op/qr 4,6,13.
+            Value::Regex(_, _, id) => *id,
             _ => 0,
         }
     }
