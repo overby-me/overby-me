@@ -5903,6 +5903,11 @@ impl Interpreter {
                     result = self.eval_expr(arg);
                 }
                 self.next_call_ctx = None;
+                // `scalar(EXPR)` always yields exactly one value — clear
+                // any list context promotion the inner expr may have set
+                // (e.g. `scalar("Unknown"->import)` should yield undef
+                // in a surrounding list, not be absorbed into it).
+                self.last_list_val = None;
                 result
             }
             "undef" => {
