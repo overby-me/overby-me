@@ -2388,7 +2388,36 @@ impl Parser {
                 // File test operators: -e, -f, -d, etc.
                 let op = name.clone();
                 self.pos += 1;
-                let expr = self.parse_primary();
+                // Default operand: `$_`. Applies when the next token
+                // can't start a primary expression. op/dor `-f // 0`.
+                let needs_default = matches!(
+                    self.tok(),
+                    Token::Semi
+                        | Token::Comma
+                        | Token::RParen
+                        | Token::RBrace
+                        | Token::RBracket
+                        | Token::Question
+                        | Token::Colon
+                        | Token::LogAnd
+                        | Token::LogOr
+                        | Token::DefOr
+                        | Token::And
+                        | Token::Or
+                        | Token::NumEq
+                        | Token::NumNe
+                        | Token::NumLt
+                        | Token::NumGt
+                        | Token::NumLe
+                        | Token::NumGe
+                        | Token::Eq
+                        | Token::Ne
+                );
+                let expr = if needs_default {
+                    Expr::ScalarVar("_".to_string())
+                } else {
+                    self.parse_primary()
+                };
                 Expr::FileTest(op, Box::new(expr))
             }
             _ => self.parse_power(),

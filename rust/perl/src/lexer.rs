@@ -1802,15 +1802,29 @@ impl Lexer {
                 '/' => {
                     // Division or regex?
                     let is_regex = tokens.last().map(|t| t.expects_operand()).unwrap_or(true);
-                    // Heuristic: after a built-in operator that returns a
-                    // scalar (`shift`, `pop`, `return`, …), `//` is much
-                    // more likely the defined-or operator than an empty
-                    // m// (reuse-last-pattern). op/dor tests `shift // 7`,
-                    // `pop() // 7`, etc.
-                    let prev_is_dor_source = matches!(
-                        tokens.last(),
-                        Some(Token::Shift | Token::Pop)
-                    );
+                    // Heuristic: after a built-in unary operator that
+                    // returns a scalar (`shift`, `pop`, `defined`, file
+                    // tests, etc.), `//` is much more likely the
+                    // defined-or operator than an empty m// reusing the
+                    // last pattern. List operators that take a pattern
+                    // as their first arg (e.g. `split`, `m`, `s`, `tr`)
+                    // need the regex semantics, so keep them outside
+                    // this set. op/dor tests `shift // 0`, `-f // 0`.
+                    let prev_is_dor_source = match tokens.last() {
+                        Some(
+                            Token::Shift
+                            | Token::Pop
+                            | Token::Defined
+                            | Token::UndefKw
+                            | Token::Caller
+                            | Token::Wantarray,
+                        ) => true,
+                        // File-test operators are lexed as `Ident("-X")`
+                        // (e.g. `-f`, `-d`). After them, `//` is the
+                        // defined-or operator.
+                        Some(Token::Ident(s)) if s.len() == 2 && s.starts_with('-') => true,
+                        _ => false,
+                    };
                     if is_regex && prev_is_dor_source && self.peek(1) == '/' {
                         // `<op> //` — treat as DefOr / DefOrAssign.
                         self.pos += 2;
