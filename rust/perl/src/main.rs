@@ -61,6 +61,7 @@ fn run_interpreter() -> i32 {
     let mut auto_newline = false; // -l flag
     let mut warnings_flag = false; // -w flag
     let mut taint_mode_arg = false; // -T flag
+    let mut record_sep_override: Option<String> = None; // -0NNN flag
 
     let mut i = 1;
     while i < args.len() {
@@ -126,6 +127,21 @@ fn run_interpreter() -> i32 {
             }
             "-T" => {
                 taint_mode_arg = true;
+            }
+            // `-0NNN` — set $/ to chr(NNN) (octal by default, `x` for hex).
+            // Bare `-0` is `-00` → chr(0). `-0` followed by no digits is
+            // `-0` (chr 0). run/switch0.
+            s if s.starts_with("-0") => {
+                let digits = &s[2..];
+                let code = if digits.is_empty() {
+                    0u32
+                } else if let Some(hex) = digits.strip_prefix("x") {
+                    u32::from_str_radix(hex, 16).unwrap_or(0)
+                } else {
+                    u32::from_str_radix(digits, 8).unwrap_or(0)
+                };
+                let ch = char::from_u32(code).unwrap_or('\0');
+                record_sep_override = Some(ch.to_string());
             }
             s if s.starts_with("-")
                 && s.len() > 1
@@ -216,6 +232,27 @@ fn run_interpreter() -> i32 {
                 );
                 std::process::exit(255);
             }
+            if has_shebang_flag(shebang, 'l') {
+                auto_newline = true;
+            }
+            if has_shebang_flag(shebang, 'w') {
+                warnings_flag = true;
+            }
+            // `-0NNN` on the shebang sets $/ to chr(NNN). Plain `-0`
+            // (no digits) is chr(0). run/switch0.
+            for token in shebang.split_whitespace() {
+                if let Some(rest) = token.strip_prefix("-0") {
+                    let code = if rest.is_empty() {
+                        0u32
+                    } else if let Some(hex) = rest.strip_prefix("x") {
+                        u32::from_str_radix(hex, 16).unwrap_or(0)
+                    } else {
+                        u32::from_str_radix(rest, 8).unwrap_or(0)
+                    };
+                    let ch = char::from_u32(code).unwrap_or('\0');
+                    record_sep_override = Some(ch.to_string());
+                }
+            }
             let rest = program_text[newline + 1..].to_string();
             program_text = format!("\n{rest}");
         }
@@ -248,6 +285,9 @@ fn run_interpreter() -> i32 {
         // -l flag: set $\ (output record separator) to \n
         // and auto-chomp on input
         interp.set_special_var("\\", "\n");
+    }
+    if let Some(rs) = record_sep_override {
+        interp.set_special_var("/", &rs);
     }
     if warnings_flag {
         interp.enable_warnings();
