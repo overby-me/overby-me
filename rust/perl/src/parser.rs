@@ -3213,12 +3213,20 @@ impl Parser {
                             | (Token::Ident(_), Token::FatComma)
                             | (Token::Integer(_), Token::FatComma)
                     );
-                // If not already detected, look ahead for a `;` at depth 0
-                // — its absence strongly suggests a hashref expression.
+                // If not already detected, scan for shape clues at depth 0:
+                // - no `;` and contains a `..` (Range) or `,`/`=>` — looks
+                //   like a list-producing expression. Treat as hashref.
+                // - presence of `;` is a strong block marker.
+                // - a bare `{ SINGLE_EXPR }` is a hashref only when the
+                //   `{` appears in a value-expecting context (after `=`,
+                //   `,`, `(`, `return`, `=>`, etc.). Otherwise we'd
+                //   misparse forms like `*{"name"}` (typeglob deref) as
+                //   anonymous hashref construction.
                 if !is_hash {
                     let mut depth: i32 = 1;
                     let mut p = self.pos;
                     let mut has_semi = false;
+                    let mut has_list_marker = false;
                     while p < self.tokens.len() {
                         match &self.tokens[p] {
                             Token::LBrace | Token::LParen | Token::LBracket => depth += 1,
@@ -3232,11 +3240,25 @@ impl Parser {
                                 has_semi = true;
                                 break;
                             }
+                            Token::DotDot | Token::Comma | Token::FatComma if depth == 1 => {
+                                has_list_marker = true;
+                            }
                             _ => {}
                         }
                         p += 1;
                     }
-                    if !has_semi {
+                    let in_value_ctx = saved == 0
+                        || matches!(
+                            self.tokens.get(saved - 1),
+                            Some(Token::Assign)
+                                | Some(Token::FatComma)
+                                | Some(Token::Comma)
+                                | Some(Token::LParen)
+                                | Some(Token::Return)
+                                | Some(Token::Print)
+                                | Some(Token::Say)
+                        );
+                    if !has_semi && (has_list_marker || in_value_ctx) {
                         is_hash = true;
                     }
                 }
