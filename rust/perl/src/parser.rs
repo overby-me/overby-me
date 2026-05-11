@@ -3997,9 +3997,13 @@ impl Parser {
                 // sub returned as the block's value (Perl's last-expr
                 // implicit return). Without this, a tail `sub { … }` was
                 // parsed as a nameless `sub NAME { … }` declaration,
-                // dropping the CodeRef. Same for trailing `;`.
+                // dropping the CodeRef. Same for trailing `;` and EOF
+                // (e.g. `eval 'sub { … }'`, where the whole eval body
+                // is just the anon sub).
                 | Some(Token::RBrace)
                 | Some(Token::Semi)
+                | Some(Token::EOF)
+                | None
         )
     }
 }
