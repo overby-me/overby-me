@@ -4184,58 +4184,58 @@ impl Interpreter {
                             Expr::ScalarVar(n) => Some(n.clone()),
                             _ => None,
                         };
-                        let expand_replacement_fr =
-                            |caps: &fancy_regex::Captures, replacement: &str| -> String {
-                                let mut result = String::new();
-                                let repl_chars: Vec<char> = replacement.chars().collect();
-                                let mut i = 0;
-                                while i < repl_chars.len() {
-                                    if repl_chars[i] == '$' && i + 1 < repl_chars.len() {
-                                        if repl_chars[i + 1] == '{' {
-                                            let mut num_str = String::new();
-                                            i += 2;
-                                            while i < repl_chars.len() && repl_chars[i] != '}' {
-                                                num_str.push(repl_chars[i]);
-                                                i += 1;
-                                            }
-                                            if i < repl_chars.len() {
-                                                i += 1;
-                                            }
-                                            if let Ok(n) = num_str.parse::<usize>() {
-                                                if let Some(m) = caps.get(n) {
-                                                    result.push_str(m.as_str());
-                                                }
-                                            }
-                                        } else if repl_chars[i + 1].is_ascii_digit() {
-                                            let mut num_str = String::new();
-                                            i += 1;
-                                            while i < repl_chars.len()
-                                                && repl_chars[i].is_ascii_digit()
-                                            {
-                                                num_str.push(repl_chars[i]);
-                                                i += 1;
-                                            }
-                                            if let Ok(n) = num_str.parse::<usize>() {
-                                                if let Some(m) = caps.get(n) {
-                                                    result.push_str(m.as_str());
-                                                }
-                                            }
-                                        } else {
-                                            result.push(repl_chars[i]);
+                        let expand_replacement_fr = |caps: &fancy_regex::Captures,
+                                                     replacement: &str|
+                         -> String {
+                            let mut result = String::new();
+                            let repl_chars: Vec<char> = replacement.chars().collect();
+                            let mut i = 0;
+                            while i < repl_chars.len() {
+                                if repl_chars[i] == '$' && i + 1 < repl_chars.len() {
+                                    if repl_chars[i + 1] == '{' {
+                                        let mut num_str = String::new();
+                                        i += 2;
+                                        while i < repl_chars.len() && repl_chars[i] != '}' {
+                                            num_str.push(repl_chars[i]);
                                             i += 1;
                                         }
-                                    } else if repl_chars[i] == '&' {
-                                        if let Some(m) = caps.get(0) {
-                                            result.push_str(m.as_str());
+                                        if i < repl_chars.len() {
+                                            i += 1;
                                         }
+                                        if let Ok(n) = num_str.parse::<usize>() {
+                                            if let Some(m) = caps.get(n) {
+                                                result.push_str(m.as_str());
+                                            }
+                                        }
+                                    } else if repl_chars[i + 1].is_ascii_digit() {
+                                        let mut num_str = String::new();
                                         i += 1;
+                                        while i < repl_chars.len() && repl_chars[i].is_ascii_digit()
+                                        {
+                                            num_str.push(repl_chars[i]);
+                                            i += 1;
+                                        }
+                                        if let Ok(n) = num_str.parse::<usize>() {
+                                            if let Some(m) = caps.get(n) {
+                                                result.push_str(m.as_str());
+                                            }
+                                        }
                                     } else {
                                         result.push(repl_chars[i]);
                                         i += 1;
                                     }
+                                } else if repl_chars[i] == '&' {
+                                    if let Some(m) = caps.get(0) {
+                                        result.push_str(m.as_str());
+                                    }
+                                    i += 1;
+                                } else {
+                                    result.push(repl_chars[i]);
+                                    i += 1;
                                 }
-                                result
-                            };
+                            }
+                            result
+                        };
                         let (new_text, count) = if global {
                             let mut out = String::new();
                             let mut count = 0u64;
@@ -4346,11 +4346,7 @@ impl Interpreter {
                     && let Some((name_expr, rest)) = args.split_first()
                 {
                     let name = self.eval_expr(name_expr).to_str();
-                    return self.eval_expr(&Expr::MethodCall(
-                        recv.clone(),
-                        name,
-                        rest.to_vec(),
-                    ));
+                    return self.eval_expr(&Expr::MethodCall(recv.clone(), name, rest.to_vec()));
                 }
                 // Resolve the invocant's class name. For `Class->method`
                 // the receiver parses as an ident/string; for an object
@@ -4466,15 +4462,11 @@ impl Interpreter {
                     return Value::Num(match &val {
                         Value::CodeRef(name) => {
                             let q = format!("{}::{}", self.package, name);
-                            let in_subs = self.subs.contains_key(name)
-                                || self.subs.contains_key(&q);
+                            let in_subs =
+                                self.subs.contains_key(name) || self.subs.contains_key(&q);
                             let declared_only = self.declared_only_subs.contains(name)
                                 || self.declared_only_subs.contains(&q);
-                            if in_subs && !declared_only {
-                                1.0
-                            } else {
-                                0.0
-                            }
+                            if in_subs && !declared_only { 1.0 } else { 0.0 }
                         }
                         _ => 0.0,
                     });
@@ -5944,8 +5936,7 @@ impl Interpreter {
                             let q = format!("{}::{}", self.package, name);
                             for key in [name.clone(), q.clone()] {
                                 if self.subs.contains_key(&key) {
-                                    self.subs
-                                        .insert(key.clone(), (Vec::new(), Vec::new()));
+                                    self.subs.insert(key.clone(), (Vec::new(), Vec::new()));
                                     self.declared_only_subs.insert(key);
                                 }
                             }
@@ -7097,8 +7088,7 @@ impl Interpreter {
                         // op/exists_sub.
                         Expr::Call(name, sub_args) if sub_args.is_empty() => {
                             let q = format!("{}::{}", self.package, name);
-                            let here = self.subs.contains_key(name)
-                                || self.subs.contains_key(&q);
+                            let here = self.subs.contains_key(name) || self.subs.contains_key(&q);
                             return Value::Num(if here { 1.0 } else { 0.0 });
                         }
                         // `exists &{EXPR}` / `exists &$ref` — evaluate
@@ -7624,9 +7614,7 @@ impl Interpreter {
                     Value::ScalarRef(r) => r.borrow().clone(),
                     // `${qr/…/}` — dereferencing a regex yields its
                     // stringified pattern (`(?^:…)`). op/qr 24-25.
-                    Value::Regex(pat, flags, _) => {
-                        Value::Str(format!("(?^{flags}:{pat})"))
-                    }
+                    Value::Regex(pat, flags, _) => Value::Str(format!("(?^{flags}:{pat})")),
                     // Symbolic ref: `${EXPR}` where EXPR is a string names
                     // the global scalar. Matches Perl under `no strict 'refs'`.
                     Value::Str(s) if !s.is_empty() => {
@@ -12366,8 +12354,7 @@ impl Interpreter {
                         if group_starts[idx].is_none() {
                             continue;
                         }
-                        let (parent, _branch) =
-                            info.get(idx).copied().unwrap_or((0, 0));
+                        let (parent, _branch) = info.get(idx).copied().unwrap_or((0, 0));
                         if parent == 0 {
                             continue;
                         }
@@ -12481,8 +12468,7 @@ impl Interpreter {
                             if group_starts[idx].is_none() {
                                 continue;
                             }
-                            let (parent, _branch) =
-                                info.get(idx).copied().unwrap_or((0, 0));
+                            let (parent, _branch) = info.get(idx).copied().unwrap_or((0, 0));
                             if parent == 0 {
                                 continue;
                             }
@@ -15963,9 +15949,7 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                     let byte = (source as u32) ^ 0x40;
                     if (0x20..=0x7E).contains(&byte) {
                         let result_char = char::from_u32(byte).unwrap_or(' ');
-                        let clearer = if result_char.is_ascii_alphanumeric()
-                            || result_char == '_'
-                        {
+                        let clearer = if result_char.is_ascii_alphanumeric() || result_char == '_' {
                             format!("{result_char}")
                         } else {
                             format!("\\{result_char}")
@@ -16853,9 +16837,7 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
             // reference emits "Sequence (?{...}) not terminated with
             // ')'". re/regexp 579.
             if !(j + 1 < chars.len() && chars[j + 1] == ')') {
-                return Some(
-                    "Sequence (?{...}) not terminated with ')'".to_string(),
-                );
+                return Some("Sequence (?{...}) not terminated with ')'".to_string());
             }
             k = j + 2;
             continue;
@@ -16983,11 +16965,7 @@ fn validate_regex_pattern(pat: &str) -> Option<String> {
                             "Group name must start with a non-digit word character in regex; marked by <-- HERE in m/{prefix} <-- HERE {suffix}/"
                         ));
                     }
-                } else if after_p != '<'
-                    && after_p != '='
-                    && after_p != '\''
-                    && after_p != '>'
-                {
+                } else if after_p != '<' && after_p != '=' && after_p != '\'' && after_p != '>' {
                     // `(?PX…)` for any X other than `<`/`=`/`'`/`>`
                     // is unrecognised. `(?P>NAME)` is the Python-style
                     // recursion ref handled later by the inline-recursion
@@ -17704,10 +17682,7 @@ fn extract_named_group_indices(pattern: &str) -> Vec<(usize, String)> {
                     (i + 3, '>')
                 } else if i + 2 < chars.len() && chars[i + 2] == '\'' {
                     (i + 3, '\'')
-                } else if i + 3 < chars.len()
-                    && chars[i + 2] == 'P'
-                    && chars[i + 3] == '<'
-                {
+                } else if i + 3 < chars.len() && chars[i + 2] == 'P' && chars[i + 3] == '<' {
                     (i + 4, '>')
                 } else {
                     (0, '\0')
@@ -17840,9 +17815,7 @@ fn expand_inline_aa_case_insensitive(pattern: &str) -> String {
             // Parse flag chars.
             let mut k = i + 2;
             let mut flags = String::new();
-            while k < chars.len()
-                && (chars[k].is_ascii_alphabetic() || chars[k] == '-')
-            {
+            while k < chars.len() && (chars[k].is_ascii_alphabetic() || chars[k] == '-') {
                 flags.push(chars[k]);
                 k += 1;
             }
@@ -18010,9 +17983,7 @@ fn extract_quantified_branches(pattern: &str) -> Vec<(usize, usize)> {
                 && chars[i + 1] == '?'
                 && chars[i + 2] == 'P'
                 && chars[i + 3] == '<';
-            let is_named_quote = i + 2 < chars.len()
-                && chars[i + 1] == '?'
-                && chars[i + 2] == '\'';
+            let is_named_quote = i + 2 < chars.len() && chars[i + 1] == '?' && chars[i + 2] == '\'';
             let is_capturing = !(i + 1 < chars.len() && chars[i + 1] == '?')
                 || is_named_angle
                 || is_named_p
@@ -18089,8 +18060,7 @@ fn extract_quantified_branches(pattern: &str) -> Vec<(usize, usize)> {
                         while k < chars.len() && chars[k] != '}' {
                             k += 1;
                         }
-                        let body: String =
-                            chars[after + 1..k.min(chars.len())].iter().collect();
+                        let body: String = chars[after + 1..k.min(chars.len())].iter().collect();
                         body.contains(',')
                     }));
             if is_quantified {
@@ -18141,9 +18111,7 @@ fn extract_quantified_parent_positions(pattern: &str) -> Vec<usize> {
                 && chars[i + 1] == '?'
                 && chars[i + 2] == 'P'
                 && chars[i + 3] == '<';
-            let is_named_quote = i + 2 < chars.len()
-                && chars[i + 1] == '?'
-                && chars[i + 2] == '\'';
+            let is_named_quote = i + 2 < chars.len() && chars[i + 1] == '?' && chars[i + 2] == '\'';
             let is_capturing = !(i + 1 < chars.len() && chars[i + 1] == '?')
                 || is_named_angle
                 || is_named_p
@@ -18210,8 +18178,7 @@ fn extract_quantified_parent_positions(pattern: &str) -> Vec<usize> {
                         while k < chars.len() && chars[k] != '}' {
                             k += 1;
                         }
-                        let body: String =
-                            chars[after + 1..k.min(chars.len())].iter().collect();
+                        let body: String = chars[after + 1..k.min(chars.len())].iter().collect();
                         body.contains(',')
                     }));
             if is_quantified {
@@ -18266,9 +18233,7 @@ fn extract_quantified_parents(pattern: &str) -> Vec<usize> {
                 && chars[i + 1] == '?'
                 && chars[i + 2] == 'P'
                 && chars[i + 3] == '<';
-            let is_named_quote = i + 2 < chars.len()
-                && chars[i + 1] == '?'
-                && chars[i + 2] == '\'';
+            let is_named_quote = i + 2 < chars.len() && chars[i + 1] == '?' && chars[i + 2] == '\'';
             let is_capturing = !(i + 1 < chars.len() && chars[i + 1] == '?')
                 || is_named_angle
                 || is_named_p
@@ -18351,8 +18316,7 @@ fn extract_quantified_parents(pattern: &str) -> Vec<usize> {
                         while k < chars.len() && chars[k] != '}' {
                             k += 1;
                         }
-                        let body: String =
-                            chars[after + 1..k.min(chars.len())].iter().collect();
+                        let body: String = chars[after + 1..k.min(chars.len())].iter().collect();
                         body.contains(',')
                     }));
             if is_quantified {
@@ -18719,11 +18683,7 @@ fn inline_simple_recursion_pass(pattern: &str) -> String {
             i += 1;
             continue;
         }
-        if !in_class
-            && c == '('
-            && i + 2 < chars.len()
-            && chars[i + 1] == '?'
-        {
+        if !in_class && c == '(' && i + 2 < chars.len() && chars[i + 1] == '?' {
             // `(?N)` — numeric group reference.
             if chars[i + 2].is_ascii_digit() {
                 let mut k = i + 2;
@@ -18732,7 +18692,8 @@ fn inline_simple_recursion_pass(pattern: &str) -> String {
                     num_str.push(chars[k]);
                     k += 1;
                 }
-                if k < chars.len() && chars[k] == ')'
+                if k < chars.len()
+                    && chars[k] == ')'
                     && let Ok(n) = num_str.parse::<usize>()
                     && let Some((_, body)) = groups.iter().find(|(num, _)| *num == n)
                     && !body_has_recursion_ref(body)
@@ -18756,7 +18717,8 @@ fn inline_simple_recursion_pass(pattern: &str) -> String {
                     num_str.push(chars[k]);
                     k += 1;
                 }
-                if k < chars.len() && chars[k] == ')'
+                if k < chars.len()
+                    && chars[k] == ')'
                     && let Ok(n) = num_str.parse::<i64>()
                 {
                     let target = if sign == '-' {
@@ -18780,10 +18742,7 @@ fn inline_simple_recursion_pass(pattern: &str) -> String {
             // `(?&NAME)` or `(?P>NAME)` — named group reference.
             let name_start = if i + 3 < chars.len() && chars[i + 2] == '&' {
                 Some(i + 3)
-            } else if i + 4 < chars.len()
-                && chars[i + 2] == 'P'
-                && chars[i + 3] == '>'
-            {
+            } else if i + 4 < chars.len() && chars[i + 2] == 'P' && chars[i + 3] == '>' {
                 Some(i + 4)
             } else {
                 None
@@ -18812,17 +18771,10 @@ fn inline_simple_recursion_pass(pattern: &str) -> String {
             // Only count capturing forms.
             let is_capturing = if i + 1 < chars.len() && chars[i + 1] == '?' {
                 if i + 2 < chars.len() && chars[i + 2] == '<' {
-                    !(i + 3 < chars.len()
-                        && (chars[i + 3] == '=' || chars[i + 3] == '!'))
-                } else if i + 2 < chars.len() && chars[i + 2] == '\'' {
-                    true
-                } else if i + 3 < chars.len()
-                    && chars[i + 2] == 'P'
-                    && chars[i + 3] == '<'
-                {
-                    true
+                    !(i + 3 < chars.len() && (chars[i + 3] == '=' || chars[i + 3] == '!'))
                 } else {
-                    false
+                    (i + 2 < chars.len() && chars[i + 2] == '\'')
+                        || (i + 3 < chars.len() && chars[i + 2] == 'P' && chars[i + 3] == '<')
                 }
             } else {
                 true
@@ -18888,29 +18840,16 @@ fn collect_capture_group_bodies(pattern: &str) -> Vec<(usize, String)> {
                 // `(?<NAME>…)` / `(?'NAME'…)` / `(?P<NAME>…)` are capturing.
                 if i + 2 < chars.len() && chars[i + 2] == '<' {
                     // Distinguish lookbehind `(?<=…)` / `(?<!…)`.
-                    if i + 3 < chars.len()
-                        && (chars[i + 3] == '=' || chars[i + 3] == '!')
-                    {
-                        false
-                    } else {
-                        true
-                    }
-                } else if i + 2 < chars.len() && chars[i + 2] == '\'' {
-                    true
-                } else if i + 3 < chars.len()
-                    && chars[i + 2] == 'P'
-                    && chars[i + 3] == '<'
-                {
-                    true
+                    !(i + 3 < chars.len() && (chars[i + 3] == '=' || chars[i + 3] == '!'))
                 } else {
-                    false
+                    (i + 2 < chars.len() && chars[i + 2] == '\'')
+                        || (i + 3 < chars.len() && chars[i + 2] == 'P' && chars[i + 3] == '<')
                 }
             } else {
                 true
             };
             // Compute body start (after the opening sequence).
-            let body_start = if is_capturing && i + 1 < chars.len() && chars[i + 1] == '?'
-            {
+            let body_start = if is_capturing && i + 1 < chars.len() && chars[i + 1] == '?' {
                 // Skip past `(?<NAME>` / `(?'NAME'` / `(?P<NAME>`.
                 let mut k = i + 2;
                 if chars[k] == '<' || chars[k] == '\'' {
@@ -18998,9 +18937,7 @@ fn lookup_named_group(pattern: &str, name: &str) -> Option<(usize, String)> {
             if nxt == '?' && i + 2 < chars.len() {
                 let p2 = chars[i + 2];
                 if p2 == '<' {
-                    if i + 3 < chars.len()
-                        && (chars[i + 3] == '=' || chars[i + 3] == '!')
-                    {
+                    if i + 3 < chars.len() && (chars[i + 3] == '=' || chars[i + 3] == '!') {
                         is_capturing = false;
                         body_start = i + 1;
                     } else {
@@ -19102,10 +19039,7 @@ fn body_has_recursion_ref(body: &str) -> bool {
             i += 2;
             continue;
         }
-        if chars[i] == '('
-            && i + 2 < chars.len()
-            && chars[i + 1] == '?'
-        {
+        if chars[i] == '(' && i + 2 < chars.len() && chars[i + 1] == '?' {
             let p2 = chars[i + 2];
             if p2.is_ascii_digit() || p2 == 'R' || p2 == '&' || p2 == '-' || p2 == '+' {
                 return true;
@@ -19435,10 +19369,7 @@ fn normalize_named_backref(pattern: &str) -> String {
         // Track capturing-group count up to current position so
         // relative refs `\g-N` / `\g+N` can resolve. Skip `(?…)`
         // non-capturing forms.
-        if !in_class
-            && c == '('
-            && !(i + 1 < chars.len() && chars[i + 1] == '?')
-        {
+        if !in_class && c == '(' && !(i + 1 < chars.len() && chars[i + 1] == '?') {
             groups_before += 1;
         }
         // `\g-N` / `\g+N` — relative numeric backref. Translate to
@@ -19534,8 +19465,7 @@ fn normalize_named_backref(pattern: &str) -> String {
                 let name = raw.trim();
                 let first_meaningful = name.chars().next();
                 let is_relative = matches!(first_meaningful, Some('-') | Some('+'));
-                let is_pure_digit = !name.is_empty()
-                    && name.chars().all(|c| c.is_ascii_digit());
+                let is_pure_digit = !name.is_empty() && name.chars().all(|c| c.is_ascii_digit());
                 if name.is_empty() {
                     // Leave malformed `\g{}` alone — let the engine
                     // produce its own error.
@@ -19602,10 +19532,7 @@ fn translate_perl_whitespace_escapes(pattern: &str) -> String {
         let c = chars[i];
         // `\cX` is a 3-char escape (where X may be `\`). Pass through
         // verbatim so a following `X` isn't misinterpreted as `\X`.
-        if c == '\\'
-            && i + 2 < chars.len()
-            && chars[i + 1] == 'c'
-        {
+        if c == '\\' && i + 2 < chars.len() && chars[i + 1] == 'c' {
             out.push(c);
             out.push(chars[i + 1]);
             out.push(chars[i + 2]);
@@ -20018,11 +19945,7 @@ fn rewrite_nonexistent_group_conditionals(pattern: &str) -> String {
                         let inner = trimmed[1..trimmed.len() - 1].trim();
                         // If inner has multiple statements, take the
                         // last `return X` expression.
-                        let last = inner
-                            .rsplit(';')
-                            .next()
-                            .unwrap_or(inner)
-                            .trim();
+                        let last = inner.rsplit(';').next().unwrap_or(inner).trim();
                         unwrapped = last
                             .strip_prefix("return")
                             .map(|r| r.trim_start().to_string())
@@ -20172,11 +20095,7 @@ fn isolate_posix_class_from_case_fold(pattern: &str) -> String {
         // POSIX class needs the (?-i:) wrapper, since other POSIX
         // classes' /i behaviour (e.g. [[:lower:]]/i matching \x{100})
         // is what reference perl does.
-        if chars[i] == '['
-            && i + 2 < chars.len()
-            && chars[i + 1] == '['
-            && chars[i + 2] == ':'
-        {
+        if chars[i] == '[' && i + 2 < chars.len() && chars[i + 1] == '[' && chars[i + 2] == ':' {
             let body_start = i + 3;
             let mut k = body_start;
             if k < chars.len() && chars[k] == '^' {
@@ -20255,9 +20174,7 @@ fn strip_xx_class_whitespace(pattern: &str) -> String {
                 let mut has_neg = false;
                 let mut x_count = 0;
                 let mut minus_x = false;
-                while k < chars.len()
-                    && (chars[k].is_ascii_alphabetic() || chars[k] == '-')
-                {
+                while k < chars.len() && (chars[k].is_ascii_alphabetic() || chars[k] == '-') {
                     if chars[k] == '-' {
                         has_neg = true;
                     } else if chars[k] == 'x' {
@@ -20319,9 +20236,7 @@ fn pattern_has_inline_single_x(pattern: &str) -> bool {
         if !in_class && c == '(' && i + 1 < chars.len() && chars[i + 1] == '?' {
             let mut k = i + 2;
             let mut x_count = 0;
-            while k < chars.len()
-                && (chars[k].is_ascii_alphabetic() || chars[k] == '-')
-            {
+            while k < chars.len() && (chars[k].is_ascii_alphabetic() || chars[k] == '-') {
                 if chars[k] == 'x' {
                     x_count += 1;
                 }
@@ -20356,9 +20271,7 @@ fn pattern_has_inline_i_flag(pattern: &str) -> bool {
         }
         if !in_class && c == '(' && i + 1 < chars.len() && chars[i + 1] == '?' {
             let mut k = i + 2;
-            while k < chars.len()
-                && (chars[k].is_ascii_alphabetic() || chars[k] == '-')
-            {
+            while k < chars.len() && (chars[k].is_ascii_alphabetic() || chars[k] == '-') {
                 if chars[k] == 'i' {
                     return true;
                 }
@@ -20387,9 +20300,7 @@ fn pattern_has_inline_ascii_flag(pattern: &str) -> bool {
         }
         if !in_class && c == '(' && i + 1 < chars.len() && chars[i + 1] == '?' {
             let mut k = i + 2;
-            while k < chars.len()
-                && (chars[k].is_ascii_alphabetic() || chars[k] == '-')
-            {
+            while k < chars.len() && (chars[k].is_ascii_alphabetic() || chars[k] == '-') {
                 if chars[k] == 'a' {
                     return true;
                 }
@@ -20400,7 +20311,6 @@ fn pattern_has_inline_ascii_flag(pattern: &str) -> bool {
     }
     false
 }
-
 
 fn translate_posix_classes(pattern: &str, ascii_only_outer: bool) -> String {
     let chars: Vec<char> = pattern.chars().collect();
@@ -20433,9 +20343,7 @@ fn translate_posix_classes(pattern: &str, ascii_only_outer: bool) -> String {
             if i + 2 < chars.len() && chars[i + 1] == '?' {
                 let mut k = i + 2;
                 let mut saw_a = false;
-                while k < chars.len()
-                    && (chars[k].is_ascii_alphabetic() || chars[k] == '-')
-                {
+                while k < chars.len() && (chars[k].is_ascii_alphabetic() || chars[k] == '-') {
                     if chars[k] == 'a' {
                         saw_a = true;
                     }
@@ -20532,9 +20440,7 @@ fn translate_posix_classes(pattern: &str, ascii_only_outer: bool) -> String {
                         let pos = match name.as_str() {
                             "alnum" => Some("\\p{Alphabetic}\\p{Nd}"),
                             "blank" => Some("\\t\\p{Zs}"),
-                            "print" => {
-                                Some("\\p{Alphabetic}\\p{Nd}\\p{P}\\p{S}\\p{Zs}")
-                            }
+                            "print" => Some("\\p{Alphabetic}\\p{Nd}\\p{P}\\p{S}\\p{Zs}"),
                             "graph" => Some("\\p{Alphabetic}\\p{Nd}\\p{P}\\p{S}"),
                             "word" => Some("\\p{Alphabetic}\\p{Nd}\\p{Pc}\\p{M}_"),
                             "xdigit" => Some("0-9A-Fa-f"),
@@ -20683,9 +20589,7 @@ fn strip_k_anchor(pattern: &str) -> String {
             if !in_class && chars[i + 1] == 'K' {
                 // Skip \K and following quantifier.
                 let mut k = i + 2;
-                if k < chars.len()
-                    && (chars[k] == '+' || chars[k] == '*' || chars[k] == '?')
-                {
+                if k < chars.len() && (chars[k] == '+' || chars[k] == '*' || chars[k] == '?') {
                     k += 1;
                     if k < chars.len() && (chars[k] == '?' || chars[k] == '+') {
                         k += 1;
@@ -20868,11 +20772,7 @@ fn rewrite_self_conditional_iteration(pattern: &str) -> String {
 /// Helper: try to match `((?(N)YES|NO))+` starting at `chars[at]`.
 /// Returns `Some((consumed_chars, replacement_string))` or `None`.
 /// `expected_n` is the group number the conditional must refer to.
-fn try_rewrite_self_cond(
-    chars: &[char],
-    at: usize,
-    expected_n: usize,
-) -> Option<(usize, String)> {
+fn try_rewrite_self_cond(chars: &[char], at: usize, expected_n: usize) -> Option<(usize, String)> {
     // chars[at] must be `(`. We need `((?(`.
     if chars.get(at).copied()? != '(' {
         return None;
@@ -20990,7 +20890,7 @@ fn collapse_lazy_plus_then(pattern: &str) -> String {
                 k += 1;
             }
             let verb_body: String = chars[i + 4..k].iter().collect();
-            let verb = verb_body.splitn(2, ':').next().unwrap_or("").to_uppercase();
+            let verb = verb_body.split(':').next().unwrap_or("").to_uppercase();
             if verb == "THEN" || verb == "PRUNE" {
                 to_strip.push((i, i + 2));
             }
@@ -21035,11 +20935,7 @@ fn extract_first_mark_label(pattern: &str) -> Option<String> {
             i += 1;
             continue;
         }
-        if !in_class
-            && c == '('
-            && i + 1 < chars.len()
-            && chars[i + 1] == '*'
-        {
+        if !in_class && c == '(' && i + 1 < chars.len() && chars[i + 1] == '*' {
             let mut k = i + 2;
             while k < chars.len() && chars[k] != ')' {
                 k += 1;
@@ -21094,17 +20990,13 @@ fn truncate_at_first_accept(pattern: &str) -> String {
             i += 1;
             continue;
         }
-        if !in_class
-            && c == '('
-            && i + 1 < chars.len()
-            && chars[i + 1] == '*'
-        {
+        if !in_class && c == '(' && i + 1 < chars.len() && chars[i + 1] == '*' {
             let mut k = i + 2;
             while k < chars.len() && chars[k] != ')' {
                 k += 1;
             }
             let body: String = chars[i + 2..k].iter().collect();
-            let name = body.splitn(2, ':').next().unwrap_or("").to_uppercase();
+            let name = body.split(':').next().unwrap_or("").to_uppercase();
             if name == "ACCEPT" && lookaround_depth == 0 {
                 accept_at = Some(i);
                 break;
@@ -21294,7 +21186,10 @@ fn prune_alternations_after_prune(pattern: &str) -> String {
             i += 1;
             continue;
         }
-        if !in_class && c == '|' && let Some(top) = stack.last_mut() {
+        if !in_class
+            && c == '|'
+            && let Some(top) = stack.last_mut()
+        {
             if top.1.is_none() {
                 top.1 = Some(i);
             }
@@ -21330,8 +21225,7 @@ fn prune_alternations_after_prune(pattern: &str) -> String {
             stack2.push(j);
         } else if !in_cls && c == ')' {
             if let Some(open) = stack2.pop()
-                && let Some(&(_, alt)) =
-                    keep_only_first.iter().find(|(o, _)| *o == open)
+                && let Some(&(_, alt)) = keep_only_first.iter().find(|(o, _)| *o == open)
             {
                 ranges.push((alt, j));
             }
@@ -21383,11 +21277,7 @@ fn strip_control_verbs(pattern: &str) -> String {
             i += 1;
             continue;
         }
-        if !in_class
-            && c == '('
-            && i + 1 < chars.len()
-            && chars[i + 1] == '*'
-        {
+        if !in_class && c == '(' && i + 1 < chars.len() && chars[i + 1] == '*' {
             // Find matching `)`. Body ends at `)` (no nesting in
             // verbs).
             let mut k = i + 2;
@@ -21396,22 +21286,10 @@ fn strip_control_verbs(pattern: &str) -> String {
             }
             if k < chars.len() {
                 let body: String = chars[i + 2..k].iter().collect();
-                let verb_name = body
-                    .splitn(2, ':')
-                    .next()
-                    .unwrap_or("")
-                    .to_uppercase();
+                let verb_name = body.split(':').next().unwrap_or("").to_uppercase();
                 let known = matches!(
                     verb_name.as_str(),
-                    "ACCEPT"
-                        | "FAIL"
-                        | "F"
-                        | "PRUNE"
-                        | "SKIP"
-                        | "THEN"
-                        | "COMMIT"
-                        | "MARK"
-                        | ""
+                    "ACCEPT" | "FAIL" | "F" | "PRUNE" | "SKIP" | "THEN" | "COMMIT" | "MARK" | ""
                 );
                 if known {
                     let replacement = if verb_name == "FAIL" || verb_name == "F" {
@@ -21453,13 +21331,9 @@ fn strip_quantifier_after_empty_lookaround(pattern: &str) -> String {
             out.push_str("(?!)");
             let mut k = i + 4;
             // Skip following quantifier so fancy_regex doesn't see it.
-            if k < chars.len()
-                && (chars[k] == '+' || chars[k] == '*' || chars[k] == '?')
-            {
+            if k < chars.len() && (chars[k] == '+' || chars[k] == '*' || chars[k] == '?') {
                 k += 1;
-                if k < chars.len()
-                    && (chars[k] == '?' || chars[k] == '+')
-                {
+                if k < chars.len() && (chars[k] == '?' || chars[k] == '+') {
                     k += 1;
                 }
             } else if k < chars.len() && chars[k] == '{' {
@@ -21469,9 +21343,7 @@ fn strip_quantifier_after_empty_lookaround(pattern: &str) -> String {
                 if k < chars.len() {
                     k += 1;
                 }
-                if k < chars.len()
-                    && (chars[k] == '?' || chars[k] == '+')
-                {
+                if k < chars.len() && (chars[k] == '?' || chars[k] == '+') {
                     k += 1;
                 }
             }
@@ -21643,11 +21515,7 @@ fn strip_hex_underscores(pattern: &str) -> String {
     let mut out = String::with_capacity(pattern.len());
     let mut i = 0;
     while i < chars.len() {
-        if chars[i] == '\\'
-            && i + 2 < chars.len()
-            && chars[i + 1] == 'x'
-            && chars[i + 2] == '{'
-        {
+        if chars[i] == '\\' && i + 2 < chars.len() && chars[i + 1] == 'x' && chars[i + 2] == '{' {
             let body_start = i + 3;
             let mut k = body_start;
             while k < chars.len() && chars[k] != '}' {
@@ -21732,8 +21600,7 @@ fn translate_octal_escapes(pattern: &str) -> String {
                 if k < chars.len() {
                     let raw: String = chars[body_start..k].iter().collect();
                     let trimmed = raw.trim();
-                    let body_owned: String =
-                        trimmed.chars().filter(|c| *c != '_').collect();
+                    let body_owned: String = trimmed.chars().filter(|c| *c != '_').collect();
                     let body = body_owned.as_str();
                     if !body.is_empty() && body.chars().all(|c| c.is_digit(8)) {
                         let n: u32 = u32::from_str_radix(body, 8).unwrap_or(0);
@@ -21754,10 +21621,7 @@ fn translate_octal_escapes(pattern: &str) -> String {
             // is octal `"`. Also handles `\10` against a 9-group pattern
             // — group 10 doesn't exist, so `\10` is octal `\010` =
             // char 0x08. re/regexp 1613-1620, 1963-1966.
-            if nxt.is_digit(8)
-                && nxt != '0'
-                && i + 2 < chars.len()
-                && chars[i + 2].is_ascii_digit()
+            if nxt.is_digit(8) && nxt != '0' && i + 2 < chars.len() && chars[i + 2].is_ascii_digit()
             {
                 // Read full decimal number to compare against group count.
                 let mut decimal_end = i + 1;
@@ -21907,8 +21771,7 @@ fn apply_branch_reset_renumber(
                     .take_while(|g| inner_groups.contains(g))
                     .count();
                 if prefix_len > 0 {
-                    let inner_size =
-                        inner.iter().map(|b| b.len()).max().unwrap_or(0);
+                    let inner_size = inner.iter().map(|b| b.len()).max().unwrap_or(0);
                     size += inner_size;
                     remaining.drain(..prefix_len);
                     progress = true;
@@ -21980,12 +21843,7 @@ fn apply_branch_reset_renumber(
                 }
                 // Advance old past all groups in this block (which are
                 // contiguous: block_first..=block_last).
-                let block_last = branches
-                    .iter()
-                    .flatten()
-                    .copied()
-                    .max()
-                    .unwrap_or(old);
+                let block_last = branches.iter().flatten().copied().max().unwrap_or(old);
                 old = block_last + 1;
                 continue;
             }
@@ -22023,8 +21881,7 @@ fn compute_effective_branch_size(
                 .iter()
                 .take_while(|g| inner_groups.contains(g))
                 .count();
-            if prefix_len == remaining.len()
-                || (prefix_len > 0 && prefix_len == inner_groups.len())
+            if prefix_len == remaining.len() || (prefix_len > 0 && prefix_len == inner_groups.len())
             {
                 let inner_size = inner.iter().map(|b| b.len()).max().unwrap_or(0);
                 size += inner_size;
@@ -22086,9 +21943,7 @@ fn extract_branch_reset_blocks(pattern: &str) -> Vec<Vec<Vec<usize>>> {
                 && chars[i + 1] == '?'
                 && chars[i + 2] == 'P'
                 && chars[i + 3] == '<';
-            let is_named_quote = i + 2 < chars.len()
-                && chars[i + 1] == '?'
-                && chars[i + 2] == '\'';
+            let is_named_quote = i + 2 < chars.len() && chars[i + 1] == '?' && chars[i + 2] == '\'';
             let is_capturing = !(i + 1 < chars.len() && chars[i + 1] == '?')
                 || is_named_angle
                 || is_named_p
@@ -22119,8 +21974,7 @@ fn extract_branch_reset_blocks(pattern: &str) -> Vec<Vec<Vec<usize>>> {
             if let Some((is_br, mut branches, branch_groups)) = stack.pop() {
                 if is_br {
                     branches.push(branch_groups);
-                    let all_groups: Vec<usize> =
-                        branches.iter().flatten().copied().collect();
+                    let all_groups: Vec<usize> = branches.iter().flatten().copied().collect();
                     out.push(branches);
                     // Propagate ALL nested groups (from every branch) to
                     // parent so outer branch_reset sees them.
@@ -22363,10 +22217,8 @@ fn split_variable_lookbehind(pattern: &str) -> String {
                     alts.push(cur);
                     if alts.len() > 1 {
                         let kind = if positive { "=" } else { "!" };
-                        let pieces: Vec<String> = alts
-                            .iter()
-                            .map(|a| format!("(?<{kind}{a})"))
-                            .collect();
+                        let pieces: Vec<String> =
+                            alts.iter().map(|a| format!("(?<{kind}{a})")).collect();
                         out.push_str(&format!("(?:{})", pieces.join("|")));
                         i = j + 2; // past inner `)` and outer `)`
                         continue;
@@ -22423,7 +22275,9 @@ fn expand_ascii_ligatures(pattern: &str) -> String {
                 }
             }
             // `\xNN` two-digit form.
-            if !in_class && n == 'x' && i + 3 < chars.len()
+            if !in_class
+                && n == 'x'
+                && i + 3 < chars.len()
                 && chars[i + 2].is_ascii_hexdigit()
                 && chars[i + 3].is_ascii_hexdigit()
             {
@@ -22494,24 +22348,23 @@ fn expand_ascii_ligatures(pattern: &str) -> String {
         // substitution — kept for non-letter runs).
         let rest: String = chars[i..].iter().collect();
         let lower = rest.to_lowercase();
-        let (consume, replacement): (usize, &str) =
-            if lower.starts_with("ffi") {
-                (3, "(?:ffi|\\x{FB03})")
-            } else if lower.starts_with("ffl") {
-                (3, "(?:ffl|\\x{FB04})")
-            } else if lower.starts_with("ff") {
-                (2, "(?:ff|\\x{FB00})")
-            } else if lower.starts_with("fi") {
-                (2, "(?:fi|\\x{FB01})")
-            } else if lower.starts_with("fl") {
-                (2, "(?:fl|\\x{FB02})")
-            } else if lower.starts_with("st") {
-                (2, "(?:st|\\x{FB06}|\\x{FB05})")
-            } else if lower.starts_with("ss") {
-                (2, "(?:ss|\\x{DF})")
-            } else {
-                (0, "")
-            };
+        let (consume, replacement): (usize, &str) = if lower.starts_with("ffi") {
+            (3, "(?:ffi|\\x{FB03})")
+        } else if lower.starts_with("ffl") {
+            (3, "(?:ffl|\\x{FB04})")
+        } else if lower.starts_with("ff") {
+            (2, "(?:ff|\\x{FB00})")
+        } else if lower.starts_with("fi") {
+            (2, "(?:fi|\\x{FB01})")
+        } else if lower.starts_with("fl") {
+            (2, "(?:fl|\\x{FB02})")
+        } else if lower.starts_with("st") {
+            (2, "(?:st|\\x{FB06}|\\x{FB05})")
+        } else if lower.starts_with("ss") {
+            (2, "(?:ss|\\x{DF})")
+        } else {
+            (0, "")
+        };
         if consume > 0 {
             // Ensure we don't grab a prefix that's followed by a
             // quantifier directly attached to its last char (e.g.
@@ -22661,38 +22514,36 @@ fn substitute_constant_runtime_regex(pattern: &str) -> String {
                     }
                 }
                 // Handle `"..."` constant.
-                let extracted: Option<String> =
-                    if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
-                        Some(trimmed[1..trimmed.len() - 1].to_string())
-                    } else if trimmed.starts_with("q(") && trimmed.ends_with(')') {
-                        Some(trimmed[2..trimmed.len() - 1].to_string())
-                    } else if trimmed.starts_with('\'')
-                        && trimmed.ends_with('\'')
-                        && trimmed.len() >= 2
-                    {
-                        Some(trimmed[1..trimmed.len() - 1].to_string())
-                    } else if !trimmed.is_empty()
-                        && trimmed.chars().all(|c| c.is_ascii_digit())
-                    {
-                        // Numeric literal — stringified value is the
-                        // pattern. re/regexp 1703, 1705.
-                        Some(trimmed.to_string())
-                    } else if let Some(rest) = trimmed.strip_prefix("chr ") {
-                        // `chr N` — codepoint literal. re/regexp 1112+.
-                        let arg = rest.trim();
-                        let n: Option<u32> = if let Some(hex) = arg.strip_prefix("0x") {
-                            u32::from_str_radix(hex, 16).ok()
-                        } else if let Some(hex) = arg.strip_prefix("0X") {
-                            u32::from_str_radix(hex, 16).ok()
-                        } else if let Some(oct) = arg.strip_prefix("0o") {
-                            u32::from_str_radix(oct, 8).ok()
-                        } else {
-                            arg.parse().ok()
-                        };
-                        n.map(|v| format!("\\x{{{v:x}}}"))
+                let extracted: Option<String> = if trimmed.starts_with('"')
+                    && trimmed.ends_with('"')
+                    && trimmed.len() >= 2
+                {
+                    Some(trimmed[1..trimmed.len() - 1].to_string())
+                } else if trimmed.starts_with("q(") && trimmed.ends_with(')') {
+                    Some(trimmed[2..trimmed.len() - 1].to_string())
+                } else if trimmed.starts_with('\'') && trimmed.ends_with('\'') && trimmed.len() >= 2
+                {
+                    Some(trimmed[1..trimmed.len() - 1].to_string())
+                } else if !trimmed.is_empty() && trimmed.chars().all(|c| c.is_ascii_digit()) {
+                    // Numeric literal — stringified value is the
+                    // pattern. re/regexp 1703, 1705.
+                    Some(trimmed.to_string())
+                } else if let Some(rest) = trimmed.strip_prefix("chr ") {
+                    // `chr N` — codepoint literal. re/regexp 1112+.
+                    let arg = rest.trim();
+                    let n: Option<u32> = if let Some(hex) = arg.strip_prefix("0x") {
+                        u32::from_str_radix(hex, 16).ok()
+                    } else if let Some(hex) = arg.strip_prefix("0X") {
+                        u32::from_str_radix(hex, 16).ok()
+                    } else if let Some(oct) = arg.strip_prefix("0o") {
+                        u32::from_str_radix(oct, 8).ok()
                     } else {
-                        None
+                        arg.parse().ok()
                     };
+                    n.map(|v| format!("\\x{{{v:x}}}"))
+                } else {
+                    None
+                };
                 if let Some(pat) = extracted {
                     // After `}` we expect `)`.
                     let after = if j + 1 < chars.len() && chars[j + 1] == ')' {
@@ -22726,9 +22577,7 @@ fn substitute_constant_runtime_regex(pattern: &str) -> String {
                                 next += 1;
                             }
                             // Lazy / possessive marker.
-                            if next < chars.len()
-                                && (chars[next] == '?' || chars[next] == '+')
-                            {
+                            if next < chars.len() && (chars[next] == '?' || chars[next] == '+') {
                                 next += 1;
                             }
                         }
@@ -22973,9 +22822,7 @@ fn perl_dollar_anchor(pattern: &str, multiline: bool) -> String {
                 let mut has_neg = false;
                 let mut saw_m = false;
                 let mut saw_minus_m = false;
-                while k < chars.len()
-                    && (chars[k].is_ascii_alphabetic() || chars[k] == '-')
-                {
+                while k < chars.len() && (chars[k].is_ascii_alphabetic() || chars[k] == '-') {
                     if chars[k] == '-' {
                         has_neg = true;
                     } else if chars[k] == 'm' {
@@ -23016,9 +22863,8 @@ fn perl_dollar_anchor(pattern: &str, multiline: bool) -> String {
             // bare `^` with `(?:\A|(?<=\n))(?!\z)` to exclude that
             // position. Skip inside class. re/regexp 984.
             if !in_class && c == '^' {
-                let prev_is_escape = i > 0
-                    && chars[i - 1] == '\\'
-                    && (i < 2 || chars[i - 2] != '\\');
+                let prev_is_escape =
+                    i > 0 && chars[i - 1] == '\\' && (i < 2 || chars[i - 2] != '\\');
                 if !prev_is_escape {
                     out.push_str("(?:\\A|(?<=\\n))(?!\\z)");
                     i += 1;

@@ -2513,8 +2513,7 @@ impl Lexer {
                                 k += 1;
                             }
                             if k < self.input.len() {
-                                let raw: String =
-                                    self.input[body_start..k].iter().collect();
+                                let raw: String = self.input[body_start..k].iter().collect();
                                 let trimmed = raw.trim();
                                 if let Some(rest) = trimmed
                                     .strip_prefix("U+")
@@ -2532,9 +2531,7 @@ impl Lexer {
                                         continue;
                                     }
                                 } else if !trimmed.is_empty()
-                                    && !trimmed
-                                        .chars()
-                                        .all(|c| c.is_ascii_digit() || c == ',')
+                                    && !trimmed.chars().all(|c| c.is_ascii_digit() || c == ',')
                                 {
                                     if let Some(c) = lookup_named_char(trimmed) {
                                         s.push(c);
@@ -2584,8 +2581,7 @@ impl Lexer {
                         // op/chars `"\c\\"` is control-\\ (0x1c).
                         self.pos += 1;
                         if self.pos < self.input.len() {
-                            let operand = if self.ch() == '\\' && self.pos + 1 < self.input.len()
-                            {
+                            let operand = if self.ch() == '\\' && self.pos + 1 < self.input.len() {
                                 self.pos += 1;
                                 self.ch()
                             } else {
@@ -2911,9 +2907,7 @@ impl Lexer {
                     && i + 2 < chars.len()
                     && chars[i + 1] == '?'
                     && (chars[i + 2] == '{'
-                        || (chars[i + 2] == '?'
-                            && i + 3 < chars.len()
-                            && chars[i + 3] == '{'))
+                        || (chars[i + 2] == '?' && i + 3 < chars.len() && chars[i + 3] == '{'))
                 {
                     let body_open = if chars[i + 2] == '?' { i + 3 } else { i + 2 };
                     let mut depth = 1;
@@ -3869,8 +3863,10 @@ fn process_escapes(s: &str) -> String {
                             }
                         }
                     }
-                    let cleaned: String =
-                        hex.chars().filter(|c| !c.is_whitespace() && *c != '_').collect();
+                    let cleaned: String = hex
+                        .chars()
+                        .filter(|c| !c.is_whitespace() && *c != '_')
+                        .collect();
                     let v = u32::from_str_radix(&cleaned, 16).unwrap_or(0);
                     if let Some(c) = char::from_u32(v) {
                         result.push(c);

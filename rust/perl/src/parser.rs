@@ -2748,6 +2748,27 @@ impl Parser {
                         expr = Expr::Call("_scalar_block_deref".to_string(), vec![inner]);
                         continue;
                     }
+                    // `->@*` — postfix array-flat deref. Lexer emits
+                    // `ArrayVar("")` (no following name char) + `Star`.
+                    if let Token::ArrayVar(n) = self.tok()
+                        && n.is_empty()
+                        && matches!(self.peek(1), Token::Star)
+                    {
+                        self.pos += 2;
+                        let inner = expr;
+                        expr = Expr::Call("_array_block_deref".to_string(), vec![inner]);
+                        continue;
+                    }
+                    // `->%*` — postfix hash-flat deref. The lexer's `%`
+                    // handler falls through to `Token::Percent` (no name
+                    // char before `*`), so we recognise `Percent + Star`
+                    // after the arrow.
+                    if matches!(self.tok(), Token::Percent) && matches!(self.peek(1), Token::Star) {
+                        self.pos += 2;
+                        let inner = expr;
+                        expr = Expr::Call("_hash_block_deref".to_string(), vec![inner]);
+                        continue;
+                    }
                     // `->$#*` — postfix array-length deref. Same as
                     // `$#{EXPR}`. Lexer produces `ArrayLen("")` followed
                     // by `Times` (`*`) since `read_ident` after `$#`
@@ -4081,11 +4102,25 @@ fn parse_interp_string(s: &str) -> Expr {
             // $| (autoflush), $& $` $' (regex matches).
             let is_punct_special = matches!(
                 chars[i + 1],
-                '@' | '!' | '/' | '\\' | ',' | '"' | ';' | '|' | '&' | '`' | '\'' | '?' | '-' | '+' | '~' | '%' | '='
+                '@' | '!'
+                    | '/'
+                    | '\\'
+                    | ','
+                    | '"'
+                    | ';'
+                    | '|'
+                    | '&'
+                    | '`'
+                    | '\''
+                    | '?'
+                    | '-'
+                    | '+'
+                    | '~'
+                    | '%'
+                    | '='
             ) || (chars[i + 1] == '.'
                 && (i + 2 >= chars.len() || !chars[i + 2].is_ascii_digit()))
-                || (chars[i + 1] == ':'
-                    && (i + 2 >= chars.len() || chars[i + 2] != ':'));
+                || (chars[i + 1] == ':' && (i + 2 >= chars.len() || chars[i + 2] != ':'));
             // `$$name` — scalar deref interpolation. Detect `$$` followed
             // by an ident (otherwise `$$` is the pid var or literal).
             let is_scalar_deref = chars[i + 1] == '$'
@@ -4290,8 +4325,7 @@ fn parse_interp_string(s: &str) -> Expr {
                         | '='
                 ) || (chars[i] == '.'
                     && (i + 1 >= chars.len() || !chars[i + 1].is_ascii_digit()))
-                    || (chars[i] == ':'
-                        && (i + 1 >= chars.len() || chars[i + 1] != ':'))
+                    || (chars[i] == ':' && (i + 1 >= chars.len() || chars[i + 1] != ':'))
                 {
                     // Single-char punctuation special variable.
                     // May be followed by an arrow-chain: `$@->{k}`, `$!->[0]`.
