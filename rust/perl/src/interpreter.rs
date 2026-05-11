@@ -11317,12 +11317,18 @@ impl Interpreter {
         // LIFO order, before tearing down the scope. A defer body may
         // register further defers (nested `defer { defer { … } }`);
         // those queue onto the same frame, so loop until empty so they
-        // all run before the scope dies. op/defer 9, 10.
+        // all run before the scope dies. op/defer 9, 10. A defer that
+        // dies surfaces the exception to the enclosing caller via
+        // `pending_flow` (later iterations still run — Perl runs all
+        // defers, and the last unwinding exception wins). op/defer 22.
         loop {
             let body = self.defer_blocks.last_mut().and_then(|v| v.pop());
             match body {
                 Some(body) => {
-                    let _ = self.exec_stmts(&body);
+                    let flow = self.exec_stmts(&body);
+                    if let Flow::Die(msg) = flow {
+                        self.pending_flow = Some(Flow::Die(msg));
+                    }
                 }
                 None => break,
             }
