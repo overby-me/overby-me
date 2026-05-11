@@ -4431,6 +4431,30 @@ impl Interpreter {
             }
 
             Expr::Defined(expr) => {
+                // `defined &{EXPR}` / `defined &$ref` — evaluate the
+                // inner without invoking it; true iff it is a CodeRef
+                // pointing at a sub with a body (forward-declared subs
+                // count as not-defined).
+                if let Expr::CodeCall(inner, sub_args) = expr.as_ref()
+                    && sub_args.is_empty()
+                {
+                    let val = self.eval_expr(inner);
+                    return Value::Num(match &val {
+                        Value::CodeRef(name) => {
+                            let q = format!("{}::{}", self.package, name);
+                            let in_subs = self.subs.contains_key(name)
+                                || self.subs.contains_key(&q);
+                            let declared_only = self.declared_only_subs.contains(name)
+                                || self.declared_only_subs.contains(&q);
+                            if in_subs && !declared_only {
+                                1.0
+                            } else {
+                                0.0
+                            }
+                        }
+                        _ => 0.0,
+                    });
+                }
                 // `defined &name` checks whether the sub is defined
                 // *without* invoking it. Likewise `defined &$ref` should
                 // not call the code ref. Detect these forms before the
@@ -7040,6 +7064,17 @@ impl Interpreter {
                             let here = self.subs.contains_key(name)
                                 || self.subs.contains_key(&q);
                             return Value::Num(if here { 1.0 } else { 0.0 });
+                        }
+                        // `exists &{EXPR}` / `exists &$ref` — evaluate
+                        // EXPR/$ref without calling it; true iff it
+                        // resolves to a CodeRef.
+                        Expr::CodeCall(inner, sub_args) if sub_args.is_empty() => {
+                            let val = self.eval_expr(inner);
+                            return Value::Num(if matches!(val, Value::CodeRef(_)) {
+                                1.0
+                            } else {
+                                0.0
+                            });
                         }
                         Expr::HashElement(name, key_e) => {
                             let key = self.eval_expr(key_e).to_str();
