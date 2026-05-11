@@ -727,6 +727,29 @@ impl Parser {
             Expr::Call(ref name, _) if name == "each" || name == "readline" => {
                 Expr::Defined(Box::new(cond))
             }
+            // `while ($k = each X)` / `while ($l = <FH>)` / `while ($l = readline FH)`
+            // — Perl wraps the assignment in defined() so the loop exits only
+            // when the RHS produces undef (so a 0/'' first value still iterates).
+            // Only wrap when LHS is a single scalar (ScalarVar / MyVar / LocalVar);
+            // list-context destructuring like `($k, $v) = each X` already exits
+            // on the empty list from each, so wrapping would prevent termination.
+            // op/each_array tests 43–48.
+            Expr::Assign(ref lhs, ref rhs) => {
+                let lhs_is_scalar = matches!(
+                    lhs.as_ref(),
+                    Expr::ScalarVar(_) | Expr::MyVar(_) | Expr::LocalVar(_)
+                );
+                let rhs_is_iter = match rhs.as_ref() {
+                    Expr::Diamond(_) => true,
+                    Expr::Call(n, _) => n == "each" || n == "readline",
+                    _ => false,
+                };
+                if lhs_is_scalar && rhs_is_iter {
+                    Expr::Defined(Box::new(cond))
+                } else {
+                    cond
+                }
+            }
             other => other,
         };
         let body = self.parse_brace_block();
