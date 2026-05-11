@@ -11014,6 +11014,19 @@ impl Interpreter {
     }
 
     fn set_hash_from_list(&mut self, name: &str, items: Vec<Value>) {
+        // Odd number of elements → warn (default on under `use
+        // warnings`). op/hashwarn.
+        if items.len() % 2 == 1 {
+            let file = if self.current_file.is_empty() {
+                "-e".to_string()
+            } else {
+                self.current_file.clone()
+            };
+            let line = self.current_line;
+            self.emit_warning(&format!(
+                "Odd number of elements in hash assignment at {file} line {line}.\n"
+            ));
+        }
         let mut hash = HashMap::new();
         let mut iter = items.into_iter();
         while let Some(key) = iter.next() {
