@@ -5800,6 +5800,10 @@ impl Interpreter {
         // for `&NAME()` (empty parens), so the actual call gets an
         // empty args list. The sentinel exists only to let `exists
         // &NAME()` distinguish between `&NAME` and `&NAME()`.
+        //
+        // `_amp_call_inherit_args` is the `&NAME` (no-parens) sentinel —
+        // expand it to the current sub's @_ so the called sub sees the
+        // caller's args. op/args `&methimpl` tests.
         let filtered: Vec<Expr>;
         let args = if args
             .iter()

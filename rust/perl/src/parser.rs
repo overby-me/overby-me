@@ -3050,23 +3050,33 @@ impl Parser {
             }
             Token::ArrayBlockDerefOpen => {
                 // `@{ EXPR }` — evaluate EXPR, treat its result as an
-                // array ref and return its elements.
+                // array ref and return its elements. Lexer emits this for
+                // `@` only; eat the trailing `{` so parse_expr sees the
+                // inner expression, not a block primary.
                 self.pos += 1;
+                self.eat(&Token::LBrace);
                 let inner = self.parse_expr();
                 self.expect(&Token::RBrace);
                 Expr::Call("_array_block_deref".to_string(), vec![inner])
             }
             Token::HashBlockDerefOpen => {
                 // `%{ EXPR }` — evaluate EXPR, treat its result as a hash
-                // ref and return the key/value list.
+                // ref and return the key/value list. The lexer emits
+                // HashBlockDerefOpen for the `%` but leaves the `{` as a
+                // separate Token::LBrace — consume it here so the inner
+                // parse_expr sees the actual expression, not a primary
+                // `{ … }` block.
                 self.pos += 1;
+                self.eat(&Token::LBrace);
                 let inner = self.parse_expr();
                 self.expect(&Token::RBrace);
                 Expr::Call("_hash_block_deref".to_string(), vec![inner])
             }
             Token::ScalarBlockDerefOpen => {
                 // `${ EXPR }` — evaluate EXPR, dereference as scalar.
+                // Same as above — eat the lexer's separate `{`.
                 self.pos += 1;
+                self.eat(&Token::LBrace);
                 let inner = self.parse_expr();
                 self.expect(&Token::RBrace);
                 Expr::Call("_scalar_block_deref".to_string(), vec![inner])
