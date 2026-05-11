@@ -12010,6 +12010,11 @@ impl Interpreter {
         let pattern = substitute_constant_runtime_regex(&pattern);
         let (pattern, code_blocks) = extract_regex_code_blocks(&pattern);
         let pattern = expand_inline_aa_case_insensitive(&pattern);
+        // Unroll (?R)/(?0) BEFORE flag transforms, otherwise
+        // `strip_unsupported_regex_flags` / `translate_inline_flag_groups`
+        // misread the `R` in `(?R)` as a regex flag and mangle the pattern
+        // into `(?R:rest_of_pattern)`. re/regexp 1183, 2010.
+        let pattern = unroll_full_recursion(&pattern, 4);
         let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_inline_flag_groups(&pattern);
         let pattern = translate_perl_whitespace_escapes(&pattern);
@@ -12467,6 +12472,11 @@ impl Interpreter {
         let pattern = substitute_constant_runtime_regex(&pattern);
         let (pattern, code_blocks) = extract_regex_code_blocks(&pattern);
         let pattern = expand_inline_aa_case_insensitive(&pattern);
+        // Unroll (?R)/(?0) BEFORE flag transforms, otherwise
+        // `strip_unsupported_regex_flags` / `translate_inline_flag_groups`
+        // misread the `R` in `(?R)` as a regex flag and mangle the pattern
+        // into `(?R:rest_of_pattern)`. re/regexp 1183, 2010.
+        let pattern = unroll_full_recursion(&pattern, 4);
         let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_inline_flag_groups(&pattern);
         let pattern = translate_perl_whitespace_escapes(&pattern);
@@ -18357,6 +18367,78 @@ fn restrict_word_classes_ascii(pattern: &str) -> String {
             in_class = false;
         }
         out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Unroll `(?R)` / `(?0)` full-pattern recursion to a bounded depth
+/// by substituting the whole pattern in place of the recursion ref.
+/// Captures inside the embedded copies are neutralised so outer
+/// group numbering stays intact. At max depth, the recursion ref is
+/// replaced with `(?!)` (never match) so the regex still terminates.
+/// Approximate — only handles `(?R)` / `(?0)` (whole-pattern), not
+/// `(?N)` / `(?&NAME)`. re/regexp 1182, 1183, 2010.
+fn unroll_full_recursion(pattern: &str, depth: usize) -> String {
+    // Only act if the pattern actually contains `(?R)` or `(?0)`.
+    if !pattern_contains_full_recursion(pattern) {
+        return pattern.to_string();
+    }
+    // Build the innermost replacement: pattern with (?R)/(?0) → (?!)
+    // (never match), so deepest level terminates.
+    let mut current = substitute_full_recursion_with(pattern, "(?!)");
+    // Wrap depth times: replace (?R)/(?0) with the previous level,
+    // captures neutralised so they don't shift outer group numbers.
+    for _ in 0..depth {
+        let neutralised = neutralise_captures(&current);
+        let wrapped = substitute_full_recursion_with(pattern, &format!("(?:{neutralised})"));
+        current = wrapped;
+    }
+    current
+}
+
+fn pattern_contains_full_recursion(pattern: &str) -> bool {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut i = 0;
+    while i + 3 < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if chars[i] == '('
+            && chars[i + 1] == '?'
+            && (chars[i + 2] == 'R' || chars[i + 2] == '0')
+            && chars[i + 3] == ')'
+        {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+fn substitute_full_recursion_with(pattern: &str, replacement: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            out.push(chars[i]);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if i + 3 < chars.len()
+            && chars[i] == '('
+            && chars[i + 1] == '?'
+            && (chars[i + 2] == 'R' || chars[i + 2] == '0')
+            && chars[i + 3] == ')'
+        {
+            out.push_str(replacement);
+            i += 4;
+            continue;
+        }
+        out.push(chars[i]);
         i += 1;
     }
     out
