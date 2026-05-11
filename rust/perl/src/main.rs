@@ -179,6 +179,19 @@ fn run_interpreter() -> i32 {
         }
     }
 
+    // If no script file or -e program was given but stdin is
+    // redirected (a pipe or file), reference perl reads the script
+    // from stdin. Matches `perl < file.pl`. run/script test 3.
+    if program_text.is_empty() && script_file.is_empty() {
+        use std::io::{IsTerminal, Read};
+        if !std::io::stdin().is_terminal() {
+            let mut bytes = Vec::new();
+            if std::io::stdin().read_to_end(&mut bytes).is_ok() {
+                program_text = String::from_utf8_lossy(&bytes).into_owned();
+            }
+        }
+    }
+
     if program_text.is_empty() {
         eprintln!("usage: perl [switches] [programfile] [arguments]");
         std::process::exit(1);
