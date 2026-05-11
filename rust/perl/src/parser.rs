@@ -1508,6 +1508,10 @@ impl Parser {
         }
         exprs.push(self.parse_expr());
         while self.eat(&Token::Comma) || self.eat(&Token::FatComma) {
+            // Skip extra commas — `f(1, , 'a')` is Perl-legal and the
+            // empty slot is silently dropped, not coerced to undef.
+            // op/exists_sub test 10 (`ok( defined &t5, , 't5 defined' )`).
+            while self.eat(&Token::Comma) || self.eat(&Token::FatComma) {}
             if self.at_list_end() {
                 break;
             }
