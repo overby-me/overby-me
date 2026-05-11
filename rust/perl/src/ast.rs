@@ -46,13 +46,13 @@ pub enum Expr {
     MethodCall(Box<Expr>, String, Vec<Expr>),
 
     // Special
-    Diamond(String),            // <FH> or <>
-    Backtick(String),           // `command` (literal)
-    BacktickInterp(Box<Expr>),  // `command` with interpolation
-    Ref(Box<Expr>),             // \expr
-    Deref(Box<Expr>),           // $$ref, @$ref, %$ref
-    ArrayRef(Vec<Expr>),        // [expr, ...]
-    HashRef(Vec<(Expr, Expr)>), // {key => val, ...}
+    Diamond(String),           // <FH> or <>
+    Backtick(String),          // `command` (literal)
+    BacktickInterp(Box<Expr>), // `command` with interpolation
+    Ref(Box<Expr>),            // \expr
+    Deref(Box<Expr>),          // $$ref, @$ref, %$ref
+    ArrayRef(Vec<Expr>),       // [expr, ...]
+    HashRef(Vec<Expr>),        // {key, val, key, val, ...} — flat list, paired at eval time
     /// Array dereference of a scalar reference: `@$name` / `@{$name}`.
     /// In list context yields the array's elements; in scalar context the length.
     ArrayDerefVar(String),

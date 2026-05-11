@@ -1597,11 +1597,7 @@ impl Interpreter {
                     // registered DURING this iteration runs at iteration
                     // end (LIFO), not accumulating into the outer scope.
                     // op/defer test 6 (foreach iter captures own $i).
-                    let defer_base = self
-                        .defer_blocks
-                        .last()
-                        .map(|v| v.len())
-                        .unwrap_or(0);
+                    let defer_base = self.defer_blocks.last().map(|v| v.len()).unwrap_or(0);
                     let flow = self.exec_stmts(body);
                     if let Some(blocks) = self.defer_blocks.last_mut() {
                         let drained: Vec<Vec<Stmt>> = blocks.drain(defer_base..).collect();
@@ -2141,7 +2137,10 @@ impl Interpreter {
                         // exclude them via `aliased_vars`/`aliased_arrays`/
                         // `aliased_hashes`. op/fresh_perl_utf8.
                         if !var_name.is_empty()
-                            && var_name.chars().next().is_some_and(|c| c == '_' || c.is_alphabetic())
+                            && var_name
+                                .chars()
+                                .next()
+                                .is_some_and(|c| c == '_' || c.is_alphabetic())
                         {
                             let qualified = format!("{}::{}", self.package, var_name);
                             let is_our = self.aliased_vars.contains_key(var_name)
@@ -2152,18 +2151,15 @@ impl Interpreter {
                                 || self.aliased_hashes.contains_key(&qualified);
                             let lexical = !is_our
                                 && match name.chars().next() {
-                                    Some('$') => self
-                                        .scopes
-                                        .iter()
-                                        .any(|s| s.vars.contains_key(var_name)),
-                                    Some('@') => self
-                                        .scopes
-                                        .iter()
-                                        .any(|s| s.arrays.contains_key(var_name)),
-                                    Some('%') => self
-                                        .scopes
-                                        .iter()
-                                        .any(|s| s.hashes.contains_key(var_name)),
+                                    Some('$') => {
+                                        self.scopes.iter().any(|s| s.vars.contains_key(var_name))
+                                    }
+                                    Some('@') => {
+                                        self.scopes.iter().any(|s| s.arrays.contains_key(var_name))
+                                    }
+                                    Some('%') => {
+                                        self.scopes.iter().any(|s| s.hashes.contains_key(var_name))
+                                    }
                                     _ => false,
                                 };
                             if lexical {
@@ -2810,8 +2806,7 @@ impl Interpreter {
                             | Value::ScalarRef(_)
                             | Value::CodeRef(_)
                             | Value::Regex(_, _, _)
-                    )
-                {
+                    ) {
                     Some(arg_vals[0].clone())
                 } else {
                     None
@@ -4907,12 +4902,32 @@ impl Interpreter {
                 Value::ArrayRef(std::rc::Rc::new(std::cell::RefCell::new(vals)))
             }
 
-            Expr::HashRef(pairs) => {
+            Expr::HashRef(items) => {
+                // Flatten every entry in list context so ranges, arrays,
+                // slices and other list-producing exprs expand. Then pair up
+                // key/value, padding the last value with undef and emitting
+                // the standard anonymous-hash odd-elements warning when the
+                // count is odd. op/hashwarn.
+                let mut flat: Vec<Value> = Vec::new();
+                for e in items {
+                    flat.extend(self.eval_list(e));
+                }
+                if flat.len() % 2 == 1 {
+                    let file = if self.current_file.is_empty() {
+                        "-e".to_string()
+                    } else {
+                        self.current_file.clone()
+                    };
+                    let line = self.current_line;
+                    self.emit_warning(&format!(
+                        "Odd number of elements in anonymous hash at {file} line {line}.\n"
+                    ));
+                }
                 let mut h = std::collections::HashMap::new();
-                for (k, v) in pairs {
-                    let key = self.eval_expr(k).to_str();
-                    let val = self.eval_expr(v);
-                    h.insert(key, val);
+                let mut it = flat.into_iter();
+                while let Some(key) = it.next() {
+                    let val = it.next().unwrap_or(Value::Undef);
+                    h.insert(key.to_str(), val);
                 }
                 Value::HashRef(std::rc::Rc::new(std::cell::RefCell::new(h)))
             }
@@ -7148,9 +7163,8 @@ impl Interpreter {
                     if let Some(key) = self.array_each_cursor_key(args.first()) {
                         self.each_cursors.remove(&key);
                     }
-                    self.last_list_val = Some(
-                        (0..arr.len()).map(|i| Value::Num(i as f64)).collect(),
-                    );
+                    self.last_list_val =
+                        Some((0..arr.len()).map(|i| Value::Num(i as f64)).collect());
                     return Value::Num(arr.len() as f64);
                 }
                 let (cursor_key, hash) = match self.resolve_hash_arg(args.first()) {
@@ -7264,9 +7278,9 @@ impl Interpreter {
                         // `&NAME()` with a `_amp_call_parens` sentinel
                         // arg so we can detect it. op/exists_sub.
                         Expr::Call(_, sub_args)
-                            if sub_args.iter().any(|a| {
-                                matches!(a, Expr::Call(n, _) if n == "_amp_call_parens")
-                            }) =>
+                            if sub_args.iter().any(
+                                |a| matches!(a, Expr::Call(n, _) if n == "_amp_call_parens"),
+                            ) =>
                         {
                             let file = if self.current_file.is_empty() {
                                 "-e".to_string()
@@ -11236,10 +11250,7 @@ impl Interpreter {
         // those queue onto the same frame, so loop until empty so they
         // all run before the scope dies. op/defer 9, 10.
         loop {
-            let body = self
-                .defer_blocks
-                .last_mut()
-                .and_then(|v| v.pop());
+            let body = self.defer_blocks.last_mut().and_then(|v| v.pop());
             match body {
                 Some(body) => {
                     let _ = self.exec_stmts(&body);

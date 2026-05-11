@@ -33,6 +33,8 @@ Siz = "Siz"
 gir = "gir"
 # restat = ninja build system keyword (re-stat output files)
 restat = "restat"
+# Nd = Unicode General Category for Decimal Digit (used in \p{Nd} regex props)
+Nd = "Nd"
 
 
 [default]

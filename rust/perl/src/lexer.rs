@@ -2071,10 +2071,7 @@ impl Lexer {
                     // surrounding context to be operator-positioned —
                     // bare `~~$x` at expression-start is `~(~$x)`.
                     if self.ch() == '~'
-                        && tokens
-                            .last()
-                            .map(|t| !t.expects_operand())
-                            .unwrap_or(false)
+                        && tokens.last().map(|t| !t.expects_operand()).unwrap_or(false)
                     {
                         self.pos += 1;
                         tokens.push(Token::Smartmatch);

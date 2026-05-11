@@ -182,8 +182,8 @@ impl Parser {
             }
             // `defer { … }` — Perl 5.36+ experimental: defer body to
             // lexical scope exit, in LIFO order. op/defer.
-            Token::Ident(name) if name.as_str() == "defer"
-                && matches!(self.peek(1), Token::LBrace) =>
+            Token::Ident(name)
+                if name.as_str() == "defer" && matches!(self.peek(1), Token::LBrace) =>
             {
                 self.pos += 1;
                 let body = self.parse_brace_block();
@@ -741,9 +741,7 @@ impl Parser {
         // Check if it's foreach-style: for my $var (list) { }
         // or C-style: for (init; cond; step) { }
 
-        if self.at(&Token::My)
-            || self.at(&Token::Our)
-            || matches!(self.tok(), Token::ScalarVar(_))
+        if self.at(&Token::My) || self.at(&Token::Our) || matches!(self.tok(), Token::ScalarVar(_))
         {
             // Foreach style. `for my $i (…)` declares a lexical; `for
             // our $i (…)` declares a package var. We model both as
@@ -3145,34 +3143,62 @@ impl Parser {
                 // Anonymous hash ref {...} or block
                 // Heuristic: { ident => ... } is a hash ref; `{}` (empty)
                 // is an empty hashref (the common `my $h = {};` idiom);
-                // otherwise it's a block.
+                // otherwise it's a block. Also: `{LIST}` with no `;` inside
+                // the outer braces is treated as a hashref — e.g. `{1..3}`.
                 let saved = self.pos;
                 self.pos += 1;
 
                 // Check if it looks like a hash ref
-                let is_hash = self.at(&Token::RBrace)
+                let mut is_hash = self.at(&Token::RBrace)
                     || matches!(
                         (self.tok(), self.peek(1)),
                         (Token::StringLit(_), Token::FatComma)
                             | (Token::Ident(_), Token::FatComma)
                             | (Token::Integer(_), Token::FatComma)
                     );
+                // If not already detected, look ahead for a `;` at depth 0
+                // — its absence strongly suggests a hashref expression.
+                if !is_hash {
+                    let mut depth: i32 = 1;
+                    let mut p = self.pos;
+                    let mut has_semi = false;
+                    while p < self.tokens.len() {
+                        match &self.tokens[p] {
+                            Token::LBrace | Token::LParen | Token::LBracket => depth += 1,
+                            Token::RBrace | Token::RParen | Token::RBracket => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    break;
+                                }
+                            }
+                            Token::Semi if depth == 1 => {
+                                has_semi = true;
+                                break;
+                            }
+                            _ => {}
+                        }
+                        p += 1;
+                    }
+                    if !has_semi {
+                        is_hash = true;
+                    }
+                }
 
                 if is_hash {
-                    let mut pairs = Vec::new();
-                    loop {
-                        if self.at(&Token::RBrace) || self.at(&Token::EOF) {
+                    // Collect inner content as a flat list of expressions.
+                    // Each element is evaluated in list context at runtime
+                    // and the resulting flat value list is paired key/value,
+                    // emitting the standard anonymous-hash odd-elements
+                    // warning when the count is odd.
+                    let mut flat: Vec<Expr> = Vec::new();
+                    while !self.at(&Token::RBrace) && !self.at(&Token::EOF) {
+                        flat.push(self.parse_expr());
+                        if !self.eat(&Token::Comma) && !self.eat(&Token::FatComma) {
                             break;
                         }
-                        let key = self.parse_expr();
-                        self.eat(&Token::FatComma);
-                        self.eat(&Token::Comma);
-                        let val = self.parse_expr();
-                        pairs.push((key, val));
-                        self.eat(&Token::Comma);
                     }
                     self.expect(&Token::RBrace);
-                    Expr::HashRef(pairs)
+                    Expr::HashRef(flat)
                 } else {
                     // It's a block
                     self.pos = saved;
