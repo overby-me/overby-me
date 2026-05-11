@@ -12011,10 +12011,6 @@ impl Interpreter {
         let (pattern, flags) = unwrap_qr(&pattern, flags);
         let pattern = perl_backslash_n(&pattern);
         let pattern = strip_regex_comments(&pattern);
-        // Detect `(?a)` / `(?aa)` inline-flag groups before they get
-        // stripped — POSIX class translation needs to know whether
-        // /a is in scope. Re/regexp 679, 685, 688.
-        let inline_ascii = pattern_has_inline_ascii_flag(&pattern);
         // Rewrite conditional groups BEFORE extracting code blocks
         // so `(?(?{0})...)` / `(?(?{1})...)` can see the code-block
         // body and pick the right branch.
@@ -12027,6 +12023,15 @@ impl Interpreter {
         // misread the `R` in `(?R)` as a regex flag and mangle the pattern
         // into `(?R:rest_of_pattern)`. re/regexp 1183, 2010.
         let pattern = unroll_full_recursion(&pattern, 4);
+        // Expand `(?a:...)`/`(?aa:...)` scoped flag groups, ASCII-
+        // restricting word classes inside (suspended by inner
+        // `(?u:...)` / `(?u)` scopes). re/regexp 965.
+        let pattern = expand_scoped_a_flag(&pattern);
+        // Detect remaining `(?a)` / `(?aa)` inline flags (standalone,
+        // not handled by the scoped-flag expander) so POSIX class
+        // translation knows whether outer /a is in scope. Re/regexp 679,
+        // 685, 688.
+        let inline_ascii = pattern_has_inline_ascii_flag(&pattern);
         let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_inline_flag_groups(&pattern);
         let pattern = translate_perl_whitespace_escapes(&pattern);
@@ -12476,8 +12481,6 @@ impl Interpreter {
         let (pattern, flags) = unwrap_qr(&pattern, flags);
         let pattern = perl_backslash_n(&pattern);
         let pattern = strip_regex_comments(&pattern);
-        let inline_ascii = pattern_has_inline_ascii_flag(&pattern);
-        let ascii_posix = flags.contains('a') || inline_ascii;
         // Rewrite conditional groups BEFORE extracting code blocks
         // so `(?(?{0})...)` / `(?(?{1})...)` can see the code-block
         // body and pick the right branch.
@@ -12490,6 +12493,13 @@ impl Interpreter {
         // misread the `R` in `(?R)` as a regex flag and mangle the pattern
         // into `(?R:rest_of_pattern)`. re/regexp 1183, 2010.
         let pattern = unroll_full_recursion(&pattern, 4);
+        // Expand `(?a:...)`/`(?aa:...)` scoped flag groups, ASCII-
+        // restricting word classes inside (suspended by inner
+        // `(?u:...)` / `(?u)` scopes). re/regexp 965.
+        let pattern = expand_scoped_a_flag(&pattern);
+        // Detect remaining inline `(?a)` flags after scoped expansion.
+        let inline_ascii = pattern_has_inline_ascii_flag(&pattern);
+        let ascii_posix = flags.contains('a') || inline_ascii;
         let pattern = strip_unsupported_regex_flags(&pattern);
         let pattern = translate_inline_flag_groups(&pattern);
         let pattern = translate_perl_whitespace_escapes(&pattern);
@@ -18379,6 +18389,122 @@ fn restrict_word_classes_ascii(pattern: &str) -> String {
             in_class = true;
         } else if in_class && c == ']' {
             in_class = false;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Expand `(?a:CONTENT)` / `(?aa:CONTENT)` scopes by ASCII-restricting
+/// the word classes within the scope's content (with `(?u:...)` /
+/// `(?u)` sub-scopes restoring Unicode semantics for the remainder of
+/// their enclosing group). Replaces the leading `(?a:` / `(?aa:` with
+/// a plain `(?:`. Top-level `\w/\d/\s` outside any `(?a:)` are left
+/// untouched here — `restrict_word_classes_ascii` handles the outer
+/// `/a` flag case. re/regexp 965.
+fn expand_scoped_a_flag(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    // Stack tracks whether we're currently in a scope that ASCII-restricts
+    // word classes. Push true on `(?a:` / `(?aa:`, push false on `(?u:`,
+    // pop on `)`. Also reset to false inside a sub-group that starts with
+    // bare `(?u)` (no colon) — those apply to the remainder of the
+    // enclosing group, modeled by toggling the top of the stack.
+    let mut ascii_stack: Vec<bool> = Vec::new();
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            let n = chars[i + 1];
+            // ASCII restriction applies iff the innermost scope toggle
+            // is `true`. Nested `(?u:)` scopes push `false`, restoring
+            // Unicode for that subrange.
+            let ascii_active = ascii_stack.last().copied().unwrap_or(false);
+            if !in_class && ascii_active {
+                let repl = match n {
+                    'd' => Some("[0-9]"),
+                    'D' => Some("[^0-9]"),
+                    'w' => Some("[a-zA-Z0-9_]"),
+                    'W' => Some("[^a-zA-Z0-9_]"),
+                    's' => Some("[\\t\\n\\f\\r ]"),
+                    'S' => Some("[^\\t\\n\\f\\r ]"),
+                    _ => None,
+                };
+                if let Some(r) = repl {
+                    out.push_str(r);
+                    i += 2;
+                    continue;
+                }
+            }
+            out.push(c);
+            out.push(n);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class && c == '(' {
+            // Detect flag-group openers.
+            if i + 3 < chars.len() && chars[i + 1] == '?' {
+                // `(?a:` / `(?aa:` — push true (ASCII-restrict).
+                if chars[i + 2] == 'a' {
+                    let mut p = i + 2;
+                    while p < chars.len() && chars[p] == 'a' {
+                        p += 1;
+                    }
+                    if p < chars.len() && chars[p] == ':' {
+                        ascii_stack.push(true);
+                        out.push_str("(?:");
+                        i = p + 1;
+                        continue;
+                    }
+                }
+                // `(?u:` — push false (Unicode-restore).
+                if chars[i + 2] == 'u' && chars[i + 3] == ':' {
+                    ascii_stack.push(false);
+                    out.push_str("(?:");
+                    i += 4;
+                    continue;
+                }
+                // `(?u)` standalone (no body) inside a scoped group —
+                // toggle innermost scope to Unicode (false) for the
+                // remainder of this enclosing group. Only act when an
+                // outer scope was actually pushed (e.g. by `(?a:)`),
+                // otherwise leave the bare `(?u)` for the downstream
+                // pipeline to process.
+                if chars[i + 2] == 'u' && chars[i + 3] == ')' && !ascii_stack.is_empty() {
+                    if let Some(top) = ascii_stack.last_mut() {
+                        *top = false;
+                    }
+                    i += 4;
+                    continue;
+                }
+                // Other `(?...)` groups — fall through to normal `(`.
+            }
+            // Plain `(` group — inherit outer scope's ASCII state by
+            // pushing a copy of the top.
+            ascii_stack.push(ascii_stack.last().copied().unwrap_or(false));
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class && c == ')' {
+            ascii_stack.pop();
+            out.push(c);
+            i += 1;
+            continue;
         }
         out.push(c);
         i += 1;
