@@ -142,6 +142,7 @@ pub enum Token {
     BitOr,              // |
     BitXor,             // ^
     BitNot,             // ~
+    Smartmatch,         // ~~
     ShiftLeft,          // <<
     ShiftRight,         // >>
     PlusPlus,           // ++
@@ -231,6 +232,7 @@ impl Token {
                 | Token::BitOr
                 | Token::BitXor
                 | Token::BitNot
+                | Token::Smartmatch
                 | Token::ShiftLeft
                 | Token::ShiftRight
                 | Token::PlusAssign
@@ -2065,7 +2067,20 @@ impl Lexer {
 
                 '~' => {
                     self.pos += 1;
-                    tokens.push(Token::BitNot);
+                    // `~~` is the smartmatch operator. It needs the
+                    // surrounding context to be operator-positioned —
+                    // bare `~~$x` at expression-start is `~(~$x)`.
+                    if self.ch() == '~'
+                        && tokens
+                            .last()
+                            .map(|t| !t.expects_operand())
+                            .unwrap_or(false)
+                    {
+                        self.pos += 1;
+                        tokens.push(Token::Smartmatch);
+                    } else {
+                        tokens.push(Token::BitNot);
+                    }
                 }
 
                 '`' => {

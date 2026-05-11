@@ -1809,6 +1809,10 @@ impl Parser {
             Token::Eq => (Some(BinOp::StrEq), "eq"),
             Token::Ne => (Some(BinOp::StrNe), "ne"),
             Token::Cmp => (Some(BinOp::StrCmp), "cmp"),
+            // `~~` smartmatch — treat as no-op (returns empty string).
+            // Not used in modern Perl for runtime, but the test suite
+            // exercises the non-associativity check.
+            Token::Smartmatch => (Some(BinOp::Smartmatch), "~~"),
             _ => (None, ""),
         };
         let Some(op) = op else { return left };
@@ -1823,6 +1827,7 @@ impl Parser {
             self.tok(),
             Token::Spaceship
                 | Token::Cmp
+                | Token::Smartmatch
                 | Token::NumEq
                 | Token::NumNe
                 | Token::Eq

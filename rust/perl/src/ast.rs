@@ -130,6 +130,7 @@ pub enum BinOp {
     NumLe,
     NumGe,
     Spaceship,
+    Smartmatch,
 
     // String comparison
     StrEq,

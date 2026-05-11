@@ -5529,6 +5529,11 @@ impl Interpreter {
                     0.0
                 })
             }
+            // `~~` smartmatch — minimal stub: stringify equality.
+            // (Real smartmatch has elaborate type-driven semantics; we
+            // only need this to compile so the chain-detection error
+            // fires correctly. op/cmpchain.)
+            BinOp::Smartmatch => bool_value(l.to_str() == r.to_str()),
 
             BinOp::StrEq => bool_value(l.to_str() == r.to_str()),
             BinOp::StrNe => bool_value(l.to_str() != r.to_str()),
