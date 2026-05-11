@@ -5059,7 +5059,13 @@ impl Interpreter {
                         }
                         Flow::Die(msg) => {
                             self.pop_scope();
-                            self.set_global_var("@", Value::Str(msg));
+                            self.set_global_var("@", Value::Str(msg.clone()));
+                            // Propagate the die out of the `do { … }`
+                            // block so the surrounding eval catches it.
+                            // Without this, `do { die }; 1;` inside an
+                            // eval would just return 1 and discard $@.
+                            // op/die_except 3.
+                            self.pending_flow = Some(Flow::Die(msg));
                             return Value::Undef;
                         }
                         // Goto / Last / Next inside a `do { … }` (or
