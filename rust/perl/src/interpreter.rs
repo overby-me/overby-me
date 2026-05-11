@@ -11187,7 +11187,10 @@ impl Interpreter {
 
     fn set_hash_from_list(&mut self, name: &str, items: Vec<Value>) {
         // Odd number of elements → warn (default on under `use
-        // warnings`). op/hashwarn.
+        // warnings`). op/hashwarn. When the dangling tail is a
+        // reference, Perl suppresses the generic odd-elements message
+        // and instead emits "Reference found where even-sized list
+        // expected" — the ref-aware variant is more informative.
         if items.len() % 2 == 1 {
             let file = if self.current_file.is_empty() {
                 "-e".to_string()
@@ -11195,9 +11198,21 @@ impl Interpreter {
                 self.current_file.clone()
             };
             let line = self.current_line;
-            self.emit_warning(&format!(
-                "Odd number of elements in hash assignment at {file} line {line}.\n"
-            ));
+            // Only ArrayRef / HashRef trigger the ref-aware variant —
+            // CodeRef and ScalarRef still print the generic odd-elements
+            // message (matches reference perl; op/hashwarn 7,9 vs 11).
+            let tail_is_ref = items
+                .last()
+                .map_or(false, |v| matches!(v, Value::ArrayRef(_) | Value::HashRef(_)));
+            if tail_is_ref {
+                self.emit_warning(&format!(
+                    "Reference found where even-sized list expected at {file} line {line}.\n"
+                ));
+            } else {
+                self.emit_warning(&format!(
+                    "Odd number of elements in hash assignment at {file} line {line}.\n"
+                ));
+            }
         }
         let mut hash = HashMap::new();
         let mut iter = items.into_iter();
