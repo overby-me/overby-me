@@ -2841,6 +2841,63 @@ impl Parser {
                         expr = Expr::Call("_array_block_deref".to_string(), vec![inner]);
                         continue;
                     }
+                    // `->@[INDEX_LIST]` — postfix array slice through ref.
+                    // `->@{KEY_LIST}` — postfix hash slice through ref.
+                    // The lexer turns `@{` into Token::ArrayBlockDerefOpen
+                    // (and may consume the `{`); the `@[` form leaves
+                    // `ArrayVar("") + LBracket`. Handle both.
+                    if let Token::ArrayVar(n) = self.tok()
+                        && n.is_empty()
+                        && matches!(self.peek(1), Token::LBracket)
+                    {
+                        self.pos += 2;
+                        let mut indices = vec![self.parse_expr()];
+                        while self.eat(&Token::Comma) || self.eat(&Token::FatComma) {
+                            if self.at(&Token::RBracket) {
+                                break;
+                            }
+                            indices.push(self.parse_expr());
+                        }
+                        self.expect(&Token::RBracket);
+                        let mut args = vec![expr];
+                        args.extend(indices);
+                        expr = Expr::Call("_postfix_array_slice".to_string(), args);
+                        continue;
+                    }
+                    if matches!(self.tok(), Token::ArrayBlockDerefOpen) {
+                        self.pos += 1;
+                        self.eat(&Token::LBrace);
+                        let mut keys = vec![self.parse_expr()];
+                        while self.eat(&Token::Comma) || self.eat(&Token::FatComma) {
+                            if self.at(&Token::RBrace) {
+                                break;
+                            }
+                            keys.push(self.parse_expr());
+                        }
+                        self.expect(&Token::RBrace);
+                        let mut args = vec![expr];
+                        args.extend(keys);
+                        expr = Expr::Call("_postfix_hash_slice".to_string(), args);
+                        continue;
+                    }
+                    if let Token::ArrayVar(n) = self.tok()
+                        && n.is_empty()
+                        && matches!(self.peek(1), Token::LBrace)
+                    {
+                        self.pos += 2;
+                        let mut keys = vec![self.parse_expr()];
+                        while self.eat(&Token::Comma) || self.eat(&Token::FatComma) {
+                            if self.at(&Token::RBrace) {
+                                break;
+                            }
+                            keys.push(self.parse_expr());
+                        }
+                        self.expect(&Token::RBrace);
+                        let mut args = vec![expr];
+                        args.extend(keys);
+                        expr = Expr::Call("_postfix_hash_slice".to_string(), args);
+                        continue;
+                    }
                     // `->%*` — postfix hash-flat deref. The lexer's `%`
                     // handler falls through to `Token::Percent` (no name
                     // char before `*`), so we recognise `Percent + Star`
@@ -2849,6 +2906,57 @@ impl Parser {
                         self.pos += 2;
                         let inner = expr;
                         expr = Expr::Call("_hash_block_deref".to_string(), vec![inner]);
+                        continue;
+                    }
+                    // `->%[i1,i2]` — array key/value slice through ref.
+                    // `->%{k1,k2}` — hash key/value slice through ref.
+                    if matches!(self.tok(), Token::Percent)
+                        && matches!(self.peek(1), Token::LBracket)
+                    {
+                        self.pos += 2;
+                        let mut indices = vec![self.parse_expr()];
+                        while self.eat(&Token::Comma) || self.eat(&Token::FatComma) {
+                            if self.at(&Token::RBracket) {
+                                break;
+                            }
+                            indices.push(self.parse_expr());
+                        }
+                        self.expect(&Token::RBracket);
+                        let mut args = vec![expr];
+                        args.extend(indices);
+                        expr = Expr::Call("_postfix_array_kvslice".to_string(), args);
+                        continue;
+                    }
+                    if matches!(self.tok(), Token::HashBlockDerefOpen) {
+                        self.pos += 1;
+                        self.eat(&Token::LBrace);
+                        let mut keys = vec![self.parse_expr()];
+                        while self.eat(&Token::Comma) || self.eat(&Token::FatComma) {
+                            if self.at(&Token::RBrace) {
+                                break;
+                            }
+                            keys.push(self.parse_expr());
+                        }
+                        self.expect(&Token::RBrace);
+                        let mut args = vec![expr];
+                        args.extend(keys);
+                        expr = Expr::Call("_postfix_hash_kvslice".to_string(), args);
+                        continue;
+                    }
+                    if matches!(self.tok(), Token::Percent) && matches!(self.peek(1), Token::LBrace)
+                    {
+                        self.pos += 2;
+                        let mut keys = vec![self.parse_expr()];
+                        while self.eat(&Token::Comma) || self.eat(&Token::FatComma) {
+                            if self.at(&Token::RBrace) {
+                                break;
+                            }
+                            keys.push(self.parse_expr());
+                        }
+                        self.expect(&Token::RBrace);
+                        let mut args = vec![expr];
+                        args.extend(keys);
+                        expr = Expr::Call("_postfix_hash_kvslice".to_string(), args);
                         continue;
                     }
                     // `->$#*` — postfix array-length deref. Same as

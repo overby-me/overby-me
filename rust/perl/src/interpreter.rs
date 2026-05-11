@@ -3797,9 +3797,7 @@ impl Interpreter {
                                 // Any other ref kind (ArrayRef/CodeRef/...)
                                 // dies — Perl rejects the deref through the
                                 // wrong type. op/hashwarn pseudo-hash 1/2.
-                                Value::ArrayRef(_)
-                                | Value::CodeRef(_)
-                                | Value::ScalarRef(_) => {
+                                Value::ArrayRef(_) | Value::CodeRef(_) | Value::ScalarRef(_) => {
                                     let file = if self.current_file.is_empty() {
                                         "-e".to_string()
                                     } else {
@@ -7980,6 +7978,103 @@ impl Interpreter {
                 let refs = self.distribute_backslash_to_list(args);
                 refs.into_iter().last().unwrap_or(Value::Undef)
             }
+            "_postfix_array_slice" => {
+                // `$ref->@[i1,i2,…]` — array slice through an arrayref.
+                if args.is_empty() {
+                    return Value::Undef;
+                }
+                let r = self.eval_expr(&args[0]);
+                let arr = match &r {
+                    Value::ArrayRef(r) => r.borrow().clone(),
+                    _ => return Value::Undef,
+                };
+                let mut out = Vec::new();
+                for a in &args[1..] {
+                    for v in self.eval_list(a) {
+                        let i = v.to_num() as i64;
+                        let idx = if i < 0 { arr.len() as i64 + i } else { i };
+                        let val = if idx >= 0 && (idx as usize) < arr.len() {
+                            arr[idx as usize].clone()
+                        } else {
+                            Value::Undef
+                        };
+                        out.push(val);
+                    }
+                }
+                self.last_list_val = Some(out.clone());
+                out.into_iter().last().unwrap_or(Value::Undef)
+            }
+            "_postfix_hash_slice" => {
+                // `$ref->@{k1,k2,…}` — hash slice through a hashref.
+                if args.is_empty() {
+                    return Value::Undef;
+                }
+                let r = self.eval_expr(&args[0]);
+                let h = match &r {
+                    Value::HashRef(r) => r.borrow().clone(),
+                    _ => return Value::Undef,
+                };
+                let mut out = Vec::new();
+                for a in &args[1..] {
+                    for v in self.eval_list(a) {
+                        let k = v.to_str();
+                        out.push(h.get(&k).cloned().unwrap_or(Value::Undef));
+                    }
+                }
+                self.last_list_val = Some(out.clone());
+                out.into_iter().last().unwrap_or(Value::Undef)
+            }
+            "_postfix_array_kvslice" => {
+                // `$ref->%[i1,i2,…]` — array key/value slice. Returns
+                // interleaved (idx, $ref->[idx]) pairs.
+                if args.is_empty() {
+                    return Value::Undef;
+                }
+                let r = self.eval_expr(&args[0]);
+                let arr = match &r {
+                    Value::ArrayRef(r) => r.borrow().clone(),
+                    _ => return Value::Undef,
+                };
+                let mut out = Vec::new();
+                for a in &args[1..] {
+                    for v in self.eval_list(a) {
+                        let i = v.to_num() as i64;
+                        let idx = if i < 0 { arr.len() as i64 + i } else { i };
+                        let val = if idx >= 0 && (idx as usize) < arr.len() {
+                            arr[idx as usize].clone()
+                        } else {
+                            Value::Undef
+                        };
+                        out.push(Value::Num(i as f64));
+                        out.push(val);
+                    }
+                }
+                self.last_list_val = Some(out.clone());
+                out.into_iter().last().unwrap_or(Value::Undef)
+            }
+            "_postfix_hash_kvslice" => {
+                // `$ref->%{k1,k2,…}` — hash key/value slice. Returns
+                // interleaved (k, $ref->{k}) pairs.
+                if args.is_empty() {
+                    return Value::Undef;
+                }
+                let r = self.eval_expr(&args[0]);
+                let h = match &r {
+                    Value::HashRef(r) => r.borrow().clone(),
+                    _ => return Value::Undef,
+                };
+                let mut out = Vec::new();
+                for a in &args[1..] {
+                    for v in self.eval_list(a) {
+                        let k = v.to_str();
+                        let val = h.get(&k).cloned().unwrap_or(Value::Undef);
+                        out.push(Value::Str(k));
+                        out.push(val);
+                    }
+                }
+                self.last_list_val = Some(out.clone());
+                out.into_iter().last().unwrap_or(Value::Undef)
+            }
             "_array_kvslice" => {
                 // `%arr[i,j,…]` — interleave (idx, $arr[idx]) pairs.
                 if args.is_empty() {
@@ -9946,7 +10041,8 @@ impl Interpreter {
                         }
                     };
                     if let Some((_params, body)) = self.subs.get(&lookup_name).cloned() {
-                        return_val = Some(self.call_sub_named(&body, &cur_args, Some(&lookup_name)));
+                        return_val =
+                            Some(self.call_sub_named(&body, &cur_args, Some(&lookup_name)));
                     } else {
                         return_val = Some(Value::Undef);
                     }
@@ -11254,7 +11350,7 @@ impl Interpreter {
             // message (matches reference perl; op/hashwarn 7,9 vs 11).
             let tail_is_ref = items
                 .last()
-                .map_or(false, |v| matches!(v, Value::ArrayRef(_) | Value::HashRef(_)));
+                .is_some_and(|v| matches!(v, Value::ArrayRef(_) | Value::HashRef(_)));
             if tail_is_ref {
                 self.emit_warning(&format!(
                     "Reference found where even-sized list expected at {file} line {line}.\n"
