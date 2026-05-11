@@ -9918,6 +9918,36 @@ impl Interpreter {
                     propagate = Some(Flow::Exit(code));
                     break;
                 }
+                Flow::Goto(label) if label.starts_with('&') => {
+                    // `goto &sub` — tail call. Look up the target sub by
+                    // name and re-enter it with the *current* @_ as its
+                    // arguments. The caller of the current sub is the
+                    // one observing the result. op/args goto tests 5-8.
+                    let target = label.trim_start_matches('&').to_string();
+                    let cur_args: Vec<Value> = self
+                        .scopes
+                        .last()
+                        .and_then(|s| s.arrays.get("_"))
+                        .cloned()
+                        .unwrap_or_default();
+                    let lookup_name = if target.contains("::") {
+                        target.clone()
+                    } else {
+                        let pkg = self.package.clone();
+                        let qualified = format!("{pkg}::{target}");
+                        if self.subs.contains_key(&qualified) {
+                            qualified
+                        } else {
+                            target.clone()
+                        }
+                    };
+                    if let Some((_params, body)) = self.subs.get(&lookup_name).cloned() {
+                        return_val = Some(self.call_sub_named(&body, &cur_args, Some(&lookup_name)));
+                    } else {
+                        return_val = Some(Value::Undef);
+                    }
+                    break;
+                }
                 _ => {}
             }
         }

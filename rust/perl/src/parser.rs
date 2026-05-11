@@ -439,7 +439,19 @@ impl Parser {
             }
             Token::Goto => {
                 self.pos += 1;
-                let label = if let Token::Ident(name) = self.tok() {
+                // `goto &sub` — tail call to the named sub, passing the
+                // current @_. Encoded into Stmt::Goto with the `&` prefix
+                // so the interpreter recognises the sub-form.
+                let label = if matches!(self.tok(), Token::BitAnd) {
+                    self.pos += 1;
+                    if let Token::Ident(name) = self.tok() {
+                        let n = name.clone();
+                        self.pos += 1;
+                        format!("&{n}")
+                    } else {
+                        "&".to_string()
+                    }
+                } else if let Token::Ident(name) = self.tok() {
                     let n = name.clone();
                     self.pos += 1;
                     n
