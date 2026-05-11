@@ -180,6 +180,15 @@ impl Parser {
                 self.pos += 1;
                 return Some(Stmt::Nop);
             }
+            // `defer { … }` — Perl 5.36+ experimental: defer body to
+            // lexical scope exit, in LIFO order. op/defer.
+            Token::Ident(name) if name.as_str() == "defer"
+                && matches!(self.peek(1), Token::LBrace) =>
+            {
+                self.pos += 1;
+                let body = self.parse_brace_block();
+                return Some(Stmt::Defer(body));
+            }
             // `...` (yada-yada) — Perl 5.12+ placeholder operator that
             // dies "Unimplemented" when reached. Recognise it as a
             // statement and emit a die call. base/lex tests 107, 108.

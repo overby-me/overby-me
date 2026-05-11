@@ -285,6 +285,10 @@ pub struct Interpreter {
     /// Stack of saved (last_read_fh) values pushed by `local($.)` and
     /// popped at scope exit. Each frame pushes once per `local($.)`.
     local_dot_fh_saves: Vec<Vec<Option<String>>>,
+    /// Per-scope stack of `defer { … }` bodies. Each lexical scope
+    /// frame collects deferred blocks; on scope exit they run in LIFO
+    /// order. op/defer.
+    defer_blocks: Vec<Vec<Vec<Stmt>>>,
     // Counter for generating anonymous filehandle names
     fh_counter: usize,
     // Counter for generating unique names for anonymous subs. `sub { ... }`
@@ -523,6 +527,7 @@ impl Interpreter {
             fh_aliases: HashMap::new(),
             fh_line_counts: HashMap::new(),
             local_dot_fh_saves: Vec::new(),
+            defer_blocks: Vec::new(),
             fh_counter: 0,
             anon_sub_counter: 0,
             closure_envs: std::collections::HashMap::new(),
@@ -1588,7 +1593,22 @@ impl Interpreter {
                         }
                     }
                     let _ = total_items;
+                    // Snapshot the defer-stack size so any `defer { … }`
+                    // registered DURING this iteration runs at iteration
+                    // end (LIFO), not accumulating into the outer scope.
+                    // op/defer test 6 (foreach iter captures own $i).
+                    let defer_base = self
+                        .defer_blocks
+                        .last()
+                        .map(|v| v.len())
+                        .unwrap_or(0);
                     let flow = self.exec_stmts(body);
+                    if let Some(blocks) = self.defer_blocks.last_mut() {
+                        let drained: Vec<Vec<Stmt>> = blocks.drain(defer_base..).collect();
+                        for body in drained.into_iter().rev() {
+                            let _ = self.exec_stmts(&body);
+                        }
+                    }
 
                     // If iterating over an array, write modifications back
                     if let Some(ref arr_name) = source_array {
@@ -2756,6 +2776,14 @@ impl Interpreter {
             Stmt::Init(body) => {
                 let origin = self.loading_files.last().cloned();
                 self.init_blocks.push((body.clone(), origin));
+                Flow::None
+            }
+            Stmt::Defer(body) => {
+                // Register the deferred block on the current scope's
+                // stack; pop_scope runs them in LIFO order. op/defer.
+                if let Some(blocks) = self.defer_blocks.last_mut() {
+                    blocks.push(body.clone());
+                }
                 Flow::None
             }
 
@@ -11193,6 +11221,7 @@ impl Interpreter {
         self.local_array_len_saves
             .push(std::collections::HashMap::new());
         self.local_dot_fh_saves.push(Vec::new());
+        self.defer_blocks.push(Vec::new());
         // Snapshot lexical pragma state (e.g. `use bytes`) so a `use` /
         // `no` inside the block doesn't leak out.
         self.bytes_mode_saves.push(self.bytes_mode);
@@ -11201,6 +11230,24 @@ impl Interpreter {
     }
 
     fn pop_scope(&mut self) {
+        // Run any `defer { … }` bodies registered in this scope, in
+        // LIFO order, before tearing down the scope. A defer body may
+        // register further defers (nested `defer { defer { … } }`);
+        // those queue onto the same frame, so loop until empty so they
+        // all run before the scope dies. op/defer 9, 10.
+        loop {
+            let body = self
+                .defer_blocks
+                .last_mut()
+                .and_then(|v| v.pop());
+            match body {
+                Some(body) => {
+                    let _ = self.exec_stmts(&body);
+                }
+                None => break,
+            }
+        }
+        self.defer_blocks.pop();
         // Before releasing the scope frame, fire DESTROY on blessed-ref
         // scalars whose last live pointer lives in this frame — i.e.,
         // nowhere else in the interpreter (other scopes, globals, aliased

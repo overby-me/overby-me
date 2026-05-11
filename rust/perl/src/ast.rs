@@ -316,6 +316,9 @@ pub enum Stmt {
     End(Vec<Stmt>),
     Check(Vec<Stmt>),
     Init(Vec<Stmt>),
+    /// `defer { … }` — body runs at lexical scope exit in LIFO order
+    /// (Perl 5.36+ experimental feature). op/defer.
+    Defer(Vec<Stmt>),
 
     // Die/warn
     Die(Vec<Expr>),
