@@ -2706,7 +2706,7 @@ impl Interpreter {
                             | Value::HashRef(_)
                             | Value::ScalarRef(_)
                             | Value::CodeRef(_)
-                            | Value::Regex(_, _)
+                            | Value::Regex(_, _, _)
                     ) {
                         Some(v)
                     } else {
@@ -3205,7 +3205,7 @@ impl Interpreter {
                     self.pending_flow = Some(Flow::Die(format!("{err} at {file} line {line}.\n")));
                     return Value::Undef;
                 }
-                Value::Regex(interpolated, flags.clone())
+                Value::Regex(interpolated, flags.clone(), crate::value::next_regex_id())
             }
             Expr::QW(words) => {
                 // In scalar context, returns last element
@@ -4807,7 +4807,7 @@ impl Interpreter {
                         // test 236 reads `$$re` after `$$re = "ab"`
                         // (handled in assign_to: assignment replaces
                         // `$re` with a ScalarRef to the new value).
-                        Value::Regex(pat, flags) => {
+                        Value::Regex(pat, flags, _) => {
                             return Value::Str(format!("(?^{flags}:{pat})"));
                         }
                         Value::Str(s) if !s.is_empty() => self.get_var(&s),
@@ -7663,7 +7663,7 @@ impl Interpreter {
                     .first()
                     .map(|a| self.eval_expr(a))
                     .unwrap_or(Value::Undef);
-                Value::Num(if matches!(val, Value::Regex(_, _)) {
+                Value::Num(if matches!(val, Value::Regex(_, _, _)) {
                     1.0
                 } else {
                     0.0
@@ -10111,7 +10111,7 @@ impl Interpreter {
             }
             Value::HashRef(_) => Some("Setting $/ to a HASH reference is forbidden\n".to_string()),
             Value::CodeRef(_) => Some("Setting $/ to a CODE reference is forbidden\n".to_string()),
-            Value::Regex(_, _) => {
+            Value::Regex(_, _, _) => {
                 Some("Setting $/ to a REGEXP reference is forbidden\n".to_string())
             }
             Value::ScalarRef(r) => {
@@ -10146,7 +10146,7 @@ impl Interpreter {
                     Value::CodeRef(_) => {
                         Some("Setting $/ to a REF reference is forbidden\n".to_string())
                     }
-                    Value::Regex(_, _) => {
+                    Value::Regex(_, _, _) => {
                         Some("Setting $/ to a REGEXP reference is forbidden\n".to_string())
                     }
                     Value::Glob(_) => {
@@ -11239,7 +11239,7 @@ impl Interpreter {
                     // We model this by converting `$re` into a
                     // `ScalarRef` to a fresh cell holding NEW; subsequent
                     // `$$re` reads return NEW. opbasic/concat test 236.
-                    Value::Regex(_, _) => {
+                    Value::Regex(_, _, _) => {
                         let rc = std::rc::Rc::new(std::cell::RefCell::new(val));
                         self.set_var(base, Value::ScalarRef(rc));
                     }
@@ -13665,12 +13665,12 @@ impl Interpreter {
                 }
                 ReadMode::Fixed(n as usize)
             }
-            Value::ArrayRef(_) | Value::HashRef(_) | Value::CodeRef(_) | Value::Regex(_, _) => {
+            Value::ArrayRef(_) | Value::HashRef(_) | Value::CodeRef(_) | Value::Regex(_, _, _) => {
                 let kind = match &rs {
                     Value::ArrayRef(_) => "ARRAY",
                     Value::HashRef(_) => "HASH",
                     Value::CodeRef(_) => "CODE",
-                    Value::Regex(_, _) => "Regexp",
+                    Value::Regex(_, _, _) => "Regexp",
                     _ => unreachable!(),
                 };
                 self.pending_flow = Some(Flow::Die(format!(

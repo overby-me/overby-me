@@ -20,10 +20,12 @@ pub enum Value {
     ScalarRef(Rc<RefCell<Value>>),
     /// Reference to a subroutine (by name for now) — `CODE(0x...)`.
     CodeRef(String),
-    /// Compiled regex from `qr//` (pattern, flags). `ref()` returns
+    /// Compiled regex from `qr//` (pattern, flags, id). `ref()` returns
     /// "Regexp"; stringifies as `(?^flags:pattern)` — the same form real
     /// perl uses so it can be matched against with `=~` transparently.
-    Regex(String, String),
+    /// `id` is a unique per-object counter used as a stand-in for the
+    /// object's address when numerified (`$qr + 0` in op/qr).
+    Regex(String, String, usize),
     /// Typeglob — a symbol-table entry identified by its fully-qualified
     /// name. Stringifies as `*main::NAME`. We model only what the Perl
     /// test suite exercises: passing a glob as a sub argument, then
@@ -38,6 +40,15 @@ pub enum Value {
     /// slot that is itself an Alias update the RefCell contents. Distinct
     /// from `ScalarRef` which is a user-visible Perl ref (`\$x`).
     Alias(Rc<RefCell<Value>>),
+}
+
+/// Per-process monotonic counter for assigning unique IDs to `qr//`
+/// objects. Each numerification (`$qr + 0`) yields this id so two
+/// distinct qr// objects compare numerically unequal. op/qr 3.
+pub fn next_regex_id() -> usize {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COUNTER: AtomicUsize = AtomicUsize::new(1);
+    COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
 impl Value {
@@ -59,7 +70,7 @@ impl Value {
             Value::HashRef(r) => format!("HASH(0x{:x})", Rc::as_ptr(r) as usize),
             Value::ScalarRef(r) => format!("SCALAR(0x{:x})", Rc::as_ptr(r) as usize),
             Value::CodeRef(name) => format!("CODE({name})"),
-            Value::Regex(pat, flags) => format!("(?^{flags}:{pat})"),
+            Value::Regex(pat, flags, _) => format!("(?^{flags}:{pat})"),
             Value::Glob(name) => {
                 if name.contains("::") {
                     format!("*{name}")
@@ -82,8 +93,11 @@ impl Value {
             | Value::HashRef(_)
             | Value::ScalarRef(_)
             | Value::CodeRef(_)
-            | Value::Regex(_, _)
             | Value::Glob(_) => 0.0,
+            // qr// objects yield a unique id when numerified — Perl uses
+            // the object's address, but a monotonic id is enough for the
+            // `$qr_a + 0 != $qr_b + 0` identity test (op/qr 3).
+            Value::Regex(_, _, id) => *id as f64,
             Value::Alias(rc) => rc.borrow().to_num(),
         }
     }
@@ -98,7 +112,7 @@ impl Value {
             | Value::HashRef(_)
             | Value::ScalarRef(_)
             | Value::CodeRef(_)
-            | Value::Regex(_, _)
+            | Value::Regex(_, _, _)
             | Value::Glob(_) => true,
             Value::Alias(rc) => rc.borrow().to_bool(),
         }
@@ -119,7 +133,7 @@ impl Value {
             Value::HashRef(_) => "HASH",
             Value::ScalarRef(_) => "SCALAR",
             Value::CodeRef(_) => "CODE",
-            Value::Regex(_, _) => "Regexp",
+            Value::Regex(_, _, _) => "Regexp",
             Value::Glob(_) => "GLOB",
             _ => "",
         }
