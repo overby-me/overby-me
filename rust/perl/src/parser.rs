@@ -690,6 +690,17 @@ impl Parser {
 
     fn parse_while(&mut self) -> Stmt {
         let cond = self.parse_paren_expr();
+        // Perl's `while (<FH>)` is syntactic sugar for
+        // `while (defined($_ = <FH>))` — without this, the loop body
+        // runs once per line but `$_` is never set. Rewrite it here
+        // so existing line-iter idioms work. comp/multiline.
+        let cond = match cond {
+            Expr::Diamond(name) => Expr::Defined(Box::new(Expr::Assign(
+                Box::new(Expr::ScalarVar("_".to_string())),
+                Box::new(Expr::Diamond(name)),
+            ))),
+            other => other,
+        };
         let body = self.parse_brace_block();
         let continue_body = self.try_parse_continue();
         Stmt::While {
