@@ -10,6 +10,7 @@ enum Flow {
     None,
     Last(Option<String>),
     Next(Option<String>),
+    Redo(Option<String>),
     Return(Value),
     Die(String),
     Exit(i32),
@@ -1272,10 +1273,12 @@ impl Interpreter {
                 // whole while in its own lexical scope.
                 self.push_scope();
                 let mut result = Flow::None;
+                let mut redo_pending = false;
                 loop {
-                    if !self.eval_expr(cond).to_bool() {
+                    if !redo_pending && !self.eval_expr(cond).to_bool() {
                         break;
                     }
+                    redo_pending = false;
                     let flow = self.exec_stmts(body);
                     let ran_continue = match flow {
                         Flow::Last(l) if l.is_none() || l == *label => break,
@@ -1298,6 +1301,14 @@ impl Interpreter {
                         Flow::Next(l) if l.is_none() || l == *label => true,
                         Flow::Next(l) => {
                             result = Flow::Next(l);
+                            break;
+                        }
+                        Flow::Redo(l) if l.is_none() || l == *label => {
+                            redo_pending = true;
+                            false
+                        }
+                        Flow::Redo(l) => {
+                            result = Flow::Redo(l);
                             break;
                         }
                         Flow::Goto(l) => {
@@ -1337,10 +1348,12 @@ impl Interpreter {
                 continue_body,
                 label,
             } => {
+                let mut redo_pending = false;
                 loop {
-                    if self.eval_expr(cond).to_bool() {
+                    if !redo_pending && self.eval_expr(cond).to_bool() {
                         break;
                     }
+                    redo_pending = false;
                     let flow = self.exec_stmts(body);
                     let ran_continue = match flow {
                         Flow::Last(l) if l.is_none() || l == *label => break,
@@ -1350,6 +1363,11 @@ impl Interpreter {
                         Flow::Exit(code) => return Flow::Exit(code),
                         Flow::Next(l) if l.is_none() || l == *label => true,
                         Flow::Next(l) => return Flow::Next(l),
+                        Flow::Redo(l) if l.is_none() || l == *label => {
+                            redo_pending = true;
+                            false
+                        }
+                        Flow::Redo(l) => return Flow::Redo(l),
                         Flow::Goto(l) => return Flow::Goto(l),
                         Flow::None => true,
                     };
@@ -1382,12 +1400,17 @@ impl Interpreter {
                 if let Some(init) = init {
                     self.exec_stmt(init);
                 }
+                let mut redo_pending = false;
                 loop {
-                    if let Some(cond) = cond {
-                        if !self.eval_expr(cond).to_bool() {
-                            break;
+                    if !redo_pending {
+                        if let Some(cond) = cond {
+                            if !self.eval_expr(cond).to_bool() {
+                                break;
+                            }
                         }
                     }
+                    let was_redo = redo_pending;
+                    redo_pending = false;
                     match self.exec_stmts(body) {
                         Flow::Last(l) if l.is_none() || l == *label => break,
                         Flow::Last(l) => {
@@ -1397,6 +1420,13 @@ impl Interpreter {
                         Flow::Next(l) if l.is_none() || l == *label => {}
                         Flow::Next(l) => {
                             result = Flow::Next(l);
+                            break;
+                        }
+                        Flow::Redo(l) if l.is_none() || l == *label => {
+                            redo_pending = true;
+                        }
+                        Flow::Redo(l) => {
+                            result = Flow::Redo(l);
                             break;
                         }
                         Flow::Return(v) => {
@@ -1417,6 +1447,10 @@ impl Interpreter {
                         }
                         Flow::None => {}
                     }
+                    if redo_pending {
+                        continue;
+                    }
+                    let _ = was_redo;
                     if let Some(step) = step {
                         self.eval_expr(step);
                     }
@@ -1559,15 +1593,22 @@ impl Interpreter {
                     .insert(var.clone(), Value::Undef);
                 let _ = is_my;
                 let total_items = items.len();
-                for (i, item) in items.into_iter().enumerate() {
+                let mut i = 0;
+                let mut redo_pending = false;
+                while i < total_items {
                     // Bypass set_var so the readonly_vars check (set
                     // above for `for (!0)` etc.) doesn't fire on our own
-                    // iterator assignment.
-                    if let Some(scope) = self.scopes.last_mut() {
-                        scope.vars.insert(var.clone(), item);
-                    } else {
-                        self.globals.vars.insert(var.clone(), item);
+                    // iterator assignment. `redo` re-executes the body
+                    // with the same iterator value, so skip re-assignment.
+                    if !redo_pending {
+                        let item = items[i].clone();
+                        if let Some(scope) = self.scopes.last_mut() {
+                            scope.vars.insert(var.clone(), item);
+                        } else {
+                            self.globals.vars.insert(var.clone(), item);
+                        }
                     }
+                    redo_pending = false;
                     // "Use of freed value in iteration" — if the list
                     // included `@a` and `@a` has been cleared / shrunk
                     // by an earlier iteration to no longer cover this
@@ -1645,6 +1686,18 @@ impl Interpreter {
                             self.set_var(var, saved_var);
                             return Flow::Next(l);
                         }
+                        Flow::Redo(l) if l.is_none() || l == *label => {
+                            redo_pending = true;
+                            false
+                        }
+                        Flow::Redo(l) => {
+                            if readonly_iter {
+                                self.readonly_vars.remove(var);
+                            }
+                            self.pop_scope();
+                            self.set_var(var, saved_var);
+                            return Flow::Redo(l);
+                        }
                         Flow::Return(v) => {
                             self.pop_scope();
                             self.set_var(var, saved_var);
@@ -1690,6 +1743,9 @@ impl Interpreter {
                             }
                         }
                     }
+                    if !redo_pending {
+                        i += 1;
+                    }
                 }
                 if readonly_iter {
                     self.readonly_vars.remove(var);
@@ -1702,7 +1758,7 @@ impl Interpreter {
 
             Stmt::Last(label) => Flow::Last(label.clone()),
             Stmt::Next(label) => Flow::Next(label.clone()),
-            Stmt::Redo(_) => Flow::None, // TODO
+            Stmt::Redo(label) => Flow::Redo(label.clone()),
             Stmt::Return(expr) => {
                 if let Some(e) = expr {
                     // Store list result for list-context returns
@@ -1720,18 +1776,23 @@ impl Interpreter {
                 // Perl's `package NAME;` is lexically scoped to the
                 // enclosing block; revert to the outer package on exit.
                 let saved_pkg = self.package.clone();
-                self.push_scope();
-                let flow = self.exec_stmts(stmts);
-                self.pop_scope();
-                self.package = saved_pkg;
                 // A naked block is implicitly a 1-iteration loop for
                 // last/next/redo: `{ … last; }` exits the block, doesn't
-                // bubble out. Convert unlabeled Last/Next here. Labeled
-                // ones still propagate to their named loop.
-                match flow {
-                    Flow::Last(None) | Flow::Next(None) => Flow::None,
-                    other => other,
-                }
+                // bubble out; `redo` restarts it. Each iteration uses a
+                // fresh scope so `defer` blocks fire per iteration.
+                let final_flow = loop {
+                    self.push_scope();
+                    let flow = self.exec_stmts(stmts);
+                    self.pop_scope();
+                    match flow {
+                        Flow::Redo(None) => continue,
+                        Flow::Last(None) | Flow::Next(None) => break Flow::None,
+                        Flow::Redo(Some(l)) => break Flow::Redo(Some(l)),
+                        other => break other,
+                    }
+                };
+                self.package = saved_pkg;
+                final_flow
             }
 
             Stmt::BlockWithContinue {
@@ -1772,6 +1833,10 @@ impl Interpreter {
                     Flow::Goto(l) => {
                         self.pop_scope();
                         return Flow::Goto(l);
+                    }
+                    Flow::Redo(l) => {
+                        self.pop_scope();
+                        return Flow::Redo(l);
                     }
                     Flow::None => true,
                 };

@@ -461,6 +461,18 @@ impl Parser {
                 let stmt = Stmt::Next(label);
                 return Some(self.maybe_postfix(stmt));
             }
+            Token::Redo => {
+                self.pos += 1;
+                let label = if let Token::Ident(name) = self.tok() {
+                    let n = name.clone();
+                    self.pos += 1;
+                    Some(n)
+                } else {
+                    None
+                };
+                let stmt = Stmt::Redo(label);
+                return Some(self.maybe_postfix(stmt));
+            }
             Token::Return => {
                 self.pos += 1;
                 let expr = if self.at(&Token::Semi)
