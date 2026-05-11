@@ -213,6 +213,13 @@ fn run_interpreter() -> i32 {
         std::process::exit(1);
     }
 
+    // Strip a leading UTF-8 BOM (U+FEFF = 0xEF 0xBB 0xBF). Reference
+    // perl treats it as invisible whitespace so the script starts
+    // with the first real char. io/bom.
+    if let Some(rest) = program_text.strip_prefix('\u{feff}') {
+        program_text = rest.to_string();
+    }
+
     // Blank out the shebang line so it's ignored but keeps line numbers
     // accurate. Lexer treats the resulting empty line as whitespace.
     // Before blanking, check for `-T` (taint mode) on the shebang —
