@@ -2579,10 +2579,19 @@ impl Lexer {
                         self.pos += 1;
                     }
                     'c' => {
-                        // \cX — control character: XOR next char with 0x40
+                        // \cX — control character: XOR next char with 0x40.
+                        // The operand can itself be `\\` (literal backslash) —
+                        // op/chars `"\c\\"` is control-\\ (0x1c).
                         self.pos += 1;
                         if self.pos < self.input.len() {
-                            let ctrl = (self.ch() as u8 ^ 0x40) as char;
+                            let operand = if self.ch() == '\\' && self.pos + 1 < self.input.len()
+                            {
+                                self.pos += 1;
+                                self.ch()
+                            } else {
+                                self.ch()
+                            };
+                            let ctrl = (operand as u8 ^ 0x40) as char;
                             s.push(ctrl);
                             self.pos += 1;
                         }
