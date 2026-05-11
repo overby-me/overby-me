@@ -10612,6 +10612,10 @@ impl Interpreter {
         if name == "INC" {
             self.inc_user_modified = true;
         }
+        // Wholesale array reassignment invalidates any `each` cursor
+        // pointing at this array — the next `each @name` starts fresh.
+        // op/each_array RT #75596.
+        self.each_cursors.remove(&format!("@{name}"));
         // If the old array held blessed refs that aren't reachable from
         // anywhere else (including the *new* array we're about to store),
         // dispatch their DESTROY before dropping the slot.
