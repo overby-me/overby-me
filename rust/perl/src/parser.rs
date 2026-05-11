@@ -725,9 +725,14 @@ impl Parser {
         // Check if it's foreach-style: for my $var (list) { }
         // or C-style: for (init; cond; step) { }
 
-        if self.at(&Token::My) || matches!(self.tok(), Token::ScalarVar(_)) {
-            // Foreach style
-            let is_my = self.eat(&Token::My);
+        if self.at(&Token::My)
+            || self.at(&Token::Our)
+            || matches!(self.tok(), Token::ScalarVar(_))
+        {
+            // Foreach style. `for my $i (…)` declares a lexical; `for
+            // our $i (…)` declares a package var. We model both as
+            // `is_my` since the interpreter localises the loop var.
+            let is_my = self.eat(&Token::My) || self.eat(&Token::Our);
             let var = if let Token::ScalarVar(name) = self.tok() {
                 let n = name.clone();
                 self.pos += 1;
