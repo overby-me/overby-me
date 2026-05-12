@@ -5475,6 +5475,52 @@ impl Interpreter {
                             }
                             ret
                         } else {
+                            let file = if self.current_file.is_empty() {
+                                "-e".to_string()
+                            } else {
+                                self.current_file.clone()
+                            };
+                            let line = self.current_line;
+                            self.pending_flow = Some(Flow::Die(format!(
+                                "Undefined subroutine &{name} called at {file} line {line}.\n"
+                            )));
+                            Value::Undef
+                        }
+                    }
+                    // `&$name(...)` where $name is a string / number —
+                    // symbolic sub call. Resolve the sub by name and
+                    // call it; if missing, die "Undefined subroutine".
+                    // (`use strict 'refs'` would normally die first, but
+                    // we don't track that pragma separately yet.)
+                    Value::Str(_) | Value::Num(_) => {
+                        let name = callee_val.to_str();
+                        let file = if self.current_file.is_empty() {
+                            "-e".to_string()
+                        } else {
+                            self.current_file.clone()
+                        };
+                        let line = self.current_line;
+                        let qualified = if name.contains("::") {
+                            name.clone()
+                        } else {
+                            format!("{}::{}", self.package, name)
+                        };
+                        if let Some((_params, body)) = self
+                            .subs
+                            .get(&qualified)
+                            .or_else(|| self.subs.get(&name))
+                            .cloned()
+                        {
+                            let lookup_name = if self.subs.contains_key(&qualified) {
+                                qualified
+                            } else {
+                                name
+                            };
+                            self.call_sub_named(&body, &arg_vals, Some(&lookup_name))
+                        } else {
+                            self.pending_flow = Some(Flow::Die(format!(
+                                "Undefined subroutine &{qualified} called at {file} line {line}.\n"
+                            )));
                             Value::Undef
                         }
                     }
