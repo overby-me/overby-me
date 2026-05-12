@@ -3993,6 +3993,23 @@ impl Interpreter {
                         let slurp_kind: Option<&'static str> = match t {
                             Expr::ArrayVar(_) => Some("@"),
                             Expr::HashVar(_) => Some("%"),
+                            // `(my @a)` / `(my %h)` desugar — DoBlock
+                            // wrapping the My-stmt and an Array/HashVar
+                            // — still slurps like a bare @a / %h.
+                            // op/each_array 64 (`($a, $b) = each our @a`).
+                            Expr::DoBlock(stmts)
+                                if stmts.len() == 2
+                                    && matches!(
+                                        stmts[0],
+                                        Stmt::My(_, _) | Stmt::Our(_, _) | Stmt::Local(_, _)
+                                    ) =>
+                            {
+                                match stmts.get(1) {
+                                    Some(Stmt::Expr(Expr::ArrayVar(_))) => Some("@"),
+                                    Some(Stmt::Expr(Expr::HashVar(_))) => Some("%"),
+                                    _ => None,
+                                }
+                            }
                             _ if target_name
                                 .as_ref()
                                 .is_some_and(|n| self.lvalue_subs.contains(n)) =>
@@ -4030,6 +4047,33 @@ impl Interpreter {
                                 };
                                 idx = items.len();
                                 self.set_hash_from_list(name, rest);
+                            }
+                            // `(my @a)` / `(my %h)` desugar: run the
+                            // declaration stmt to install the lexical,
+                            // then slurp into the resulting Array/HashVar.
+                            (Expr::DoBlock(stmts), Some(kind))
+                                if stmts.len() == 2
+                                    && matches!(
+                                        stmts[0],
+                                        Stmt::My(_, _) | Stmt::Our(_, _) | Stmt::Local(_, _)
+                                    ) =>
+                            {
+                                self.exec_stmt(&stmts[0]);
+                                let rest: Vec<Value> = if idx < items.len() {
+                                    items[idx..].to_vec()
+                                } else {
+                                    Vec::new()
+                                };
+                                idx = items.len();
+                                match (kind, stmts.get(1)) {
+                                    ("@", Some(Stmt::Expr(Expr::ArrayVar(name)))) => {
+                                        self.set_array(name, rest);
+                                    }
+                                    ("%", Some(Stmt::Expr(Expr::HashVar(name)))) => {
+                                        self.set_hash_from_list(name, rest);
+                                    }
+                                    _ => {}
+                                }
                             }
                             (_, Some(kind)) if target_name.is_some() => {
                                 let call_name = target_name.as_ref().unwrap().clone();
