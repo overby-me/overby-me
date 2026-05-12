@@ -190,10 +190,21 @@ impl Parser {
                 return Some(Stmt::Defer(body));
             }
             // `...` (yada-yada) — Perl 5.12+ placeholder operator that
-            // dies "Unimplemented" when reached. Recognise it as a
-            // statement and emit a die call. base/lex tests 107, 108.
+            // dies "Unimplemented" when reached. Only valid as a bare
+            // statement (`...;` or `... EOF` or `... }`); any other
+            // following token is a syntax error in reference perl,
+            // including postfix `if`/`unless`/etc. op/yadayada 10-22.
+            // base/lex tests 107, 108.
             Token::Ident(name) if name.as_str() == "..." => {
                 self.pos += 1;
+                if !matches!(self.tok(), Token::Semi | Token::EOF | Token::RBrace) {
+                    let line = self.current_line();
+                    let near = format!("... {}", token_display(self.tok()));
+                    self.error = Some(format!(
+                        "syntax error at {{FILE}} line {line}, near \"{near}\"\n"
+                    ));
+                    return Some(Stmt::Nop);
+                }
                 self.eat(&Token::Semi);
                 return Some(Stmt::Die(vec![Expr::StringLit(
                     "Unimplemented".to_string(),
@@ -1766,7 +1777,14 @@ impl Parser {
         // `or`/`and`/`not` are *lower* precedence than `..` — drop down
         // into the logical-or tier directly.
         let left = self.parse_log_or();
-        if self.eat(&Token::DotDot) {
+        // `..` and `...` are both range operators in expression
+        // position. `...` differs only in flip-flop semantics, which
+        // we don't model separately. op/yadayada 31+ ('A' ... 'D').
+        let is_triple_dot = matches!(self.tok(), Token::Ident(n) if n == "...");
+        if self.eat(&Token::DotDot) || is_triple_dot {
+            if is_triple_dot {
+                self.pos += 1;
+            }
             let right = self.parse_log_or();
             Expr::Range(Box::new(left), Box::new(right))
         } else {
@@ -3243,16 +3261,20 @@ impl Parser {
     }
 
     fn parse_primary(&mut self) -> Expr {
-        // `...` (yada-yada) operator as an expression — dies
-        // "Unimplemented" when evaluated. base/lex 107.
+        // `...` (yada-yada) in expression position is a syntax error
+        // in reference perl. The valid form `... ;` (as a statement)
+        // is caught in parse_stmt before reaching here. op/yadayada
+        // 10-22.
         if let Token::Ident(name) = self.tok()
             && name == "..."
         {
             self.pos += 1;
-            return Expr::Call(
-                "_yada_yada".to_string(),
-                vec![Expr::StringLit("Unimplemented".to_string())],
-            );
+            let line = self.current_line();
+            let near = format!("... {}", token_display(self.tok()));
+            self.error = Some(format!(
+                "syntax error at {{FILE}} line {line}, near \"{near}\"\n"
+            ));
+            return Expr::Undef;
         }
         match self.tok().clone() {
             Token::Integer(n) => {
@@ -4417,7 +4439,8 @@ impl Parser {
                         | Token::Stat
                         | Token::Bless
                         | Token::Binmode
-                ) {
+                ) && !matches!(self.tok(), Token::Ident(n) if n == "...")
+                {
                     // Function call without parentheses: func arg, ...
                     // Perl prototype-`$` builtins only take a single scalar arg.
                     // Without this, `is(scalar @b, 1, $name)` would be parsed as

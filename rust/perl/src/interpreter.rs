@@ -18035,7 +18035,19 @@ fn expr_introduces_my(expr: &Expr) -> bool {
     match expr {
         Expr::MyVar(_) => true,
         Expr::ArrayLit(items) => items.iter().any(|e| matches!(e, Expr::MyVar(_))),
-        Expr::DoBlock(stmts) => stmts.iter().any(|s| matches!(s, Stmt::My(_, _))),
+        // Only the parser-internal `\my @x` desugar shape counts —
+        // that's exactly `[Stmt::My, Stmt::Expr(ArrayVar|HashVar)]`.
+        // A regular `do { my $err; ... }` block introduces a lexical
+        // scoped to the block, NOT a `COND && my $x` pattern, so it
+        // must NOT trigger the false-conditional error.
+        Expr::DoBlock(stmts) => {
+            stmts.len() == 2
+                && matches!(stmts.first(), Some(Stmt::My(_, _)))
+                && matches!(
+                    stmts.get(1),
+                    Some(Stmt::Expr(Expr::ArrayVar(_))) | Some(Stmt::Expr(Expr::HashVar(_)))
+                )
+        }
         _ => false,
     }
 }
