@@ -6304,13 +6304,12 @@ impl Interpreter {
                 {
                     // `-"-N"` where the rest is purely numeric returns
                     // a number (the negation), not a "+N" string —
-                    // matches reference perl (op/negate 6-9).
-                    let rest_is_numeric = |rest: &str| {
-                        !rest.is_empty()
-                            && rest
-                                .chars()
-                                .all(|c| c.is_ascii_digit() || c == '.' || c == 'e' || c == 'E')
-                    };
+                    // matches reference perl (op/negate 6-9).  Anything
+                    // that doesn't parse fully as a float (e.g. "e1",
+                    // "10foo") stays as a string with the sign swapped
+                    // (op/negate 19).
+                    let rest_is_numeric =
+                        |rest: &str| -> bool { !rest.is_empty() && rest.parse::<f64>().is_ok() };
                     if first == '-' {
                         let rest: String = s.chars().skip(1).collect();
                         if rest_is_numeric(&rest) {

@@ -1778,6 +1778,8 @@ impl Lexer {
                         self.pos += 1;
                         tokens.push(Token::Arrow);
                     } else if self.ch().is_ascii_alphabetic()
+                        && !self.peek(1).is_ascii_alphanumeric()
+                        && self.peek(1) != '_'
                         && (tokens.last().map(|t| t.expects_operand()).unwrap_or(true)
                             // Stacked file tests: after another file-test
                             // Ident (`-t`), the next `-X` is also a file
@@ -1788,6 +1790,9 @@ impl Lexer {
                             ))
                     {
                         // File test operator like -d, -f, -e, etc.
+                        // Only emit when the single letter is followed by
+                        // a word boundary — otherwise `-bareword` would
+                        // wrongly lex as `-b areword` (op/negate 14-15).
                         let op = self.advance();
                         tokens.push(Token::Ident(format!("-{op}")));
                     } else {
