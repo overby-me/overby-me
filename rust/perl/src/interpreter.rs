@@ -13072,6 +13072,34 @@ impl Interpreter {
                 self.set_array("_", saved_underscore);
                 return;
             }
+            // AUTOLOAD lvalue dispatch: if `foobar = X` for an
+            // undefined `foobar` sub, find `<pkg>::AUTOLOAD` and if
+            // it's an lvalue sub, route the assignment through its
+            // body. Set $AUTOLOAD to the original qualified name.
+            // op/sub_lval test 58.
+            if !self.subs.contains_key(name) {
+                let pkg = self.package.clone();
+                let qual_autoload = format!("{pkg}::AUTOLOAD");
+                let autoload_name = if self.subs.contains_key(&qual_autoload) {
+                    Some(qual_autoload)
+                } else if self.subs.contains_key("AUTOLOAD") {
+                    Some("AUTOLOAD".to_string())
+                } else {
+                    None
+                };
+                if let Some(autoload_name) = autoload_name
+                    && self.lvalue_subs.contains(&autoload_name)
+                {
+                    let qname = if name.contains("::") {
+                        name.clone()
+                    } else {
+                        format!("{pkg}::{name}")
+                    };
+                    self.set_global_var("AUTOLOAD", Value::Str(qname));
+                    let synthetic = Expr::Call(autoload_name, args.clone());
+                    return self.assign_to(&synthetic, val);
+                }
+            }
             // `nolv = …` where `nolv` is a known non-lvalue sub —
             // reference perl emits a compile-time "Can't modify
             // non-lvalue subroutine call" error. We emit it at
