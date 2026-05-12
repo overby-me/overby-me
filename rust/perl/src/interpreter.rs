@@ -9982,6 +9982,17 @@ impl Interpreter {
 
     fn eval_expr_for_arg(&mut self, expr: &Expr) -> Value {
         match expr {
+            // Lvalue sub call as an argument: pass the lvalue's backing
+            // slot as a Value::Alias so the receiving sub's `$_[i]`
+            // writes propagate to the source. op/sub_lval tests
+            // `inc(get_st)` / `id(get_st)` / `id1(get_st)` etc.
+            Expr::Call(n, ca) if self.lvalue_subs.contains(n) => {
+                let r = self.lvalue_sub_take_ref(n, ca);
+                if let Value::ScalarRef(rc) = r {
+                    return Value::Alias(rc);
+                }
+                r
+            }
             // `$_[i]` aliasing is already handled by `underscore_arg_sources`
             // and the negative-index off-by-one rewrite (op/array tests
             // 131, 133, 135). Promoting `@_[i]` to a fresh `Value::Alias`
@@ -10017,6 +10028,12 @@ impl Interpreter {
     fn eval_list_for_arg(&mut self, expr: &Expr) -> Vec<Value> {
         match expr {
             Expr::ArrayElement(_, _) | Expr::HashElement(_, _) => {
+                vec![self.eval_expr_for_arg(expr)]
+            }
+            // Lvalue sub call as an argument — pass the lvalue's backing
+            // slot through as Value::Alias so the receiving sub's @_[i]
+            // writes propagate to the source (op/sub_lval `inc(get_st)`).
+            Expr::Call(n, ca) if self.lvalue_subs.contains(n) => {
                 vec![self.eval_expr_for_arg(expr)]
             }
             Expr::ArrayVar(name) => {
@@ -10329,6 +10346,7 @@ impl Interpreter {
         }
         let saved_underscore = self.get_array("_");
         self.set_array("_", arg_vals);
+        self.current_sub_stack.push(name.to_string());
         for stmt in &body[..body.len() - 1] {
             self.exec_stmt(stmt);
         }
@@ -10342,12 +10360,14 @@ impl Interpreter {
                     if let Some(slot) = scope.vars.get_mut(n) {
                         if let Value::Alias(rc) = slot {
                             let rc = rc.clone();
+                            self.current_sub_stack.pop();
                             self.set_array("_", saved_underscore);
                             return Value::ScalarRef(rc);
                         }
                         let old = std::mem::replace(slot, Value::Undef);
                         let rc = std::rc::Rc::new(std::cell::RefCell::new(old));
                         *slot = Value::Alias(rc.clone());
+                        self.current_sub_stack.pop();
                         self.set_array("_", saved_underscore);
                         return Value::ScalarRef(rc);
                     }
@@ -10357,6 +10377,7 @@ impl Interpreter {
         } else {
             Value::Undef
         };
+        self.current_sub_stack.pop();
         self.set_array("_", saved_underscore);
         result
     }
