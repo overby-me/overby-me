@@ -14293,6 +14293,13 @@ impl Interpreter {
                         let mut mutated = items.clone();
                         self.call_context.push(2);
                         let saved_us = self.get_var("_");
+                        // Track whether $_ was originally a lexical so we
+                        // restore to the same scope (and don't introduce a
+                        // fresh lexical $_ that would later block `\$_`'s
+                        // live-aliased-global promotion). Mirrors the grep
+                        // LIST form's logic.
+                        let underscore_was_lexical =
+                            self.scopes.iter().any(|s| s.vars.contains_key("_"));
                         for (i, item) in items.iter().enumerate() {
                             // Break any prior Alias on the lexical $_
                             // slot first so set_var below replaces (not
@@ -14312,9 +14319,19 @@ impl Interpreter {
                                 mutated[i] = self.get_var("_");
                             }
                         }
-                        if let Some(scope) = self.scopes.last_mut() {
-                            scope.vars.insert("_".to_string(), saved_us);
+                        // Restore $_: if it wasn't lexical to begin with,
+                        // make sure any lexical slot we inadvertently
+                        // created is removed and the global is restored.
+                        if underscore_was_lexical {
+                            if let Some(scope) = self.scopes.last_mut() {
+                                scope.vars.insert("_".to_string(), saved_us);
+                            } else {
+                                self.globals.vars.insert("_".to_string(), saved_us);
+                            }
                         } else {
+                            for scope in self.scopes.iter_mut().rev() {
+                                scope.vars.remove("_");
+                            }
                             self.globals.vars.insert("_".to_string(), saved_us);
                         }
                         self.call_context.pop();
