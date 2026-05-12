@@ -6402,6 +6402,57 @@ impl Interpreter {
                 };
                 Value::Num(val.to_num().abs())
             }
+            // Floating-point math built-ins. Each accepts an optional
+            // single argument and defaults to `$_`. op/pow / op/numeric.
+            "sqrt" => {
+                let n = if args.is_empty() {
+                    self.get_var("_").to_num()
+                } else {
+                    self.eval_expr(&args[0]).to_num()
+                };
+                Value::Num(n.sqrt())
+            }
+            "log" => {
+                let n = if args.is_empty() {
+                    self.get_var("_").to_num()
+                } else {
+                    self.eval_expr(&args[0]).to_num()
+                };
+                Value::Num(n.ln())
+            }
+            "exp" => {
+                let n = if args.is_empty() {
+                    self.get_var("_").to_num()
+                } else {
+                    self.eval_expr(&args[0]).to_num()
+                };
+                Value::Num(n.exp())
+            }
+            "sin" => {
+                let n = if args.is_empty() {
+                    self.get_var("_").to_num()
+                } else {
+                    self.eval_expr(&args[0]).to_num()
+                };
+                Value::Num(n.sin())
+            }
+            "cos" => {
+                let n = if args.is_empty() {
+                    self.get_var("_").to_num()
+                } else {
+                    self.eval_expr(&args[0]).to_num()
+                };
+                Value::Num(n.cos())
+            }
+            "atan2" => {
+                let y = self.eval_expr(&args[0]).to_num();
+                let x = if args.len() > 1 {
+                    self.eval_expr(&args[1]).to_num()
+                } else {
+                    0.0
+                };
+                Value::Num(y.atan2(x))
+            }
             "int" => {
                 let val = if args.is_empty() {
                     self.get_var("_")
