@@ -1443,6 +1443,38 @@ pub(crate) fn parse_args() -> Options {
         process::exit(2);
     }
 
+    // Expand `{a,b}` / `[1-10]` style globs in -T values; each expanded file
+    // becomes a separate transfer. If the expansion produces more upload
+    // sources than the group's URL count, replicate URLs to match (test 490).
+    {
+        let mut expanded: Vec<std::path::PathBuf> = Vec::new();
+        for up in &group_uploads {
+            let s = up.to_string_lossy();
+            if !opts.globoff && (s.contains('{') || s.contains('[')) {
+                match crate::url::expand_glob(&s) {
+                    Ok(items) => {
+                        for (path, _) in items {
+                            expanded.push(std::path::PathBuf::from(path));
+                        }
+                    }
+                    Err(_) => expanded.push(up.clone()),
+                }
+            } else {
+                expanded.push(up.clone());
+            }
+        }
+        if !expanded.is_empty() && opts.urls.len() > group_start_idx {
+            let urls_in_group = opts.urls.len() - group_start_idx;
+            if expanded.len() > urls_in_group {
+                let last_url = opts.urls[opts.urls.len() - 1].clone();
+                for _ in urls_in_group..expanded.len() {
+                    opts.urls.push(last_url.clone());
+                }
+            }
+        }
+        group_uploads = expanded;
+    }
+
     // Snapshot per-URL fields for the final --next group (or the only group
     // when --next was never used).
     {

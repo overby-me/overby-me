@@ -6,7 +6,7 @@ Use the upstream [curl test suite](https://github.com/curl/curl/tree/master/test
 
 ## Current Status
 
-**734 tests passing** (was 709 at session start; +12 across multipart, retry, IPv6,
+**737 tests passing** (was 709 at session start; +12 across multipart, retry, IPv6,
 upload-stdin redirect, write-out, interface, and dump-header fixes) across the
 curl 8.19.0 test suite (verified with strict
 runner checks — the derivation fails when a test number doesn't exist or the
@@ -404,13 +404,14 @@ Current gaps:
 - [x] `--suppress-connect-headers` keeps the proxy CONNECT response headers out of `--include` / `--dump-header` output while still counting them toward `%{size_header}` (unlocked test 1288)
 - [x] Emit `--write-out` even when the URL fails to parse (unsupported scheme, no `://`, etc.) using a lenient parser that populates `%{url.*}` / `%{urle.*}` with the partial components (or empty for fully-unparsable inputs) (unlocked tests 423, 424)
 - [x] Map TLS handshake / peer-certificate verification failures (NotValidForName, BadCertificate, InvalidCertificate, UnknownIssuer, Expired) to exit 60 instead of the generic exit 6 (unlocked tests 311, 312)
+- [x] `-T` glob expansion: `{a,b}` / `[1-10]` in upload-source paths expand into multiple transfers; replicate the URL to match the expanded count so each file gets its own PUT (unlocked tests 490, 491, 492)
 - [ ] Target 750+ passing by addressing remaining feature gaps
 
 ---
 
 ## Test Inventory
 
-### Passing tests (734)
+### Passing tests (737)
 
 The authoritative list is `testNums` in `default.nix`; the count is
 checked there by Nix and stays in sync with the per-test derivations.
