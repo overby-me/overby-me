@@ -129,6 +129,7 @@ pub struct Interpreter {
     /// `local @name`. The cursor key (e.g. `@arr`) and its prior
     /// state, or None if there was no cursor. On scope exit the
     /// saved cursor is reinstated. op/each_array localization tests.
+    #[allow(clippy::type_complexity)]
     local_each_cursor_saves: Vec<Vec<(String, Option<(Vec<String>, usize)>)>>,
     // Local hash-element saves: each entry is (hash_name, key, prior_value
     // or None if the key was absent). Restored at sub / block scope exit.
@@ -1823,43 +1824,43 @@ impl Interpreter {
                                 Flow::Return(v) => {
                                     self.pop_scope();
                                     // Restore via direct slot replacement so we
-                            // don't write the saved value THROUGH any
-                            // Value::Alias still installed in $_ (which
-                            // would clobber the source list's last
-                            // element). op/for `reverse map {$_} 1, @arr`.
-                            if let Some(scope) = self.scopes.last_mut() {
-                                scope.vars.insert(var.clone(), saved_var);
-                            } else {
-                                self.globals.vars.insert(var.clone(), saved_var);
-                            }
+                                    // don't write the saved value THROUGH any
+                                    // Value::Alias still installed in $_ (which
+                                    // would clobber the source list's last
+                                    // element). op/for `reverse map {$_} 1, @arr`.
+                                    if let Some(scope) = self.scopes.last_mut() {
+                                        scope.vars.insert(var.clone(), saved_var);
+                                    } else {
+                                        self.globals.vars.insert(var.clone(), saved_var);
+                                    }
                                     return Flow::Return(v);
                                 }
                                 Flow::Die(msg) => {
                                     self.pop_scope();
                                     // Restore via direct slot replacement so we
-                            // don't write the saved value THROUGH any
-                            // Value::Alias still installed in $_ (which
-                            // would clobber the source list's last
-                            // element). op/for `reverse map {$_} 1, @arr`.
-                            if let Some(scope) = self.scopes.last_mut() {
-                                scope.vars.insert(var.clone(), saved_var);
-                            } else {
-                                self.globals.vars.insert(var.clone(), saved_var);
-                            }
+                                    // don't write the saved value THROUGH any
+                                    // Value::Alias still installed in $_ (which
+                                    // would clobber the source list's last
+                                    // element). op/for `reverse map {$_} 1, @arr`.
+                                    if let Some(scope) = self.scopes.last_mut() {
+                                        scope.vars.insert(var.clone(), saved_var);
+                                    } else {
+                                        self.globals.vars.insert(var.clone(), saved_var);
+                                    }
                                     return Flow::Die(msg);
                                 }
                                 Flow::Exit(code) => {
                                     self.pop_scope();
                                     // Restore via direct slot replacement so we
-                            // don't write the saved value THROUGH any
-                            // Value::Alias still installed in $_ (which
-                            // would clobber the source list's last
-                            // element). op/for `reverse map {$_} 1, @arr`.
-                            if let Some(scope) = self.scopes.last_mut() {
-                                scope.vars.insert(var.clone(), saved_var);
-                            } else {
-                                self.globals.vars.insert(var.clone(), saved_var);
-                            }
+                                    // don't write the saved value THROUGH any
+                                    // Value::Alias still installed in $_ (which
+                                    // would clobber the source list's last
+                                    // element). op/for `reverse map {$_} 1, @arr`.
+                                    if let Some(scope) = self.scopes.last_mut() {
+                                        scope.vars.insert(var.clone(), saved_var);
+                                    } else {
+                                        self.globals.vars.insert(var.clone(), saved_var);
+                                    }
                                     return Flow::Exit(code);
                                 }
                                 _ => {}
@@ -5943,7 +5944,7 @@ impl Interpreter {
             // class on the RHS appears as a string after parsing.
             BinOp::Isa => {
                 let class = r.to_str();
-                let p = Self::ref_ptr(&l);
+                let p = Self::ref_ptr(l);
                 if p == 0 {
                     bool_value(false)
                 } else if let Some(actual) = self.blessed_refs.get(&p).cloned() {
@@ -14186,17 +14187,22 @@ impl Interpreter {
                         let mut mutated = items.clone();
                         self.call_context.push(1);
                         let saved_us = self.get_var("_");
+                        // Track whether $_ was originally a lexical so
+                        // we restore to the same scope (and don't
+                        // introduce a fresh lexical $_ that would later
+                        // block `local $_`). op/sub_lval.
+                        let underscore_was_lexical =
+                            self.scopes.iter().any(|s| s.vars.contains_key("_"));
                         for (i, item) in items.iter().enumerate() {
-                            // Direct slot insert (NOT set_var) — set_var
-                            // would write *through* the prior `$_` Alias,
-                            // chaining iterations together so iter N+1's
-                            // value lands in iter N's Rc. Replace the
-                            // slot wholesale each iteration.
-                            if let Some(scope) = self.scopes.last_mut() {
-                                scope.vars.insert("_".to_string(), item.clone());
-                            } else {
-                                self.globals.vars.insert("_".to_string(), item.clone());
+                            // Break any prior Alias before set_var so it
+                            // replaces the slot instead of writing
+                            // items[i] through to the source array.
+                            if let Some(scope) = self.scopes.last_mut()
+                                && matches!(scope.vars.get("_"), Some(Value::Alias(_)))
+                            {
+                                scope.vars.insert("_".to_string(), Value::Undef);
                             }
+                            self.set_var("_", item.clone());
                             let result = self.eval_expr(block);
                             if alias_target.is_some() {
                                 mutated[i] = self.get_var("_");
@@ -14205,9 +14211,19 @@ impl Interpreter {
                                 results.push(mutated[i].clone());
                             }
                         }
-                        if let Some(scope) = self.scopes.last_mut() {
-                            scope.vars.insert("_".to_string(), saved_us);
+                        // Restore $_: if it wasn't lexical to begin with,
+                        // make sure any lexical slot we inadvertently
+                        // created is removed and the global is restored.
+                        if underscore_was_lexical {
+                            if let Some(scope) = self.scopes.last_mut() {
+                                scope.vars.insert("_".to_string(), saved_us);
+                            } else {
+                                self.globals.vars.insert("_".to_string(), saved_us);
+                            }
                         } else {
+                            for scope in self.scopes.iter_mut().rev() {
+                                scope.vars.remove("_");
+                            }
                             self.globals.vars.insert("_".to_string(), saved_us);
                         }
                         self.call_context.pop();

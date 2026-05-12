@@ -1905,11 +1905,12 @@ impl Parser {
         // also validates against the non-associative group
         // (<=>, cmp, ~~, isa) which can't be chained with anything.
         let nceq_tok = |t: &Token| {
-            matches!(t, Token::Spaceship | Token::Cmp | Token::Smartmatch | Token::Isa)
+            matches!(
+                t,
+                Token::Spaceship | Token::Cmp | Token::Smartmatch | Token::Isa
+            )
         };
-        let eqop_tok = |t: &Token| {
-            matches!(t, Token::NumEq | Token::NumNe | Token::Eq | Token::Ne)
-        };
+        let eqop_tok = |t: &Token| matches!(t, Token::NumEq | Token::NumNe | Token::Eq | Token::Ne);
         loop {
             let (op, op_name) = match self.tok() {
                 Token::NumEq => (Some(BinOp::NumEq), "=="),
@@ -1932,12 +1933,8 @@ impl Parser {
                     BinOp::Spaceship | BinOp::StrCmp | BinOp::Smartmatch | BinOp::Isa
                 )
             };
-            let is_eqop = |o: &BinOp| {
-                matches!(
-                    o,
-                    BinOp::NumEq | BinOp::NumNe | BinOp::StrEq | BinOp::StrNe
-                )
-            };
+            let is_eqop =
+                |o: &BinOp| matches!(o, BinOp::NumEq | BinOp::NumNe | BinOp::StrEq | BinOp::StrNe);
             let is_relational = |o: &BinOp| {
                 matches!(
                     o,
@@ -1988,9 +1985,7 @@ impl Parser {
                     {
                         true
                     }
-                    Expr::BinOp(BinOp::LogAnd, l, r) => {
-                        contains_eqop(l) || contains_eqop(r)
-                    }
+                    Expr::BinOp(BinOp::LogAnd, l, r) => contains_eqop(l) || contains_eqop(r),
                     _ => false,
                 }
             }
@@ -2034,18 +2029,12 @@ impl Parser {
             // expr by reference — naive (doesn't preserve single-
             // evaluation across side-effects), but matches the common
             // chained-comparison usage.
-            let left_is_eqop_top =
-                matches!(&left, Expr::BinOp(o, _, _) if is_eqop(o));
+            let left_is_eqop_top = matches!(&left, Expr::BinOp(o, _, _) if is_eqop(o));
             if is_eqop(&op) && left_is_eqop_top {
                 if let Expr::BinOp(_, _, b_box) = &left {
                     let b = (**b_box).clone();
-                    let new_pair =
-                        Expr::BinOp(op.clone(), Box::new(b), Box::new(right));
-                    left = Expr::BinOp(
-                        BinOp::LogAnd,
-                        Box::new(left),
-                        Box::new(new_pair),
-                    );
+                    let new_pair = Expr::BinOp(op.clone(), Box::new(b), Box::new(right));
+                    left = Expr::BinOp(BinOp::LogAnd, Box::new(left), Box::new(new_pair));
                     continue;
                 }
             }
@@ -2100,11 +2089,7 @@ impl Parser {
                 if let Expr::BinOp(_, _, b_box) = &left {
                     let b = (**b_box).clone();
                     let new_pair = Expr::BinOp(op, Box::new(b), Box::new(right));
-                    left = Expr::BinOp(
-                        BinOp::LogAnd,
-                        Box::new(left),
-                        Box::new(new_pair),
-                    );
+                    left = Expr::BinOp(BinOp::LogAnd, Box::new(left), Box::new(new_pair));
                     continue;
                 }
             }
@@ -2384,10 +2369,7 @@ impl Parser {
                     } else if !had_parens {
                         Expr::Call(
                             name,
-                            vec![Expr::Call(
-                                "_amp_call_inherit_args".to_string(),
-                                Vec::new(),
-                            )],
+                            vec![Expr::Call("_amp_call_inherit_args".to_string(), Vec::new())],
                         )
                     } else {
                         Expr::Call(name, args)
@@ -3216,8 +3198,7 @@ impl Parser {
                             } else {
                                 Vec::new()
                             };
-                            expr =
-                                Expr::MethodCall(Box::new(expr), "isa".to_string(), args);
+                            expr = Expr::MethodCall(Box::new(expr), "isa".to_string(), args);
                         }
                         // `$obj->$method` — method name from scalar var.
                         // Stringify at runtime via a marker method name
