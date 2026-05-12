@@ -83,7 +83,14 @@ pub(crate) fn format_write_out(
         filename_effective.and_then(|p| p.to_str()).unwrap_or(""),
     );
     result = result.replace("%{remote_ip}", &url.host);
-    result = result.replace("%{remote_port}", &url.port.to_string());
+    // For -w from a totally unparsable URL (scheme empty) we expose the port
+    // as an empty string rather than "0" so the test-423 `+++++++` shape lines up.
+    let port_str = if url.scheme.is_empty() {
+        String::new()
+    } else {
+        url.port.to_string()
+    };
+    result = result.replace("%{remote_port}", &port_str);
     // %{local_ip} / %{local_port} — set by `connect()` after a successful
     // TCP connect (test 435).
     let local = crate::connection::LOCAL_ADDR.with(|r| r.borrow().clone());
@@ -92,7 +99,7 @@ pub(crate) fn format_write_out(
     result = result.replace("%{local_port}", &local_port.to_string());
     result = result.replace("%{url.scheme}", &url.scheme);
     result = result.replace("%{url.host}", &url.host);
-    result = result.replace("%{url.port}", &url.port.to_string());
+    result = result.replace("%{url.port}", &port_str);
     result = result.replace("%{scheme}", &url.scheme);
     result = result.replace("%{http_version}", "1.1");
     let (path_only, query) = url
@@ -117,9 +124,14 @@ pub(crate) fn format_write_out(
         .as_deref()
         .and_then(|s| crate::url::parse_url(s).ok());
     if let Some(ref eu) = eff {
+        let eu_port_str = if eu.scheme.is_empty() {
+            String::new()
+        } else {
+            eu.port.to_string()
+        };
         result = result.replace("%{urle.scheme}", &eu.scheme);
         result = result.replace("%{urle.host}", &eu.host);
-        result = result.replace("%{urle.port}", &eu.port.to_string());
+        result = result.replace("%{urle.port}", &eu_port_str);
         let (ep, eq) = eu
             .path
             .split_once('?')
@@ -137,7 +149,7 @@ pub(crate) fn format_write_out(
     } else {
         result = result.replace("%{urle.scheme}", &url.scheme);
         result = result.replace("%{urle.host}", &url.host);
-        result = result.replace("%{urle.port}", &url.port.to_string());
+        result = result.replace("%{urle.port}", &port_str);
         result = result.replace("%{urle.path}", &path_only);
         result = result.replace("%{urle.query}", &query);
         result = result.replace("%{urle.fragment}", url.fragment.as_deref().unwrap_or(""));

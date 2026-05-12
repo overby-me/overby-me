@@ -1798,6 +1798,87 @@ fn main() {
                 } else {
                     exit_code = 6;
                 }
+
+                // Emit --write-out even when the URL was rejected up front
+                // (unsupported scheme, malformed authority, etc.) so
+                // `%{url.*}` / `%{urle.*}` reflect what curl tried to parse
+                // (test 423/424). Uses a lenient parser that accepts any
+                // scheme and degrades to all-empty fields when the input
+                // has no `://`.
+                if let Some(ref fmt) = effective_opts.write_out
+                    && !e.starts_with("CONNECT tunnel failed")
+                {
+                    use crate::format::{WriteOutDest, split_write_out};
+                    let parsed_url = crate::url::parse_url_lenient(url_str);
+                    let synth = crate::response::Response {
+                        trailer_bytes: Vec::new(),
+                        http10_response: false,
+                        status: 0,
+                        status_text: String::new(),
+                        headers: Vec::new(),
+                        body: Vec::new(),
+                        header_bytes: Vec::new(),
+                        redirect_headers: Vec::new(),
+                        connect_header_size: 0,
+                        num_connects: 0,
+                        num_redirects: 0,
+                        max_redirects_reached: false,
+                        proto_redir_blocked: false,
+                        upload_redirect_failed: false,
+                        redirect_url_malformed: false,
+                        weird_server_reply: false,
+                        final_url: None,
+                        final_referer: None,
+                        redirect_url: None,
+                        timed_out: false,
+                        recv_error: false,
+                        partial_file: false,
+                        bad_content_encoding: false,
+                        bad_encoding_too_many: false,
+                        filesize_exceeded: false,
+                        header_size_error: false,
+                    };
+                    for (dest, _gated, raw) in split_write_out(fmt) {
+                        if raw.is_empty() {
+                            continue;
+                        }
+                        let text = crate::format::format_write_out(
+                            &raw,
+                            &synth,
+                            &parsed_url,
+                            0,
+                            0,
+                            "GET",
+                            None,
+                            url_idx,
+                            exit_code,
+                            &e,
+                            "",
+                        );
+                        use std::io::Write as _;
+                        match dest {
+                            WriteOutDest::Stdout => {
+                                let _ = io::stdout().write_all(text.as_bytes());
+                                let _ = io::stdout().flush();
+                            }
+                            WriteOutDest::Stderr => {
+                                let _ = io::stderr().write_all(text.as_bytes());
+                            }
+                            WriteOutDest::File { path, append } => {
+                                let mut open = fs::OpenOptions::new();
+                                open.write(true).create(true);
+                                if append {
+                                    open.append(true);
+                                } else {
+                                    open.truncate(true);
+                                }
+                                if let Ok(mut f) = open.open(path) {
+                                    let _ = f.write_all(text.as_bytes());
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 

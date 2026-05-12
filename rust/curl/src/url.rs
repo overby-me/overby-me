@@ -342,6 +342,76 @@ pub fn parse_url(raw: &str) -> Result<ParsedUrl, String> {
     })
 }
 
+/// Parse a URL into ParsedUrl WITHOUT rejecting unsupported schemes — used
+/// by `--write-out` to populate `%{url.*}` / `%{urle.*}` even when the URL
+/// would be rejected at transfer time (test 423). Falls back to empty fields
+/// when the URL has no scheme separator at all.
+pub(crate) fn parse_url_lenient(raw: &str) -> ParsedUrl {
+    if let Ok(p) = parse_url(raw) {
+        return p;
+    }
+    // Look for "scheme://rest". Without it, return all-empty fields.
+    let Some((scheme, rest)) = raw.split_once("://") else {
+        return ParsedUrl {
+            scheme: String::new(),
+            host: String::new(),
+            port: 0,
+            path: String::new(),
+            raw: raw.to_string(),
+            userinfo: None,
+            fragment: None,
+        };
+    };
+    let scheme = scheme.to_ascii_lowercase();
+    // Strip fragment off whatever is to come.
+    let (rest, fragment) = match rest.split_once('#') {
+        Some((p, f)) => (p, Some(f.to_string())),
+        None => (rest, None),
+    };
+    // Split authority from path.
+    let (authority, path) = match rest.find(['/', '?']) {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, ""),
+    };
+    let (userinfo, host_port) = match authority.rfind('@') {
+        Some(i) => (Some(authority[..i].to_string()), &authority[i + 1..]),
+        None => (None, authority),
+    };
+    let (host, port) = if let Some(stripped) = host_port.strip_prefix('[') {
+        match stripped.find(']') {
+            Some(end) => {
+                let h = &stripped[..end];
+                let p = stripped
+                    .get(end + 1..)
+                    .and_then(|s| s.strip_prefix(':'))
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+                (h.to_string(), p)
+            }
+            None => (stripped.to_string(), 0),
+        }
+    } else {
+        match host_port.rsplit_once(':') {
+            Some((h, p)) => (h.to_string(), p.parse().unwrap_or(0)),
+            None => (host_port.to_string(), 0),
+        }
+    };
+    let path = if path.is_empty() {
+        String::new()
+    } else {
+        path.to_string()
+    };
+    ParsedUrl {
+        scheme,
+        host,
+        port,
+        path,
+        raw: raw.to_string(),
+        userinfo,
+        fragment,
+    }
+}
+
 /// Strip an IPv6 zone/scope ID from a bare host. Accepts both the raw
 /// `%scope` and percent-encoded `%25scope` forms used in URLs. Non-IPv6
 /// hosts (no `:`) are returned unchanged.
