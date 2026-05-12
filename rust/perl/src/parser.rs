@@ -756,47 +756,7 @@ impl Parser {
 
     fn parse_while(&mut self) -> Stmt {
         let cond = self.parse_paren_expr();
-        // Perl's `while (<FH>)` is syntactic sugar for
-        // `while (defined($_ = <FH>))` — without this, the loop body
-        // runs once per line but `$_` is never set. Rewrite it here
-        // so existing line-iter idioms work. comp/multiline.
-        // Same idiom for `while (each HASH/ARRAY)` and `while (readline FH)`
-        // — Perl auto-wraps the sole condition in `defined()` so the
-        // loop exits only when each returns end-of-iteration.
-        // op/each_array test 28+.
-        let cond = match cond {
-            Expr::Diamond(name) => Expr::Defined(Box::new(Expr::Assign(
-                Box::new(Expr::ScalarVar("_".to_string())),
-                Box::new(Expr::Diamond(name)),
-            ))),
-            Expr::Call(ref name, _) if name == "each" || name == "readline" => {
-                Expr::Defined(Box::new(cond))
-            }
-            // `while ($k = each X)` / `while ($l = <FH>)` / `while ($l = readline FH)`
-            // — Perl wraps the assignment in defined() so the loop exits only
-            // when the RHS produces undef (so a 0/'' first value still iterates).
-            // Only wrap when LHS is a single scalar (ScalarVar / MyVar / LocalVar);
-            // list-context destructuring like `($k, $v) = each X` already exits
-            // on the empty list from each, so wrapping would prevent termination.
-            // op/each_array tests 43–48.
-            Expr::Assign(ref lhs, ref rhs) => {
-                let lhs_is_scalar = matches!(
-                    lhs.as_ref(),
-                    Expr::ScalarVar(_) | Expr::MyVar(_) | Expr::LocalVar(_)
-                );
-                let rhs_is_iter = match rhs.as_ref() {
-                    Expr::Diamond(_) => true,
-                    Expr::Call(n, _) => n == "each" || n == "readline",
-                    _ => false,
-                };
-                if lhs_is_scalar && rhs_is_iter {
-                    Expr::Defined(Box::new(cond))
-                } else {
-                    cond
-                }
-            }
-            other => other,
-        };
+        let cond = wrap_iter_cond_with_defined(cond);
         let body = self.parse_brace_block();
         let continue_body = self.try_parse_continue();
         Stmt::While {
@@ -901,7 +861,13 @@ impl Parser {
                 let cond = if self.at(&Token::Semi) {
                     None
                 } else {
-                    Some(self.parse_expr())
+                    // Same defined() auto-wrap as `while` for `each`,
+                    // `readline`, and `<FH>` in the cond slot of
+                    // C-style for. Without this, `for(; $k=each(@a) ;)`
+                    // would exit on the first iteration because the
+                    // first key (0) is falsy. op/each_array 55-57.
+                    let raw = self.parse_expr();
+                    Some(wrap_iter_cond_with_defined(raw))
                 };
                 self.expect(&Token::Semi);
 
@@ -4556,6 +4522,46 @@ impl Parser {
 
 /// Perl builtins with prototype `$` — they take exactly one scalar-context
 /// argument. Without this, something like `is(scalar @b, 1, "msg")` would
+/// Perl's `while/for/until` condition auto-wraps iterator-style
+/// expressions in `defined()` so the loop body runs even when each()
+/// returns the falsy key 0 or readline() returns "0". Returns the
+/// (possibly wrapped) condition.
+///
+/// Wraps when COND is:
+///   * `<FH>` — auto-translate to `defined($_ = <FH>)`
+///   * `each(X)` / `readline(X)` — bare iterator call
+///   * `$var = <iter>` — assignment whose RHS is an iterator
+///
+/// Other conditions are returned unchanged.
+fn wrap_iter_cond_with_defined(cond: Expr) -> Expr {
+    match cond {
+        Expr::Diamond(name) => Expr::Defined(Box::new(Expr::Assign(
+            Box::new(Expr::ScalarVar("_".to_string())),
+            Box::new(Expr::Diamond(name)),
+        ))),
+        Expr::Call(ref name, _) if name == "each" || name == "readline" => {
+            Expr::Defined(Box::new(cond))
+        }
+        Expr::Assign(ref lhs, ref rhs) => {
+            let lhs_is_scalar = matches!(
+                lhs.as_ref(),
+                Expr::ScalarVar(_) | Expr::MyVar(_) | Expr::LocalVar(_)
+            );
+            let rhs_is_iter = match rhs.as_ref() {
+                Expr::Diamond(_) => true,
+                Expr::Call(n, _) => n == "each" || n == "readline",
+                _ => false,
+            };
+            if lhs_is_scalar && rhs_is_iter {
+                Expr::Defined(Box::new(cond))
+            } else {
+                cond
+            }
+        }
+        other => other,
+    }
+}
+
 /// parse as `is(scalar(@b, 1, "msg"))`, swallowing the outer call's args.
 /// Map a named-operator token back to its identifier so it can be
 /// used as a bareword hash key inside `{...}`. Returns None for
