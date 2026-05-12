@@ -12743,6 +12743,35 @@ impl Interpreter {
             self.eval_call("substr", &new_args);
             return;
         }
+        // `shift = val` / `pop = val` — when an lvalue sub's body is
+        // `shift` (op/sub_lval lv2t), assigning to the call writes
+        // through the popped slot's Alias. The slot has already been
+        // removed from @_, but the Rc still ties back to the original
+        // (`Value::Alias` was placed by `eval_expr_for_arg` for
+        // lvalue-sub arg passing).
+        if let Expr::Call(n, args) = target
+            && (n == "shift" || n == "pop")
+            && args.is_empty()
+        {
+            let target_arr = if self.current_sub_stack.is_empty() {
+                "ARGV".to_string()
+            } else {
+                "_".to_string()
+            };
+            let mut arr = self.get_array(&target_arr);
+            if !arr.is_empty() {
+                let slot = if n == "shift" {
+                    arr.remove(0)
+                } else {
+                    arr.pop().unwrap()
+                };
+                self.set_array(&target_arr, arr);
+                if let Value::Alias(rc) = slot {
+                    *rc.borrow_mut() = val;
+                }
+            }
+            return;
+        }
         // `vec($s, OFFS, BITS) = REPL` — vec lvalue; route to the
         // 4-arg form analogously to substr above. op/sub_lval veclv.
         if let Expr::Call(n, sub_args) = target
@@ -12838,21 +12867,36 @@ impl Interpreter {
                 // sub call, evaluate it to a ScalarRef of the lvalue's
                 // backing slot and pass that through as a Value::Alias
                 // so `shift`/`$_[i]` inside the body deref the original
-                // (op/sub_lval `id(get_st) = 10` → $blah = 10).
+                // (op/sub_lval `id(get_st) = 10` → $blah = 10). Bare
+                // ScalarVar / ArrayElement / HashElement args also
+                // become Aliases so `(lv2t($_)) = …` etc. propagate
+                // back to the source.
                 let mut arg_vals: Vec<Value> = Vec::new();
                 for a in args.iter() {
-                    if let Expr::Call(an, aa) = a
-                        && self.lvalue_subs.contains(an)
-                    {
-                        let r = self.lvalue_sub_take_ref(an, aa);
-                        if let Value::ScalarRef(rc) = r {
-                            arg_vals.push(Value::Alias(rc));
-                            continue;
+                    match a {
+                        Expr::Call(an, aa) if self.lvalue_subs.contains(an) => {
+                            let r = self.lvalue_sub_take_ref(an, aa);
+                            if let Value::ScalarRef(rc) = r {
+                                arg_vals.push(Value::Alias(rc));
+                            } else {
+                                arg_vals.push(r);
+                            }
                         }
-                        arg_vals.push(r);
-                        continue;
+                        Expr::ScalarVar(n) => {
+                            let r = self.eval_expr(&Expr::Ref(Box::new(a.clone())));
+                            if let Value::ScalarRef(rc) = r {
+                                arg_vals.push(Value::Alias(rc));
+                            } else {
+                                arg_vals.push(self.get_var(n));
+                            }
+                        }
+                        Expr::ArrayElement(_, _) | Expr::HashElement(_, _) => {
+                            arg_vals.push(self.eval_expr_for_arg(a));
+                        }
+                        _ => {
+                            arg_vals.push(self.eval_expr(a));
+                        }
                     }
-                    arg_vals.push(self.eval_expr(a));
                 }
                 let saved_underscore = self.get_array("_");
                 self.set_array("_", arg_vals);
