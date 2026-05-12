@@ -442,8 +442,22 @@ impl Parser {
                 // `goto &sub` — tail call to the named sub, passing the
                 // current @_. Encoded into Stmt::Goto with the `&` prefix
                 // so the interpreter recognises the sub-form.
+                // `goto \&sub` — same semantics; the `\&` produces a
+                // coderef, and we normalise it here to `&NAME` form.
                 let label = if matches!(self.tok(), Token::BitAnd) {
                     self.pos += 1;
+                    if let Token::Ident(name) = self.tok() {
+                        let n = name.clone();
+                        self.pos += 1;
+                        format!("&{n}")
+                    } else {
+                        "&".to_string()
+                    }
+                } else if matches!(self.tok(), Token::Backslash)
+                    && matches!(self.peek(1), Token::BitAnd)
+                    && matches!(self.peek(2), Token::Ident(_))
+                {
+                    self.pos += 2; // skip \ and &
                     if let Token::Ident(name) = self.tok() {
                         let n = name.clone();
                         self.pos += 1;

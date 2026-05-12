@@ -10291,6 +10291,18 @@ impl Interpreter {
                     // name and re-enter it with the *current* @_ as its
                     // arguments. The caller of the current sub is the
                     // one observing the result. op/args goto tests 5-8.
+                    // Before the tail-call, drain this scope's defer
+                    // blocks in LIFO order so deferred actions execute
+                    // *before* control transfers. op/defer test 15.
+                    loop {
+                        let body = self.defer_blocks.last_mut().and_then(|v| v.pop());
+                        match body {
+                            Some(body) => {
+                                let _ = self.exec_stmts(&body);
+                            }
+                            None => break,
+                        }
+                    }
                     let target = label.trim_start_matches('&').to_string();
                     let cur_args: Vec<Value> = self
                         .scopes
