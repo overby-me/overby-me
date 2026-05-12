@@ -1635,6 +1635,24 @@ fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String> {
     let mut opts = opts.clone();
+
+    // Early URL parse: a malformed URL must take priority over later
+    // local checks (e.g. missing -T file). Test 1469 expects exit 3
+    // for a URL with whitespace, even when -T points at a non-existent
+    // file. We re-parse below within the redirect loop too.
+    {
+        let probe = if url_str.starts_with("http://") || url_str.starts_with("https://") {
+            url_str.to_string()
+        } else {
+            format!("http://{url_str}")
+        };
+        if let Err(e) = crate::url::parse_url(&probe)
+            && e.starts_with("malformed URL")
+        {
+            return Err(e);
+        }
+    }
+
     // Check that all form file uploads exist before connecting.
     // "-" means stdin — always allowed.
     for field in &opts.form_fields {
