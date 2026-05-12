@@ -500,6 +500,15 @@ pub(crate) fn parse_args() -> Options {
                 // Parallel transfers: accepted but executed sequentially. Tests
                 // that only check error mapping (e.g. 496) still pass.
             }
+            "--haproxy-protocol" => {
+                opts.haproxy_protocol = true;
+            }
+            "--haproxy-clientip" => {
+                i += 1;
+                let val = next_arg(&args, i, "--haproxy-clientip");
+                opts.haproxy_clientip = Some(val);
+                opts.haproxy_protocol = true;
+            }
             "--parallel-immediate" | "--parallel-max" => {
                 // Same — accepted, ignored. Consume the value for --parallel-max.
                 if arg == "--parallel-max" {

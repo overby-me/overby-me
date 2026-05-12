@@ -89,6 +89,11 @@ pub struct Options {
     pub(crate) max_time: Option<Duration>,
     pub(crate) insecure: bool,
     pub(crate) compressed: bool,
+    /// --haproxy-protocol: prefix the HTTP request connection with the
+    /// PROXY TCP4/TCP6 header (test 3028).
+    pub(crate) haproxy_protocol: bool,
+    /// --haproxy-clientip: override the source IP in the PROXY header.
+    pub(crate) haproxy_clientip: Option<String>,
     pub(crate) dump_header: Option<PathBuf>,
     pub(crate) write_out: Option<String>,
     pub(crate) retry: usize,
@@ -209,6 +214,8 @@ impl Default for Options {
             max_time: None,
             insecure: false,
             compressed: false,
+            haproxy_protocol: false,
+            haproxy_clientip: None,
             dump_header: None,
             write_out: None,
             retry: 0,

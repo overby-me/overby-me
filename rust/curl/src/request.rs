@@ -1170,6 +1170,51 @@ fn execute_request_inner(
     accumulated_header_bytes: usize,
 ) -> Result<Response, String> {
     let (mut conn, connect_response) = connect(url, opts)?;
+    // --haproxy-protocol: prepend a PROXY v1 header to the connection
+    // before the HTTP request (test 3028). For proxy-tunneled requests
+    // (CONNECT) the header goes onto the established tunnel.
+    if opts.haproxy_protocol {
+        let local = crate::connection::LOCAL_ADDR
+            .with(|r| r.borrow().clone())
+            .unwrap_or_default();
+        let src_ip = opts
+            .haproxy_clientip
+            .clone()
+            .unwrap_or_else(|| local.0.clone());
+        let src_port = local.1;
+        let (dst_ip, dst_port) = if let Some(ref p) = opts.proxy {
+            // Strip scheme + auth + path; we only want host:port.
+            let no_scheme = p.split("://").nth(1).unwrap_or(p.as_str());
+            let no_path = no_scheme.split('/').next().unwrap_or(no_scheme);
+            let after_at = no_path.split('@').next_back().unwrap_or(no_path);
+            // Bracketed IPv6 literal vs plain host:port.
+            let (h, port_s) = if let Some(rest) = after_at.strip_prefix('[') {
+                let end = rest.find(']').unwrap_or(rest.len());
+                let host = &rest[..end];
+                let pt = rest
+                    .get(end + 1..)
+                    .and_then(|s| s.strip_prefix(':'))
+                    .unwrap_or("");
+                (host.to_string(), pt.to_string())
+            } else {
+                match after_at.rsplit_once(':') {
+                    Some((h, pt)) => (h.to_string(), pt.to_string()),
+                    None => (after_at.to_string(), String::new()),
+                }
+            };
+            let p_num = port_s.parse::<u16>().unwrap_or(0);
+            (h, p_num)
+        } else {
+            (url.host.clone(), url.port)
+        };
+        let bare_dst = crate::url::strip_ipv6_scope(&dst_ip);
+        let bare_src = crate::url::strip_ipv6_scope(&src_ip);
+        let is_ipv6 = bare_src.contains(':') || bare_dst.contains(':');
+        let proto = if is_ipv6 { "TCP6" } else { "TCP4" };
+        let line = format!("PROXY {proto} {bare_src} {bare_dst} {src_port} {dst_port}\r\n");
+        conn.write_all(line.as_bytes())
+            .map_err(|e| format!("failed to write PROXY header: {e}"))?;
+    }
     let (request_headers, expect_body) = build_request(url, opts);
 
     let is_head = opts.head
