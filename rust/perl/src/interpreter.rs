@@ -12656,23 +12656,6 @@ impl Interpreter {
             self.eval_call("vec", &new_args);
             return;
         }
-        // `pos($s) = N` — set pos for /g matches. Reroute through
-        // Expr::Assign's pos handling so the offset table updates.
-        if let Expr::Call(n, sub_args) = target
-            && n == "pos"
-            && !sub_args.is_empty()
-        {
-            let val_expr = match &val {
-                Value::Str(s) => Expr::StringLit(s.clone()),
-                Value::Num(n) => Expr::FloatLit(*n),
-                _ => Expr::StringLit(val.to_str()),
-            };
-            self.eval_expr(&Expr::Assign(
-                Box::new(Expr::Call("pos".to_string(), sub_args.clone())),
-                Box::new(val_expr),
-            ));
-            return;
-        }
         // `RECV->METHOD = val` — lvalue method call. Only intercept
         // when the resolved method is in lvalue_subs; otherwise we fall
         // through (matching reference perl, which compile-errors on
