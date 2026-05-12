@@ -12730,11 +12730,38 @@ impl Interpreter {
                 }
             }
         }
-        // Restore `local`-saved slots BEFORE we snapshot @_, so a
-        // `local $_[i]` in this scope is undone in time for the
-        // caller-arg writeback to see the original (unlocalized) value.
-        // op/args 10 ("local $_[0] doesn't trash caller's lvalue").
-        self.restore_locals();
+        // Restore any `local @_[i]` slots in this scope BEFORE we
+        // snapshot @_ — otherwise `local $_[i]` would leak its
+        // temporary Undef into the caller-arg writeback at sub exit
+        // (op/args 10 "local $_[0] doesn't trash caller's lvalue").
+        // For other local saves (scalars, hashes, full arrays), the
+        // normal post-pop `restore_locals` still does the work.
+        if let Some(saves) = self.local_hash_elem_saves.last() {
+            let underscore_saves: Vec<(String, Value)> = saves
+                .iter()
+                .filter_map(|(b, k, p)| {
+                    if b == "@_" {
+                        let idx: i64 = k.parse().ok()?;
+                        Some((idx.to_string(), p.clone().unwrap_or(Value::Undef)))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if !underscore_saves.is_empty()
+                && let Some(scope) = self.scopes.last_mut()
+                && let Some(arr) = scope.arrays.get_mut("_")
+            {
+                for (idx_s, val) in underscore_saves.into_iter().rev() {
+                    let idx: i64 = idx_s.parse().unwrap_or(0);
+                    let len = arr.len() as i64;
+                    let real = if idx < 0 { idx + len } else { idx };
+                    if real >= 0 && (real as usize) < arr.len() {
+                        arr[real as usize] = val;
+                    }
+                }
+            }
+        }
         // Capture @_ from the popped scope so eval_call's post-hoc
         // aliasing can write mutations back to the caller's arg exprs.
         // Only subs install @_ in a freshly pushed scope, so for block
@@ -12744,6 +12771,7 @@ impl Interpreter {
         if popped_underscore.is_some() {
             self.last_popped_underscore = popped_underscore;
         }
+        self.restore_locals();
         if let Some(prev) = self.bytes_mode_saves.pop() {
             self.bytes_mode = prev;
         }
