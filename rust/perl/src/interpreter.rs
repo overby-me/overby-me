@@ -2114,6 +2114,11 @@ impl Interpreter {
                 match flow {
                     Flow::Last(Some(ref l)) if l == label => Flow::None,
                     Flow::Next(Some(ref l)) if l == label => Flow::None,
+                    // A bare `last` / `next` from inside the block (or
+                    // from a sub called inside) targets the nearest
+                    // enclosing loop/block — which is THIS labeled
+                    // block. op/loopctl 41 ("dynamically scoped").
+                    Flow::Last(None) | Flow::Next(None) => Flow::None,
                     other => other,
                 }
             }
@@ -11322,11 +11327,16 @@ impl Interpreter {
                     self.pending_flow = Some(Flow::Die(msg));
                     return Value::Undef;
                 }
-                Flow::Last(lbl @ Some(_)) => {
+                // `last`/`next` (with or without a label) propagate
+                // dynamically across sub boundaries — `last LABEL` from
+                // a sub jumps to the labeled block in the caller; bare
+                // `last` stretches to the nearest enclosing loop in
+                // any caller. op/loopctl 41 ("dynamically scoped").
+                Flow::Last(lbl) => {
                     propagate = Some(Flow::Last(lbl));
                     break;
                 }
-                Flow::Next(lbl @ Some(_)) => {
+                Flow::Next(lbl) => {
                     propagate = Some(Flow::Next(lbl));
                     break;
                 }
