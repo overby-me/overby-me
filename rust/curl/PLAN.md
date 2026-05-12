@@ -8,7 +8,7 @@ Use the upstream [curl test suite](https://github.com/curl/curl/tree/master/test
 
 **743 tests passing** (was 709 at session start; +12 across multipart, retry, IPv6,
 upload-stdin redirect, write-out, interface, and dump-header fixes) across the
-curl 8.19.0 test suite (verified with strict
+curl 8.18.0 test suite (verified with strict
 runner checks — the derivation fails when a test number doesn't exist or the
 suite reports anything other than 100% OK).
 
