@@ -2274,12 +2274,17 @@ impl Parser {
         match self.tok() {
             Token::Minus => {
                 self.pos += 1;
-                let expr = self.parse_power();
+                // Recurse through parse_unary so consecutive unary
+                // signs chain: `- -10` → `-(-10)` → 10, `-+5` → -5.
+                // Precedence over `**` is preserved because parse_unary
+                // falls through to parse_power for the operand.
+                // op/negate 2-9.
+                let expr = self.parse_unary();
                 Expr::UnaryOp(UnaryOp::Neg, Box::new(expr))
             }
             Token::Plus => {
                 self.pos += 1;
-                let expr = self.parse_power();
+                let expr = self.parse_unary();
                 Expr::UnaryOp(UnaryOp::Pos, Box::new(expr))
             }
             Token::LogNot => {

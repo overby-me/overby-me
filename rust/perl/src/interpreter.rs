@@ -6302,12 +6302,27 @@ impl Interpreter {
                 if let Value::Str(s) = &val
                     && let Some(first) = s.chars().next()
                 {
+                    // `-"-N"` where the rest is purely numeric returns
+                    // a number (the negation), not a "+N" string —
+                    // matches reference perl (op/negate 6-9).
+                    let rest_is_numeric = |rest: &str| {
+                        !rest.is_empty()
+                            && rest
+                                .chars()
+                                .all(|c| c.is_ascii_digit() || c == '.' || c == 'e' || c == 'E')
+                    };
                     if first == '-' {
                         let rest: String = s.chars().skip(1).collect();
+                        if rest_is_numeric(&rest) {
+                            return Value::Num(rest.parse::<f64>().unwrap_or(0.0));
+                        }
                         return Value::Str(format!("+{rest}"));
                     }
                     if first == '+' {
                         let rest: String = s.chars().skip(1).collect();
+                        if rest_is_numeric(&rest) {
+                            return Value::Num(-rest.parse::<f64>().unwrap_or(0.0));
+                        }
                         return Value::Str(format!("-{rest}"));
                     }
                     if first.is_ascii_alphabetic() || first == '_' {
