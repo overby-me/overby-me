@@ -68,7 +68,13 @@ impl Value {
             Value::Num(n) => format_number(*n),
             Value::ArrayRef(r) => format!("ARRAY(0x{:x})", Rc::as_ptr(r) as usize),
             Value::HashRef(r) => format!("HASH(0x{:x})", Rc::as_ptr(r) as usize),
-            Value::ScalarRef(r) => format!("SCALAR(0x{:x})", Rc::as_ptr(r) as usize),
+            // A scalar ref whose inner value is a Glob stringifies as
+            // `GLOB(0x…)` — `\*test` is a GLOB ref in reference perl.
+            Value::ScalarRef(r) => {
+                let is_glob = matches!(&*r.borrow(), Value::Glob(_));
+                let kind = if is_glob { "GLOB" } else { "SCALAR" };
+                format!("{kind}(0x{:x})", Rc::as_ptr(r) as usize)
+            }
             Value::CodeRef(name) => format!("CODE({name})"),
             Value::Regex(pat, flags, _) => format!("(?^{flags}:{pat})"),
             Value::Glob(name) => {
@@ -134,7 +140,13 @@ impl Value {
         match self {
             Value::ArrayRef(_) => "ARRAY",
             Value::HashRef(_) => "HASH",
-            Value::ScalarRef(_) => "SCALAR",
+            // `\*name` returns a SCALAR ref whose inner Value is
+            // `Value::Glob`. Look inside so `ref(\*test) == "GLOB"`
+            // matches reference perl (op/bless 15).
+            Value::ScalarRef(rc) => match &*rc.borrow() {
+                Value::Glob(_) => "GLOB",
+                _ => "SCALAR",
+            },
             Value::CodeRef(_) => "CODE",
             Value::Regex(_, _, _) => "Regexp",
             Value::Glob(_) => "GLOB",

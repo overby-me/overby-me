@@ -5481,6 +5481,21 @@ impl Interpreter {
                         self.eval_call("delete", &[target]);
                         Value::ScalarRef(rc)
                     }
+                    Expr::GlobVar(name) => {
+                        // `\*test` — glob reference. ref() returns "GLOB"
+                        // and the value stringifies as `GLOB(0x…)`.
+                        // Don't wrap in ScalarRef; produce a fresh
+                        // Rc-backed scalar slot holding the Value::Glob
+                        // so a later ScalarRef would still give SCALAR,
+                        // but here we want the value's own ref form.
+                        // op/bless 15.
+                        let q = if name.contains("::") {
+                            name.clone()
+                        } else {
+                            format!("{}::{name}", self.package)
+                        };
+                        Value::ScalarRef(std::rc::Rc::new(std::cell::RefCell::new(Value::Glob(q))))
+                    }
                     _ => {
                         let v = self.eval_expr(expr);
                         // If the inner eval returned a Value::Alias(rc),
