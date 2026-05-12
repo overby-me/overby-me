@@ -3223,6 +3223,28 @@ impl Parser {
                                 args,
                             );
                         }
+                        // `$obj->${EXPR}` / `$obj->${\&sub}` — coderef
+                        // method dispatch. EXPR evaluates to a coderef
+                        // (or scalar holding a method name); we invoke
+                        // it with $obj as first arg. op/sub_lval 53.
+                        Token::ScalarBlockDerefOpen => {
+                            self.pos += 1;
+                            self.eat(&Token::LBrace);
+                            let inner = self.parse_expr();
+                            self.expect(&Token::RBrace);
+                            let mut args =
+                                vec![Expr::Call("_scalar_block_deref".to_string(), vec![inner])];
+                            if self.eat(&Token::LParen) {
+                                let extra = self.parse_list_expr();
+                                self.expect(&Token::RParen);
+                                args.extend(extra);
+                            }
+                            expr = Expr::MethodCall(
+                                Box::new(expr),
+                                "_dynamic_method".to_string(),
+                                args,
+                            );
+                        }
                         _ => break,
                     }
                 }

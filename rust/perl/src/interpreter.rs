@@ -1167,7 +1167,14 @@ impl Interpreter {
                     Expr::ArrayLit(items) => {
                         let list: Vec<Value> =
                             items.iter().flat_map(|item| self.eval_list(item)).collect();
-                        if let Some(last) = list.last() {
+                        // Scalar context: store length as last_expr_val
+                        // (so a sub returning `(1,2,3)` returns 3 in
+                        // scalar context). List context: store the
+                        // full list and use last item for last_expr_val.
+                        let is_scalar = self.call_context.last().copied() == Some(1);
+                        if is_scalar {
+                            self.last_expr_val = Value::Num(list.len() as f64);
+                        } else if let Some(last) = list.last() {
                             self.last_expr_val = last.clone();
                         } else {
                             self.last_expr_val = Value::Undef;
@@ -1176,7 +1183,14 @@ impl Interpreter {
                     }
                     Expr::ArrayVar(name) => {
                         let list = self.get_array(name);
-                        if let Some(last) = list.last() {
+                        // Same context-aware split as ArrayLit above:
+                        // sub returning `@a` in scalar context yields
+                        // the length, not the last element. op/sub_lval
+                        // tests 53-54.
+                        let is_scalar = self.call_context.last().copied() == Some(1);
+                        if is_scalar {
+                            self.last_expr_val = Value::Num(list.len() as f64);
+                        } else if let Some(last) = list.last() {
                             self.last_expr_val = last.clone();
                         } else {
                             self.last_expr_val = Value::Undef;
@@ -4896,10 +4910,28 @@ impl Interpreter {
                 // `_dynamic_method` is the parser's encoding of
                 // `$obj->$var` — the first arg is the var holding the
                 // method name. Resolve it at runtime then re-dispatch.
+                // If the var holds a CodeRef, invoke it directly with
+                // the invocant as first arg (op/sub_lval 53).
                 if method == "_dynamic_method"
                     && let Some((name_expr, rest)) = args.split_first()
                 {
-                    let name = self.eval_expr(name_expr).to_str();
+                    let name_val = self.eval_expr(name_expr);
+                    if let Value::CodeRef(sub_name) = &name_val {
+                        // Pass invocant + extra args to the coderef.
+                        // The invocant is taken in scalar context.
+                        self.next_call_ctx = Some(1);
+                        let inv_val = self.eval_expr(recv);
+                        self.next_call_ctx = None;
+                        let mut call_args: Vec<Value> = vec![inv_val];
+                        for a in rest.iter() {
+                            call_args.push(self.eval_expr(a));
+                        }
+                        if let Some((_p, body)) = self.subs.get(sub_name).cloned() {
+                            return self.call_sub_named(&body, &call_args, Some(sub_name));
+                        }
+                        return Value::Undef;
+                    }
+                    let name = name_val.to_str();
                     return self.eval_expr(&Expr::MethodCall(recv.clone(), name, rest.to_vec()));
                 }
                 // Resolve the invocant's class name. For `Class->method`
