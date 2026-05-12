@@ -6,7 +6,7 @@ Use the upstream [curl test suite](https://github.com/curl/curl/tree/master/test
 
 ## Current Status
 
-**722 tests passing** (was 709 at session start; +12 across multipart, retry, IPv6,
+**724 tests passing** (was 709 at session start; +12 across multipart, retry, IPv6,
 upload-stdin redirect, write-out, interface, and dump-header fixes) across the
 curl 8.19.0 test suite (verified with strict
 runner checks — the derivation fails when a test number doesn't exist or the
@@ -398,13 +398,15 @@ Current gaps:
 - [x] `--retry` with `--include`: drop the failed-attempt prefix when the final attempt succeeds (no `--fail` / `--fail-with-body`) so a clean 200 doesn't carry the failed body (test 198)
 - [x] Track URL fragment through `parse_url`; expose `%{url.fragment}`, `%{urle.fragment}`, `%{urle.user}`, `%{urle.password}` in `--write-out`
 - [x] `#N` substitution in `-o`/`--output` runs even when the path was supplied explicitly (was only running on the synthetic fallback), so a single `-o "outfile_#1#2.dump"` paired with `[a-a][1-1]…` globbing now resolves to `outfile_a1.dump` (unlocked test 1283)
+- [x] file:// GET on a directory emits a newline-separated sorted listing (or empty) with exit 0 instead of exit 37 (unlocked tests 3016, 3203)
+- [x] perform() probes the URL for malformed-shape errors before checking `-T` upload-source existence so a bad URL paired with a missing `-T` target reports exit 3 instead of exit 26 (unlocked test 1469 from regression)
 - [ ] Target 750+ passing by addressing remaining feature gaps
 
 ---
 
 ## Test Inventory
 
-### Passing tests (722)
+### Passing tests (724)
 
 The authoritative list is `testNums` in `default.nix`; the count is
 checked there by Nix and stays in sync with the per-test derivations.

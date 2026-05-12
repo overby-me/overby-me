@@ -389,7 +389,28 @@ fn main() {
                 }
                 continue;
             }
-            match fs::read(&fpath) {
+            // GET a directory via file://: curl emits a newline-terminated
+            // sorted directory listing with exit 0 (tests 3016, 3203).
+            let is_dir = fs::metadata(&fpath).map(|m| m.is_dir()).unwrap_or(false);
+            let read_result = if is_dir {
+                let mut names: Vec<String> = match fs::read_dir(&fpath) {
+                    Ok(entries) => entries
+                        .filter_map(|e| e.ok())
+                        .map(|e| e.file_name().to_string_lossy().into_owned())
+                        .collect(),
+                    Err(_) => Vec::new(),
+                };
+                names.sort();
+                let mut listing = String::new();
+                for n in &names {
+                    listing.push_str(n);
+                    listing.push('\n');
+                }
+                Ok(listing.into_bytes())
+            } else {
+                fs::read(&fpath)
+            };
+            match read_result {
                 Ok(content) => {
                     // -C / --continue-at: skip the leading N bytes of the
                     // file before output (test 231).
