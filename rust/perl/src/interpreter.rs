@@ -2276,6 +2276,12 @@ impl Interpreter {
                             if let Some(flow) = self.pending_flow.take() {
                                 return flow;
                             }
+                            // `my $x = VAL` returns VAL as its value
+                            // when used in expression-of-statement
+                            // position (e.g. last stmt of eval STRING).
+                            // op/state 1 (`eval 'CORE::state $x = 1'`
+                            // must return 1 for ok-check to pass).
+                            self.last_expr_val = val.clone();
                             self.set_my_var(var_name, val);
                         }
                     }
@@ -2310,6 +2316,7 @@ impl Interpreter {
                             *rc.borrow_mut() = v;
                         }
                     }
+                    self.last_expr_val = rc.borrow().clone();
                     // Install in the current sub-scope as an alias to
                     // the persistent Rc. Subsequent reads/writes of
                     // `$x` in this scope flow through the Rc.
