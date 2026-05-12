@@ -4752,10 +4752,55 @@ fn parse_interp_string(s: &str) -> Expr {
                             let f_over = std::mem::take(&mut lex.file_overrides);
                             let mut p = Parser::new_with_lines_and_files(toks, tl, f_over);
                             let inner_expr = p.parse_expr();
-                            parts.push(InterpPart::Expr(Box::new(Expr::Call(
-                                "_scalar_block_deref".to_string(),
-                                vec![inner_expr],
-                            ))));
+                            // After `${EXPR}`, peek for `{KEY}` or `[IDX]`
+                            // — these are arrow-deref subscripts treating
+                            // EXPR as a hash/array ref. `"${\%x}{3}"`
+                            // means `$x{3}`. base/lex test 78.
+                            if i < chars.len() && (chars[i] == '{' || chars[i] == '[') {
+                                let open = chars[i];
+                                let close = if open == '{' { '}' } else { ']' };
+                                i += 1;
+                                let mut sub = String::new();
+                                let mut depth = 1;
+                                while i < chars.len() && depth > 0 {
+                                    if chars[i] == open {
+                                        depth += 1;
+                                    } else if chars[i] == close {
+                                        depth -= 1;
+                                        if depth == 0 {
+                                            break;
+                                        }
+                                    }
+                                    sub.push(chars[i]);
+                                    i += 1;
+                                }
+                                if i < chars.len() {
+                                    i += 1;
+                                }
+                                let mut idx_lex = Lexer::new(&sub);
+                                let idx_toks = idx_lex.tokenize();
+                                let idx_tl = std::mem::take(&mut idx_lex.token_lines);
+                                let idx_files = std::mem::take(&mut idx_lex.file_overrides);
+                                let mut idx_p = Parser::new_with_lines_and_files(
+                                    idx_toks, idx_tl, idx_files,
+                                );
+                                let idx_expr = idx_p.parse_expr();
+                                let kind = if open == '[' {
+                                    ArrowKind::Array
+                                } else {
+                                    ArrowKind::Hash
+                                };
+                                parts.push(InterpPart::Expr(Box::new(Expr::ArrowElement(
+                                    Box::new(inner_expr),
+                                    Box::new(idx_expr),
+                                    kind,
+                                ))));
+                            } else {
+                                parts.push(InterpPart::Expr(Box::new(Expr::Call(
+                                    "_scalar_block_deref".to_string(),
+                                    vec![inner_expr],
+                                ))));
+                            }
                         }
                     }
                 } else if chars[i] == '^' && i + 1 < chars.len() {

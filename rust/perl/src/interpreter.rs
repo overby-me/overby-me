@@ -1214,11 +1214,17 @@ impl Interpreter {
 
             Stmt::Print(fh, args) => {
                 self.exec_print(fh, args, false);
+                // Update last_expr_val so `eval 'print ...'` returns
+                // truthy (matches reference perl — print returns 1 on
+                // success). base/lex test 71's `eval 'print qq;...;'`
+                // chains its OR-fallback against this return.
+                self.last_expr_val = Value::Num(1.0);
                 Flow::None
             }
 
             Stmt::Say(fh, args) => {
                 self.exec_print(fh, args, true);
+                self.last_expr_val = Value::Num(1.0);
                 Flow::None
             }
 
@@ -10282,6 +10288,44 @@ impl Interpreter {
     /// `ref()` for `v`. Returns the blessed class name if `v` was
     /// `bless`ed, otherwise the built-in type name ("ARRAY", "HASH", …),
     /// or `""` for non-refs.
+    /// Index into a value (treated as a ref) by a subscript expression
+    /// captured as text. Used by regex pattern interp for
+    /// `${EXPR}{KEY}` / `${EXPR}[IDX]` after EXPR is evaluated.
+    fn subscript_value(&mut self, v: &Value, sub: &str, is_array: bool) -> Value {
+        match v {
+            Value::HashRef(r) => {
+                // Evaluate the subscript string in Perl-ish way: try as
+                // an int literal, else as a $var, else literal.
+                let key = self.resolve_subscript_key(sub);
+                r.borrow().get(&key).cloned().unwrap_or(Value::Undef)
+            }
+            Value::ArrayRef(r) => {
+                let key_str = self.resolve_subscript_key(sub);
+                let idx = key_str.parse::<i64>().unwrap_or(0);
+                let arr = r.borrow();
+                let len = arr.len() as i64;
+                let real = if idx < 0 { len + idx } else { idx };
+                if real >= 0 && (real as usize) < arr.len() {
+                    arr[real as usize].clone()
+                } else {
+                    Value::Undef
+                }
+            }
+            _ => {
+                let _ = is_array;
+                Value::Undef
+            }
+        }
+    }
+
+    fn resolve_subscript_key(&mut self, sub: &str) -> String {
+        let trimmed = sub.trim();
+        if let Some(name) = trimmed.strip_prefix('$') {
+            return self.get_var(name).to_str();
+        }
+        trimmed.to_string()
+    }
+
     fn ref_class(&self, v: &Value) -> String {
         let p = Self::ref_ptr(v);
         if p != 0
@@ -13217,14 +13261,78 @@ impl Interpreter {
                 if chars[i] == '{' {
                     i += 1;
                     let mut n = String::new();
-                    while i < chars.len() && chars[i] != '}' {
+                    let mut depth = 1;
+                    while i < chars.len() && depth > 0 {
+                        if chars[i] == '{' {
+                            depth += 1;
+                        } else if chars[i] == '}' {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
                         n.push(chars[i]);
                         i += 1;
                     }
                     if i < chars.len() {
                         i += 1;
                     }
-                    name = n;
+                    let trimmed = n.trim();
+                    // If the brace content isn't a simple identifier
+                    // (e.g. `${\%x}{3}` — ref to hash), evaluate it as
+                    // Perl code so the value's dereference can take the
+                    // following `{KEY}` or `[IDX]` subscript.
+                    let is_simple_ident = !trimmed.is_empty()
+                        && trimmed.chars().enumerate().all(|(idx, c)| {
+                            if idx == 0 {
+                                c == '_' || c == '^' || c.is_ascii_alphabetic()
+                            } else {
+                                c == '_' || c.is_ascii_alphanumeric() || c == ':'
+                            }
+                        });
+                    if !is_simple_ident && sigil == '$' {
+                        // Save / restore $@ so a parse-fail doesn't
+                        // leak into the surrounding regex match.
+                        let saved_at = self.get_var("@");
+                        let inner_val = self.eval_string(trimmed);
+                        self.set_global_var("@", saved_at);
+                        let mut consumed_subscript = false;
+                        if i < chars.len() && (chars[i] == '{' || chars[i] == '[') {
+                            let open = chars[i];
+                            let close = if open == '{' { '}' } else { ']' };
+                            i += 1;
+                            let mut sub = String::new();
+                            let mut depth = 1;
+                            while i < chars.len() && depth > 0 {
+                                if chars[i] == open {
+                                    depth += 1;
+                                } else if chars[i] == close {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        break;
+                                    }
+                                }
+                                sub.push(chars[i]);
+                                i += 1;
+                            }
+                            if i < chars.len() {
+                                i += 1;
+                            }
+                            consumed_subscript = true;
+                            let v = self.subscript_value(&inner_val, &sub, open == '[');
+                            push_maybe_quotemeta(&mut out, &v.to_str(), in_q);
+                        }
+                        if !consumed_subscript {
+                            // Plain `${EXPR}` — push the resolved scalar.
+                            let resolved = match &inner_val {
+                                Value::ScalarRef(r) => r.borrow().clone(),
+                                other => other.clone(),
+                            };
+                            push_maybe_quotemeta(&mut out, &resolved.to_str(), in_q);
+                        }
+                        continue;
+                    }
+                    name = trimmed.to_string();
                 } else {
                     let mut n = String::new();
                     while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
@@ -15836,6 +15944,13 @@ impl Interpreter {
     fn eval_string_inner(&mut self, code: &str) -> Value {
         use crate::lexer::Lexer;
         use crate::parser::Parser;
+
+        // Reset `last_expr_val` so an eval STRING with no statements
+        // (empty or whitespace-only code) returns Undef rather than
+        // whatever a prior expression set. Matters for `s/PAT//e` —
+        // the empty replacement must eval to Undef each match instead
+        // of leaking the pattern-interp's last value (base/lex 78).
+        self.last_expr_val = Value::Undef;
 
         let mut lexer = Lexer::new(code);
         let tokens = lexer.tokenize();
