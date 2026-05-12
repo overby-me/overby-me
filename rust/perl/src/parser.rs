@@ -4146,6 +4146,24 @@ impl Parser {
                 {
                     return Expr::Call(name, Vec::new());
                 }
+                // `pos` with no parens / no arg-starter defaults to $_
+                // (named unary). Without this, bare `pos` (e.g. inside
+                // `sub position : lvalue { pos }`) is parsed as the
+                // string literal "pos". op/sub_lval test 74.
+                if name == "pos" && !self.at(&Token::LParen) {
+                    let starts_arg = matches!(
+                        self.tok(),
+                        Token::ScalarVar(_)
+                            | Token::ArrayVar(_)
+                            | Token::HashVar(_)
+                            | Token::Glob(_)
+                            | Token::Star
+                    );
+                    if starts_arg {
+                        return Expr::Call(name, vec![self.parse_unary()]);
+                    }
+                    return Expr::Call(name, vec![Expr::ScalarVar("_".to_string())]);
+                }
                 // `exit` (bare, no parens, no arg-starter) — without this
                 // `exit;` parsed as the bareword string. Same parens-or-arg
                 // shape as rand/srand below.

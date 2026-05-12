@@ -12743,6 +12743,53 @@ impl Interpreter {
             self.eval_call("substr", &new_args);
             return;
         }
+        // `pos($s) = N` / `pos() += N` — set pos for /g matches by
+        // updating `pos_offsets` directly. Inline the logic here
+        // instead of routing through eval_expr's Expr::Assign branch
+        // (which would recurse back into assign_to and overflow).
+        if let Expr::Call(n, sub_args) = target
+            && n == "pos"
+        {
+            let name: Option<String> = if let Some(first) = sub_args.first() {
+                match first {
+                    Expr::ScalarVar(n) => Some(n.clone()),
+                    Expr::GlobVar(g) => {
+                        let stripped = g.trim_start_matches("::").to_string();
+                        Some(
+                            stripped
+                                .strip_prefix("main::")
+                                .map(|s| s.to_string())
+                                .unwrap_or(stripped),
+                        )
+                    }
+                    _ => None,
+                }
+            } else {
+                Some("_".to_string())
+            };
+            if let Some(name) = name {
+                let n_val = val.to_num();
+                if n_val.is_nan() || n_val < 0.0 {
+                    self.pos_offsets.remove(&name);
+                } else {
+                    let s = self.get_var(&name).to_str();
+                    let target_chars = n_val as usize;
+                    let byte_off = s
+                        .char_indices()
+                        .nth(target_chars)
+                        .map(|(b, _)| b)
+                        .unwrap_or_else(|| {
+                            if target_chars > s.chars().count() {
+                                target_chars
+                            } else {
+                                s.len()
+                            }
+                        });
+                    self.pos_offsets.insert(name, byte_off);
+                }
+            }
+            return;
+        }
         // `shift = val` / `pop = val` — when an lvalue sub's body is
         // `shift` (op/sub_lval lv2t), assigning to the call writes
         // through the popped slot's Alias. The slot has already been
