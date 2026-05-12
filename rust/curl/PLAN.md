@@ -6,7 +6,7 @@ Use the upstream [curl test suite](https://github.com/curl/curl/tree/master/test
 
 ## Current Status
 
-**721 tests passing** (was 709 at session start; +12 across multipart, retry, IPv6,
+**722 tests passing** (was 709 at session start; +12 across multipart, retry, IPv6,
 upload-stdin redirect, write-out, interface, and dump-header fixes) across the
 curl 8.19.0 test suite (verified with strict
 runner checks — the derivation fails when a test number doesn't exist or the
@@ -397,13 +397,14 @@ Current gaps:
 - [x] `-Z` / `--parallel` / `--parallel-immediate` / `--parallel-max` accepted as no-ops so dependent option parsing reaches the rest of the command line
 - [x] `--retry` with `--include`: drop the failed-attempt prefix when the final attempt succeeds (no `--fail` / `--fail-with-body`) so a clean 200 doesn't carry the failed body (test 198)
 - [x] Track URL fragment through `parse_url`; expose `%{url.fragment}`, `%{urle.fragment}`, `%{urle.user}`, `%{urle.password}` in `--write-out`
+- [x] `#N` substitution in `-o`/`--output` runs even when the path was supplied explicitly (was only running on the synthetic fallback), so a single `-o "outfile_#1#2.dump"` paired with `[a-a][1-1]…` globbing now resolves to `outfile_a1.dump` (unlocked test 1283)
 - [ ] Target 750+ passing by addressing remaining feature gaps
 
 ---
 
 ## Test Inventory
 
-### Passing tests (721)
+### Passing tests (722)
 
 The authoritative list is `testNums` in `default.nix`; the count is
 checked there by Nix and stays in sync with the per-test derivations.

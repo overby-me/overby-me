@@ -1272,6 +1272,28 @@ fn main() {
                         p
                     })
                 };
+                // Substitute `#N` in the path with the Nth glob value from the
+                // URL (test 1283 has [a-a][1-1][b-b:1][2-2:1] + `#1#2#3#4`).
+                let output_path = output_path.map(|p| {
+                    if let Some(s) = p.to_str()
+                        && s.contains('#')
+                    {
+                        let glob_vals = url_glob_values
+                            .get(url_idx)
+                            .map(|v| v.as_slice())
+                            .unwrap_or(&[]);
+                        let mut result = s.to_string();
+                        for digit in (1..=9u8).rev() {
+                            let pattern = format!("#{digit}");
+                            if let Some(val) = glob_vals.get(digit as usize - 1) {
+                                result = result.replace(&pattern, val);
+                            }
+                        }
+                        PathBuf::from(result)
+                    } else {
+                        p
+                    }
+                });
                 // --output-dir prefixes the output path (but only for relative paths).
                 let output_path = output_path.map(|p| {
                     if let Some(ref dir) = opts.output_dir
