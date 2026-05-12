@@ -15699,10 +15699,54 @@ impl Interpreter {
                         self.last_list_val.take().unwrap_or_default()
                     }
                     "sort" => {
+                        // First arg may be a comparison block (Expr::DoBlock).
+                        // Without the block, default to string cmp.
+                        let (cmp_block, list_args): (Option<&Vec<Stmt>>, &[Expr]) =
+                            if let Some(Expr::DoBlock(body)) = args.first() {
+                                (Some(body), &args[1..])
+                            } else {
+                                (None, args)
+                            };
                         let mut items: Vec<Value> =
-                            args.iter().flat_map(|a| self.eval_list(a)).collect();
-                        items.sort_by(|a, b| a.to_str().cmp(&b.to_str()));
-                        items
+                            list_args.iter().flat_map(|a| self.eval_list(a)).collect();
+                        if let Some(body) = cmp_block {
+                            // Save $a/$b and restore after sort. Block sees
+                            // them as the two values being compared.
+                            let saved_a = self.get_var("a");
+                            let saved_b = self.get_var("b");
+                            // Sort isn't `sort_by` with a closure because
+                            // the comparator can have side effects (and we
+                            // need `&mut self`); use a stable insertion
+                            // sort over indices for correctness.
+                            let body = body.clone();
+                            let n = items.len();
+                            let mut order: Vec<usize> = (0..n).collect();
+                            // Simple O(n^2) insertion sort — enough for the
+                            // small lists tests exercise.
+                            for i in 1..n {
+                                let mut j = i;
+                                while j > 0 {
+                                    self.set_var("a", items[order[j - 1]].clone());
+                                    self.set_var("b", items[order[j]].clone());
+                                    let cmp_val = {
+                                        let r = self.eval_list(&Expr::DoBlock(body.clone()));
+                                        r.into_iter().next().map(|v| v.to_num() as i32).unwrap_or(0)
+                                    };
+                                    if cmp_val > 0 {
+                                        order.swap(j - 1, j);
+                                        j -= 1;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                            self.set_var("a", saved_a);
+                            self.set_var("b", saved_b);
+                            order.into_iter().map(|i| items[i].clone()).collect()
+                        } else {
+                            items.sort_by(|a, b| a.to_str().cmp(&b.to_str()));
+                            items
+                        }
                     }
                     "split" => {
                         let pat = if args.is_empty() {
