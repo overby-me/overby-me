@@ -5258,8 +5258,56 @@ impl Interpreter {
                     // an undef. We mimic this by handing back a
                     // single canonical Rc for every `\undef`.
                     Expr::Undef => Value::ScalarRef(self.shared_undef_ref()),
+                    // `\delete $h{k}` / `\delete $a[i]` — promote the slot
+                    // to an Alias BEFORE the delete so the returned ref
+                    // shares storage with any prior `\$h{k}` (op/delete
+                    // tests 26/54 — "a b c equivalent"). The delete still
+                    // runs and removes the slot from the hash/array.
+                    Expr::Call(n, dargs)
+                        if n == "delete"
+                            && dargs.len() == 1
+                            && matches!(
+                                &dargs[0],
+                                Expr::HashElement(_, _) | Expr::ArrayElement(_, _)
+                            ) =>
+                    {
+                        let target = dargs[0].clone();
+                        let rc = match &target {
+                            Expr::HashElement(name, key) => {
+                                let key_val = self.eval_expr(key).to_str();
+                                self.promote_hash_slot_to_alias(name, &key_val)
+                            }
+                            Expr::ArrayElement(name, index) => {
+                                let idx = self.eval_expr(index).to_num() as i64;
+                                let len = self.get_array_len(name) as i64;
+                                let real = if idx < 0 {
+                                    let from_end = len + idx;
+                                    if from_end < 0 {
+                                        return Value::ScalarRef(self.shared_undef_ref());
+                                    }
+                                    from_end as usize
+                                } else {
+                                    idx as usize
+                                };
+                                self.promote_slot_to_alias(name, real)
+                            }
+                            _ => unreachable!(),
+                        };
+                        // Now run the delete for its side effects (removes
+                        // the slot, fires DESTROY if needed). The returned
+                        // value goes through the Rc we already have.
+                        self.eval_call("delete", &[target]);
+                        Value::ScalarRef(rc)
+                    }
                     _ => {
                         let v = self.eval_expr(expr);
+                        // If the inner eval returned a Value::Alias(rc),
+                        // reuse the Rc instead of wrapping in a fresh one.
+                        // This makes `\(values %h)` and `\$h{k}` share
+                        // storage when the slot was promoted to Alias.
+                        if let Value::Alias(rc) = v {
+                            return Value::ScalarRef(rc);
+                        }
                         Value::ScalarRef(std::rc::Rc::new(std::cell::RefCell::new(v)))
                     }
                 }
@@ -9694,6 +9742,49 @@ impl Interpreter {
                         ))));
                         out.push(key_ref);
                         out.push(val_ref);
+                    }
+                }
+                // `\(values %h)` / `\(keys %h)` / `\(values @arr)` / etc.
+                // — distribute by taking refs to each slot so the
+                // returned refs share storage with `\$h{k}` (op/delete
+                // tests 26/54 — "a b c equivalent").
+                Expr::Call(n, inner) if (n == "values" || n == "keys") && inner.len() == 1 => {
+                    match &inner[0] {
+                        Expr::HashVar(name) => {
+                            let h = self.get_hash(name);
+                            let keys: Vec<String> = h.keys().cloned().collect();
+                            for k in keys {
+                                let r = if n == "keys" {
+                                    self.eval_expr(&Expr::Ref(Box::new(Expr::StringLit(k.clone()))))
+                                } else {
+                                    self.eval_expr(&Expr::Ref(Box::new(Expr::HashElement(
+                                        name.clone(),
+                                        Box::new(Expr::StringLit(k.clone())),
+                                    ))))
+                                };
+                                out.push(r);
+                            }
+                        }
+                        Expr::ArrayVar(name) => {
+                            let len = self.get_array_len(name);
+                            for i in 0..len {
+                                let r = if n == "keys" {
+                                    Value::ScalarRef(std::rc::Rc::new(std::cell::RefCell::new(
+                                        Value::Num(i as f64),
+                                    )))
+                                } else {
+                                    self.eval_expr(&Expr::Ref(Box::new(Expr::ArrayElement(
+                                        name.clone(),
+                                        Box::new(Expr::IntLit(i as i64)),
+                                    ))))
+                                };
+                                out.push(r);
+                            }
+                        }
+                        _ => {
+                            // Fallback: evaluate normally.
+                            out.push(self.eval_expr(&Expr::Ref(Box::new(item.clone()))));
+                        }
                     }
                 }
                 _ => {
