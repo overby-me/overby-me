@@ -2203,6 +2203,13 @@ impl Interpreter {
                             }
                         }
                     }
+                    // Sub-return semantics: `local LIST = LIST` returns
+                    // the assigned list in list context (the last
+                    // expression evaluated). Make sure the body's tail
+                    // value reflects this so `sub foo { local(@_) = LIST }`
+                    // returns the new @_'s contents. op/args test 12.
+                    self.last_list_val = Some(items.clone());
+                    self.last_expr_val = items.last().cloned().unwrap_or(Value::Undef);
                 } else {
                     for (name, init) in vars {
                         if name.starts_with('*') {
