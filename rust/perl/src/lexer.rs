@@ -1384,12 +1384,17 @@ impl Lexer {
                             }
                             codepoints.push(cur);
                         }
-                        // If what follows is an alphabetic / underscore (i.e.,
-                        // this is `vN<letter>` like `v1foo`), backtrack — the
-                        // whole token is a normal identifier.
-                        if self.pos < self.input.len()
-                            && (self.ch().is_ascii_alphabetic() || self.ch() == '_')
-                        {
+                        // If what follows is an alphabetic / underscore
+                        // (i.e., this is `vN<letter>` like `v1foo`), OR a
+                        // package qualifier `::` (so `v10::foo::bar` is a
+                        // qualified identifier, not a v-string + label),
+                        // backtrack — the whole token is a normal identifier.
+                        let next_is_alnum = self.pos < self.input.len()
+                            && (self.ch().is_ascii_alphabetic() || self.ch() == '_');
+                        let next_is_colcol = self.pos + 1 < self.input.len()
+                            && self.ch() == ':'
+                            && self.peek(1) == ':';
+                        if next_is_alnum || next_is_colcol {
                             self.pos = saved;
                         } else {
                             let s: String =
