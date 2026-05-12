@@ -286,6 +286,10 @@ pub enum Stmt {
     },
     My(Vec<(String, Option<Expr>)>, bool), // my ($a, $b) = ...; bool = is list-context destructure (parens used)
     Local(Vec<(String, Option<Expr>)>, bool),
+    /// `state $x = EXPR` — variable scoped to its sub, initialized
+    /// exactly once per sub-definition (first call). Persists across
+    /// calls. op/state.
+    State(Vec<(String, Option<Expr>)>, bool),
     /// `local $NAME{KEY} = VAL;` — save the old hash element, set the new
     /// value, and schedule restoration at scope exit. Required for the
     /// `local $SIG{__DIE__} = sub {…}` idiom (temporarily install a die

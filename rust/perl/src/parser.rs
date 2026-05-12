@@ -318,6 +318,16 @@ impl Parser {
                 self.eat(&Token::Semi);
                 return Some(stmt);
             }
+            Token::State => {
+                self.pos += 1;
+                // Reuse parse_var_list (same shape as `my`) and emit
+                // Stmt::State so the interpreter can install
+                // per-sub persistent storage. op/state.
+                let (vars, list_ctx) = self.parse_var_list();
+                let stmt = self.maybe_postfix(Stmt::State(vars, list_ctx));
+                self.eat(&Token::Semi);
+                return Some(stmt);
+            }
             Token::Package => {
                 self.pos += 1;
                 let name = if let Token::Ident(name) = self.tok() {

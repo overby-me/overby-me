@@ -33,6 +33,7 @@ pub enum Token {
     My,
     Our,
     Local,
+    State,
     Sub,
     Return,
     Last,
@@ -1646,7 +1647,7 @@ impl Lexer {
                         // tests using `state $y = EXPR` for the init-only
                         // semantics this is sufficient. True state-var
                         // persistence would need per-sub static storage.
-                        "state" | "CORE::state" => Token::My,
+                        "state" | "CORE::state" => Token::State,
                         "our" => Token::Our,
                         "local" => Token::Local,
                         "sub" => Token::Sub,

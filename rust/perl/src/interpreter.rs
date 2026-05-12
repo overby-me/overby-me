@@ -111,6 +111,13 @@ pub struct Interpreter {
     /// CodeRefs. Separate from `blessed_refs` because CodeRefs are
     /// identified by name string, not pointer. op/bless 17-20.
     blessed_coderefs: HashMap<String, String>,
+    /// Per-sub `state $x` storage. Key is (sub_name, var_name). The
+    /// value is the persistent slot — populated on first call's
+    /// initialization, then reused across calls. op/state.
+    state_vars: HashMap<(String, String), std::rc::Rc<std::cell::RefCell<Value>>>,
+    /// Tracks which (sub_name, var_name) state slots have already
+    /// been initialized so the init expression doesn't run twice.
+    state_initialized: std::collections::HashSet<(String, String)>,
     /// Per-package overload handlers: `overload_handlers[pkg][op]` is
     /// the CodeRef name for that operator (e.g. `""`, `0+`, `bool`,
     /// `.`). Populated by `use overload OP => sub {...}, …`. When
@@ -611,6 +618,8 @@ impl Interpreter {
             local_array_len_saves: Vec::new(),
             blessed_refs: HashMap::new(),
             blessed_coderefs: HashMap::new(),
+            state_vars: HashMap::new(),
+            state_initialized: std::collections::HashSet::new(),
             overload_handlers: HashMap::new(),
             pending_die_value: None,
             max_capture_seen: 0,
@@ -2269,6 +2278,43 @@ impl Interpreter {
                             }
                             self.set_my_var(var_name, val);
                         }
+                    }
+                }
+                Flow::None
+            }
+
+            Stmt::State(vars, _list_ctx) => {
+                // `state $x = INIT` — initialize once per sub, persist
+                // across calls. Each (sub_name, var_name) pair gets a
+                // shared Rc that the current scope's `$x` aliases to.
+                let sub_key = self
+                    .current_sub_stack
+                    .last()
+                    .cloned()
+                    .unwrap_or_else(|| String::from("(main)"));
+                for (raw_name, init) in vars.iter() {
+                    let var_name = raw_name
+                        .trim_start_matches('$')
+                        .trim_start_matches('@')
+                        .trim_start_matches('%');
+                    let key = (sub_key.clone(), var_name.to_string());
+                    let rc = self
+                        .state_vars
+                        .entry(key.clone())
+                        .or_insert_with(|| std::rc::Rc::new(std::cell::RefCell::new(Value::Undef)))
+                        .clone();
+                    if !self.state_initialized.contains(&key) {
+                        self.state_initialized.insert(key.clone());
+                        if let Some(init_expr) = init {
+                            let v = self.eval_expr(init_expr);
+                            *rc.borrow_mut() = v;
+                        }
+                    }
+                    // Install in the current sub-scope as an alias to
+                    // the persistent Rc. Subsequent reads/writes of
+                    // `$x` in this scope flow through the Rc.
+                    if let Some(scope) = self.scopes.last_mut() {
+                        scope.vars.insert(var_name.to_string(), Value::Alias(rc));
                     }
                 }
                 Flow::None
