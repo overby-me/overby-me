@@ -1653,7 +1653,16 @@ impl Interpreter {
                             let msg =
                                 format!("Use of freed value in iteration at {file} line {line}.\n");
                             self.pop_scope();
-                            self.set_var(var, saved_var);
+                            // Restore via direct slot replacement so we
+                            // don't write the saved value THROUGH any
+                            // Value::Alias still installed in $_ (which
+                            // would clobber the source list's last
+                            // element). op/for `reverse map {$_} 1, @arr`.
+                            if let Some(scope) = self.scopes.last_mut() {
+                                scope.vars.insert(var.clone(), saved_var);
+                            } else {
+                                self.globals.vars.insert(var.clone(), saved_var);
+                            }
                             return Flow::Die(msg);
                         }
                     }
@@ -1698,7 +1707,16 @@ impl Interpreter {
                                 self.readonly_vars.remove(var);
                             }
                             self.pop_scope();
-                            self.set_var(var, saved_var);
+                            // Restore via direct slot replacement so we
+                            // don't write the saved value THROUGH any
+                            // Value::Alias still installed in $_ (which
+                            // would clobber the source list's last
+                            // element). op/for `reverse map {$_} 1, @arr`.
+                            if let Some(scope) = self.scopes.last_mut() {
+                                scope.vars.insert(var.clone(), saved_var);
+                            } else {
+                                self.globals.vars.insert(var.clone(), saved_var);
+                            }
                             return Flow::Last(l);
                         }
                         Flow::Next(l) if l.is_none() || l == *label => true,
@@ -1707,7 +1725,16 @@ impl Interpreter {
                                 self.readonly_vars.remove(var);
                             }
                             self.pop_scope();
-                            self.set_var(var, saved_var);
+                            // Restore via direct slot replacement so we
+                            // don't write the saved value THROUGH any
+                            // Value::Alias still installed in $_ (which
+                            // would clobber the source list's last
+                            // element). op/for `reverse map {$_} 1, @arr`.
+                            if let Some(scope) = self.scopes.last_mut() {
+                                scope.vars.insert(var.clone(), saved_var);
+                            } else {
+                                self.globals.vars.insert(var.clone(), saved_var);
+                            }
                             return Flow::Next(l);
                         }
                         Flow::Redo(l) if l.is_none() || l == *label => {
@@ -1719,27 +1746,72 @@ impl Interpreter {
                                 self.readonly_vars.remove(var);
                             }
                             self.pop_scope();
-                            self.set_var(var, saved_var);
+                            // Restore via direct slot replacement so we
+                            // don't write the saved value THROUGH any
+                            // Value::Alias still installed in $_ (which
+                            // would clobber the source list's last
+                            // element). op/for `reverse map {$_} 1, @arr`.
+                            if let Some(scope) = self.scopes.last_mut() {
+                                scope.vars.insert(var.clone(), saved_var);
+                            } else {
+                                self.globals.vars.insert(var.clone(), saved_var);
+                            }
                             return Flow::Redo(l);
                         }
                         Flow::Return(v) => {
                             self.pop_scope();
-                            self.set_var(var, saved_var);
+                            // Restore via direct slot replacement so we
+                            // don't write the saved value THROUGH any
+                            // Value::Alias still installed in $_ (which
+                            // would clobber the source list's last
+                            // element). op/for `reverse map {$_} 1, @arr`.
+                            if let Some(scope) = self.scopes.last_mut() {
+                                scope.vars.insert(var.clone(), saved_var);
+                            } else {
+                                self.globals.vars.insert(var.clone(), saved_var);
+                            }
                             return Flow::Return(v);
                         }
                         Flow::Die(msg) => {
                             self.pop_scope();
-                            self.set_var(var, saved_var);
+                            // Restore via direct slot replacement so we
+                            // don't write the saved value THROUGH any
+                            // Value::Alias still installed in $_ (which
+                            // would clobber the source list's last
+                            // element). op/for `reverse map {$_} 1, @arr`.
+                            if let Some(scope) = self.scopes.last_mut() {
+                                scope.vars.insert(var.clone(), saved_var);
+                            } else {
+                                self.globals.vars.insert(var.clone(), saved_var);
+                            }
                             return Flow::Die(msg);
                         }
                         Flow::Exit(code) => {
                             self.pop_scope();
-                            self.set_var(var, saved_var);
+                            // Restore via direct slot replacement so we
+                            // don't write the saved value THROUGH any
+                            // Value::Alias still installed in $_ (which
+                            // would clobber the source list's last
+                            // element). op/for `reverse map {$_} 1, @arr`.
+                            if let Some(scope) = self.scopes.last_mut() {
+                                scope.vars.insert(var.clone(), saved_var);
+                            } else {
+                                self.globals.vars.insert(var.clone(), saved_var);
+                            }
                             return Flow::Exit(code);
                         }
                         Flow::Goto(l) => {
                             self.pop_scope();
-                            self.set_var(var, saved_var);
+                            // Restore via direct slot replacement so we
+                            // don't write the saved value THROUGH any
+                            // Value::Alias still installed in $_ (which
+                            // would clobber the source list's last
+                            // element). op/for `reverse map {$_} 1, @arr`.
+                            if let Some(scope) = self.scopes.last_mut() {
+                                scope.vars.insert(var.clone(), saved_var);
+                            } else {
+                                self.globals.vars.insert(var.clone(), saved_var);
+                            }
                             return Flow::Goto(l);
                         }
                         Flow::None => true,
@@ -1750,17 +1822,44 @@ impl Interpreter {
                                 Flow::Last(l) if l.is_none() || l == *label => break,
                                 Flow::Return(v) => {
                                     self.pop_scope();
-                                    self.set_var(var, saved_var);
+                                    // Restore via direct slot replacement so we
+                            // don't write the saved value THROUGH any
+                            // Value::Alias still installed in $_ (which
+                            // would clobber the source list's last
+                            // element). op/for `reverse map {$_} 1, @arr`.
+                            if let Some(scope) = self.scopes.last_mut() {
+                                scope.vars.insert(var.clone(), saved_var);
+                            } else {
+                                self.globals.vars.insert(var.clone(), saved_var);
+                            }
                                     return Flow::Return(v);
                                 }
                                 Flow::Die(msg) => {
                                     self.pop_scope();
-                                    self.set_var(var, saved_var);
+                                    // Restore via direct slot replacement so we
+                            // don't write the saved value THROUGH any
+                            // Value::Alias still installed in $_ (which
+                            // would clobber the source list's last
+                            // element). op/for `reverse map {$_} 1, @arr`.
+                            if let Some(scope) = self.scopes.last_mut() {
+                                scope.vars.insert(var.clone(), saved_var);
+                            } else {
+                                self.globals.vars.insert(var.clone(), saved_var);
+                            }
                                     return Flow::Die(msg);
                                 }
                                 Flow::Exit(code) => {
                                     self.pop_scope();
-                                    self.set_var(var, saved_var);
+                                    // Restore via direct slot replacement so we
+                            // don't write the saved value THROUGH any
+                            // Value::Alias still installed in $_ (which
+                            // would clobber the source list's last
+                            // element). op/for `reverse map {$_} 1, @arr`.
+                            if let Some(scope) = self.scopes.last_mut() {
+                                scope.vars.insert(var.clone(), saved_var);
+                            } else {
+                                self.globals.vars.insert(var.clone(), saved_var);
+                            }
                                     return Flow::Exit(code);
                                 }
                                 _ => {}
@@ -8815,6 +8914,17 @@ impl Interpreter {
                 self.call_context.push(2);
                 let saved_us = self.get_var("_");
                 for (i, item) in items.iter().enumerate() {
+                    // Write `$_` directly through the aliased-globals
+                    // cell when one exists (so all `\$_` refs share the
+                    // same Rc — `[perl #78194]` op/grep test 64), but
+                    // BREAK any prior Alias chain on the lexical slot
+                    // first (clear it to plain Undef) so set_var doesn't
+                    // write items[i] through to a source array.
+                    if let Some(scope) = self.scopes.last_mut()
+                        && matches!(scope.vars.get("_"), Some(Value::Alias(_)))
+                    {
+                        scope.vars.insert("_".to_string(), Value::Undef);
+                    }
                     self.set_var("_", item.clone());
                     let block_results = self.eval_list(block);
                     if !void_ctx {
@@ -14030,6 +14140,17 @@ impl Interpreter {
                         self.call_context.push(2);
                         let saved_us = self.get_var("_");
                         for (i, item) in items.iter().enumerate() {
+                            // Break any prior Alias on the lexical $_
+                            // slot first so set_var below replaces (not
+                            // writes-through) on subsequent iters.
+                            // op/for `reverse map {$_} 1, @array`;
+                            // keep aliased-globals sharing for op/grep
+                            // `\$_` test 64.
+                            if let Some(scope) = self.scopes.last_mut()
+                                && matches!(scope.vars.get("_"), Some(Value::Alias(_)))
+                            {
+                                scope.vars.insert("_".to_string(), Value::Undef);
+                            }
                             self.set_var("_", item.clone());
                             let block_results = self.eval_list(block);
                             results.extend(block_results);
@@ -14037,7 +14158,11 @@ impl Interpreter {
                                 mutated[i] = self.get_var("_");
                             }
                         }
-                        self.set_var("_", saved_us);
+                        if let Some(scope) = self.scopes.last_mut() {
+                            scope.vars.insert("_".to_string(), saved_us);
+                        } else {
+                            self.globals.vars.insert("_".to_string(), saved_us);
+                        }
                         self.call_context.pop();
                         if let Some(Expr::ArrayDerefVar(name)) = alias_target
                             && let Value::ArrayRef(r) = self.get_var(&name)
