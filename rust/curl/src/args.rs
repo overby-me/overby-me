@@ -327,11 +327,13 @@ pub(crate) fn parse_args() -> Options {
                 if i + 1 < args.len() {
                     let nxt = &args[i + 1];
                     if !nxt.is_empty() && !nxt.starts_with('-') {
-                        // Category like "all", "http", "important", etc. — print
-                        // the full usage and exit successfully. Unknown
-                        // categories print the category list (test 1462).
-                        if is_known_category(nxt) {
-                            print_usage();
+                        let lc = nxt.to_lowercase();
+                        if is_known_category(&lc) {
+                            if let Some(text) = category_help(&lc) {
+                                print!("{text}");
+                            } else {
+                                print_usage();
+                            }
                         } else {
                             print_categories();
                         }
@@ -340,7 +342,7 @@ pub(crate) fn parse_args() -> Options {
                     if nxt.starts_with("--") {
                         // Look up the option in the help table; if absent, error.
                         if known_long_option(nxt) {
-                            print_usage();
+                            print!("{IMPORTANT_HELP}");
                             process::exit(0);
                         } else {
                             eprintln!("Incorrect option name to show help for, see curl -h");
@@ -348,7 +350,7 @@ pub(crate) fn parse_args() -> Options {
                         }
                     }
                 }
-                print_usage();
+                print!("{IMPORTANT_HELP}");
                 process::exit(0);
             }
             "-V" | "--version" => {
@@ -2076,6 +2078,48 @@ pub(crate) fn format_http_date(timestamp: i64) -> String {
         dow_name, d, month_names[m as usize], y, hour, min, sec
     )
 }
+
+/// Help text for a specific category (e.g. `--help file`). Returns None
+/// when we fall back to the full usage instead.
+fn category_help(name: &str) -> Option<&'static str> {
+    match name {
+        "file" => Some(concat!(
+            "file: FILE protocol\n",
+            "     --create-file-mode <mode>  File mode for created files\n",
+            " -I, --head                     Show document info only\n",
+            " -l, --list-only                List only mode\n",
+            " -r, --range <range>            Retrieve only the bytes within RANGE\n",
+        )),
+        "important" => Some(IMPORTANT_HELP),
+        _ => None,
+    }
+}
+
+/// Curl's default `--help` output (test 1461). Column width matches the
+/// expected text exactly: description starts at column 29.
+const IMPORTANT_HELP: &str = concat!(
+    "Usage: curl [options...] <url>\n",
+    " -d, --data <data>           HTTP POST data\n",
+    " -f, --fail                  Fail fast with no output on HTTP errors\n",
+    " -h, --help <subject>        Get help for commands\n",
+    " -o, --output <file>         Write to file instead of stdout\n",
+    " -O, --remote-name           Write output to file named as remote file\n",
+    " -i, --show-headers          Show response headers in output\n",
+    " -s, --silent                Silent mode\n",
+    " -T, --upload-file <file>    Transfer local FILE to destination\n",
+    " -u, --user <user:password>  Server user and password\n",
+    " -A, --user-agent <name>     Send User-Agent <name> to server\n",
+    " -v, --verbose               Make the operation more talkative\n",
+    " -V, --version               Show version number and quit\n",
+    "\n",
+    "This is not the full help; this menu is split into categories.\n",
+    "Use \"--help category\" to get an overview of all categories, which are:\n",
+    "auth, connection, curl, deprecated, dns, file, ftp, global, http, imap, ldap, \n",
+    "output, pop3, post, proxy, scp, sftp, smtp, ssh, telnet, tftp, timeout, tls, \n",
+    "upload, verbose.\n",
+    "Use \"--help all\" to list all options\n",
+    "Use \"--help [option]\" to view documentation for a given option\n",
+);
 
 fn is_known_category(name: &str) -> bool {
     matches!(

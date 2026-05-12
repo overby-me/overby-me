@@ -135,7 +135,7 @@
             -c "${rust-curl-dev}/bin/curl" \
             -n \
             -a \
-            1260 to 1280 \
+            2400 to 2700 \
             2>&1 | ${coreutils}/bin/tee "$TMPDIR/results.txt" || true
 
           ${coreutils}/bin/mkdir -p $out
@@ -769,7 +769,10 @@
       1457
       1458
       1460
+      1461
       1462
+      1463
+      1464
       1466
       1469
       1471

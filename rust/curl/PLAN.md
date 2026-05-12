@@ -6,7 +6,7 @@ Use the upstream [curl test suite](https://github.com/curl/curl/tree/master/test
 
 ## Current Status
 
-**740 tests passing** (was 709 at session start; +12 across multipart, retry, IPv6,
+**743 tests passing** (was 709 at session start; +12 across multipart, retry, IPv6,
 upload-stdin redirect, write-out, interface, and dump-header fixes) across the
 curl 8.19.0 test suite (verified with strict
 runner checks — the derivation fails when a test number doesn't exist or the
@@ -408,13 +408,14 @@ Current gaps:
 - [x] `--write-out %{certs}`: force the TLS handshake on connect to capture the peer certificate chain (DER from rustls) and PEM-encode it on demand (unlocked test 417)
 - [x] Status-line read errors distinguish ConnectionReset/Aborted/BrokenPipe (CURLE_RECV_ERROR / exit 56) from clean EOF (CURLE_GOT_NOTHING / exit 52) (unlocked test 1244)
 - [x] Secure-cookie protection: a non-secure Set-Cookie cannot replace an existing secure cookie with the same name (matched by name only, broader than RFC 6265bis's host-only/domain pairing) (unlocked test 414)
+- [x] `--help` and `--help file` produce curl's exact "important options" / file-category text (case-insensitive category name) (unlocked tests 1461, 1463, 1464)
 - [ ] Target 750+ passing by addressing remaining feature gaps
 
 ---
 
 ## Test Inventory
 
-### Passing tests (740)
+### Passing tests (743)
 
 The authoritative list is `testNums` in `default.nix`; the count is
 checked there by Nix and stays in sync with the per-test derivations.
