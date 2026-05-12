@@ -22,6 +22,7 @@ pub(crate) struct PerUrlOptions {
     pub(crate) head: bool,
     pub(crate) get: bool,
     pub(crate) connect_tos: Vec<String>,
+    pub(crate) resolves: Vec<String>,
     pub(crate) no_basic: bool,
     pub(crate) user: Option<String>,
     pub(crate) dump_header: Option<PathBuf>,
@@ -29,6 +30,7 @@ pub(crate) struct PerUrlOptions {
     pub(crate) proxy_user: Option<String>,
     pub(crate) etag_save: Option<PathBuf>,
     pub(crate) etag_compare: Option<PathBuf>,
+    pub(crate) include_headers: bool,
     /// True when this URL is the first transfer of its operation group
     /// (i.e. URL index 0, or the first URL after a --next). Used by `-D`
     /// to decide whether to truncate or append the dump-header file

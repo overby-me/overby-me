@@ -45,6 +45,12 @@ pub(crate) struct PooledConn {
     /// the next request reusing the connection downgrades to HTTP/1.0
     /// (test 1074).
     pub http10: bool,
+    /// `true` when this connection used `--resolve` for hostname-to-address
+    /// mapping. Curl bucket-tags such connections so a subsequent transfer
+    /// using `--connect-to` to reach the same host:port does NOT reuse the
+    /// connection (test 2052). Plain transfers with no override CAN still
+    /// reuse a `--connect-to` connection if endpoints match (test 2051).
+    pub used_resolve: bool,
     pub conn: Connection,
 }
 
@@ -145,15 +151,46 @@ pub(crate) fn connect_to_override(
 /// Match --resolve entries ("host:port:addr") against the requested host:port.
 /// Returns the destination "addr:port" string when a match is found.
 /// Hostnames match case-insensitively and a trailing dot is ignored on either side.
-fn resolve_override(host: &str, port: u16, resolves: &[String]) -> Option<String> {
+/// Entries beginning with `-` mark a *removal* (`-host:port`): once such an
+/// entry is seen, any earlier mapping for the same host:port is cancelled,
+/// matching curl's `--resolve -…` semantics (test 2052).
+pub(crate) fn resolve_override(host: &str, port: u16, resolves: &[String]) -> Option<String> {
     let host_norm = host.trim_end_matches('.').to_ascii_lowercase();
+    let mut current: Option<String> = None;
     for entry in resolves {
-        let entry = entry.trim_start_matches('+');
+        if let Some(rest) = entry.strip_prefix('-') {
+            let mut parts = rest.splitn(2, ':');
+            let entry_host = match parts.next() {
+                Some(h) => h,
+                None => continue,
+            };
+            let entry_port = match parts.next() {
+                Some(p) => p,
+                None => continue,
+            };
+            let entry_host_norm = entry_host.trim_end_matches('.').to_ascii_lowercase();
+            if (entry_host_norm == "*" || entry_host_norm == host_norm)
+                && entry_port.parse::<u16>().ok() == Some(port)
+            {
+                current = None;
+            }
+            continue;
+        }
+        let entry = entry.strip_prefix('+').unwrap_or(entry);
         // host:port:addr[,addr2,...]
         let mut parts = entry.splitn(3, ':');
-        let entry_host = parts.next()?;
-        let entry_port = parts.next()?;
-        let entry_addrs = parts.next()?;
+        let entry_host = match parts.next() {
+            Some(h) => h,
+            None => continue,
+        };
+        let entry_port = match parts.next() {
+            Some(p) => p,
+            None => continue,
+        };
+        let entry_addrs = match parts.next() {
+            Some(a) => a,
+            None => continue,
+        };
         let entry_host_norm = entry_host.trim_end_matches('.').to_ascii_lowercase();
         // Wildcard host "*" matches any hostname (test 1458).
         if entry_host_norm != "*" && entry_host_norm != host_norm {
@@ -169,9 +206,9 @@ fn resolve_override(host: &str, port: u16, resolves: &[String]) -> Option<String
         } else {
             format!("{first_addr}:{port}")
         };
-        return Some(addr);
+        current = Some(addr);
     }
-    None
+    current
 }
 
 pub(crate) enum Connection {
@@ -311,6 +348,12 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
         } else {
             Some((url.host.clone(), url.port, false))
         };
+        // Curl considers `--resolve` and `--connect-to` distinct DNS-routing
+        // mechanisms: a connection made with `--resolve` cannot be reused by
+        // a transfer that swaps in `--connect-to` for the same host:port
+        // (test 2052), even when both resolve to the same physical endpoint.
+        let new_uses_connect_to = has_connect_to_match;
+        let new_uses_resolve = resolve_override(&url.host, url.port, &opts.resolves).is_some();
         if let Some((khost, kport, is_proxy_key)) = key_host_port
             && let Some(reused) = CONN_POOL.with(|r| {
                 let mut slot = r.borrow_mut();
@@ -318,6 +361,7 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
                     && p.host == khost
                     && p.port == kport
                     && p.is_proxy == is_proxy_key
+                    && !(p.used_resolve && new_uses_connect_to && !new_uses_resolve)
                 {
                     let was_http10 = p.http10;
                     let taken = slot.take().map(|p| p.conn);

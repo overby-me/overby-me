@@ -687,6 +687,7 @@ fn main() {
             o.head = puo.head;
             o.get = puo.get;
             o.connect_tos = puo.connect_tos.clone();
+            o.resolves = puo.resolves.clone();
             o.no_basic = puo.no_basic;
             o.user = puo.user.clone();
             o.dump_header = puo.dump_header.clone();
@@ -694,6 +695,7 @@ fn main() {
             o.proxy_user = puo.proxy_user.clone();
             o.etag_save = puo.etag_save.clone();
             o.etag_compare = puo.etag_compare.clone();
+            o.include_headers = puo.include_headers;
             o
         } else {
             opts.clone()
@@ -830,7 +832,7 @@ fn main() {
                                     break;
                                 }
                             }
-                            if opts.include_headers {
+                            if effective_opts.include_headers {
                                 // Include redirect chain bytes (e.g. 301)
                                 // before the final response headers so the
                                 // attempt is reproduced verbatim in -i output.
@@ -1029,7 +1031,7 @@ fn main() {
                     && !opts.remote_name
                     && !opts.remote_header_name;
                 let dump_pair_with_include =
-                    dump_to_stdout && opts.include_headers && include_goes_to_stdout;
+                    dump_to_stdout && effective_opts.include_headers && include_goes_to_stdout;
                 if let Some(ref dump_path) = effective_opts.dump_header {
                     match dump_path.to_str() {
                         Some("-") => {
@@ -1469,7 +1471,7 @@ fn main() {
                     {
                         let _ = fs::create_dir_all(parent);
                     }
-                    if opts.include_headers || effective_opts.head {
+                    if effective_opts.include_headers || effective_opts.head {
                         let mut data = Vec::new();
                         data.extend_from_slice(&retry_prefix);
                         data.extend_from_slice(&resp.redirect_headers);
@@ -1490,7 +1492,7 @@ fn main() {
                     let mut out = stdout.lock();
 
                     let _ = out.write_all(&retry_prefix);
-                    if opts.include_headers || effective_opts.head {
+                    if effective_opts.include_headers || effective_opts.head {
                         let _ = out.write_all(&resp.redirect_headers);
                         // When `-D -` already wrote each header twice
                         // (paired with --include), skip the include write

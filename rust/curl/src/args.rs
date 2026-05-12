@@ -206,6 +206,7 @@ fn snapshot_per_url(opts: &Options) -> PerUrlOptions {
         head: opts.head,
         get: opts.get,
         connect_tos: opts.connect_tos.clone(),
+        resolves: opts.resolves.clone(),
         no_basic: opts.no_basic,
         user: opts.user.clone(),
         dump_header: opts.dump_header.clone(),
@@ -213,6 +214,7 @@ fn snapshot_per_url(opts: &Options) -> PerUrlOptions {
         proxy_user: opts.proxy_user.clone(),
         etag_save: opts.etag_save.clone(),
         etag_compare: opts.etag_compare.clone(),
+        include_headers: opts.include_headers,
         first_in_group: false,
     }
 }
@@ -1245,6 +1247,7 @@ pub(crate) fn parse_args() -> Options {
                 opts.head = false;
                 opts.get = false;
                 opts.connect_tos.clear();
+                opts.resolves.clear();
                 opts.no_basic = false;
                 opts.user = None;
                 opts.dump_header = None;
@@ -1252,6 +1255,7 @@ pub(crate) fn parse_args() -> Options {
                 opts.proxy_user = None;
                 opts.etag_save = None;
                 opts.etag_compare = None;
+                opts.include_headers = false;
                 etag_in_group = false;
                 expecting_url_after_next = true;
                 i += 1;
@@ -1408,6 +1412,7 @@ pub(crate) fn parse_args() -> Options {
                                 opts.head = false;
                                 opts.get = false;
                                 opts.connect_tos.clear();
+                                opts.resolves.clear();
                                 opts.no_basic = false;
                             }
                             'N' => {} // --no-buffer, ignored

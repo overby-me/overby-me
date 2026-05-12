@@ -1690,12 +1690,15 @@ fn execute_request_inner(
         } else {
             (url.host.clone(), url.port, false)
         };
+        let used_resolve =
+            crate::connection::resolve_override(&url.host, url.port, &opts.resolves).is_some();
         crate::connection::CONN_POOL.with(|r| {
             *r.borrow_mut() = Some(crate::connection::PooledConn {
                 host: khost,
                 port: kport,
                 is_proxy: is_proxy_key,
                 http10: resp_http10,
+                used_resolve,
                 conn,
             });
         });
