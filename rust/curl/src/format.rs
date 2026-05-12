@@ -72,6 +72,23 @@ pub(crate) fn format_write_out(
     result = result.replace("%{num_redirects}", &num_redirects.to_string());
     result = result.replace("%{num_retries}", "0");
     result = result.replace("%{num_headers}", &resp.headers.len().to_string());
+    // %{certs} — PEM-encoded peer certificate chain (test 417). Captured
+    // by `connect()` post-TLS-handshake into the PEER_CERTS thread-local.
+    if result.contains("%{certs}") {
+        let certs = crate::connection::PEER_CERTS.with(|r| r.borrow().clone());
+        let mut pem = String::new();
+        for der in &certs {
+            let b64 = base64_encode(der);
+            pem.push_str("-----BEGIN CERTIFICATE-----\n");
+            // Wrap at 64 chars per RFC 7468.
+            for line in b64.as_bytes().chunks(64) {
+                pem.push_str(std::str::from_utf8(line).unwrap_or(""));
+                pem.push('\n');
+            }
+            pem.push_str("-----END CERTIFICATE-----\n");
+        }
+        result = result.replace("%{certs}", &pem);
+    }
     // %{http_connect}: status code of the last CONNECT response (0 if no
     // CONNECT happened, otherwise the proxy's reply status).
     let http_connect =

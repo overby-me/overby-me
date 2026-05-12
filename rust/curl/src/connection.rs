@@ -30,6 +30,9 @@ thread_local! {
     /// HTTP/0.9 (body-only, no status line) on a reused connection as a weird
     /// server reply (test 1479).
     pub(crate) static POOL_REUSED: RefCell<bool> = const { RefCell::new(false) };
+    /// Peer certificate chain (DER) captured after the TLS handshake.
+    /// Read by `--write-out %{certs}` (test 417).
+    pub(crate) static PEER_CERTS: RefCell<Vec<Vec<u8>>> = const { RefCell::new(Vec::new()) };
 }
 
 pub(crate) struct PooledConn {
@@ -588,7 +591,19 @@ pub(crate) fn connect(url: &ParsedUrl, opts: &Options) -> Result<(Connection, Ve
             .to_owned();
         let conn = rustls::ClientConnection::new(tls_config, server_name)
             .map_err(|e| format!("TLS handshake failed: {e}"))?;
-        let stream = rustls::StreamOwned::new(conn, tcp);
+        let mut stream = rustls::StreamOwned::new(conn, tcp);
+        // Force the handshake here so we can capture the peer certificate
+        // chain for `--write-out %{certs}` (test 417). flush() drives the
+        // I/O loop until the handshake completes (or fails).
+        if let Err(e) = stream.flush() {
+            return Err(format!("TLS handshake failed: {e}"));
+        }
+        let certs: Vec<Vec<u8>> = stream
+            .conn
+            .peer_certificates()
+            .map(|chain| chain.iter().map(|c| c.as_ref().to_vec()).collect())
+            .unwrap_or_default();
+        PEER_CERTS.with(|r| *r.borrow_mut() = certs);
         Ok((Connection::Tls(Box::new(stream)), connect_headers))
     } else {
         Ok((Connection::Plain(tcp), connect_headers))
