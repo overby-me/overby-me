@@ -12354,27 +12354,20 @@ impl Interpreter {
         }
         // Look up the sub. Try unqualified first (main::), then qualified.
         let body_params = if pkg == "main" {
-            self.subs
-                .get(key)
-                .or_else(|| self.subs.get(&qualified))
+            self.subs.get(key).or_else(|| self.subs.get(&qualified))
         } else {
             self.subs.get(&qualified)
         };
         let (params, body) = body_params?;
-        let is_const = params.is_empty()
-            && !self.constant_upgraded.contains(&qualified)
-            && {
-                let last = body
-                    .iter()
-                    .rev()
-                    .find(|s| !matches!(s, Stmt::LineMark(_)));
-                matches!(
-                    last,
-                    Some(Stmt::Expr(Expr::StringLit(_)))
-                        | Some(Stmt::Expr(Expr::IntLit(_)))
-                        | Some(Stmt::Expr(Expr::FloatLit(_)))
-                )
-            };
+        let is_const = params.is_empty() && !self.constant_upgraded.contains(&qualified) && {
+            let last = body.iter().rev().find(|s| !matches!(s, Stmt::LineMark(_)));
+            matches!(
+                last,
+                Some(Stmt::Expr(Expr::StringLit(_)))
+                    | Some(Stmt::Expr(Expr::IntLit(_)))
+                    | Some(Stmt::Expr(Expr::FloatLit(_)))
+            )
+        };
         if is_const {
             let last = body.iter().rev().find(|s| !matches!(s, Stmt::LineMark(_)));
             let v = match last {
@@ -12737,6 +12730,11 @@ impl Interpreter {
                 }
             }
         }
+        // Restore `local`-saved slots BEFORE we snapshot @_, so a
+        // `local $_[i]` in this scope is undone in time for the
+        // caller-arg writeback to see the original (unlocalized) value.
+        // op/args 10 ("local $_[0] doesn't trash caller's lvalue").
+        self.restore_locals();
         // Capture @_ from the popped scope so eval_call's post-hoc
         // aliasing can write mutations back to the caller's arg exprs.
         // Only subs install @_ in a freshly pushed scope, so for block
@@ -12746,7 +12744,6 @@ impl Interpreter {
         if popped_underscore.is_some() {
             self.last_popped_underscore = popped_underscore;
         }
-        self.restore_locals();
         if let Some(prev) = self.bytes_mode_saves.pop() {
             self.bytes_mode = prev;
         }

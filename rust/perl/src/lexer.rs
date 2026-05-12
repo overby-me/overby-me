@@ -1778,7 +1778,14 @@ impl Lexer {
                         self.pos += 1;
                         tokens.push(Token::Arrow);
                     } else if self.ch().is_ascii_alphabetic()
-                        && tokens.last().map(|t| t.expects_operand()).unwrap_or(true)
+                        && (tokens.last().map(|t| t.expects_operand()).unwrap_or(true)
+                            // Stacked file tests: after another file-test
+                            // Ident (`-t`), the next `-X` is also a file
+                            // test, not subtraction. op/filetest_t.
+                            || matches!(
+                                tokens.last(),
+                                Some(Token::Ident(s)) if s.len() == 2 && s.starts_with('-')
+                            ))
                     {
                         // File test operator like -d, -f, -e, etc.
                         let op = self.advance();

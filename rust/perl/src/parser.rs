@@ -2654,6 +2654,14 @@ impl Parser {
                 );
                 let expr = if needs_default {
                     Expr::ScalarVar("_".to_string())
+                } else if matches!(self.tok(), Token::Ident(n) if n.starts_with('-') && n.len() == 2)
+                {
+                    // Stacked file tests: `-t -e $null` parses as
+                    // `-t (-e $null)`. Recurse through parse_unary so
+                    // the inner `-e` is recognized as a file test and
+                    // not treated as a bareword sub call.
+                    // op/filetest_t (`!-t -e $null` chains).
+                    self.parse_unary()
                 } else {
                     self.parse_primary()
                 };
