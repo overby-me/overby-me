@@ -138,6 +138,18 @@ impl Value {
             Value::CodeRef(_) => "CODE",
             Value::Regex(_, _, _) => "Regexp",
             Value::Glob(_) => "GLOB",
+            // Resolve through Alias so `ref` on an aliased value
+            // (e.g. from list-slice `(LIST)[N]` which emits
+            // `Value::Alias(rc)`) sees the underlying value's type.
+            Value::Alias(rc) => match &*rc.borrow() {
+                Value::ArrayRef(_) => "ARRAY",
+                Value::HashRef(_) => "HASH",
+                Value::ScalarRef(_) => "SCALAR",
+                Value::CodeRef(_) => "CODE",
+                Value::Regex(_, _, _) => "Regexp",
+                Value::Glob(_) => "GLOB",
+                _ => "",
+            },
             _ => "",
         }
     }

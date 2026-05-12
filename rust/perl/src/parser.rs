@@ -263,8 +263,19 @@ impl Parser {
                 // sub expression — peek past the matching `}` to see if the
                 // next token after the body is one that continues an
                 // expression (`->`, `(`, `->(`, operator, etc.).
-                if matches!(self.tokens.get(self.pos + 1), Some(Token::LBrace))
-                    && self.anon_sub_starts_expr(self.pos + 1)
+                // Also catch `sub :ATTR { ... }` (anon sub with attributes
+                // like `sub :lvalue { … }`) when the next non-attribute
+                // token is `{` and the body is followed by an expr-
+                // continuation token — base/lex test 110
+                // (`map { sub :lvalue { "a" } } 1`).
+                let mut p = self.pos + 1;
+                while matches!(self.tokens.get(p), Some(Token::Colon)) {
+                    p += 1;
+                    if matches!(self.tokens.get(p), Some(Token::Ident(_))) {
+                        p += 1;
+                    }
+                }
+                if matches!(self.tokens.get(p), Some(Token::LBrace)) && self.anon_sub_starts_expr(p)
                 {
                     let expr = self.parse_expr();
                     let stmt = Stmt::Expr(expr);
@@ -3470,7 +3481,11 @@ impl Parser {
                     self.expect(&Token::RParen);
                     // `(EXPR) x N` — list-context x-repeat.
                     // `(EXPR) = …`  — list-context assignment with one target.
-                    if matches!(self.tok(), Token::StringRepeat | Token::Assign) {
+                    // `(EXPR)[N]`  — list slice on the one-element list.
+                    if matches!(
+                        self.tok(),
+                        Token::StringRepeat | Token::Assign | Token::LBracket
+                    ) {
                         return Expr::ArrayLit(vec![expr]);
                     }
                     expr
