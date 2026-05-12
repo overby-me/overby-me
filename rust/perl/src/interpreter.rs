@@ -12758,12 +12758,64 @@ impl Interpreter {
                     self.exec_stmt(stmt);
                 }
                 if let Stmt::Expr(lvalue_expr) = &body[body.len() - 1] {
+                    // Body returns a Call to a user-defined non-lvalue
+                    // sub (`sub lv1tmp : lvalue { xxx }` where `xxx`
+                    // isn't lvalue) — reference perl dies "Can't modify
+                    // non-lvalue subroutine call of &main::xxx at …"
+                    // (op/sub_lval 45-46). Constant-returning subs use
+                    // a different error ("Can't return a readonly
+                    // value") — detect by looking at the sub's body
+                    // (single literal return).
+                    if let Expr::Call(call_name, _) = lvalue_expr
+                        && !self.lvalue_subs.contains(call_name)
+                        && self.subs.contains_key(call_name)
+                    {
+                        let qualified = if call_name.contains("::") {
+                            call_name.clone()
+                        } else {
+                            format!("main::{call_name}")
+                        };
+                        let file = if self.current_file.is_empty() {
+                            "-e".to_string()
+                        } else {
+                            self.current_file.clone()
+                        };
+                        let line = self.current_line;
+                        // Detect "constant sub returning a readonly
+                        // value": body has one expression that's a
+                        // bare string/number literal.
+                        let is_readonly_const = self
+                            .subs
+                            .get(call_name)
+                            .map(|(_, b)| {
+                                let last = b.iter().rev().find(|s| !matches!(s, Stmt::LineMark(_)));
+                                matches!(
+                                    last,
+                                    Some(Stmt::Expr(Expr::StringLit(_)))
+                                        | Some(Stmt::Expr(Expr::IntLit(_)))
+                                        | Some(Stmt::Expr(Expr::FloatLit(_)))
+                                )
+                            })
+                            .unwrap_or(false);
+                        let msg = if is_readonly_const {
+                            format!(
+                                "Can't return a readonly value from lvalue subroutine at {file} line {line}.\n"
+                            )
+                        } else {
+                            format!(
+                                "Can't modify non-lvalue subroutine call of &{qualified} at {file} line {line}.\n"
+                            )
+                        };
+                        self.pending_flow = Some(Flow::Die(msg));
+                        self.current_sub_stack.pop();
+                        self.set_array("_", saved_underscore);
+                        return;
+                    }
                     // If the body's last expression is a Call to a
-                    // builtin or other non-lvalue sub that returns a
-                    // temporary (e.g. `index`, `length`, `pos`, …), the
-                    // returned value isn't a writable slot — reference
-                    // perl dies "Can't return a temporary from lvalue
-                    // subroutine" in both scalar AND list context
+                    // builtin (not in self.subs and not a recognised
+                    // lvalue helper) that returns a temporary, the
+                    // returned value isn't a writable slot — die
+                    // "Can't return a temporary from lvalue subroutine"
                     // (op/sub_lval 39-41).
                     if let Expr::Call(call_name, _) = lvalue_expr
                         && !self.lvalue_subs.contains(call_name)
