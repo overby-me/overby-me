@@ -1547,6 +1547,28 @@ impl Interpreter {
                     let _ = was_redo;
                     if let Some(step) = step {
                         self.eval_expr(step);
+                        // `last LABEL` / `next LABEL` / `return` in the
+                        // for-step expr surface as pending_flow because
+                        // eval_expr doesn't return a Flow. Convert that
+                        // back into a Flow propagation so the labeled
+                        // outer block can catch it. op/loopctl 16+.
+                        match self.pending_flow.take() {
+                            Some(Flow::Last(l)) if l.is_none() || l == *label => break,
+                            Some(Flow::Last(l)) => {
+                                result = Flow::Last(l);
+                                break;
+                            }
+                            Some(Flow::Next(l)) if l.is_none() || l == *label => continue,
+                            Some(Flow::Next(l)) => {
+                                result = Flow::Next(l);
+                                break;
+                            }
+                            Some(other) => {
+                                result = other;
+                                break;
+                            }
+                            None => {}
+                        }
                     }
                 }
                 self.pop_scope();
@@ -2016,58 +2038,61 @@ impl Interpreter {
                 continue_body,
                 label,
             } => {
-                // One-shot loop: body runs once. `last` exits without
-                // running the continue block; normal fall-through runs it.
-                // The body and continue block live in *separate* lexical
-                // frames so any `local $x` in body is restored before
-                // the continue block sees `$x`. op/while continue-block
-                // local restore tests.
-                self.push_scope();
-                let flow = self.exec_stmts(body);
-                self.pop_scope();
-                let ran_continue = match flow {
-                    Flow::Last(l) if l.is_none() || l == *label => {
-                        return Flow::None;
-                    }
-                    Flow::Last(l) => {
-                        return Flow::Last(l);
-                    }
-                    Flow::Next(l) if l.is_none() || l == *label => true,
-                    Flow::Next(l) => {
-                        return Flow::Next(l);
-                    }
-                    Flow::Return(v) => {
-                        return Flow::Return(v);
-                    }
-                    Flow::Die(msg) => {
-                        return Flow::Die(msg);
-                    }
-                    Flow::Exit(code) => {
-                        return Flow::Exit(code);
-                    }
-                    Flow::Goto(l) => {
-                        return Flow::Goto(l);
-                    }
-                    Flow::Redo(l) => {
-                        return Flow::Redo(l);
-                    }
-                    Flow::None => true,
-                };
-                if ran_continue {
+                // One-shot loop with continue: body runs once normally,
+                // but `redo;` restarts the body (skipping continue).
+                // `last` exits without running continue; `next` skips
+                // to the continue block.
+                loop {
                     self.push_scope();
-                    let cflow = self.exec_stmts(continue_body);
+                    let flow = self.exec_stmts(body);
                     self.pop_scope();
-                    match cflow {
-                        Flow::Last(l) if l.is_none() || l == *label => Flow::None,
-                        other => {
-                            // Eval completed without die — clear $@ so inner errors
-                            // do not leak (e.g. eval { eval { die }; return }).
-                            self.set_global_var("@", Value::Str(String::new()));
-                            other
+                    let ran_continue = match flow {
+                        Flow::Last(l) if l.is_none() || l == *label => {
+                            return Flow::None;
+                        }
+                        Flow::Last(l) => {
+                            return Flow::Last(l);
+                        }
+                        Flow::Next(l) if l.is_none() || l == *label => true,
+                        Flow::Next(l) => {
+                            return Flow::Next(l);
+                        }
+                        Flow::Redo(l) if l.is_none() || l == *label => {
+                            // Re-run the body without firing continue.
+                            // op/loopctl 17 ("no label on bare block").
+                            continue;
+                        }
+                        Flow::Redo(l) => {
+                            return Flow::Redo(l);
+                        }
+                        Flow::Return(v) => {
+                            return Flow::Return(v);
+                        }
+                        Flow::Die(msg) => {
+                            return Flow::Die(msg);
+                        }
+                        Flow::Exit(code) => {
+                            return Flow::Exit(code);
+                        }
+                        Flow::Goto(l) => {
+                            return Flow::Goto(l);
+                        }
+                        Flow::None => true,
+                    };
+                    if ran_continue {
+                        self.push_scope();
+                        let cflow = self.exec_stmts(continue_body);
+                        self.pop_scope();
+                        match cflow {
+                            Flow::Last(l) if l.is_none() || l == *label => return Flow::None,
+                            Flow::None => return Flow::None,
+                            other => {
+                                self.set_global_var("@", Value::Str(String::new()));
+                                return other;
+                            }
                         }
                     }
-                } else {
-                    Flow::None
+                    return Flow::None;
                 }
             }
 

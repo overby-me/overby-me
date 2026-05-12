@@ -4015,6 +4015,31 @@ impl Parser {
                 }
             }
 
+            // `last`/`next`/`redo` in expression position — e.g. inside
+            // a C-style for's step (`for(;;last LABEL)`). Wrap as a
+            // DoBlock containing the flow-control stmt so the existing
+            // Stmt handler runs (sets pending_flow). Without this, the
+            // step would be a no-op and the for loop would spin
+            // forever. op/loopctl 16+.
+            Token::Last | Token::Next | Token::Redo => {
+                let which = self.tok().clone();
+                self.pos += 1;
+                let label = if let Token::Ident(name) = self.tok() {
+                    let n = name.clone();
+                    self.pos += 1;
+                    Some(n)
+                } else {
+                    None
+                };
+                let stmt = match which {
+                    Token::Last => Stmt::Last(label),
+                    Token::Next => Stmt::Next(label),
+                    Token::Redo => Stmt::Redo(label),
+                    _ => unreachable!(),
+                };
+                Expr::DoBlock(vec![stmt])
+            }
+
             Token::Local => {
                 // `local $var` / `local @arr` / `local %h` / `local (...)`
                 // in expression position. Wrap each in a `do { local …;
