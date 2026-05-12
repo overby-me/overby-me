@@ -796,6 +796,53 @@ impl Lexer {
 
             let c = self.ch();
 
+            // Check for `format NAME = ... .` at start of statement.
+            // Perl's old report-writing form. We don't implement it;
+            // we just skip past the body so the following statements
+            // parse correctly (comp/decl tests 1-9 use `format` /
+            // `write` for tests 6-8 but we still need the surrounding
+            // structure to parse). Treat the body as inert.
+            if c == 'f'
+                && (tokens.is_empty()
+                    || matches!(tokens.last(), Some(Token::Newline) | Some(Token::Semi)))
+            {
+                let rest: String = self.input[self.pos..].iter().take(7).collect();
+                if rest.starts_with("format ") || rest.starts_with("format\t") {
+                    // Skip the entire `format NAME = ... .\n` block.
+                    // Scan to first newline (end of `format NAME = `
+                    // line), then to a lone `.` line which terminates.
+                    while self.pos < self.input.len() && self.ch() != '\n' {
+                        self.pos += 1;
+                    }
+                    if self.pos < self.input.len() {
+                        self.pos += 1; // consume the \n after `format NAME =`
+                        self.current_line += 1;
+                    }
+                    // Now read lines until we hit one that is exactly `.\n`
+                    // (optionally with trailing whitespace). reference perl
+                    // allows the terminator to have trailing spaces.
+                    loop {
+                        let line_start = self.pos;
+                        let mut line_end = line_start;
+                        while line_end < self.input.len() && self.input[line_end] != '\n' {
+                            line_end += 1;
+                        }
+                        let line: String = self.input[line_start..line_end].iter().collect();
+                        let trimmed = line.trim_end_matches([' ', '\t', '\r']);
+                        let is_terminator = trimmed == ".";
+                        self.pos = line_end;
+                        if self.pos < self.input.len() {
+                            self.pos += 1;
+                            self.current_line += 1;
+                        }
+                        if is_terminator || self.pos >= self.input.len() {
+                            break;
+                        }
+                    }
+                    continue;
+                }
+            }
+
             // Check for POD at start of line
             if c == '='
                 && (tokens.is_empty()
