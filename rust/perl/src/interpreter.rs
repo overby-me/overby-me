@@ -6657,6 +6657,80 @@ impl Interpreter {
                     Value::Undef
                 }
             }
+            "vec" => {
+                // `vec(STR, OFFSET, BITS)` — read N-bit field at OFFSET
+                // (in BITS-unit chunks). `vec(STR, OFFSET, BITS, VAL)`
+                // — write the field (mutates STR in place). Supports
+                // power-of-two BITS up to 32.
+                if args.len() < 3 {
+                    return Value::Undef;
+                }
+                let offset = self.eval_expr(&args[1]).to_num() as i64;
+                let bits = self.eval_expr(&args[2]).to_num() as i64;
+                if offset < 0 || bits <= 0 || !(bits as u64).is_power_of_two() {
+                    return Value::Undef;
+                }
+                let offset = offset as usize;
+                let bits = bits as usize;
+                // Get string bytes.
+                let str_val = self.eval_expr(&args[0]).to_str();
+                let mut bytes = str_val.into_bytes();
+                if args.len() == 4 {
+                    // Write mode: set the field, then assign back.
+                    let val = self.eval_expr(&args[3]).to_num() as u64;
+                    if bits >= 8 {
+                        // Byte-aligned write: BITS=8/16/32 stores
+                        // big-endian into bytes[offset*N/8..].
+                        let byte_off = offset * (bits / 8);
+                        let n_bytes = bits / 8;
+                        while bytes.len() < byte_off + n_bytes {
+                            bytes.push(0);
+                        }
+                        for i in 0..n_bytes {
+                            // Big-endian: high byte first.
+                            let shift = (n_bytes - 1 - i) * 8;
+                            bytes[byte_off + i] = ((val >> shift) & 0xff) as u8;
+                        }
+                    } else {
+                        // Sub-byte: pack bits into byte at offset*BITS/8.
+                        let bit_off = offset * bits;
+                        let byte_idx = bit_off / 8;
+                        let bit_in_byte = bit_off % 8;
+                        while bytes.len() <= byte_idx {
+                            bytes.push(0);
+                        }
+                        let mask = ((1u64 << bits) - 1) as u8;
+                        bytes[byte_idx] = (bytes[byte_idx] & !(mask << bit_in_byte))
+                            | (((val as u8) & mask) << bit_in_byte);
+                    }
+                    // Assign back to STR.
+                    let new_str = String::from_utf8_lossy(&bytes).to_string();
+                    self.assign_to(&args[0], Value::Str(new_str));
+                    return Value::Num(val as f64);
+                }
+                // Read mode.
+                if bits >= 8 {
+                    let byte_off = offset * (bits / 8);
+                    let n_bytes = bits / 8;
+                    if byte_off + n_bytes > bytes.len() {
+                        return Value::Num(0.0);
+                    }
+                    let mut val: u64 = 0;
+                    for i in 0..n_bytes {
+                        val = (val << 8) | (bytes[byte_off + i] as u64);
+                    }
+                    return Value::Num(val as f64);
+                }
+                let bit_off = offset * bits;
+                let byte_idx = bit_off / 8;
+                let bit_in_byte = bit_off % 8;
+                if byte_idx >= bytes.len() {
+                    return Value::Num(0.0);
+                }
+                let mask = ((1u64 << bits) - 1) as u8;
+                let val = (bytes[byte_idx] >> bit_in_byte) & mask;
+                Value::Num(val as f64)
+            }
             "_list_slice" => {
                 // Internal: `(LIST)[i1, i2, ...]` — list slice. Returns
                 // the selected elements; scalar context returns the last.
