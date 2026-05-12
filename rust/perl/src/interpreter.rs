@@ -12855,7 +12855,14 @@ impl Interpreter {
                     // a different error ("Can't return a readonly
                     // value") — detect by looking at the sub's body
                     // (single literal return).
-                    if let Expr::Call(call_name, _) = lvalue_expr
+                    let body_call_name: Option<String> = match lvalue_expr {
+                        Expr::Call(n, _) => Some(n.clone()),
+                        // Parsed bareword in eval STRING context (parser
+                        // didn't know name was a sub at parse time).
+                        Expr::StringLit(s) => Some(s.clone()),
+                        _ => None,
+                    };
+                    if let Some(call_name) = body_call_name.as_ref()
                         && !self.lvalue_subs.contains(call_name)
                         && self.subs.contains_key(call_name)
                     {
