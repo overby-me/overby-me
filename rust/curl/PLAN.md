@@ -6,11 +6,13 @@ Use the upstream [curl test suite](https://github.com/curl/curl/tree/master/test
 
 ## Current Status
 
-**743 tests passing** (was 709 at session start; +12 across multipart, retry, IPv6,
-upload-stdin redirect, write-out, interface, and dump-header fixes) across the
-curl 8.18.0 test suite (verified with strict
-runner checks — the derivation fails when a test number doesn't exist or the
-suite reports anything other than 100% OK).
+**747 tests passing** (was 709 at session start; +38 across multipart, retry, IPv6,
+upload-stdin redirect, write-out, interface, dump-header, per-URL --include /
+--resolve resets, --resolve removal entries, pool routing distinguishing --resolve
+from --connect-to, -F text-field ;filename= / ;type= modifiers, and -o pairing
+with original (pre-glob) URLs) across the curl 8.18.0 test suite (verified with
+strict runner checks — the derivation fails when a test number doesn't exist or
+the suite reports anything other than 100% OK).
 
 The full list is in `default.nix` under `testNums`; see the per-fix bullets
 in "Phase 7" below for what each addition unlocks.
