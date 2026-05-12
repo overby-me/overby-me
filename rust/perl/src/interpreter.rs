@@ -10463,6 +10463,7 @@ impl Interpreter {
             arg_vals.push(self.eval_expr(a));
         }
         let saved_underscore = self.get_array("_");
+        let saved_line = self.current_line;
         self.set_array("_", arg_vals);
         self.current_sub_stack.push(name.to_string());
         for stmt in &body[..body.len() - 1] {
@@ -10480,6 +10481,7 @@ impl Interpreter {
                             let rc = rc.clone();
                             self.current_sub_stack.pop();
                             self.set_array("_", saved_underscore);
+                            self.current_line = saved_line;
                             return Value::ScalarRef(rc);
                         }
                         let old = std::mem::replace(slot, Value::Undef);
@@ -10487,6 +10489,7 @@ impl Interpreter {
                         *slot = Value::Alias(rc.clone());
                         self.current_sub_stack.pop();
                         self.set_array("_", saved_underscore);
+                        self.current_line = saved_line;
                         return Value::ScalarRef(rc);
                     }
                 }
@@ -10503,6 +10506,7 @@ impl Interpreter {
                 if let Value::ScalarRef(rc) = v {
                     self.current_sub_stack.pop();
                     self.set_array("_", saved_underscore);
+                    self.current_line = saved_line;
                     return Value::ScalarRef(rc);
                 }
             }
@@ -10519,6 +10523,7 @@ impl Interpreter {
                         let rc = rc.clone();
                         self.current_sub_stack.pop();
                         self.set_array("_", saved_underscore);
+                        self.current_line = saved_line;
                         return Value::ScalarRef(rc);
                     }
                 }
@@ -10529,6 +10534,7 @@ impl Interpreter {
         };
         self.current_sub_stack.pop();
         self.set_array("_", saved_underscore);
+        self.current_line = saved_line;
         result
     }
 
@@ -12962,6 +12968,7 @@ impl Interpreter {
                     }
                 }
                 let saved_underscore = self.get_array("_");
+                let saved_line = self.current_line;
                 self.set_array("_", arg_vals);
                 self.current_sub_stack.push(name.clone());
                 for stmt in &body[..body.len() - 1] {
@@ -13026,6 +13033,7 @@ impl Interpreter {
                         self.pending_flow = Some(Flow::Die(msg));
                         self.current_sub_stack.pop();
                         self.set_array("_", saved_underscore);
+                        self.current_line = saved_line;
                         return;
                     }
                     // If the body's last expression is a Call to a
@@ -13061,15 +13069,18 @@ impl Interpreter {
                         )));
                         self.current_sub_stack.pop();
                         self.set_array("_", saved_underscore);
+                        self.current_line = saved_line;
                         return;
                     }
                     self.assign_to(lvalue_expr, val);
                     self.current_sub_stack.pop();
                     self.set_array("_", saved_underscore);
+                    self.current_line = saved_line;
                     return;
                 }
                 self.current_sub_stack.pop();
                 self.set_array("_", saved_underscore);
+                self.current_line = saved_line;
                 return;
             }
             // AUTOLOAD lvalue dispatch: if `foobar = X` for an
