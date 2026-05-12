@@ -5235,19 +5235,32 @@ impl Interpreter {
                         let rc = self.promote_hash_slot_to_alias(name, &key_val);
                         Value::ScalarRef(rc)
                     }
-                    // `\&name` — our BitAnd parser emits `Call(name, [])`
-                    // or `Call(name, [_amp_call_inherit_args])` for the
-                    // `&name` half, so `Ref(Call(…))` shows up here.
-                    // Return a CodeRef to the sub, NOT the result of
-                    // calling it — otherwise `*glob = \&runperl` ends
-                    // up invoking `runperl()` at load time.
+                    // `\&name` — our BitAnd parser emits `Call(name,
+                    // [_amp_call_inherit_args])` for `&name`, so
+                    // `Ref(Call(…))` with that sentinel shows up here.
+                    // Return a CodeRef to the sub. `\name` (without
+                    // `&`) is a different beast — it CALLS the sub and
+                    // takes a ref to the returned value, so don't
+                    // match the bare-empty-args form here. op/sub_lval
+                    // (`${\shift}`) needs `\shift` to invoke shift.
                     Expr::Call(name, args)
-                        if args.is_empty()
-                            || (args.len() == 1
-                                && matches!(
-                                    &args[0],
-                                    Expr::Call(n, inner) if n == "_amp_call_inherit_args" && inner.is_empty()
-                                )) =>
+                        if args.len() == 1
+                            && matches!(
+                                &args[0],
+                                Expr::Call(n, inner) if n == "_amp_call_inherit_args" && inner.is_empty()
+                            ) =>
+                    {
+                        Value::CodeRef(name.clone())
+                    }
+                    // `\&name()` (empty parens) — our BitAnd parser
+                    // emits `Call(name, [_amp_call_parens])`. Same
+                    // intent: CodeRef to the sub, no call.
+                    Expr::Call(name, args)
+                        if args.len() == 1
+                            && matches!(
+                                &args[0],
+                                Expr::Call(n, inner) if n == "_amp_call_parens" && inner.is_empty()
+                            ) =>
                     {
                         Value::CodeRef(name.clone())
                     }
@@ -10288,6 +10301,66 @@ impl Interpreter {
     /// `ref()` for `v`. Returns the blessed class name if `v` was
     /// `bless`ed, otherwise the built-in type name ("ARRAY", "HASH", …),
     /// or `""` for non-refs.
+    /// Run an lvalue sub body to extract a ScalarRef to the lvalue
+    /// slot it returns. Used for nested lvalue calls (`id(get_st) = X`):
+    /// `get_st` is itself an lvalue sub returning `$blah`, so we need a
+    /// ref to `$blah`, not its current value.
+    fn lvalue_sub_take_ref(&mut self, name: &str, args: &[Expr]) -> Value {
+        let Some((_p, body)) = self.subs.get(name).cloned() else {
+            return Value::Undef;
+        };
+        if body.is_empty() {
+            return Value::Undef;
+        }
+        let mut arg_vals: Vec<Value> = Vec::new();
+        for a in args.iter() {
+            if let Expr::Call(an, aa) = a
+                && self.lvalue_subs.contains(an)
+            {
+                let r = self.lvalue_sub_take_ref(an, aa);
+                if let Value::ScalarRef(rc) = r {
+                    arg_vals.push(Value::Alias(rc));
+                    continue;
+                }
+                arg_vals.push(r);
+                continue;
+            }
+            arg_vals.push(self.eval_expr(a));
+        }
+        let saved_underscore = self.get_array("_");
+        self.set_array("_", arg_vals);
+        for stmt in &body[..body.len() - 1] {
+            self.exec_stmt(stmt);
+        }
+        let result = if let Stmt::Expr(lvalue_expr) = &body[body.len() - 1] {
+            // Promote lexical scalars to Value::Alias(rc) in-place so
+            // the returned ScalarRef shares storage with the lexical's
+            // slot. Without this, `\$lex` makes a fresh copy and
+            // writes through the ref never reach the original lex.
+            if let Expr::ScalarVar(n) = lvalue_expr {
+                for scope in self.scopes.iter_mut().rev() {
+                    if let Some(slot) = scope.vars.get_mut(n) {
+                        if let Value::Alias(rc) = slot {
+                            let rc = rc.clone();
+                            self.set_array("_", saved_underscore);
+                            return Value::ScalarRef(rc);
+                        }
+                        let old = std::mem::replace(slot, Value::Undef);
+                        let rc = std::rc::Rc::new(std::cell::RefCell::new(old));
+                        *slot = Value::Alias(rc.clone());
+                        self.set_array("_", saved_underscore);
+                        return Value::ScalarRef(rc);
+                    }
+                }
+            }
+            self.eval_expr(&Expr::Ref(Box::new(lvalue_expr.clone())))
+        } else {
+            Value::Undef
+        };
+        self.set_array("_", saved_underscore);
+        result
+    }
+
     /// Index into a value (treated as a ref) by a subscript expression
     /// captured as text. Used by regex pattern interp for
     /// `${EXPR}{KEY}` / `${EXPR}[IDX]` after EXPR is evaluated.
@@ -12531,7 +12604,6 @@ impl Interpreter {
             if self.lvalue_subs.contains(name)
                 && let Some((_params, body)) = self.subs.get(name).cloned()
             {
-                let _ = args; // arg evaluation deferred — args unused for simple cases
                 if body.is_empty() || matches!(body.last(), Some(Stmt::Return(_))) {
                     // `sub lv0 : lvalue { }` and `sub rlv0 : lvalue { return }`
                     // — empty / no-value return. Reference perl emits
@@ -12547,12 +12619,40 @@ impl Interpreter {
                     )));
                     return;
                 }
+                // Build @_ for the call. If an arg is itself an lvalue
+                // sub call, evaluate it to a ScalarRef of the lvalue's
+                // backing slot and pass that through as a Value::Alias
+                // so `shift`/`$_[i]` inside the body deref the original
+                // (op/sub_lval `id(get_st) = 10` → $blah = 10).
+                let mut arg_vals: Vec<Value> = Vec::new();
+                for a in args.iter() {
+                    if let Expr::Call(an, aa) = a
+                        && self.lvalue_subs.contains(an)
+                    {
+                        let r = self.lvalue_sub_take_ref(an, aa);
+                        if let Value::ScalarRef(rc) = r {
+                            arg_vals.push(Value::Alias(rc));
+                            continue;
+                        }
+                        arg_vals.push(r);
+                        continue;
+                    }
+                    arg_vals.push(self.eval_expr(a));
+                }
+                let saved_underscore = self.get_array("_");
+                self.set_array("_", arg_vals);
+                self.current_sub_stack.push(name.clone());
                 for stmt in &body[..body.len() - 1] {
                     self.exec_stmt(stmt);
                 }
                 if let Stmt::Expr(lvalue_expr) = &body[body.len() - 1] {
-                    return self.assign_to(lvalue_expr, val);
+                    self.assign_to(lvalue_expr, val);
+                    self.current_sub_stack.pop();
+                    self.set_array("_", saved_underscore);
+                    return;
                 }
+                self.current_sub_stack.pop();
+                self.set_array("_", saved_underscore);
                 return;
             }
             // `nolv = …` where `nolv` is a known non-lvalue sub —

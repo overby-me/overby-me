@@ -4781,9 +4781,8 @@ fn parse_interp_string(s: &str) -> Expr {
                                 let idx_toks = idx_lex.tokenize();
                                 let idx_tl = std::mem::take(&mut idx_lex.token_lines);
                                 let idx_files = std::mem::take(&mut idx_lex.file_overrides);
-                                let mut idx_p = Parser::new_with_lines_and_files(
-                                    idx_toks, idx_tl, idx_files,
-                                );
+                                let mut idx_p =
+                                    Parser::new_with_lines_and_files(idx_toks, idx_tl, idx_files);
                                 let idx_expr = idx_p.parse_expr();
                                 let kind = if open == '[' {
                                     ArrowKind::Array
