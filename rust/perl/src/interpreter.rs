@@ -1299,9 +1299,14 @@ impl Interpreter {
                 self.push_scope();
                 let mut result = Flow::None;
                 let mut redo_pending = false;
+                let mut last_cond_val: Value = Value::Undef;
+                let mut exited_via_last = false;
                 loop {
-                    if !redo_pending && !self.eval_expr(cond).to_bool() {
-                        break;
+                    if !redo_pending {
+                        last_cond_val = self.eval_expr(cond);
+                        if !last_cond_val.to_bool() {
+                            break;
+                        }
                     }
                     redo_pending = false;
                     // Body and continue block run in separate lexical
@@ -1311,7 +1316,10 @@ impl Interpreter {
                     let flow = self.exec_stmts(body);
                     self.pop_scope();
                     let ran_continue = match flow {
-                        Flow::Last(l) if l.is_none() || l == *label => break,
+                        Flow::Last(l) if l.is_none() || l == *label => {
+                            exited_via_last = true;
+                            break;
+                        }
                         Flow::Last(l) => {
                             result = Flow::Last(l);
                             break;
@@ -1350,7 +1358,10 @@ impl Interpreter {
                     if ran_continue {
                         if let Some(cont) = continue_body {
                             match self.exec_stmts(cont) {
-                                Flow::Last(l) if l.is_none() || l == *label => break,
+                                Flow::Last(l) if l.is_none() || l == *label => {
+                                    exited_via_last = true;
+                                    break;
+                                }
                                 Flow::Return(v) => {
                                     result = Flow::Return(v);
                                     break;
@@ -1369,6 +1380,17 @@ impl Interpreter {
                     }
                 }
                 self.pop_scope();
+                // While in scalar context: natural exit returns the
+                // last cond value (the falsy one). A `last` exit
+                // (with no label or a matching label) returns undef.
+                // op/while.
+                if matches!(result, Flow::None) {
+                    self.last_expr_val = if exited_via_last {
+                        Value::Undef
+                    } else {
+                        last_cond_val
+                    };
+                }
                 result
             }
 

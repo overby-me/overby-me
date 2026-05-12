@@ -1953,21 +1953,18 @@ impl Parser {
             // resolves to one (produced by our chained-comparison rewrite).
             fn contains_relational(e: &Expr) -> bool {
                 match e {
-                    Expr::BinOp(o, _, _)
-                        if matches!(
-                            o,
-                            BinOp::NumLt
-                                | BinOp::NumGt
-                                | BinOp::NumLe
-                                | BinOp::NumGe
-                                | BinOp::StrLt
-                                | BinOp::StrGt
-                                | BinOp::StrLe
-                                | BinOp::StrGe,
-                        ) =>
-                    {
-                        true
-                    }
+                    Expr::BinOp(
+                        BinOp::NumLt
+                        | BinOp::NumGt
+                        | BinOp::NumLe
+                        | BinOp::NumGe
+                        | BinOp::StrLt
+                        | BinOp::StrGt
+                        | BinOp::StrLe
+                        | BinOp::StrGe,
+                        _,
+                        _,
+                    ) => true,
                     Expr::BinOp(BinOp::LogAnd, l, r) => {
                         contains_relational(l) || contains_relational(r)
                     }
@@ -1977,14 +1974,11 @@ impl Parser {
             // Likewise for eq-class chains rewritten to LogAnd.
             fn contains_eqop(e: &Expr) -> bool {
                 match e {
-                    Expr::BinOp(o, _, _)
-                        if matches!(
-                            o,
-                            BinOp::NumEq | BinOp::NumNe | BinOp::StrEq | BinOp::StrNe
-                        ) =>
-                    {
-                        true
-                    }
+                    Expr::BinOp(
+                        BinOp::NumEq | BinOp::NumNe | BinOp::StrEq | BinOp::StrNe,
+                        _,
+                        _,
+                    ) => true,
                     Expr::BinOp(BinOp::LogAnd, l, r) => contains_eqop(l) || contains_eqop(r),
                     _ => false,
                 }
