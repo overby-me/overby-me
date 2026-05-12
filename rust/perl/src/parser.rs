@@ -4234,39 +4234,47 @@ impl Parser {
                         .chars()
                         .next()
                         .is_some_and(|c| c.is_ascii_lowercase() || c == '_')
-                    && let Token::Ident(class) = self.tok().clone()
-                    && !class.starts_with('-')
-                    && class != "::"
-                    && class.chars().next().is_some_and(|c| c.is_ascii_uppercase())
                 {
-                    // Indirect method-call: a lowercase bareword
-                    // followed by an Uppercase class-shaped bareword.
-                    //   method Class(args)   → Class->method(args)
-                    //   method Class args    → Class->method(args)
-                    //   method Class         → Class->method
-                    // The case-based heuristic avoids breaking
-                    // `func args` (lowercase second word) and is what
-                    // reference perl's parser does for the legacy
-                    // indirect-object syntax. op/method tests 2-22.
-                    self.pos += 1; // consume class ident
-                    let args = if self.eat(&Token::LParen) {
-                        let a = self.parse_list_expr();
-                        self.expect(&Token::RParen);
-                        a
-                    } else if matches!(
-                        self.tok(),
-                        Token::Semi
-                            | Token::EOF
-                            | Token::RParen
-                            | Token::RBrace
-                            | Token::RBracket
-                            | Token::Comma
-                    ) {
-                        Vec::new()
-                    } else {
-                        self.parse_list_expr()
+                    // Indirect method-call: lowercase bareword followed by
+                    //   * Uppercase class-shaped bareword: `method Class …`
+                    //   * Scalar variable:                 `method $obj …`
+                    // Both then accept args with or without parens.
+                    // op/method indirect-syntax tests 2-22, 25-26.
+                    let recv: Option<Expr> = match self.tok().clone() {
+                        Token::Ident(class)
+                            if !class.starts_with('-')
+                                && class != "::"
+                                && class.chars().next().is_some_and(|c| c.is_ascii_uppercase()) =>
+                        {
+                            self.pos += 1;
+                            Some(Expr::StringLit(class))
+                        }
+                        Token::ScalarVar(v) => {
+                            self.pos += 1;
+                            Some(Expr::ScalarVar(v))
+                        }
+                        _ => None,
                     };
-                    return Expr::MethodCall(Box::new(Expr::StringLit(class)), name, args);
+                    if let Some(recv) = recv {
+                        let args = if self.eat(&Token::LParen) {
+                            let a = self.parse_list_expr();
+                            self.expect(&Token::RParen);
+                            a
+                        } else if matches!(
+                            self.tok(),
+                            Token::Semi
+                                | Token::EOF
+                                | Token::RParen
+                                | Token::RBrace
+                                | Token::RBracket
+                                | Token::Comma
+                        ) {
+                            Vec::new()
+                        } else {
+                            self.parse_list_expr()
+                        };
+                        return Expr::MethodCall(Box::new(recv), name, args);
+                    }
                 }
 
                 // `::name` — explicit top-level / `main::name` reference.
@@ -4827,6 +4835,38 @@ fn is_method_name_excluded(name: &str) -> bool {
             | "format"
             | "write"
             | "lock"
+            // Common test.pl helpers — `is $a, $b` must NOT parse as
+            // `$a->is($b)`.
+            | "is"
+            | "isnt"
+            | "like"
+            | "unlike"
+            | "cmp_ok"
+            | "isa_ok"
+            | "object_ok"
+            | "can_ok"
+            | "class_ok"
+            | "ok"
+            | "pass"
+            | "fail"
+            | "diag"
+            | "note"
+            | "plan"
+            | "skip"
+            | "todo"
+            | "todo_skip"
+            | "skip_all"
+            | "eq_array"
+            | "eq_hash"
+            | "eq_set"
+            | "warning_is"
+            | "warning_like"
+            | "warnings_like"
+            | "fresh_perl"
+            | "fresh_perl_is"
+            | "fresh_perl_like"
+            | "runperl"
+            | "which_perl"
     )
 }
 
