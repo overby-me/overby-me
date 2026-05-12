@@ -166,6 +166,9 @@ pub struct ParsedUrl {
     pub(crate) raw: String,
     /// "user:pass" extracted from "scheme://user:pass@host".
     pub(crate) userinfo: Option<String>,
+    /// Fragment component (`#...`) — never sent on the wire but exposed
+    /// via `-w %{url.fragment}` / `%{urle.fragment}`.
+    pub(crate) fragment: Option<String>,
 }
 
 pub fn parse_url(raw: &str) -> Result<ParsedUrl, String> {
@@ -212,8 +215,12 @@ pub fn parse_url(raw: &str) -> Result<ParsedUrl, String> {
         _ => return Err(format!("unsupported scheme: {scheme}")),
     };
 
-    // Strip fragment — it's never sent to the server.
-    let rest = rest.split('#').next().unwrap_or(rest);
+    // Strip fragment from the wire-bound path but remember it for `-w
+    // %{url.fragment}` (test 423).
+    let (rest, fragment) = match rest.split_once('#') {
+        Some((path, frag)) => (path, Some(frag.to_string())),
+        None => (rest, None),
+    };
 
     // Tolerate one extra leading slash after the scheme separator
     // (slashes between scheme and authority); two or more extra leading
@@ -331,6 +338,7 @@ pub fn parse_url(raw: &str) -> Result<ParsedUrl, String> {
         path: path.to_string(),
         raw: url,
         userinfo,
+        fragment,
     })
 }
 

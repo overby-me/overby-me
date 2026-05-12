@@ -135,7 +135,7 @@
             -c "${rust-curl-dev}/bin/curl" \
             -n \
             -a \
-            200 to 500 \
+            1100 to 1300 \
             2>&1 | ${coreutils}/bin/tee "$TMPDIR/results.txt" || true
 
           ${coreutils}/bin/mkdir -p $out

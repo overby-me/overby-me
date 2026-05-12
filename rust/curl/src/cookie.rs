@@ -373,6 +373,7 @@ pub(crate) fn load_cookies_from_file(
             path: "/".to_string(),
             raw: String::new(),
             userinfo: None,
+            fragment: None,
         };
         for header_line in contents.split('\n') {
             let header_line = header_line.trim_end_matches('\r');

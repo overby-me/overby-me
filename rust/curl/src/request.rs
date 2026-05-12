@@ -743,6 +743,7 @@ fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options)
                             path: "/".to_string(), // file-loaded cookies default to path "/"
                             raw: String::new(),
                             userinfo: None,
+                            fragment: None,
                         };
                         if let Some(nline) =
                             crate::cookie::format_cookie_line(cookie_str, &fake_url, &request_host)

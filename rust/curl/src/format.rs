@@ -99,7 +99,7 @@ pub(crate) fn format_write_out(
         .unwrap_or((url.path.clone(), String::new()));
     result = result.replace("%{url.path}", &path_only);
     result = result.replace("%{url.query}", &query);
-    result = result.replace("%{url.fragment}", "");
+    result = result.replace("%{url.fragment}", url.fragment.as_deref().unwrap_or(""));
     let (u, p) = match url.userinfo.as_deref() {
         Some(ui) => ui.split_once(':').unwrap_or((ui, "")),
         None => ("", ""),
@@ -124,12 +124,22 @@ pub(crate) fn format_write_out(
             .unwrap_or((eu.path.clone(), String::new()));
         result = result.replace("%{urle.path}", &ep);
         result = result.replace("%{urle.query}", &eq);
+        result = result.replace("%{urle.fragment}", eu.fragment.as_deref().unwrap_or(""));
+        let (eu_user, eu_pw) = match eu.userinfo.as_deref() {
+            Some(ui) => ui.split_once(':').unwrap_or((ui, "")),
+            None => ("", ""),
+        };
+        result = result.replace("%{urle.user}", eu_user);
+        result = result.replace("%{urle.password}", eu_pw);
     } else {
         result = result.replace("%{urle.scheme}", &url.scheme);
         result = result.replace("%{urle.host}", &url.host);
         result = result.replace("%{urle.port}", &url.port.to_string());
         result = result.replace("%{urle.path}", &path_only);
         result = result.replace("%{urle.query}", &query);
+        result = result.replace("%{urle.fragment}", url.fragment.as_deref().unwrap_or(""));
+        result = result.replace("%{urle.user}", u);
+        result = result.replace("%{urle.password}", p);
     }
     // %{header_json} — JSON object mapping header name → array of values.
     // Same-named headers (e.g. multiple Set-Cookie) are accumulated into a list.
