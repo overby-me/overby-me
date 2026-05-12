@@ -4219,6 +4219,37 @@ impl Parser {
                 let mut name = name.clone();
                 self.pos += 1;
 
+                // Indirect method-call syntax: `method Class(args)` →
+                // `Class->method(args)`. Only fire for the
+                // explicit-parens form to avoid breaking the common
+                // `func arg1, arg2` list-op pattern. The receiver must
+                // be a class-shaped bareword (alpha first char), and
+                // the method name must not be a list-op/builtin
+                // (excluded by is_method_name_excluded). op/method
+                // indirect tests.
+                if !is_method_name_excluded(&name)
+                    && name != "::"
+                    && !name.starts_with('-')
+                    && name
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
+                    && let Token::Ident(class) = self.tok().clone()
+                    && !class.starts_with('-')
+                    && class != "::"
+                    && class
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
+                    && matches!(self.tokens.get(self.pos + 1), Some(Token::LParen))
+                {
+                    self.pos += 1; // consume class ident
+                    self.pos += 1; // consume LParen
+                    let args = self.parse_list_expr();
+                    self.expect(&Token::RParen);
+                    return Expr::MethodCall(Box::new(Expr::StringLit(class)), name, args);
+                }
+
                 // `::name` — explicit top-level / `main::name` reference.
                 // The lexer emitted `Ident("::")` + `Ident("name")`; stitch
                 // them into the full qualified name here so call resolution
@@ -4647,6 +4678,137 @@ fn parse_index_expr(s: &str) -> Expr {
         return Expr::ScalarVar(v.to_string());
     }
     Expr::StringLit(s.to_string())
+}
+
+/// Names that should NOT trigger indirect method-call parsing even
+/// when followed by another bareword. These are commonly-used
+/// builtins/list operators where `name BAREWORD ...` is the regular
+/// list-op syntax, not an indirect method call.
+fn is_method_name_excluded(name: &str) -> bool {
+    matches!(
+        name,
+        "print"
+            | "printf"
+            | "say"
+            | "die"
+            | "warn"
+            | "return"
+            | "do"
+            | "eval"
+            | "require"
+            | "use"
+            | "no"
+            | "my"
+            | "our"
+            | "local"
+            | "state"
+            | "if"
+            | "unless"
+            | "while"
+            | "until"
+            | "for"
+            | "foreach"
+            | "sub"
+            | "package"
+            | "BEGIN"
+            | "END"
+            | "CHECK"
+            | "INIT"
+            | "and"
+            | "or"
+            | "not"
+            | "xor"
+            | "defined"
+            | "exists"
+            | "delete"
+            | "ref"
+            | "bless"
+            | "scalar"
+            | "wantarray"
+            | "caller"
+            | "open"
+            | "close"
+            | "read"
+            | "binmode"
+            | "split"
+            | "join"
+            | "map"
+            | "grep"
+            | "sort"
+            | "reverse"
+            | "push"
+            | "pop"
+            | "shift"
+            | "unshift"
+            | "splice"
+            | "keys"
+            | "values"
+            | "each"
+            | "substr"
+            | "index"
+            | "rindex"
+            | "length"
+            | "lc"
+            | "uc"
+            | "lcfirst"
+            | "ucfirst"
+            | "chr"
+            | "ord"
+            | "hex"
+            | "oct"
+            | "abs"
+            | "int"
+            | "sqrt"
+            | "rand"
+            | "srand"
+            | "time"
+            | "times"
+            | "sprintf"
+            | "chomp"
+            | "chop"
+            | "chown"
+            | "chmod"
+            | "exit"
+            | "fork"
+            | "wait"
+            | "waitpid"
+            | "system"
+            | "exec"
+            | "kill"
+            | "sleep"
+            | "tie"
+            | "untie"
+            | "tied"
+            | "pos"
+            | "study"
+            | "select"
+            | "fileno"
+            | "tell"
+            | "seek"
+            | "eof"
+            | "unlink"
+            | "rename"
+            | "mkdir"
+            | "rmdir"
+            | "chdir"
+            | "stat"
+            | "lstat"
+            | "glob"
+            | "readdir"
+            | "opendir"
+            | "closedir"
+            | "qw"
+            | "qr"
+            | "q"
+            | "qq"
+            | "qx"
+            | "pack"
+            | "unpack"
+            | "vec"
+            | "format"
+            | "write"
+            | "lock"
+    )
 }
 
 fn wrap_iter_cond_with_defined(cond: Expr) -> Expr {
