@@ -1656,10 +1656,18 @@ impl Interpreter {
                     // with the same iterator value, so skip re-assignment.
                     if !redo_pending {
                         let item = items[i].clone();
+                        // Wrap as Value::Alias so `\$_ == \$_` inside the
+                        // body refer to the same Rc (perl #78194 — foreach
+                        // aliasing op return values). If item is already an
+                        // Alias (from map/grep slot promotion), reuse it.
+                        let aliased = match item {
+                            Value::Alias(rc) => Value::Alias(rc),
+                            other => Value::Alias(std::rc::Rc::new(std::cell::RefCell::new(other))),
+                        };
                         if let Some(scope) = self.scopes.last_mut() {
-                            scope.vars.insert(var.clone(), item);
+                            scope.vars.insert(var.clone(), aliased);
                         } else {
-                            self.globals.vars.insert(var.clone(), item);
+                            self.globals.vars.insert(var.clone(), aliased);
                         }
                     }
                     redo_pending = false;
@@ -5135,6 +5143,14 @@ impl Interpreter {
                         // ref that should see later assignments to BAR).
                         for scope in self.scopes.iter().rev() {
                             if let Some(v) = scope.vars.get(name) {
+                                // If the slot holds a `Value::Alias(rc)`
+                                // (set up by foreach/map/grep for $_
+                                // aliasing), return a ScalarRef sharing
+                                // that Rc so two `\$_` reads inside the
+                                // same iteration are address-equal.
+                                if let Value::Alias(rc) = v {
+                                    return Value::ScalarRef(rc.clone());
+                                }
                                 return Value::ScalarRef(std::rc::Rc::new(
                                     std::cell::RefCell::new(v.clone()),
                                 ));
