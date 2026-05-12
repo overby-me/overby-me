@@ -1102,6 +1102,21 @@ fn absorb_response_cookies(opts: &mut Options, resp: &Response, url: &ParsedUrl)
             let new_dom = fields[0].strip_prefix("#HttpOnly_").unwrap_or(fields[0]);
             let np = fields[2];
             let nn = fields[5];
+            // Per RFC 6265bis §5.5 step 12.4: a non-secure source cannot
+            // override an existing secure-flagged cookie (test 414, with
+            // curl's broader name-only match — applies even when the host-
+            // only-flag differs).
+            let new_secure = fields[3].eq_ignore_ascii_case("TRUE");
+            let from_https = url.scheme == "https";
+            if !from_https && !new_secure {
+                let blocked = opts.memory_cookies.iter().any(|existing| {
+                    let ef: Vec<&str> = existing.split('\t').collect();
+                    ef.len() >= 7 && ef[5] == nn && ef[3].eq_ignore_ascii_case("TRUE")
+                });
+                if blocked {
+                    continue;
+                }
+            }
             opts.memory_cookies.retain(|existing| {
                 let ef: Vec<&str> = existing.split('\t').collect();
                 if ef.len() >= 7 {
@@ -1989,6 +2004,21 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                         let new_dom = fields[0].strip_prefix("#HttpOnly_").unwrap_or(fields[0]);
                         let np = fields[2];
                         let nn = fields[5];
+                        // Secure-cookie protection: a non-secure source cannot
+                        // shadow an existing secure cookie with the same name
+                        // (test 414, RFC 6265bis §5.5.12.4 with curl's broader
+                        // name-only match).
+                        let new_secure = fields[3].eq_ignore_ascii_case("TRUE");
+                        let from_https = url.scheme == "https";
+                        if !from_https && !new_secure {
+                            let blocked = opts.memory_cookies.iter().any(|existing| {
+                                let ef: Vec<&str> = existing.split('\t').collect();
+                                ef.len() >= 7 && ef[5] == nn && ef[3].eq_ignore_ascii_case("TRUE")
+                            });
+                            if blocked {
+                                continue;
+                            }
+                        }
                         opts.memory_cookies.retain(|existing| {
                             let ef: Vec<&str> = existing.split('\t').collect();
                             if ef.len() >= 7 {

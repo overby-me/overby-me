@@ -422,12 +422,25 @@ pub(crate) fn save_cookie_jar(
     // they remove matching entries and are NOT themselves kept. Drops new
     // cookies that would push the per-domain count over 50 (matches curl's
     // CMAX_COOKIES_PER_DOMAIN — test 444).
-    let mut add_cookie = |cookie: Cookie| {
+    // `from_http` is true when the cookie was received over an insecure
+    // scheme: per RFC 6265bis §5.5 step 12.4, a non-secure source cannot
+    // override an existing secure-flagged cookie of the same name (test 414).
+    let mut add_cookie = |cookie: Cookie, from_http: bool| {
         let domain_key = cookie
             .domain
             .strip_prefix("#HttpOnly_")
             .unwrap_or(&cookie.domain)
             .to_string();
+        if from_http
+            && !cookie.secure
+            && let Some(existing) = cookies.iter().find(|c| {
+                let d = c.domain.strip_prefix("#HttpOnly_").unwrap_or(&c.domain);
+                d == domain_key && c.path == cookie.path && c.name == cookie.name
+            })
+            && existing.secure
+        {
+            return;
+        }
         let mut replaced = false;
         cookies.retain(|c| {
             let d = c.domain.strip_prefix("#HttpOnly_").unwrap_or(&c.domain);
@@ -464,23 +477,24 @@ pub(crate) fn save_cookie_jar(
         let file_cookies =
             load_cookies_from_file(arg, request_host, &url.path, url.scheme == "https");
         for c in file_cookies {
-            add_cookie(c);
+            add_cookie(c, false);
         }
     }
 
     // Phase 2: Load memory cookies (Netscape-format lines from prior responses).
     for line in memory_cookies {
         if let Some(cookie) = Cookie::from_jar_line(line) {
-            add_cookie(cookie);
+            add_cookie(cookie, false);
         }
     }
 
     // Phase 3: Parse Set-Cookie headers from the current response.
+    let from_http = url.scheme != "https";
     for (key, value) in response_headers {
         if key.eq_ignore_ascii_case("set-cookie")
             && let Some(cookie) = parse_set_cookie(value, url, request_host)
         {
-            add_cookie(cookie);
+            add_cookie(cookie, from_http);
         }
     }
 
