@@ -17392,6 +17392,14 @@ fn is_internal_lvalue_helper(name: &str) -> bool {
             // a Value::Alias (op/sub_lval lv2t).
             | "shift"
             | "pop"
+            // Builtins that are also lvalues in Perl: substr, vec, pos,
+            // keys (op/sub_lval sstr, veclv, position).
+            | "substr"
+            | "vec"
+            | "pos"
+            | "keys"
+            // `local` returns the localized lvalue.
+            | "local"
     )
 }
 
