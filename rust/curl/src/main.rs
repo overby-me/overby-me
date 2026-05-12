@@ -1786,6 +1786,8 @@ fn main() {
                     exit_code = 47; // Too many redirects
                 } else if e.contains("weird_server_reply") {
                     exit_code = 8; // Weird server reply
+                } else if e.starts_with("recv_error") {
+                    exit_code = 56; // CURLE_RECV_ERROR — connection reset mid-read (test 1244)
                 } else if e.contains("empty reply")
                     || e.contains("failed to read status line")
                     || e.contains("malformed status line")

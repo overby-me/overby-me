@@ -88,9 +88,20 @@ pub(crate) fn read_response(
     let status_line;
     loop {
         let mut line = String::new();
-        let n = reader
-            .read_line(&mut line)
-            .map_err(|e| format!("failed to read status line: {e}"))?;
+        let n = match reader.read_line(&mut line) {
+            Ok(n) => n,
+            Err(e) => {
+                // Distinguish connection-level recv errors (reset / aborted /
+                // BrokenPipe) from a clean EOF: curl maps the former to
+                // CURLE_RECV_ERROR (exit 56) and the latter to
+                // CURLE_GOT_NOTHING (exit 52, test 1244).
+                use std::io::ErrorKind::*;
+                if matches!(e.kind(), ConnectionReset | ConnectionAborted | BrokenPipe) {
+                    return Err(format!("recv_error: {e}"));
+                }
+                return Err(format!("failed to read status line: {e}"));
+            }
+        };
         if n == 0 {
             if !header_bytes.is_empty() {
                 // We consumed a 1xx interim response but got no final response.
