@@ -3624,6 +3624,15 @@ impl Parser {
                         self.pos += 1;
                     }
                 }
+                // Anonymous `sub` requires a body block — `{ $x = sub }`
+                // is a syntax error in reference perl (op/anonsub 3).
+                if !self.at(&Token::LBrace) {
+                    let line = self.current_line();
+                    self.error = Some(format!(
+                        "Illegal declaration of anonymous subroutine at {{FILE}} line {line}.\n"
+                    ));
+                    return Expr::Undef;
+                }
                 let body = self.parse_brace_block();
                 Expr::AnonSub(Vec::new(), body)
             }
