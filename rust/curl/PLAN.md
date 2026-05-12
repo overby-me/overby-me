@@ -6,7 +6,9 @@ Use the upstream [curl test suite](https://github.com/curl/curl/tree/master/test
 
 ## Current Status
 
-**721 tests passing** across the curl 8.19.0 test suite (verified with strict
+**721 tests passing** (was 709 at session start; +12 across multipart, retry, IPv6,
+upload-stdin redirect, write-out, interface, and dump-header fixes) across the
+curl 8.19.0 test suite (verified with strict
 runner checks — the derivation fails when a test number doesn't exist or the
 suite reports anything other than 100% OK).
 
@@ -393,6 +395,8 @@ Current gaps:
 - [x] Chunked body honors `--max-filesize`: truncate body to the limit, exit 63 (unlocked test 457)
 - [x] `-T file` validates the upload source exists before connecting; missing file maps to exit 26 (unlocked test 496)
 - [x] `-Z` / `--parallel` / `--parallel-immediate` / `--parallel-max` accepted as no-ops so dependent option parsing reaches the rest of the command line
+- [x] `--retry` with `--include`: drop the failed-attempt prefix when the final attempt succeeds (no `--fail` / `--fail-with-body`) so a clean 200 doesn't carry the failed body (test 198)
+- [x] Track URL fragment through `parse_url`; expose `%{url.fragment}`, `%{urle.fragment}`, `%{urle.user}`, `%{urle.password}` in `--write-out`
 - [ ] Target 750+ passing by addressing remaining feature gaps
 
 ---
