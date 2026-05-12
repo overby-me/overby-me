@@ -3993,6 +3993,17 @@ impl Parser {
                     // with errors trapped into $@. Wrap in a Call so the
                     // interpreter can handle the trap semantics.
                     Expr::Call("eval".to_string(), vec![Expr::DoBlock(body)])
+                } else if self.at(&Token::LParen) {
+                    // `eval(EXPR)` — parenthesized form; the arg list
+                    // ends at the matching `)`. Avoid letting an outer
+                    // operator (`.`, etc.) bleed into the arg, which
+                    // would happen if we used `parse_additive` here:
+                    // `eval("x") . "y"` must NOT be `eval("x" . "y")`.
+                    // comp/package_block depends on this.
+                    self.pos += 1;
+                    let args = self.parse_list_expr();
+                    self.expect(&Token::RParen);
+                    Expr::Call("eval".to_string(), args)
                 } else {
                     // `eval EXPR` is a named-unary op: its arg includes
                     // `.` (concat) and arithmetic operators but NOT
