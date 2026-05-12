@@ -10596,8 +10596,11 @@ impl Interpreter {
         }
 
         let result = return_val.unwrap_or_else(|| self.last_expr_val.clone());
+        // Preserve the body's last_list_val so callers in list context
+        // see the full returned list (e.g. `my @r = $obj->method()` for
+        // a method that does `return %hash`). Only restore last_expr_val.
         self.last_expr_val = saved_last;
-        self.last_list_val = saved_list;
+        let _ = saved_list;
         self.pop_scope();
         self.exit_file_scope(pushed_origin);
         self.exit_named_sub_scope(stashed_scopes);
