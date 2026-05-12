@@ -115,6 +115,14 @@ pub struct Interpreter {
     /// value is the persistent slot — populated on first call's
     /// initialization, then reused across calls. op/state.
     state_vars: HashMap<(String, String), std::rc::Rc<std::cell::RefCell<Value>>>,
+    /// Per-sub `state @a` storage. Same scheme as state_vars but for
+    /// arrays. op/state arrays.
+    state_arrays: HashMap<(String, String), std::rc::Rc<std::cell::RefCell<Vec<Value>>>>,
+    /// Per-sub `state %h` storage. Same scheme for hashes.
+    state_hashes: HashMap<
+        (String, String),
+        std::rc::Rc<std::cell::RefCell<HashMap<String, Value>>>,
+    >,
     /// Tracks which (sub_name, var_name) state slots have already
     /// been initialized so the init expression doesn't run twice.
     state_initialized: std::collections::HashSet<(String, String)>,
@@ -619,6 +627,8 @@ impl Interpreter {
             blessed_refs: HashMap::new(),
             blessed_coderefs: HashMap::new(),
             state_vars: HashMap::new(),
+            state_arrays: HashMap::new(),
+            state_hashes: HashMap::new(),
             state_initialized: std::collections::HashSet::new(),
             overload_handlers: HashMap::new(),
             pending_die_value: None,
