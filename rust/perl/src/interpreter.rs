@@ -13033,12 +13033,23 @@ impl Interpreter {
                     // lvalue helper) that returns a temporary, the
                     // returned value isn't a writable slot — die
                     // "Can't return a temporary from lvalue subroutine"
-                    // (op/sub_lval 39-41).
-                    if let Expr::Call(call_name, _) = lvalue_expr
-                        && !self.lvalue_subs.contains(call_name)
-                        && !self.subs.contains_key(call_name)
-                        && !is_internal_lvalue_helper(call_name)
-                    {
+                    // (op/sub_lval 39-41). Also fire for short-circuit
+                    // ops `||`/`//` whose result is a scalarized
+                    // temporary (op/sub_lval 42).
+                    let temp_via_binop = matches!(
+                        lvalue_expr,
+                        Expr::BinOp(BinOp::LogOr, _, _)
+                            | Expr::BinOp(BinOp::DefOr, _, _)
+                            | Expr::BinOp(BinOp::LogAnd, _, _)
+                    );
+                    let temp_via_call = if let Expr::Call(call_name, _) = lvalue_expr {
+                        !self.lvalue_subs.contains(call_name)
+                            && !self.subs.contains_key(call_name)
+                            && !is_internal_lvalue_helper(call_name)
+                    } else {
+                        false
+                    };
+                    if temp_via_call || temp_via_binop {
                         let file = if self.current_file.is_empty() {
                             "-e".to_string()
                         } else {
