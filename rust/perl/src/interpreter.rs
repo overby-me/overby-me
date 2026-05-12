@@ -3905,11 +3905,24 @@ impl Interpreter {
                         // For lvalue subs whose body returns an array
                         // or hash (op/sub_lval `(array()) = qw(...)`),
                         // also slurp.
+                        // Inside eval STRING, the parser doesn't know
+                        // a bareword names a sub, so it emits StringLit.
+                        // Resolve target_name from either Call or
+                        // StringLit and look up the sub.
+                        let target_name = match t {
+                            Expr::Call(n, _) => Some(n.clone()),
+                            Expr::StringLit(s) => Some(s.clone()),
+                            _ => None,
+                        };
                         let slurp_kind: Option<&'static str> = match t {
                             Expr::ArrayVar(_) => Some("@"),
                             Expr::HashVar(_) => Some("%"),
-                            Expr::Call(call_name, _) if self.lvalue_subs.contains(call_name) => {
-                                self.subs.get(call_name).and_then(|(_, body)| {
+                            _ if target_name
+                                .as_ref()
+                                .is_some_and(|n| self.lvalue_subs.contains(n)) =>
+                            {
+                                let n = target_name.clone().unwrap();
+                                self.subs.get(&n).and_then(|(_, body)| {
                                     let last =
                                         body.iter().rev().find(|s| !matches!(s, Stmt::LineMark(_)));
                                     match last {
@@ -3942,7 +3955,8 @@ impl Interpreter {
                                 idx = items.len();
                                 self.set_hash_from_list(name, rest);
                             }
-                            (Expr::Call(call_name, _), Some(kind)) => {
+                            (_, Some(kind)) if target_name.is_some() => {
+                                let call_name = target_name.as_ref().unwrap().clone();
                                 let rest: Vec<Value> = if idx < items.len() {
                                     items[idx..].to_vec()
                                 } else {
@@ -3952,7 +3966,7 @@ impl Interpreter {
                                 // Resolve the lvalue sub's body and
                                 // assign the slurped list directly to
                                 // the underlying ArrayVar/HashVar.
-                                if let Some((_, body)) = self.subs.get(call_name).cloned() {
+                                if let Some((_, body)) = self.subs.get(&call_name).cloned() {
                                     let last =
                                         body.iter().rev().find(|s| !matches!(s, Stmt::LineMark(_)));
                                     if let Some(Stmt::Expr(inner_expr)) = last {
