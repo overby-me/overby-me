@@ -12618,6 +12618,61 @@ impl Interpreter {
             let synthetic = Expr::Call(s.clone(), Vec::new());
             return self.assign_to(&synthetic, val);
         }
+        // `substr($s, OFFS, [LEN]) = REPL` — duplicate of the substr
+        // lvalue handling in Expr::Assign, but reachable here when an
+        // lvalue sub's body returns a substr call (op/sub_lval sstr).
+        if let Expr::Call(n, sub_args) = target
+            && n == "substr"
+            && (sub_args.len() == 2 || sub_args.len() == 3)
+        {
+            let mut new_args = sub_args.clone();
+            if new_args.len() == 2 {
+                new_args.push(Expr::IntLit(i32::MAX as i64));
+            }
+            // 4-arg substr expects the replacement as a literal at the
+            // arg position. Wrap the runtime value into a literal Expr.
+            let val_expr = match &val {
+                Value::Str(s) => Expr::StringLit(s.clone()),
+                Value::Num(n) => Expr::FloatLit(*n),
+                _ => Expr::StringLit(val.to_str()),
+            };
+            new_args.push(val_expr);
+            self.eval_call("substr", &new_args);
+            return;
+        }
+        // `vec($s, OFFS, BITS) = REPL` — vec lvalue; route to the
+        // 4-arg form analogously to substr above. op/sub_lval veclv.
+        if let Expr::Call(n, sub_args) = target
+            && n == "vec"
+            && sub_args.len() == 3
+        {
+            let mut new_args = sub_args.clone();
+            let val_expr = match &val {
+                Value::Str(s) => Expr::StringLit(s.clone()),
+                Value::Num(n) => Expr::FloatLit(*n),
+                _ => Expr::StringLit(val.to_str()),
+            };
+            new_args.push(val_expr);
+            self.eval_call("vec", &new_args);
+            return;
+        }
+        // `pos($s) = N` — set pos for /g matches. Reroute through
+        // Expr::Assign's pos handling so the offset table updates.
+        if let Expr::Call(n, sub_args) = target
+            && n == "pos"
+            && !sub_args.is_empty()
+        {
+            let val_expr = match &val {
+                Value::Str(s) => Expr::StringLit(s.clone()),
+                Value::Num(n) => Expr::FloatLit(*n),
+                _ => Expr::StringLit(val.to_str()),
+            };
+            self.eval_expr(&Expr::Assign(
+                Box::new(Expr::Call("pos".to_string(), sub_args.clone())),
+                Box::new(val_expr),
+            ));
+            return;
+        }
         // `RECV->METHOD = val` — lvalue method call. Only intercept
         // when the resolved method is in lvalue_subs; otherwise we fall
         // through (matching reference perl, which compile-errors on
