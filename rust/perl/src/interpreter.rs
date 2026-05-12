@@ -4367,6 +4367,24 @@ impl Interpreter {
                                                 result.push_str(m.as_str());
                                             }
                                         }
+                                    } else if repl_chars[i + 1] == '&' {
+                                        // $& — whole match
+                                        if let Some(m) = caps.get(0) {
+                                            result.push_str(m.as_str());
+                                        }
+                                        i += 2;
+                                    } else if repl_chars[i + 1] == '`' {
+                                        // $` — prematch
+                                        if let Some(m) = caps.get(0) {
+                                            result.push_str(&text[..m.start()]);
+                                        }
+                                        i += 2;
+                                    } else if repl_chars[i + 1] == '\'' {
+                                        // $' — postmatch
+                                        if let Some(m) = caps.get(0) {
+                                            result.push_str(&text[m.end()..]);
+                                        }
+                                        i += 2;
                                     } else {
                                         result.push(repl_chars[i]);
                                         i += 1;
