@@ -90,6 +90,10 @@ pub struct Interpreter {
     // Recursion guard for `$SIG{__DIE__}` handlers so a handler that itself
     // raises die doesn't loop back into itself.
     in_die_handler: usize,
+    /// Set while resolving list-context list assignment (`(LIST) = …`)
+    /// so `assign_to` knows lvalue subs with empty bodies should be a
+    /// silent no-op rather than dying. op/sub_lval tests 32-34.
+    assign_list_ctx: bool,
     /// Map from ref pointer (Rc::as_ptr) to class name for `bless`ed refs.
     /// `ref()` / method dispatch consults this so `$obj->isa('Foo')`
     /// walks `@Foo::ISA` instead of falling back to the literal ref type.
@@ -588,6 +592,7 @@ impl Interpreter {
             check_blocks: Vec::new(),
             init_blocks: Vec::new(),
             in_die_handler: 0,
+            assign_list_ctx: false,
             local_hash_elem_saves: Vec::new(),
             local_array_len_saves: Vec::new(),
             blessed_refs: HashMap::new(),
@@ -3871,6 +3876,9 @@ impl Interpreter {
                     };
                 // Check for list assignment: ($a, $b, $c) = (list)
                 if let Expr::ArrayLit(targets) = unwrapped_target {
+                    let saved_lctx = self.assign_list_ctx;
+                    self.assign_list_ctx = true;
+                    let _list_ctx_guard = ();
                     // Expand `(EXPR) x N` targets into N copies (so e.g.
                     // `(undef)x5` skips 5 RHS elements).
                     let mut expanded: Vec<&Expr> = Vec::with_capacity(targets.len());
@@ -3920,6 +3928,7 @@ impl Interpreter {
                             }
                         }
                     }
+                    self.assign_list_ctx = saved_lctx;
                     return Value::Num(items.len() as f64);
                 }
                 // Check if target is an array — need list context for RHS
@@ -12657,10 +12666,21 @@ impl Interpreter {
             if self.lvalue_subs.contains(name)
                 && let Some((_params, body)) = self.subs.get(name).cloned()
             {
-                if body.is_empty() || matches!(body.last(), Some(Stmt::Return(_))) {
-                    // `sub lv0 : lvalue { }` and `sub rlv0 : lvalue { return }`
-                    // — empty / no-value return. Reference perl emits
-                    // "Can't return undef from lvalue subroutine".
+                let last_is_undef_expr = matches!(
+                    body.last(),
+                    Some(Stmt::Expr(Expr::Undef))
+                        | Some(Stmt::Return(Some(Expr::Undef)))
+                        | Some(Stmt::Return(None))
+                );
+                if body.is_empty() || last_is_undef_expr {
+                    // `sub lv0 : lvalue { }`, `sub rlv0 : lvalue { return }`,
+                    // `sub lv1u : lvalue { undef }` — empty / undef return.
+                    // Reference perl emits "Can't return undef from lvalue
+                    // subroutine" only in scalar context; list-context list
+                    // assignment (`(lv0) = (2,3)`) silently succeeds (no-op).
+                    if self.assign_list_ctx {
+                        return;
+                    }
                     let file = if self.current_file.is_empty() {
                         "-e".to_string()
                     } else {
@@ -14379,6 +14399,8 @@ impl Interpreter {
                 ) =>
             {
                 let items = self.eval_list(value);
+                let saved_ctx = self.assign_list_ctx;
+                self.assign_list_ctx = true;
                 match target.as_ref() {
                     Expr::ArrayLit(targets) => {
                         for (i, t) in targets.iter().enumerate() {
@@ -14394,6 +14416,7 @@ impl Interpreter {
                     }
                     _ => {}
                 }
+                self.assign_list_ctx = saved_ctx;
                 items
             }
             // `my @tmp = LIST` in expression position — declare and assign.
