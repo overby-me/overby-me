@@ -16270,6 +16270,28 @@ impl Interpreter {
                 ) as Box<dyn Iterator<Item = String>>
             })
             .collect();
+        // Compile-time check: `NAME = …` where NAME is a known non-
+        // lvalue sub dies "Can't modify non-lvalue subroutine call"
+        // even when the assignment is gated by `if 0` etc. — reference
+        // perl emits this at parse time, before runtime conditionals.
+        // op/sub_lval tests 26-29.
+        if let Some(err) =
+            nolv_assign_check(&stmts, &self.subs, &self.lvalue_subs, &self.current_file)
+        {
+            let handler = self.get_hash_element("SIG", "__DIE__");
+            if self.in_die_handler == 0
+                && let Value::CodeRef(name) = handler
+                && let Some((_params, body)) = self.subs.get(&name).cloned()
+            {
+                self.in_die_handler += 1;
+                self.call_sub_named(&body, &[Value::Str(err.clone())], Some(&name));
+                self.in_die_handler -= 1;
+            }
+            self.set_global_var("@", Value::Str(err));
+            self.current_file = saved_file;
+            self.current_line = saved_line;
+            return Value::Undef;
+        }
         let inner_uses_strict = stmts
             .iter()
             .any(|s| matches!(s, Stmt::Use(m, _, _) if m == "strict"));
@@ -17414,6 +17436,93 @@ fn is_lvalue_shape(expr: &Expr) -> bool {
 /// represent valid lvalues (block-form derefs, slice helpers, etc.).
 /// Used by the lvalue-sub assign_to path to avoid mistaking these
 /// for builtins that return a temporary.
+/// Walk `stmts` for any `Assign(Call(name), …)` where `name` is a
+/// known non-lvalue sub. Returns the first error message found (or
+/// None if all assigns target lvalue subs or non-subs). Matches
+/// reference perl's compile-time "Can't modify non-lvalue subroutine
+/// call of &main::NAME in scalar assignment" check (op/sub_lval 26-29).
+fn nolv_assign_check(
+    stmts: &[Stmt],
+    subs: &std::collections::HashMap<String, (Vec<String>, Vec<Stmt>)>,
+    lvalue_subs: &std::collections::HashSet<String>,
+    file: &str,
+) -> Option<String> {
+    fn walk_expr(
+        e: &Expr,
+        subs: &std::collections::HashMap<String, (Vec<String>, Vec<Stmt>)>,
+        lvalue_subs: &std::collections::HashSet<String>,
+        file: &str,
+        line: &mut usize,
+    ) -> Option<String> {
+        match e {
+            Expr::Assign(lhs, rhs) => {
+                let target_name = match lhs.as_ref() {
+                    Expr::Call(name, _) => Some(name.clone()),
+                    // The parser emits StringLit for a bareword in eval
+                    // STRING context (it didn't know NAME was a sub).
+                    Expr::StringLit(s) => Some(s.clone()),
+                    _ => None,
+                };
+                if let Some(name) = target_name
+                    && subs.contains_key(&name)
+                    && !lvalue_subs.contains(&name)
+                    && !name.starts_with('_')
+                {
+                    let qname = if name.contains("::") {
+                        name.clone()
+                    } else {
+                        format!("main::{name}")
+                    };
+                    let f = if file.is_empty() { "-e" } else { file };
+                    return Some(format!(
+                        "Can't modify non-lvalue subroutine call of &{qname} in scalar assignment at {f} line {line}.\n",
+                    ));
+                }
+                walk_expr(lhs, subs, lvalue_subs, file, line)
+                    .or_else(|| walk_expr(rhs, subs, lvalue_subs, file, line))
+            }
+            _ => {
+                // Recurse into common children; this is best-effort —
+                // missed nested assigns won't false-positive, just won't
+                // emit the error at compile time.
+                None
+            }
+        }
+    }
+    let mut line: usize = 1;
+    for stmt in stmts {
+        match stmt {
+            Stmt::LineMark(n) => line = *n,
+            Stmt::Expr(e) | Stmt::Return(Some(e)) => {
+                if let Some(err) = walk_expr(e, subs, lvalue_subs, file, &mut line) {
+                    return Some(err);
+                }
+            }
+            Stmt::Block(body) | Stmt::BareBlock(body) => {
+                if let Some(err) = nolv_assign_check(body, subs, lvalue_subs, file) {
+                    return Some(err);
+                }
+            }
+            // Postfix if/unless/while/until/for — descend into the
+            // gated statement so `nolv = … if 0` triggers the
+            // compile-time check (op/sub_lval 26).
+            Stmt::PostfixIf(inner, _)
+            | Stmt::PostfixUnless(inner, _)
+            | Stmt::PostfixWhile(inner, _)
+            | Stmt::PostfixUntil(inner, _)
+            | Stmt::PostfixFor(inner, _) => {
+                if let Some(err) =
+                    nolv_assign_check(std::slice::from_ref(&**inner), subs, lvalue_subs, file)
+                {
+                    return Some(err);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 fn is_internal_lvalue_helper(name: &str) -> bool {
     matches!(
         name,
