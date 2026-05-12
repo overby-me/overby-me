@@ -2319,6 +2319,49 @@ impl Interpreter {
                         .trim_start_matches('@')
                         .trim_start_matches('%');
                     let key = (sub_key.clone(), var_name.to_string());
+                    if raw_name.starts_with('@') {
+                        // state @x — persistent array per sub.
+                        let rc = self
+                            .state_arrays
+                            .entry(key.clone())
+                            .or_insert_with(|| std::rc::Rc::new(std::cell::RefCell::new(Vec::new())))
+                            .clone();
+                        if !self.state_initialized.contains(&key) {
+                            self.state_initialized.insert(key.clone());
+                            if let Some(init_expr) = init {
+                                let v = self.eval_list(init_expr);
+                                *rc.borrow_mut() = v;
+                            }
+                        }
+                        // Alias-share via aliased_arrays so reads/writes
+                        // of the bare name in this scope flow through.
+                        self.aliased_arrays.insert(var_name.to_string(), rc);
+                        continue;
+                    }
+                    if raw_name.starts_with('%') {
+                        let rc = self
+                            .state_hashes
+                            .entry(key.clone())
+                            .or_insert_with(|| {
+                                std::rc::Rc::new(std::cell::RefCell::new(HashMap::new()))
+                            })
+                            .clone();
+                        if !self.state_initialized.contains(&key) {
+                            self.state_initialized.insert(key.clone());
+                            if let Some(init_expr) = init {
+                                let items = self.eval_list(init_expr);
+                                let mut h = HashMap::new();
+                                let mut it = items.into_iter();
+                                while let Some(k) = it.next() {
+                                    let v = it.next().unwrap_or(Value::Undef);
+                                    h.insert(k.to_str(), v);
+                                }
+                                *rc.borrow_mut() = h;
+                            }
+                        }
+                        self.aliased_hashes.insert(var_name.to_string(), rc);
+                        continue;
+                    }
                     let rc = self
                         .state_vars
                         .entry(key.clone())
