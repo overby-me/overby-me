@@ -10331,6 +10331,7 @@ impl Interpreter {
     /// slot it returns. Used for nested lvalue calls (`id(get_st) = X`):
     /// `get_st` is itself an lvalue sub returning `$blah`, so we need a
     /// ref to `$blah`, not its current value.
+    /// (defined below as free fn `is_internal_lvalue_helper`)
     fn lvalue_sub_take_ref(&mut self, name: &str, args: &[Expr]) -> Value {
         let Some((_p, body)) = self.subs.get(name).cloned() else {
             return Value::Undef;
@@ -12719,6 +12720,32 @@ impl Interpreter {
                     self.exec_stmt(stmt);
                 }
                 if let Stmt::Expr(lvalue_expr) = &body[body.len() - 1] {
+                    // If the body's last expression is a Call to a
+                    // builtin or other non-lvalue sub that returns a
+                    // temporary (e.g. `index`, `length`, `pos`, …), the
+                    // returned value isn't a writable slot — reference
+                    // perl dies "Can't return a temporary from lvalue
+                    // subroutine" in scalar context (op/sub_lval 39-44).
+                    // List context (assign_list_ctx) doesn't die.
+                    if !self.assign_list_ctx
+                        && let Expr::Call(call_name, _) = lvalue_expr
+                        && !self.lvalue_subs.contains(call_name)
+                        && !self.subs.contains_key(call_name)
+                        && !is_internal_lvalue_helper(call_name)
+                    {
+                        let file = if self.current_file.is_empty() {
+                            "-e".to_string()
+                        } else {
+                            self.current_file.clone()
+                        };
+                        let line = self.current_line;
+                        self.pending_flow = Some(Flow::Die(format!(
+                            "Can't return a temporary from lvalue subroutine at {file} line {line}.\n"
+                        )));
+                        self.current_sub_stack.pop();
+                        self.set_array("_", saved_underscore);
+                        return;
+                    }
                     self.assign_to(lvalue_expr, val);
                     self.current_sub_stack.pop();
                     self.set_array("_", saved_underscore);
@@ -17343,6 +17370,24 @@ fn is_lvalue_shape(expr: &Expr) -> bool {
             | Expr::MyVar(_)
             | Expr::LocalVar(_)
             | Expr::ArrayLen(_)
+    )
+}
+
+/// Names of internal helper "calls" emitted by the parser that
+/// represent valid lvalues (block-form derefs, slice helpers, etc.).
+/// Used by the lvalue-sub assign_to path to avoid mistaking these
+/// for builtins that return a temporary.
+fn is_internal_lvalue_helper(name: &str) -> bool {
+    matches!(
+        name,
+        "_scalar_block_deref"
+            | "_array_block_deref"
+            | "_hash_block_deref"
+            | "_arylen_block_deref"
+            | "_list_slice"
+            | "_postfix_array_slice"
+            | "_postfix_hash_slice"
+            | "_array_kvslice"
     )
 }
 
