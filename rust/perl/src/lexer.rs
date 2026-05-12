@@ -139,6 +139,8 @@ pub enum Token {
     LogOr,              // ||
     LogNot,             // !
     DefOr,              // //
+    LogXor,             // ^^ (logical xor, Perl 5.40+)
+    LogXorAssign,       // ^^=
     BitAnd,             // &
     BitOr,              // |
     BitXor,             // ^
@@ -2178,7 +2180,18 @@ impl Lexer {
 
                 '^' => {
                     self.pos += 1;
-                    if self.ch() == '=' {
+                    if self.ch() == '^' {
+                        // `^^` — logical XOR (Perl 5.40+). `^^=` is the
+                        // compound-assignment form. op/lop 25+ tests
+                        // both `0 ^^ 0` and `0 ^^= 0`.
+                        self.pos += 1;
+                        if self.ch() == '=' {
+                            self.pos += 1;
+                            tokens.push(Token::LogXorAssign);
+                        } else {
+                            tokens.push(Token::LogXor);
+                        }
+                    } else if self.ch() == '=' {
                         self.pos += 1;
                         tokens.push(Token::BitXorAssign);
                     } else {

@@ -1732,6 +1732,11 @@ impl Parser {
                 let right = self.parse_assign();
                 Expr::OpAssign(BinOp::DefOr, Box::new(left), Box::new(right))
             }
+            Token::LogXorAssign => {
+                self.pos += 1;
+                let right = self.parse_assign();
+                Expr::OpAssign(BinOp::Xor, Box::new(left), Box::new(right))
+            }
             Token::BitOrAssign => {
                 self.pos += 1;
                 let right = self.parse_assign();
@@ -1842,6 +1847,12 @@ impl Parser {
             } else if self.eat(&Token::DefOr) {
                 let right = self.parse_log_and();
                 left = Expr::BinOp(BinOp::DefOr, Box::new(left), Box::new(right));
+            } else if self.eat(&Token::LogXor) {
+                // `^^` — logical XOR (Perl 5.40+). Same precedence as
+                // `||` / `//`. Returns 1 if exactly one operand is
+                // true, else "" (empty string). op/lop.
+                let right = self.parse_log_and();
+                left = Expr::BinOp(BinOp::Xor, Box::new(left), Box::new(right));
             } else {
                 break;
             }
@@ -4590,6 +4601,31 @@ impl Parser {
 ///   * `$var = <iter>` — assignment whose RHS is an iterator
 ///
 /// Other conditions are returned unchanged.
+/// Parse `EXPR` inside an interpolated subscript like `"$a[EXPR]"`.
+/// Falls back to a string literal if parsing fails.
+fn parse_index_expr(s: &str) -> Expr {
+    use crate::lexer::Lexer;
+    let mut lex = Lexer::new(s);
+    let tokens = lex.tokenize();
+    if !tokens.is_empty() && lex.error.is_none() {
+        let mut parser = Parser::new(tokens);
+        let e = parser.parse_expr();
+        if parser.error.is_none() {
+            return e;
+        }
+    }
+    // Fall back to legacy behaviour for very simple cases so we
+    // don't regress when the inner contains chars the standalone
+    // lexer/parser would choke on.
+    if let Ok(n) = s.trim().parse::<i64>() {
+        return Expr::IntLit(n);
+    }
+    if let Some(v) = s.trim().strip_prefix('$') {
+        return Expr::ScalarVar(v.to_string());
+    }
+    Expr::StringLit(s.to_string())
+}
+
 fn wrap_iter_cond_with_defined(cond: Expr) -> Expr {
     match cond {
         Expr::Diamond(name) => Expr::Defined(Box::new(Expr::Assign(
@@ -5163,14 +5199,11 @@ fn parse_interp_string(s: &str) -> Expr {
                         if i < chars.len() && chars[i] == ']' {
                             i += 1;
                         }
-                        // Parse the index expression
-                        let idx_expr = if let Ok(n) = idx_str.parse::<i64>() {
-                            Box::new(Expr::IntLit(n))
-                        } else {
-                            // Strip $ sigil if present
-                            let var_name = idx_str.strip_prefix('$').unwrap_or(&idx_str);
-                            Box::new(Expr::ScalarVar(var_name.to_string()))
-                        };
+                        // Parse the index as a full expression so
+                        // `$a[$i+1]`, `$a[$x*2]` etc. work in
+                        // interpolation (op/lop ^^ truth table uses
+                        // `$a[$i+1]` in print).
+                        let idx_expr = Box::new(parse_index_expr(&idx_str));
                         // `$name[i][j]` / `$name[i]{k}` — chained
                         // subscripts in interpolation become arrow
                         // chains (Perl auto-inserts `->` between them).
