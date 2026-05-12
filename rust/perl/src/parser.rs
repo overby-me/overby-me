@@ -323,7 +323,20 @@ impl Parser {
                 // Reuse parse_var_list (same shape as `my`) and emit
                 // Stmt::State so the interpreter can install
                 // per-sub persistent storage. op/state.
-                let (vars, list_ctx) = self.parse_var_list();
+                let (mut vars, list_ctx) = self.parse_var_list();
+                // `state ($t) //= EXPR` — list-context init using
+                // defined-or-assign. Treat the RHS as the init
+                // expression for the only var; the interpreter
+                // already runs init exactly once. op/state 6-14.
+                if list_ctx
+                    && vars.len() == 1
+                    && vars[0].1.is_none()
+                    && matches!(self.tok(), Token::DefOrAssign)
+                {
+                    self.pos += 1;
+                    let init = self.parse_expr();
+                    vars[0].1 = Some(init);
+                }
                 let stmt = self.maybe_postfix(Stmt::State(vars, list_ctx));
                 self.eat(&Token::Semi);
                 return Some(stmt);
