@@ -7875,6 +7875,34 @@ impl Interpreter {
                             }
                             Value::Num(if exists { 1.0 } else { 0.0 })
                         }
+                        // `exists $ref->{key}` / `exists $ref->[i]` —
+                        // deref through the ref and check the slot.
+                        Expr::ArrowElement(inner, key_e, kind) => {
+                            let target = self.eval_expr(inner);
+                            match kind {
+                                ArrowKind::Hash => {
+                                    let key = self.eval_expr(key_e).to_str();
+                                    let exists = if let Value::HashRef(r) = target {
+                                        r.borrow().contains_key(&key)
+                                    } else {
+                                        false
+                                    };
+                                    Value::Num(if exists { 1.0 } else { 0.0 })
+                                }
+                                ArrowKind::Array => {
+                                    let idx = self.eval_expr(key_e).to_num() as i64;
+                                    let exists = if let Value::ArrayRef(r) = target {
+                                        let v = r.borrow();
+                                        let n = v.len() as i64;
+                                        let i = if idx < 0 { n + idx } else { idx };
+                                        i >= 0 && i < n
+                                    } else {
+                                        false
+                                    };
+                                    Value::Num(if exists { 1.0 } else { 0.0 })
+                                }
+                            }
+                        }
                         _ => Value::Num(0.0),
                     }
                 } else {
