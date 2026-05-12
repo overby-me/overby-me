@@ -1753,30 +1753,21 @@ fn parse_form_field(opts: &mut Options, val: &str) {
                 filename: None,
             });
         } else {
-            // Text field may have ;type=... modifier that applies a Content-Type.
-            // Do NOT split on every ';' — the type value itself can contain ';'
-            // (e.g. "text/html;charset=verymoo"). Only split once on ";type=".
+            // Text field may have ;type=... and ;filename=... modifiers
+            // (test 2073). The split uses the file-modifier parser, which
+            // handles quoting and lets either field contain bare `;`.
             // curl also trims a single leading space after '=' in the value.
             let rest = rest.strip_prefix(' ').unwrap_or(rest);
-            let mut value = rest.to_string();
-            let mut content_type = None;
-            if let Some(idx) = find_type_modifier(rest) {
-                value = rest[..idx].to_string();
-                content_type = Some(rest[idx + ";type=".len()..].to_string());
-            }
+            let (value, content_type, filename) = split_file_form_modifiers(rest);
             opts.form_fields.push(FormField {
                 name: name.to_string(),
                 value,
                 is_file: false,
                 content_type,
-                filename: None,
+                filename,
             });
         }
     }
-}
-
-fn find_type_modifier(s: &str) -> Option<usize> {
-    s.find(";type=")
 }
 
 /// Split "path;type=X;filename=Y" into (path, type, filename).

@@ -605,9 +605,18 @@ fn build_body(opts: &Options, boundary: Option<&str>) -> Option<Vec<u8>> {
                 }
             } else {
                 // `-F=value` (empty name) emits just `Content-Disposition:
-                // form-data` with no `name=` attribute (test 1293).
+                // form-data` with no `name=` attribute (test 1293). A
+                // `;filename=…` modifier on a text field adds the filename
+                // attribute and infers Content-Type from the filename
+                // extension if no explicit `;type=` was given (test 2073).
                 let cd = if field.name.is_empty() {
                     format!("Content-Disposition: {disposition}\r\n")
+                } else if let Some(ref fname) = field.filename {
+                    let safe = mime_percent_encode(fname);
+                    format!(
+                        "Content-Disposition: {disposition}; name=\"{}\"; filename=\"{safe}\"\r\n",
+                        field.name
+                    )
                 } else {
                     format!(
                         "Content-Disposition: {disposition}; name=\"{}\"\r\n",
@@ -615,7 +624,13 @@ fn build_body(opts: &Options, boundary: Option<&str>) -> Option<Vec<u8>> {
                     )
                 };
                 body.extend_from_slice(cd.as_bytes());
-                if let Some(ref ct) = field.content_type {
+                let ct = field.content_type.as_deref().map(String::from).or_else(|| {
+                    field
+                        .filename
+                        .as_deref()
+                        .map(|f| guess_content_type(f).to_string())
+                });
+                if let Some(ct) = ct {
                     body.extend_from_slice(format!("Content-Type: {ct}\r\n").as_bytes());
                 }
                 body.extend_from_slice(b"\r\n");
