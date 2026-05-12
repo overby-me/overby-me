@@ -107,6 +107,10 @@ pub struct Interpreter {
     /// `ref()` / method dispatch consults this so `$obj->isa('Foo')`
     /// walks `@Foo::ISA` instead of falling back to the literal ref type.
     blessed_refs: HashMap<usize, String>,
+    /// Map from CodeRef sub-name (or `__anon_N`) to class for blessed
+    /// CodeRefs. Separate from `blessed_refs` because CodeRefs are
+    /// identified by name string, not pointer. op/bless 17-20.
+    blessed_coderefs: HashMap<String, String>,
     /// Per-package overload handlers: `overload_handlers[pkg][op]` is
     /// the CodeRef name for that operator (e.g. `""`, `0+`, `bool`,
     /// `.`). Populated by `use overload OP => sub {...}, …`. When
@@ -606,6 +610,7 @@ impl Interpreter {
             local_hash_elem_saves: Vec::new(),
             local_array_len_saves: Vec::new(),
             blessed_refs: HashMap::new(),
+            blessed_coderefs: HashMap::new(),
             overload_handlers: HashMap::new(),
             pending_die_value: None,
             max_capture_seen: 0,
@@ -9580,6 +9585,9 @@ impl Interpreter {
                     .get(1)
                     .map(|a| self.eval_expr(a).to_str())
                     .unwrap_or_else(|| self.package.clone());
+                if let Value::CodeRef(name) = &val {
+                    self.blessed_coderefs.insert(name.clone(), class.clone());
+                }
                 let p = Self::ref_ptr(&val);
                 if p != 0 {
                     self.blessed_refs.insert(p, class);
@@ -10742,6 +10750,12 @@ impl Interpreter {
         {
             return cls.clone();
         }
+        // CodeRefs are tracked by sub name, not pointer.
+        if let Value::CodeRef(name) = v
+            && let Some(cls) = self.blessed_coderefs.get(name)
+        {
+            return cls.clone();
+        }
         v.ref_type().to_string()
     }
 
@@ -10857,6 +10871,13 @@ impl Interpreter {
             ) {
                 return format!("{cls}={}", v.to_str());
             }
+        }
+        // Blessed CodeRefs stringify as `CLASS=CODE(0xADDR)` — same
+        // pattern as other blessed refs (op/bless 17-20).
+        if let Value::CodeRef(name) = v
+            && let Some(cls) = self.blessed_coderefs.get(name).cloned()
+        {
+            return format!("{cls}={}", v.to_str());
         }
         v.to_str()
     }

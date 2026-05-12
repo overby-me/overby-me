@@ -75,7 +75,16 @@ impl Value {
                 let kind = if is_glob { "GLOB" } else { "SCALAR" };
                 format!("{kind}(0x{:x})", Rc::as_ptr(r) as usize)
             }
-            Value::CodeRef(name) => format!("CODE({name})"),
+            // CodeRefs stringify as `CODE(0xADDR)` in reference perl —
+            // produce a stable pseudo-address from the sub-name so
+            // `\&foo == \&foo` (op/bless 18-20 expect the (0x...) shape).
+            Value::CodeRef(name) => {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                name.hash(&mut hasher);
+                let addr = hasher.finish() as usize;
+                format!("CODE(0x{addr:x})")
+            }
             Value::Regex(pat, flags, _) => format!("(?^{flags}:{pat})"),
             Value::Glob(name) => {
                 if name.contains("::") {
@@ -102,7 +111,16 @@ impl Value {
             Value::ArrayRef(r) => Rc::as_ptr(r) as usize as f64,
             Value::HashRef(r) => Rc::as_ptr(r) as usize as f64,
             Value::ScalarRef(r) => Rc::as_ptr(r) as usize as f64,
-            Value::CodeRef(_) | Value::Glob(_) => 0.0,
+            // CodeRef numerifies to the same pseudo-address used in
+            // its stringification (`CODE(0xADDR)`), so `0 + $coderef`
+            // matches `hex` of the address (op/bless 20).
+            Value::CodeRef(name) => {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                name.hash(&mut hasher);
+                hasher.finish() as usize as f64
+            }
+            Value::Glob(_) => 0.0,
             // qr// objects yield a unique id when numerified — Perl uses
             // the object's address, but a monotonic id is enough for the
             // `$qr_a + 0 != $qr_b + 0` identity test (op/qr 3).
