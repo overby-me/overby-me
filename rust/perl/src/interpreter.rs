@@ -3902,8 +3902,29 @@ impl Interpreter {
                     let mut idx = 0usize;
                     for t in expanded.iter() {
                         // Hash / array targets slurp the remaining RHS.
-                        match t {
-                            Expr::ArrayVar(name) => {
+                        // For lvalue subs whose body returns an array
+                        // or hash (op/sub_lval `(array()) = qw(...)`),
+                        // also slurp.
+                        let slurp_kind: Option<&'static str> = match t {
+                            Expr::ArrayVar(_) => Some("@"),
+                            Expr::HashVar(_) => Some("%"),
+                            Expr::Call(call_name, _) if self.lvalue_subs.contains(call_name) => {
+                                self.subs.get(call_name).and_then(|(_, body)| {
+                                    let last =
+                                        body.iter().rev().find(|s| !matches!(s, Stmt::LineMark(_)));
+                                    match last {
+                                        Some(Stmt::Expr(Expr::ArrayVar(_))) => Some("@"),
+                                        Some(Stmt::Expr(Expr::HashVar(_))) => Some("%"),
+                                        Some(Stmt::Expr(Expr::ArraySlice(_, _))) => Some("@"),
+                                        Some(Stmt::Expr(Expr::HashSlice(_, _))) => Some("@"),
+                                        _ => None,
+                                    }
+                                })
+                            }
+                            _ => None,
+                        };
+                        match (t, slurp_kind) {
+                            (Expr::ArrayVar(name), Some(_)) => {
                                 let rest: Vec<Value> = if idx < items.len() {
                                     items[idx..].to_vec()
                                 } else {
@@ -3912,7 +3933,7 @@ impl Interpreter {
                                 idx = items.len();
                                 self.set_array(name, rest);
                             }
-                            Expr::HashVar(name) => {
+                            (Expr::HashVar(name), Some(_)) => {
                                 let rest: Vec<Value> = if idx < items.len() {
                                     items[idx..].to_vec()
                                 } else {
@@ -3920,6 +3941,74 @@ impl Interpreter {
                                 };
                                 idx = items.len();
                                 self.set_hash_from_list(name, rest);
+                            }
+                            (Expr::Call(call_name, _), Some(kind)) => {
+                                let rest: Vec<Value> = if idx < items.len() {
+                                    items[idx..].to_vec()
+                                } else {
+                                    Vec::new()
+                                };
+                                idx = items.len();
+                                // Resolve the lvalue sub's body and
+                                // assign the slurped list directly to
+                                // the underlying ArrayVar/HashVar.
+                                if let Some((_, body)) = self.subs.get(call_name).cloned() {
+                                    let last =
+                                        body.iter().rev().find(|s| !matches!(s, Stmt::LineMark(_)));
+                                    if let Some(Stmt::Expr(inner_expr)) = last {
+                                        match inner_expr {
+                                            Expr::ArrayVar(n) if kind == "@" => {
+                                                self.set_array(n, rest);
+                                            }
+                                            Expr::HashVar(n) if kind == "%" => {
+                                                self.set_hash_from_list(n, rest);
+                                            }
+                                            Expr::ArraySlice(n, indices) => {
+                                                let name = n.clone();
+                                                let idxs: Vec<i64> = indices
+                                                    .iter()
+                                                    .flat_map(|e| self.eval_list(e))
+                                                    .map(|v| v.to_num() as i64)
+                                                    .collect();
+                                                for (i, ix) in idxs.iter().enumerate() {
+                                                    let v = rest
+                                                        .get(i)
+                                                        .cloned()
+                                                        .unwrap_or(Value::Undef);
+                                                    self.assign_to(
+                                                        &Expr::ArrayElement(
+                                                            name.clone(),
+                                                            Box::new(Expr::IntLit(*ix)),
+                                                        ),
+                                                        v,
+                                                    );
+                                                }
+                                            }
+                                            Expr::HashSlice(n, keys) => {
+                                                let name = n.clone();
+                                                let ks: Vec<String> = keys
+                                                    .iter()
+                                                    .flat_map(|e| self.eval_list(e))
+                                                    .map(|v| v.to_str())
+                                                    .collect();
+                                                for (i, k) in ks.iter().enumerate() {
+                                                    let v = rest
+                                                        .get(i)
+                                                        .cloned()
+                                                        .unwrap_or(Value::Undef);
+                                                    self.assign_to(
+                                                        &Expr::HashElement(
+                                                            name.clone(),
+                                                            Box::new(Expr::StringLit(k.clone())),
+                                                        ),
+                                                        v,
+                                                    );
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
                             }
                             _ => {
                                 let val = items.get(idx).cloned().unwrap_or(Value::Undef);
