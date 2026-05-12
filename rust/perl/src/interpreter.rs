@@ -2286,27 +2286,30 @@ impl Interpreter {
                             if let Some(saves) = self.local_each_cursor_saves.last_mut() {
                                 saves.push((cursor_key, prev_cursor));
                             }
+                            // Evaluate the initializer first so we can
+                            // populate both the globals slot and the
+                            // aliased-Rc swap below with the same data.
+                            let items = if init.is_some() {
+                                self.eval_list(init.as_ref().unwrap())
+                            } else {
+                                Vec::new()
+                            };
                             // If the array has been ref'd (it has an
                             // entry in `aliased_arrays`), swap the Rc
-                            // for a fresh empty one so any outstanding
-                            // refs created BEFORE this `local` keep
-                            // pointing at the original storage. The
-                            // matching `restore_locals` puts the
-                            // original Rc back on scope exit.
+                            // for a fresh one holding the new items so
+                            // any outstanding refs created BEFORE this
+                            // `local` keep pointing at the original
+                            // storage. The matching `restore_locals`
+                            // puts the original Rc back on scope exit.
                             if let Some(orig_rc) = self.aliased_arrays.get(var_name).cloned() {
                                 if let Some(saves) = self.local_aliased_array_saves.last_mut() {
                                     saves.push((var_name.to_string(), orig_rc));
                                 }
                                 self.aliased_arrays.insert(
                                     var_name.to_string(),
-                                    std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+                                    std::rc::Rc::new(std::cell::RefCell::new(items.clone())),
                                 );
                             }
-                            let items = if init.is_some() {
-                                self.eval_list(init.as_ref().unwrap())
-                            } else {
-                                Vec::new()
-                            };
                             self.globals.arrays.insert(var_name.to_string(), items);
                         } else if name.starts_with('%') {
                             let prev_arr: Vec<Value> = self
