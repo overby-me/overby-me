@@ -4230,12 +4230,12 @@ impl Parser {
                 if !is_method_name_excluded(&name)
                     && name != "::"
                     && !name.starts_with('-')
-                    && !self.known_subs.contains(&name)
                     && name
                         .chars()
                         .next()
                         .is_some_and(|c| c.is_ascii_lowercase() || c == '_')
                 {
+                    let is_known_sub = self.known_subs.contains(&name);
                     // Indirect method-call: lowercase bareword followed by
                     //   * Uppercase class-shaped bareword: `method Class …`
                     //   * Scalar variable:                 `method $obj …`
@@ -4244,6 +4244,10 @@ impl Parser {
                     // they're regular function calls.
                     // op/method indirect-syntax tests 2-22, 25-26.
                     let recv: Option<Expr> = match self.tok().clone() {
+                        // Capitalised bareword receiver: ALWAYS indirect
+                        // even if `name` names a known sub (`method
+                        // Pack(...)` inside op/method.t where `sub
+                        // method` is defined for the test).
                         Token::Ident(class)
                             if !class.starts_with('-')
                                 && class != "::"
@@ -4252,7 +4256,10 @@ impl Parser {
                             self.pos += 1;
                             Some(Expr::StringLit(class))
                         }
-                        Token::ScalarVar(v) => {
+                        // Scalar receiver: only if `name` is NOT a known
+                        // sub. Otherwise `tryeq $T++, …` would be parsed
+                        // as `$T->tryeq(…)` instead of a function call.
+                        Token::ScalarVar(v) if !is_known_sub => {
                             self.pos += 1;
                             Some(Expr::ScalarVar(v))
                         }
