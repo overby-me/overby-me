@@ -3366,13 +3366,15 @@ impl Parser {
                 Expr::Call("_hash_block_deref".to_string(), vec![inner])
             }
             Token::ScalarBlockDerefOpen => {
-                // `${ EXPR }` — evaluate EXPR, dereference as scalar.
-                // Same as above — eat the lexer's separate `{`.
+                // `${ EXPR }` — evaluate EXPR, dereference as scalar. If
+                // EXPR is a comma list (`${f(), \$x}`), each arg is
+                // evaluated in order (for side effects) and the LAST
+                // value is used as the scalar deref target.
                 self.pos += 1;
                 self.eat(&Token::LBrace);
-                let inner = self.parse_expr();
+                let inner = self.parse_list_expr();
                 self.expect(&Token::RBrace);
-                Expr::Call("_scalar_block_deref".to_string(), vec![inner])
+                Expr::Call("_scalar_block_deref".to_string(), inner)
             }
             Token::HashDeref(name) => {
                 self.pos += 1;

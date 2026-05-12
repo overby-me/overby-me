@@ -8415,12 +8415,26 @@ impl Interpreter {
             }
             // `${ EXPR }` — block scalar deref. EXPR should yield a scalar
             // ref; deref to the scalar value. If EXPR is itself a scalar,
-            // pass through (matches Perl's `${ \$x }` idiom).
+            // pass through (matches Perl's `${ \$x }` idiom). When EXPR is
+            // a comma list, evaluate each for side effects but only use the
+            // last value (scalar-context coercion).
             "_scalar_block_deref" => {
-                let v = args
-                    .first()
-                    .map(|a| self.eval_expr(a))
-                    .unwrap_or(Value::Undef);
+                let mut v = Value::Undef;
+                for a in args.iter() {
+                    // If a bareword (StringLit auto-quoted) is in a non-final
+                    // position of a comma list, treat it as a function call
+                    // so its side effects fire. `${func, \$_}` is the
+                    // canonical "scalar-deref via function side effect" idiom.
+                    if args.len() > 1
+                        && let Expr::StringLit(name) = a
+                        && self.subs.contains_key(name)
+                    {
+                        let body = self.subs[name].1.clone();
+                        v = self.call_sub_named(&body, &[], Some(name));
+                        continue;
+                    }
+                    v = self.eval_expr(a);
+                }
                 match v {
                     Value::ScalarRef(r) => r.borrow().clone(),
                     // `${qr/…/}` — dereferencing a regex yields its
