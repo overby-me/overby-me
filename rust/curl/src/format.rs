@@ -58,7 +58,10 @@ pub(crate) fn format_write_out(
             .unwrap_or(""),
     );
     result = result.replace("%{size_download}", &resp.body.len().to_string());
-    result = result.replace("%{size_header}", &resp.header_bytes.len().to_string());
+    // size_header includes the (possibly suppressed) CONNECT response bytes
+    // so `--suppress-connect-headers` doesn't undercount (test 1288).
+    let visible_header_bytes = resp.header_bytes.len() + resp.connect_header_size;
+    result = result.replace("%{size_header}", &visible_header_bytes.to_string());
     result = result.replace("%{url_effective}", &url.raw);
     result = result.replace("%{url}", &url.raw);
     result = result.replace(

@@ -94,6 +94,10 @@ pub struct Options {
     pub(crate) haproxy_protocol: bool,
     /// --haproxy-clientip: override the source IP in the PROXY header.
     pub(crate) haproxy_clientip: Option<String>,
+    /// --suppress-connect-headers: hide proxy CONNECT response headers from
+    /// `--include` and `--dump-header` output (test 1288). They still count
+    /// toward `%{size_header}`.
+    pub(crate) suppress_connect_headers: bool,
     pub(crate) dump_header: Option<PathBuf>,
     pub(crate) write_out: Option<String>,
     pub(crate) retry: usize,
@@ -216,6 +220,7 @@ impl Default for Options {
             compressed: false,
             haproxy_protocol: false,
             haproxy_clientip: None,
+            suppress_connect_headers: false,
             dump_header: None,
             write_out: None,
             retry: 0,

@@ -1314,9 +1314,12 @@ fn execute_request_inner(
             }
 
             if !connect_response.is_empty() {
-                let mut combined = connect_response;
-                combined.extend_from_slice(&resp.header_bytes);
-                resp.header_bytes = combined;
+                resp.connect_header_size = connect_response.len();
+                if !opts.suppress_connect_headers {
+                    let mut combined = connect_response;
+                    combined.extend_from_slice(&resp.header_bytes);
+                    resp.header_bytes = combined;
+                }
             }
             return Ok(resp);
         }
@@ -1399,9 +1402,12 @@ fn execute_request_inner(
                     }
 
                     if !connect_response.is_empty() {
-                        let mut combined = connect_response;
-                        combined.extend_from_slice(&resp.header_bytes);
-                        resp.header_bytes = combined;
+                        resp.connect_header_size = connect_response.len();
+                        if !opts.suppress_connect_headers {
+                            let mut combined = connect_response;
+                            combined.extend_from_slice(&resp.header_bytes);
+                            resp.header_bytes = combined;
+                        }
                     }
                     return Ok(resp);
                 } else if status_code == 417 {
@@ -1481,12 +1487,16 @@ fn execute_request_inner(
                     }
 
                     // Prepend 417 headers + CONNECT headers to the retry response.
+                    // With --suppress-connect-headers the CONNECT bytes still
+                    // count toward `%{size_header}` but stay out of the output.
+                    let connect_total = connect_response.len() + connect_response2.len();
+                    resp.connect_header_size = connect_total;
                     let mut combined = Vec::new();
-                    if !connect_response.is_empty() {
+                    if !opts.suppress_connect_headers && !connect_response.is_empty() {
                         combined.extend_from_slice(&connect_response);
                     }
                     combined.extend_from_slice(&headers_417);
-                    if !connect_response2.is_empty() {
+                    if !opts.suppress_connect_headers && !connect_response2.is_empty() {
                         combined.extend_from_slice(&connect_response2);
                     }
                     combined.extend_from_slice(&resp.header_bytes);
@@ -1565,9 +1575,12 @@ fn execute_request_inner(
         }
 
         if !connect_response.is_empty() {
-            let mut combined = connect_response;
-            combined.extend_from_slice(&resp.header_bytes);
-            resp.header_bytes = combined;
+            resp.connect_header_size = connect_response.len();
+            if !opts.suppress_connect_headers {
+                let mut combined = connect_response;
+                combined.extend_from_slice(&resp.header_bytes);
+                resp.header_bytes = combined;
+            }
         }
         return Ok(resp);
     }
@@ -1604,9 +1617,12 @@ fn execute_request_inner(
 
     // Prepend CONNECT tunnel response headers so callers can see them.
     if !connect_response.is_empty() {
-        let mut combined = connect_response;
-        combined.extend_from_slice(&resp.header_bytes);
-        resp.header_bytes = combined;
+        resp.connect_header_size = connect_response.len();
+        if !opts.suppress_connect_headers {
+            let mut combined = connect_response;
+            combined.extend_from_slice(&resp.header_bytes);
+            resp.header_bytes = combined;
+        }
     }
 
     // HTTP/1.1 keep-alive pool: save the connection back unless the server

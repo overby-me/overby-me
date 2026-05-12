@@ -503,6 +503,9 @@ pub(crate) fn parse_args() -> Options {
             "--haproxy-protocol" => {
                 opts.haproxy_protocol = true;
             }
+            "--suppress-connect-headers" => {
+                opts.suppress_connect_headers = true;
+            }
             "--haproxy-clientip" => {
                 i += 1;
                 let val = next_arg(&args, i, "--haproxy-clientip");

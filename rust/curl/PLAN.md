@@ -6,7 +6,7 @@ Use the upstream [curl test suite](https://github.com/curl/curl/tree/master/test
 
 ## Current Status
 
-**729 tests passing** (was 709 at session start; +12 across multipart, retry, IPv6,
+**730 tests passing** (was 709 at session start; +12 across multipart, retry, IPv6,
 upload-stdin redirect, write-out, interface, and dump-header fixes) across the
 curl 8.19.0 test suite (verified with strict
 runner checks — the derivation fails when a test number doesn't exist or the
@@ -401,13 +401,14 @@ Current gaps:
 - [x] file:// GET on a directory emits a newline-separated sorted listing (or empty) with exit 0 instead of exit 37 (unlocked tests 3016, 3203)
 - [x] perform() probes the URL for malformed-shape errors before checking `-T` upload-source existence so a bad URL paired with a missing `-T` target reports exit 3 instead of exit 26 (unlocked test 1469 from regression)
 - [x] `--haproxy-protocol` / `--haproxy-clientip` write a v1 PROXY TCP4/TCP6 header onto the post-connect stream (post-CONNECT for proxytunnel); destination is the proxy when `-x` is set, the origin otherwise; client IP defaults to the local socket but can be overridden (unlocked tests 1455, 1456, 3028, 3201, 3202)
+- [x] `--suppress-connect-headers` keeps the proxy CONNECT response headers out of `--include` / `--dump-header` output while still counting them toward `%{size_header}` (unlocked test 1288)
 - [ ] Target 750+ passing by addressing remaining feature gaps
 
 ---
 
 ## Test Inventory
 
-### Passing tests (729)
+### Passing tests (730)
 
 The authoritative list is `testNums` in `default.nix`; the count is
 checked there by Nix and stays in sync with the per-test derivations.
