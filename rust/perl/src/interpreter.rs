@@ -12725,10 +12725,9 @@ impl Interpreter {
                     // temporary (e.g. `index`, `length`, `pos`, …), the
                     // returned value isn't a writable slot — reference
                     // perl dies "Can't return a temporary from lvalue
-                    // subroutine" in scalar context (op/sub_lval 39-44).
-                    // List context (assign_list_ctx) doesn't die.
-                    if !self.assign_list_ctx
-                        && let Expr::Call(call_name, _) = lvalue_expr
+                    // subroutine" in both scalar AND list context
+                    // (op/sub_lval 39-41).
+                    if let Expr::Call(call_name, _) = lvalue_expr
                         && !self.lvalue_subs.contains(call_name)
                         && !self.subs.contains_key(call_name)
                         && !is_internal_lvalue_helper(call_name)
@@ -17388,6 +17387,11 @@ fn is_internal_lvalue_helper(name: &str) -> bool {
             | "_postfix_array_slice"
             | "_postfix_hash_slice"
             | "_array_kvslice"
+            // `shift`/`pop` return an alias to the popped slot which
+            // can serve as the lvalue when the slot was passed in as
+            // a Value::Alias (op/sub_lval lv2t).
+            | "shift"
+            | "pop"
     )
 }
 
