@@ -2743,7 +2743,8 @@ impl Interpreter {
                             format!("{}::{}", self.package, var_name)
                         };
                         if name.starts_with('@') {
-                            let items = if init.is_some() {
+                            let has_init = init.is_some();
+                            let items = if has_init {
                                 self.eval_list(init.as_ref().unwrap())
                             } else {
                                 Vec::new()
@@ -2757,7 +2758,9 @@ impl Interpreter {
                                 let rc = if let Some(existing) =
                                     self.aliased_arrays.get(&qualified).cloned()
                                 {
-                                    *existing.borrow_mut() = items;
+                                    if has_init {
+                                        *existing.borrow_mut() = items;
+                                    }
                                     existing
                                 } else {
                                     let rc = std::rc::Rc::new(std::cell::RefCell::new(items));
@@ -2766,11 +2769,16 @@ impl Interpreter {
                                     rc
                                 };
                                 self.aliased_arrays.insert(var_name.to_string(), rc);
-                            } else {
+                            } else if has_init {
+                                // `our @x = (…)` with init: assign.
+                                // `our @x;` (no init): leave existing
+                                // global @x alone — it's a declaration,
+                                // not a clear. op/each_array 64.
                                 self.globals.arrays.insert(qualified, items);
                             }
                         } else if name.starts_with('%') {
-                            let items = if init.is_some() {
+                            let has_init = init.is_some();
+                            let items = if has_init {
                                 self.eval_list(init.as_ref().unwrap())
                             } else {
                                 Vec::new()
@@ -2787,7 +2795,9 @@ impl Interpreter {
                                 let rc = if let Some(existing) =
                                     self.aliased_hashes.get(&qualified).cloned()
                                 {
-                                    *existing.borrow_mut() = h;
+                                    if has_init {
+                                        *existing.borrow_mut() = h;
+                                    }
                                     existing
                                 } else {
                                     let rc = std::rc::Rc::new(std::cell::RefCell::new(h));
@@ -2796,7 +2806,10 @@ impl Interpreter {
                                     rc
                                 };
                                 self.aliased_hashes.insert(var_name.to_string(), rc);
-                            } else {
+                            } else if has_init {
+                                // `our %h = (…)` with init only.
+                                // Bare `our %h;` declares without
+                                // clearing existing global %h.
                                 self.set_hash_from_list(&qualified, items);
                             }
                         } else {
