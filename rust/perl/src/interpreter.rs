@@ -7380,6 +7380,11 @@ impl Interpreter {
                 if let Some(name) = name_opt
                     && let Some(off_bytes) = self.pos_offsets.get(&name).copied()
                 {
+                    // Under `use bytes`, return raw byte offset; otherwise
+                    // convert to char count. op/pos test 32.
+                    if self.bytes_mode {
+                        return Value::Num(off_bytes as f64);
+                    }
                     let s = self.get_var(&name).to_str();
                     let bytes = s.as_bytes();
                     if off_bytes > bytes.len() {
