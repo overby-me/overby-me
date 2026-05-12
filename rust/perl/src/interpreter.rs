@@ -7233,7 +7233,9 @@ impl Interpreter {
             "system" => {
                 // `system LIST` — run a command, wait for it, set `$?`
                 // and `${^CHILD_ERROR_NATIVE}` to the wait status. Returns
-                // the wait status (not the exit code).
+                // the wait status (not the exit code). A single-argument
+                // form with shell metacharacters is passed through
+                // `/bin/sh -c` per Perl docs.
                 let list: Vec<Value> = args.iter().flat_map(|a| self.eval_list(a)).collect();
                 if list.is_empty() {
                     return Value::Num(-1.0);
@@ -7241,7 +7243,18 @@ impl Interpreter {
                 let prog = list[0].to_str();
                 let prog_args: Vec<String> = list[1..].iter().map(|v| v.to_str()).collect();
                 use std::process::Command;
-                let status = Command::new(&prog).args(&prog_args).status();
+                let needs_shell = prog_args.is_empty()
+                    && prog.chars().any(|c| matches!(
+                        c,
+                        ' ' | '\t' | '\n' | '|' | '&' | ';' | '<' | '>'
+                            | '(' | ')' | '$' | '`' | '\\' | '"' | '\''
+                            | '*' | '?' | '[' | ']' | '{' | '}'
+                    ));
+                let status = if needs_shell {
+                    Command::new("/bin/sh").arg("-c").arg(&prog).status()
+                } else {
+                    Command::new(&prog).args(&prog_args).status()
+                };
                 let wait_status: i32 = match status {
                     Ok(s) => {
                         #[cfg(unix)]
