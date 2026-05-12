@@ -1304,7 +1304,12 @@ impl Interpreter {
                         break;
                     }
                     redo_pending = false;
+                    // Body and continue block run in separate lexical
+                    // frames so `local $x` from body is restored before
+                    // continue runs. op/while continue-block tests.
+                    self.push_scope();
                     let flow = self.exec_stmts(body);
+                    self.pop_scope();
                     let ran_continue = match flow {
                         Flow::Last(l) if l.is_none() || l == *label => break,
                         Flow::Last(l) => {
@@ -1379,7 +1384,9 @@ impl Interpreter {
                         break;
                     }
                     redo_pending = false;
+                    self.push_scope();
                     let flow = self.exec_stmts(body);
+                    self.pop_scope();
                     let ran_continue = match flow {
                         Flow::Last(l) if l.is_none() || l == *label => break,
                         Flow::Last(l) => return Flow::Last(l),
@@ -1673,7 +1680,12 @@ impl Interpreter {
                     // end (LIFO), not accumulating into the outer scope.
                     // op/defer test 6 (foreach iter captures own $i).
                     let defer_base = self.defer_blocks.last().map(|v| v.len()).unwrap_or(0);
+                    // Body runs in its own scope so `local $x` inside is
+                    // restored between iterations (and before the
+                    // continue block). op/while local-in-body tests.
+                    self.push_scope();
                     let flow = self.exec_stmts(body);
+                    self.pop_scope();
                     if let Some(blocks) = self.defer_blocks.last_mut() {
                         let drained: Vec<Vec<Stmt>> = blocks.drain(defer_base..).collect();
                         for body in drained.into_iter().rev() {
