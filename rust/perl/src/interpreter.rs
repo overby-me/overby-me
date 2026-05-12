@@ -5839,6 +5839,20 @@ impl Interpreter {
             // only need this to compile so the chain-detection error
             // fires correctly. op/cmpchain.)
             BinOp::Smartmatch => bool_value(l.to_str() == r.to_str()),
+            // `isa` — $obj isa "Class" returns true if $obj is a
+            // blessed ref of Class or a subclass. Walks @ISA. Bare
+            // class on the RHS appears as a string after parsing.
+            BinOp::Isa => {
+                let class = r.to_str();
+                let p = Self::ref_ptr(&l);
+                if p == 0 {
+                    bool_value(false)
+                } else if let Some(actual) = self.blessed_refs.get(&p).cloned() {
+                    bool_value(self.class_isa(&actual, &class))
+                } else {
+                    bool_value(false)
+                }
+            }
 
             BinOp::StrEq => bool_value(l.to_str() == r.to_str()),
             BinOp::StrNe => bool_value(l.to_str() != r.to_str()),
@@ -9743,6 +9757,37 @@ impl Interpreter {
 
     /// Extract the backing pointer of a reference value — used as the key
     /// for `blessed_refs`. Non-ref values have no stable pointer; return 0.
+    /// `$class isa $target` — true if `class` equals `target` or any
+    /// class reachable through `@class::ISA` matches. Walks the ISA
+    /// graph breadth-first with cycle detection.
+    fn class_isa(&self, class: &str, target: &str) -> bool {
+        if class == target {
+            return true;
+        }
+        let mut visited: HashSet<String> = HashSet::new();
+        let mut stack: Vec<String> = vec![class.to_string()];
+        while let Some(c) = stack.pop() {
+            if !visited.insert(c.clone()) {
+                continue;
+            }
+            if c == target {
+                return true;
+            }
+            let isa_arr = self
+                .globals
+                .arrays
+                .get(&format!("{c}::ISA"))
+                .cloned()
+                .unwrap_or_default();
+            for parent in isa_arr.into_iter().map(|v| v.to_str()) {
+                if !visited.contains(&parent) {
+                    stack.push(parent);
+                }
+            }
+        }
+        false
+    }
+
     fn ref_ptr(v: &Value) -> usize {
         match v {
             Value::ArrayRef(r) => std::rc::Rc::as_ptr(r) as usize,

@@ -1885,85 +1885,216 @@ impl Parser {
     }
 
     fn parse_comparison(&mut self) -> Expr {
-        let left = self.parse_relational();
-        let (op, op_name) = match self.tok() {
-            Token::NumEq => (Some(BinOp::NumEq), "=="),
-            Token::NumNe => (Some(BinOp::NumNe), "!="),
-            Token::Spaceship => (Some(BinOp::Spaceship), "<=>"),
-            Token::Eq => (Some(BinOp::StrEq), "eq"),
-            Token::Ne => (Some(BinOp::StrNe), "ne"),
-            Token::Cmp => (Some(BinOp::StrCmp), "cmp"),
-            // `~~` smartmatch — treat as no-op (returns empty string).
-            // Not used in modern Perl for runtime, but the test suite
-            // exercises the non-associativity check.
-            Token::Smartmatch => (Some(BinOp::Smartmatch), "~~"),
-            _ => (None, ""),
+        let mut left = self.parse_relational();
+        // Loop to handle chained equality operators (==, !=, eq, ne)
+        // which are mutually chainable in Perl 5.32+. Each iteration
+        // also validates against the non-associative group
+        // (<=>, cmp, ~~, isa) which can't be chained with anything.
+        let nceq_tok = |t: &Token| {
+            matches!(t, Token::Spaceship | Token::Cmp | Token::Smartmatch | Token::Isa)
         };
-        let Some(op) = op else { return left };
-        self.pos += 1;
-        let right = self.parse_relational();
-        // Detect chained non-associative comparisons (`$a <=> $b cmp
-        // $c`, `$a == $b != $c`, etc.) — these are syntax errors in
-        // Perl 5.32+. The right-hand side already absorbed one
-        // comparison; if another follows immediately, the chain is
-        // illegal. op/cmpchain.
-        if matches!(
-            self.tok(),
-            Token::Spaceship
-                | Token::Cmp
-                | Token::Smartmatch
-                | Token::NumEq
-                | Token::NumNe
-                | Token::Eq
-                | Token::Ne
-        ) {
-            let line = self.current_line();
-            self.error = Some(format!(
-                "syntax error at {{FILE}} line {line}, near \"{op_name}\"\n"
-            ));
+        let eqop_tok = |t: &Token| {
+            matches!(t, Token::NumEq | Token::NumNe | Token::Eq | Token::Ne)
+        };
+        loop {
+            let (op, op_name) = match self.tok() {
+                Token::NumEq => (Some(BinOp::NumEq), "=="),
+                Token::NumNe => (Some(BinOp::NumNe), "!="),
+                Token::Spaceship => (Some(BinOp::Spaceship), "<=>"),
+                Token::Eq => (Some(BinOp::StrEq), "eq"),
+                Token::Ne => (Some(BinOp::StrNe), "ne"),
+                Token::Cmp => (Some(BinOp::StrCmp), "cmp"),
+                Token::Smartmatch => (Some(BinOp::Smartmatch), "~~"),
+                Token::Isa => (Some(BinOp::Isa), "isa"),
+                _ => (None, ""),
+            };
+            let Some(op) = op else { return left };
+            self.pos += 1;
+            let right = self.parse_relational();
+            // Helpers (closures captured each iteration).
+            let is_nceq = |o: &BinOp| {
+                matches!(
+                    o,
+                    BinOp::Spaceship | BinOp::StrCmp | BinOp::Smartmatch | BinOp::Isa
+                )
+            };
+            let is_eqop = |o: &BinOp| {
+                matches!(
+                    o,
+                    BinOp::NumEq | BinOp::NumNe | BinOp::StrEq | BinOp::StrNe
+                )
+            };
+            let is_relational = |o: &BinOp| {
+                matches!(
+                    o,
+                    BinOp::NumLt
+                        | BinOp::NumGt
+                        | BinOp::NumLe
+                        | BinOp::NumGe
+                        | BinOp::StrLt
+                        | BinOp::StrGt
+                        | BinOp::StrLe
+                        | BinOp::StrGe,
+                )
+            };
+            // Recursively detect a chained-relational shape: either a
+            // direct relational BinOp, or a LogAnd whose either side
+            // resolves to one (produced by our chained-comparison rewrite).
+            fn contains_relational(e: &Expr) -> bool {
+                match e {
+                    Expr::BinOp(o, _, _)
+                        if matches!(
+                            o,
+                            BinOp::NumLt
+                                | BinOp::NumGt
+                                | BinOp::NumLe
+                                | BinOp::NumGe
+                                | BinOp::StrLt
+                                | BinOp::StrGt
+                                | BinOp::StrLe
+                                | BinOp::StrGe,
+                        ) =>
+                    {
+                        true
+                    }
+                    Expr::BinOp(BinOp::LogAnd, l, r) => {
+                        contains_relational(l) || contains_relational(r)
+                    }
+                    _ => false,
+                }
+            }
+            // Likewise for eq-class chains rewritten to LogAnd.
+            fn contains_eqop(e: &Expr) -> bool {
+                match e {
+                    Expr::BinOp(o, _, _)
+                        if matches!(
+                            o,
+                            BinOp::NumEq | BinOp::NumNe | BinOp::StrEq | BinOp::StrNe
+                        ) =>
+                    {
+                        true
+                    }
+                    Expr::BinOp(BinOp::LogAnd, l, r) => {
+                        contains_eqop(l) || contains_eqop(r)
+                    }
+                    _ => false,
+                }
+            }
+            // Non-assoc op cannot chain with anything that follows.
+            if is_nceq(&op) && (nceq_tok(self.tok()) || eqop_tok(self.tok())) {
+                let line = self.current_line();
+                self.error = Some(format!(
+                    "syntax error at {{FILE}} line {line}, near \"{op_name}\"\n"
+                ));
+            }
+            // Eq-class op followed by a non-assoc op is illegal.
+            if is_eqop(&op) && nceq_tok(self.tok()) {
+                let line = self.current_line();
+                self.error = Some(format!(
+                    "syntax error at {{FILE}} line {line}, near \"{op_name}\"\n"
+                ));
+            }
+            // Mixing with a relational chain on either side is illegal
+            // when the current op is non-assoc or eq-class.
+            let left_is_rel = contains_relational(&left);
+            let right_is_rel = contains_relational(&right);
+            let _ = is_relational; // kept for clarity above
+            if (left_is_rel || right_is_rel) && (is_nceq(&op) || is_eqop(&op)) {
+                let line = self.current_line();
+                self.error = Some(format!(
+                    "syntax error at {{FILE}} line {line}, near \"{op_name}\"\n"
+                ));
+            }
+            // Non-assoc op mixed with an eq-class chain on either side.
+            let left_is_eq = contains_eqop(&left);
+            let right_is_eq = contains_eqop(&right);
+            if (left_is_eq || right_is_eq) && is_nceq(&op) {
+                let line = self.current_line();
+                self.error = Some(format!(
+                    "syntax error at {{FILE}} line {line}, near \"{op_name}\"\n"
+                ));
+            }
+            // For chained eq-class ops, rewrite as && so each step
+            // short-circuits and the result is the conjunction of
+            // pairwise comparisons. We reuse the intermediate operand
+            // expr by reference — naive (doesn't preserve single-
+            // evaluation across side-effects), but matches the common
+            // chained-comparison usage.
+            let left_is_eqop_top =
+                matches!(&left, Expr::BinOp(o, _, _) if is_eqop(o));
+            if is_eqop(&op) && left_is_eqop_top {
+                if let Expr::BinOp(_, _, b_box) = &left {
+                    let b = (**b_box).clone();
+                    let new_pair =
+                        Expr::BinOp(op.clone(), Box::new(b), Box::new(right));
+                    left = Expr::BinOp(
+                        BinOp::LogAnd,
+                        Box::new(left),
+                        Box::new(new_pair),
+                    );
+                    continue;
+                }
+            }
+            left = Expr::BinOp(op.clone(), Box::new(left), Box::new(right));
+            // Only eq-class operators chain — for everything else stop
+            // the loop so the caller (parse_bit_and / higher) handles
+            // the remaining tokens.
+            if !is_eqop(&op) {
+                return left;
+            }
         }
-        Expr::BinOp(op, Box::new(left), Box::new(right))
     }
 
     fn parse_relational(&mut self) -> Expr {
         let mut left = self.parse_shift();
-        // Loop to handle chained comparisons like 32 <= $x <= 126
+        // Loop to handle chained comparisons like 32 <= $x <= 126.
+        // For chained relational comparisons Perl evaluates them as
+        // pairwise short-circuit AND: `$a < $b < $c` ⇒
+        // `($a < $b) && ($b < $c)`. We rewrite to && at parse time.
+        // op/cmpchain. (Note: doesn't preserve single-evaluation of
+        // the shared operand across side effects.)
+        let is_rel = |o: &BinOp| {
+            matches!(
+                o,
+                BinOp::NumLt
+                    | BinOp::NumGt
+                    | BinOp::NumLe
+                    | BinOp::NumGe
+                    | BinOp::StrLt
+                    | BinOp::StrGt
+                    | BinOp::StrLe
+                    | BinOp::StrGe,
+            )
+        };
         loop {
-            match self.tok() {
-                Token::NumLt => {
-                    self.pos += 1;
-                    left = Expr::BinOp(BinOp::NumLt, Box::new(left), Box::new(self.parse_shift()));
+            let op = match self.tok() {
+                Token::NumLt => Some(BinOp::NumLt),
+                Token::NumGt => Some(BinOp::NumGt),
+                Token::NumLe => Some(BinOp::NumLe),
+                Token::NumGe => Some(BinOp::NumGe),
+                Token::Lt => Some(BinOp::StrLt),
+                Token::Gt => Some(BinOp::StrGt),
+                Token::Le => Some(BinOp::StrLe),
+                Token::Ge => Some(BinOp::StrGe),
+                _ => None,
+            };
+            let Some(op) = op else { break };
+            self.pos += 1;
+            let right = self.parse_shift();
+            let left_is_rel_top = matches!(&left, Expr::BinOp(o, _, _) if is_rel(o));
+            if left_is_rel_top {
+                if let Expr::BinOp(_, _, b_box) = &left {
+                    let b = (**b_box).clone();
+                    let new_pair = Expr::BinOp(op, Box::new(b), Box::new(right));
+                    left = Expr::BinOp(
+                        BinOp::LogAnd,
+                        Box::new(left),
+                        Box::new(new_pair),
+                    );
+                    continue;
                 }
-                Token::NumGt => {
-                    self.pos += 1;
-                    left = Expr::BinOp(BinOp::NumGt, Box::new(left), Box::new(self.parse_shift()));
-                }
-                Token::NumLe => {
-                    self.pos += 1;
-                    left = Expr::BinOp(BinOp::NumLe, Box::new(left), Box::new(self.parse_shift()));
-                }
-                Token::NumGe => {
-                    self.pos += 1;
-                    left = Expr::BinOp(BinOp::NumGe, Box::new(left), Box::new(self.parse_shift()));
-                }
-                Token::Lt => {
-                    self.pos += 1;
-                    left = Expr::BinOp(BinOp::StrLt, Box::new(left), Box::new(self.parse_shift()));
-                }
-                Token::Gt => {
-                    self.pos += 1;
-                    left = Expr::BinOp(BinOp::StrGt, Box::new(left), Box::new(self.parse_shift()));
-                }
-                Token::Le => {
-                    self.pos += 1;
-                    left = Expr::BinOp(BinOp::StrLe, Box::new(left), Box::new(self.parse_shift()));
-                }
-                Token::Ge => {
-                    self.pos += 1;
-                    left = Expr::BinOp(BinOp::StrGe, Box::new(left), Box::new(self.parse_shift()));
-                }
-                _ => break,
             }
+            left = Expr::BinOp(op, Box::new(left), Box::new(right));
         }
         left
     }
@@ -3058,6 +3189,21 @@ impl Parser {
                                 Vec::new()
                             };
                             expr = Expr::MethodCall(Box::new(expr), method, args);
+                        }
+                        // `$obj->isa(...)` — `isa` lexes as its own
+                        // token now that it's an operator. Allow it as
+                        // a method name here.
+                        Token::Isa => {
+                            self.pos += 1;
+                            let args = if self.eat(&Token::LParen) {
+                                let a = self.parse_list_expr();
+                                self.expect(&Token::RParen);
+                                a
+                            } else {
+                                Vec::new()
+                            };
+                            expr =
+                                Expr::MethodCall(Box::new(expr), "isa".to_string(), args);
                         }
                         // `$obj->$method` — method name from scalar var.
                         // Stringify at runtime via a marker method name

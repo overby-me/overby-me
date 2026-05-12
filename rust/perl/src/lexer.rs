@@ -134,6 +134,7 @@ pub enum Token {
     NumGe,              // >=
     Spaceship,          // <=>
     Cmp,                // cmp
+    Isa,                // isa
     LogAnd,             // &&
     LogOr,              // ||
     LogNot,             // !
@@ -1581,6 +1582,7 @@ impl Lexer {
                         "le" => Token::Le,
                         "ge" => Token::Ge,
                         "cmp" => Token::Cmp,
+                        "isa" => Token::Isa,
                         "chomp" => Token::Chomp,
                         "chop" => Token::Chop,
                         "push" => Token::Push,
