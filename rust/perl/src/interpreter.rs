@@ -5047,12 +5047,22 @@ impl Interpreter {
                         let rc = self.promote_hash_slot_to_alias(name, &key_val);
                         Value::ScalarRef(rc)
                     }
-                    // `\&name` — our BitAnd parser emits `Call(name, [])` for
-                    // the `&name` half, so `Ref(Call(…, []))` shows up here.
-                    // Return a CodeRef to the sub, NOT the result of calling
-                    // it — otherwise `*glob = \&runperl` ends up invoking
-                    // `runperl()` at load time (and dies since no prog is set).
-                    Expr::Call(name, args) if args.is_empty() => Value::CodeRef(name.clone()),
+                    // `\&name` — our BitAnd parser emits `Call(name, [])`
+                    // or `Call(name, [_amp_call_inherit_args])` for the
+                    // `&name` half, so `Ref(Call(…))` shows up here.
+                    // Return a CodeRef to the sub, NOT the result of
+                    // calling it — otherwise `*glob = \&runperl` ends
+                    // up invoking `runperl()` at load time.
+                    Expr::Call(name, args)
+                        if args.is_empty()
+                            || (args.len() == 1
+                                && matches!(
+                                    &args[0],
+                                    Expr::Call(n, inner) if n == "_amp_call_inherit_args" && inner.is_empty()
+                                )) =>
+                    {
+                        Value::CodeRef(name.clone())
+                    }
                     // `\&{EXPR}` — ref to the sub *named* by EXPR (no call).
                     // Matches Perl's `\&{"name"}` / `\&$name` idiom where the
                     // `&` sigil names a sub by string.
@@ -5898,8 +5908,55 @@ impl Interpreter {
         // `_amp_call_inherit_args` is the `&NAME` (no-parens) sentinel —
         // expand it to the current sub's @_ so the called sub sees the
         // caller's args. op/args `&methimpl` tests.
+        // `_amp_call_inherit_args` is the `&NAME` (no-parens) sentinel.
+        // Only inherit when we're inside a sub call (so the bare-name
+        // form at module top level doesn't accidentally pull in some
+        // outer-scope @_).
+        let inherit = args
+            .iter()
+            .any(|a| matches!(a, Expr::Call(n, _) if n == "_amp_call_inherit_args"))
+            && !self.current_sub_stack.is_empty();
+        let inherited: Vec<Value>;
         let filtered: Vec<Expr>;
-        let args = if args
+        let args: &[Expr] = if inherit {
+            // Resolve the sub and call it directly with caller's @_.
+            let cur_args: Vec<Value> = self.get_array("_");
+            inherited = cur_args;
+            let lookup_name = if name.contains("::") {
+                name.to_string()
+            } else {
+                let pkg = self.package.clone();
+                let qualified = format!("{pkg}::{name}");
+                if self.subs.contains_key(&qualified) {
+                    qualified
+                } else {
+                    name.to_string()
+                }
+            };
+            if let Some((_params, body)) = self.subs.get(&lookup_name).cloned() {
+                return self.call_sub_named(&body, &inherited, Some(&lookup_name));
+            }
+            // Fall back to normal dispatch with empty args if sub
+            // can't be found locally — eval_call's later paths handle
+            // method dispatch, AUTOLOAD, etc.
+            filtered = args
+                .iter()
+                .filter(|a| !matches!(a, Expr::Call(n, _) if n == "_amp_call_inherit_args"))
+                .cloned()
+                .collect();
+            &filtered[..]
+        } else if args
+            .iter()
+            .any(|a| matches!(a, Expr::Call(n, _) if n == "_amp_call_inherit_args"))
+        {
+            // Outside any sub call: strip the sentinel, call with no args.
+            filtered = args
+                .iter()
+                .filter(|a| !matches!(a, Expr::Call(n, _) if n == "_amp_call_inherit_args"))
+                .cloned()
+                .collect();
+            &filtered[..]
+        } else if args
             .iter()
             .any(|a| matches!(a, Expr::Call(n, _) if n == "_amp_call_parens"))
         {
@@ -6246,8 +6303,17 @@ impl Interpreter {
                         // `defined &name` reports false, but `exists
                         // &name` stays true (matches reference perl:
                         // the slot remains, just without a body).
+                        // The parser emits either `Call(name, [])` or
+                        // `Call(name, [_amp_call_inherit_args])`.
                         // op/exists_sub.
-                        Expr::Call(name, sub_args) if sub_args.is_empty() => {
+                        Expr::Call(name, sub_args)
+                            if sub_args.is_empty()
+                                || (sub_args.len() == 1
+                                    && matches!(
+                                        &sub_args[0],
+                                        Expr::Call(n, inner) if n == "_amp_call_inherit_args" && inner.is_empty()
+                                    )) =>
+                        {
                             let q = format!("{}::{}", self.package, name);
                             for key in [name.clone(), q.clone()] {
                                 if self.subs.contains_key(&key) {
@@ -7445,9 +7511,18 @@ impl Interpreter {
                 if let Some(a) = args.first() {
                     match a {
                         // `exists &name` — true iff sub is declared or
-                        // defined (parser emits this as a no-arg Call).
+                        // defined. The parser emits either an empty-args
+                        // `Expr::Call(name, [])` or, since we added the
+                        // pass-through @_ form, `Expr::Call(name, [sentinel])`.
                         // op/exists_sub.
-                        Expr::Call(name, sub_args) if sub_args.is_empty() => {
+                        Expr::Call(name, sub_args)
+                            if sub_args.is_empty()
+                                || (sub_args.len() == 1
+                                    && matches!(
+                                        &sub_args[0],
+                                        Expr::Call(n, inner) if n == "_amp_call_inherit_args" && inner.is_empty()
+                                    )) =>
+                        {
                             let q = format!("{}::{}", self.package, name);
                             let here = self.subs.contains_key(name) || self.subs.contains_key(&q);
                             return Value::Num(if here { 1.0 } else { 0.0 });

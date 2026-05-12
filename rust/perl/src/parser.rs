@@ -2225,10 +2225,24 @@ impl Parser {
                     // sentinel `_amp_call_parens` first-arg so `exists`
                     // can reject `exists &NAME()` while still allowing
                     // `exists &NAME`. op/exists_sub.
+                    //
+                    // `&NAME` (no parens at all) inherits the caller's
+                    // @_ as its args — Perl's pass-through call form.
+                    // Tag with `_amp_call_inherit_args` so the
+                    // interpreter forwards @_ only when called from
+                    // inside a sub. op/args `&methimpl` tests.
                     if had_parens && args.is_empty() {
                         Expr::Call(
                             name,
                             vec![Expr::Call("_amp_call_parens".to_string(), Vec::new())],
+                        )
+                    } else if !had_parens {
+                        Expr::Call(
+                            name,
+                            vec![Expr::Call(
+                                "_amp_call_inherit_args".to_string(),
+                                Vec::new(),
+                            )],
                         )
                     } else {
                         Expr::Call(name, args)
