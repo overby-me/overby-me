@@ -1936,45 +1936,43 @@ impl Interpreter {
             } => {
                 // One-shot loop: body runs once. `last` exits without
                 // running the continue block; normal fall-through runs it.
+                // The body and continue block live in *separate* lexical
+                // frames so any `local $x` in body is restored before
+                // the continue block sees `$x`. op/while continue-block
+                // local restore tests.
                 self.push_scope();
                 let flow = self.exec_stmts(body);
+                self.pop_scope();
                 let ran_continue = match flow {
                     Flow::Last(l) if l.is_none() || l == *label => {
-                        self.pop_scope();
                         return Flow::None;
                     }
                     Flow::Last(l) => {
-                        self.pop_scope();
                         return Flow::Last(l);
                     }
                     Flow::Next(l) if l.is_none() || l == *label => true,
                     Flow::Next(l) => {
-                        self.pop_scope();
                         return Flow::Next(l);
                     }
                     Flow::Return(v) => {
-                        self.pop_scope();
                         return Flow::Return(v);
                     }
                     Flow::Die(msg) => {
-                        self.pop_scope();
                         return Flow::Die(msg);
                     }
                     Flow::Exit(code) => {
-                        self.pop_scope();
                         return Flow::Exit(code);
                     }
                     Flow::Goto(l) => {
-                        self.pop_scope();
                         return Flow::Goto(l);
                     }
                     Flow::Redo(l) => {
-                        self.pop_scope();
                         return Flow::Redo(l);
                     }
                     Flow::None => true,
                 };
                 if ran_continue {
+                    self.push_scope();
                     let cflow = self.exec_stmts(continue_body);
                     self.pop_scope();
                     match cflow {
@@ -1987,7 +1985,6 @@ impl Interpreter {
                         }
                     }
                 } else {
-                    self.pop_scope();
                     Flow::None
                 }
             }
