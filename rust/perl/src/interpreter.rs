@@ -11130,10 +11130,7 @@ impl Interpreter {
         for (idx, stmt) in body.iter().enumerate() {
             // Tail-position calls inherit the sub's caller context so
             // `sub { …; foo() }` lets foo see wantarray correctly.
-            if idx == last_idx
-                && let Stmt::Expr(e) = stmt
-                && expr_has_tail_call(e)
-            {
+            if idx == last_idx && stmt_has_tail_call(stmt) {
                 self.next_call_ctx = Some(caller_ctx);
             }
             match self.exec_stmt(stmt) {
@@ -18152,10 +18149,25 @@ fn expr_has_tail_call(expr: &Expr) -> bool {
         | Expr::BinOp(BinOp::Or, _, r)
         | Expr::BinOp(BinOp::And, _, r) => expr_has_tail_call(r),
         Expr::Ternary(_, then, else_) => expr_has_tail_call(then) || expr_has_tail_call(else_),
-        Expr::DoBlock(stmts) => stmts.last().is_some_and(|s| match s {
-            Stmt::Expr(e) => expr_has_tail_call(e),
-            _ => false,
-        }),
+        Expr::DoBlock(stmts) => stmts.last().is_some_and(stmt_has_tail_call),
+        _ => false,
+    }
+}
+
+/// Does this statement have a tail-position call that should inherit
+/// the surrounding sub's caller context? Recurses into bare/named
+/// blocks so `sub { { foo() } }` propagates context to foo.
+fn stmt_has_tail_call(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Expr(e) => expr_has_tail_call(e),
+        Stmt::Block(body) | Stmt::BareBlock(body) | Stmt::NamedBlock(_, body) => {
+            // The block's last meaningful stmt is the tail.
+            let last = body
+                .iter()
+                .rev()
+                .find(|s| !matches!(s, Stmt::Nop | Stmt::LineMark(_) | Stmt::FileMark(_)));
+            last.is_some_and(stmt_has_tail_call)
+        }
         _ => false,
     }
 }
