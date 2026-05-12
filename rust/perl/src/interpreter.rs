@@ -10373,6 +10373,38 @@ impl Interpreter {
                     }
                 }
             }
+            // `${EXPR}` — the lvalue is whatever EXPR refs to. Evaluate
+            // EXPR, if it's a ScalarRef return it directly so callers
+            // (`id`/`id1` returning `${\shift}` / `$_[0]`) share storage
+            // with the original lvalue. op/sub_lval tests 18-21.
+            if let Expr::Call(n, ca) = lvalue_expr
+                && n == "_scalar_block_deref"
+                && let Some(inner) = ca.first()
+            {
+                let v = self.eval_expr(inner);
+                if let Value::ScalarRef(rc) = v {
+                    self.current_sub_stack.pop();
+                    self.set_array("_", saved_underscore);
+                    return Value::ScalarRef(rc);
+                }
+            }
+            // `$_[i]` — return ref to the i-th `@_` slot's Alias rc
+            // directly so the returned ref shares storage with the
+            // caller-passed slot (op/sub_lval `id1(get_st) = X`).
+            if let Expr::ArrayElement(an, idx_e) = lvalue_expr
+                && an == "_"
+            {
+                let idx = self.eval_expr(idx_e).to_num() as i64;
+                if idx >= 0 {
+                    let arr = self.get_array("_");
+                    if let Some(Value::Alias(rc)) = arr.get(idx as usize) {
+                        let rc = rc.clone();
+                        self.current_sub_stack.pop();
+                        self.set_array("_", saved_underscore);
+                        return Value::ScalarRef(rc);
+                    }
+                }
+            }
             self.eval_expr(&Expr::Ref(Box::new(lvalue_expr.clone())))
         } else {
             Value::Undef
