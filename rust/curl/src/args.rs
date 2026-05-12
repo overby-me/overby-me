@@ -496,6 +496,17 @@ pub(crate) fn parse_args() -> Options {
                 // Linux / BSD only, but our tests run on Linux only.
                 opts.outputs.push(PathBuf::from("/dev/null"));
             }
+            "-Z" | "--parallel" => {
+                // Parallel transfers: accepted but executed sequentially. Tests
+                // that only check error mapping (e.g. 496) still pass.
+            }
+            "--parallel-immediate" | "--parallel-max" => {
+                // Same — accepted, ignored. Consume the value for --parallel-max.
+                if arg == "--parallel-max" {
+                    i += 1;
+                    let _ = next_arg(&args, i, "--parallel-max");
+                }
+            }
             "-O" | "--remote-name" => {
                 opts.remote_name = true;
             }
@@ -992,7 +1003,7 @@ pub(crate) fn parse_args() -> Options {
                 // wildcards but if non-empty must be numeric (test 3020).
                 // Bracketed IPv6 literals (`[::1]`) are now accepted (test
                 // 2053). The bracket-aware parser lives in connection.rs.
-                let Some(parts) = crate::connection::split_connect_to_for_validation(&val) else {
+                let Some(parts) = crate::connection::parse_connect_to(&val) else {
                     eprintln!("curl: (49) Invalid syntax for --connect-to: '{val}'");
                     process::exit(49);
                 };

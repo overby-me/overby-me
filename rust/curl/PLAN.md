@@ -6,7 +6,7 @@ Use the upstream [curl test suite](https://github.com/curl/curl/tree/master/test
 
 ## Current Status
 
-**718 tests passing** across the curl 8.19.0 test suite (verified with strict
+**721 tests passing** across the curl 8.19.0 test suite (verified with strict
 runner checks — the derivation fails when a test number doesn't exist or the
 suite reports anything other than 100% OK).
 
@@ -388,13 +388,18 @@ Current gaps:
 - [x] `--retry` with `--output` file: prepend prior failed attempts (retry_prefix) so `-i` reproduces the full sequence; `--fail` drops the 4xx body from the prefix (unlocked tests 1633, 1634)
 - [x] `--write-out %header{name:all[:sep]}` and `:N` / `:last` qualifiers; values harvested from redirect chain + final response; allow `\}` to escape `}` in the pattern (unlocked tests 764, 765)
 - [x] `-D -` paired with `-i`: emit each header line twice in succession (per-line interleave), matching curl's callback-per-line behavior (unlocked test 1066)
+- [x] Multipart parts use `Content-Disposition: attachment` when the user-supplied `Content-Type:` is not a `multipart/form-data` variant (RFC 1867 style, unlocked test 277)
+- [x] `--retry-max-time`: don't accumulate the failing attempt into the retry prefix when the proposed Retry-After delay would push past the budget — break with the response alone (unlocked test 366)
+- [x] Chunked body honors `--max-filesize`: truncate body to the limit, exit 63 (unlocked test 457)
+- [x] `-T file` validates the upload source exists before connecting; missing file maps to exit 26 (unlocked test 496)
+- [x] `-Z` / `--parallel` / `--parallel-immediate` / `--parallel-max` accepted as no-ops so dependent option parsing reaches the rest of the command line
 - [ ] Target 750+ passing by addressing remaining feature gaps
 
 ---
 
 ## Test Inventory
 
-### Passing tests (718)
+### Passing tests (721)
 
 The authoritative list is `testNums` in `default.nix`; the count is
 checked there by Nix and stays in sync with the per-test derivations.

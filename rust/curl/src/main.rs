@@ -791,6 +791,23 @@ fn main() {
                             && attempt < opts.retry
                         {
                             last_err = format!("HTTP {}", r.status);
+                            // Honor Retry-After header (seconds) for the delay.
+                            let proposed_delay = r
+                                .headers
+                                .iter()
+                                .find(|(k, _)| k.eq_ignore_ascii_case("retry-after"))
+                                .and_then(|(_, v)| v.trim().parse::<u64>().ok())
+                                .unwrap_or((attempt as u64 + 1) * 2);
+                            // If Retry-After exceeds --retry-max-time, abort
+                            // the retry sequence without accumulating this
+                            // attempt into the prefix (test 366).
+                            if let Some(budget) = opts.retry_max_time {
+                                let elapsed = retry_start.elapsed().as_secs();
+                                if elapsed + proposed_delay > budget {
+                                    resp = Some(r);
+                                    break;
+                                }
+                            }
                             if opts.include_headers {
                                 // Include redirect chain bytes (e.g. 301)
                                 // before the final response headers so the
@@ -804,13 +821,7 @@ fn main() {
                             if !drop_body {
                                 retry_prefix.extend_from_slice(&r.body);
                             }
-                            // Honor Retry-After header (seconds) for the delay.
-                            next_delay_secs = r
-                                .headers
-                                .iter()
-                                .find(|(k, _)| k.eq_ignore_ascii_case("retry-after"))
-                                .and_then(|(_, v)| v.trim().parse::<u64>().ok())
-                                .unwrap_or((attempt as u64 + 1) * 2);
+                            next_delay_secs = proposed_delay;
                             resp = Some(r);
                             continue;
                         }
@@ -974,8 +985,11 @@ fn main() {
                 // once to include), so emit each line twice in succession to
                 // match (test 1066). The include branch below skips its own
                 // header write in this case.
-                let dump_to_stdout =
-                    effective_opts.dump_header.as_deref().and_then(|p| p.to_str()) == Some("-");
+                let dump_to_stdout = effective_opts
+                    .dump_header
+                    .as_deref()
+                    .and_then(|p| p.to_str())
+                    == Some("-");
                 let dump_pair_with_include = dump_to_stdout && opts.include_headers;
                 if let Some(ref dump_path) = effective_opts.dump_header {
                     match dump_path.to_str() {

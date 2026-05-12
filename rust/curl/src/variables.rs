@@ -7,7 +7,11 @@
 // verbatim. Backslash before `{{` produces a literal — the backslash itself
 // is dropped (matching curl's escape rule, test 428).
 
-#![allow(clippy::collapsible_if, clippy::manual_div_ceil, clippy::manual_is_multiple_of)]
+#![allow(
+    clippy::collapsible_if,
+    clippy::manual_div_ceil,
+    clippy::manual_is_multiple_of
+)]
 
 use std::env;
 use std::fs;

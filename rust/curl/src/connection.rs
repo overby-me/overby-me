@@ -51,11 +51,7 @@ pub(crate) struct PooledConn {
 /// Split a `--connect-to` entry into its four fields, respecting bracketed
 /// IPv6 literals so colons inside `[...]` aren't treated as separators
 /// (test 2053 — `[fc00::1]:8082:...:...`).
-pub(crate) fn split_connect_to_for_validation(entry: &str) -> Option<[String; 4]> {
-    split_connect_to(entry)
-}
-
-fn split_connect_to(entry: &str) -> Option<[String; 4]> {
+pub(crate) fn parse_connect_to(entry: &str) -> Option<[String; 4]> {
     let mut fields: Vec<String> = Vec::with_capacity(4);
     let mut buf = String::new();
     let mut depth: u32 = 0;
@@ -99,7 +95,7 @@ pub(crate) fn connect_to_override(
 ) -> Option<(String, u16)> {
     let host_norm = host.trim_end_matches('.').to_ascii_lowercase();
     for entry in entries {
-        let Some(parts) = split_connect_to(entry) else {
+        let Some(parts) = parse_connect_to(entry) else {
             continue;
         };
         let (h1, p1, h2, p2) = (

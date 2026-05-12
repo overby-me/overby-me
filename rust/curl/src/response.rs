@@ -902,8 +902,14 @@ pub(crate) fn read_response(
         }
     }
 
+    let mut chunked_filesize_exceeded = false;
     let (body, timed_out, recv_error_flag, partial_flag, chunked_trailers) = if is_chunked {
-        let (b, err, trailers) = read_chunked_body(&mut reader)?;
+        let cap = if !is_redirect { max_filesize } else { None };
+        let (b, err, trailers) = read_chunked_body(&mut reader, cap)?;
+        let exceeded = matches!(err, ChunkErr::FilesizeExceeded);
+        if exceeded {
+            chunked_filesize_exceeded = true;
+        }
         (
             b,
             false,
@@ -1079,7 +1085,7 @@ pub(crate) fn read_response(
         partial_file: partial_flag,
         bad_content_encoding: bad_encoding,
         bad_encoding_too_many,
-        filesize_exceeded: false,
+        filesize_exceeded: chunked_filesize_exceeded,
         header_size_error: false,
     })
 }
@@ -1091,9 +1097,14 @@ pub(crate) enum ChunkErr {
     Partial,
     /// Malformed framing (bad size, overflow, etc.) -> CURLE_RECV_ERROR (56).
     Recv,
+    /// Cumulative body would exceed --max-filesize (test 457).
+    FilesizeExceeded,
 }
 
-fn read_chunked_body(reader: &mut impl BufRead) -> Result<(Vec<u8>, ChunkErr, Vec<u8>), String> {
+fn read_chunked_body(
+    reader: &mut impl BufRead,
+    max_filesize: Option<u64>,
+) -> Result<(Vec<u8>, ChunkErr, Vec<u8>), String> {
     let mut body = Vec::new();
     loop {
         let mut size_line = String::new();
@@ -1148,6 +1159,12 @@ fn read_chunked_body(reader: &mut impl BufRead) -> Result<(Vec<u8>, ChunkErr, Ve
             return Ok((body, ChunkErr::Partial, Vec::new()));
         }
         body.extend_from_slice(&chunk);
+        if let Some(limit) = max_filesize
+            && body.len() as u64 > limit
+        {
+            body.truncate(limit as usize);
+            return Ok((body, ChunkErr::FilesizeExceeded, Vec::new()));
+        }
         // Read trailing line terminator after chunk data. Spec says CRLF, but
         // some servers / test fixtures use bare LF — read_line consumes either.
         let mut sep = String::new();

@@ -545,6 +545,24 @@ fn build_body(opts: &Options, boundary: Option<&str>) -> Option<Vec<u8>> {
         return Some(data.clone());
     }
 
+    // When -H "Content-Type:" overrides the multipart wrapper Content-Type
+    // with a non-`multipart/form-data` value, curl emits part dispositions
+    // as `attachment` rather than `form-data` (RFC 1867 style, test 277).
+    // A user-supplied `multipart/form-data; charset=…` keeps the default
+    // `form-data` disposition (test 669).
+    let user_non_mp_ct = opts.headers.iter().any(|(k, v)| {
+        k.eq_ignore_ascii_case("content-type")
+            && !v
+                .trim_start()
+                .to_ascii_lowercase()
+                .starts_with("multipart/form-data")
+    });
+    let disposition = if user_non_mp_ct {
+        "attachment"
+    } else {
+        "form-data"
+    };
+
     if let Some(boundary) = boundary {
         let mut body = Vec::new();
         for field in &opts.form_fields {
@@ -572,7 +590,7 @@ fn build_body(opts: &Options, boundary: Option<&str>) -> Option<Vec<u8>> {
                 let safe_filename = mime_percent_encode(display_filename);
                 body.extend_from_slice(
                     format!(
-                        "Content-Disposition: form-data; name=\"{}\"; filename=\"{safe_filename}\"\r\n\
+                        "Content-Disposition: {disposition}; name=\"{}\"; filename=\"{safe_filename}\"\r\n\
                          Content-Type: {ct}\r\n\r\n",
                         field.name
                     )
@@ -589,10 +607,10 @@ fn build_body(opts: &Options, boundary: Option<&str>) -> Option<Vec<u8>> {
                 // `-F=value` (empty name) emits just `Content-Disposition:
                 // form-data` with no `name=` attribute (test 1293).
                 let cd = if field.name.is_empty() {
-                    String::from("Content-Disposition: form-data\r\n")
+                    format!("Content-Disposition: {disposition}\r\n")
                 } else {
                     format!(
-                        "Content-Disposition: form-data; name=\"{}\"\r\n",
+                        "Content-Disposition: {disposition}; name=\"{}\"\r\n",
                         field.name
                     )
                 };
@@ -692,8 +710,7 @@ fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options)
     let mut inline_pairs: Vec<String> = Vec::new();
     // Per-domain cap: curl's CMAX_COOKIES_PER_DOMAIN is 150. New entries past
     // that limit for a given domain are rejected at insert time (test 442).
-    let mut per_domain_count: std::collections::HashMap<String, usize> =
-        std::collections::HashMap::new();
+    let mut per_domain_count: Vec<(String, usize)> = Vec::new();
     const MAX_COOKIES_PER_DOMAIN: usize = 150;
 
     for cookie in &opts.cookies {
@@ -863,7 +880,14 @@ fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options)
                     // file gets capped at the cookie-store level, not just
                     // at the matching set (test 442).
                     let cap_key = domain.strip_prefix('.').unwrap_or(domain).to_lowercase();
-                    let count = per_domain_count.entry(cap_key).or_insert(0);
+                    let count = if let Some(slot) =
+                        per_domain_count.iter_mut().find(|(k, _)| k == &cap_key)
+                    {
+                        &mut slot.1
+                    } else {
+                        per_domain_count.push((cap_key, 0));
+                        &mut per_domain_count.last_mut().unwrap().1
+                    };
                     if *count >= MAX_COOKIES_PER_DOMAIN {
                         continue;
                     }
@@ -1619,6 +1643,18 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                 field.value
             ));
         }
+    }
+
+    // -T file: validate the upload-source file exists before connecting,
+    // so a missing file maps to exit 26 (CURLE_READ_ERROR) rather than a
+    // connection failure (test 496). "-" / "." are stdin and always allowed.
+    if let Some(ref up) = opts.upload_file
+        && let Some(s) = up.to_str()
+        && s != "-"
+        && s != "."
+        && !std::path::Path::new(s).exists()
+    {
+        return Err(format!("read form file: couldn't open file \"{s}\""));
     }
 
     // HTTP/1.0 + stdin upload: no chunked encoding available so we can't ship
