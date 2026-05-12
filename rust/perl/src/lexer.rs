@@ -3686,6 +3686,7 @@ fn last_is_named_unary(last: Option<&Token>) -> bool {
             n.as_str(),
             "scalar" | "pos" | "defined" | "exists" | "delete" | "ref"
             | "keys" | "values" | "each" | "wantarray"
+            | "tie" | "untie" | "tied"
         )
     )
 }
