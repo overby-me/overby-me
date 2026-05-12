@@ -1,6 +1,8 @@
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::rc::Rc;
 
 use crate::ast::*;
 use crate::value::{Value, format_number};
@@ -60,6 +62,13 @@ pub struct Interpreter {
     /// an empty body) for simplicity; this set is the discriminator.
     /// op/exists_sub.
     declared_only_subs: std::collections::HashSet<String>,
+    /// Names of constant subs (empty `()` proto + literal body) that
+    /// have been "upgraded" from a SCALAR ref in the symbol table to
+    /// a full GLOB. This happens when reference perl is forced to
+    /// materialize the CV — e.g. parsing `eval 'a b'` makes the
+    /// *inner* constant (b) a real sub call, upgrading it. The outer
+    /// constant stays optimized as a SCALAR. Matches base/lex 119-120.
+    constant_upgraded: std::collections::HashSet<String>,
     /// Names of subs declared with `: lvalue`. When such a sub is the
     /// target of an assignment (`get_st = 7`), we look up the body's
     /// last expression and assign to it instead — supports the simple
@@ -582,6 +591,7 @@ impl Interpreter {
             sub_def_package: HashMap::new(),
             lvalue_subs: std::collections::HashSet::new(),
             declared_only_subs: std::collections::HashSet::new(),
+            constant_upgraded: std::collections::HashSet::new(),
             my_subs: std::collections::HashSet::new(),
             eval_strict_pkg: false,
             current_sub_stack: Vec::new(),
@@ -3670,6 +3680,15 @@ impl Interpreter {
             }
             Expr::HashElement(name, key) => {
                 let key_str = self.eval_expr(key).to_str();
+                // Symbol-table hash lookup: `$::{name}` / `$Pkg::{name}`
+                // resolves to a SCALAR ref for constant subs, a GLOB
+                // for other subs. Matches reference perl's
+                // glob/constant-sub optimization (base/lex 119/120).
+                if (name == "::" || name == "main::" || name.ends_with("::"))
+                    && let Some(s) = self.stash_entry_for(name, &key_str)
+                {
+                    return s;
+                }
                 self.get_hash_element(name, &key_str).resolve()
             }
             Expr::ArrayLen(name) => {
@@ -12298,6 +12317,75 @@ impl Interpreter {
             .and_then(|h| h.get(key))
             .cloned()
             .unwrap_or(Value::Undef)
+    }
+
+    /// Resolve a symbol-table hash lookup like `$::{NAME}` or
+    /// `$Pkg::{NAME}` against `self.subs`. Returns:
+    ///   * `Value::ScalarRef(...)` for constant subs (empty proto +
+    ///     single literal-returning body) that have not been "upgraded"
+    ///     (forced into a full glob by something like `eval 'a b'`).
+    ///   * `Value::Glob(...)` for other named subs in the package, or
+    ///     constant subs that have been upgraded.
+    ///   * `None` if no such sub exists — caller falls back to the
+    ///     normal hash lookup so explicit `$::{KEY} = ...` writes work.
+    fn stash_entry_for(&self, name: &str, key: &str) -> Option<Value> {
+        let pkg = if name == "::" {
+            "main"
+        } else {
+            name.trim_end_matches("::")
+        };
+        let qualified = if pkg == "main" {
+            key.to_string()
+        } else {
+            format!("{pkg}::{key}")
+        };
+        // First look for an explicit user hash entry (e.g. `$::{foo} = 1`);
+        // those win over the auto-stash view.
+        let explicit = self
+            .globals
+            .hashes
+            .get(name)
+            .and_then(|h| h.get(key))
+            .cloned();
+        if let Some(v) = explicit
+            && !matches!(v, Value::Undef)
+        {
+            return Some(v);
+        }
+        // Look up the sub. Try unqualified first (main::), then qualified.
+        let body_params = if pkg == "main" {
+            self.subs
+                .get(key)
+                .or_else(|| self.subs.get(&qualified))
+        } else {
+            self.subs.get(&qualified)
+        };
+        let (params, body) = body_params?;
+        let is_const = params.is_empty()
+            && !self.constant_upgraded.contains(&qualified)
+            && {
+                let last = body
+                    .iter()
+                    .rev()
+                    .find(|s| !matches!(s, Stmt::LineMark(_)));
+                matches!(
+                    last,
+                    Some(Stmt::Expr(Expr::StringLit(_)))
+                        | Some(Stmt::Expr(Expr::IntLit(_)))
+                        | Some(Stmt::Expr(Expr::FloatLit(_)))
+                )
+            };
+        if is_const {
+            let last = body.iter().rev().find(|s| !matches!(s, Stmt::LineMark(_)));
+            let v = match last {
+                Some(Stmt::Expr(Expr::StringLit(s))) => Value::Str(s.clone()),
+                Some(Stmt::Expr(Expr::IntLit(n))) => Value::Num(*n as f64),
+                Some(Stmt::Expr(Expr::FloatLit(n))) => Value::Num(*n),
+                _ => Value::Undef,
+            };
+            return Some(Value::ScalarRef(Rc::new(RefCell::new(v))));
+        }
+        Some(Value::Glob(qualified))
     }
 
     fn array_set_undef_then_mark_deleted(&mut self, arr_name: &str, ridx: usize) {
