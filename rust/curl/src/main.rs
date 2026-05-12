@@ -119,34 +119,49 @@ fn main() {
     // into separate URLs. -g/--globoff disables this.
     // Track glob values for each URL so #N in -o refers to the Nth glob value.
     let url_glob_values: Vec<Vec<String>>;
+    let orig_urls_count = opts.urls.len();
+    let orig_outputs = opts.outputs.clone();
     if !opts.globoff {
         let orig_urls = opts.urls.clone();
         let mut all_expanded = Vec::new();
-        for u in &orig_urls {
+        // Map each expanded URL back to its original URL index so per-URL
+        // pairings (per_url_opts, outputs) survive glob expansion.
+        let mut orig_idx_of: Vec<usize> = Vec::new();
+        for (orig_idx, u) in orig_urls.iter().enumerate() {
             match expand_glob(u) {
-                Ok(expanded) => all_expanded.extend(expanded),
+                Ok(expanded) => {
+                    for _ in 0..expanded.len() {
+                        orig_idx_of.push(orig_idx);
+                    }
+                    all_expanded.extend(expanded);
+                }
                 Err(e) => {
                     eprintln!("{e}");
                     std::process::exit(3);
                 }
             }
         }
-        // Expand per_url_opts in sync: each original URL's per-URL options
-        // apply to all URLs it expanded into.
         if !opts.per_url_opts.is_empty() {
             let mut new_per_url = Vec::new();
-
-            for (orig_idx, orig_url) in orig_urls.iter().enumerate() {
-                let count = match expand_glob(orig_url) {
-                    Ok(exp) => exp.len(),
-                    Err(_) => 1,
-                };
+            for &orig_idx in &orig_idx_of {
                 let puo = opts.per_url_opts.get(orig_idx).cloned().unwrap_or_default();
-                for _ in 0..count {
-                    new_per_url.push(puo.clone());
-                }
+                new_per_url.push(puo);
             }
             opts.per_url_opts = new_per_url;
+        }
+        // Replicate -o by original-URL index. Curl pairs each `-o` with a URL
+        // definition, NOT a glob expansion: a single `-o file#1` on one
+        // globbed URL applies (the same -o, with #N substitution per
+        // iteration) to every expansion (test 1328). Extras beyond the
+        // original URL count are unused.
+        if !orig_outputs.is_empty() {
+            let mut new_outputs = Vec::with_capacity(orig_idx_of.len());
+            for &orig_idx in &orig_idx_of {
+                if let Some(o) = orig_outputs.get(orig_idx) {
+                    new_outputs.push(o.clone());
+                }
+            }
+            opts.outputs = new_outputs;
         }
         opts.urls = all_expanded.iter().map(|(url, _)| url.clone()).collect();
         url_glob_values = all_expanded.into_iter().map(|(_, vals)| vals).collect();
@@ -154,7 +169,7 @@ fn main() {
         url_glob_values = opts.urls.iter().map(|_| Vec::new()).collect();
     }
 
-    if opts.outputs.len() > opts.urls.len() && !opts.silent {
+    if orig_outputs.len() > orig_urls_count && !opts.silent {
         eprintln!("Warning: Got more output options than URLs");
     }
 
