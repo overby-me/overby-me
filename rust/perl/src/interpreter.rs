@@ -119,10 +119,9 @@ pub struct Interpreter {
     /// arrays. op/state arrays.
     state_arrays: HashMap<(String, String), std::rc::Rc<std::cell::RefCell<Vec<Value>>>>,
     /// Per-sub `state %h` storage. Same scheme for hashes.
-    state_hashes: HashMap<
-        (String, String),
-        std::rc::Rc<std::cell::RefCell<HashMap<String, Value>>>,
-    >,
+    #[allow(clippy::type_complexity)]
+    state_hashes:
+        HashMap<(String, String), std::rc::Rc<std::cell::RefCell<HashMap<String, Value>>>>,
     /// Tracks which (sub_name, var_name) state slots have already
     /// been initialized so the init expression doesn't run twice.
     state_initialized: std::collections::HashSet<(String, String)>,
@@ -2324,7 +2323,9 @@ impl Interpreter {
                         let rc = self
                             .state_arrays
                             .entry(key.clone())
-                            .or_insert_with(|| std::rc::Rc::new(std::cell::RefCell::new(Vec::new())))
+                            .or_insert_with(|| {
+                                std::rc::Rc::new(std::cell::RefCell::new(Vec::new()))
+                            })
                             .clone();
                         if !self.state_initialized.contains(&key) {
                             self.state_initialized.insert(key.clone());
@@ -12599,6 +12600,18 @@ impl Interpreter {
             if let Some(hash) = scope.hashes.get(name) {
                 return hash.get(key).cloned().unwrap_or(Value::Undef);
             }
+        }
+        // Aliased hashes (e.g. `state %h` storage, `our %h` globals)
+        // share an Rc that lives outside scopes/globals — check it too
+        // so `$h{key}` lookups see what `keys %h` returns. op/state hash.
+        let qname = self.qualify_global(name);
+        if let Some(rc) = self.aliased_hashes.get(qname.as_str()) {
+            return rc.borrow().get(key).cloned().unwrap_or(Value::Undef);
+        }
+        if qname != name
+            && let Some(rc) = self.aliased_hashes.get(name)
+        {
+            return rc.borrow().get(key).cloned().unwrap_or(Value::Undef);
         }
         self.globals
             .hashes

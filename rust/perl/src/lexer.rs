@@ -269,6 +269,7 @@ impl Token {
                 | Token::My
                 | Token::Our
                 | Token::Local
+                | Token::State
                 | Token::Sub
                 | Token::Return
                 | Token::Last
