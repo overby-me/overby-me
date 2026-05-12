@@ -969,11 +969,46 @@ fn main() {
                 }
 
                 // Dump headers. Special destinations: "-" → stdout, "%" → stderr.
+                // When dump dest is stdout AND --include is also on, curl's
+                // per-line callback writes each header twice (once to dump,
+                // once to include), so emit each line twice in succession to
+                // match (test 1066). The include branch below skips its own
+                // header write in this case.
+                let dump_to_stdout =
+                    effective_opts.dump_header.as_deref().and_then(|p| p.to_str()) == Some("-");
+                let dump_pair_with_include = dump_to_stdout && opts.include_headers;
                 if let Some(ref dump_path) = effective_opts.dump_header {
                     match dump_path.to_str() {
                         Some("-") => {
-                            let _ = io::stdout().write_all(&resp.header_bytes);
-                            let _ = io::stdout().write_all(&resp.trailer_bytes);
+                            if dump_pair_with_include {
+                                let mut tail = resp.header_bytes.as_slice();
+                                while !tail.is_empty() {
+                                    let end = tail
+                                        .iter()
+                                        .position(|&b| b == b'\n')
+                                        .map(|p| p + 1)
+                                        .unwrap_or(tail.len());
+                                    let line = &tail[..end];
+                                    let _ = io::stdout().write_all(line);
+                                    let _ = io::stdout().write_all(line);
+                                    tail = &tail[end..];
+                                }
+                                let mut tail = resp.trailer_bytes.as_slice();
+                                while !tail.is_empty() {
+                                    let end = tail
+                                        .iter()
+                                        .position(|&b| b == b'\n')
+                                        .map(|p| p + 1)
+                                        .unwrap_or(tail.len());
+                                    let line = &tail[..end];
+                                    let _ = io::stdout().write_all(line);
+                                    let _ = io::stdout().write_all(line);
+                                    tail = &tail[end..];
+                                }
+                            } else {
+                                let _ = io::stdout().write_all(&resp.header_bytes);
+                                let _ = io::stdout().write_all(&resp.trailer_bytes);
+                            }
                         }
                         Some("%") => {
                             let _ = io::stderr().write_all(&resp.header_bytes);
@@ -1382,7 +1417,13 @@ fn main() {
                     let _ = out.write_all(&retry_prefix);
                     if opts.include_headers || effective_opts.head {
                         let _ = out.write_all(&resp.redirect_headers);
-                        let _ = out.write_all(&resp.header_bytes);
+                        // When `-D -` already wrote each header twice
+                        // (paired with --include), skip the include write
+                        // so the per-line interleave isn't replaced with a
+                        // second header block.
+                        if !dump_pair_with_include {
+                            let _ = out.write_all(&resp.header_bytes);
+                        }
                     }
                     if write_body {
                         let _ = out.write_all(&resp.body);

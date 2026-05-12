@@ -6,7 +6,7 @@ Use the upstream [curl test suite](https://github.com/curl/curl/tree/master/test
 
 ## Current Status
 
-**717 tests passing** across the curl 8.19.0 test suite (verified with strict
+**718 tests passing** across the curl 8.19.0 test suite (verified with strict
 runner checks — the derivation fails when a test number doesn't exist or the
 suite reports anything other than 100% OK).
 
@@ -387,13 +387,14 @@ Current gaps:
 - [x] Stdin upload redirect: when a `-T -` body can't be replayed across a redirect, emit the prior response and exit 25 (unlocked test 1073)
 - [x] `--retry` with `--output` file: prepend prior failed attempts (retry_prefix) so `-i` reproduces the full sequence; `--fail` drops the 4xx body from the prefix (unlocked tests 1633, 1634)
 - [x] `--write-out %header{name:all[:sep]}` and `:N` / `:last` qualifiers; values harvested from redirect chain + final response; allow `\}` to escape `}` in the pattern (unlocked tests 764, 765)
+- [x] `-D -` paired with `-i`: emit each header line twice in succession (per-line interleave), matching curl's callback-per-line behavior (unlocked test 1066)
 - [ ] Target 750+ passing by addressing remaining feature gaps
 
 ---
 
 ## Test Inventory
 
-### Passing tests (717)
+### Passing tests (718)
 
 The authoritative list is `testNums` in `default.nix`; the count is
 checked there by Nix and stays in sync with the per-test derivations.

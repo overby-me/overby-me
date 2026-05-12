@@ -135,7 +135,7 @@
             -c "${rust-curl-dev}/bin/curl" \
             -n \
             -a \
-            700 to 900 \
+            200 to 500 \
             2>&1 | ${coreutils}/bin/tee "$TMPDIR/results.txt" || true
 
           ${coreutils}/bin/mkdir -p $out
@@ -526,6 +526,7 @@
       1063
       1064
       1065
+      1066
       1067
       1068
       1069
@@ -869,7 +870,7 @@
       3216
     ];
     # Tests under investigation — added to enable single-test build inspection.
-    extraNums = [1066];
+    extraNums = [];
     allNums = testNums ++ extraNums;
   in
     builtins.listToAttrs (map (num: {
