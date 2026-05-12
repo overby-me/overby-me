@@ -12721,6 +12721,17 @@ impl Interpreter {
             let synthetic = Expr::Call(s.clone(), Vec::new());
             return self.assign_to(&synthetic, val);
         }
+        // `$cref->() = val` / `&{$cref}() = val` — coderef invocation
+        // as assignment target. Resolve the coderef to its sub name
+        // and route through the Call path (op/sub_lval test 57:
+        // `$a = \&lv1nn; $a->() = 8`).
+        if let Expr::CodeCall(callee, call_args) = target {
+            let v = self.eval_expr(callee);
+            if let Value::CodeRef(sub_name) = v {
+                let synthetic = Expr::Call(sub_name, call_args.clone());
+                return self.assign_to(&synthetic, val);
+            }
+        }
         // `substr($s, OFFS, [LEN]) = REPL` — duplicate of the substr
         // lvalue handling in Expr::Assign, but reachable here when an
         // lvalue sub's body returns a substr call (op/sub_lval sstr).
