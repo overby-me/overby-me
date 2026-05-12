@@ -1900,6 +1900,13 @@ impl Interpreter {
                 // Perl's `package NAME;` is lexically scoped to the
                 // enclosing block; revert to the outer package on exit.
                 let saved_pkg = self.package.clone();
+                // Regex match-vars ($`, $&, $') reflect the most recent
+                // match in the current dynamic scope. A block-level save
+                // here, restored after the block exits, makes inner-block
+                // regex matches not leak out. op/while regex-scope tests.
+                let saved_match_pre = self.get_var("`");
+                let saved_match_mid = self.get_var("&");
+                let saved_match_post = self.get_var("'");
                 // A naked block is implicitly a 1-iteration loop for
                 // last/next/redo: `{ … last; }` exits the block, doesn't
                 // bubble out; `redo` restarts it. Each iteration uses a
@@ -1915,6 +1922,9 @@ impl Interpreter {
                         other => break other,
                     }
                 };
+                self.set_global_var("`", saved_match_pre);
+                self.set_global_var("&", saved_match_mid);
+                self.set_global_var("'", saved_match_post);
                 self.package = saved_pkg;
                 final_flow
             }
