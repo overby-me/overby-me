@@ -8221,7 +8221,19 @@ impl Interpreter {
                 // underlying array ref and keying the cursor by the
                 // ref's pointer. op/each_array.
                 let (arr_owned, cursor_key) = if let Some(Expr::ArrayVar(name)) = args.first() {
-                    (Some(self.get_array(name)), format!("@{name}"))
+                    // Distinguish a lexical @x in some inner scope from
+                    // the global @x — same as array_each_cursor_key.
+                    // Without this, a prior lexical each leaves stale
+                    // cursor state under "@x" that a later global each
+                    // mistakenly inherits (op/each_array 64).
+                    let mut key = format!("@{name}");
+                    for (depth, scope) in self.scopes.iter().enumerate().rev() {
+                        if scope.arrays.contains_key(name) {
+                            key = format!("@{depth}:{name}");
+                            break;
+                        }
+                    }
+                    (Some(self.get_array(name)), key)
                 } else if let Some(Expr::ArrayDerefVar(name)) = args.first() {
                     let v = self.get_var(name);
                     if let Value::ArrayRef(r) = v {
@@ -12042,8 +12054,11 @@ impl Interpreter {
         }
         // Wholesale array reassignment invalidates any `each` cursor
         // pointing at this array — the next `each @name` starts fresh.
-        // op/each_array RT #75596.
+        // op/each_array RT #75596. Cursor keys for lexical arrays are
+        // scoped as "@{depth}:{name}", globals use plain "@{name}".
         self.each_cursors.remove(&format!("@{name}"));
+        let suffix = format!(":{name}");
+        self.each_cursors.retain(|k, _| !k.ends_with(&suffix));
         // If the old array held blessed refs that aren't reachable from
         // anywhere else (including the *new* array we're about to store),
         // dispatch their DESTROY before dropping the slot.
@@ -12391,7 +12406,20 @@ impl Interpreter {
     fn array_each_cursor_key(&mut self, arg: Option<&Expr>) -> Option<String> {
         let a = arg?;
         match a {
-            Expr::ArrayVar(name) => Some(format!("@{name}")),
+            Expr::ArrayVar(name) => {
+                // Distinguish between a lexical `@a` in some inner
+                // scope and the global `@a`. Without this, a finished
+                // `my @a = (...); each @a;` iteration leaves a cursor
+                // under key "@a" that a later `each @main::a` reuses,
+                // causing the global to look already-exhausted.
+                // op/each_array 64 ("each in list assignment").
+                for (depth, scope) in self.scopes.iter().enumerate().rev() {
+                    if scope.arrays.contains_key(name) {
+                        return Some(format!("@{depth}:{name}"));
+                    }
+                }
+                Some(format!("@{name}"))
+            }
             Expr::ArrayDerefVar(name) => {
                 let v = self.get_var(name);
                 if let Value::ArrayRef(r) = v {
