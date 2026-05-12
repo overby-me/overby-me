@@ -4230,6 +4230,7 @@ impl Parser {
                 if !is_method_name_excluded(&name)
                     && name != "::"
                     && !name.starts_with('-')
+                    && !self.known_subs.contains(&name)
                     && name
                         .chars()
                         .next()
@@ -4239,6 +4240,8 @@ impl Parser {
                     //   * Uppercase class-shaped bareword: `method Class …`
                     //   * Scalar variable:                 `method $obj …`
                     // Both then accept args with or without parens.
+                    // Known subs (`tryeq $T++, …`) are NOT eligible —
+                    // they're regular function calls.
                     // op/method indirect-syntax tests 2-22, 25-26.
                     let recv: Option<Expr> = match self.tok().clone() {
                         Token::Ident(class)
