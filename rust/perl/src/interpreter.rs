@@ -6331,6 +6331,17 @@ impl Interpreter {
                 r.clone()
             }
 
+            // Logical `^^` — non-short-circuiting xor of boolean values.
+            // Returns 1 if exactly one operand is true, else "".
+            // op/lop tests for `0 ^^= 0` etc.
+            BinOp::Xor => {
+                if l.to_bool() ^ r.to_bool() {
+                    Value::Num(1.0)
+                } else {
+                    Value::Str(String::new())
+                }
+            }
+
             _ => Value::Undef,
         }
     }
