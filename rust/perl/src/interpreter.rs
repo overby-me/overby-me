@@ -14338,17 +14338,22 @@ impl Interpreter {
                         // Restore $_: if it wasn't lexical to begin with,
                         // make sure any lexical slot we inadvertently
                         // created is removed and the global is restored.
+                        // Also flush saved_us through aliased_vars[_] so the
+                        // last iter's value doesn't keep a blessed ref alive.
                         if underscore_was_lexical {
                             if let Some(scope) = self.scopes.last_mut() {
-                                scope.vars.insert("_".to_string(), saved_us);
+                                scope.vars.insert("_".to_string(), saved_us.clone());
                             } else {
-                                self.globals.vars.insert("_".to_string(), saved_us);
+                                self.globals.vars.insert("_".to_string(), saved_us.clone());
                             }
                         } else {
                             for scope in self.scopes.iter_mut().rev() {
                                 scope.vars.remove("_");
                             }
-                            self.globals.vars.insert("_".to_string(), saved_us);
+                            self.globals.vars.insert("_".to_string(), saved_us.clone());
+                        }
+                        if let Some(rc) = self.aliased_vars.get("_") {
+                            *rc.borrow_mut() = saved_us;
                         }
                         self.call_context.pop();
                         if let Some(Expr::ArrayDerefVar(name)) = alias_target
@@ -14400,17 +14405,25 @@ impl Interpreter {
                         // Restore $_: if it wasn't lexical to begin with,
                         // make sure any lexical slot we inadvertently
                         // created is removed and the global is restored.
+                        // Also flush the saved value through aliased_vars[_]
+                        // so the last iteration's value doesn't keep a
+                        // blessed-ref alive (op/grep test 73 "grep list
+                        // post" needs DESTROY to fire for the last @a
+                        // element when `@a = ()` runs).
                         if underscore_was_lexical {
                             if let Some(scope) = self.scopes.last_mut() {
-                                scope.vars.insert("_".to_string(), saved_us);
+                                scope.vars.insert("_".to_string(), saved_us.clone());
                             } else {
-                                self.globals.vars.insert("_".to_string(), saved_us);
+                                self.globals.vars.insert("_".to_string(), saved_us.clone());
                             }
                         } else {
                             for scope in self.scopes.iter_mut().rev() {
                                 scope.vars.remove("_");
                             }
-                            self.globals.vars.insert("_".to_string(), saved_us);
+                            self.globals.vars.insert("_".to_string(), saved_us.clone());
+                        }
+                        if let Some(rc) = self.aliased_vars.get("_") {
+                            *rc.borrow_mut() = saved_us;
                         }
                         self.call_context.pop();
                         if let Some(target) = alias_target {
