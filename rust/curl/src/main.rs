@@ -1795,6 +1795,15 @@ fn main() {
                     exit_code = 26; // Read error (form file)
                 } else if e.contains("upload_failed") {
                     exit_code = 25; // CURLE_UPLOAD_FAILED (test 1069)
+                } else if e.contains("TLS handshake failed")
+                    || e.contains("invalid peer certificate")
+                    || e.contains("NotValidForName")
+                    || e.contains("BadCertificate")
+                    || e.contains("UnknownIssuer")
+                    || e.contains("Expired")
+                    || e.contains("InvalidCertificate")
+                {
+                    exit_code = 60; // CURLE_PEER_FAILED_VERIFICATION (test 311, 312)
                 } else {
                     exit_code = 6;
                 }
