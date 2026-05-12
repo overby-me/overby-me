@@ -998,7 +998,16 @@ fn main() {
                     .as_deref()
                     .and_then(|p| p.to_str())
                     == Some("-");
-                let dump_pair_with_include = dump_to_stdout && opts.include_headers;
+                // Only double the headers when the include path will also
+                // emit to stdout (i.e. there is no -o / -O sending the body
+                // elsewhere). In `-D -` + `-i` + `-O file` (test 1343) the
+                // include output goes to the file, so the dump-to-stdout
+                // should not be doubled.
+                let include_goes_to_stdout = opts.outputs.get(url_idx).is_none()
+                    && !opts.remote_name
+                    && !opts.remote_header_name;
+                let dump_pair_with_include =
+                    dump_to_stdout && opts.include_headers && include_goes_to_stdout;
                 if let Some(ref dump_path) = effective_opts.dump_header {
                     match dump_path.to_str() {
                         Some("-") => {
