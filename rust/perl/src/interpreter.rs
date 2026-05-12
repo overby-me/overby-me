@@ -9120,9 +9120,14 @@ impl Interpreter {
                 Value::Num(1.0)
             }
             "unlink" => {
+                let paths: Vec<String> = if args.is_empty() {
+                    // Bare `unlink` defaults to `$_` (op/unlink 5).
+                    vec![self.get_var("_").to_str()]
+                } else {
+                    args.iter().map(|a| self.eval_expr(a).to_str()).collect()
+                };
                 let mut count = 0;
-                for arg in args {
-                    let path = self.eval_expr(arg).to_str();
+                for path in paths {
                     if std::fs::remove_file(&path).is_ok() {
                         count += 1;
                     }

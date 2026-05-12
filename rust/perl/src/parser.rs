@@ -682,7 +682,15 @@ impl Parser {
             }
             Token::For | Token::Foreach => {
                 self.pos += 1;
-                let list = self.parse_expr();
+                // Postfix `for LIST` accepts comma-separated lists:
+                // `stmt for 'a', 'b'` iterates over both elements.
+                // parse_expr alone stops at the first comma.
+                let items = self.parse_list_expr();
+                let list = if items.len() == 1 {
+                    items.into_iter().next().unwrap()
+                } else {
+                    Expr::ArrayLit(items)
+                };
                 self.eat(&Token::Semi);
                 Stmt::PostfixFor(Box::new(stmt), list)
             }
@@ -3890,6 +3898,20 @@ impl Parser {
                     let a = self.parse_list_expr();
                     self.expect(&Token::RParen);
                     a
+                } else if matches!(
+                    self.tok(),
+                    Token::Comma
+                        | Token::Semi
+                        | Token::EOF
+                        | Token::RBrace
+                        | Token::RParen
+                        | Token::RBracket
+                ) {
+                    // `unlink, …` / `unlink;` / `unlink}` — bare form
+                    // with no args; the builtin's docs say it defaults
+                    // to `$_`. Don't consume the comma; let the outer
+                    // arg-list collect the rest. op/unlink 5-6.
+                    Vec::new()
                 } else {
                     self.parse_list_expr()
                 };
@@ -4387,6 +4409,14 @@ impl Parser {
                         | Token::Exists
                         | Token::Glob(_)
                         | Token::Diamond(_)
+                        | Token::Unlink
+                        | Token::Rename
+                        | Token::Mkdir
+                        | Token::Rmdir
+                        | Token::Chdir
+                        | Token::Stat
+                        | Token::Bless
+                        | Token::Binmode
                 ) {
                     // Function call without parentheses: func arg, ...
                     // Perl prototype-`$` builtins only take a single scalar arg.
