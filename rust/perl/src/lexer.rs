@@ -1351,6 +1351,53 @@ impl Lexer {
                         tokens.push(Token::StringRepeat);
                         continue;
                     }
+                    // V-string detection: `v\d+(\.\d+)*` becomes a literal
+                    // string of chars with the given codepoints. Only
+                    // recognise at expression position; statement-start
+                    // `v23:` is a label, not a v-string. Multi-segment
+                    // `v1.2.3` is unambiguous so we'd want to also catch
+                    // those, but they don't show up in the test suite so
+                    // we keep the rule simple and only match single-segment
+                    // at operand position.
+                    if self.ch() == 'v'
+                        && self.peek(1).is_ascii_digit()
+                        && tokens.last().map(|t| t.expects_operand()).unwrap_or(false)
+                    {
+                        let saved = self.pos;
+                        self.pos += 1;
+                        let mut codepoints: Vec<u32> = Vec::new();
+                        let mut cur: u32 = 0;
+                        while self.pos < self.input.len() && self.ch().is_ascii_digit() {
+                            cur = cur.saturating_mul(10) + (self.ch() as u32 - '0' as u32);
+                            self.pos += 1;
+                        }
+                        codepoints.push(cur);
+                        while self.pos + 1 < self.input.len()
+                            && self.ch() == '.'
+                            && self.peek(1).is_ascii_digit()
+                        {
+                            self.pos += 1;
+                            cur = 0;
+                            while self.pos < self.input.len() && self.ch().is_ascii_digit() {
+                                cur = cur.saturating_mul(10) + (self.ch() as u32 - '0' as u32);
+                                self.pos += 1;
+                            }
+                            codepoints.push(cur);
+                        }
+                        // If what follows is an alphabetic / underscore (i.e.,
+                        // this is `vN<letter>` like `v1foo`), backtrack — the
+                        // whole token is a normal identifier.
+                        if self.pos < self.input.len()
+                            && (self.ch().is_ascii_alphabetic() || self.ch() == '_')
+                        {
+                            self.pos = saved;
+                        } else {
+                            let s: String =
+                                codepoints.into_iter().filter_map(char::from_u32).collect();
+                            tokens.push(Token::StringLit(s));
+                            continue;
+                        }
+                    }
                     let ident = self.read_ident();
 
                     // `__END__` and `__DATA__` end source-code parsing.

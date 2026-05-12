@@ -6098,8 +6098,25 @@ impl Interpreter {
                 // don't track that pragma yet — unsigned matches the
                 // default case used by almost all of the test suite
                 // (including `@a = (1) x ~1` → OOM).
-                let val = self.eval_expr(expr);
-                Value::Num(!(val.to_num() as u64) as f64)
+                //
+                // Collapse a chain of BitNots into a single u64-domain
+                // evaluation. `~~N` then evaluates as `N as u64`, which
+                // round-trips without precision loss. Without this, the
+                // intermediate `~N` (a large u64) was cast to f64 and
+                // rounded up to 2^64, then the outer cast back to u64
+                // saturated to u64::MAX, and `~u64::MAX = 0`.
+                let mut count: u64 = 1;
+                let mut inner = expr;
+                while let Expr::UnaryOp(UnaryOp::BitNot, e) = inner {
+                    count += 1;
+                    inner = e;
+                }
+                let val = self.eval_expr(inner);
+                let mut n = val.to_num() as u64;
+                if count % 2 == 1 {
+                    n = !n;
+                }
+                Value::Num(n as f64)
             }
             UnaryOp::PreInc => {
                 let val = self.eval_expr(expr);
@@ -7244,12 +7261,31 @@ impl Interpreter {
                 let prog_args: Vec<String> = list[1..].iter().map(|v| v.to_str()).collect();
                 use std::process::Command;
                 let needs_shell = prog_args.is_empty()
-                    && prog.chars().any(|c| matches!(
-                        c,
-                        ' ' | '\t' | '\n' | '|' | '&' | ';' | '<' | '>'
-                            | '(' | ')' | '$' | '`' | '\\' | '"' | '\''
-                            | '*' | '?' | '[' | ']' | '{' | '}'
-                    ));
+                    && prog.chars().any(|c| {
+                        matches!(
+                            c,
+                            ' ' | '\t'
+                                | '\n'
+                                | '|'
+                                | '&'
+                                | ';'
+                                | '<'
+                                | '>'
+                                | '('
+                                | ')'
+                                | '$'
+                                | '`'
+                                | '\\'
+                                | '"'
+                                | '\''
+                                | '*'
+                                | '?'
+                                | '['
+                                | ']'
+                                | '{'
+                                | '}'
+                        )
+                    });
                 let status = if needs_shell {
                     Command::new("/bin/sh").arg("-c").arg(&prog).status()
                 } else {
