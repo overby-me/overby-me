@@ -273,6 +273,7 @@ fn main() {
         // URL2 should still exit 0 (test 1293). --fail-early breaks the
         // loop earlier, so this reset doesn't change that path.
         exit_code = 0;
+        let mut fatal_protocol_error = false;
 
         // file:// — read the local file and write it to the chosen output
         // (stdout if no -o). file://[host]/path: host MUST be empty,
@@ -1779,6 +1780,7 @@ fn main() {
                     exit_code = 7; // Unsupported proxy protocol
                 } else if e.contains("unsupported scheme") || e.contains("unsupported protocol") {
                     exit_code = 1; // Unsupported protocol
+                    fatal_protocol_error = true;
                 } else if e.contains("invalid status") {
                     exit_code = 1; // CURLE_UNSUPPORTED_PROTOCOL — malformed status code (test 1430)
                 } else if e.contains("too many response headers")
@@ -1913,6 +1915,12 @@ fn main() {
         // --fail-early: stop processing additional URLs once any URL has
         // produced a non-zero exit code (test 1247).
         if opts.fail_early && exit_code != 0 {
+            break;
+        }
+        // Unsupported-protocol errors are fatal across the URL list — curl's
+        // serial_transfers returns from create_transfer with the error and
+        // never gets to URL2 (test 760).
+        if exit_code == 1 && fatal_protocol_error {
             break;
         }
     }

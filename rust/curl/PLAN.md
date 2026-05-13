@@ -6,13 +6,14 @@ Use the upstream [curl test suite](https://github.com/curl/curl/tree/master/test
 
 ## Current Status
 
-**747 tests passing** (was 709 at session start; +38 across multipart, retry, IPv6,
+**749 tests passing** (was 709 at session start; +40 across multipart, retry, IPv6,
 upload-stdin redirect, write-out, interface, dump-header, per-URL --include /
 --resolve resets, --resolve removal entries, pool routing distinguishing --resolve
-from --connect-to, -F text-field ;filename= / ;type= modifiers, and -o pairing
-with original (pre-glob) URLs) across the curl 8.18.0 test suite (verified with
-strict runner checks — the derivation fails when a test number doesn't exist or
-the suite reports anything other than 100% OK).
+from --connect-to, -F text-field ;filename= / ;type= modifiers, -o pairing
+with original (pre-glob) URLs, `-h` inside `-K` config file with no URL, and
+treating "unsupported protocol" as fatal across the URL list) across the curl
+8.18.0 test suite (verified with strict runner checks — the derivation fails
+when a test number doesn't exist or the suite reports anything other than 100% OK).
 
 The full list is in `default.nix` under `testNums`; see the per-fix bullets
 in "Phase 7" below for what each addition unlocks.
@@ -411,13 +412,15 @@ Current gaps:
 - [x] Status-line read errors distinguish ConnectionReset/Aborted/BrokenPipe (CURLE_RECV_ERROR / exit 56) from clean EOF (CURLE_GOT_NOTHING / exit 52) (unlocked test 1244)
 - [x] Secure-cookie protection: a non-secure Set-Cookie cannot replace an existing secure cookie with the same name (matched by name only, broader than RFC 6265bis's host-only/domain pairing) (unlocked test 414)
 - [x] `--help` and `--help file` produce curl's exact "important options" / file-category text (case-insensitive category name) (unlocked tests 1461, 1463, 1464)
+- [x] `-h` inside a `-K` config file with no URL: print help, exit 2 ("no URL specified") so curl validates URL count after config processing (unlocked test 748)
+- [x] Treat "unsupported scheme" / "unsupported protocol" as fatal across the URL list — curl's `serial_transfers` returns immediately from `create_transfer` on this error, so URL2 after URL1's bad scheme is never attempted (unlocked test 760)
 - [ ] Target 750+ passing by addressing remaining feature gaps
 
 ---
 
 ## Test Inventory
 
-### Passing tests (743)
+### Passing tests (749)
 
 The authoritative list is `testNums` in `default.nix`; the count is
 checked there by Nix and stays in sync with the per-test derivations.

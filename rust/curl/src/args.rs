@@ -286,6 +286,12 @@ pub(crate) fn parse_args() -> Options {
     }
 
     let mut has_url = false;
+    // Parallel boolean per element of `args`: true when that slot came from
+    // a `-K` config file (i.e. was spliced in by the config loader). Lets
+    // us treat `-h` differently when it appears in a config file — curl
+    // prints help but still validates URLs at end-of-parse, exiting 2 if
+    // none are given (test 748).
+    let mut arg_from_config: Vec<bool> = vec![false; args.len()];
     // True once a -K config file has been opened. We tolerate a leading
     // `--next` only when it came from a config file (test 430); a leading
     // `--next` on the bare command line is an error (test 422).
@@ -326,6 +332,7 @@ pub(crate) fn parse_args() -> Options {
                 // We don't implement per-option help text, but we must validate the
                 // argument and emit curl's exact "Incorrect option name" error for
                 // unknown options (test 1709).
+                let from_config = *arg_from_config.get(i).unwrap_or(&false);
                 if i + 1 < args.len() {
                     let nxt = &args[i + 1];
                     if !nxt.is_empty() && !nxt.starts_with('-') {
@@ -339,20 +346,31 @@ pub(crate) fn parse_args() -> Options {
                         } else {
                             print_categories();
                         }
+                        if from_config {
+                            i += 2;
+                            continue;
+                        }
                         process::exit(0);
                     }
                     if nxt.starts_with("--") {
                         // Look up the option in the help table; if absent, error.
                         if known_long_option(nxt) {
                             print!("{IMPORTANT_HELP}");
-                            process::exit(0);
                         } else {
                             eprintln!("Incorrect option name to show help for, see curl -h");
-                            process::exit(0);
                         }
+                        if from_config {
+                            i += 2;
+                            continue;
+                        }
+                        process::exit(0);
                     }
                 }
                 print!("{IMPORTANT_HELP}");
+                if from_config {
+                    i += 1;
+                    continue;
+                }
                 process::exit(0);
             }
             "-V" | "--version" => {
@@ -1051,6 +1069,7 @@ pub(crate) fn parse_args() -> Options {
                 }
                 for (j, a) in file_args.into_iter().enumerate() {
                     args.insert(i + 1 + j, a);
+                    arg_from_config.insert(i + 1 + j, true);
                 }
             }
             "-x" | "--proxy" => {
