@@ -413,7 +413,7 @@ Current gaps:
 - [x] Secure-cookie protection: a non-secure Set-Cookie cannot replace an existing secure cookie with the same name (matched by name only, broader than RFC 6265bis's host-only/domain pairing) (unlocked test 414)
 - [x] `--help` and `--help file` produce curl's exact "important options" / file-category text (case-insensitive category name) (unlocked tests 1461, 1463, 1464)
 - [x] `-h` inside a `-K` config file with no URL: print help, exit 2 ("no URL specified") so curl validates URL count after config processing (unlocked test 748)
-- [x] Treat "unsupported scheme" / "unsupported protocol" as fatal across the URL list — curl's `serial_transfers` returns immediately from `create_transfer` on this error, so URL2 after URL1's bad scheme is never attempted (unlocked test 760)
+- [x] Treat "unsupported scheme" / "unsupported protocol" as fatal across the URL list only when the FIRST URL has the bad scheme — curl's `serial_transfers` calls `create_transfer` for URL1 outside the loop and returns immediately on CURLE_UNSUPPORTED_PROTOCOL (test 760), but for later URLs it just sets returncode and continues so the per-URL `-w` survey keeps emitting for the failed slots (test 423 regression fix)
 - [ ] Target 750+ passing by addressing remaining feature gaps
 
 ---

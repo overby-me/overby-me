@@ -1917,10 +1917,13 @@ fn main() {
         if opts.fail_early && exit_code != 0 {
             break;
         }
-        // Unsupported-protocol errors are fatal across the URL list — curl's
-        // serial_transfers returns from create_transfer with the error and
-        // never gets to URL2 (test 760).
-        if exit_code == 1 && fatal_protocol_error {
+        // Unsupported-protocol on the FIRST URL is fatal across the list —
+        // curl's serial_transfers calls create_transfer for URL1 outside the
+        // loop and returns immediately on CURLE_UNSUPPORTED_PROTOCOL (test
+        // 760). For subsequent URLs, curl just records the returncode and
+        // continues; the per-URL `-w` keeps emitting for the failed slots
+        // (test 423).
+        if url_idx == 0 && exit_code == 1 && fatal_protocol_error {
             break;
         }
     }
