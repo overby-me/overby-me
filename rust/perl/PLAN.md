@@ -10,6 +10,10 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 This iteration's improvements:
 
+- **`parse_unary` recurses for chained prefix operators** — `++` / `--` previously called `parse_postfix` directly, skipping the parser's prefix-keyword arms (`my`, `state`, `local`). Now they call `parse_unary`. Unblocks `++state $x` (op/state generator closure tests 19-23).
+- **`assign_to` recurses through DoBlock-wrapped lvalue targets** — when the target is `DoBlock([Stmt::*, Stmt::Expr(var)])` (expr-position `state $x` etc.), run the setup stmts then assign to the trailing var.
+- **`print BAREWORD ... REST` keeps BAREWORD in the list rather than treating it as a filehandle** — `...` (and `..`) between barewords are the range operator, not a list separator. op/yadayada test 33.
+- **`token_display` uses Perl-style identifier names in syntax errors** — e.g. `Ident("A")` → `A` in "near ..." messages. op/yadayada test 33.
 - **`pos` in `(?{...})` regex code blocks** — the eval block now sees the current match end via a transient `regex_code_block_pos_target` field. Translates byte offset (in `stringify_value` text) to a byte offset relative to the target's `to_str` so `pos $x` survives a mid-match `bless`. op/pos diff: 77 → 7 lines (tests 20, 21, 26, 27).
 - **Substitution `s///g` propagates pos through aliased sub-arg slots** by Rc pointer, mirroring the RegexMatch defelem path. op/pos test 20.
 - **`state $y = EXPR` in expression position** — e.g. `ref(state $y = ...)`. Emits a DoBlock with `Stmt::State` + var-read so the value flows out. opbasic/concat test 34 (`state $y = "foo $bar baz"` does not stringify; only concats).
