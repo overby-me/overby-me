@@ -2333,7 +2333,10 @@ impl Parser {
             }
             Token::PlusPlus => {
                 self.pos += 1;
-                let expr = self.parse_postfix();
+                // Recurse into parse_unary so chained prefix operators
+                // (including `++my $x` / `++state $x`) reach the My/State
+                // handlers. op/state test 19+.
+                let expr = self.parse_unary();
                 // `++` at end-of-input (or against a non-lvalue) is a
                 // syntax error. Perl emits "syntax error" with details;
                 // match the "syntax error" substring so eval captures it.
@@ -2345,7 +2348,7 @@ impl Parser {
             }
             Token::MinusMinus => {
                 self.pos += 1;
-                let expr = self.parse_postfix();
+                let expr = self.parse_unary();
                 if matches!(expr, Expr::Undef) && self.error.is_none() {
                     let line = self.current_line();
                     self.error = Some(format!("syntax error at {{FILE}} line {line}, at EOF\n"));

@@ -13313,6 +13313,21 @@ impl Interpreter {
     // --- Assignment ---
 
     fn assign_to(&mut self, target: &Expr, val: Value) {
+        // DoBlock-wrapped lvalue: parser emits `state $x` (and similar
+        // bind-and-read patterns) as DoBlock([Stmt::State, Stmt::Expr(var)]).
+        // For `++state $x` / `state $x = INIT` etc. to assign through the
+        // var, run the setup statements then route the assignment to the
+        // last expression. op/state test 19+.
+        if let Expr::DoBlock(stmts) = target
+            && stmts.len() >= 2
+            && let Some(Stmt::Expr(last)) = stmts.last()
+        {
+            for stmt in &stmts[..stmts.len() - 1] {
+                self.exec_stmt(stmt);
+            }
+            let last_clone = last.clone();
+            return self.assign_to(&last_clone, val);
+        }
         // `name() = val` for lvalue subs — find the body's last
         // expression (a simple ScalarVar / ArrayElement / HashElement)
         // and assign through that. Run preceding stmts for side effects.
