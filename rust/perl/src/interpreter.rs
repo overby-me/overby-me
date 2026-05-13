@@ -49,6 +49,15 @@ impl Scope {
     }
 }
 
+/// Target for `pos` to point at while a regex `(?{...})` code block
+/// runs. Used by `regex_code_block_pos_target` so the code block sees
+/// the current match end through `pos $var` or `pos $h{k}`.
+#[derive(Clone)]
+pub enum RegexPosTarget {
+    Named(String),
+    AliasRc(usize),
+}
+
 pub struct Interpreter {
     // Scope stack: last is innermost
     scopes: Vec<Scope>,
@@ -252,6 +261,12 @@ pub struct Interpreter {
     /// `$_[0]` name. Stored alongside `pos_offsets`; lookups walk
     /// the alias chain to find the right key. op/pos defelem tests.
     pos_offsets_by_rc: HashMap<usize, usize>,
+    /// Transient target for `pos` to point at during `(?{...})` regex
+    /// code-block evaluation. Set by the RegexMatch / Substitution arms
+    /// before invoking `regex_match_pos`; cleared after. Inside the code
+    /// block, `pos $h{n}` returns the current match end. op/pos test 21
+    /// `re-evals set pos through defelems`.
+    regex_code_block_pos_target: Option<RegexPosTarget>,
     /// Names whose write should die with "Modification of a read-only
     /// value attempted at FILE line N." — used by `for (!0) { … }`,
     /// where the iterator variable aliases Perl's PL_sv_yes / PL_sv_no
@@ -567,6 +582,7 @@ impl Interpreter {
             deleted_slots: HashMap::new(),
             pos_offsets: HashMap::new(),
             pos_offsets_by_rc: HashMap::new(),
+            regex_code_block_pos_target: None,
             readonly_vars: std::collections::HashSet::new(),
             last_popped_underscore: None,
             underscore_arg_sources: Vec::new(),
@@ -4603,7 +4619,17 @@ impl Interpreter {
                 } else {
                     0
                 };
+                // Set the regex-code-block pos target so `(?{ pos $h{n} })`
+                // inside the pattern sees the current match end. Restored
+                // after the match. op/pos test 21.
+                let prev_target = self.regex_code_block_pos_target.take();
+                if let Some(n) = &var_name {
+                    self.regex_code_block_pos_target = Some(RegexPosTarget::Named(n.clone()));
+                } else if let Some(p) = alias_rc_ptr {
+                    self.regex_code_block_pos_target = Some(RegexPosTarget::AliasRc(p));
+                }
                 let (matched, end) = self.regex_match_pos(&text, pat, flags, start);
+                self.regex_code_block_pos_target = prev_target;
                 if flags.contains('g') {
                     if let Some(n) = var_name {
                         if matched {
@@ -4815,6 +4841,22 @@ impl Interpreter {
                             Expr::ScalarVar(n) => Some(n.clone()),
                             _ => None,
                         };
+                        // For non-scalar targets (`$_[i]`, `$h{k}`), look up
+                        // the underlying alias Rc so pos updates propagate
+                        // back to the caller via `pos_offsets_by_rc`. Mirrors
+                        // the RegexMatch defelem path so `$_[3] =~ s///eg`
+                        // sets pos seen by `pos($h{n})` when $_[3] aliases
+                        // $h{n}. op/pos tests 20, 21, 25, 26.
+                        let target_alias_rc_ptr: Option<usize> = if target_name.is_none() {
+                            let slot = self.lvalue_alias_slot(target);
+                            if let Value::Alias(rc) = slot {
+                                Some(std::rc::Rc::as_ptr(&rc) as usize)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
                         let (new_text, count) = if global {
                             // Manually iterate so we can update pos and eval
                             // the replacement per match (and not lose pos
@@ -4842,6 +4884,8 @@ impl Interpreter {
                                     // (Perl's documented behaviour for
                                     // pos() inside //eg replacements).
                                     self.pos_offsets.insert(n.clone(), m0.start());
+                                } else if let Some(p) = target_alias_rc_ptr {
+                                    self.pos_offsets_by_rc.insert(p, m0.start());
                                 }
                                 let r = if want_eval {
                                     let mut current = replacement.clone();
@@ -4856,6 +4900,8 @@ impl Interpreter {
                                     // After replacement runs, advance pos
                                     // to end of the match.
                                     self.pos_offsets.insert(n.clone(), m0.end());
+                                } else if let Some(p) = target_alias_rc_ptr {
+                                    self.pos_offsets_by_rc.insert(p, m0.end());
                                 }
                                 out.push_str(&r);
                                 count += 1;
@@ -5278,9 +5324,21 @@ impl Interpreter {
                 // `defined &name` checks whether the sub is defined
                 // *without* invoking it. Likewise `defined &$ref` should
                 // not call the code ref. Detect these forms before the
-                // recursive eval_expr that would call them.
+                // recursive eval_expr that would call them. The `&NAME`
+                // form (no parens) parses with a `_amp_call_inherit_args`
+                // sentinel arg — treat that as "no real args" so the
+                // defined-without-invoke check still applies. op/undef
+                // around line 51.
+                let no_real_args = |sub_args: &[Expr]| -> bool {
+                    sub_args.is_empty()
+                        || (sub_args.len() == 1
+                            && matches!(
+                                &sub_args[0],
+                                Expr::Call(n, _) if n == "_amp_call_inherit_args" || n == "_amp_call_parens"
+                            ))
+                };
                 if let Expr::Call(name, sub_args) = expr.as_ref()
-                    && sub_args.is_empty()
+                    && no_real_args(sub_args)
                 {
                     let here = self.subs.contains_key(name);
                     let q = format!("{}::{}", self.package, name);
@@ -12802,34 +12860,50 @@ impl Interpreter {
     }
 
     fn set_hash_element(&mut self, name: &str, key: &str, val: Value) {
+        // If the existing slot is a `Value::Alias(rc)` (set up by sub-arg
+        // aliasing — `sub f { ... }->( ..., $h{k}, ... )`), assign through
+        // the rc instead of replacing the slot. Preserves the alias so
+        // a subsequent `pos $h{k}` finds the Rc-keyed offset. op/pos
+        // test 21 (`re-evals set pos through defelems`).
         for scope in self.scopes.iter_mut().rev() {
-            if scope.hashes.contains_key(name) {
-                scope
-                    .hashes
-                    .entry(name.to_string())
-                    .or_default()
-                    .insert(key.to_string(), val);
+            if let Some(h) = scope.hashes.get_mut(name) {
+                if let Some(Value::Alias(rc)) = h.get(key) {
+                    *rc.borrow_mut() = val;
+                } else {
+                    h.insert(key.to_string(), val);
+                }
                 return;
             }
         }
         let qname = self.qualify_global(name);
-        if let Some(rc) = self.aliased_hashes.get(qname.as_str()) {
-            rc.borrow_mut().insert(key.to_string(), val);
+        if let Some(rc) = self.aliased_hashes.get(qname.as_str()).cloned() {
+            let mut h = rc.borrow_mut();
+            if let Some(Value::Alias(slot_rc)) = h.get(key) {
+                *slot_rc.borrow_mut() = val;
+            } else {
+                h.insert(key.to_string(), val);
+            }
             return;
         }
         if qname != name
-            && let Some(rc) = self.aliased_hashes.get(name)
+            && let Some(rc) = self.aliased_hashes.get(name).cloned()
         {
-            rc.borrow_mut().insert(key.to_string(), val);
+            let mut h = rc.borrow_mut();
+            if let Some(Value::Alias(slot_rc)) = h.get(key) {
+                *slot_rc.borrow_mut() = val;
+            } else {
+                h.insert(key.to_string(), val);
+            }
             return;
         }
         // Not found in lexical scopes — set in globals under the
         // package-qualified name.
-        self.globals
-            .hashes
-            .entry(qname)
-            .or_default()
-            .insert(key.to_string(), val);
+        let h = self.globals.hashes.entry(qname).or_default();
+        if let Some(Value::Alias(rc)) = h.get(key) {
+            *rc.borrow_mut() = val;
+        } else {
+            h.insert(key.to_string(), val);
+        }
     }
 
     fn set_hash_from_list(&mut self, name: &str, items: Vec<Value>) {
@@ -14529,6 +14603,83 @@ impl Interpreter {
         out
     }
 
+    /// Set `pos` on the regex match target to the current match end for the
+    /// duration of a `(?{...})` code-block evaluation, returning the prior
+    /// value (or None if unset) so it can be restored after. Translates
+    /// `end_bytes` (a byte offset in `text`, which is `stringify_value(v)`)
+    /// to a byte offset relative to the target's `to_str()` form — the
+    /// canonical pos-storage convention pos-read uses. This preserves pos
+    /// across `bless`-mediated stringification changes inside the code
+    /// block (op/pos tests 26/27). Reads
+    /// `regex_code_block_pos_target` to pick the slot.
+    fn set_pos_for_code_block(
+        &mut self,
+        end_bytes: usize,
+        text: &str,
+    ) -> Option<(RegexPosTarget, Option<usize>)> {
+        let target = self.regex_code_block_pos_target.clone()?;
+        let text_bytes = text.as_bytes();
+        let char_count = if end_bytes <= text_bytes.len() {
+            std::str::from_utf8(&text_bytes[..end_bytes])
+                .map(|s| s.chars().count())
+                .unwrap_or(end_bytes)
+        } else {
+            end_bytes
+        };
+        let prior = match &target {
+            RegexPosTarget::Named(n) => {
+                let p = self.pos_offsets.get(n).copied();
+                let to_str_s = self.get_var(n).to_str();
+                let byte_off = to_str_s
+                    .char_indices()
+                    .nth(char_count)
+                    .map(|(b, _)| b)
+                    .unwrap_or_else(|| {
+                        if char_count > to_str_s.chars().count() {
+                            char_count
+                        } else {
+                            to_str_s.len()
+                        }
+                    });
+                self.pos_offsets.insert(n.clone(), byte_off);
+                p
+            }
+            RegexPosTarget::AliasRc(p) => {
+                let prior = self.pos_offsets_by_rc.get(p).copied();
+                // Pass byte offset through unchanged — defelem alias
+                // values are plain scalars whose to_str equals
+                // stringify_value. op/pos test 21.
+                self.pos_offsets_by_rc.insert(*p, end_bytes);
+                prior
+            }
+        };
+        Some((target, prior))
+    }
+
+    /// Restore the prior `pos` after a `(?{...})` eval. Inverse of
+    /// `set_pos_for_code_block`.
+    fn restore_pos_after_code_block(&mut self, saved: Option<(RegexPosTarget, Option<usize>)>) {
+        let Some((target, prior)) = saved else {
+            return;
+        };
+        match target {
+            RegexPosTarget::Named(n) => {
+                if let Some(p) = prior {
+                    self.pos_offsets.insert(n, p);
+                } else {
+                    self.pos_offsets.remove(&n);
+                }
+            }
+            RegexPosTarget::AliasRc(p) => {
+                if let Some(prev) = prior {
+                    self.pos_offsets_by_rc.insert(p, prev);
+                } else {
+                    self.pos_offsets_by_rc.remove(&p);
+                }
+            }
+        }
+    }
+
     /// Match `pattern` against `text[start..]` and return whether it
     /// matched plus the byte offset where the match ended (or `start` on
     /// failure). Used by `/g` so `pos` advances after each match.
@@ -14834,9 +14985,13 @@ impl Interpreter {
                     self.set_global_var("REGMARK", Value::Str(mark.clone()));
                 }
                 let end = start + group_ends[0].unwrap();
-                for code in &code_blocks {
-                    let v = self.eval_string(code);
-                    self.set_global_var("^R", v);
+                if !code_blocks.is_empty() {
+                    let saved_pos = self.set_pos_for_code_block(end, text);
+                    for code in &code_blocks {
+                        let v = self.eval_string(code);
+                        self.set_global_var("^R", v);
+                    }
+                    self.restore_pos_after_code_block(saved_pos);
                 }
                 return (true, end);
             }
@@ -14946,9 +15101,13 @@ impl Interpreter {
                         self.set_global_var("REGMARK", Value::Str(mark.clone()));
                     }
                     let end = start + group_ends[0].unwrap();
-                    for code in &code_blocks {
-                        let v = self.eval_string(code);
-                        self.set_global_var("^R", v);
+                    if !code_blocks.is_empty() {
+                        let saved_pos = self.set_pos_for_code_block(end, text);
+                        for code in &code_blocks {
+                            let v = self.eval_string(code);
+                            self.set_global_var("^R", v);
+                        }
+                        self.restore_pos_after_code_block(saved_pos);
                     }
                     (true, end)
                 }

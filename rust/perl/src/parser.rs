@@ -2654,6 +2654,36 @@ impl Parser {
                     Expr::Undef
                 }
             }
+            Token::State => {
+                // `state $y = EXPR` in expression position — emit a
+                // DoBlock that runs Stmt::State and then yields the var.
+                // Used by `ref(state $y = "a $o b")` (opbasic/concat test 34).
+                self.pos += 1;
+                if let Token::ScalarVar(name) = self.tok() {
+                    let n = name.clone();
+                    self.pos += 1;
+                    Expr::DoBlock(vec![
+                        Stmt::State(vec![(format!("${n}"), None)], false),
+                        Stmt::Expr(Expr::ScalarVar(n)),
+                    ])
+                } else if let Token::ArrayVar(name) = self.tok() {
+                    let n = name.clone();
+                    self.pos += 1;
+                    Expr::DoBlock(vec![
+                        Stmt::State(vec![(format!("@{n}"), None)], false),
+                        Stmt::Expr(Expr::ArrayVar(n)),
+                    ])
+                } else if let Token::HashVar(name) = self.tok() {
+                    let n = name.clone();
+                    self.pos += 1;
+                    Expr::DoBlock(vec![
+                        Stmt::State(vec![(format!("%{n}"), None)], false),
+                        Stmt::Expr(Expr::HashVar(n)),
+                    ])
+                } else {
+                    Expr::Undef
+                }
+            }
             Token::Ident(name) if name.starts_with('-') && name.len() == 2 => {
                 // File test operators: -e, -f, -d, etc.
                 let op = name.clone();
