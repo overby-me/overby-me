@@ -21,13 +21,8 @@ pub fn main(raw_args: &[String]) -> i32 {
 
     // Short required-argument flags per OPTIONS = "hvprmdsR:P:q:aM:n:c"
     // (the `:`-marked entries).
-    let short_required: &[(char, &str)] = &[
-        ('R', "R"),
-        ('P', "P"),
-        ('q', "q"),
-        ('M', "M"),
-        ('n', "n"),
-    ];
+    let short_required: &[(char, &str)] =
+        &[('R', "R"), ('P', "P"), ('q', "q"), ('M', "M"), ('n', "n")];
     // Long required-argument flags per long_options[].
     let long_required: &[&str] = &[
         "--remote",
@@ -81,8 +76,14 @@ pub fn main(raw_args: &[String]) -> i32 {
         // -727379969 like C's atoi). Return 0 if no digits.
         let mut chars = s.trim_start().chars().peekable();
         let neg = match chars.peek() {
-            Some('-') => { chars.next(); true }
-            Some('+') => { chars.next(); false }
+            Some('-') => {
+                chars.next();
+                true
+            }
+            Some('+') => {
+                chars.next();
+                false
+            }
             _ => false,
         };
         let mut n: i32 = 0;
@@ -91,9 +92,17 @@ pub fn main(raw_args: &[String]) -> i32 {
             if let Some(d) = c.to_digit(10) {
                 n = n.wrapping_mul(10).wrapping_add(d as i32);
                 any = true;
-            } else { break; }
+            } else {
+                break;
+            }
         }
-        if !any { 0 } else if neg { (n.wrapping_neg()) as i64 } else { n as i64 }
+        if !any {
+            0
+        } else if neg {
+            (n.wrapping_neg()) as i64
+        } else {
+            n as i64
+        }
     };
     let mut i = 1;
     while i < args.len() {
@@ -281,28 +290,28 @@ pub fn main(raw_args: &[String]) -> i32 {
     //   2. channels <= 0   → "error: bad channels <n>"
     //   3. master pw-cat with no mode flag → "playback/record options"
     //   4. mode set but no positional → "filename or - argument missing"
-    if let Some(r) = rate {
-        if r <= 0 {
-            eprintln!("error: bad rate {r}");
-            print_help(argv0);
-            return 1;
-        }
+    if let Some(r) = rate
+        && r <= 0
+    {
+        eprintln!("error: bad rate {r}");
+        print_help(argv0);
+        return 1;
     }
-    if let Some(c) = channels {
-        if c <= 0 {
-            eprintln!("error: bad channels {c}");
-            print_help(argv0);
-            return 1;
-        }
+    if let Some(c) = channels
+        && c <= 0
+    {
+        eprintln!("error: bad channels {c}");
+        print_help(argv0);
+        return 1;
     }
     if is_cat_master(argv0) && !mode_set {
         eprintln!("error: one of the playback/record options must be provided");
         print_help(argv0);
-        return 1;
+        1
     } else if positional_count == 0 {
         eprintln!("error: filename or - argument missing");
         print_help(argv0);
-        return 1;
+        1
     } else {
         // C tries to connect first, then open the file via sndfile.
         // Without daemon → connect-fail. With daemon → sndfile error.
@@ -333,10 +342,8 @@ pub fn main(raw_args: &[String]) -> i32 {
                 );
             }
         }
-        return 1;
+        1
     }
-    print_help(argv0);
-    0
 }
 
 fn emit_open_error(argv0: &str, file: &str, raw_mode: bool) {
@@ -394,8 +401,10 @@ fn emit_open_error(argv0: &str, file: &str, raw_mode: bool) {
     }
     match argv0_basename {
         // MIDI-mode tools.
-        s if s.contains("midiplay") || s.contains("midirecord")
-            || s.contains("midi2play") || s.contains("midi2record") =>
+        s if s.contains("midiplay")
+            || s.contains("midirecord")
+            || s.contains("midi2play")
+            || s.contains("midi2record") =>
         {
             let err = normalize_midi(strerror_for(file, is_record));
             eprintln!("midifile: can't read midi file '{file}': {err}");

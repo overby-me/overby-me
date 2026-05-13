@@ -65,8 +65,8 @@ pub fn main(raw_args: &[String]) -> i32 {
             }
             // -C and --color have OPTIONAL argument; bare `-C` is fine.
             "-C" | "--color" => {}
-            "-N" | "--no-colors" | "-o" | "--hide-props" | "-a"
-            | "--hide-params" | "-p" | "--print-separator" => {}
+            "-N" | "--no-colors" | "-o" | "--hide-props" | "-a" | "--hide-params" | "-p"
+            | "--print-separator" => {}
             s if s.starts_with("--color=") => {
                 let val = &s["--color=".len()..];
                 if !matches!(val, "" | "never" | "always" | "auto") {
@@ -122,7 +122,10 @@ pub fn main(raw_args: &[String]) -> i32 {
     match connect {
         Ok(_) => 0,
         Err(_) => {
-            eprintln!("can't connect: {}", crate::tools::common::connect_failure_msg());
+            eprintln!(
+                "can't connect: {}",
+                crate::tools::common::connect_failure_msg()
+            );
             255
         }
     }

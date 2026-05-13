@@ -1383,265 +1383,1042 @@
         tool = "pw-mididump";
         name = "pitch-wheel";
       }
-      { tool = "pw-cli"; name = "remote-inline-eq"; }
-      { tool = "pw-cli"; name = "remote-short-eq"; }
-      { tool = "pw-cli"; name = "remote-short-attached"; }
-      { tool = "pw-mon"; name = "remote-bad"; }
-      { tool = "pw-link"; name = "remote-bad"; }
-      { tool = "pw-dump"; name = "remote-bad"; }
-      { tool = "pw-dot"; name = "remote-attached"; }
-      { tool = "pw-metadata"; name = "remote-bad"; }
-      { tool = "pw-cli"; name = "help-with-bad-remote"; }
-      { tool = "spa-acp-tool"; name = "cluster-hv"; }
-      { tool = "pw-cat"; name = "dash-dash-only"; }
-      { tool = "pw-mididump"; name = "multi-positional"; }
-      { tool = "spa-resample"; name = "two-positional-fail"; }
-      { tool = "pw-cat"; name = "playback-bad-file"; }
-      { tool = "pw-play"; name = "bad-file"; }
-      { tool = "pw-record"; name = "bad-file"; }
-      { tool = "pw-mididump"; name = "live-no-daemon"; }
-      { tool = "pw-config"; name = "dash-dash-paths"; }
-      { tool = "pw-cli"; name = "info-no-args"; }
-      { tool = "pw-cli"; name = "i-alias-no-args"; }
-      { tool = "pw-cli"; name = "ls-dash"; }
-      { tool = "spa-acp-tool"; name = "unknown-cmd"; }
-      { tool = "pw-link"; name = "props-attached"; }
-      { tool = "pw-link"; name = "props-empty"; }
-      { tool = "pw-config"; name = "invalid-color"; }
-      { tool = "pw-link"; name = "latency-with-pos"; }
-      { tool = "spa-json-dump"; name = "conf-filter-chain"; }
-      { tool = "spa-json-dump"; name = "conf-pipewire-vulkan"; }
-      { tool = "spa-json-dump"; name = "conf-pipewire-pulse"; }
-      { tool = "spa-json-dump"; name = "conf-pipewire-avb"; }
-      { tool = "spa-json-dump"; name = "conf-fc-22-onnx-vad"; }
-      { tool = "spa-json-dump"; name = "conf-fc-35-ebur128"; }
-      { tool = "spa-json-dump"; name = "conf-fc-36-dcblock"; }
-      { tool = "spa-json-dump"; name = "conf-fc-demonic"; }
-      { tool = "spa-json-dump"; name = "conf-fc-sink-dolby-pro-logic-ii"; }
-      { tool = "spa-json-dump"; name = "conf-fc-sink-eq6"; }
-      { tool = "pw-mididump"; name = "M-attached-bad"; }
-      { tool = "pw-mididump"; name = "M-equals-ump"; }
-      { tool = "pw-mididump"; name = "M-ump-file"; }
-      { tool = "pw-config"; name = "short-bad-flag"; }
-      { tool = "spa-resample"; name = "short-bad-cluster"; }
-      { tool = "spa-acp-tool"; name = "short-bad-cluster"; }
-      { tool = "spa-json-dump"; name = "short-bad-cluster"; }
-      { tool = "pw-link"; name = "short-bad-cluster"; }
-      { tool = "pw-mon"; name = "short-bad-cluster"; }
-      { tool = "pw-dump"; name = "short-bad-cluster"; }
-      { tool = "pw-dot"; name = "short-bad-cluster"; }
-      { tool = "pw-metadata"; name = "short-bad-cluster"; }
-      { tool = "pw-profiler"; name = "short-bad-cluster"; }
-      { tool = "pw-mididump"; name = "short-bad-cluster"; }
-      { tool = "pw-loopback"; name = "short-bad-cluster"; }
-      { tool = "pw-container"; name = "short-bad-cluster"; }
-      { tool = "pw-reserve"; name = "short-bad-cluster"; }
-      { tool = "pw-mon"; name = "C-cluster-attached"; }
-      { tool = "pw-top"; name = "short-bad-cluster"; }
-      { tool = "pw-cli"; name = "pipewire-remote-bad-info"; }
-      { tool = "pw-cli"; name = "pipewire-remote-bad-quit"; }
-      { tool = "pw-cli"; name = "pipewire-remote-bad-listvars"; }
-      { tool = "pw-cli"; name = "connect-refused-info"; }
-      { tool = "pw-cli"; name = "connect-refused-help"; }
-      { tool = "pw-cat"; name = "playback-existing-bad-format"; }
-      { tool = "pw-cat"; name = "playback-stdin-marker"; }
-      { tool = "spa-resample"; name = "existing-bad-format"; }
-      { tool = "spa-resample"; name = "dash-stdin-marker"; }
-      { tool = "pw-mididump"; name = "directory-arg"; }
-      { tool = "spa-json-dump"; name = "stdin-marker"; }
-      { tool = "spa-json-dump"; name = "no-args"; }
-      { tool = "spa-json-dump"; name = "empty-file"; }
-      { tool = "spa-json-dump"; name = "directory"; }
-      { tool = "pw-cat"; name = "bad-rate-string"; }
-      { tool = "pw-cat"; name = "bad-rate-zero"; }
-      { tool = "pw-cat"; name = "bad-rate-negative"; }
-      { tool = "pw-cat"; name = "bad-channels-string"; }
-      { tool = "pw-mididump"; name = "dash-dash-terminator"; }
-      { tool = "pw-mididump"; name = "dash-dash-empty"; }
-      { tool = "spa-resample"; name = "dash-dash-only"; }
-      { tool = "spa-resample"; name = "dash-dash-args"; }
-      { tool = "spa-json-dump"; name = "dash-dash-only"; }
-      { tool = "spa-json-dump"; name = "dash-dash-missing-file"; }
-      { tool = "spa-json-dump"; name = "dash-dash-directory"; }
-      { tool = "spa-json-dump"; name = "proc-zero-size"; }
-      { tool = "spa-json-dump"; name = "stdin-content"; }
-      { tool = "spa-json-dump"; name = "stdin-whitespace-only"; }
-      { tool = "spa-json-dump"; name = "stdin-comment-only"; }
-      { tool = "spa-json-dump"; name = "bare-number-stdin"; }
-      { tool = "spa-json-dump"; name = "bare-string-stdin"; }
-      { tool = "spa-json-dump"; name = "bare-bool-stdin"; }
-      { tool = "spa-resample"; name = "bad-rate-string"; }
-      { tool = "spa-resample"; name = "bad-rate-long"; }
-      { tool = "spa-resample"; name = "bad-format"; }
-      { tool = "spa-resample"; name = "bad-format-long"; }
-      { tool = "spa-resample"; name = "bad-quality-negative"; }
-      { tool = "spa-resample"; name = "attached-rate"; }
-      { tool = "spa-resample"; name = "long-rate-no-arg"; }
-      { tool = "spa-resample"; name = "long-format-no-arg"; }
-      { tool = "spa-resample"; name = "long-quality-no-arg"; }
-      { tool = "spa-json-dump"; name = "indent-no-arg"; }
-      { tool = "spa-json-dump"; name = "i-short-no-arg"; }
-      { tool = "pw-cli"; name = "long-remote-no-arg"; }
-      { tool = "pw-link"; name = "long-remote-no-arg"; }
-      { tool = "pw-mon"; name = "long-remote-no-arg"; }
-      { tool = "pw-mididump"; name = "long-remote-no-arg"; }
-      { tool = "pw-mididump"; name = "short-remote-no-arg"; }
-      { tool = "pw-config"; name = "long-name-no-arg"; }
-      { tool = "pw-config"; name = "short-name-no-arg"; }
-      { tool = "pw-config"; name = "long-prefix-no-arg"; }
-      { tool = "pw-config"; name = "short-prefix-no-arg"; }
-      { tool = "spa-json-dump"; name = "cluster-help-shortcircuit"; }
-      { tool = "spa-json-dump"; name = "cluster-s-then-h"; }
-      { tool = "pw-cli"; name = "env-pipewire-remote"; }
-      { tool = "pw-mon"; name = "env-pipewire-remote"; }
-      { tool = "pw-mididump"; name = "env-pipewire-remote"; }
-      { tool = "pw-link"; name = "env-pipewire-remote"; }
-      { tool = "pw-link"; name = "env-pipewire-remote-list"; }
-      { tool = "pw-cat"; name = "env-pipewire-remote"; }
-      { tool = "pw-cat"; name = "midi-no-primary-mode"; }
-      { tool = "pw-cat"; name = "dsd-no-primary-mode"; }
-      { tool = "pw-cat"; name = "sysex-no-primary-mode"; }
-      { tool = "pw-cat"; name = "encoded-no-primary-mode"; }
-      { tool = "pw-dump"; name = "long-remote-no-arg"; }
-      { tool = "pw-loopback"; name = "long-remote-no-arg"; }
-      { tool = "pw-loopback"; name = "short-remote-no-arg"; }
-      { tool = "pw-loopback"; name = "long-capture-no-arg"; }
-      { tool = "pw-loopback"; name = "unknown-flag"; }
-      { tool = "spa-json-dump"; name = "empty-filename"; }
-      { tool = "pw-cli"; name = "bogus-flag-exit"; }
-      { tool = "pw-cli"; name = "bad-short-exit"; }
-      { tool = "pw-link"; name = "bogus-flag-exit"; }
-      { tool = "pw-mon"; name = "bogus-flag-exit"; }
-      { tool = "pw-dump"; name = "bogus-flag-exit"; }
-      { tool = "spa-json-dump"; name = "bogus-flag-exit"; }
-      { tool = "pw-config"; name = "help-with-value-exit"; }
-      { tool = "pw-mididump"; name = "help-with-value-exit"; }
-      { tool = "spa-json-dump"; name = "help-with-value-exit"; }
-      { tool = "pw-cat"; name = "missing-file-exit"; }
-      { tool = "pw-cat"; name = "midi-no-mode-exit"; }
-      { tool = "pw-loopback"; name = "connect-fail-exit"; }
-      { tool = "pw-cli"; name = "connect-fail-exit"; }
-      { tool = "pw-mididump"; name = "connect-fail-exit"; }
-      { tool = "pw-dump"; name = "env-pipewire-remote"; }
-      { tool = "spa-resample"; name = "cluster-with-required-arg"; }
-      { tool = "spa-resample"; name = "no-args-exit"; }
-      { tool = "pw-cli"; name = "no-args"; }
-      { tool = "pw-mon"; name = "no-args"; }
-      { tool = "pw-link"; name = "no-args"; }
-      { tool = "pw-mididump"; name = "no-args"; }
-      { tool = "pw-dump"; name = "no-args"; }
-      { tool = "pw-loopback"; name = "no-args"; }
-      { tool = "pw-dot"; name = "bogus-flag-exit"; }
-      { tool = "pw-metadata"; name = "bogus-flag-exit"; }
-      { tool = "pw-profiler"; name = "bogus-flag-exit"; }
-      { tool = "pw-top"; name = "bogus-flag-exit"; }
-      { tool = "pw-reserve"; name = "bogus-flag-exit"; }
-      { tool = "pw-container"; name = "bogus-flag-exit"; }
-      { tool = "pw-container"; name = "connect-fail-exit"; }
-      { tool = "pw-cat"; name = "perm-denied-file"; }
-      { tool = "spa-resample"; name = "perm-denied-input"; }
-      { tool = "pw-midiplay"; name = "missing-file"; }
-      { tool = "pw-sysex"; name = "missing-file"; }
-      { tool = "pw-dsdplay"; name = "missing-file"; }
-      { tool = "pw-v4l2"; name = "help"; }
-      { tool = "pw-v4l2"; name = "illegal-flag"; }
-      { tool = "pw-config"; name = "merge-no-section-exit"; }
-      { tool = "pw-mididump"; name = "truncated-header"; }
-      { tool = "pw-mididump"; name = "bad-magic"; }
-      { tool = "pw-mididump"; name = "stdin-valid-smf"; }
-      { tool = "pw-link"; name = "long-props-no-arg"; }
-      { tool = "pw-dot"; name = "long-remote-no-arg"; }
-      { tool = "pw-dot"; name = "long-json-no-arg"; }
-      { tool = "pw-dot"; name = "long-output-no-arg"; }
-      { tool = "pw-metadata"; name = "long-name-no-arg"; }
-      { tool = "pw-metadata"; name = "long-remote-no-arg"; }
-      { tool = "pw-profiler"; name = "long-remote-no-arg"; }
-      { tool = "pw-profiler"; name = "long-output-no-arg"; }
-      { tool = "pw-top"; name = "long-remote-no-arg"; }
-      { tool = "pw-reserve"; name = "long-name-no-arg"; }
-      { tool = "spa-acp-tool"; name = "long-properties-no-arg"; }
-      { tool = "pw-dot"; name = "output-empty"; }
-      { tool = "pw-dot"; name = "json-empty"; }
-      { tool = "pw-dot"; name = "json-missing"; }
-      { tool = "pw-cat"; name = "raw-mode-missing-file"; }
-      { tool = "pw-mididump"; name = "empty-mtrk"; }
-      { tool = "pw-mididump"; name = "oversized-mtrk"; }
-      { tool = "pw-cli"; name = "lone-dash-cmd"; }
-      { tool = "pw-config"; name = "lone-dash-cmd"; }
-      { tool = "pw-cat"; name = "short-R-remote"; }
-      { tool = "pw-cat"; name = "short-R-attached"; }
-      { tool = "pw-encplay"; name = "missing-file"; }
-      { tool = "pw-encplay"; name = "existing-bad-format"; }
-      { tool = "pw-profiler"; name = "connect-fail-exit"; }
-      { tool = "pw-metadata"; name = "connect-fail-exit"; }
-      { tool = "pw-top"; name = "connect-fail-exit"; }
-      { tool = "pw-loopback"; name = "explicit-remote"; }
-      { tool = "pw-loopback"; name = "cluster-help"; }
-      { tool = "pw-loopback"; name = "cluster-version"; }
-      { tool = "pw-reserve"; name = "cluster-help"; }
-      { tool = "pw-container"; name = "cluster-help"; }
-      { tool = "pw-mididump"; name = "undersized-mtrk"; }
-      { tool = "pw-config"; name = "missing-config"; }
-      { tool = "pw-config"; name = "missing-name"; }
-      { tool = "pw-config"; name = "missing-prefix-path"; }
-      { tool = "pw-cat"; name = "env-pipewire-runtime-dir"; }
-      { tool = "pw-mididump"; name = "dev-zero"; }
-      { tool = "pw-mididump"; name = "smpte-offset-with-eot-cut"; }
-      { tool = "pw-mididump"; name = "no-delta-partial"; }
-      { tool = "spa-json-dump"; name = "dev-zero"; }
-      { tool = "pw-cli"; name = "env-pipewire-runtime-dir-exit"; }
-      { tool = "pw-cat"; name = "bad-rate-overflow"; }
-      { tool = "spa-resample"; name = "bad-rate-overflow"; }
-      { tool = "spa-resample"; name = "bad-quality-overflow"; }
-      { tool = "pw-dump"; name = "indent-equals"; }
-      { tool = "pipewire"; name = "short-c-no-arg"; }
-      { tool = "pipewire"; name = "long-config-no-arg"; }
-      { tool = "pipewire"; name = "short-P-no-arg"; }
-      { tool = "pipewire"; name = "long-properties-no-arg"; }
-      { tool = "pipewire"; name = "c-not-dot-conf"; }
-      { tool = "pipewire"; name = "c-missing-conf"; }
-      { tool = "pipewire"; name = "cluster-help"; }
-      { tool = "pipewire"; name = "multiple-flags"; }
-      { tool = "spa-acp-tool"; name = "bogus-flag-exit"; }
-      { tool = "spa-inspect"; name = "no-args-exit"; }
-      { tool = "spa-monitor"; name = "no-args-exit"; }
-      { tool = "pw-cli"; name = "connect-refused"; }
-      { tool = "pw-link"; name = "connect-refused"; }
-      { tool = "pw-mon"; name = "connect-refused"; }
-      { tool = "pw-dump"; name = "connect-refused"; }
-      { tool = "pw-dot"; name = "connect-refused"; }
-      { tool = "pw-metadata"; name = "connect-refused"; }
-      { tool = "pw-top"; name = "connect-refused"; }
-      { tool = "pw-profiler"; name = "connect-refused"; }
-      { tool = "pw-loopback"; name = "connect-refused"; }
-      { tool = "pw-container"; name = "connect-refused"; }
-      { tool = "pw-cli"; name = "pipewire-remote-bad"; }
-      { tool = "pw-cli"; name = "cluster-hxx"; }
-      { tool = "pw-cli"; name = "cluster-Vxx"; }
-      { tool = "pw-link"; name = "cluster-hxx"; }
-      { tool = "pw-link"; name = "cluster-Vxx"; }
-      { tool = "pw-mon"; name = "cluster-hxx"; }
-      { tool = "pw-mon"; name = "cluster-Vxx"; }
-      { tool = "pw-dump"; name = "cluster-hxx"; }
-      { tool = "pw-dump"; name = "cluster-Vxx"; }
-      { tool = "pw-dot"; name = "cluster-hxx"; }
-      { tool = "pw-dot"; name = "cluster-Vxx"; }
-      { tool = "pw-metadata"; name = "cluster-hxx"; }
-      { tool = "pw-metadata"; name = "cluster-Vxx"; }
-      { tool = "pw-top"; name = "cluster-hxx"; }
-      { tool = "pw-top"; name = "cluster-Vxx"; }
-      { tool = "pw-profiler"; name = "cluster-hxx"; }
-      { tool = "pw-profiler"; name = "cluster-Vxx"; }
-      { tool = "pw-config"; name = "cluster-hxx"; }
-      { tool = "pw-config"; name = "cluster-Vxx"; }
-      { tool = "pw-mididump"; name = "cluster-hxx"; }
-      { tool = "pw-mididump"; name = "cluster-Vxx"; }
-      { tool = "pw-link"; name = "lone-dash"; }
-      { tool = "pw-mon"; name = "lone-dash"; }
-      { tool = "pw-link"; name = "d-then-i"; }
-      { tool = "pw-link"; name = "i-then-d"; }
-      { tool = "pw-link"; name = "I-without-list"; }
-      { tool = "pw-config"; name = "list-empty-no-newline"; }
+      {
+        tool = "pw-cli";
+        name = "remote-inline-eq";
+      }
+      {
+        tool = "pw-cli";
+        name = "remote-short-eq";
+      }
+      {
+        tool = "pw-cli";
+        name = "remote-short-attached";
+      }
+      {
+        tool = "pw-mon";
+        name = "remote-bad";
+      }
+      {
+        tool = "pw-link";
+        name = "remote-bad";
+      }
+      {
+        tool = "pw-dump";
+        name = "remote-bad";
+      }
+      {
+        tool = "pw-dot";
+        name = "remote-attached";
+      }
+      {
+        tool = "pw-metadata";
+        name = "remote-bad";
+      }
+      {
+        tool = "pw-cli";
+        name = "help-with-bad-remote";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "cluster-hv";
+      }
+      {
+        tool = "pw-cat";
+        name = "dash-dash-only";
+      }
+      {
+        tool = "pw-mididump";
+        name = "multi-positional";
+      }
+      {
+        tool = "spa-resample";
+        name = "two-positional-fail";
+      }
+      {
+        tool = "pw-cat";
+        name = "playback-bad-file";
+      }
+      {
+        tool = "pw-play";
+        name = "bad-file";
+      }
+      {
+        tool = "pw-record";
+        name = "bad-file";
+      }
+      {
+        tool = "pw-mididump";
+        name = "live-no-daemon";
+      }
+      {
+        tool = "pw-config";
+        name = "dash-dash-paths";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-no-args";
+      }
+      {
+        tool = "pw-cli";
+        name = "i-alias-no-args";
+      }
+      {
+        tool = "pw-cli";
+        name = "ls-dash";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "unknown-cmd";
+      }
+      {
+        tool = "pw-link";
+        name = "props-attached";
+      }
+      {
+        tool = "pw-link";
+        name = "props-empty";
+      }
+      {
+        tool = "pw-config";
+        name = "invalid-color";
+      }
+      {
+        tool = "pw-link";
+        name = "latency-with-pos";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "conf-filter-chain";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "conf-pipewire-vulkan";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "conf-pipewire-pulse";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "conf-pipewire-avb";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "conf-fc-22-onnx-vad";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "conf-fc-35-ebur128";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "conf-fc-36-dcblock";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "conf-fc-demonic";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "conf-fc-sink-dolby-pro-logic-ii";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "conf-fc-sink-eq6";
+      }
+      {
+        tool = "pw-mididump";
+        name = "M-attached-bad";
+      }
+      {
+        tool = "pw-mididump";
+        name = "M-equals-ump";
+      }
+      {
+        tool = "pw-mididump";
+        name = "M-ump-file";
+      }
+      {
+        tool = "pw-config";
+        name = "short-bad-flag";
+      }
+      {
+        tool = "spa-resample";
+        name = "short-bad-cluster";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "short-bad-cluster";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "short-bad-cluster";
+      }
+      {
+        tool = "pw-link";
+        name = "short-bad-cluster";
+      }
+      {
+        tool = "pw-mon";
+        name = "short-bad-cluster";
+      }
+      {
+        tool = "pw-dump";
+        name = "short-bad-cluster";
+      }
+      {
+        tool = "pw-dot";
+        name = "short-bad-cluster";
+      }
+      {
+        tool = "pw-metadata";
+        name = "short-bad-cluster";
+      }
+      {
+        tool = "pw-profiler";
+        name = "short-bad-cluster";
+      }
+      {
+        tool = "pw-mididump";
+        name = "short-bad-cluster";
+      }
+      {
+        tool = "pw-loopback";
+        name = "short-bad-cluster";
+      }
+      {
+        tool = "pw-container";
+        name = "short-bad-cluster";
+      }
+      {
+        tool = "pw-reserve";
+        name = "short-bad-cluster";
+      }
+      {
+        tool = "pw-mon";
+        name = "C-cluster-attached";
+      }
+      {
+        tool = "pw-top";
+        name = "short-bad-cluster";
+      }
+      {
+        tool = "pw-cli";
+        name = "pipewire-remote-bad-info";
+      }
+      {
+        tool = "pw-cli";
+        name = "pipewire-remote-bad-quit";
+      }
+      {
+        tool = "pw-cli";
+        name = "pipewire-remote-bad-listvars";
+      }
+      {
+        tool = "pw-cli";
+        name = "connect-refused-info";
+      }
+      {
+        tool = "pw-cli";
+        name = "connect-refused-help";
+      }
+      {
+        tool = "pw-cat";
+        name = "playback-existing-bad-format";
+      }
+      {
+        tool = "pw-cat";
+        name = "playback-stdin-marker";
+      }
+      {
+        tool = "spa-resample";
+        name = "existing-bad-format";
+      }
+      {
+        tool = "spa-resample";
+        name = "dash-stdin-marker";
+      }
+      {
+        tool = "pw-mididump";
+        name = "directory-arg";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "stdin-marker";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "no-args";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "empty-file";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "directory";
+      }
+      {
+        tool = "pw-cat";
+        name = "bad-rate-string";
+      }
+      {
+        tool = "pw-cat";
+        name = "bad-rate-zero";
+      }
+      {
+        tool = "pw-cat";
+        name = "bad-rate-negative";
+      }
+      {
+        tool = "pw-cat";
+        name = "bad-channels-string";
+      }
+      {
+        tool = "pw-mididump";
+        name = "dash-dash-terminator";
+      }
+      {
+        tool = "pw-mididump";
+        name = "dash-dash-empty";
+      }
+      {
+        tool = "spa-resample";
+        name = "dash-dash-only";
+      }
+      {
+        tool = "spa-resample";
+        name = "dash-dash-args";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "dash-dash-only";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "dash-dash-missing-file";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "dash-dash-directory";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "proc-zero-size";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "stdin-content";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "stdin-whitespace-only";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "stdin-comment-only";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "bare-number-stdin";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "bare-string-stdin";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "bare-bool-stdin";
+      }
+      {
+        tool = "spa-resample";
+        name = "bad-rate-string";
+      }
+      {
+        tool = "spa-resample";
+        name = "bad-rate-long";
+      }
+      {
+        tool = "spa-resample";
+        name = "bad-format";
+      }
+      {
+        tool = "spa-resample";
+        name = "bad-format-long";
+      }
+      {
+        tool = "spa-resample";
+        name = "bad-quality-negative";
+      }
+      {
+        tool = "spa-resample";
+        name = "attached-rate";
+      }
+      {
+        tool = "spa-resample";
+        name = "long-rate-no-arg";
+      }
+      {
+        tool = "spa-resample";
+        name = "long-format-no-arg";
+      }
+      {
+        tool = "spa-resample";
+        name = "long-quality-no-arg";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "indent-no-arg";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "i-short-no-arg";
+      }
+      {
+        tool = "pw-cli";
+        name = "long-remote-no-arg";
+      }
+      {
+        tool = "pw-link";
+        name = "long-remote-no-arg";
+      }
+      {
+        tool = "pw-mon";
+        name = "long-remote-no-arg";
+      }
+      {
+        tool = "pw-mididump";
+        name = "long-remote-no-arg";
+      }
+      {
+        tool = "pw-mididump";
+        name = "short-remote-no-arg";
+      }
+      {
+        tool = "pw-config";
+        name = "long-name-no-arg";
+      }
+      {
+        tool = "pw-config";
+        name = "short-name-no-arg";
+      }
+      {
+        tool = "pw-config";
+        name = "long-prefix-no-arg";
+      }
+      {
+        tool = "pw-config";
+        name = "short-prefix-no-arg";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "cluster-help-shortcircuit";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "cluster-s-then-h";
+      }
+      {
+        tool = "pw-cli";
+        name = "env-pipewire-remote";
+      }
+      {
+        tool = "pw-mon";
+        name = "env-pipewire-remote";
+      }
+      {
+        tool = "pw-mididump";
+        name = "env-pipewire-remote";
+      }
+      {
+        tool = "pw-link";
+        name = "env-pipewire-remote";
+      }
+      {
+        tool = "pw-link";
+        name = "env-pipewire-remote-list";
+      }
+      {
+        tool = "pw-cat";
+        name = "env-pipewire-remote";
+      }
+      {
+        tool = "pw-cat";
+        name = "midi-no-primary-mode";
+      }
+      {
+        tool = "pw-cat";
+        name = "dsd-no-primary-mode";
+      }
+      {
+        tool = "pw-cat";
+        name = "sysex-no-primary-mode";
+      }
+      {
+        tool = "pw-cat";
+        name = "encoded-no-primary-mode";
+      }
+      {
+        tool = "pw-dump";
+        name = "long-remote-no-arg";
+      }
+      {
+        tool = "pw-loopback";
+        name = "long-remote-no-arg";
+      }
+      {
+        tool = "pw-loopback";
+        name = "short-remote-no-arg";
+      }
+      {
+        tool = "pw-loopback";
+        name = "long-capture-no-arg";
+      }
+      {
+        tool = "pw-loopback";
+        name = "unknown-flag";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "empty-filename";
+      }
+      {
+        tool = "pw-cli";
+        name = "bogus-flag-exit";
+      }
+      {
+        tool = "pw-cli";
+        name = "bad-short-exit";
+      }
+      {
+        tool = "pw-link";
+        name = "bogus-flag-exit";
+      }
+      {
+        tool = "pw-mon";
+        name = "bogus-flag-exit";
+      }
+      {
+        tool = "pw-dump";
+        name = "bogus-flag-exit";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "bogus-flag-exit";
+      }
+      {
+        tool = "pw-config";
+        name = "help-with-value-exit";
+      }
+      {
+        tool = "pw-mididump";
+        name = "help-with-value-exit";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "help-with-value-exit";
+      }
+      {
+        tool = "pw-cat";
+        name = "missing-file-exit";
+      }
+      {
+        tool = "pw-cat";
+        name = "midi-no-mode-exit";
+      }
+      {
+        tool = "pw-loopback";
+        name = "connect-fail-exit";
+      }
+      {
+        tool = "pw-cli";
+        name = "connect-fail-exit";
+      }
+      {
+        tool = "pw-mididump";
+        name = "connect-fail-exit";
+      }
+      {
+        tool = "pw-dump";
+        name = "env-pipewire-remote";
+      }
+      {
+        tool = "spa-resample";
+        name = "cluster-with-required-arg";
+      }
+      {
+        tool = "spa-resample";
+        name = "no-args-exit";
+      }
+      {
+        tool = "pw-cli";
+        name = "no-args";
+      }
+      {
+        tool = "pw-mon";
+        name = "no-args";
+      }
+      {
+        tool = "pw-link";
+        name = "no-args";
+      }
+      {
+        tool = "pw-mididump";
+        name = "no-args";
+      }
+      {
+        tool = "pw-dump";
+        name = "no-args";
+      }
+      {
+        tool = "pw-loopback";
+        name = "no-args";
+      }
+      {
+        tool = "pw-dot";
+        name = "bogus-flag-exit";
+      }
+      {
+        tool = "pw-metadata";
+        name = "bogus-flag-exit";
+      }
+      {
+        tool = "pw-profiler";
+        name = "bogus-flag-exit";
+      }
+      {
+        tool = "pw-top";
+        name = "bogus-flag-exit";
+      }
+      {
+        tool = "pw-reserve";
+        name = "bogus-flag-exit";
+      }
+      {
+        tool = "pw-container";
+        name = "bogus-flag-exit";
+      }
+      {
+        tool = "pw-container";
+        name = "connect-fail-exit";
+      }
+      {
+        tool = "pw-cat";
+        name = "perm-denied-file";
+      }
+      {
+        tool = "spa-resample";
+        name = "perm-denied-input";
+      }
+      {
+        tool = "pw-midiplay";
+        name = "missing-file";
+      }
+      {
+        tool = "pw-sysex";
+        name = "missing-file";
+      }
+      {
+        tool = "pw-dsdplay";
+        name = "missing-file";
+      }
+      {
+        tool = "pw-v4l2";
+        name = "help";
+      }
+      {
+        tool = "pw-v4l2";
+        name = "illegal-flag";
+      }
+      {
+        tool = "pw-config";
+        name = "merge-no-section-exit";
+      }
+      {
+        tool = "pw-mididump";
+        name = "truncated-header";
+      }
+      {
+        tool = "pw-mididump";
+        name = "bad-magic";
+      }
+      {
+        tool = "pw-mididump";
+        name = "stdin-valid-smf";
+      }
+      {
+        tool = "pw-link";
+        name = "long-props-no-arg";
+      }
+      {
+        tool = "pw-dot";
+        name = "long-remote-no-arg";
+      }
+      {
+        tool = "pw-dot";
+        name = "long-json-no-arg";
+      }
+      {
+        tool = "pw-dot";
+        name = "long-output-no-arg";
+      }
+      {
+        tool = "pw-metadata";
+        name = "long-name-no-arg";
+      }
+      {
+        tool = "pw-metadata";
+        name = "long-remote-no-arg";
+      }
+      {
+        tool = "pw-profiler";
+        name = "long-remote-no-arg";
+      }
+      {
+        tool = "pw-profiler";
+        name = "long-output-no-arg";
+      }
+      {
+        tool = "pw-top";
+        name = "long-remote-no-arg";
+      }
+      {
+        tool = "pw-reserve";
+        name = "long-name-no-arg";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "long-properties-no-arg";
+      }
+      {
+        tool = "pw-dot";
+        name = "output-empty";
+      }
+      {
+        tool = "pw-dot";
+        name = "json-empty";
+      }
+      {
+        tool = "pw-dot";
+        name = "json-missing";
+      }
+      {
+        tool = "pw-cat";
+        name = "raw-mode-missing-file";
+      }
+      {
+        tool = "pw-mididump";
+        name = "empty-mtrk";
+      }
+      {
+        tool = "pw-mididump";
+        name = "oversized-mtrk";
+      }
+      {
+        tool = "pw-cli";
+        name = "lone-dash-cmd";
+      }
+      {
+        tool = "pw-config";
+        name = "lone-dash-cmd";
+      }
+      {
+        tool = "pw-cat";
+        name = "short-R-remote";
+      }
+      {
+        tool = "pw-cat";
+        name = "short-R-attached";
+      }
+      {
+        tool = "pw-encplay";
+        name = "missing-file";
+      }
+      {
+        tool = "pw-encplay";
+        name = "existing-bad-format";
+      }
+      {
+        tool = "pw-profiler";
+        name = "connect-fail-exit";
+      }
+      {
+        tool = "pw-metadata";
+        name = "connect-fail-exit";
+      }
+      {
+        tool = "pw-top";
+        name = "connect-fail-exit";
+      }
+      {
+        tool = "pw-loopback";
+        name = "explicit-remote";
+      }
+      {
+        tool = "pw-loopback";
+        name = "cluster-help";
+      }
+      {
+        tool = "pw-loopback";
+        name = "cluster-version";
+      }
+      {
+        tool = "pw-reserve";
+        name = "cluster-help";
+      }
+      {
+        tool = "pw-container";
+        name = "cluster-help";
+      }
+      {
+        tool = "pw-mididump";
+        name = "undersized-mtrk";
+      }
+      {
+        tool = "pw-config";
+        name = "missing-config";
+      }
+      {
+        tool = "pw-config";
+        name = "missing-name";
+      }
+      {
+        tool = "pw-config";
+        name = "missing-prefix-path";
+      }
+      {
+        tool = "pw-cat";
+        name = "env-pipewire-runtime-dir";
+      }
+      {
+        tool = "pw-mididump";
+        name = "dev-zero";
+      }
+      {
+        tool = "pw-mididump";
+        name = "smpte-offset-with-eot-cut";
+      }
+      {
+        tool = "pw-mididump";
+        name = "no-delta-partial";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "dev-zero";
+      }
+      {
+        tool = "pw-cli";
+        name = "env-pipewire-runtime-dir-exit";
+      }
+      {
+        tool = "pw-cat";
+        name = "bad-rate-overflow";
+      }
+      {
+        tool = "spa-resample";
+        name = "bad-rate-overflow";
+      }
+      {
+        tool = "spa-resample";
+        name = "bad-quality-overflow";
+      }
+      {
+        tool = "pw-dump";
+        name = "indent-equals";
+      }
+      {
+        tool = "pipewire";
+        name = "short-c-no-arg";
+      }
+      {
+        tool = "pipewire";
+        name = "long-config-no-arg";
+      }
+      {
+        tool = "pipewire";
+        name = "short-P-no-arg";
+      }
+      {
+        tool = "pipewire";
+        name = "long-properties-no-arg";
+      }
+      {
+        tool = "pipewire";
+        name = "c-not-dot-conf";
+      }
+      {
+        tool = "pipewire";
+        name = "c-missing-conf";
+      }
+      {
+        tool = "pipewire";
+        name = "cluster-help";
+      }
+      {
+        tool = "pipewire";
+        name = "multiple-flags";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "bogus-flag-exit";
+      }
+      {
+        tool = "spa-inspect";
+        name = "no-args-exit";
+      }
+      {
+        tool = "spa-monitor";
+        name = "no-args-exit";
+      }
+      {
+        tool = "pw-cli";
+        name = "connect-refused";
+      }
+      {
+        tool = "pw-link";
+        name = "connect-refused";
+      }
+      {
+        tool = "pw-mon";
+        name = "connect-refused";
+      }
+      {
+        tool = "pw-dump";
+        name = "connect-refused";
+      }
+      {
+        tool = "pw-dot";
+        name = "connect-refused";
+      }
+      {
+        tool = "pw-metadata";
+        name = "connect-refused";
+      }
+      {
+        tool = "pw-top";
+        name = "connect-refused";
+      }
+      {
+        tool = "pw-profiler";
+        name = "connect-refused";
+      }
+      {
+        tool = "pw-loopback";
+        name = "connect-refused";
+      }
+      {
+        tool = "pw-container";
+        name = "connect-refused";
+      }
+      {
+        tool = "pw-cli";
+        name = "pipewire-remote-bad";
+      }
+      {
+        tool = "pw-cli";
+        name = "cluster-hxx";
+      }
+      {
+        tool = "pw-cli";
+        name = "cluster-Vxx";
+      }
+      {
+        tool = "pw-link";
+        name = "cluster-hxx";
+      }
+      {
+        tool = "pw-link";
+        name = "cluster-Vxx";
+      }
+      {
+        tool = "pw-mon";
+        name = "cluster-hxx";
+      }
+      {
+        tool = "pw-mon";
+        name = "cluster-Vxx";
+      }
+      {
+        tool = "pw-dump";
+        name = "cluster-hxx";
+      }
+      {
+        tool = "pw-dump";
+        name = "cluster-Vxx";
+      }
+      {
+        tool = "pw-dot";
+        name = "cluster-hxx";
+      }
+      {
+        tool = "pw-dot";
+        name = "cluster-Vxx";
+      }
+      {
+        tool = "pw-metadata";
+        name = "cluster-hxx";
+      }
+      {
+        tool = "pw-metadata";
+        name = "cluster-Vxx";
+      }
+      {
+        tool = "pw-top";
+        name = "cluster-hxx";
+      }
+      {
+        tool = "pw-top";
+        name = "cluster-Vxx";
+      }
+      {
+        tool = "pw-profiler";
+        name = "cluster-hxx";
+      }
+      {
+        tool = "pw-profiler";
+        name = "cluster-Vxx";
+      }
+      {
+        tool = "pw-config";
+        name = "cluster-hxx";
+      }
+      {
+        tool = "pw-config";
+        name = "cluster-Vxx";
+      }
+      {
+        tool = "pw-mididump";
+        name = "cluster-hxx";
+      }
+      {
+        tool = "pw-mididump";
+        name = "cluster-Vxx";
+      }
+      {
+        tool = "pw-link";
+        name = "lone-dash";
+      }
+      {
+        tool = "pw-mon";
+        name = "lone-dash";
+      }
+      {
+        tool = "pw-link";
+        name = "d-then-i";
+      }
+      {
+        tool = "pw-link";
+        name = "i-then-d";
+      }
+      {
+        tool = "pw-link";
+        name = "I-without-list";
+      }
+      {
+        tool = "pw-config";
+        name = "list-empty-no-newline";
+      }
       {
         tool = "pw-cli";
         name = "cmd-connect-bad";
@@ -1903,6 +2680,34 @@
       {
         tool = "pw-config";
         name = "bad-flag";
+      }
+      {
+        tool = "spa-resample";
+        name = "bad-rate-zero";
+      }
+      {
+        tool = "spa-resample";
+        name = "bad-rate-negative";
+      }
+      {
+        tool = "spa-resample";
+        name = "rate-wraps-positive";
+      }
+      {
+        tool = "spa-resample";
+        name = "rate-trailing-junk";
+      }
+      {
+        tool = "spa-resample";
+        name = "quality-zero";
+      }
+      {
+        tool = "spa-resample";
+        name = "quality-empty";
+      }
+      {
+        tool = "spa-resample";
+        name = "quality-wraps-positive";
       }
     ];
 

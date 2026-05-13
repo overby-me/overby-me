@@ -10,7 +10,10 @@ use crate::pipewire_lib::interfaces;
 use crate::tools::common::{expand_short_clusters, print_version};
 
 pub fn main(raw_args: &[String]) -> i32 {
-    let argv0 = raw_args.first().map(String::as_str).unwrap_or("pw-metadata");
+    let argv0 = raw_args
+        .first()
+        .map(String::as_str)
+        .unwrap_or("pw-metadata");
     let args = expand_short_clusters(raw_args, &['h', 'V', 'l', 'm', 'd']);
 
     let mut list = false;
@@ -127,7 +130,10 @@ pub fn main(raw_args: &[String]) -> i32 {
             // pattern (no `Error:` wrapper), with errno mapped through
             // EHOSTDOWN.
             if e.contains("connect:") || e.starts_with("connect:") {
-                eprintln!("can't connect: {}", crate::tools::common::connect_failure_msg());
+                eprintln!(
+                    "can't connect: {}",
+                    crate::tools::common::connect_failure_msg()
+                );
             } else {
                 eprintln!("{argv0}: {e}");
             }
@@ -171,7 +177,9 @@ pub fn main(raw_args: &[String]) -> i32 {
 
 fn collect_globals(remote: Option<&str>, app_name: &str) -> Result<Vec<RegistryGlobal>, String> {
     // PIPEWIRE_REMOTE supplies the socket name when -r wasn't given.
-    let env_remote = std::env::var("PIPEWIRE_REMOTE").ok().filter(|s| !s.is_empty());
+    let env_remote = std::env::var("PIPEWIRE_REMOTE")
+        .ok()
+        .filter(|s| !s.is_empty());
     let chosen: Option<String> = remote.map(String::from).or(env_remote);
     let mut client = match chosen.as_deref() {
         Some(name) if name.starts_with('/') => Client::connect_path(std::path::Path::new(name)),

@@ -106,8 +106,8 @@ pub fn main(raw_args: &[String]) -> i32 {
             s if s.starts_with("-j") && s.len() > 2 => {
                 json_input = Some(s[2..].to_string());
             }
-            "-a" | "--all" | "-s" | "--smart" | "-d" | "--detail" | "-L"
-            | "--lr" | "-9" | "--90" => {}
+            "-a" | "--all" | "-s" | "--smart" | "-d" | "--detail" | "-L" | "--lr" | "-9"
+            | "--90" => {}
             s if s.starts_with("--") => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);
@@ -137,10 +137,10 @@ pub fn main(raw_args: &[String]) -> i32 {
 
     // If -o given, announce it before opening anything (C does this in
     // option parsing; with empty value the announce still fires).
-    if let Some(out_path) = output.as_deref() {
-        if out_path != "-" {
-            println!("set output file {out_path}");
-        }
+    if let Some(out_path) = output.as_deref()
+        && out_path != "-"
+    {
+        println!("set output file {out_path}");
     }
     if let Some(path) = json_input {
         // C tool prints `Using JSON file <path> as input` on stdout when
@@ -198,16 +198,20 @@ pub fn main(raw_args: &[String]) -> i32 {
         Ok(_) => {
             // Successful connect — try opening the output file (if -o
             // given with an unwritable path, this is where C errors).
-            if let Some(out_path) = output.as_deref() {
-                if out_path != "-" && std::fs::File::create(out_path).is_err() {
-                    eprintln!("open error: could not open {out_path} for writing");
-                    return 0;
-                }
+            if let Some(out_path) = output.as_deref()
+                && out_path != "-"
+                && std::fs::File::create(out_path).is_err()
+            {
+                eprintln!("open error: could not open {out_path} for writing");
+                return 0;
             }
             0
         }
         Err(_) => {
-            eprintln!("can't connect: {}", crate::tools::common::connect_failure_msg());
+            eprintln!(
+                "can't connect: {}",
+                crate::tools::common::connect_failure_msg()
+            );
             255
         }
     }

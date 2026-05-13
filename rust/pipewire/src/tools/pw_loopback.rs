@@ -61,8 +61,12 @@ pub fn main(args: &[String]) -> i32 {
                 return u8::MAX as i32;
             }
             // Bare required-arg flag: must consume a following value.
-            s if required_args.iter().any(|(short, long, _)| *short == s || *long == s) => {
-                let (_, long, ch) = required_args.iter()
+            s if required_args
+                .iter()
+                .any(|(short, long, _)| *short == s || *long == s) =>
+            {
+                let (_, long, ch) = required_args
+                    .iter()
                     .find(|(short, long, _)| *short == s || *long == s)
                     .copied()
                     .unwrap();
@@ -128,7 +132,9 @@ pub fn main(args: &[String]) -> i32 {
     // on failure. (The C tool also errors when the daemon is up but the
     // module path doesn't include libpipewire-module-loopback in our
     // sandbox, hence the consistent error in both cases.)
-    let env_remote = std::env::var("PIPEWIRE_REMOTE").ok().filter(|s| !s.is_empty());
+    let env_remote = std::env::var("PIPEWIRE_REMOTE")
+        .ok()
+        .filter(|s| !s.is_empty());
     let chosen: Option<String> = explicit_remote.or(env_remote);
     eprintln!(
         "can't load module: {}",

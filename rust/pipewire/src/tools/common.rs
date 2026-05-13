@@ -22,8 +22,16 @@ pub fn connect_failure_msg_for(remote: Option<&str>) -> String {
         .unwrap_or_else(|_| "/tmp".to_string());
     let core: String = remote
         .map(|s| s.to_string())
-        .or_else(|| std::env::var("PIPEWIRE_REMOTE").ok().filter(|s| !s.is_empty()))
-        .or_else(|| std::env::var("PIPEWIRE_CORE").ok().filter(|s| !s.is_empty()))
+        .or_else(|| {
+            std::env::var("PIPEWIRE_REMOTE")
+                .ok()
+                .filter(|s| !s.is_empty())
+        })
+        .or_else(|| {
+            std::env::var("PIPEWIRE_CORE")
+                .ok()
+                .filter(|s| !s.is_empty())
+        })
         .unwrap_or_else(|| "pipewire-0".to_string());
     let path = if core.starts_with('/') {
         std::path::PathBuf::from(&core)

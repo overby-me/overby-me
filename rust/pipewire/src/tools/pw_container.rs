@@ -113,7 +113,10 @@ pub fn main(args: &[String]) -> i32 {
     match connect {
         Ok(_) => 0,
         Err(_) => {
-            eprintln!("can't connect: {}", crate::tools::common::connect_failure_msg());
+            eprintln!(
+                "can't connect: {}",
+                crate::tools::common::connect_failure_msg()
+            );
             u8::MAX as i32
         }
     }

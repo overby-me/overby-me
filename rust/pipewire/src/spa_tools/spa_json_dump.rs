@@ -47,13 +47,9 @@ pub fn main(args: &[String]) -> i32 {
                     Some(a) => a,
                     None => {
                         if opt == "--indent" {
-                            eprintln!(
-                                "{argv0}: option '--indent' requires an argument"
-                            );
+                            eprintln!("{argv0}: option '--indent' requires an argument");
                         } else {
-                            eprintln!(
-                                "{argv0}: option requires an argument -- 'i'"
-                            );
+                            eprintln!("{argv0}: option requires an argument -- 'i'");
                         }
                         print_help_to(argv0, true);
                         return u8::MAX as i32;
@@ -169,7 +165,8 @@ pub fn main(args: &[String]) -> i32 {
     if let Ok(meta) = std::fs::metadata(&filename) {
         use std::os::unix::fs::FileTypeExt;
         let ft = meta.file_type();
-        let is_special = ft.is_char_device() || ft.is_block_device() || ft.is_fifo() || ft.is_socket();
+        let is_special =
+            ft.is_char_device() || ft.is_block_device() || ft.is_fifo() || ft.is_socket();
         if (meta.is_file() && meta.len() == 0) || is_special {
             eprintln!("error mmapping file '{filename}': Invalid argument");
             return 1;

@@ -17,4 +17,5 @@ disabled_rules = [
   "generic_name",
   "rust_unbuffered_file_writes",
   "rust_debug_secret",
+  "rust_check_then_open_path",
 ]

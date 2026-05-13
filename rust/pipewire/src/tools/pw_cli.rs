@@ -145,9 +145,8 @@ pub fn main(raw_args: &[String]) -> i32 {
     // Any user-directed connection setting forces a hard exit on
     // connect failure (255 instead of 0). C treats PIPEWIRE_RUNTIME_DIR
     // the same way since it changes the resolved socket path.
-    let force_connect = remote.is_some()
-        || env_remote.is_some()
-        || std::env::var("PIPEWIRE_RUNTIME_DIR").is_ok();
+    let force_connect =
+        remote.is_some() || env_remote.is_some() || std::env::var("PIPEWIRE_RUNTIME_DIR").is_ok();
     let connect_remote = remote.clone().or(env_remote);
     if positional.is_empty() {
         // Bare `pw-cli` (no command, no flags): C attempts to connect to
@@ -179,7 +178,6 @@ pub fn main(raw_args: &[String]) -> i32 {
 }
 
 fn run_positional(argv0: &str, remote: Option<String>, positional: Vec<&str>) -> i32 {
-
     // The C tool joins every positional arg with spaces into a single
     // buffer, then splits on whitespace. So `pw-cli "ls Core"` and
     // `pw-cli ls Core` both parse to command="ls", rest=["Core"].
@@ -280,7 +278,7 @@ fn run_positional(argv0: &str, remote: Option<String>, positional: Vec<&str>) ->
                 }
             }
         }
-        "create-device" | "cd" if rest.is_empty() => {
+        "create-device" | "cd" | "create-node" | "cn" if rest.is_empty() => {
             eprintln!("Error: \"{cmd} <factory-name> [<properties>]\"");
             1
         }
@@ -297,10 +295,6 @@ fn run_positional(argv0: &str, remote: Option<String>, positional: Vec<&str>) ->
                     1
                 }
             }
-        }
-        "create-node" | "cn" if rest.is_empty() => {
-            eprintln!("Error: \"{cmd} <factory-name> [<properties>]\"");
-            1
         }
         "destroy" | "d" if rest.is_empty() => {
             eprintln!("Error: \"{cmd} <object-id>\"");
@@ -343,9 +337,8 @@ fn run_positional(argv0: &str, remote: Option<String>, positional: Vec<&str>) ->
         }
         // Recognized commands with sufficient args. C tries to connect to
         // the daemon and execute. Without daemon → connect-fail.
-        "enum-params" | "e" | "set-param" | "s" | "permissions" | "sp"
-        | "send-command" | "c" | "get-permissions" | "gp" | "create-link" | "cl"
-        | "export-node" | "en" => {
+        "enum-params" | "e" | "set-param" | "s" | "permissions" | "sp" | "send-command" | "c"
+        | "get-permissions" | "gp" | "create-link" | "cl" | "export-node" | "en" => {
             match open_client(remote.as_deref(), "pw-cli") {
                 Ok(_) => 0,
                 Err(e) => {

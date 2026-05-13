@@ -13,16 +13,16 @@ pub fn main(raw_args: &[String]) -> i32 {
     // Expand short clusters like `-hV`, `-iol`, `-ioI` etc.
     let args = expand_short_clusters(
         raw_args,
-        &['h', 'V', 'd', 'i', 'o', 'l', 'm', 'I', 'v', 'L', 'P', 'w', 't', 'N'],
+        &[
+            'h', 'V', 'd', 'i', 'o', 'l', 'm', 'I', 'v', 'L', 'P', 'w', 't', 'N',
+        ],
     );
 
     let mut list_inputs = false;
     let mut list_outputs = false;
     let mut list_links = false;
-    let mut list_latency = false;
     let mut show_id = false;
     let mut verbose = false;
-    let mut disconnect = false;
     // Mirror C's opt_mode: last MODE_LIST / MODE_DISCONNECT flag wins.
     // Each list-flag (`-i`/`-o`/`-l`/`-t`) sets MODE_LIST and OR-s into
     // opt_list. `-d` sets MODE_DISCONNECT but does NOT clear opt_list.
@@ -121,20 +121,18 @@ pub fn main(raw_args: &[String]) -> i32 {
                 remote = Some(s[2..].to_string());
             }
             "-d" | "--disconnect" => {
-                disconnect = true;
                 mode = Mode::Disconnect;
             }
             // Per pw-link.c optstring "hVr:oilmIvLPp:wdt", `t` takes
             // NO argument — it just sets MODE_LIST + LIST_LATENCY (which
             // by itself produces no output without -i/-o/-l).
             "-t" | "--latency" => {
-                list_latency = true;
                 mode = Mode::List;
             }
             // pw-link's long_options don't include --no-colors, so the
             // long form is unrecognized — only -N short works.
-            "-m" | "--monitor" | "-L" | "--linger"
-            | "-P" | "--passive" | "-w" | "--wait" | "-N" => {}
+            "-m" | "--monitor" | "-L" | "--linger" | "-P" | "--passive" | "-w" | "--wait"
+            | "-N" => {}
             opt @ ("-p" | "--props") => {
                 // -p / --props requires an argument.
                 if i + 1 >= args.len() {
@@ -244,7 +242,10 @@ pub fn main(raw_args: &[String]) -> i32 {
             None => crate::pipewire_lib::client::Client::connect_default(),
         };
         if connect.is_err() {
-            eprintln!("can't connect: {}", crate::tools::common::connect_failure_msg());
+            eprintln!(
+                "can't connect: {}",
+                crate::tools::common::connect_failure_msg()
+            );
             return 255;
         }
         // Connect succeeded. Mode determines what comes next:
@@ -276,7 +277,10 @@ pub fn main(raw_args: &[String]) -> i32 {
             Ok(g) => g,
             Err(e) => {
                 if e.contains("connect:") || e.starts_with("connect:") {
-                    eprintln!("can't connect: {}", crate::tools::common::connect_failure_msg());
+                    eprintln!(
+                        "can't connect: {}",
+                        crate::tools::common::connect_failure_msg()
+                    );
                 } else {
                     eprintln!("{argv0}: {e}");
                 }

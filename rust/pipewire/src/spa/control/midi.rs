@@ -325,7 +325,10 @@ fn read_event(t: &mut Track) -> Result<DecodedEvent, ParseError> {
         // of truncated EOT — `FF 2F` at end-of-buffer (no length byte) is
         // accepted as End-of-Track with empty payload.
         if t.pos >= t.body.len() {
-            return Ok(DecodedEvent::Meta { meta_type, payload: Vec::new() });
+            return Ok(DecodedEvent::Meta {
+                meta_type,
+                payload: Vec::new(),
+            });
         }
         let len = read_varlen(t)? as usize;
         if t.pos + len > t.body.len() {

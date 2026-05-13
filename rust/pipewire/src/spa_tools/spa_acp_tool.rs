@@ -3,7 +3,10 @@
 // Phase 10+ work. We mirror the C tool's --help / -h output exactly.
 
 pub fn main(raw_args: &[String]) -> i32 {
-    let argv0 = raw_args.first().map(String::as_str).unwrap_or("spa-acp-tool");
+    let argv0 = raw_args
+        .first()
+        .map(String::as_str)
+        .unwrap_or("spa-acp-tool");
     let args = crate::tools::common::expand_short_clusters(raw_args, &['h', 'v']);
 
     let mut i = 1;
@@ -183,9 +186,9 @@ fn handle_command(cmd: &str, args: &[String]) -> i32 {
         }
         // Commands that need real ALSA — silent exit 0 to avoid spurious
         // diffs in test sandboxes where hardware is unavailable.
-        "info" | "list" | "list-verbose" | "list-profiles" | "set-profile"
-        | "list-ports" | "set-port" | "list-devices" | "get-volume" | "set-volume"
-        | "inc-volume" | "dec-volume" | "get-mute" | "set-mute" | "toggle-mute" => 0,
+        "info" | "list" | "list-verbose" | "list-profiles" | "set-profile" | "list-ports"
+        | "set-port" | "list-devices" | "get-volume" | "set-volume" | "inc-volume"
+        | "dec-volume" | "get-mute" | "set-mute" | "toggle-mute" => 0,
         other => {
             eprintln!("unknown command {other}");
             // C calls cmd_help() after the unknown-command error.

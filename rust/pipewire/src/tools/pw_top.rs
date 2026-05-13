@@ -89,7 +89,9 @@ pub fn main(raw_args: &[String]) -> i32 {
     // C connects to the daemon to start the curses UI. Try connecting;
     // emit C's "Can't connect" error if it fails (capital C, matches
     // pw-top.c's show_error).
-    let env_remote = std::env::var("PIPEWIRE_REMOTE").ok().filter(|s| !s.is_empty());
+    let env_remote = std::env::var("PIPEWIRE_REMOTE")
+        .ok()
+        .filter(|s| !s.is_empty());
     let connect = if let Some(name) = &env_remote {
         let runtime = std::env::var("PIPEWIRE_RUNTIME_DIR")
             .or_else(|_| std::env::var("XDG_RUNTIME_DIR"))

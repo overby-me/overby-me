@@ -5,7 +5,10 @@
 use crate::tools::common::expand_short_clusters;
 
 pub fn main(raw_args: &[String]) -> i32 {
-    let argv0 = raw_args.first().map(String::as_str).unwrap_or("spa-resample");
+    let argv0 = raw_args
+        .first()
+        .map(String::as_str)
+        .unwrap_or("spa-resample");
     // OPTIONS = "hvc:r:f:w:q:u:t:p:": h, v are no-arg; rest take values.
     let args = expand_short_clusters(raw_args, &['h', 'v']);
 
@@ -105,8 +108,10 @@ pub fn main(raw_args: &[String]) -> i32 {
                 }
                 i += 1;
             }
-            s if (s.starts_with("-c") || s.starts_with("-w")
-                || s.starts_with("-u") || s.starts_with("-t")
+            s if (s.starts_with("-c")
+                || s.starts_with("-w")
+                || s.starts_with("-u")
+                || s.starts_with("-t")
                 || s.starts_with("-p"))
                 && s.len() > 2 =>
             {
@@ -122,9 +127,14 @@ pub fn main(raw_args: &[String]) -> i32 {
                         eprintln!("{argv0}: option '{opt}' requires an argument");
                     } else {
                         let ch = match opt {
-                            "-c" => 'c', "-r" => 'r', "-f" => 'f',
-                            "-w" => 'w', "-q" => 'q', "-u" => 'u',
-                            "-t" => 't', "-p" => 'p',
+                            "-c" => 'c',
+                            "-r" => 'r',
+                            "-f" => 'f',
+                            "-w" => 'w',
+                            "-q" => 'q',
+                            "-u" => 'u',
+                            "-t" => 't',
+                            "-p" => 'p',
                             _ => '?',
                         };
                         eprintln!("{argv0}: option requires an argument -- '{ch}'");
@@ -205,9 +215,7 @@ pub fn main(raw_args: &[String]) -> i32 {
     // "Format not recognised" once the file is successfully opened.
     let infile = positionals.first().map(String::as_str).unwrap_or("");
     if infile == "-" {
-        eprintln!(
-            "error: failed to open input file \"{infile}\": Format not recognised."
-        );
+        eprintln!("error: failed to open input file \"{infile}\": Format not recognised.");
     } else if !std::path::Path::new(infile).exists() {
         eprintln!(
             "error: failed to open input file \"{infile}\": System error : No such file or directory."
@@ -217,45 +225,50 @@ pub fn main(raw_args: &[String]) -> i32 {
             "error: failed to open input file \"{infile}\": System error : Permission denied."
         );
     } else {
-        eprintln!(
-            "error: failed to open input file \"{infile}\": Format not recognised."
-        );
+        eprintln!("error: failed to open input file \"{infile}\": Format not recognised.");
     }
     1
 }
 
-// Returns `Some(orig)` to signal "bad rate <orig>" — only when the
-// value cannot be parsed as a full i32 (C uses spa_atoi32 which both
-// requires the entire string to be consumed AND rejects values outside
-// the i32 range).
-fn bad_rate(v: &str) -> Option<&str> {
-    if v.parse::<i32>().is_ok() {
-        None
-    } else {
-        Some(v)
+// Mirror libc's atoi: skip leading whitespace, optional sign, consume
+// leading decimal digits, wrap in i32 (so "999999999999" → a wrapped
+// negative). Non-numeric input yields 0.
+fn atoi_i32(s: &str) -> i32 {
+    let mut chars = s.trim_start().chars().peekable();
+    let neg = match chars.peek() {
+        Some('-') => {
+            chars.next();
+            true
+        }
+        Some('+') => {
+            chars.next();
+            false
+        }
+        _ => false,
+    };
+    let mut n: i32 = 0;
+    for c in chars {
+        if let Some(d) = c.to_digit(10) {
+            n = n.wrapping_mul(10).wrapping_add(d as i32);
+        } else {
+            break;
+        }
     }
+    if neg { n.wrapping_neg() } else { n }
+}
+
+// C: `ret = atoi(optarg); if (ret <= 0) { error "bad rate <orig>" }`.
+fn bad_rate(v: &str) -> Option<&str> {
+    if atoi_i32(v) <= 0 { Some(v) } else { None }
 }
 
 fn is_valid_format(v: &str) -> bool {
     matches!(v, "s8" | "s16" | "s32" | "f32" | "f64")
 }
 
-// `bad quality` triggers when the value parses as a full i32 but is
-// negative, OR when the value is outside the i32 range (spa_atoi32
-// rejects overflow). Non-numeric values pass through (C's atoi gives 0).
+// C: `ret = atoi(optarg); if (ret < 0) { error "bad quality <orig>" }`.
 fn bad_quality(v: &str) -> Option<&str> {
-    match v.parse::<i32>() {
-        Ok(n) if n < 0 => Some(v),
-        Ok(_) => None,
-        Err(_) => {
-            // Could be overflow (all digits, out of range) or non-numeric.
-            if v.trim_start_matches('-').chars().all(|c| c.is_ascii_digit()) {
-                Some(v)
-            } else {
-                None
-            }
-        }
-    }
+    if atoi_i32(v) < 0 { Some(v) } else { None }
 }
 
 fn print_help(argv0: &str) {
