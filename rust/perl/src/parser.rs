@@ -1538,7 +1538,15 @@ impl Parser {
                         | Token::ArrayVar(_)
                         | Token::HashVar(_)
                 );
-                if self.at(&Token::FatComma) {
+                // `print BAREWORD ... REST` — `...` between barewords is
+                // the range operator, not a filehandle terminator. Treat
+                // BAREWORD as part of the print list. op/yadayada test 33.
+                let next_is_range_op =
+                    self.at(&Token::DotDot) || matches!(self.tok(), Token::Ident(n) if n == "...");
+                if next_is_range_op {
+                    self.pos = saved;
+                    None
+                } else if self.at(&Token::FatComma) {
                     // `print FOO => …` — not a filehandle call, `FOO` is a
                     // bareword hash key.
                     self.pos = saved;
@@ -5972,6 +5980,13 @@ fn token_display(t: &Token) -> String {
         Token::NumNe => "!=".to_string(),
         Token::NumLe => "<=".to_string(),
         Token::NumGe => ">=".to_string(),
+        Token::Ident(s) => s.clone(),
+        Token::ScalarVar(s) => format!("${s}"),
+        Token::ArrayVar(s) => format!("@{s}"),
+        Token::HashVar(s) => format!("%{s}"),
+        Token::StringLit(s) => format!("\"{s}\""),
+        Token::Integer(n) => n.to_string(),
+        Token::Float(n) => n.to_string(),
         _ => format!("{t:?}"),
     }
 }
