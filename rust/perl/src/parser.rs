@@ -5634,6 +5634,8 @@ fn parse_interp_string(s: &str) -> Expr {
                         }
                         // `$h{$k}` — key is a scalar variable reference.
                         // `$h{foo}` — auto-quoted bareword key (Perl semantics).
+                        // `$h{\1}` / `$h{anything-non-bareword}` — parse the
+                        // key as a Perl expression (op/hashwarn test 20).
                         let key_expr = if let Some(varname) = key_str.strip_prefix('$') {
                             Expr::ScalarVar(varname.to_string())
                         } else {

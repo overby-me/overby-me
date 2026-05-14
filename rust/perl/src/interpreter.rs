@@ -6367,8 +6367,26 @@ impl Interpreter {
                             }
                         }
                         InterpPart::HashElement(name, key) => {
-                            let key_str = self.eval_expr(key).to_str();
-                            result.push_str(&self.get_hash_element(name, &key_str).to_str());
+                            let key_val = self.eval_expr(key);
+                            let key_str = self.stringify_value(&key_val);
+                            let v = self.get_hash_element(name, &key_str);
+                            // `use warnings qw(uninitialized)` — emit a
+                            // diagnostic when an undef hash element is
+                            // interpolated. op/hashwarn test 19-20.
+                            let warnings_on =
+                                self.warnings_on || self.get_var("^W").to_num() != 0.0;
+                            if warnings_on && matches!(v, Value::Undef) {
+                                let file = if self.current_file.is_empty() {
+                                    "-e".to_string()
+                                } else {
+                                    self.current_file.clone()
+                                };
+                                let line = self.current_line;
+                                self.emit_warning(&format!(
+                                    "Use of uninitialized value ${name}{{\"{key_str}\"}} in string at {file} line {line}.\n"
+                                ));
+                            }
+                            result.push_str(&v.to_str());
                         }
                         InterpPart::Expr(expr) => {
                             // Array-like expressions (e.g. `@$ref`,
