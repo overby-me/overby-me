@@ -111,6 +111,20 @@ impl Parser {
             if self.eat(&Token::Semi) || self.eat(&Token::Newline) {
                 continue;
             }
+            // Unmatched right brace at top level — reference perl
+            // emits "Unmatched right curly bracket at FILE line N, at
+            // end of line\nsyntax error at FILE line N, near "…}"" for
+            // `eval '5; }'` etc. Record once, then keep scanning so a
+            // subsequent eval-string check (or compile-time-use-check)
+            // can still report the surrounding context.
+            if self.at(&Token::RBrace) && self.error.is_none() {
+                let line = self.current_line();
+                self.error = Some(format!(
+                    "Unmatched right curly bracket at {{FILE}} line {line}, at end of line\nsyntax error at {{FILE}} line {line}, near \"}}\"\nExecution of {{FILE}} aborted due to compilation errors.\n"
+                ));
+                self.pos += 1;
+                continue;
+            }
             let line = self.current_line();
             if line != 0 && line != last_line {
                 while let Some((idx, _)) = self.file_overrides.front() {

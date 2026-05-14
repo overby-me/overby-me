@@ -4102,7 +4102,11 @@ fn process_escapes(s: &str) -> String {
                             hex.push(chars[i]);
                             i += 1;
                         }
-                        // skip }
+                        // Skip the closing `}` so the literal char isn't
+                        // emitted into the resulting string.
+                        if i < chars.len() && chars[i] == '}' {
+                            i += 1;
+                        }
                     } else {
                         for _ in 0..2 {
                             if i < chars.len() && chars[i].is_ascii_hexdigit() {
