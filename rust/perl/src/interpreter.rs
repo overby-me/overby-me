@@ -199,6 +199,10 @@ pub struct Interpreter {
     /// Mutating builtins (push/unshift/splice/shift/pop) raise a die when
     /// the target is in this set.
     readonly_arrays: std::collections::HashSet<String>,
+    /// Scalar names flagged read-only via `Internals::SvREADONLY($x, 1)`.
+    /// Lvalue subs returning these dies with "Can't return a readonly
+    /// value from lvalue subroutine" on assignment. op/sub_lval 49/50.
+    readonly_scalars: std::collections::HashSet<String>,
     /// **Live-aliased** global arrays — names for which `\@name` has been
     /// taken at some point. These arrays are backed by an `Rc<RefCell<Vec>>`
     /// so the ref and the `@name` slot share one underlying storage.
@@ -592,6 +596,7 @@ impl Interpreter {
             string_write_handles: HashMap::new(),
             last_read_fh: None,
             readonly_arrays: std::collections::HashSet::new(),
+            readonly_scalars: std::collections::HashSet::new(),
             aliased_arrays: HashMap::new(),
             aliased_hashes: HashMap::new(),
             aliased_vars: HashMap::new(),
@@ -9441,7 +9446,10 @@ impl Interpreter {
             "Internals::SvREADONLY" => {
                 // Only the `Internals::SvREADONLY(@array, 1)` pattern tests
                 // care about; detect it and record the array name so the
-                // mutating builtins can croak.
+                // mutating builtins can croak. Scalar form is also accepted
+                // (op/sub_lval test 49/50) — record the scalar so an lvalue
+                // sub that returns it triggers "Can't return a readonly
+                // value from lvalue subroutine" on assignment.
                 if let Some(Expr::ArrayVar(name)) = args.first() {
                     let on = args
                         .get(1)
@@ -9451,6 +9459,16 @@ impl Interpreter {
                         self.readonly_arrays.insert(name.clone());
                     } else {
                         self.readonly_arrays.remove(name);
+                    }
+                } else if let Some(Expr::ScalarVar(name) | Expr::MyVar(name)) = args.first() {
+                    let on = args
+                        .get(1)
+                        .map(|a| self.eval_expr(a).to_bool())
+                        .unwrap_or(true);
+                    if on {
+                        self.readonly_scalars.insert(name.clone());
+                    } else {
+                        self.readonly_scalars.remove(name);
                     }
                 }
                 Value::Num(1.0)
@@ -13861,6 +13879,27 @@ impl Interpreter {
                         }
                         self.pending_flow = Some(Flow::Die(format!(
                             "Can't return a temporary from lvalue subroutine at {file} line {line}.\n"
+                        )));
+                        self.current_sub_stack.pop();
+                        self.set_array("_", saved_underscore);
+                        self.current_line = saved_line;
+                        return;
+                    }
+                    // Detect readonly scalar return: `sub : lvalue {
+                    // Internals::SvREADONLY $x, 1; $x }`. The body's last
+                    // expression names a scalar in `readonly_scalars`.
+                    // op/sub_lval 49/50.
+                    if let Expr::ScalarVar(call_var_name) = lvalue_expr
+                        && self.readonly_scalars.contains(call_var_name)
+                    {
+                        let file = if self.current_file.is_empty() {
+                            "-e".to_string()
+                        } else {
+                            self.current_file.clone()
+                        };
+                        let line = self.current_line;
+                        self.pending_flow = Some(Flow::Die(format!(
+                            "Can't return a readonly value from lvalue subroutine at {file} line {line}.\n"
                         )));
                         self.current_sub_stack.pop();
                         self.set_array("_", saved_underscore);
