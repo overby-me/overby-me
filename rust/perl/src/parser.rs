@@ -1472,7 +1472,6 @@ impl Parser {
             while self.eat(&Token::Colon) {
                 if let Token::Ident(_) = self.tok() {
                     self.pos += 1;
-                    // Optional `(args)` after attribute name.
                     if self.eat(&Token::LParen) {
                         let mut depth = 1;
                         while depth > 0 {
@@ -1599,7 +1598,56 @@ impl Parser {
                         self.pos = saved;
                         None
                     }
-                } else if is_fh_name || next_starts_expr {
+                } else if is_fh_name {
+                    // Uppercase bareword followed by an expression — FH.
+                    Some(Expr::StringLit(fh_name))
+                } else if next_starts_expr
+                    && !matches!(
+                        fh_name.as_str(),
+                        // Lowercase barewords that are list-ops / named-unaries
+                        // shouldn't be treated as filehandles (`print scalar
+                        // @x, ...`, `print sort @x`, etc.).
+                        "scalar"
+                            | "sort"
+                            | "reverse"
+                            | "map"
+                            | "grep"
+                            | "join"
+                            | "split"
+                            | "keys"
+                            | "values"
+                            | "each"
+                            | "length"
+                            | "ref"
+                            | "defined"
+                            | "exists"
+                            | "delete"
+                            | "chr"
+                            | "ord"
+                            | "int"
+                            | "abs"
+                            | "sqrt"
+                            | "sprintf"
+                            | "uc"
+                            | "lc"
+                            | "ucfirst"
+                            | "lcfirst"
+                            | "hex"
+                            | "oct"
+                            | "chop"
+                            | "chomp"
+                            | "wantarray"
+                            | "caller"
+                            | "die"
+                            | "warn"
+                            | "pop"
+                            | "shift"
+                            | "push"
+                            | "unshift"
+                            | "splice"
+                    )
+                    && !self.known_subs.contains(&fh_name)
+                {
                     Some(Expr::StringLit(fh_name))
                 } else {
                     self.pos = saved;
@@ -4339,8 +4387,9 @@ impl Parser {
                     //   * Uppercase class-shaped bareword: `method Class …`
                     //   * Scalar variable:                 `method $obj …`
                     // Both then accept args with or without parens.
-                    // Known subs (`tryeq $T++, …`) are NOT eligible —
-                    // they're regular function calls.
+                    // Known subs are eligible only when the scalar receiver
+                    // is followed by `(` (method call args). Otherwise (e.g.
+                    // `tryeq $T++, …`) we treat it as a function call.
                     // op/method indirect-syntax tests 2-22, 25-26.
                     let recv: Option<Expr> = match self.tok().clone() {
                         // Capitalised bareword receiver: ALWAYS indirect
@@ -4355,12 +4404,32 @@ impl Parser {
                             self.pos += 1;
                             Some(Expr::StringLit(class))
                         }
-                        // Scalar receiver: only if `name` is NOT a known
-                        // sub. Otherwise `tryeq $T++, …` would be parsed
-                        // as `$T->tryeq(…)` instead of a function call.
-                        Token::ScalarVar(v) if !is_known_sub => {
-                            self.pos += 1;
-                            Some(Expr::ScalarVar(v))
+                        // Scalar receiver: when name is NOT a known sub,
+                        // always indirect. When name IS a known sub, only
+                        // indirect if the scalar is immediately followed
+                        // by `(`, `,`, `;`, or close-paren/brace/bracket —
+                        // i.e., the scalar isn't followed by a postfix
+                        // op like `++` that would suggest a function-call
+                        // arg list.
+                        Token::ScalarVar(v) => {
+                            let after_scalar = self.peek(1);
+                            let is_call_followed = matches!(
+                                after_scalar,
+                                Token::LParen
+                                    | Token::Comma
+                                    | Token::FatComma
+                                    | Token::Semi
+                                    | Token::EOF
+                                    | Token::RParen
+                                    | Token::RBrace
+                                    | Token::RBracket
+                            );
+                            if !is_known_sub || is_call_followed {
+                                self.pos += 1;
+                                Some(Expr::ScalarVar(v))
+                            } else {
+                                None
+                            }
                         }
                         _ => None,
                     };
