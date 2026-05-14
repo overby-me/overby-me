@@ -4540,6 +4540,9 @@ impl Parser {
                 if name == "__FILE__" || name == "__LINE__" || name == "__PACKAGE__" {
                     return Expr::Call(name, Vec::new());
                 }
+                if name == "__SUB__" || name == "CORE::__SUB__" {
+                    return Expr::Call(name, Vec::new());
+                }
                 // Perl nullary builtins. Recognise them before the
                 // "function call without parens" branch so `time - $t`
                 // parses as `time() - $t` rather than `time(-$t)`.

@@ -7064,6 +7064,17 @@ impl Interpreter {
             "__FILE__" => return Value::Str(self.current_file.clone()),
             "__LINE__" => return Value::Num(self.current_line as f64),
             "__PACKAGE__" => return Value::Str(self.package.clone()),
+            "__SUB__" | "CORE::__SUB__" => {
+                // Reference perl returns a CV ref to the currently
+                // executing sub (named or anon). Outside any sub
+                // returns undef. We surface the top of current_sub_stack
+                // as a `Value::CodeRef` keyed by the sub's qualified
+                // name — that's what call_sub_named pushes.
+                if let Some(n) = self.current_sub_stack.last() {
+                    return Value::CodeRef(n.clone());
+                }
+                return Value::Undef;
+            }
             _ => {}
         }
         // `use builtin qw(ceil floor …)` is a LEXICAL pragma — its
