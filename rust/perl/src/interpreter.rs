@@ -3306,6 +3306,20 @@ impl Interpreter {
                 } else {
                     self.eval_expr(expr).to_str()
                 };
+                // `require Config` mirrors `use Config`: bundle is
+                // assumed when @INC hasn't been narrowed by user code.
+                // Tests like re/uniprops01 do `require Config;
+                // $Config::Config{ccflags}` and don't actually care
+                // that we don't populate %Config — the trailing
+                // hash-deref returns undef and the surrounding `if`
+                // falls through, exactly matching reference perl's
+                // path when Config is compiled-in but the test's
+                // particular config keys are absent.
+                if filename == "Config.pm" && !self.inc_user_modified {
+                    self.required_files.insert(filename.clone());
+                    self.set_hash_element("INC", &filename, Value::Str(filename.clone()));
+                    return Flow::None;
+                }
                 let inc = self.get_array("INC");
                 let mut found = false;
                 for dir in &inc {
