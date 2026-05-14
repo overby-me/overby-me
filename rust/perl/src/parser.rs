@@ -2667,16 +2667,22 @@ impl Parser {
             }
             Token::State => {
                 // `state $y = EXPR` in expression position — emit a
-                // DoBlock that runs Stmt::State and then yields the var.
-                // Used by `ref(state $y = "a $o b")` (opbasic/concat test 34).
+                // special _state_expr call so the interpreter can install
+                // the state binding in the CURRENT (sub) scope rather than
+                // a DoBlock-pushed child scope. Without this, the alias to
+                // the persistent Rc is lost when the DoBlock scope pops,
+                // so subsequent reads see undef. op/state test 48
+                // (`my $x = state $y = 42`); opbasic/concat test 34
+                // (`ref(state $y = "a $o b")`).
                 self.pos += 1;
                 if let Token::ScalarVar(name) = self.tok() {
                     let n = name.clone();
                     self.pos += 1;
-                    Expr::DoBlock(vec![
-                        Stmt::State(vec![(format!("${n}"), None)], false),
-                        Stmt::Expr(Expr::ScalarVar(n)),
-                    ])
+                    let mut args = vec![Expr::StringLit(format!("${n}"))];
+                    if self.eat(&Token::Assign) {
+                        args.push(self.parse_assign());
+                    }
+                    Expr::Call("_state_expr".to_string(), args)
                 } else if let Token::ArrayVar(name) = self.tok() {
                     let n = name.clone();
                     self.pos += 1;

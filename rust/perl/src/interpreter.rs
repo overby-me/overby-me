@@ -7859,6 +7859,47 @@ impl Interpreter {
                 self.set_global_var("@", Value::Str(msg));
                 return Value::Undef;
             }
+            "_state_expr" => {
+                // `state $y = INIT` in expression position. First arg is
+                // the literal "$NAME"; optional second arg is the init
+                // expression (run once per sub-key). Installs the alias
+                // in the CURRENT scope (the sub's scope) so subsequent
+                // reads through the same variable name see the persistent
+                // value. op/state test 48; opbasic/concat test 34.
+                let raw_name = if args.is_empty() {
+                    return Value::Undef;
+                } else {
+                    self.eval_expr(&args[0]).to_str()
+                };
+                let init = args.get(1);
+                let var_name = raw_name
+                    .trim_start_matches('$')
+                    .trim_start_matches('@')
+                    .trim_start_matches('%');
+                let sub_key = self
+                    .current_sub_stack
+                    .last()
+                    .cloned()
+                    .unwrap_or_else(|| String::from("(main)"));
+                let key = (sub_key, var_name.to_string());
+                let rc = self
+                    .state_vars
+                    .entry(key.clone())
+                    .or_insert_with(|| std::rc::Rc::new(std::cell::RefCell::new(Value::Undef)))
+                    .clone();
+                if !self.state_initialized.contains(&key) {
+                    self.state_initialized.insert(key.clone());
+                    if let Some(init_expr) = init {
+                        let v = self.eval_expr(init_expr);
+                        *rc.borrow_mut() = v;
+                    }
+                }
+                let v = rc.borrow().clone();
+                if let Some(scope) = self.scopes.last_mut() {
+                    scope.vars.insert(var_name.to_string(), Value::Alias(rc));
+                }
+                return v;
+            }
             "exit" => {
                 // `exit N` — terminate the program with status N (default 0).
                 let code = if args.is_empty() {
@@ -13327,6 +13368,24 @@ impl Interpreter {
             }
             let last_clone = last.clone();
             return self.assign_to(&last_clone, val);
+        }
+        // `_state_expr` lvalue: parser emits `state $y` in expr position
+        // as `Call("_state_expr", ["$y", init?])`. To make `++state $y`
+        // and `state $y = X` work, run the call (which installs the
+        // alias in current scope) then assign to the underlying var.
+        // op/state test 19+ (closure generator).
+        if let Expr::Call(n, sub_args) = target
+            && n == "_state_expr"
+            && !sub_args.is_empty()
+        {
+            self.eval_call("_state_expr", sub_args);
+            let raw_name = self.eval_expr(&sub_args[0]).to_str();
+            let var_name = raw_name
+                .trim_start_matches('$')
+                .trim_start_matches('@')
+                .trim_start_matches('%')
+                .to_string();
+            return self.assign_to(&Expr::ScalarVar(var_name), val);
         }
         // `name() = val` for lvalue subs — find the body's last
         // expression (a simple ScalarVar / ArrayElement / HashElement)
