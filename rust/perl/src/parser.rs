@@ -1454,6 +1454,38 @@ impl Parser {
                 _ => return (vars, list_ctx),
             };
 
+            // Skip variable attributes (`:NAME`, `:NAME(arg)` etc.) — we
+            // don't model attribute behavior, but ignoring them lets the
+            // following `= INIT` (and the `;` terminator) parse correctly.
+            // E.g. `state $b :shared = 3` (op/state.t line 179) treats
+            // `:shared` as a no-op attribute. Multiple `:NAME` attrs in a
+            // row are also accepted.
+            while self.eat(&Token::Colon) {
+                if let Token::Ident(_) = self.tok() {
+                    self.pos += 1;
+                    // Optional `(args)` after attribute name.
+                    if self.eat(&Token::LParen) {
+                        let mut depth = 1;
+                        while depth > 0 {
+                            match self.tok() {
+                                Token::LParen => {
+                                    depth += 1;
+                                    self.pos += 1;
+                                }
+                                Token::RParen => {
+                                    depth -= 1;
+                                    self.pos += 1;
+                                }
+                                Token::EOF => break,
+                                _ => self.pos += 1,
+                            }
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+
             let init = if self.eat(&Token::Assign) {
                 Some(self.parse_expr())
             } else {

@@ -3801,15 +3801,23 @@ impl Interpreter {
                 // Tied scalars: route reads through `class::FETCH(obj)`.
                 // Guard with `in_tie_handler` so a FETCH that itself
                 // reads the same tied scalar doesn't recurse forever.
+                // BUT: if any current lexical scope has the name (e.g. a
+                // `state $y` alias or `my $y` shadow), use that — the
+                // outer tied binding shouldn't override a shadowing
+                // lexical. op/state foreach/for/until tests after the
+                // countfetches `tie my $y` block.
                 if self.in_tie_handler == 0
                     && let Some((class, obj)) = self.tied_scalars.get(name).cloned()
                 {
-                    let key = format!("{class}::FETCH");
-                    if let Some((_p, body)) = self.subs.get(&key).cloned() {
-                        self.in_tie_handler += 1;
-                        let v = self.call_sub_named(&body, &[obj], Some(&key));
-                        self.in_tie_handler -= 1;
-                        return v;
+                    let shadowed = self.scopes.iter().any(|s| s.vars.contains_key(name));
+                    if !shadowed {
+                        let key = format!("{class}::FETCH");
+                        if let Some((_p, body)) = self.subs.get(&key).cloned() {
+                            self.in_tie_handler += 1;
+                            let v = self.call_sub_named(&body, &[obj], Some(&key));
+                            self.in_tie_handler -= 1;
+                            return v;
+                        }
                     }
                 }
                 self.get_var(name)
