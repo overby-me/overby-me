@@ -357,6 +357,12 @@ pub struct Interpreter {
     /// for/until tests after the `tie my $y` countfetches block.
     #[allow(clippy::type_complexity)]
     tied_scalar_saves: Vec<Vec<(String, Option<(String, Value)>)>>,
+    /// Names of subs that appeared as `sub NAME { … }` inside an
+    /// `eval STRING` that failed at parse time. Subsequent calls to
+    /// those names die "Undefined subroutine &PKG::NAME". op/state
+    /// tests 41+ where `state $b :shared = 3` syntax-errors the eval
+    /// and the surrounding `stateful_attr` sub never registers.
+    failed_eval_subs: std::collections::HashSet<String>,
     /// `use warnings FATAL => 'all'` makes runtime warnings (like
     /// "Useless assignment to a temporary") die rather than print to
     /// STDERR. op/sub_lval test 43.
@@ -627,6 +633,7 @@ impl Interpreter {
             fh_aliases: HashMap::new(),
             localized_globs: std::collections::HashSet::new(),
             local_localized_globs_saves: vec![Vec::new()],
+            failed_eval_subs: std::collections::HashSet::new(),
             fatal_warnings: false,
             fatal_warnings_saves: Vec::new(),
             fh_line_counts: HashMap::new(),
@@ -10460,6 +10467,28 @@ impl Interpreter {
                     }
                     return Value::Num(1.0);
                 }
+                // If this name appeared as `sub NAME { … }` inside an
+                // `eval STRING` that failed at parse time, ref perl dies
+                // "Undefined subroutine &PKG::NAME". op/state tests 41+.
+                if self.failed_eval_subs.contains(name)
+                    && candidates.iter().all(|c| !self.subs.contains_key(c))
+                {
+                    let file = if self.current_file.is_empty() {
+                        "-e".to_string()
+                    } else {
+                        self.current_file.clone()
+                    };
+                    let line = self.current_line;
+                    let qualified = if name.contains("::") {
+                        name.to_string()
+                    } else {
+                        format!("{}::{}", self.package, name)
+                    };
+                    self.pending_flow = Some(Flow::Die(format!(
+                        "Undefined subroutine &{qualified} called at {file} line {line}.\n"
+                    )));
+                    return Value::Undef;
+                }
                 for candidate in &candidates {
                     if let Some((params, body)) = self.subs.get(candidate).cloned() {
                         let arg_vals = self.eval_args_with_proto(args, &params);
@@ -17712,6 +17741,30 @@ impl Interpreter {
         // Lexer::error — surface as a Flow::Die captured in `$@` so the
         // eval context can detect the syntax error like reference perl does.
         if let Some(err) = lex_error.or(parse_error) {
+            // Even though the parse failed, scan whatever stmts the
+            // parser managed to produce for `sub NAME { … }` patterns.
+            // Record those names so subsequent calls to them die
+            // "Undefined subroutine &main::NAME" — matching reference
+            // perl, where the syntax error inside an `eval q{ sub X { … } }`
+            // means X was never compiled. op/state tests 41+ where
+            // `state $b :shared = 3` aborts the eval and `stateful_attr`
+            // remains undefined.
+            fn collect_sub_names(stmts: &[Stmt], out: &mut Vec<String>) {
+                for s in stmts {
+                    match s {
+                        Stmt::Sub { name, .. } if !name.is_empty() => {
+                            out.push(name.clone());
+                        }
+                        Stmt::Block(b) => collect_sub_names(b, out),
+                        _ => {}
+                    }
+                }
+            }
+            let mut names = Vec::new();
+            collect_sub_names(&stmts, &mut names);
+            for n in names {
+                self.failed_eval_subs.insert(n);
+            }
             let filled = err.replace("{FILE}", &self.current_file);
             self.set_global_var("@", Value::Str(filled));
             self.current_file = saved_file;

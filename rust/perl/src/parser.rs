@@ -1463,14 +1463,27 @@ impl Parser {
                 _ => return (vars, list_ctx),
             };
 
-            // Skip variable attributes (`:NAME`, `:NAME(arg)` etc.) — we
-            // don't model attribute behavior, but ignoring them lets the
-            // following `= INIT` (and the `;` terminator) parse correctly.
-            // E.g. `state $b :shared = 3` (op/state.t line 179) treats
-            // `:shared` as a no-op attribute. Multiple `:NAME` attrs in a
-            // row are also accepted.
+            // Variable attributes (`:NAME`, `:NAME(arg)` etc.). vanilla
+            // perl rejects `:shared` as a syntax error unless
+            // `use threads::shared` is in scope. We don't model
+            // threads::shared, so emit the syntax error so eval q{...}
+            // fails and any sub containing it stays undefined. op/state
+            // tests 41-58 (stateful_attr never registers, the call to
+            // it then dies via failed_eval_subs).
             while self.eat(&Token::Colon) {
-                if let Token::Ident(_) = self.tok() {
+                if let Token::Ident(attr_name) = self.tok() {
+                    let attr = attr_name.clone();
+                    if attr == "shared" {
+                        let line = self.current_line();
+                        let near = format!("{} :", name);
+                        self.error = Some(format!(
+                            "syntax error at {{FILE}} line {line}, near \"{near}\"\n"
+                        ));
+                        while !matches!(self.tok(), Token::Semi | Token::EOF | Token::RBrace) {
+                            self.pos += 1;
+                        }
+                        return (vars, list_ctx);
+                    }
                     self.pos += 1;
                     if self.eat(&Token::LParen) {
                         let mut depth = 1;
