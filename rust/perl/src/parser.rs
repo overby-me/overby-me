@@ -3486,9 +3486,20 @@ impl Parser {
                 // `${ EXPR }` — evaluate EXPR, dereference as scalar. If
                 // EXPR is a comma list (`${f(), \$x}`), each arg is
                 // evaluated in order (for side effects) and the LAST
-                // value is used as the scalar deref target.
+                // value is used as the scalar deref target. `${...}` is
+                // the special yada-yada-in-block-deref form: reference
+                // perl evaluates `...` as a statement-level yada-yada
+                // that dies "Unimplemented". base/lex test 107.
                 self.pos += 1;
                 self.eat(&Token::LBrace);
+                if let Token::Ident(n) = self.tok()
+                    && n == "..."
+                    && matches!(self.peek(1), Token::RBrace)
+                {
+                    self.pos += 1;
+                    self.expect(&Token::RBrace);
+                    return Expr::Call("_yada_yada".to_string(), vec![]);
+                }
                 let inner = self.parse_list_expr();
                 self.expect(&Token::RBrace);
                 Expr::Call("_scalar_block_deref".to_string(), inner)

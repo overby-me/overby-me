@@ -2228,7 +2228,29 @@ impl Lexer {
                 }
 
                 _ => {
-                    // Skip unknown characters
+                    // Reference perl emits "Unrecognized character \xHH"
+                    // for stray bytes outside known token starts (including
+                    // non-ASCII bytes like \xDF when used as a bareword
+                    // initial). base/lex test 61.
+                    let byte = c as u32;
+                    let is_unrecognized = byte > 0x7F
+                        || (byte < 0x20 && byte != 0x09 && byte != 0x0A && byte != 0x0D);
+                    if is_unrecognized && self.error.is_none() {
+                        // Build the "after <text>" prefix: text from start
+                        // of current line up to the offending byte.
+                        let line_start = self.input[..self.pos]
+                            .iter()
+                            .rposition(|&c| c == '\n')
+                            .map(|i| i + 1)
+                            .unwrap_or(0);
+                        let before: String = self.input[line_start..self.pos].iter().collect();
+                        let col = before.chars().count() + 1;
+                        let line = self.current_line;
+                        self.error = Some(format!(
+                            "Unrecognized character \\x{byte:02X}; marked by <-- HERE after {before}<-- HERE near column {col} at {{FILE}} line {line}.\n",
+                        ));
+                    }
+                    // Skip the unknown char so we don't infinite-loop.
                     self.pos += 1;
                 }
             }
