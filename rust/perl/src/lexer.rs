@@ -1410,7 +1410,9 @@ impl Lexer {
 
                 c if c.is_ascii_alphabetic()
                     || c == '_'
-                    || (self.has_use_utf8 && !c.is_ascii() && c.is_alphabetic()) =>
+                    || ((self.has_use_utf8 || (c as u32) > 0xFF)
+                        && !c.is_ascii()
+                        && c.is_alphabetic()) =>
                 {
                     // Special case: `x` immediately after an expression-value
                     // token and followed by a digit is the repeat operator, not
@@ -2265,7 +2267,15 @@ impl Lexer {
                     let byte = c as u32;
                     let is_low_control =
                         byte < 0x20 && byte != 0x09 && byte != 0x0A && byte != 0x0D;
-                    let is_unrecognized = is_low_control || (byte >= 0x80 && !self.has_use_utf8);
+                    // Latin-1 range (0x80..0xFF) is ambiguous between
+                    // raw bytes and UTF-8 leading bytes, so without
+                    // `use utf8` reference perl treats them as
+                    // unrecognized. Codepoints > 0xFF are always
+                    // Unicode (and accepted in identifier position by
+                    // `read_ident`); they reach here only when they
+                    // appear outside an identifier, so leave alone.
+                    let is_unrecognized =
+                        is_low_control || ((0x80..=0xFF).contains(&byte) && !self.has_use_utf8);
                     if is_unrecognized && self.error.is_none() {
                         let line_start = self.input[..self.pos]
                             .iter()
@@ -2331,10 +2341,10 @@ impl Lexer {
     fn read_ident(&mut self) -> String {
         let mut s = String::new();
         let utf8 = self.has_use_utf8;
+        let nonascii_ok =
+            |c: char| -> bool { !c.is_ascii() && c.is_alphabetic() && (utf8 || (c as u32) > 0xFF) };
         while self.pos < self.input.len()
-            && (self.ch().is_ascii_alphanumeric()
-                || self.ch() == '_'
-                || (utf8 && !self.ch().is_ascii() && self.ch().is_alphabetic()))
+            && (self.ch().is_ascii_alphanumeric() || self.ch() == '_' || nonascii_ok(self.ch()))
         {
             s.push(self.advance());
         }
@@ -2343,9 +2353,7 @@ impl Lexer {
             s.push_str("::");
             self.pos += 2;
             while self.pos < self.input.len()
-                && (self.ch().is_ascii_alphanumeric()
-                    || self.ch() == '_'
-                    || (utf8 && !self.ch().is_ascii() && self.ch().is_alphabetic()))
+                && (self.ch().is_ascii_alphanumeric() || self.ch() == '_' || nonascii_ok(self.ch()))
             {
                 s.push(self.advance());
             }
