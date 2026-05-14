@@ -353,6 +353,13 @@ pub struct Interpreter {
     /// for/until tests after the `tie my $y` countfetches block.
     #[allow(clippy::type_complexity)]
     tied_scalar_saves: Vec<Vec<(String, Option<(String, Value)>)>>,
+    /// `use warnings FATAL => 'all'` makes runtime warnings (like
+    /// "Useless assignment to a temporary") die rather than print to
+    /// STDERR. op/sub_lval test 43.
+    fatal_warnings: bool,
+    /// Stack to restore `fatal_warnings` on scope exit, mirroring other
+    /// pragma flags.
+    fatal_warnings_saves: Vec<bool>,
     /// Per-scope stack of `defer { … }` bodies. Each lexical scope
     /// frame collects deferred blocks; on scope exit they run in LIFO
     /// order. op/defer.
@@ -615,6 +622,8 @@ impl Interpreter {
             fh_aliases: HashMap::new(),
             localized_globs: std::collections::HashSet::new(),
             local_localized_globs_saves: vec![Vec::new()],
+            fatal_warnings: false,
+            fatal_warnings_saves: Vec::new(),
             fh_line_counts: HashMap::new(),
             local_dot_fh_saves: Vec::new(),
             tied_scalar_saves: vec![Vec::new()],
@@ -3068,6 +3077,17 @@ impl Interpreter {
                         // / substr then emit "Use of uninitialized value"
                         // through the warning handler.
                         self.warnings_on = true;
+                        // `use warnings FATAL => ...` makes runtime warnings
+                        // die rather than print to STDERR. op/sub_lval test 43.
+                        let mut i = 0;
+                        while i + 1 < _args.len() {
+                            let key = self.eval_expr(&_args[i]).to_str();
+                            if key == "FATAL" {
+                                self.fatal_warnings = true;
+                                break;
+                            }
+                            i += 2;
+                        }
                     } else if module == "overload" {
                         // `use overload OP => CODEREF, …` — register
                         // operator handlers for the current package so
@@ -13153,6 +13173,7 @@ impl Interpreter {
         self.bytes_mode_saves.push(self.bytes_mode);
         self.strict_vars_saves.push(self.strict_vars);
         self.warnings_on_saves.push(self.warnings_on);
+        self.fatal_warnings_saves.push(self.fatal_warnings);
     }
 
     fn pop_scope(&mut self) {
@@ -13283,6 +13304,9 @@ impl Interpreter {
         }
         if let Some(prev) = self.warnings_on_saves.pop() {
             self.warnings_on = prev;
+        }
+        if let Some(prev) = self.fatal_warnings_saves.pop() {
+            self.fatal_warnings = prev;
         }
     }
 
@@ -13819,6 +13843,22 @@ impl Interpreter {
                             self.current_file.clone()
                         };
                         let line = self.current_line;
+                        // List context assignment fires "Useless assignment
+                        // to a temporary" warning (fatal under `use warnings
+                        // FATAL`). The warning category is "misc" which is
+                        // off by default — only fire under FATAL. op/sub_lval
+                        // test 43 (passes via this); tests 41/42 expect the
+                        // "Can't return a temporary" die instead.
+                        if self.assign_list_ctx && self.fatal_warnings {
+                            let warn = format!(
+                                "Useless assignment to a temporary at {file} line {line}.\n"
+                            );
+                            self.pending_flow = Some(Flow::Die(warn));
+                            self.current_sub_stack.pop();
+                            self.set_array("_", saved_underscore);
+                            self.current_line = saved_line;
+                            return;
+                        }
                         self.pending_flow = Some(Flow::Die(format!(
                             "Can't return a temporary from lvalue subroutine at {file} line {line}.\n"
                         )));
