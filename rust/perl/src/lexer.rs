@@ -1378,7 +1378,12 @@ impl Lexer {
                     if has_interp {
                         tokens.push(Token::InterpString(s));
                     } else {
-                        tokens.push(Token::StringLit(s));
+                        // No interpolation — the var-boundary marker is
+                        // moot here (no variable absorption to prevent),
+                        // so strip it. Otherwise `"\#"` stays as
+                        // `\u{F0003}#` instead of just `#`.
+                        let cleaned: String = s.chars().filter(|c| *c != '\u{F0003}').collect();
+                        tokens.push(Token::StringLit(cleaned));
                     }
                 }
 
@@ -1551,6 +1556,7 @@ impl Lexer {
                             } else if s.contains('\u{F0001}') || s.contains('\u{F0002}') {
                                 let restored: String = s
                                     .chars()
+                                    .filter(|c| *c != '\u{F0003}')
                                     .map(|c| match c {
                                         '\u{F0001}' => '$',
                                         '\u{F0002}' => '@',
@@ -1559,7 +1565,9 @@ impl Lexer {
                                     .collect();
                                 tokens.push(Token::StringLit(restored));
                             } else {
-                                tokens.push(Token::StringLit(s));
+                                let cleaned: String =
+                                    s.chars().filter(|c| *c != '\u{F0003}').collect();
+                                tokens.push(Token::StringLit(cleaned));
                             }
                             continue;
                         }
@@ -2223,7 +2231,8 @@ impl Lexer {
                     if s.contains('$') || s.contains('@') {
                         tokens.push(Token::InterpString(s));
                     } else {
-                        tokens.push(Token::StringLit(s));
+                        let cleaned: String = s.chars().filter(|c| *c != '\u{F0003}').collect();
+                        tokens.push(Token::StringLit(cleaned));
                     }
                 }
 
@@ -2260,6 +2269,20 @@ impl Lexer {
                 self.token_lines.push(line_at_token_start);
             }
             let _ = token_count_before;
+        }
+
+        // Strip stray var-boundary markers from plain `StringLit` tokens — they only
+        // exist to terminate variable absorption inside interpolated strings,
+        // so anywhere they survive into a non-interpolating literal is moot.
+        // (Heredoc bodies, qq// bodies, and double-quoted strings with no
+        // sigils all end up as StringLit; the marker leaks through if we
+        // don't sweep it.) See `process_escapes` for the producer.
+        for t in tokens.iter_mut() {
+            if let Token::StringLit(s) = t
+                && s.contains('\u{F0003}')
+            {
+                *s = s.chars().filter(|c| *c != '\u{F0003}').collect();
+            }
         }
 
         // Filter out newlines (they're not significant in our grammar).
@@ -2772,15 +2795,40 @@ impl Lexer {
                         // "Unrecognized escape \X passed through"
                         // warning and drops the backslash for
                         // non-alphabetic characters (`"\{"` → `{`).
-                        // For alphabetic escapes we preserve `\X`
-                        // so case-conversion / quotemeta sentinels
-                        // we haven't covered yet (`\F`, `\a` already
-                        // handled above) still see them.
-                        if self.ch().is_ascii_alphabetic() {
-                            s.push('\\');
-                            s.push(self.ch());
+                        // Emit a zero-width var-boundary marker so
+                        // `"$a\::Y"` parses as `$a` + `::Y` rather
+                        // than the package-qualified `$a::Y`.
+                        let nc = self.ch();
+                        if nc.is_ascii_alphabetic() {
+                            let known_letter = matches!(
+                                nc,
+                                'l' | 'u'
+                                    | 'L'
+                                    | 'U'
+                                    | 'E'
+                                    | 'Q'
+                                    | 'N'
+                                    | 'a'
+                                    | 'b'
+                                    | 'f'
+                                    | 'e'
+                                    | 't'
+                                    | 'n'
+                                    | 'r'
+                                    | 'c'
+                                    | 'x'
+                                    | 'o'
+                            );
+                            if known_letter {
+                                s.push('\\');
+                                s.push(nc);
+                            } else {
+                                s.push('\u{F0003}');
+                                s.push(nc);
+                            }
                         } else {
-                            s.push(self.ch());
+                            s.push('\u{F0003}');
+                            s.push(nc);
                         }
                         self.pos += 1;
                     }
@@ -4097,10 +4145,54 @@ fn process_escapes(s: &str) -> String {
                     // alphabetic escapes we preserve `\X` so later
                     // processing (case-conversion `\l`/`\u`/`\L`/`\U`/
                     // `\E`, quotemeta `\Q…\E`, etc.) still sees them.
+                    // Emit a zero-width var-boundary marker so an
+                    // interpolated `$var\…` doesn't accidentally absorb
+                    // the following chars into its name — `"$a\::Y"`
+                    // should be `$a` + `::Y`, not the package-qualified
+                    // var `$a::Y`. The marker is stripped from final
+                    // literals by parse_interp_string.
                     if chars[i].is_ascii_alphabetic() {
-                        result.push('\\');
-                        result.push(chars[i]);
+                        // Letter escapes (\l \u \L \U \E \Q \N etc.)
+                        // need to retain the backslash for downstream
+                        // case-modifier / quotemeta logic. Don't add
+                        // a boundary marker — `"$a\Q…"` etc. is rare
+                        // and the existing escape handling already
+                        // routes through these letter codes.
+                        let known_letter = matches!(
+                            chars[i],
+                            'l' | 'u'
+                                | 'L'
+                                | 'U'
+                                | 'E'
+                                | 'Q'
+                                | 'N'
+                                | 'a'
+                                | 'b'
+                                | 'f'
+                                | 'e'
+                                | 't'
+                                | 'n'
+                                | 'r'
+                                | 'c'
+                                | 'x'
+                                | 'o'
+                        );
+                        if known_letter {
+                            result.push('\\');
+                            result.push(chars[i]);
+                        } else {
+                            // Unknown letter — drop backslash so
+                            // `"\Z"` → `Z`, matching reference perl.
+                            // Insert a boundary so a preceding `$var`
+                            // doesn't absorb `Z` as part of its name.
+                            result.push('\u{F0003}');
+                            result.push(chars[i]);
+                        }
                     } else {
+                        // Non-letter (e.g. `\:`, `\(`): emit boundary
+                        // then the literal char so `"$a\::Y"` parses
+                        // as `$a` followed by `::Y`.
+                        result.push('\u{F0003}');
                         result.push(chars[i]);
                     }
                 }

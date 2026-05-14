@@ -5978,6 +5978,11 @@ fn parse_interp_string(s: &str) -> Expr {
             // Escaped @ placeholder.
             lit.push('@');
             i += 1;
+        } else if chars[i] == '\u{F0003}' {
+            // Zero-width var-boundary marker emitted by process_escapes
+            // for unknown `\X` escapes. Strip it from the literal — its
+            // only role is to terminate any preceding sigil's var name.
+            i += 1;
         } else {
             lit.push(chars[i]);
             i += 1;

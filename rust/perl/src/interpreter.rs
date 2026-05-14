@@ -363,6 +363,11 @@ pub struct Interpreter {
     /// tests 41+ where `state $b :shared = 3` syntax-errors the eval
     /// and the surrounding `stateful_attr` sub never registers.
     failed_eval_subs: std::collections::HashSet<String>,
+    /// MRO strategy per package — "dfs" (default) or "c3". Set via
+    /// `mro::set_mro($class, $type)` or `use mro 'c3'`. Consulted by
+    /// `mro::get_linear_isa` / `mro::get_mro`. mro/basic_04_c3 and
+    /// friends.
+    package_mro: HashMap<String, String>,
     /// `use warnings FATAL => 'all'` makes runtime warnings (like
     /// "Useless assignment to a temporary") die rather than print to
     /// STDERR. op/sub_lval test 43.
@@ -634,6 +639,7 @@ impl Interpreter {
             localized_globs: std::collections::HashSet::new(),
             local_localized_globs_saves: vec![Vec::new()],
             failed_eval_subs: std::collections::HashSet::new(),
+            package_mro: HashMap::new(),
             fatal_warnings: false,
             fatal_warnings_saves: Vec::new(),
             fh_line_counts: HashMap::new(),
@@ -3157,28 +3163,55 @@ impl Interpreter {
                 }
                 // Turn `Foo::Bar` into `Foo/Bar.pm`.
                 let filename = format!("{}.pm", module.replace("::", "/"));
-                // Honour an existing `$INC{filename}` entry — user
-                // code (typically a BEGIN block) may have declared
-                // the module pre-loaded to skip the actual disk
-                // lookup. Reference perl does the same.
-                if !matches!(self.get_hash_element("INC", &filename), Value::Undef) {
-                    return Flow::None;
-                }
-                let inc = self.get_array("INC");
-                let mut found = false;
-                for dir in &inc {
-                    let p = std::path::PathBuf::from(dir.to_str()).join(&filename);
-                    if p.is_file() {
-                        found = true;
-                        break;
+                // Did the require step happen, succeed, or get skipped because
+                // %INC already had the entry? In all three cases we still need
+                // to call `Module->import(args)` afterwards — base.pm, etc.
+                // depend on every use site triggering the import.
+                let already_loaded =
+                    !matches!(self.get_hash_element("INC", &filename), Value::Undef);
+                let mut found = already_loaded;
+                if !already_loaded {
+                    let inc = self.get_array("INC");
+                    for dir in &inc {
+                        let p = std::path::PathBuf::from(dir.to_str()).join(&filename);
+                        if p.is_file() {
+                            found = true;
+                            break;
+                        }
                     }
                 }
                 if found {
-                    let _ = self.do_require(&filename);
-                    // If require chained-failed (e.g. Tie/Array.pm tried to
-                    // load Carp and croaked), let that failure propagate.
-                    if let Some(flow) = self.pending_flow.take() {
-                        return flow;
+                    if !already_loaded {
+                        let _ = self.do_require(&filename);
+                        // If require chained-failed (e.g. Tie/Array.pm tried to
+                        // load Carp and croaked), let that failure propagate.
+                        if let Some(flow) = self.pending_flow.take() {
+                            return flow;
+                        }
+                    }
+                    // `use Foo (args)` invokes `Foo->import(args)` after
+                    // require. base.pm, parent.pm, Exporter, and most other
+                    // modules rely on this to wire `@ISA`, export symbols,
+                    // etc. The post-require import call fires every time a
+                    // `use` is seen — even when %INC already had the entry —
+                    // so a second `use base ("X")` in a different package
+                    // still wires up @ISA. Reference perl distinguishes the
+                    // explicit `use Foo ()` form (no-import) via a no_import
+                    // flag we don't track; passing zero args still means
+                    // import() is called with zero args, which Exporter etc.
+                    // treat as the empty-export case.
+                    let import_sub = format!("{module}::import");
+                    if self.subs.contains_key(&import_sub) {
+                        let mut call_args: Vec<Value> = vec![Value::Str(module.clone())];
+                        for a in _args.iter() {
+                            call_args.extend(self.eval_list(a));
+                        }
+                        if let Some((_params, body)) = self.subs.get(&import_sub).cloned() {
+                            self.call_sub_named(&body, &call_args, Some(&import_sub));
+                        }
+                        if let Some(flow) = self.pending_flow.take() {
+                            return flow;
+                        }
                     }
                     return Flow::None;
                 }
@@ -3197,6 +3230,7 @@ impl Interpreter {
                 if module == "Config" && !self.inc_user_modified {
                     return Flow::None;
                 }
+                let inc = self.get_array("INC");
                 let inc_str = inc.iter().map(|v| v.to_str()).collect::<Vec<_>>().join(" ");
                 let file = if self.current_file.is_empty() {
                     "-e".to_string()
@@ -7825,6 +7859,16 @@ impl Interpreter {
                 }
                 Value::Num(count as f64)
             }
+            "study" => {
+                // `study $scalar` — historically an optimization hint; modern
+                // perl makes it a no-op but still evaluates its operand so
+                // tied/FETCH-bearing variables run their magic. Returning 1
+                // matches Perl's documented "always true" success indicator.
+                if let Some(a) = args.first() {
+                    self.eval_expr(a);
+                }
+                Value::Num(1.0)
+            }
             "sleep" => {
                 // `sleep N` — pause N seconds, return seconds slept.
                 let secs = if args.is_empty() {
@@ -8331,8 +8375,21 @@ impl Interpreter {
                     Value::Num(len as f64)
                 } else if let Some(Expr::ArrayDerefVar(name)) = args.first() {
                     // `push @$ref, ...` — autovivifies an array ref if $ref
-                    // is undef (Perl semantics).
+                    // is undef (Perl semantics). Also accepts a Value::Str /
+                    // Value::Num as a symbolic ref so `my $n = "Foo::ISA";
+                    // push @{$n}, …` reaches `@Foo::ISA` (used by base.pm to
+                    // wire up `@ISA` of the inheriting package).
                     let existing = self.get_var(name);
+                    if matches!(existing, Value::Str(_) | Value::Num(_)) {
+                        let arr_name = existing.to_str();
+                        let mut arr = self.get_array(&arr_name);
+                        for arg in &args[1..] {
+                            arr.extend(self.eval_list(arg));
+                        }
+                        let len = arr.len();
+                        self.set_array(&arr_name, arr);
+                        return Value::Num(len as f64);
+                    }
                     let arr_ref = if let Value::ArrayRef(r) = existing {
                         r
                     } else if matches!(existing, Value::Undef) {
@@ -10003,6 +10060,98 @@ impl Interpreter {
                 self.call_context.pop();
                 Value::Num(results.len() as f64)
             }
+            "mro::set_mro" => {
+                let class = args
+                    .first()
+                    .map(|a| self.eval_expr(a).to_str())
+                    .unwrap_or_default();
+                let kind = args
+                    .get(1)
+                    .map(|a| self.eval_expr(a).to_str())
+                    .unwrap_or_else(|| "dfs".to_string());
+                if kind != "dfs" && kind != "c3" {
+                    self.pending_flow = Some(Flow::Die(format!("Invalid mro name: '{kind}'\n")));
+                    return Value::Undef;
+                }
+                self.package_mro.insert(class, kind);
+                return Value::Undef;
+            }
+            "mro::get_mro" => {
+                let class = args
+                    .first()
+                    .map(|a| self.eval_expr(a).to_str())
+                    .unwrap_or_default();
+                let kind = self
+                    .package_mro
+                    .get(&class)
+                    .cloned()
+                    .unwrap_or_else(|| "dfs".to_string());
+                return Value::Str(kind);
+            }
+            "mro::get_linear_isa" => {
+                let class = args
+                    .first()
+                    .map(|a| self.eval_expr(a).to_str())
+                    .unwrap_or_default();
+                let kind = if let Some(a) = args.get(1) {
+                    let k = self.eval_expr(a).to_str();
+                    if k != "dfs" && k != "c3" {
+                        self.pending_flow = Some(Flow::Die(format!("Invalid mro name: '{k}'\n")));
+                        return Value::Undef;
+                    }
+                    k
+                } else {
+                    self.package_mro
+                        .get(&class)
+                        .cloned()
+                        .unwrap_or_else(|| "dfs".to_string())
+                };
+                let linear = if kind == "c3" {
+                    mro_linear_c3(self, &class)
+                } else {
+                    mro_linear_dfs(self, &class)
+                };
+                let arr: Vec<Value> = linear.into_iter().map(Value::Str).collect();
+                return Value::ArrayRef(std::rc::Rc::new(std::cell::RefCell::new(arr)));
+            }
+            "mro::get_isarev" => {
+                let class = args
+                    .first()
+                    .map(|a| self.eval_expr(a).to_str())
+                    .unwrap_or_default();
+                // Walk all package-qualified arrays — any `Foo::ISA` reveals
+                // package `Foo`. Filter to those whose isa-walk reaches the
+                // target class.
+                let mut pkgs: std::collections::HashSet<String> = std::collections::HashSet::new();
+                for k in self.globals.arrays.keys() {
+                    if let Some(p) = k.strip_suffix("::ISA") {
+                        pkgs.insert(p.to_string());
+                    }
+                }
+                let mut subs: Vec<String> = Vec::new();
+                for p in &pkgs {
+                    if p == &class {
+                        continue;
+                    }
+                    if isa_walk(self, p, &class) {
+                        subs.push(p.clone());
+                    }
+                }
+                subs.sort();
+                let arr: Vec<Value> = subs.into_iter().map(Value::Str).collect();
+                return Value::ArrayRef(std::rc::Rc::new(std::cell::RefCell::new(arr)));
+            }
+            "mro::is_universal" => {
+                let class = args
+                    .first()
+                    .map(|a| self.eval_expr(a).to_str())
+                    .unwrap_or_default();
+                let is_u = class == "UNIVERSAL" || isa_walk(self, &class, "UNIVERSAL");
+                return Value::Num(if is_u { 1.0 } else { 0.0 });
+            }
+            "mro::invalidate_all_method_caches" => return Value::Undef,
+            "mro::method_changed_in" => return Value::Undef,
+            "mro::get_pkg_gen" => return Value::Num(1.0),
             "UNIVERSAL::isa" => {
                 // UNIVERSAL::isa(obj, class) — works on unblessed refs too:
                 // matches against the ref type ("ARRAY"/"HASH"/…). For
@@ -17493,11 +17642,28 @@ impl Interpreter {
         let prior = self.file_scopes.remove(&origin).unwrap_or_else(Scope::new);
         self.scopes.push(prior);
         self.loading_files.push(origin.clone());
+        // Save the caller's package so `package Foo;` inside the required
+        // file doesn't bleed back into the caller's namespace. Without
+        // this, `use base ("A")` inside `package C { … }` leaves
+        // self.package = "base" (set by `package base;` in base.pm) and
+        // the post-require `base->import("A")` call sees caller(0)=base,
+        // so base.pm pushes to @base::ISA instead of @C::ISA.
+        let saved_pkg_for_file = self.package.clone();
 
         // Process like run(): collect subs and BEGIN blocks first.
+        // Track package context so `package Foo; sub bar { … }` registers
+        // under `Foo::bar`, not the bare `bar`. Required modules (base.pm,
+        // parent.pm, etc.) rely on this for `Module->import(args)` dispatch
+        // and for the `use Module (args)` post-require import call.
         let mut main_stmts = Vec::new();
+        let mut current_pkg = self.package.clone();
         for stmt in &stmts {
             match stmt {
+                Stmt::Package(p) => {
+                    current_pkg = p.clone();
+                    main_stmts.push(stmt.clone());
+                    continue;
+                }
                 Stmt::Sub {
                     name,
                     params,
@@ -17505,15 +17671,20 @@ impl Interpreter {
                     is_lvalue,
                     is_my_sub,
                 } if !name.is_empty() => {
+                    let qualified = if name.contains("::") || current_pkg == "main" {
+                        name.clone()
+                    } else {
+                        format!("{current_pkg}::{name}")
+                    };
                     if *is_lvalue {
-                        self.lvalue_subs.insert(name.clone());
+                        self.lvalue_subs.insert(qualified.clone());
                     }
                     if *is_my_sub {
-                        self.my_subs.insert(name.clone());
+                        self.my_subs.insert(qualified.clone());
                     }
                     self.subs
-                        .insert(name.clone(), (params.clone(), body.clone()));
-                    self.sub_origin.insert(name.clone(), origin.clone());
+                        .insert(qualified.clone(), (params.clone(), body.clone()));
+                    self.sub_origin.insert(qualified.clone(), origin.clone());
                     // sub_def_loc is what the call site uses to swap
                     // `current_file` when entering the sub. Required-file
                     // subs need this too — without it, errors raised by
@@ -17530,9 +17701,8 @@ impl Interpreter {
                         }
                     }
                     self.sub_def_loc
-                        .insert(name.clone(), (origin.clone(), line));
-                    self.sub_def_package
-                        .insert(name.clone(), self.package.clone());
+                        .insert(qualified.clone(), (origin.clone(), line));
+                    self.sub_def_package.insert(qualified, current_pkg.clone());
                 }
                 Stmt::Begin(body, _end_line) => {
                     let _flow = self.exec_stmts(body);
@@ -17582,6 +17752,8 @@ impl Interpreter {
         self.loading_files.pop();
         let file_scope = self.scopes.pop().unwrap_or_else(Scope::new);
         self.file_scopes.insert(origin, file_scope);
+        // Restore caller's package — see `saved_pkg_for_file` above.
+        self.package = saved_pkg_for_file;
 
         if let Some(v) = early_return {
             return v;
@@ -18210,6 +18382,68 @@ fn isa_walk(interp: &Interpreter, class: &str, target: &str) -> bool {
         }
     }
     false
+}
+
+/// Depth-first linearization (Perl's default MRO). Walks `@ISA` left-to-right
+/// pre-order; duplicates are filtered so each class appears once. Used by
+/// `mro::get_linear_isa` for the `dfs` branch.
+fn mro_linear_dfs(interp: &Interpreter, class: &str) -> Vec<String> {
+    fn walk(interp: &Interpreter, class: &str, out: &mut Vec<String>) {
+        if !out.iter().any(|c| c == class) {
+            out.push(class.to_string());
+        }
+        let isa = interp.get_array(&format!("{class}::ISA"));
+        for parent in &isa {
+            let p = parent.to_str();
+            walk(interp, &p, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(interp, class, &mut out);
+    out
+}
+
+/// C3 linearization: L[C] = [C] + merge of the parents' linearizations and the parent list itself.
+/// merge: pick the head of the first list that doesn't appear in the tail of
+/// any list; repeat. Cycles raise a die matching reference perl's wording.
+fn mro_linear_c3(interp: &Interpreter, class: &str) -> Vec<String> {
+    let isa = interp.get_array(&format!("{class}::ISA"));
+    let parents: Vec<String> = isa.iter().map(|v| v.to_str()).collect();
+    if parents.is_empty() {
+        return vec![class.to_string()];
+    }
+    let mut lists: Vec<Vec<String>> = parents.iter().map(|p| mro_linear_c3(interp, p)).collect();
+    lists.push(parents.clone());
+    let mut result = vec![class.to_string()];
+    while lists.iter().any(|l| !l.is_empty()) {
+        let mut picked: Option<String> = None;
+        for l in &lists {
+            if let Some(head) = l.first() {
+                let in_tail = lists
+                    .iter()
+                    .any(|other| other.len() > 1 && other.iter().skip(1).any(|x| x == head));
+                if !in_tail {
+                    picked = Some(head.clone());
+                    break;
+                }
+            }
+        }
+        match picked {
+            Some(p) => {
+                result.push(p.clone());
+                for l in lists.iter_mut() {
+                    l.retain(|x| x != &p);
+                }
+            }
+            None => {
+                // Inconsistent hierarchy — reference perl dies.
+                // Return what we have so callers can still inspect.
+                break;
+            }
+        }
+        lists.retain(|l| !l.is_empty());
+    }
+    result
 }
 
 /// Perl booleans from comparison ops: `1` for true, `""` (empty string) for
