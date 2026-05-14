@@ -1434,7 +1434,7 @@ impl Parser {
                 }
             }
         } else {
-            // Single variable: my $x = expr;
+            // Single variable: my $x = expr; or local *FH;
             let name = match self.tok() {
                 Token::ScalarVar(name) => {
                     let n = format!("${}", name);
@@ -1448,6 +1448,15 @@ impl Parser {
                 }
                 Token::HashVar(name) => {
                     let n = format!("%{}", name);
+                    self.pos += 1;
+                    n
+                }
+                Token::Glob(name) => {
+                    // `local *FH;` — typeglob localisation. Prefix `*`
+                    // distinguishes it from scalar/array/hash slots so
+                    // Stmt::Local recognises the typeglob form. op/yadayada
+                    // tests 32-34 (`local *STDOUT`).
+                    let n = format!("*{}", name);
                     self.pos += 1;
                     n
                 }

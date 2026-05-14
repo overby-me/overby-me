@@ -332,6 +332,15 @@ pub struct Interpreter {
     // Keyed by the local name, value is the target slot name. Restored on
     // scope exit via `local_saves`.
     fh_aliases: HashMap<String, String>,
+    /// Filehandle names that are currently `local`ized to an unopened
+    /// state — print/say/printf to such handles silently discards output
+    /// (matches reference perl `local *STDOUT`). Restored by the
+    /// per-scope `local_localized_globs_saves` stack. op/yadayada
+    /// tests 32-34 (`local *STDOUT; print ...`).
+    localized_globs: std::collections::HashSet<String>,
+    /// Per-scope list of glob names that were added to `localized_globs`
+    /// — on scope pop, remove these so the localization unwinds.
+    local_localized_globs_saves: Vec<Vec<String>>,
     /// Per-filehandle line counter that backs magic $.
     /// Incremented on every successful readline.
     fh_line_counts: HashMap<String, i64>,
@@ -604,6 +613,8 @@ impl Interpreter {
             next_call_ctx: None,
             write_handles: HashMap::new(),
             fh_aliases: HashMap::new(),
+            localized_globs: std::collections::HashSet::new(),
+            local_localized_globs_saves: vec![Vec::new()],
             fh_line_counts: HashMap::new(),
             local_dot_fh_saves: Vec::new(),
             tied_scalar_saves: vec![Vec::new()],
@@ -2565,7 +2576,10 @@ impl Interpreter {
                             // `local(*F);` — snapshot F's current slot values
                             // so scope exit restores them, then clear the slot
                             // (Perl's symbol-table local). Covers scalar and
-                            // filehandle slots.
+                            // filehandle slots. Also localize the filehandle
+                            // to an unopened state so subsequent print/say/
+                            // printf to the bare name silently discards output
+                            // (op/yadayada tests 32-34 use `local *STDOUT`).
                             let local_name = name.trim_start_matches('*').to_string();
                             let prev_fh = self.fh_aliases.get(&local_name).cloned();
                             if let Some(saves) = self.local_fh_alias_saves.last_mut() {
@@ -2577,6 +2591,11 @@ impl Interpreter {
                             }
                             self.globals.vars.insert(local_name.clone(), Value::Undef);
                             self.fh_aliases.remove(&local_name);
+                            if self.localized_globs.insert(local_name.clone())
+                                && let Some(saves) = self.local_localized_globs_saves.last_mut()
+                            {
+                                saves.push(local_name.clone());
+                            }
                             continue;
                         }
                         // Strip the single leading sigil only — `$@` keeps
@@ -3739,6 +3758,12 @@ impl Interpreter {
     }
 
     fn write_to_handle(&mut self, fh_name: &Option<String>, text: &str) {
+        // `local *FH` localizes a glob to an unopened state — writes to
+        // that handle silently discard output. op/yadayada tests 32-34.
+        let effective = fh_name.as_deref().unwrap_or("STDOUT");
+        if self.localized_globs.contains(effective) {
+            return;
+        }
         match fh_name.as_deref() {
             Some("STDERR") => {
                 let _ = io::stderr().write_all(text.as_bytes());
@@ -13098,6 +13123,7 @@ impl Interpreter {
             .push(std::collections::HashMap::new());
         self.local_dot_fh_saves.push(Vec::new());
         self.tied_scalar_saves.push(Vec::new());
+        self.local_localized_globs_saves.push(Vec::new());
         self.defer_blocks.push(Vec::new());
         // Snapshot lexical pragma state (e.g. `use bytes`) so a `use` /
         // `no` inside the block doesn't leak out.
@@ -13217,6 +13243,12 @@ impl Interpreter {
                         self.tied_scalars.remove(&name);
                     }
                 }
+            }
+        }
+        // Un-localize any `local *FH` globs registered in this scope.
+        if let Some(saves) = self.local_localized_globs_saves.pop() {
+            for name in saves.into_iter().rev() {
+                self.localized_globs.remove(&name);
             }
         }
         self.restore_locals();
