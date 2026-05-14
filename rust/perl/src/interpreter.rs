@@ -1042,6 +1042,39 @@ impl Interpreter {
                 self.exit_code = 255;
                 eprint!("{msg}");
             }
+            // `last`/`next`/`redo` outside any enclosing loop block —
+            // reference perl dies with the usual message. Convert the
+            // escaped Flow into a Die so the program ends cleanly.
+            Flow::Last(_) => {
+                self.exit_code = 255;
+                let file = if self.current_file.is_empty() {
+                    "-e".to_string()
+                } else {
+                    self.current_file.clone()
+                };
+                let line = self.current_line;
+                eprintln!("Can't \"last\" outside a loop block at {file} line {line}.");
+            }
+            Flow::Next(_) => {
+                self.exit_code = 255;
+                let file = if self.current_file.is_empty() {
+                    "-e".to_string()
+                } else {
+                    self.current_file.clone()
+                };
+                let line = self.current_line;
+                eprintln!("Can't \"next\" outside a loop block at {file} line {line}.");
+            }
+            Flow::Redo(_) => {
+                self.exit_code = 255;
+                let file = if self.current_file.is_empty() {
+                    "-e".to_string()
+                } else {
+                    self.current_file.clone()
+                };
+                let line = self.current_line;
+                eprintln!("Can't \"redo\" outside a loop block at {file} line {line}.");
+            }
             _ => {}
         }
 
