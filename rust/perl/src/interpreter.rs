@@ -10304,7 +10304,10 @@ impl Interpreter {
                 if let Some(q) = found {
                     return Value::CodeRef(q);
                 }
-                if wantcan != 0 {
+                // mro.xs convention: `throw_nomethod`/`wantcan` arg.
+                //   - 0 → empty result (next::can semantics; return undef)
+                //   - 1 → die with "No next::method '%s' found for %s"
+                if wantcan == 0 {
                     return Value::Undef;
                 }
                 let file = if self.current_file.is_empty() {
