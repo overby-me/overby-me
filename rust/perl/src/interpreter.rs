@@ -7183,14 +7183,55 @@ impl Interpreter {
                 Value::Num(1.0)
             }
             "die" => {
-                let msg = args
+                // `die` in expression context (`1 ? die : undef`) must
+                // raise the same as the statement form so a surrounding
+                // `eval { ... } // FALLBACK` triggers the fallback path.
+                // Build the message in the same shape as Stmt::Die (bare
+                // `die;` re-raises $@ or emits "Died at FILE line N.";
+                // otherwise append " at FILE line N." when missing a
+                // trailing newline). Then propagate via pending_flow so
+                // exec_stmts in the eval block stops and Flow::Die is
+                // returned. op/catch tests 4 & 10.
+                let raw = args
                     .iter()
                     .map(|a| self.eval_expr(a).to_str())
                     .collect::<Vec<_>>()
                     .join("");
+                let msg = if raw.is_empty() {
+                    let prev = self.get_var("@").to_str();
+                    if prev.is_empty() {
+                        let file = if self.current_file.is_empty() {
+                            "-e".to_string()
+                        } else {
+                            self.current_file.clone()
+                        };
+                        let line = self.current_line;
+                        format!("Died at {file} line {line}.\n")
+                    } else if prev.ends_with('\n') {
+                        prev
+                    } else {
+                        let file = if self.current_file.is_empty() {
+                            "-e".to_string()
+                        } else {
+                            self.current_file.clone()
+                        };
+                        let line = self.current_line;
+                        format!("{prev}\t...propagated at {file} line {line}.\n")
+                    }
+                } else if raw.ends_with('\n') {
+                    raw
+                } else {
+                    let file = if self.current_file.is_empty() {
+                        "-e".to_string()
+                    } else {
+                        self.current_file.clone()
+                    };
+                    let line = self.current_line;
+                    format!("{raw} at {file} line {line}.\n")
+                };
                 self.set_global_var("@", Value::Str(msg.clone()));
-                // In expression context, die should propagate
-                Value::Undef // caller should check $@
+                self.pending_flow = Some(Flow::Die(msg));
+                Value::Undef
             }
             "warn" => {
                 let mut msg = args

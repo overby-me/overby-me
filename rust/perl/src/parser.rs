@@ -620,7 +620,54 @@ impl Parser {
                 let stmt = Stmt::Warn(args);
                 return Some(self.maybe_postfix(stmt));
             }
-            Token::Eval if matches!(self.peek(1), Token::LBrace) => {
+            Token::Eval
+                if matches!(self.peek(1), Token::LBrace) && {
+                    // Peek past the matching `}` to see whether this eval
+                    // is followed by a binary operator that needs to bind
+                    // the whole expression — `eval { … } // "fallback"`,
+                    // `eval { … } or die …`, etc. In that case the guard
+                    // returns false and we fall through to the parse_expr
+                    // path so the binop's right-hand side attaches
+                    // correctly. Without this, the dedicated Stmt::Eval
+                    // would consume just the block and leave `// "fallback"`
+                    // orphaned. op/catch test 10.
+                    let mut depth = 0i32;
+                    let mut probe = self.pos + 1;
+                    let mut found_close = None;
+                    while probe < self.tokens.len() {
+                        match &self.tokens[probe] {
+                            Token::LBrace => depth += 1,
+                            Token::RBrace => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    found_close = Some(probe);
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                        probe += 1;
+                    }
+                    let next_is_binop = matches!(
+                        found_close.and_then(|p| self.tokens.get(p + 1)),
+                        Some(
+                            Token::DefOr
+                                | Token::LogOr
+                                | Token::LogAnd
+                                | Token::Or
+                                | Token::And
+                                | Token::Plus
+                                | Token::Minus
+                                | Token::Star
+                                | Token::Slash
+                                | Token::Dot
+                                | Token::DotDot
+                                | Token::Question,
+                        )
+                    );
+                    !next_is_binop
+                } =>
+            {
                 self.pos += 1;
                 let body = self.parse_brace_block();
                 let stmt = Stmt::Eval(Box::new(EvalArg::Block(body)));
@@ -4417,7 +4464,15 @@ impl Parser {
                 }
                 .to_string();
                 self.pos += 1;
-                let args = self.parse_list_expr();
+                // `:` is the ternary separator; without bailing out
+                // here, `parse_list_expr → parse_expr` would consume
+                // the `:` (silent-skip on unknown primary), corrupting
+                // the surrounding ternary parse. op/catch test 10.
+                let args = if matches!(self.tok(), Token::Colon) {
+                    Vec::new()
+                } else {
+                    self.parse_list_expr()
+                };
                 Expr::Call(func, args)
             }
 
