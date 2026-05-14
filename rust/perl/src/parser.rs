@@ -4406,30 +4406,25 @@ impl Parser {
                         }
                         // Scalar receiver: when name is NOT a known sub,
                         // always indirect. When name IS a known sub, only
-                        // indirect if the scalar is immediately followed
-                        // by `(`, `,`, `;`, or close-paren/brace/bracket —
-                        // i.e., the scalar isn't followed by a postfix
-                        // op like `++` that would suggest a function-call
-                        // arg list.
-                        Token::ScalarVar(v) => {
-                            let after_scalar = self.peek(1);
-                            let is_call_followed = matches!(
-                                after_scalar,
-                                Token::LParen
-                                    | Token::Comma
-                                    | Token::FatComma
-                                    | Token::Semi
-                                    | Token::EOF
-                                    | Token::RParen
-                                    | Token::RBrace
-                                    | Token::RBracket
-                            );
-                            if !is_known_sub || is_call_followed {
-                                self.pos += 1;
-                                Some(Expr::ScalarVar(v))
-                            } else {
-                                None
-                            }
+                        // indirect when the scalar is followed by `(args)`
+                        // OR by an EXPRESSION STARTER without a comma —
+                        // those signal indirect-method `$obj->name args`.
+                        // Followed by `,`/`;`/etc. it's a function call
+                        // (`foo $msg;` → `foo($msg)`). op/method test 26
+                        // (`method $obj "a","b","c"`) needs the
+                        // expression-starter case.
+                        Token::ScalarVar(v) if !is_known_sub => {
+                            self.pos += 1;
+                            Some(Expr::ScalarVar(v))
+                        }
+                        Token::ScalarVar(v)
+                            if matches!(
+                                self.peek(1),
+                                Token::LParen | Token::StringLit(_) | Token::InterpString(_)
+                            ) =>
+                        {
+                            self.pos += 1;
+                            Some(Expr::ScalarVar(v))
                         }
                         _ => None,
                     };
