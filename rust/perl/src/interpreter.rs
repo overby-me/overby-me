@@ -4687,7 +4687,12 @@ impl Interpreter {
             }
 
             Expr::Substitution(target, pat, repl, flags) => {
-                let text = self.eval_expr(target).to_str();
+                // Use stringify_value so blessed refs with overload "" get
+                // their handler invoked (e.g. `$obj =~ s/.../X/`). Reference
+                // perl dispatches the stringification overload to obtain
+                // the text to match against. op/concat2 test 3.
+                let target_val = self.eval_expr(target);
+                let text = self.stringify_value(&target_val);
                 let case_insensitive = flags.contains('i');
                 let global = flags.contains('g');
                 let pat_interp = self.interp_regex_pattern(pat);
