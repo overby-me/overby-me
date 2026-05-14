@@ -2229,15 +2229,16 @@ impl Lexer {
 
                 _ => {
                     // Reference perl emits "Unrecognized character \xHH"
-                    // for stray bytes outside known token starts (including
-                    // non-ASCII bytes like \xDF when used as a bareword
-                    // initial). base/lex test 61.
+                    // for stray control bytes outside known token starts.
+                    // We only fire for low-control bytes (< 0x20 except
+                    // \t/\n/\r) — non-ASCII letters/digits are valid
+                    // identifiers under `use utf8`, so emitting here
+                    // would prevent BEGIN-block compilation errors from
+                    // surfacing first (uni/stash). base/lex test 61.
                     let byte = c as u32;
-                    let is_unrecognized = byte > 0x7F
-                        || (byte < 0x20 && byte != 0x09 && byte != 0x0A && byte != 0x0D);
+                    let is_unrecognized =
+                        byte < 0x20 && byte != 0x09 && byte != 0x0A && byte != 0x0D;
                     if is_unrecognized && self.error.is_none() {
-                        // Build the "after <text>" prefix: text from start
-                        // of current line up to the offending byte.
                         let line_start = self.input[..self.pos]
                             .iter()
                             .rposition(|&c| c == '\n')
