@@ -5494,8 +5494,15 @@ impl Interpreter {
                     resolved_method
                 };
                 let method = method_str.as_str();
+                // `$obj->Pkg::method` (package-qualified method name)
+                // bypasses ISA and dispatches `Pkg::method` directly with
+                // $obj as the first arg. Used by `next::method`,
+                // `maybe::next::method`, and explicit-superclass calls.
+                let qualified_method = method.contains("::");
                 let qualified = if !resolved_class.is_empty() {
                     resolved_class
+                } else if qualified_method && self.subs.contains_key(method) {
+                    method.to_string()
                 } else if self.subs.contains_key(&format!("{class}::{method}")) {
                     format!("{class}::{method}")
                 } else if let Some(found) = resolve_method_via_isa(self, &class, method) {
@@ -10220,6 +10227,88 @@ impl Interpreter {
             "mro::invalidate_all_method_caches" => return Value::Undef,
             "mro::method_changed_in" => return Value::Undef,
             "mro::get_pkg_gen" => return Value::Num(1.0),
+            "mro::_nextcan" => {
+                // `mro::_nextcan($obj, $wantcan)` — locates the *next*
+                // implementation of the current method along the C3 MRO,
+                // starting from the package that defined the sub now on
+                // the call stack. $wantcan = 0 → die when none (called
+                // from `next::method` / `goto &$method`); $wantcan = 1
+                // → return undef when none (`next::can`).
+                let obj = args
+                    .first()
+                    .map(|a| self.eval_expr(a))
+                    .unwrap_or(Value::Undef);
+                let wantcan = args
+                    .get(1)
+                    .map(|a| self.eval_expr(a).to_num() as i64)
+                    .unwrap_or(0);
+                // Determine the invocant's class.
+                let class = {
+                    let ref_class = self.ref_class(&obj);
+                    if ref_class.is_empty() {
+                        obj.to_str()
+                    } else {
+                        ref_class
+                    }
+                };
+                // Find the calling sub name (the one *above* _nextcan on
+                // the dispatch stack — _nextcan is called from
+                // next::method's body, but `goto &$method` doesn't push
+                // a new frame, so the caller-of-caller is the lexical
+                // origin).
+                let sub_name = {
+                    // _nextcan is called from next::method's body, which
+                    // was called via `$self->next::method(args)`. The
+                    // method-dispatch arm rewrites that to a Call —
+                    // current_sub_stack therefore has next::method on
+                    // top and the user's `Class::foo` below.
+                    let stack = &self.current_sub_stack;
+                    if stack.len() >= 2 {
+                        stack[stack.len() - 2].clone()
+                    } else {
+                        stack.last().cloned().unwrap_or_default()
+                    }
+                };
+                // Extract the defining package and method name.
+                let (def_pkg, method_name) = if let Some(idx) = sub_name.rfind("::") {
+                    (sub_name[..idx].to_string(), sub_name[idx + 2..].to_string())
+                } else {
+                    (String::new(), sub_name.clone())
+                };
+                // Walk C3 MRO of the invocant's class, skip everything up
+                // to and including def_pkg, then pick the next match.
+                let linear = mro_linear_c3(self, &class);
+                let mut after_def = false;
+                let mut found: Option<String> = None;
+                for c in &linear {
+                    if after_def {
+                        let q = format!("{c}::{method_name}");
+                        if self.subs.contains_key(&q) {
+                            found = Some(q);
+                            break;
+                        }
+                    }
+                    if c == &def_pkg {
+                        after_def = true;
+                    }
+                }
+                if let Some(q) = found {
+                    return Value::CodeRef(q);
+                }
+                if wantcan != 0 {
+                    return Value::Undef;
+                }
+                let file = if self.current_file.is_empty() {
+                    "-e".to_string()
+                } else {
+                    self.current_file.clone()
+                };
+                let line = self.current_line;
+                self.pending_flow = Some(Flow::Die(format!(
+                    "No next::method '{method_name}' found for {class} at {file} line {line}.\n"
+                )));
+                return Value::Undef;
+            }
             "UNIVERSAL::isa" => {
                 // UNIVERSAL::isa(obj, class) — works on unblessed refs too:
                 // matches against the ref type ("ARRAY"/"HASH"/…). For
@@ -12065,7 +12154,17 @@ impl Interpreter {
                             None => break,
                         }
                     }
-                    let target = label.trim_start_matches('&').to_string();
+                    let raw = label.trim_start_matches('&').to_string();
+                    // `goto &$var` — encoded as `&$NAME`. Resolve the
+                    // scalar at runtime: it must hold a CodeRef.
+                    let target = if let Some(var_name) = raw.strip_prefix('$') {
+                        match self.get_var(var_name) {
+                            Value::CodeRef(name) => name,
+                            other => other.to_str(),
+                        }
+                    } else {
+                        raw
+                    };
                     let cur_args: Vec<Value> = self
                         .scopes
                         .last()

@@ -343,12 +343,30 @@ impl Parser {
             }
             Token::Package => {
                 self.pos += 1;
-                let name = if let Token::Ident(name) = self.tok() {
-                    let n = name.clone();
-                    self.pos += 1;
-                    n
-                } else {
-                    "main".to_string()
+                // Accept tokens that are normally keywords as package
+                // names — `package next` / `package maybe` etc. are
+                // legal in reference perl (mro.pm itself uses
+                // `package next;` to hide the `next::method` /
+                // `next::can` namespace).
+                let name = match self.tok() {
+                    Token::Ident(name) => {
+                        let n = name.clone();
+                        self.pos += 1;
+                        n
+                    }
+                    Token::Next => {
+                        self.pos += 1;
+                        "next".to_string()
+                    }
+                    Token::Last => {
+                        self.pos += 1;
+                        "last".to_string()
+                    }
+                    Token::Redo => {
+                        self.pos += 1;
+                        "redo".to_string()
+                    }
+                    _ => "main".to_string(),
                 };
                 // `package NAME VERSION` — assign $NAME::VERSION = VERSION
                 // before the block (or as a side-effect of the bare form).
@@ -489,12 +507,18 @@ impl Parser {
                 // so the interpreter recognises the sub-form.
                 // `goto \&sub` — same semantics; the `\&` produces a
                 // coderef, and we normalise it here to `&NAME` form.
+                // `goto &$var` — dynamic; encode as `&$NAME` so the
+                // interpreter can resolve at runtime.
                 let label = if matches!(self.tok(), Token::BitAnd) {
                     self.pos += 1;
                     if let Token::Ident(name) = self.tok() {
                         let n = name.clone();
                         self.pos += 1;
                         format!("&{n}")
+                    } else if let Token::ScalarVar(name) = self.tok() {
+                        let n = name.clone();
+                        self.pos += 1;
+                        format!("&${n}")
                     } else {
                         "&".to_string()
                     }
