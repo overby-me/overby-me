@@ -368,6 +368,13 @@ pub struct Interpreter {
     /// `mro::get_linear_isa` / `mro::get_mro`. mro/basic_04_c3 and
     /// friends.
     package_mro: HashMap<String, String>,
+    /// `m{...}o` / `s{...}{...}o` (the `/o` flag) means compile-once:
+    /// the first interpolated pattern at a source location is frozen
+    /// and reused on subsequent matches. Keyed by the raw pattern
+    /// source — separate physical sites of the same exact source
+    /// share the cache, which is a small approximation versus
+    /// Perl's per-AST-node caching but matches re/begin-once.t.
+    once_compiled_patterns: HashMap<String, String>,
     /// `use warnings FATAL => 'all'` makes runtime warnings (like
     /// "Useless assignment to a temporary") die rather than print to
     /// STDERR. op/sub_lval test 43.
@@ -640,6 +647,7 @@ impl Interpreter {
             local_localized_globs_saves: vec![Vec::new()],
             failed_eval_subs: std::collections::HashSet::new(),
             package_mro: HashMap::new(),
+            once_compiled_patterns: HashMap::new(),
             fatal_warnings: false,
             fatal_warnings_saves: Vec::new(),
             fh_line_counts: HashMap::new(),
@@ -4819,7 +4827,19 @@ impl Interpreter {
                 let text = self.stringify_value(&target_val);
                 let case_insensitive = flags.contains('i');
                 let global = flags.contains('g');
-                let pat_interp = self.interp_regex_pattern(pat);
+                // `/o` — see `regex_match_pos` for caching rationale.
+                let pat_interp = if flags.contains('o') {
+                    if let Some(cached) = self.once_compiled_patterns.get(pat).cloned() {
+                        cached
+                    } else {
+                        let p = self.interp_regex_pattern(pat);
+                        self.once_compiled_patterns
+                            .insert(pat.to_string(), p.clone());
+                        p
+                    }
+                } else {
+                    self.interp_regex_pattern(pat)
+                };
                 let (pat_inner, inner_flags) = unwrap_qr(&pat_interp, flags);
                 let case_insensitive = case_insensitive || inner_flags.contains('i');
                 // Build a `(?flags)` prefix carrying every flag the
@@ -15501,7 +15521,22 @@ impl Interpreter {
         flags: &str,
         start: usize,
     ) -> (bool, usize) {
-        let pattern = self.interp_regex_pattern(pattern);
+        // `/o` flag means compile-once: cache the first interpolated
+        // pattern at this source location and reuse it forever.
+        // re/begin-once.t uses this to freeze a `m{$var}o` regex at
+        // BEGIN time so subsequent calls keep matching the same value.
+        let pattern = if flags.contains('o') {
+            if let Some(cached) = self.once_compiled_patterns.get(pattern).cloned() {
+                cached
+            } else {
+                let p = self.interp_regex_pattern(pattern);
+                self.once_compiled_patterns
+                    .insert(pattern.to_string(), p.clone());
+                p
+            }
+        } else {
+            self.interp_regex_pattern(pattern)
+        };
         // Under /x, `#`-to-EOL is a comment; strip BEFORE validation
         // and the code-block extractor so `a# (?{1+\n` doesn't trip
         // either with brace-counter or runtime-regex parsing.
@@ -16401,7 +16436,19 @@ impl Interpreter {
                 // the captures; without captures returns (1) for success
                 // / () for failure.
                 let text = self.eval_expr(expr).to_str();
-                let pat = self.interp_regex_pattern(pat);
+                // `/o` — see `regex_match_pos` for caching rationale.
+                let pat = if flags.contains('o') {
+                    if let Some(cached) = self.once_compiled_patterns.get(pat).cloned() {
+                        cached
+                    } else {
+                        let p = self.interp_regex_pattern(pat);
+                        self.once_compiled_patterns
+                            .insert(pat.to_string(), p.clone());
+                        p
+                    }
+                } else {
+                    self.interp_regex_pattern(pat)
+                };
                 let (pat, flags) = unwrap_qr(&pat, flags);
                 let case_i = flags.contains('i');
                 let global = flags.contains('g');

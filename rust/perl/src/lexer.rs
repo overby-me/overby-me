@@ -3433,7 +3433,20 @@ impl Lexer {
         while self.pos < self.input.len()
             && matches!(
                 self.ch(),
-                'g' | 'i' | 'm' | 's' | 'x' | 'e' | 'r' | 'n' | 'a' | 'd' | 'l' | 'u' | 'c' | 'p'
+                'g' | 'i'
+                    | 'm'
+                    | 's'
+                    | 'x'
+                    | 'e'
+                    | 'r'
+                    | 'n'
+                    | 'a'
+                    | 'd'
+                    | 'l'
+                    | 'u'
+                    | 'c'
+                    | 'p'
+                    | 'o'
             )
         {
             flags.push(self.advance());
