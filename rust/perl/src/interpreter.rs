@@ -10005,6 +10005,17 @@ impl Interpreter {
                 // Always succeed for us — we don't track a UTF-8 flag.
                 Value::Num(1.0)
             }
+            "utf8::decode" => {
+                // No-op — our strings are already UTF-8 char strings
+                // and we don't track a separate utf8 flag. Returns
+                // truthy to indicate the string is treated as UTF-8.
+                Value::Num(1.0)
+            }
+            "utf8::valid" => {
+                // True if argument is valid UTF-8 — our strings are
+                // always valid UTF-8 char strings.
+                Value::Num(1.0)
+            }
             "utf8::is_utf8" => {
                 // We don't track a UTF-8 flag; reference perls heuristic
                 // is "is the string considered to have characters above
