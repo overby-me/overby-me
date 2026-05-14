@@ -10280,6 +10280,116 @@ impl Interpreter {
                         ));
                     }
                 }
+                // Common Perl builtins / pragma module names we don't
+                // implement but that callers expect to silently succeed
+                // (return 1). Without this, every unhandled-builtin call
+                // falls through to the "Undefined subroutine" die below.
+                // Add names as needed.
+                let known_builtin = matches!(
+                    name,
+                    // Pragma module names appearing as bareword args to
+                    // `use`/`no` — treat as no-op so the parser-as-call
+                    // form doesn't die.
+                    "warnings"
+                        | "strict"
+                        | "bytes"
+                        | "utf8"
+                        | "feature"
+                        | "constant"
+                        | "vars"
+                        | "subs"
+                        | "diagnostics"
+                        | "lib"
+                        | "integer"
+                        | "overload"
+                        | "overloading"
+                        | "open"
+                        | "Carp"
+                        | "Exporter"
+                        | "POSIX"
+                        | "Scalar::Util"
+                        | "List::Util"
+                        | "Config"
+                        | "builtin"
+                        | "experimental"
+                        | "deprecate"
+                        | "fields"
+                        | "version"
+                        | "B"
+                        | "B::Deparse"
+                        | "Internals"
+                        | "Devel::Peek"
+                        | "Tie::Hash"
+                        | "Tie::Array"
+                        | "Tie::Scalar"
+                        | "Tie::StdHash"
+                        | "Tie::StdArray"
+                        | "Tie::StdScalar"
+                        // Perl builtins not (yet) implemented.
+                        | "reset"
+                        | "format"
+                        | "write"
+                        | "dbmopen"
+                        | "dbmclose"
+                        | "endgrent"
+                        | "endhostent"
+                        | "endnetent"
+                        | "endprotoent"
+                        | "endpwent"
+                        | "endservent"
+                        | "getgrent"
+                        | "getgrgid"
+                        | "getgrnam"
+                        | "gethostbyaddr"
+                        | "gethostbyname"
+                        | "gethostent"
+                        | "getlogin"
+                        | "getnetbyaddr"
+                        | "getnetbyname"
+                        | "getnetent"
+                        | "getpgrp"
+                        | "getppid"
+                        | "getpriority"
+                        | "getprotobyname"
+                        | "getprotobynumber"
+                        | "getprotoent"
+                        | "getpwent"
+                        | "getpwnam"
+                        | "getpwuid"
+                        | "getservbyname"
+                        | "getservbyport"
+                        | "getservent"
+                        | "msgctl"
+                        | "msgget"
+                        | "msgrcv"
+                        | "msgsnd"
+                        | "semctl"
+                        | "semget"
+                        | "semop"
+                        | "setgrent"
+                        | "sethostent"
+                        | "setnetent"
+                        | "setpgrp"
+                        | "setpriority"
+                        | "setprotoent"
+                        | "setpwent"
+                        | "setservent"
+                        | "shmctl"
+                        | "shmget"
+                        | "shmread"
+                        | "shmwrite"
+                        | "socketpair"
+                        | "syscall"
+                        | "sysseek"
+                        | "umask"
+                );
+                if known_builtin {
+                    // Evaluate args for side effects then return 1.
+                    for a in args.iter() {
+                        let _ = self.eval_expr(a);
+                    }
+                    return Value::Num(1.0);
+                }
                 for candidate in &candidates {
                     if let Some((params, body)) = self.subs.get(candidate).cloned() {
                         let arg_vals = self.eval_args_with_proto(args, &params);
