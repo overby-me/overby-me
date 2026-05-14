@@ -1637,6 +1637,14 @@ impl Parser {
                 if next_is_range_op {
                     self.pos = saved;
                     None
+                } else if self.at(&Token::Arrow) {
+                    // `print A->foo` — `A` is a class name (method-call
+                    // receiver), not a filehandle. Reference perl
+                    // resolves the bareword to a class when followed by
+                    // `->`. Without this, `print A->foo` parses as
+                    // `print A (->foo)` with A as the filehandle.
+                    self.pos = saved;
+                    None
                 } else if self.at(&Token::FatComma) {
                     // `print FOO => …` — not a filehandle call, `FOO` is a
                     // bareword hash key.

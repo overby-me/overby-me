@@ -5400,8 +5400,13 @@ impl Interpreter {
                 // die with Perl's exact "Can't call method on unblessed
                 // reference" — test.pl's `isa_ok` catches that via the
                 // eval + regex match path to pass/fail the test.
-                let (class, unblessed_ref) = match recv.as_ref() {
-                    Expr::StringLit(s) => (s.clone(), false),
+                // Capture both the class string (for dispatch lookup)
+                // and the evaluated invocant Value so `$_[0]` inside the
+                // method body sees the actual object (not the class
+                // string) while avoiding double evaluation of side-
+                // effecting recv exprs like `(shift)`.
+                let (class, unblessed_ref, recv_val) = match recv.as_ref() {
+                    Expr::StringLit(s) => (s.clone(), false, None),
                     _ => {
                         let v = self.eval_expr(recv);
                         let ptr = Self::ref_ptr(&v);
@@ -5409,9 +5414,9 @@ impl Interpreter {
                         let has_blessing = ptr != 0 && self.blessed_refs.contains_key(&ptr);
                         let cls = self.ref_class(&v);
                         if !cls.is_empty() {
-                            (cls, is_ref && !has_blessing)
+                            (cls, is_ref && !has_blessing, Some(v))
                         } else {
-                            (v.to_str(), false)
+                            (v.to_str(), false, Some(v))
                         }
                     }
                 };
@@ -5567,17 +5572,22 @@ impl Interpreter {
                 // For object method calls, $_[0] must be the *object*
                 // (the receiver value), not the class name string. Only
                 // when the receiver is a bareword class name (parsed as
-                // StringLit) does $_[0] need to be that string. We use
-                // the original `recv` Expr as the first argument so
-                // eval_call sees the original — for ScalarVar / refs
-                // this gives the blessed object; for class literals it
-                // gives the class string.
+                // StringLit) does $_[0] need to be that string. We
+                // already evaluated `recv` above into `recv_val` to
+                // determine the class — pass that exact value through
+                // so `(shift)->method` doesn't shift twice.
+                if let Some(rv) = recv_val
+                    && let Some((_params, body)) = self.subs.get(&qualified).cloned()
+                {
+                    let mut arg_vals: Vec<Value> = Vec::with_capacity(args.len() + 1);
+                    arg_vals.push(rv);
+                    for a in args.iter() {
+                        arg_vals.push(self.eval_expr(a));
+                    }
+                    return self.call_sub_named(&body, &arg_vals, Some(&qualified));
+                }
                 let mut all_args: Vec<Expr> = Vec::with_capacity(args.len() + 1);
-                let invocant_expr = match recv.as_ref() {
-                    Expr::StringLit(_) => Expr::StringLit(class),
-                    _ => (**recv).clone(),
-                };
-                all_args.push(invocant_expr);
+                all_args.push(Expr::StringLit(class));
                 all_args.extend(args.iter().cloned());
                 self.eval_call(&qualified, &all_args)
             }
