@@ -2103,6 +2103,15 @@ impl Interpreter {
                 if let Some(e) = expr {
                     // Store list result for list-context returns
                     let list = self.eval_list(e);
+                    // If evaluating the returned expression triggered a die,
+                    // surface that flow instead of treating the (possibly
+                    // partial) value as a normal return. Required so
+                    // `eval { return f(); }` where `f` dies leaves $@ set
+                    // and the surrounding sub returns the catch arm's value
+                    // — mro/next_ineval.t and similar.
+                    if let Some(flow) = self.pending_flow.take() {
+                        return flow;
+                    }
                     self.last_list_val = Some(list.clone());
                     let val = list.last().cloned().unwrap_or(Value::Undef);
                     self.last_expr_val = val.clone();
@@ -12327,6 +12336,12 @@ impl Interpreter {
                     }
                     self.call_context.pop();
                     self.set_global_var("@", Value::Str(msg.clone()));
+                    // Re-raise via pending_flow so an `eval { return f() }`
+                    // surrounding our caller catches the die instead of
+                    // treating the (undef) return as success. Without
+                    // this the die is swallowed at the sub boundary and
+                    // `$@` is set but no flow signals the catch.
+                    self.pending_flow = Some(Flow::Die(msg));
                     return vec![Value::Undef];
                 }
                 Flow::None => {}
