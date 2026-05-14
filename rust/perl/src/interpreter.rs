@@ -5564,8 +5564,20 @@ impl Interpreter {
                     self.last_list_val = Some(Vec::new());
                     return Value::Undef;
                 }
+                // For object method calls, $_[0] must be the *object*
+                // (the receiver value), not the class name string. Only
+                // when the receiver is a bareword class name (parsed as
+                // StringLit) does $_[0] need to be that string. We use
+                // the original `recv` Expr as the first argument so
+                // eval_call sees the original — for ScalarVar / refs
+                // this gives the blessed object; for class literals it
+                // gives the class string.
                 let mut all_args: Vec<Expr> = Vec::with_capacity(args.len() + 1);
-                all_args.push(Expr::StringLit(class));
+                let invocant_expr = match recv.as_ref() {
+                    Expr::StringLit(_) => Expr::StringLit(class),
+                    _ => (**recv).clone(),
+                };
+                all_args.push(invocant_expr);
                 all_args.extend(args.iter().cloned());
                 self.eval_call(&qualified, &all_args)
             }
@@ -7934,8 +7946,15 @@ impl Interpreter {
                 } else {
                     return Value::Undef;
                 };
-                let init_args: Vec<Value> =
-                    args[2..].iter().flat_map(|a| self.eval_list(a)).collect();
+                // TIESCALAR is a class method — `Class->TIESCALAR(args)`
+                // — so $_[0] inside the body is the class name string
+                // and $_[1..] are the explicit args from the `tie`
+                // call. Without prepending the class here we'd shift
+                // every arg position by one and the canonical
+                // `bless \(my $z = $_[1]), $_[0]` body would build the
+                // wrong object.
+                let mut init_args: Vec<Value> = vec![Value::Str(class.clone())];
+                init_args.extend(args[2..].iter().flat_map(|a| self.eval_list(a)));
                 let key = format!("{class}::TIESCALAR");
                 let obj = if let Some((_p, body)) = self.subs.get(&key).cloned() {
                     self.in_tie_handler += 1;
