@@ -338,6 +338,12 @@ pub struct Interpreter {
     /// Stack of saved (last_read_fh) values pushed by `local($.)` and
     /// popped at scope exit. Each frame pushes once per `local($.)`.
     local_dot_fh_saves: Vec<Vec<Option<String>>>,
+    /// Per-scope record of `tie my $X, ...` entries — the var name plus
+    /// the prior `tied_scalars` value (if any). On scope pop, restore so
+    /// the tie doesn't bleed past the lexical scope. op/state foreach/
+    /// for/until tests after the `tie my $y` countfetches block.
+    #[allow(clippy::type_complexity)]
+    tied_scalar_saves: Vec<Vec<(String, Option<(String, Value)>)>>,
     /// Per-scope stack of `defer { … }` bodies. Each lexical scope
     /// frame collects deferred blocks; on scope exit they run in LIFO
     /// order. op/defer.
@@ -600,6 +606,7 @@ impl Interpreter {
             fh_aliases: HashMap::new(),
             fh_line_counts: HashMap::new(),
             local_dot_fh_saves: Vec::new(),
+            tied_scalar_saves: vec![Vec::new()],
             defer_blocks: Vec::new(),
             fh_counter: 0,
             anon_sub_counter: 0,
@@ -3801,23 +3808,15 @@ impl Interpreter {
                 // Tied scalars: route reads through `class::FETCH(obj)`.
                 // Guard with `in_tie_handler` so a FETCH that itself
                 // reads the same tied scalar doesn't recurse forever.
-                // BUT: if any current lexical scope has the name (e.g. a
-                // `state $y` alias or `my $y` shadow), use that — the
-                // outer tied binding shouldn't override a shadowing
-                // lexical. op/state foreach/for/until tests after the
-                // countfetches `tie my $y` block.
                 if self.in_tie_handler == 0
                     && let Some((class, obj)) = self.tied_scalars.get(name).cloned()
                 {
-                    let shadowed = self.scopes.iter().any(|s| s.vars.contains_key(name));
-                    if !shadowed {
-                        let key = format!("{class}::FETCH");
-                        if let Some((_p, body)) = self.subs.get(&key).cloned() {
-                            self.in_tie_handler += 1;
-                            let v = self.call_sub_named(&body, &[obj], Some(&key));
-                            self.in_tie_handler -= 1;
-                            return v;
-                        }
+                    let key = format!("{class}::FETCH");
+                    if let Some((_p, body)) = self.subs.get(&key).cloned() {
+                        self.in_tie_handler += 1;
+                        let v = self.call_sub_named(&body, &[obj], Some(&key));
+                        self.in_tie_handler -= 1;
+                        return v;
                     }
                 }
                 self.get_var(name)
@@ -7614,9 +7613,17 @@ impl Interpreter {
                 // Make sure a `my $t` declaration creates the slot
                 // before tie installs the handler — otherwise a later
                 // read finds nothing and falls through to globals.
-                if matches!(&args[0], Expr::MyVar(_)) {
+                // Record the tie in the current scope's save list so it
+                // gets unwound when the scope pops — `tie my $y` should
+                // not bleed into surrounding code after the block exits.
+                let is_my = matches!(&args[0], Expr::MyVar(_));
+                if is_my {
                     if let Some(scope) = self.scopes.last_mut() {
                         scope.vars.entry(var_name.clone()).or_insert(Value::Undef);
+                    }
+                    let prior_tie = self.tied_scalars.get(&var_name).cloned();
+                    if let Some(saves) = self.tied_scalar_saves.last_mut() {
+                        saves.push((var_name.clone(), prior_tie));
                     }
                 }
                 let class = if args.len() >= 2 {
@@ -13090,6 +13097,7 @@ impl Interpreter {
         self.local_array_len_saves
             .push(std::collections::HashMap::new());
         self.local_dot_fh_saves.push(Vec::new());
+        self.tied_scalar_saves.push(Vec::new());
         self.defer_blocks.push(Vec::new());
         // Snapshot lexical pragma state (e.g. `use bytes`) so a `use` /
         // `no` inside the block doesn't leak out.
@@ -13195,6 +13203,21 @@ impl Interpreter {
         self.scopes.pop();
         if popped_underscore.is_some() {
             self.last_popped_underscore = popped_underscore;
+        }
+        // Restore tied_scalars from this scope's save list. Reverse order
+        // so an outer `tie my $x` followed by an inner `tie my $x` unwind
+        // the inner first.
+        if let Some(saves) = self.tied_scalar_saves.pop() {
+            for (name, prior) in saves.into_iter().rev() {
+                match prior {
+                    Some(entry) => {
+                        self.tied_scalars.insert(name, entry);
+                    }
+                    None => {
+                        self.tied_scalars.remove(&name);
+                    }
+                }
+            }
         }
         self.restore_locals();
         if let Some(prev) = self.bytes_mode_saves.pop() {
