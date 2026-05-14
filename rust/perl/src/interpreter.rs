@@ -3822,18 +3822,28 @@ impl Interpreter {
         if self.localized_globs.contains(effective) {
             return;
         }
+        // Convert `text` to its on-the-wire byte form. When all chars
+        // fit in a single byte (< 0x100), emit them as latin-1 (1 byte
+        // per char) instead of Rust's UTF-8 encoding. This matches
+        // reference perl's default non-UTF-8-flagged string output for
+        // chars in 0x80-0xFF. op/print test 3 (`print` of overlong-utf8
+        // source bytes preserves them verbatim).
+        let bytes: Vec<u8> = if text.chars().all(|c| (c as u32) < 0x100) {
+            text.chars().map(|c| c as u8).collect()
+        } else {
+            text.as_bytes().to_vec()
+        };
         match fh_name.as_deref() {
             Some("STDERR") => {
-                let _ = io::stderr().write_all(text.as_bytes());
+                let _ = io::stderr().write_all(&bytes);
             }
             Some("STDOUT") | None => {
-                let _ = io::stdout().write_all(text.as_bytes());
+                let _ = io::stdout().write_all(&bytes);
             }
             Some(name) => {
-                // Try writing to a file handle (resolving any typeglob alias).
                 let resolved = self.resolve_fh(name);
                 if let Some(writer) = self.write_handles.get_mut(&resolved) {
-                    let _ = writer.write_all(text.as_bytes());
+                    let _ = writer.write_all(&bytes);
                     return;
                 }
                 if let Some(rc) = self.string_write_handles.get(&resolved) {
@@ -3842,8 +3852,7 @@ impl Interpreter {
                     *rc.borrow_mut() = Value::Str(s);
                     return;
                 }
-                // Fall back to stdout
-                let _ = io::stdout().write_all(text.as_bytes());
+                let _ = io::stdout().write_all(&bytes);
             }
         }
     }
@@ -10157,9 +10166,13 @@ impl Interpreter {
                     Ok(o) => o,
                     Err(_) => return Value::Undef,
                 };
-                let mut out = String::from_utf8_lossy(&output.stdout).to_string();
+                // Treat captured bytes as latin-1 (1 byte per char) so
+                // raw byte output from the subprocess survives without
+                // UTF-8-lossy → FFFD substitution. op/print test 3.
+                let mut out: String = output.stdout.iter().map(|&b| b as char).collect();
                 if want_stderr {
-                    out.push_str(&String::from_utf8_lossy(&output.stderr));
+                    let err: String = output.stderr.iter().map(|&b| b as char).collect();
+                    out.push_str(&err);
                 }
                 Value::Str(out)
             }
@@ -10214,8 +10227,13 @@ impl Interpreter {
                 let output = child.wait_with_output();
                 let results = match output {
                     Ok(out) => {
-                        let mut combined = String::from_utf8_lossy(&out.stdout).to_string();
-                        combined.push_str(&String::from_utf8_lossy(&out.stderr));
+                        // Treat captured bytes as latin-1 (1 char per byte)
+                        // so raw byte output survives without UTF-8-lossy
+                        // → FFFD substitution. op/print test 3.
+                        let mut combined: String = out.stdout.iter().map(|&b| b as char).collect();
+                        for &b in &out.stderr {
+                            combined.push(b as char);
+                        }
                         combined.trim_end_matches('\n').to_string()
                     }
                     Err(_) => String::new(),
@@ -17193,7 +17211,32 @@ impl Interpreter {
         // scalar starting at the stored cursor, advance the cursor,
         // and write the slice into the target scalar.
         if let Some((rc, offset)) = self.string_read_handles.get(&handle).cloned() {
+            // If all chars in the source string fit in a single byte
+            // (< 0x100), treat the source as a sequence of latin-1
+            // bytes (one byte per char) so `read($fh, $s, N)` reads N
+            // bytes from those source bytes — matching reference perl's
+            // non-UTF-8-flagged scalar-fh behaviour. Otherwise fall back
+            // to Rust's UTF-8 byte view. op/print test 3.
             let full = rc.borrow().to_str();
+            let chars_fit_in_byte = full.chars().all(|c| (c as u32) < 0x100);
+            if chars_fit_in_byte {
+                let src_bytes: Vec<u8> = full.chars().map(|c| c as u8).collect();
+                if offset >= src_bytes.len() {
+                    self.assign_to(&args[1], Value::Str(String::new()));
+                    return Value::Num(0.0);
+                }
+                let end = (offset + len).min(src_bytes.len());
+                let consumed = end - offset;
+                // Decode back to chars (each byte → 1 char, latin-1 style)
+                // so the resulting Rust String has codepoints matching
+                // the bytes. Subsequent `print $s` (which uses our
+                // chars-as-latin-1 path) writes those bytes verbatim.
+                let s: String = src_bytes[offset..end].iter().map(|&b| b as char).collect();
+                self.string_read_handles
+                    .insert(handle, (rc, offset + consumed));
+                self.assign_to(&args[1], Value::Str(s));
+                return Value::Num(consumed as f64);
+            }
             let bytes = full.as_bytes();
             if offset >= bytes.len() {
                 self.assign_to(&args[1], Value::Str(String::new()));
