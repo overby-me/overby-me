@@ -5416,19 +5416,87 @@ impl Interpreter {
                     return Value::Num(if yes { 1.0 } else { 0.0 });
                 }
                 if method == "can" {
+                    // `OBJ->can('method')` — walks the MRO looking for a
+                    // defined method. Returns a code ref to it, or undef
+                    // when no class in the @ISA chain (plus UNIVERSAL)
+                    // provides one. mro/basic_*.t tests `…->can('hello')`
+                    // chained into `->()` rely on this.
                     let m = args
                         .first()
                         .map(|a| self.eval_expr(a).to_str())
                         .unwrap_or_default();
-                    let q = format!("{class}::{m}");
-                    return Value::Num(if self.subs.contains_key(&q) { 1.0 } else { 0.0 });
+                    let kind = self
+                        .package_mro
+                        .get(&class)
+                        .cloned()
+                        .unwrap_or_else(|| "dfs".to_string());
+                    let linear = if kind == "c3" {
+                        mro_linear_c3(self, &class)
+                    } else {
+                        mro_linear_dfs(self, &class)
+                    };
+                    for c in &linear {
+                        let q = format!("{c}::{m}");
+                        if self.subs.contains_key(&q) {
+                            return Value::CodeRef(q);
+                        }
+                    }
+                    let universal_q = format!("UNIVERSAL::{m}");
+                    if self.subs.contains_key(&universal_q) {
+                        return Value::CodeRef(universal_q);
+                    }
+                    return Value::Undef;
                 }
-                // Otherwise dispatch — synthesize a Call to Class::method,
-                // with the class name prepended as the invocant. If
-                // Class::method itself isnt defined, walk @Class::ISA
-                // (depth-first, default mro) to find an inherited
-                // implementation.
-                let qualified = if self.subs.contains_key(&format!("{class}::{method}")) {
+                // `$obj->SUPER::method(args)` — resolve via the *current
+                // package*'s linearized MRO, starting *after* the current
+                // package. Reference perl anchors SUPER on the lexical
+                // package where the call site appears, and walks the MRO
+                // strategy in effect for that package (DFS vs C3 — basic_05
+                // uses both forms). Anything past the `SUPER::` prefix is
+                // the bare method name.
+                let (resolved_method, resolved_class): (String, String) =
+                    if let Some(rest) = method.strip_prefix("SUPER::") {
+                        let current_pkg = self.package.clone();
+                        let kind = self
+                            .package_mro
+                            .get(&current_pkg)
+                            .cloned()
+                            .unwrap_or_else(|| "dfs".to_string());
+                        let linear = if kind == "c3" {
+                            mro_linear_c3(self, &current_pkg)
+                        } else {
+                            mro_linear_dfs(self, &current_pkg)
+                        };
+                        let mut found_sub: Option<String> = None;
+                        // Skip the current package itself (linear[0]), then
+                        // find the first ancestor that defines the method.
+                        for c in linear.iter().skip(1) {
+                            let q = format!("{c}::{rest}");
+                            if self.subs.contains_key(&q) {
+                                found_sub = Some(q);
+                                break;
+                            }
+                        }
+                        if found_sub.is_none() {
+                            let universal_q = format!("UNIVERSAL::{rest}");
+                            if self.subs.contains_key(&universal_q) {
+                                found_sub = Some(universal_q);
+                            }
+                        }
+                        let q = found_sub.unwrap_or_else(|| format!("{current_pkg}::{rest}"));
+                        (rest.to_string(), q)
+                    } else {
+                        (method.clone(), String::new())
+                    };
+                let method_str: String = if resolved_class.is_empty() {
+                    method.clone()
+                } else {
+                    resolved_method
+                };
+                let method = method_str.as_str();
+                let qualified = if !resolved_class.is_empty() {
+                    resolved_class
+                } else if self.subs.contains_key(&format!("{class}::{method}")) {
                     format!("{class}::{method}")
                 } else if let Some(found) = resolve_method_via_isa(self, &class, method) {
                     found
@@ -10177,6 +10245,10 @@ impl Interpreter {
                 });
             }
             "UNIVERSAL::can" => {
+                // `OBJ->can('method')` — walks the MRO looking for a defined
+                // method, returns a code ref to it (or undef when missing).
+                // Reference perl uses C3 for any class with `use mro 'c3'`;
+                // we ask `mro::get_linear_isa` for whichever is in effect.
                 let obj = args
                     .first()
                     .map(|a| self.eval_expr(a))
@@ -10191,8 +10263,28 @@ impl Interpreter {
                 } else {
                     class
                 };
-                let q = format!("{class}::{m}");
-                return Value::Num(if self.subs.contains_key(&q) { 1.0 } else { 0.0 });
+                let kind = self
+                    .package_mro
+                    .get(&class)
+                    .cloned()
+                    .unwrap_or_else(|| "dfs".to_string());
+                let linear = if kind == "c3" {
+                    mro_linear_c3(self, &class)
+                } else {
+                    mro_linear_dfs(self, &class)
+                };
+                for c in &linear {
+                    let q = format!("{c}::{m}");
+                    if self.subs.contains_key(&q) {
+                        return Value::CodeRef(q);
+                    }
+                }
+                // Fall back to UNIVERSAL::METHOD for `->can('isa')` etc.
+                let universal_q = format!("UNIVERSAL::{m}");
+                if self.subs.contains_key(&universal_q) {
+                    return Value::CodeRef(universal_q);
+                }
+                return Value::Undef;
             }
             "bless" => {
                 // `bless REF, CLASS` — tag REF with CLASS so `ref(REF)` /
@@ -18336,38 +18428,32 @@ impl Interpreter {
 /// the method was found, or None if no class along the chain has a sub
 /// of that name.
 fn resolve_method_via_isa(interp: &Interpreter, class: &str, method: &str) -> Option<String> {
-    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
-    fn walk(
-        interp: &Interpreter,
-        class: &str,
-        method: &str,
-        visited: &mut std::collections::HashSet<String>,
-    ) -> Option<String> {
-        if !visited.insert(class.to_string()) {
-            return None;
-        }
-        let q = format!("{class}::{method}");
+    // Honour the class's MRO strategy (`use mro 'c3'` sets c3; default dfs).
+    // Without this, `Diamond_D->hello` in C3 mode would still resolve via
+    // depth-first ISA walk and pick the wrong override (mro/basic_*_c3.t).
+    let kind = interp
+        .package_mro
+        .get(class)
+        .cloned()
+        .unwrap_or_else(|| "dfs".to_string());
+    let linear = if kind == "c3" {
+        mro_linear_c3(interp, class)
+    } else {
+        mro_linear_dfs(interp, class)
+    };
+    for c in &linear {
+        let q = format!("{c}::{method}");
         if interp.subs.contains_key(&q) {
             return Some(q);
         }
-        let isa = interp.get_array(&format!("{class}::ISA"));
-        for parent in &isa {
-            let p = parent.to_str();
-            if let Some(found) = walk(interp, &p, method, visited) {
-                return Some(found);
-            }
-        }
+    }
+    // UNIVERSAL fallback (e.g. `isa`, `can`, `DOES`).
+    let q = format!("UNIVERSAL::{method}");
+    if interp.subs.contains_key(&q) {
+        Some(q)
+    } else {
         None
     }
-    walk(interp, class, method, &mut visited).or_else(|| {
-        // UNIVERSAL fallback (e.g. `isa`, `can`, `DOES`).
-        let q = format!("UNIVERSAL::{method}");
-        if interp.subs.contains_key(&q) {
-            Some(q)
-        } else {
-            None
-        }
-    })
 }
 
 fn isa_walk(interp: &Interpreter, class: &str, target: &str) -> bool {
