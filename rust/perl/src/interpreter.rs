@@ -4062,7 +4062,14 @@ impl Interpreter {
                         _ => None,
                     };
                     if let Some(name) = var_name {
-                        let n = self.eval_expr(value).to_num();
+                        let v = self.eval_expr(value);
+                        // Assigning undef to pos clears the position marker.
+                        // op/pos test 29 (foreach aliasing).
+                        if matches!(v, Value::Undef) {
+                            self.pos_offsets.remove(&name);
+                            return Value::Undef;
+                        }
+                        let n = v.to_num();
                         if n.is_nan() || n < 0.0 {
                             self.pos_offsets.remove(&name);
                         } else {
@@ -13730,6 +13737,11 @@ impl Interpreter {
                 Some("_".to_string())
             };
             if let Some(name) = name {
+                // Assigning undef clears pos. op/pos test 29.
+                if matches!(val, Value::Undef) {
+                    self.pos_offsets.remove(&name);
+                    return;
+                }
                 let n_val = val.to_num();
                 if n_val.is_nan() || n_val < 0.0 {
                     self.pos_offsets.remove(&name);
