@@ -239,6 +239,19 @@ fn run_interpreter() -> i32 {
                 );
                 std::process::exit(255);
             }
+            // `-t` (taint warnings mode) has the same shebang-vs-cmdline
+            // constraint as `-T`. run/switcht.
+            if has_shebang_flag(shebang, 't') && !args.iter().any(|a| a == "-t" || a == "-T") {
+                let file_label = if script_file.is_empty() {
+                    "-e"
+                } else {
+                    script_file.as_str()
+                };
+                eprintln!(
+                    "\"-t\" is on the #! line, it must also be used on the command line at {file_label} line 1."
+                );
+                std::process::exit(255);
+            }
             if has_shebang_flag(shebang, 'l') {
                 auto_newline = true;
             }
