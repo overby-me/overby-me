@@ -10166,13 +10166,19 @@ impl Interpreter {
                     Ok(o) => o,
                     Err(_) => return Value::Undef,
                 };
-                // Treat captured bytes as latin-1 (1 byte per char) so
-                // raw byte output from the subprocess survives without
-                // UTF-8-lossy → FFFD substitution. op/print test 3.
-                let mut out: String = output.stdout.iter().map(|&b| b as char).collect();
+                // Try strict UTF-8 decode first; fall back to latin-1
+                // (one char per byte) for invalid UTF-8. op/print test 3
+                // (raw overlong bytes) and op/join test 42 (`:utf8`-
+                // emitted multi-byte codepoints) both succeed via this.
+                let decode = |bytes: &[u8]| -> String {
+                    match std::str::from_utf8(bytes) {
+                        Ok(s) => s.to_string(),
+                        Err(_) => bytes.iter().map(|&b| b as char).collect(),
+                    }
+                };
+                let mut out = decode(&output.stdout);
                 if want_stderr {
-                    let err: String = output.stderr.iter().map(|&b| b as char).collect();
-                    out.push_str(&err);
+                    out.push_str(&decode(&output.stderr));
                 }
                 Value::Str(out)
             }
@@ -10227,13 +10233,19 @@ impl Interpreter {
                 let output = child.wait_with_output();
                 let results = match output {
                     Ok(out) => {
-                        // Treat captured bytes as latin-1 (1 char per byte)
-                        // so raw byte output survives without UTF-8-lossy
-                        // → FFFD substitution. op/print test 3.
-                        let mut combined: String = out.stdout.iter().map(|&b| b as char).collect();
-                        for &b in &out.stderr {
-                            combined.push(b as char);
-                        }
+                        // Try strict UTF-8 first (so subprocess output
+                        // emitted via `binmode :utf8` decodes to codepoint
+                        // chars — op/join test 42). Fall back to latin-1
+                        // (1 char per byte) when bytes are invalid UTF-8
+                        // — op/print test 3 with raw overlong bytes.
+                        let decode = |bytes: &[u8]| -> String {
+                            match std::str::from_utf8(bytes) {
+                                Ok(s) => s.to_string(),
+                                Err(_) => bytes.iter().map(|&b| b as char).collect(),
+                            }
+                        };
+                        let mut combined = decode(&out.stdout);
+                        combined.push_str(&decode(&out.stderr));
                         combined.trim_end_matches('\n').to_string()
                     }
                     Err(_) => String::new(),
