@@ -10662,6 +10662,21 @@ impl Interpreter {
                 }
                 return Value::Undef;
             }
+            "PerlIO::Layer::find" => {
+                // Stub: pretend the queried layer (typically "perlio") is
+                // installed so `skip_all_without_perlio` doesn't skip
+                // tests that work fine on our byte-oriented I/O. uni/chomp
+                // and similar regress to actually-runnable when we don't
+                // skip. Returns the layer name as a truthy string.
+                let layer = args
+                    .last()
+                    .map(|a| self.eval_expr(a).to_str())
+                    .unwrap_or_default();
+                if layer.is_empty() {
+                    return Value::Undef;
+                }
+                return Value::Str(layer);
+            }
             "bless" => {
                 // `bless REF, CLASS` — tag REF with CLASS so `ref(REF)` /
                 // `REF->method` / `$@->isa(…)` etc. treat it as an object
