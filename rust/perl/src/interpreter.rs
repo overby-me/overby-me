@@ -4234,6 +4234,14 @@ impl Interpreter {
                 // stores shared cells; reads transparently follow them.
                 v.resolve()
             }
+            Expr::HashKVSlice(_, _) | Expr::HashSlice(_, _) | Expr::ArraySlice(_, _) => {
+                // In scalar context a slice yields the value of its last
+                // element (or undef when the slice is empty). The
+                // eval_list path already produces the full list — we just
+                // grab the tail. op/kvhslice, op/postfixderef.
+                let list = self.eval_list(expr);
+                list.into_iter().last().unwrap_or(Value::Undef)
+            }
             Expr::HashElement(name, key) => {
                 let key_str = self.eval_expr(key).to_str();
                 // Symbol-table hash lookup: `$::{name}` / `$Pkg::{name}`
