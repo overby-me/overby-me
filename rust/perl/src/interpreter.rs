@@ -327,6 +327,11 @@ pub struct Interpreter {
     /// scope-pop semantics (saved+restored per push/pop_scope).
     strict_vars_saves: Vec<bool>,
     strict_vars: bool,
+    /// `use strict 'refs'` — when on, symbolic `&$str()`/`$$str` etc.
+    /// die before any lookup. Default off (we only flip it on for
+    /// `use strict` / `use strict 'refs'`). op/method, op/strict.
+    strict_refs_saves: Vec<bool>,
+    strict_refs: bool,
     /// Lexical `use warnings` depth. Incremented by `use warnings [cat...]`,
     /// decremented by `no warnings` or scope exit. When > 0, builtins
     /// like `join` / `substr` emit "Use of uninitialized value…"
@@ -652,6 +657,8 @@ impl Interpreter {
             bytes_mode: false,
             strict_vars_saves: Vec::new(),
             strict_vars: false,
+            strict_refs_saves: Vec::new(),
+            strict_refs: false,
             warnings_on_saves: Vec::new(),
             warnings_on: false,
             each_cursors: HashMap::new(),
@@ -3290,9 +3297,36 @@ impl Interpreter {
                         self.bytes_mode = true;
                     } else if module == "strict" {
                         // `use strict` (no args) implies vars+refs+subs.
-                        // We only enforce vars; treat any `use strict`
-                        // as enabling vars-checking inside this scope.
-                        self.strict_vars = true;
+                        // `use strict 'refs'` enables only refs;
+                        // `use strict 'vars'` only vars. Default to
+                        // enabling everything we support.
+                        if _args.is_empty() {
+                            self.strict_vars = true;
+                            self.strict_refs = true;
+                        } else {
+                            let mut any_known = false;
+                            for a in _args.iter() {
+                                let k = self.eval_expr(a).to_str();
+                                match k.as_str() {
+                                    "vars" => {
+                                        self.strict_vars = true;
+                                        any_known = true;
+                                    }
+                                    "refs" => {
+                                        self.strict_refs = true;
+                                        any_known = true;
+                                    }
+                                    "subs" => {
+                                        any_known = true;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            if !any_known {
+                                self.strict_vars = true;
+                                self.strict_refs = true;
+                            }
+                        }
                     } else if module == "warnings" {
                         // `use warnings` (with or without category args)
                         // enables warnings lexically. Builtins like join
@@ -6644,10 +6678,8 @@ impl Interpreter {
                         }
                     }
                     // `&$name(...)` where $name is a string / number —
-                    // symbolic sub call. Resolve the sub by name and
-                    // call it; if missing, die "Undefined subroutine".
-                    // (`use strict 'refs'` would normally die first, but
-                    // we don't track that pragma separately yet.)
+                    // symbolic sub call. Under `use strict 'refs'`,
+                    // die before any lookup (op/method test 8).
                     Value::Str(_) | Value::Num(_) => {
                         let name = callee_val.to_str();
                         let file = if self.current_file.is_empty() {
@@ -6656,6 +6688,12 @@ impl Interpreter {
                             self.current_file.clone()
                         };
                         let line = self.current_line;
+                        if self.strict_refs {
+                            self.pending_flow = Some(Flow::Die(format!(
+                                "Can't use string (\"{name}\") as a subroutine ref while \"strict refs\" in use at {file} line {line}.\n"
+                            )));
+                            return Value::Undef;
+                        }
                         let qualified = if name.contains("::") {
                             name.clone()
                         } else {
@@ -7297,7 +7335,38 @@ impl Interpreter {
             match module.as_str() {
                 "bytes" => self.bytes_mode = false,
                 "warnings" => self.warnings_on = false,
-                "strict" => self.strict_vars = false,
+                "strict" => {
+                    // `no strict` (no args) disables everything;
+                    // `no strict 'refs'` only refs; `no strict 'vars'`
+                    // only vars.
+                    if args.len() == 1 {
+                        self.strict_vars = false;
+                        self.strict_refs = false;
+                    } else {
+                        let mut any_known = false;
+                        for a in &args[1..] {
+                            let k = self.eval_expr(a).to_str();
+                            match k.as_str() {
+                                "vars" => {
+                                    self.strict_vars = false;
+                                    any_known = true;
+                                }
+                                "refs" => {
+                                    self.strict_refs = false;
+                                    any_known = true;
+                                }
+                                "subs" => {
+                                    any_known = true;
+                                }
+                                _ => {}
+                            }
+                        }
+                        if !any_known {
+                            self.strict_vars = false;
+                            self.strict_refs = false;
+                        }
+                    }
+                }
                 _ => {}
             }
             return Value::Num(1.0);
@@ -14293,6 +14362,7 @@ impl Interpreter {
         // `no` inside the block doesn't leak out.
         self.bytes_mode_saves.push(self.bytes_mode);
         self.strict_vars_saves.push(self.strict_vars);
+        self.strict_refs_saves.push(self.strict_refs);
         self.warnings_on_saves.push(self.warnings_on);
         self.fatal_warnings_saves.push(self.fatal_warnings);
     }
@@ -14422,6 +14492,9 @@ impl Interpreter {
         }
         if let Some(prev) = self.strict_vars_saves.pop() {
             self.strict_vars = prev;
+        }
+        if let Some(prev) = self.strict_refs_saves.pop() {
+            self.strict_refs = prev;
         }
         if let Some(prev) = self.warnings_on_saves.pop() {
             self.warnings_on = prev;

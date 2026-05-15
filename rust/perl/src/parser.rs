@@ -470,6 +470,34 @@ impl Parser {
                 self.pos += 1;
                 return Some(self.parse_use());
             }
+            // `no MODULE LIST;` — disable pragma. Parse like `use` but
+            // wrap the result as a Call to `no(MODULE, ARGS)` so the
+            // runtime can intercept it. Without this, `no strict "refs"`
+            // parses as nested bareword calls and the strict argument
+            // never reaches the pragma handler. op/method test 8.
+            Token::Ident(n)
+                if n == "no"
+                    && matches!(
+                        self.peek(1),
+                        Token::Ident(_)
+                            | Token::If
+                            | Token::Unless
+                            | Token::While
+                            | Token::Until
+                            | Token::For
+                            | Token::Foreach
+                    ) =>
+            {
+                self.pos += 1;
+                let stmt = self.parse_use();
+                if let Stmt::Use(module, args, _end_line) = stmt {
+                    let mut call_args: Vec<Expr> = Vec::with_capacity(args.len() + 1);
+                    call_args.push(Expr::StringLit(module));
+                    call_args.extend(args);
+                    return Some(Stmt::Expr(Expr::Call("no".to_string(), call_args)));
+                }
+                return Some(stmt);
+            }
             Token::Require => {
                 self.pos += 1;
                 let expr = self.parse_expr();
