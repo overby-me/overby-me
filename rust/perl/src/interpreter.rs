@@ -1183,7 +1183,18 @@ impl Interpreter {
                 self.exit_code = code;
             }
             Flow::Die(msg) => {
-                self.exit_code = 255;
+                // Reference perl chooses the wait-status low byte from
+                // `$!` if non-zero, then `$? >> 8` if non-zero, then 255.
+                // op/die_exit walks every combination.
+                let bang = self.get_var("!").to_num() as i32;
+                let query = self.get_var("?").to_num() as i32;
+                self.exit_code = if bang != 0 {
+                    bang & 0xff
+                } else if (query >> 8) != 0 {
+                    (query >> 8) & 0xff
+                } else {
+                    255
+                };
                 eprint!("{msg}");
             }
             // `last`/`next`/`redo` outside any enclosing loop block —
@@ -3704,15 +3715,15 @@ impl Interpreter {
                 };
                 let msg = if args.is_empty() {
                     let prev = self.get_var("@").to_str();
-                    if prev.is_empty() {
-                        "Died at -- line 0.\n".to_string()
+                    let file = if self.current_file.is_empty() {
+                        "-e".to_string()
                     } else {
-                        let file = if self.current_file.is_empty() {
-                            "-e".to_string()
-                        } else {
-                            self.current_file.clone()
-                        };
-                        let line = self.current_line;
+                        self.current_file.clone()
+                    };
+                    let line = self.current_line;
+                    if prev.is_empty() {
+                        format!("Died at {file} line {line}.\n")
+                    } else {
                         format!("{prev}\t...propagated at {file} line {line}.\n")
                     }
                 } else if let Some(ref v) = ref_arg {
@@ -4171,9 +4182,34 @@ impl Interpreter {
         };
         match fh_name.as_deref() {
             Some("STDERR") => {
+                // Honour user `open STDERR, ">", $file` redirects: if a
+                // write handle has been bound to STDERR, write there
+                // instead of the underlying stderr fd. op/die_exit.
+                let resolved = self.resolve_fh("STDERR");
+                if let Some(writer) = self.write_handles.get_mut(&resolved) {
+                    let _ = writer.write_all(&bytes);
+                    return;
+                }
+                if let Some(rc) = self.string_write_handles.get(&resolved) {
+                    let mut s = rc.borrow().to_str();
+                    s.push_str(text);
+                    *rc.borrow_mut() = Value::Str(s);
+                    return;
+                }
                 let _ = io::stderr().write_all(&bytes);
             }
             Some("STDOUT") | None => {
+                let resolved = self.resolve_fh("STDOUT");
+                if let Some(writer) = self.write_handles.get_mut(&resolved) {
+                    let _ = writer.write_all(&bytes);
+                    return;
+                }
+                if let Some(rc) = self.string_write_handles.get(&resolved) {
+                    let mut s = rc.borrow().to_str();
+                    s.push_str(text);
+                    *rc.borrow_mut() = Value::Str(s);
+                    return;
+                }
                 let _ = io::stdout().write_all(&bytes);
             }
             Some(name) => {
@@ -18425,6 +18461,20 @@ impl Interpreter {
                     // the existing file size (not 0).
                     if append_mode {
                         let _ = f.seek(SeekFrom::End(0));
+                    }
+                    // Redirect the real stdout/stderr file descriptor when
+                    // the user opens one of the standard handles — `dup2`
+                    // so library-level writes (println!, eprintln!) also
+                    // land in the target file. op/die_exit redirects
+                    // STDERR before spawning child processes whose
+                    // stderr inherits from us.
+                    if matches!(
+                        resolved.as_str(),
+                        "STDOUT" | "STDERR" | "main::STDOUT" | "main::STDERR"
+                    ) {
+                        use std::os::fd::AsRawFd;
+                        let target_fd = if resolved.ends_with("STDERR") { 2 } else { 1 };
+                        unsafe { libc::dup2(f.as_raw_fd(), target_fd) };
                     }
                     self.write_handles.insert(resolved, BufWriter::new(f));
                     Value::Num(1.0)
