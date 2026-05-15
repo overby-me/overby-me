@@ -8549,6 +8549,34 @@ impl Interpreter {
                     .unwrap_or(0.0);
                 Value::Num(secs)
             }
+            "times" => {
+                // `times` — returns (user, system, cuser, csys) CPU
+                // times in seconds. Use libc::times for real values;
+                // fall back to all-zero if the syscall is unavailable.
+                let (user, sys, cuser, csys) = unsafe {
+                    let mut buf: libc::tms = std::mem::zeroed();
+                    let ticks = libc::sysconf(libc::_SC_CLK_TCK) as f64;
+                    let _ = libc::times(&mut buf);
+                    if ticks > 0.0 {
+                        (
+                            buf.tms_utime as f64 / ticks,
+                            buf.tms_stime as f64 / ticks,
+                            buf.tms_cutime as f64 / ticks,
+                            buf.tms_cstime as f64 / ticks,
+                        )
+                    } else {
+                        (0.0, 0.0, 0.0, 0.0)
+                    }
+                };
+                self.last_list_val = Some(vec![
+                    Value::Num(user),
+                    Value::Num(sys),
+                    Value::Num(cuser),
+                    Value::Num(csys),
+                ]);
+                // Scalar context returns the first (user) time.
+                Value::Num(user)
+            }
             "gmtime" | "localtime" => {
                 // gmtime(EXPR) / localtime(EXPR) — return undef if EXPR is
                 // out of range (so 2**63 etc. don't loop forever computing
@@ -8573,7 +8601,50 @@ impl Interpreter {
                 if !(-67768040609740800..=67767976233532799).contains(&secs) {
                     return Value::Undef;
                 }
-                Value::Undef
+                // Decompose via libc's gmtime_r / localtime_r so the
+                // 9-element list matches reference perl (sec, min,
+                // hour, mday, mon, year, wday, yday, isdst). op/time.
+                let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+                let secs_c: libc::time_t = secs as libc::time_t;
+                let ok = unsafe {
+                    if name == "gmtime" {
+                        !libc::gmtime_r(&secs_c, &mut tm).is_null()
+                    } else {
+                        !libc::localtime_r(&secs_c, &mut tm).is_null()
+                    }
+                };
+                if !ok {
+                    return Value::Undef;
+                }
+                let list = vec![
+                    Value::Num(tm.tm_sec as f64),
+                    Value::Num(tm.tm_min as f64),
+                    Value::Num(tm.tm_hour as f64),
+                    Value::Num(tm.tm_mday as f64),
+                    Value::Num(tm.tm_mon as f64),
+                    Value::Num(tm.tm_year as f64),
+                    Value::Num(tm.tm_wday as f64),
+                    Value::Num(tm.tm_yday as f64),
+                    Value::Num(tm.tm_isdst as f64),
+                ];
+                // Scalar context: ctime-style string "Day Mon DD HH:MM:SS YYYY".
+                let day_name = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+                let mon_name = [
+                    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
+                    "Dec",
+                ];
+                let scalar = format!(
+                    "{} {} {:>2} {:02}:{:02}:{:02} {}",
+                    day_name[tm.tm_wday as usize % 7],
+                    mon_name[tm.tm_mon as usize % 12],
+                    tm.tm_mday,
+                    tm.tm_hour,
+                    tm.tm_min,
+                    tm.tm_sec,
+                    tm.tm_year + 1900,
+                );
+                self.last_list_val = Some(list);
+                Value::Str(scalar)
             }
             "pos" => {
                 // `pos($var)` / `pos(*glob)` — current `/g` match offset
