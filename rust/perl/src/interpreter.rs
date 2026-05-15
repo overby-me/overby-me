@@ -8549,6 +8549,16 @@ impl Interpreter {
                     .unwrap_or(0.0);
                 Value::Num(secs)
             }
+            "alarm" => {
+                // `alarm SECS` — set a SIGALRM timer; returns the
+                // previous value. op/sigdispatch, t/test.pl's watchdog.
+                let secs = args
+                    .first()
+                    .map(|a| self.eval_expr(a).to_num() as libc::c_uint)
+                    .unwrap_or(0);
+                let prev = unsafe { libc::alarm(secs) };
+                Value::Num(prev as f64)
+            }
             "times" => {
                 // `times` — returns (user, system, cuser, csys) CPU
                 // times in seconds. Use libc::times for real values;
