@@ -934,7 +934,17 @@ impl Parser {
     }
 
     fn parse_while(&mut self) -> Stmt {
-        let cond = self.parse_paren_expr();
+        // `while ()` is special: reference perl parses the empty
+        // condition as `1` so the loop runs indefinitely (exit via
+        // `last`). Benchmark::countit's "real timing" tail uses this
+        // form. Without the special case, the empty `()` parses as
+        // Undef → falsy → never enters the loop.
+        let cond = if self.at(&Token::LParen) && self.peek(1) == &Token::RParen {
+            self.pos += 2;
+            Expr::IntLit(1)
+        } else {
+            self.parse_paren_expr()
+        };
         let cond = wrap_iter_cond_with_defined(cond);
         let body = self.parse_brace_block();
         let continue_body = self.try_parse_continue();
@@ -3767,6 +3777,17 @@ impl Parser {
                 let inner = self.parse_expr();
                 self.expect(&Token::RBrace);
                 Expr::Call("_array_block_deref".to_string(), vec![inner])
+            }
+            Token::GlobBlockDerefOpen => {
+                // `*{ EXPR }` — block-form glob deref where EXPR is a
+                // string/expression that names a glob. Wrap in a
+                // `_glob_block_deref` call so assign_to can recognise
+                // the LHS and route the typeglob assignment.
+                self.pos += 1;
+                self.eat(&Token::LBrace);
+                let inner = self.parse_expr();
+                self.expect(&Token::RBrace);
+                Expr::Call("_glob_block_deref".to_string(), vec![inner])
             }
             Token::HashBlockDerefOpen => {
                 // `%{ EXPR }` — evaluate EXPR, treat its result as a hash

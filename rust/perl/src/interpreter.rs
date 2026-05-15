@@ -2543,10 +2543,49 @@ impl Interpreter {
                             }
                             self.set_hash_from_list(var_name, items);
                         } else {
-                            let val = init
-                                .as_ref()
-                                .map(|e| self.eval_expr(e))
-                                .unwrap_or(Value::Undef);
+                            // `my $a = expr OP rest` where OP is `or` /
+                            // `and` / `xor`: these are *lower* precedence
+                            // than `=`, so reference perl parses this as
+                            // `(my $a = expr) OP rest`. Our parser eagerly
+                            // consumes the connective into the init AST as
+                            // `Or(expr, rest)` (parse_expr is the parser
+                            // entry point). Re-shape at eval time so the
+                            // LHS becomes the assigned value and the RHS
+                            // only runs as a side-effect when the LHS
+                            // triggers the connective. The Exporter idiom
+                            // `my $args = @_ or @_ = @exports` depends on
+                            // this — $args must be the original @_ count
+                            // (0), with @_ getting reseeded from @exports.
+                            let val = match init.as_ref() {
+                                Some(Expr::BinOp(BinOp::Or, l, r)) => {
+                                    let lv = self.eval_expr(l);
+                                    if let Some(flow) = self.pending_flow.take() {
+                                        return flow;
+                                    }
+                                    if !lv.to_bool() {
+                                        let _ = self.eval_expr(r);
+                                        if let Some(flow) = self.pending_flow.take() {
+                                            return flow;
+                                        }
+                                    }
+                                    lv
+                                }
+                                Some(Expr::BinOp(BinOp::And, l, r)) => {
+                                    let lv = self.eval_expr(l);
+                                    if let Some(flow) = self.pending_flow.take() {
+                                        return flow;
+                                    }
+                                    if lv.to_bool() {
+                                        let _ = self.eval_expr(r);
+                                        if let Some(flow) = self.pending_flow.take() {
+                                            return flow;
+                                        }
+                                    }
+                                    lv
+                                }
+                                Some(e) => self.eval_expr(e),
+                                None => Value::Undef,
+                            };
                             if let Some(flow) = self.pending_flow.take() {
                                 return flow;
                             }
@@ -2900,7 +2939,16 @@ impl Interpreter {
                         // really aliases to package globals, so we
                         // exclude them via `aliased_vars`/`aliased_arrays`/
                         // `aliased_hashes`. op/fresh_perl_utf8.
+                        //
+                        // `$_` is special: reference perl rejects `my $_`
+                        // outright (since 5.24), so `local $_` can never
+                        // hit the lexical-localize error. Our foreach
+                        // loop binds `$_` in the scope's vars map, which
+                        // would falsely trip the check below. Exclude
+                        // the bare `_` name. benchmark/gh7094 (Benchmark
+                        // runloop emits `local $_;`).
                         if !var_name.is_empty()
+                            && var_name != "_"
                             && var_name
                                 .chars()
                                 .next()
@@ -3024,7 +3072,25 @@ impl Interpreter {
                             if let Some(rc) = self.aliased_vars.get(var_name) {
                                 *rc.borrow_mut() = val;
                             } else {
-                                self.globals.vars.insert(var_name.to_string(), val);
+                                // `$_` may have been bound in a parent
+                                // scope by `foreach` — masking that
+                                // binding requires writing the localised
+                                // value into the *current* scope.vars so
+                                // get_var (which walks scopes innermost-
+                                // first) sees the local before the
+                                // foreach alias. The scope binding dies
+                                // naturally on pop_scope; globals.vars
+                                // gets the standard save+restore so any
+                                // sub call made before scope-pop also
+                                // sees the localised value via the
+                                // global fallback (benchmark/gh7094's
+                                // `Benchmark::runloop` emits `local $_;`).
+                                self.globals.vars.insert(var_name.to_string(), val.clone());
+                                if var_name == "_"
+                                    && let Some(scope) = self.scopes.last_mut()
+                                {
+                                    scope.vars.insert(var_name.to_string(), val);
+                                }
                             }
                         }
                     }
@@ -3504,7 +3570,13 @@ impl Interpreter {
                     // flag we don't track; passing zero args still means
                     // import() is called with zero args, which Exporter etc.
                     // treat as the empty-export case.
-                    let import_sub = format!("{module}::import");
+                    // `Foo->import` may live in Exporter via `@Foo::ISA =
+                    // ('Exporter')` rather than as a direct `Foo::import`
+                    // sub. Walk @ISA so the canonical Exporter pattern (the
+                    // one Benchmark, Carp, etc. use) actually installs
+                    // names into the caller's namespace.
+                    let import_sub = resolve_method_via_isa(self, module, "import")
+                        .unwrap_or_else(|| format!("{module}::import"));
                     if self.subs.contains_key(&import_sub) {
                         let mut call_args: Vec<Value> = vec![Value::Str(module.clone())];
                         for a in import_args.iter() {
@@ -5989,6 +6061,11 @@ impl Interpreter {
                     let here = self.subs.contains_key(name);
                     let q = format!("{}::{}", self.package, name);
                     let qualified = self.subs.contains_key(&q);
+                    // `defined &main::name` should find a sub stored as
+                    // bare `name`, since main:: and bare names share the
+                    // same symbol table slot. Strip `main::` and retry.
+                    let stripped = name.strip_prefix("main::").unwrap_or(name);
+                    let stripped_hit = stripped != name && self.subs.contains_key(stripped);
                     // Forward-only declarations (`sub name;`) are NOT
                     // defined: `exists &name` is true but `defined &name`
                     // must be false. op/exists_sub.
@@ -6003,11 +6080,13 @@ impl Interpreter {
                             | "Internals::stack_refcounted"
                             | "DynaLoader::boot_DynaLoader"
                     );
-                    return Value::Num(if ((here || qualified) && !declared_only) || builtin {
-                        1.0
-                    } else {
-                        0.0
-                    });
+                    return Value::Num(
+                        if ((here || qualified || stripped_hit) && !declared_only) || builtin {
+                            1.0
+                        } else {
+                            0.0
+                        },
+                    );
                 }
                 if let Expr::CodeCall(inner, sub_args) = expr.as_ref()
                     && sub_args.is_empty()
@@ -6398,6 +6477,63 @@ impl Interpreter {
                             format!("{}::{name}", self.package)
                         };
                         Value::ScalarRef(std::rc::Rc::new(std::cell::RefCell::new(Value::Glob(q))))
+                    }
+                    // `\@{EXPR}` where EXPR is a symbolic array name —
+                    // reference perl returns an ArrayRef to the global
+                    // array of that name (matches `no strict 'refs'`).
+                    // Without this, the catch-all arm evaluates the inner
+                    // deref in scalar context (getting the array length)
+                    // and wraps it in a ScalarRef. Exporter.pm's
+                    // `\@{"$pkg\::EXPORT"}` depends on this to share the
+                    // package's EXPORT array as a ref. Same idea for
+                    // `\%{EXPR}` and `\&{EXPR}` (handled above already).
+                    Expr::Call(n, dargs) if n == "_array_block_deref" && !dargs.is_empty() => {
+                        let inner = self.eval_expr(&dargs[0]);
+                        match &inner {
+                            Value::ArrayRef(r) => Value::ArrayRef(r.clone()),
+                            Value::Str(_) | Value::Num(_) => {
+                                let name = inner.to_str();
+                                let qname = self.qualify_global(&name);
+                                let rc = if let Some(rc) = self.aliased_arrays.get(qname.as_str()) {
+                                    rc.clone()
+                                } else {
+                                    let arr = self
+                                        .globals
+                                        .arrays
+                                        .remove(qname.as_str())
+                                        .unwrap_or_default();
+                                    let rc = std::rc::Rc::new(std::cell::RefCell::new(arr));
+                                    self.aliased_arrays.insert(qname, rc.clone());
+                                    rc
+                                };
+                                Value::ArrayRef(rc)
+                            }
+                            _ => Value::ScalarRef(std::rc::Rc::new(std::cell::RefCell::new(inner))),
+                        }
+                    }
+                    Expr::Call(n, dargs) if n == "_hash_block_deref" && !dargs.is_empty() => {
+                        let inner = self.eval_expr(&dargs[0]);
+                        match &inner {
+                            Value::HashRef(r) => Value::HashRef(r.clone()),
+                            Value::Str(_) | Value::Num(_) => {
+                                let name = inner.to_str();
+                                let qname = self.qualify_global(&name);
+                                let rc = if let Some(rc) = self.aliased_hashes.get(qname.as_str()) {
+                                    rc.clone()
+                                } else {
+                                    let h = self
+                                        .globals
+                                        .hashes
+                                        .remove(qname.as_str())
+                                        .unwrap_or_default();
+                                    let rc = std::rc::Rc::new(std::cell::RefCell::new(h));
+                                    self.aliased_hashes.insert(qname, rc.clone());
+                                    rc
+                                };
+                                Value::HashRef(rc)
+                            }
+                            _ => Value::ScalarRef(std::rc::Rc::new(std::cell::RefCell::new(inner))),
+                        }
                     }
                     _ => {
                         let v = self.eval_expr(expr);
@@ -15558,6 +15694,14 @@ impl Interpreter {
                     }
                     _ => {}
                 }
+            }
+            Expr::Call(n, sub_args) if n == "_glob_block_deref" && !sub_args.is_empty() => {
+                // `*{EXPR} = …` — evaluate EXPR to a string giving the
+                // target glob name, then dispatch through `Expr::GlobVar`
+                // assignment. Exporter installs `*main::name = \&Pkg::name`
+                // via this path.
+                let target_name = self.eval_expr(&sub_args[0]).to_str();
+                return self.assign_to(&Expr::GlobVar(target_name), val);
             }
             Expr::GlobVar(name) => {
                 // `*FH = *SRC` — alias the FH filehandle slot (symbol-table

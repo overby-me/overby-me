@@ -187,6 +187,13 @@ pub enum Token {
     /// `%{ EXPR }` — block-form hash deref. The inner expression is
     /// evaluated; its result (a hash ref) is dereferenced as a hash.
     HashBlockDerefOpen,
+    /// `*{ EXPR }` — block-form glob deref where the inner expression is
+    /// not a bare ident or `$VAR` (those forms collapse straight to
+    /// `Token::Glob(...)`). Parser wraps the inner as a `_glob_block_deref`
+    /// call so `assign_to` can treat the assignment as
+    /// `*<EXPR-as-name> = ...`. Required for Exporter's
+    /// `*{"$callpkg\::$_"} = \&{"$pkg\::$_"}` idiom.
+    GlobBlockDerefOpen,
 
     // Delimiters
     LParen,
@@ -1907,8 +1914,12 @@ impl Lexer {
                             || last_is_named_unary(tokens.last()))
                     {
                         // `*{ EXPR }` — block-form glob deref. Supports the
-                        // common forms `*{NAME}` and `*{$var}`; complex
-                        // EXPRs fall back to a plain Star token.
+                        // common forms `*{NAME}` and `*{$var}` (collapse
+                        // directly to a `Token::Glob`). For arbitrary
+                        // expressions (e.g. `*{"main::$x"} = ...` in
+                        // Exporter), emit the GlobBlockDerefOpen sentinel
+                        // so the parser handles the inner expression and
+                        // assign_to can route the result.
                         let save = self.pos;
                         self.pos += 1;
                         if self.ch() == '$'
@@ -1921,7 +1932,7 @@ impl Lexer {
                                 tokens.push(Token::Glob(format!("${n}")));
                             } else {
                                 self.pos = save;
-                                tokens.push(Token::Star);
+                                tokens.push(Token::GlobBlockDerefOpen);
                             }
                         } else if self.ch() == '_'
                             || self.ch().is_ascii_alphabetic()
@@ -1933,11 +1944,11 @@ impl Lexer {
                                 tokens.push(Token::Glob(n));
                             } else {
                                 self.pos = save;
-                                tokens.push(Token::Star);
+                                tokens.push(Token::GlobBlockDerefOpen);
                             }
                         } else {
                             self.pos = save;
-                            tokens.push(Token::Star);
+                            tokens.push(Token::GlobBlockDerefOpen);
                         }
                     } else if (self.ch() == '_'
                         || self.ch().is_ascii_alphabetic()
