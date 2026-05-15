@@ -10843,6 +10843,26 @@ impl Interpreter {
                     Value::Undef
                 }
             }
+            "glob" => {
+                // `glob(PATTERN)` — shell-style file globbing. Reference
+                // perl auto-loads File::Glob to implement this; we
+                // provide a minimal wildcard expander using std::fs.
+                // List context returns all matches; scalar context (and
+                // `while (my $f = glob …)`) drains the iterator one at
+                // a time. Returning all matches each call is good
+                // enough for the common cases. op/defins.
+                let pat = args
+                    .first()
+                    .map(|a| self.eval_expr(a).to_str())
+                    .unwrap_or_default();
+                let matches = glob_match(&pat);
+                self.last_list_val = Some(matches.iter().cloned().map(Value::Str).collect());
+                matches
+                    .into_iter()
+                    .last()
+                    .map(Value::Str)
+                    .unwrap_or(Value::Undef)
+            }
             "chdir" => {
                 if let Some(arg) = args.first() {
                     let dir = self.eval_expr(arg).to_str();
@@ -19251,6 +19271,71 @@ fn apply_case_modifiers(s: &str) -> String {
         }
     }
     out
+}
+
+/// Minimal shell-style glob: handles `*`, `?`, and literal text. No
+/// brace expansion or character classes. Reads the parent directory
+/// once and filters by the last path segment's pattern; supports
+/// patterns of the form `[dir/]PATTERN` (without `/` inside the
+/// pattern itself). Returns lexicographically sorted matches.
+fn glob_match(pattern: &str) -> Vec<String> {
+    let (dir_part, pat_part) = match pattern.rfind('/') {
+        Some(i) => (&pattern[..i], &pattern[i + 1..]),
+        None => (".", pattern),
+    };
+    let dir = if dir_part.is_empty() { "/" } else { dir_part };
+    let entries = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(_) => return Vec::new(),
+    };
+    let mut out: Vec<String> = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let n = name.to_string_lossy().to_string();
+        // Skip dotfiles unless the pattern starts with `.`.
+        if n.starts_with('.') && !pat_part.starts_with('.') {
+            continue;
+        }
+        if glob_match_one(pat_part, &n) {
+            let prefix =
+                if dir_part.is_empty() || pattern.starts_with(['/']) || pattern.contains('/') {
+                    format!("{dir_part}/")
+                } else {
+                    String::new()
+                };
+            out.push(format!("{prefix}{n}"));
+        }
+    }
+    out.sort();
+    out
+}
+
+fn glob_match_one(pat: &str, name: &str) -> bool {
+    let pb = pat.as_bytes();
+    let nb = name.as_bytes();
+    // Recursive matcher with O(p*n) worst case via memo on (i, j).
+    fn rec(pb: &[u8], nb: &[u8], i: usize, j: usize) -> bool {
+        if i == pb.len() {
+            return j == nb.len();
+        }
+        match pb[i] {
+            b'*' => {
+                let mut k = j;
+                loop {
+                    if rec(pb, nb, i + 1, k) {
+                        return true;
+                    }
+                    if k >= nb.len() {
+                        return false;
+                    }
+                    k += 1;
+                }
+            }
+            b'?' => j < nb.len() && rec(pb, nb, i + 1, j + 1),
+            c => j < nb.len() && nb[j] == c && rec(pb, nb, i + 1, j + 1),
+        }
+    }
+    rec(pb, nb, 0, 0)
 }
 
 fn compile_time_use_check(
