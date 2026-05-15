@@ -4704,6 +4704,31 @@ impl Parser {
                 {
                     return Expr::Call(name, Vec::new());
                 }
+                // `prototype` is a named-unary — consume exactly one
+                // arg without parens. Without this, `prototype "CORE::"
+                // . $k, $k` parses as `prototype($k_concatenated, $k)`,
+                // hiding `$k` from the surrounding call's arg list.
+                // op/cproto, comp/proto.
+                if name == "prototype" && !self.at(&Token::LParen) {
+                    let arg_starts = !matches!(
+                        self.tok(),
+                        Token::Semi
+                            | Token::Comma
+                            | Token::FatComma
+                            | Token::RParen
+                            | Token::RBrace
+                            | Token::RBracket
+                            | Token::EOF
+                            | Token::Newline
+                    );
+                    if arg_starts {
+                        // Use parse_additive so `prototype "CORE::"."abs"`
+                        // (concat binds tighter than the named-unary
+                        // arg-consume) parses as `prototype("CORE::"."abs")`.
+                        return Expr::Call(name, vec![self.parse_additive()]);
+                    }
+                    return Expr::Call(name, Vec::new());
+                }
                 // `pos` with no parens / no arg-starter defaults to $_
                 // (named unary). Without this, bare `pos` (e.g. inside
                 // `sub position : lvalue { pos }`) is parsed as the

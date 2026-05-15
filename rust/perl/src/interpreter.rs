@@ -7723,6 +7723,26 @@ impl Interpreter {
                 } else {
                     return Value::Undef;
                 };
+                // `prototype("CORE::NAME")` — return the builtin's
+                // declared prototype (op/cproto). Unknown CORE names
+                // die with "Can't find an opnumber for NAME", which we
+                // emit via pending_flow so the surrounding eval catches it.
+                if let Value::Str(s) = &arg_val
+                    && let Some(rest) = s.strip_prefix("CORE::")
+                {
+                    if let Some(p) = core_builtin_prototype(rest) {
+                        return match p {
+                            Some(proto) => Value::Str(proto.to_string()),
+                            None => Value::Undef,
+                        };
+                    } else {
+                        self.pending_flow = Some(Flow::Die(format!(
+                            "Can't find an opnumber for \"{rest}\" at -e line {}.\n",
+                            self.current_line
+                        )));
+                        return Value::Undef;
+                    }
+                }
                 let sub_name: Option<String> = match &arg_val {
                     Value::CodeRef(n) => Some(n.clone()),
                     Value::Str(s) => {
@@ -19271,6 +19291,211 @@ fn apply_case_modifiers(s: &str) -> String {
         }
     }
     out
+}
+
+/// Look up the declared prototype for a CORE:: builtin. Outer
+/// `Option`: whether the name is a known builtin at all. Inner
+/// `Option<&'static str>`: the prototype string (`Some("$$")` for
+/// `atan2`, `Some("")` for an empty `()` prototype, `None` for
+/// builtins like `chomp` whose prototype is reported as undef).
+/// Data source: t/op/cproto.t's __DATA__ block.
+fn core_builtin_prototype(name: &str) -> Option<Option<&'static str>> {
+    let r: Option<&'static str> = match name {
+        "__FILE__" | "__LINE__" | "__PACKAGE__" | "__SUB__" => Some(""),
+        "__DATA__" | "__END__" | "AUTOLOAD" | "BEGIN" => None,
+        // `CORE` itself is listed as "unknown" — pretend it's a
+        // valid builtin with no prototype so callers don't die. The
+        // op/cproto test uses a `like $@, qr/.../i` rather than an
+        // explicit prototype check for it.
+        "DESTROY" | "END" | "INIT" | "CHECK" => None,
+        "abs" => Some("_"),
+        "accept" => Some("**"),
+        "alarm" => Some("_"),
+        "atan2" => Some("$$"),
+        "bind" => Some("*$"),
+        "binmode" => Some("*;$"),
+        "bless" => Some("$;$"),
+        "break" => Some(""),
+        "caller" => Some(";$"),
+        "chdir" => Some(";$"),
+        "chmod" => Some("@"),
+        "chown" => Some("@"),
+        "chr" => Some("_"),
+        "chroot" => Some("_"),
+        "close" => Some(";*"),
+        "closedir" => Some("*"),
+        "connect" => Some("*$"),
+        "continue" => Some(""),
+        "cos" => Some("_"),
+        "crypt" => Some("$$"),
+        "dbmclose" => Some("\\%"),
+        "dbmopen" => Some("\\%$$"),
+        "die" => Some("@"),
+        "dump" => Some(""),
+        "each" => Some("\\[%@]"),
+        "endgrent" | "endhostent" | "endnetent" | "endprotoent" | "endpwent" | "endservent" => {
+            Some("")
+        }
+        "eof" => Some(";*"),
+        "evalbytes" => Some("_"),
+        "exit" => Some(";$"),
+        "exp" => Some("_"),
+        "fc" => Some("_"),
+        "fcntl" => Some("*$$"),
+        "fileno" => Some("*"),
+        "flock" => Some("*$"),
+        "fork" => Some(""),
+        "formline" => Some("$@"),
+        "getc" => Some(";*"),
+        "getgrent" => Some(""),
+        "getgrgid" => Some("$"),
+        "getgrnam" => Some("$"),
+        "gethostbyaddr" => Some("$$"),
+        "gethostbyname" => Some("$"),
+        "gethostent" => Some(""),
+        "getlogin" => Some(""),
+        "getnetbyaddr" => Some("$$"),
+        "getnetbyname" => Some("$"),
+        "getnetent" => Some(""),
+        "getpeername" => Some("*"),
+        "getpgrp" => Some(";$"),
+        "getppid" => Some(""),
+        "getpriority" => Some("$$"),
+        "getprotobyname" => Some("$"),
+        "getprotobynumber" => Some("$;"),
+        "getprotoent" => Some(""),
+        "getpwent" => Some(""),
+        "getpwnam" => Some("$"),
+        "getpwuid" => Some("$"),
+        "getservbyname" => Some("$$"),
+        "getservbyport" => Some("$$"),
+        "getservent" => Some(""),
+        "getsockname" => Some("*"),
+        "getsockopt" => Some("*$$"),
+        "glob" => Some("_;"),
+        "gmtime" => Some(";$"),
+        "hex" => Some("_"),
+        "index" => Some("$$;$"),
+        "int" => Some("_"),
+        "ioctl" => Some("*$$"),
+        "join" => Some("$@"),
+        "keys" => Some("\\[%@]"),
+        "kill" => Some("@"),
+        "lc" | "lcfirst" => Some("_"),
+        "length" => Some("_"),
+        "link" => Some("$$"),
+        "listen" => Some("*$"),
+        "localtime" => Some(";$"),
+        "lock" => Some("\\[$@%&*]"),
+        "log" => Some("_"),
+        "lstat" => Some(";*"),
+        "mkdir" => Some("_;$"),
+        "msgctl" => Some("$$$"),
+        "msgget" => Some("$$"),
+        "msgrcv" => Some("$$$$$"),
+        "msgsnd" => Some("$$$"),
+        "not" => Some("$;"),
+        "oct" => Some("_"),
+        "open" => Some("*;$@"),
+        "opendir" => Some("*$"),
+        "ord" => Some("_"),
+        "pack" => Some("$@"),
+        "pipe" => Some("**"),
+        "pop" => Some(";\\@"),
+        "pos" => Some(";\\[$*]"),
+        "prototype" => Some("_"),
+        "push" => Some("\\@@"),
+        "quotemeta" => Some("_"),
+        "rand" => Some(";$"),
+        "read" => Some("*\\$$;$"),
+        "readdir" => Some("*"),
+        "readline" => Some(";*"),
+        "readlink" => Some("_"),
+        "readpipe" => Some("_"),
+        "recv" => Some("*\\$$$"),
+        "ref" => Some("_"),
+        "rename" => Some("$$"),
+        "reset" => Some(";$"),
+        "reverse" => Some("@"),
+        "rewinddir" => Some("*"),
+        "rindex" => Some("$$;$"),
+        "rmdir" => Some("_"),
+        "scalar" => Some("$"),
+        "seek" => Some("*$$"),
+        "seekdir" => Some("*$"),
+        "semctl" => Some("$$$$"),
+        "semget" => Some("$$$"),
+        "semop" => Some("$$"),
+        "send" => Some("*$$;$"),
+        "setgrent" | "setpwent" => Some(""),
+        "sethostent" | "setnetent" | "setprotoent" | "setservent" => Some("$"),
+        "setpgrp" => Some(";$$"),
+        "setpriority" => Some("$$$"),
+        "setsockopt" => Some("*$$$"),
+        "shift" => Some(";\\@"),
+        "shmctl" => Some("$$$"),
+        "shmget" => Some("$$$"),
+        "shmread" => Some("$$$$"),
+        "shmwrite" => Some("$$$$"),
+        "shutdown" => Some("*$"),
+        "sin" => Some("_"),
+        "sleep" => Some(";$"),
+        "socket" => Some("*$$$"),
+        "socketpair" => Some("**$$$"),
+        "splice" => Some("\\@;$$@"),
+        "sprintf" => Some("$@"),
+        "sqrt" => Some("_"),
+        "srand" => Some(";$"),
+        "stat" => Some(";*"),
+        "study" => Some("_"),
+        "substr" => Some("$$;$$"),
+        "symlink" => Some("$$"),
+        "syscall" => Some("$@"),
+        "sysopen" => Some("*$$;$"),
+        "sysread" => Some("*\\$$;$"),
+        "sysseek" => Some("*$$"),
+        "syswrite" => Some("*$;$$"),
+        "tell" => Some(";*"),
+        "telldir" => Some("*"),
+        "tie" => Some("\\[$@%*]$@"),
+        "tied" => Some("\\[$@%*]"),
+        "time" | "times" => Some(""),
+        "truncate" => Some("$$"),
+        "uc" | "ucfirst" => Some("_"),
+        "umask" => Some(";$"),
+        "undef" => Some(";\\[$@%&*]"),
+        "unlink" => Some("@"),
+        "unpack" => Some("$_"),
+        "unshift" => Some("\\@@"),
+        "untie" => Some("\\[$@%*]"),
+        "utime" => Some("@"),
+        "values" => Some("\\[%@]"),
+        "vec" => Some("$$$"),
+        "wait" => Some(""),
+        "waitpid" => Some("$$"),
+        "wantarray" => Some(""),
+        "warn" => Some("@"),
+        "write" => Some(";*"),
+        // Bareword keywords / list operators reported as undef by
+        // perl: `and`, `or`, `chomp`, `chop`, `defined`, `delete`,
+        // `do`, `eval`, `exec`, `exists`, `for`, `foreach`,
+        // `format`, `goto`, `grep`, `if`, `last`, `local`, `m`,
+        // `map`, `my`, `next`, `no`, `our`, `print`, `printf`, `q`,
+        // `qq`, `qr`, `qw`, `qx`, `redo`, `require`, `return`, `s`,
+        // `say`, `select`, `sort`, `split`, `state`, `sub`,
+        // `system`, `tr`, `unless`, `until`, `use`, `when`,
+        // `while`, `x`, `xor`, `y`. We model these as known builtins
+        // with undef prototype so prototype() returns undef.
+        "and" | "or" | "chomp" | "chop" | "defined" | "delete" | "do" | "eval" | "exec"
+        | "exists" | "for" | "foreach" | "format" | "goto" | "grep" | "last" | "local" | "m"
+        | "map" | "my" | "next" | "no" | "our" | "package" | "print" | "printf" | "q" | "qq"
+        | "qr" | "qw" | "qx" | "redo" | "require" | "return" | "s" | "say" | "select" | "sort"
+        | "split" | "state" | "sub" | "system" | "tr" | "unless" | "until" | "use" | "while"
+        | "x" | "xor" | "y" | "cmp" | "eq" | "ge" | "gt" | "le" | "lt" | "ne" | "if" | "else"
+        | "elsif" | "default" | "given" | "when" => None,
+        _ => return None,
+    };
+    Some(r)
 }
 
 /// Minimal shell-style glob: handles `*`, `?`, and literal text. No
