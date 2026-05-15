@@ -901,6 +901,14 @@ impl Interpreter {
                         _ => {}
                     }
                 }
+                Stmt::Package(name) => {
+                    // Track `package NAME;` at compile time so any
+                    // eager `use overload …` that follows registers the
+                    // handler under the right class. Re-runs harmlessly
+                    // at runtime when included in main_stmts.
+                    self.package = name.clone();
+                    main_stmts.push(stmt.clone());
+                }
                 Stmt::FileMark(file) => {
                     // Track `#line N FILE` directives at compile time so
                     // any eager Stmt::Use that follows blames the right
@@ -6978,12 +6986,38 @@ impl Interpreter {
                 }
             }
 
-            BinOp::StrEq => bool_value(l.to_str() == r.to_str()),
-            BinOp::StrNe => bool_value(l.to_str() != r.to_str()),
-            BinOp::StrLt => bool_value(l.to_str() < r.to_str()),
-            BinOp::StrGt => bool_value(l.to_str() > r.to_str()),
-            BinOp::StrLe => bool_value(l.to_str() <= r.to_str()),
-            BinOp::StrGe => bool_value(l.to_str() >= r.to_str()),
+            BinOp::StrEq => {
+                // Go through stringify_value so a `""` overload on a
+                // blessed ref operand fires (mro/c3_with_overload).
+                let ls = self.stringify_value(l);
+                let rs = self.stringify_value(r);
+                bool_value(ls == rs)
+            }
+            BinOp::StrNe => {
+                let ls = self.stringify_value(l);
+                let rs = self.stringify_value(r);
+                bool_value(ls != rs)
+            }
+            BinOp::StrLt => {
+                let ls = self.stringify_value(l);
+                let rs = self.stringify_value(r);
+                bool_value(ls < rs)
+            }
+            BinOp::StrGt => {
+                let ls = self.stringify_value(l);
+                let rs = self.stringify_value(r);
+                bool_value(ls > rs)
+            }
+            BinOp::StrLe => {
+                let ls = self.stringify_value(l);
+                let rs = self.stringify_value(r);
+                bool_value(ls <= rs)
+            }
+            BinOp::StrGe => {
+                let ls = self.stringify_value(l);
+                let rs = self.stringify_value(r);
+                bool_value(ls >= rs)
+            }
             BinOp::StrCmp => {
                 let a = l.to_str();
                 let b = r.to_str();
@@ -12137,11 +12171,25 @@ impl Interpreter {
         if p != 0
             && let Some(cls) = self.blessed_refs.get(&p).cloned()
         {
-            if let Some(handler_name) = self
-                .overload_handlers
+            // Walk the MRO so inherited `use overload q|""| => sub {…}`
+            // is found on parent classes too. mro/c3_with_overload.
+            let kind = self
+                .package_mro
                 .get(&cls)
-                .and_then(|m| m.get("\"\"").or_else(|| m.get("")))
                 .cloned()
+                .unwrap_or_else(|| "dfs".to_string());
+            let linear = if kind == "c3" {
+                mro_linear_c3(self, &cls)
+            } else {
+                mro_linear_dfs(self, &cls)
+            };
+            let handler_name = linear.iter().find_map(|c| {
+                self.overload_handlers
+                    .get(c)
+                    .and_then(|m| m.get("\"\"").or_else(|| m.get("")))
+                    .cloned()
+            });
+            if let Some(handler_name) = handler_name
                 && let Some((_params, body)) = self.subs.get(&handler_name).cloned()
             {
                 let ret = self.call_sub_named(
