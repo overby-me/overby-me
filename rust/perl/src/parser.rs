@@ -380,6 +380,38 @@ impl Parser {
                         self.pos += 1;
                         "redo".to_string()
                     }
+                    Token::If => {
+                        self.pos += 1;
+                        "if".to_string()
+                    }
+                    Token::Unless => {
+                        self.pos += 1;
+                        "unless".to_string()
+                    }
+                    Token::While => {
+                        self.pos += 1;
+                        "while".to_string()
+                    }
+                    Token::Until => {
+                        self.pos += 1;
+                        "until".to_string()
+                    }
+                    Token::Foreach => {
+                        self.pos += 1;
+                        "foreach".to_string()
+                    }
+                    Token::For => {
+                        self.pos += 1;
+                        "for".to_string()
+                    }
+                    Token::My => {
+                        self.pos += 1;
+                        "my".to_string()
+                    }
+                    Token::Our => {
+                        self.pos += 1;
+                        "our".to_string()
+                    }
                     _ => "main".to_string(),
                 };
                 // `package NAME VERSION` — assign $NAME::VERSION = VERSION
@@ -1856,6 +1888,35 @@ impl Parser {
             }
             self.eat(&Token::Semi);
             return Stmt::Nop;
+        } else if matches!(
+            self.tok(),
+            Token::If
+                | Token::Unless
+                | Token::While
+                | Token::Until
+                | Token::For
+                | Token::Foreach
+                | Token::My
+                | Token::Our
+        ) {
+            // `use if COND, MODULE, ARGS;` — the `if` pragma. Other
+            // keyword-looking names (unless, while, etc.) are legal
+            // package names too (mro uses `package next;`); accept
+            // them all here. op/coreamp.
+            let name = match self.tok() {
+                Token::If => "if",
+                Token::Unless => "unless",
+                Token::While => "while",
+                Token::Until => "until",
+                Token::For => "for",
+                Token::Foreach => "foreach",
+                Token::My => "my",
+                Token::Our => "our",
+                _ => unreachable!(),
+            }
+            .to_string();
+            self.pos += 1;
+            name
         } else {
             self.eat(&Token::Semi);
             return Stmt::Nop;

@@ -108,6 +108,11 @@ pub struct Interpreter {
     // Recursion guard for `$SIG{__DIE__}` handlers so a handler that itself
     // raises die doesn't loop back into itself.
     in_die_handler: usize,
+    /// Set true by Stmt::Use's chain handler when it already emitted
+    /// the "BEGIN failed--compilation aborted" tail line. My first-pass
+    /// eager Use's Flow::Exit arm checks this to avoid emitting a
+    /// duplicate. op/coreamp vs op/filehandle.
+    use_chain_emitted_begin_failed: bool,
     /// Set while resolving list-context list assignment (`(LIST) = …`)
     /// so `assign_to` knows lvalue subs with empty bodies should be a
     /// silent no-op rather than dying. op/sub_lval tests 32-34.
@@ -689,6 +694,7 @@ impl Interpreter {
             check_blocks: Vec::new(),
             init_blocks: Vec::new(),
             in_die_handler: 0,
+            use_chain_emitted_begin_failed: false,
             assign_list_ctx: false,
             local_hash_elem_saves: Vec::new(),
             local_array_len_saves: Vec::new(),
@@ -935,13 +941,29 @@ impl Interpreter {
                         Flow::Exit(code) => {
                             // `Stmt::Use` already printed the
                             // `Can't locate …` / chain diagnostic
-                            // before returning Flow::Exit(2). Run END
-                            // blocks so test.pls "Looks like you
-                            // planned X tests but ran Y" footer fires
-                            // (reference perl runs END even when a
-                            // compile-time BEGIN aborts).
-                            let _ = end_line;
+                            // before returning Flow::Exit(2). Emit the
+                            // outermost "BEGIN failed--compilation
+                            // aborted at FILE line LINE." that
+                            // reference perl tacks on at the use site
+                            // (op/coreamp's `use if …` case), unless the
+                            // inner chain handler already emitted it
+                            // (op/filehandle's nested require chain).
+                            // Then run END blocks so test.pls "Looks
+                            // like you planned X tests but ran Y"
+                            // footer fires (reference perl runs END
+                            // even when a compile-time BEGIN aborts).
                             if code != 0 {
+                                if !self.use_chain_emitted_begin_failed {
+                                    let file = if self.current_file.is_empty() {
+                                        "-e".to_string()
+                                    } else {
+                                        self.current_file.clone()
+                                    };
+                                    eprintln!(
+                                        "BEGIN failed--compilation aborted at {file} line {end_line}."
+                                    );
+                                }
+                                self.use_chain_emitted_begin_failed = false;
                                 self.run_end_blocks_for_compile_error();
                             }
                             self.exit_code = code;
@@ -3298,6 +3320,7 @@ impl Interpreter {
                                 return Flow::Die(full);
                             }
                             eprint!("{chain_msg}");
+                            self.use_chain_emitted_begin_failed = true;
                             return flow;
                         }
                     }
@@ -3373,6 +3396,9 @@ impl Interpreter {
                     return Flow::Die(msg);
                 }
                 eprint!("{msg}");
+                // Tell the eager-Use caller this path already emitted
+                // the BEGIN-failed banner so it doesn't add a duplicate.
+                self.use_chain_emitted_begin_failed = true;
                 Flow::Exit(2)
             }
 
@@ -17375,8 +17401,7 @@ impl Interpreter {
                             if has_captures {
                                 let mut result = Vec::new();
                                 let mut last = 0usize;
-                                let mut produced = 0usize;
-                                for cap in re.captures_iter(&text) {
+                                for (produced, cap) in re.captures_iter(&text).enumerate() {
                                     if let Some(n) = n_limit
                                         && produced + 1 >= n
                                     {
@@ -17384,7 +17409,6 @@ impl Interpreter {
                                     }
                                     let full = cap.get(0).unwrap();
                                     result.push(Value::Str(text[last..full.start()].to_string()));
-                                    produced += 1;
                                     for i in 1..cap_n {
                                         result.push(Value::Str(
                                             cap.get(i)
