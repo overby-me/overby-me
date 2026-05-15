@@ -17870,10 +17870,23 @@ impl Interpreter {
     }
 
     fn readline_inner(&mut self, handle: &str) -> Value {
-        // Handle <$fh> — variable containing filehandle name
+        // Handle <$fh> — variable containing filehandle name. The
+        // scalar can hold a glob (`\*DATA`), a glob value, or a plain
+        // string with the FH name.
         let effective_handle = if handle.starts_with('$') {
             let var_name = &handle[1..];
-            self.get_var(var_name).to_str()
+            let v = self.get_var(var_name);
+            match &v {
+                Value::Glob(n) => n.trim_start_matches("main::").to_string(),
+                Value::ScalarRef(rc) => {
+                    let inner = rc.borrow().clone();
+                    match inner {
+                        Value::Glob(n) => n.trim_start_matches("main::").to_string(),
+                        other => other.to_str(),
+                    }
+                }
+                _ => v.to_str(),
+            }
         } else {
             handle.to_string()
         };
