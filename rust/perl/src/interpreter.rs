@@ -1434,6 +1434,18 @@ impl Interpreter {
             Stmt::Nop => Flow::None,
             Stmt::Label(_) => Flow::None,
             Stmt::Goto(label) => Flow::Goto(label.clone()),
+            Stmt::GotoExpr(inner) => {
+                // `goto &{EXPR}` — evaluate the expression to a CodeRef
+                // and re-enter that sub with the current `@_`. Encode as
+                // `Flow::Goto("&<name>")` so the existing goto-&NAME path
+                // handles it uniformly.
+                let v = self.eval_expr(inner);
+                let target = match v {
+                    Value::CodeRef(name) => name,
+                    other => other.to_str(),
+                };
+                Flow::Goto(format!("&{target}"))
+            }
 
             Stmt::LineMark(line) => {
                 self.current_line = *line;

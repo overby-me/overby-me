@@ -583,6 +583,9 @@ impl Parser {
                 // coderef, and we normalise it here to `&NAME` form.
                 // `goto &$var` — dynamic; encode as `&$NAME` so the
                 // interpreter can resolve at runtime.
+                // `goto &{EXPR}` — block-deref form. The inner expression
+                // returns a coderef. Use Stmt::GotoExpr so the interpreter
+                // can evaluate at runtime.
                 let label = if matches!(self.tok(), Token::BitAnd) {
                     self.pos += 1;
                     if let Token::Ident(name) = self.tok() {
@@ -593,6 +596,15 @@ impl Parser {
                         let n = name.clone();
                         self.pos += 1;
                         format!("&${n}")
+                    } else if matches!(self.tok(), Token::LBrace) {
+                        // `goto &{EXPR}` — parse the inner expression.
+                        // We emit a special expression call that the
+                        // interpreter evaluates to a coderef name.
+                        self.pos += 1;
+                        let inner = self.parse_expr();
+                        self.expect(&Token::RBrace);
+                        let stmt = Stmt::GotoExpr(inner);
+                        return Some(self.maybe_postfix(stmt));
                     } else {
                         "&".to_string()
                     }

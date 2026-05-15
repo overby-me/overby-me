@@ -250,6 +250,10 @@ pub enum Stmt {
     Next(Option<String>),
     Redo(Option<String>),
     Goto(String),
+    /// `goto &{EXPR}` — block-form tail call. The inner expression is
+    /// evaluated at runtime to a CodeRef (or string naming a sub) and
+    /// control transfers to that sub with the current `@_`.
+    GotoExpr(Expr),
     /// Statement label — marks a position that `goto LABEL` / `last LABEL` /
     /// `next LABEL` / `redo LABEL` can target. The label applies to the
     /// *following* statement; we emit it as its own no-op Stmt so the
