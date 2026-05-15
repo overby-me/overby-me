@@ -4468,11 +4468,25 @@ impl Parser {
                 }
                 .to_string();
                 self.pos += 1;
-                // `:` is the ternary separator; without bailing out
-                // here, `parse_list_expr → parse_expr` would consume
-                // the `:` (silent-skip on unknown primary), corrupting
-                // the surrounding ternary parse. op/catch test 10.
-                let args = if matches!(self.tok(), Token::Colon) {
+                // `print(LIST)` — function-call form. Args end at `)`;
+                // anything after belongs to the surrounding comma
+                // expression (`ok print(""), "label";` — `"label"` is
+                // the `ok` arg, not print's). io/defout.
+                let args = if matches!(self.tok(), Token::LParen) {
+                    self.pos += 1;
+                    let a = if matches!(self.tok(), Token::RParen) {
+                        Vec::new()
+                    } else {
+                        self.parse_list_expr()
+                    };
+                    self.eat(&Token::RParen);
+                    a
+                } else if matches!(self.tok(), Token::Colon) {
+                    // `:` is the ternary separator; without bailing out
+                    // here, `parse_list_expr → parse_expr` would consume
+                    // the `:` (silent-skip on unknown primary),
+                    // corrupting the surrounding ternary parse. op/catch
+                    // test 10.
                     Vec::new()
                 } else {
                     self.parse_list_expr()
