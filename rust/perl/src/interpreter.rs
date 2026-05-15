@@ -10537,11 +10537,14 @@ impl Interpreter {
                 }
             }
             "caller" => {
-                // caller([N]) — in list context returns (package, file, line)
-                // of the Nth-up frame (default 0 = immediate caller of the
-                // current sub). `call_stack` stores the call-site info that
-                // was current when each sub was entered, so the top of the
-                // stack describes the current frame's caller.
+                // caller([N]) — in list context returns the standard
+                // 10-element tuple (package, file, line, subname, hasargs,
+                // wantarray, evaltext, is_require, hints, bitmask) for
+                // the Nth-up frame. `call_stack` records caller-site
+                // (pkg, file, line); `current_sub_stack` tracks the sub
+                // name at each frame so caller(N)[3] returns the sub the
+                // frame is executing. Exporter::as_heavy reads [3] to
+                // dispatch heavy_$callerName, so we have to populate it.
                 let n = if let Some(arg) = args.first() {
                     self.eval_expr(arg).to_num() as usize
                 } else {
@@ -10554,11 +10557,35 @@ impl Interpreter {
                     None
                 };
                 if let Some((pkg, file, line)) = frame {
-                    let pkg = Value::Str(pkg.clone());
-                    let file = Value::Str(file.clone());
-                    let line = Value::Num(*line as f64);
-                    self.last_list_val = Some(vec![pkg.clone(), file, line]);
-                    pkg
+                    let pkg_v = Value::Str(pkg.clone());
+                    let file_v = Value::Str(file.clone());
+                    let line_v = Value::Num(*line as f64);
+                    // The sub name at frame N is the sub at
+                    // current_sub_stack[len-1-N] (parallel stack).
+                    let sub_stack_len = self.current_sub_stack.len();
+                    let sub_name = if n < sub_stack_len {
+                        let raw = &self.current_sub_stack[sub_stack_len - 1 - n];
+                        if raw.contains("::") {
+                            raw.clone()
+                        } else {
+                            format!("main::{raw}")
+                        }
+                    } else {
+                        String::new()
+                    };
+                    self.last_list_val = Some(vec![
+                        pkg_v.clone(),
+                        file_v,
+                        line_v,
+                        Value::Str(sub_name),
+                        Value::Num(1.0),   // hasargs
+                        Value::Undef,      // wantarray
+                        Value::Undef,      // evaltext
+                        Value::Num(0.0),   // is_require
+                        Value::Num(0.0),   // hints
+                        Value::Str(String::new()), // bitmask
+                    ]);
+                    pkg_v
                 } else {
                     self.last_list_val = Some(vec![]);
                     Value::Undef
