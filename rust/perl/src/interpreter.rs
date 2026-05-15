@@ -12681,15 +12681,18 @@ impl Interpreter {
         ));
 
         // Subs defined inside `package Foo { sub bar { … } }` register as
-        // `Foo::bar`. After saving the caller's package above, switch
-        // self.package to `Foo` so `__PACKAGE__` and bare-name `our`
-        // declarations inside the body qualify against the right
-        // namespace. The matching pop restores the caller's package.
-        if let Some(n) = name
-            && let Some(sep) = n.rfind("::")
-        {
-            let pkg = n[..sep].to_string();
-            if !pkg.is_empty() && pkg != self.package {
+        // `Foo::bar` and the body's lexical package is `Foo`. Use the
+        // recorded def-package (set when the sub was registered) so
+        // `sub Other::foo { … }` declared from main keeps __PACKAGE__
+        // = main inside the body. Falls back to the name prefix only
+        // when no def-package is recorded.
+        if let Some(n) = name {
+            let pkg = self.sub_def_package.get(n).cloned();
+            let pkg = pkg.or_else(|| n.rfind("::").map(|sep| n[..sep].to_string()));
+            if let Some(pkg) = pkg
+                && !pkg.is_empty()
+                && pkg != self.package
+            {
                 self.package = pkg;
             }
         }
