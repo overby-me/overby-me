@@ -10052,6 +10052,9 @@ impl Interpreter {
                                     }
                                     out.push(v.resolve());
                                 }
+                                if h.is_empty() {
+                                    *h = HashMap::new();
+                                }
                             } else {
                                 // Check aliased_hashes (migrated globals)
                                 // before falling back to plain globals.
@@ -10074,6 +10077,9 @@ impl Interpreter {
                                         }
                                         out.push(v.resolve());
                                     }
+                                    if h.is_empty() {
+                                        *h = HashMap::new();
+                                    }
                                 } else if let Some(h) = self.globals.hashes.get_mut(name) {
                                     for k in &keys_v {
                                         let v = h.remove(k).unwrap_or(Value::Undef);
@@ -10081,6 +10087,9 @@ impl Interpreter {
                                             out.push(Value::Str(k.clone()));
                                         }
                                         out.push(v.resolve());
+                                    }
+                                    if h.is_empty() {
+                                        *h = HashMap::new();
                                     }
                                 }
                             }
