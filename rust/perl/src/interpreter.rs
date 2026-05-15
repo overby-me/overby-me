@@ -2776,40 +2776,37 @@ impl Interpreter {
                             let local_name = name.trim_start_matches('*').to_string();
                             // If the init is a sub/coderef, register a
                             // temporary sub and save the prior binding.
-                            let init_is_sub = init
-                                .as_ref()
-                                .map(|e| matches!(e, Expr::AnonSub(_, _)))
-                                .unwrap_or(false);
-                            if init_is_sub {
-                                // Install under both bare-name and
-                                // qualified-name keys so call sites that
-                                // look up either form pick up the local
-                                // override. Save both prior bindings so
-                                // scope exit restores them.
-                                let qualified = if local_name.contains("::") {
-                                    local_name.clone()
-                                } else {
-                                    format!("{}::{local_name}", self.package)
-                                };
-                                let prior_q = self.subs.get(&qualified).cloned();
-                                let prior_b = self.subs.get(&local_name).cloned();
-                                if let Some(saves) = self.local_sub_saves.last_mut() {
-                                    saves.push((qualified.clone(), prior_q));
-                                    if local_name != qualified {
-                                        saves.push((local_name.clone(), prior_b));
-                                    }
-                                }
-                                let cv = self.eval_expr(init.as_ref().unwrap());
+                            // `local *NAME = EXPR` where EXPR yields a
+                            // CodeRef (`sub { … }`, `\&other`, `*g{CODE}`)
+                            // installs that sub under NAME for the
+                            // enclosing scope; the prior binding is
+                            // snapshotted so scope exit restores it.
+                            // op/method tests 6-12, mro/method_caching.
+                            if let Some(init_expr) = init.as_ref() {
+                                let cv = self.eval_expr(init_expr);
                                 if let Value::CodeRef(src_name) = &cv
                                     && let Some(body) = self.subs.get(src_name).cloned()
                                 {
+                                    let qualified = if local_name.contains("::") {
+                                        local_name.clone()
+                                    } else {
+                                        format!("{}::{local_name}", self.package)
+                                    };
+                                    let prior_q = self.subs.get(&qualified).cloned();
+                                    let prior_b = self.subs.get(&local_name).cloned();
                                     let bare_differs = local_name != qualified;
+                                    if let Some(saves) = self.local_sub_saves.last_mut() {
+                                        saves.push((qualified.clone(), prior_q));
+                                        if bare_differs {
+                                            saves.push((local_name.clone(), prior_b));
+                                        }
+                                    }
                                     self.subs.insert(qualified, body.clone());
                                     if bare_differs {
                                         self.subs.insert(local_name.clone(), body);
                                     }
+                                    continue;
                                 }
-                                continue;
                             }
                             let prev_fh = self.fh_aliases.get(&local_name).cloned();
                             if let Some(saves) = self.local_fh_alias_saves.last_mut() {
