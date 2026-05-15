@@ -64,6 +64,8 @@ fn run_interpreter() -> i32 {
     let mut record_sep_override: Option<String> = None; // -0NNN flag
     let mut loop_input = false; // -n flag (wrap script in while(<>) { … })
     let mut loop_and_print = false; // -p flag (-n plus print $_ each iter)
+    let mut autosplit = false; // -a flag (split $_ into @F each iter)
+    let mut autosplit_pattern: Option<String> = None; // -F pattern (sets -a too)
 
     let mut i = 1;
     while i < args.len() {
@@ -118,6 +120,9 @@ fn run_interpreter() -> i32 {
                     loop_input = true;
                     loop_and_print = true;
                 }
+                if before_e.contains('a') {
+                    autosplit = true;
+                }
             }
             "-I" => {
                 i += 1;
@@ -140,6 +145,15 @@ fn run_interpreter() -> i32 {
             "-p" => {
                 loop_input = true;
                 loop_and_print = true;
+            }
+            "-a" => {
+                autosplit = true;
+            }
+            s if s.starts_with("-F") && s.len() > 2 => {
+                // `-FPAT` implies `-a` and `-n` (perlrun).
+                autosplit = true;
+                loop_input = true;
+                autosplit_pattern = Some(s[2..].to_string());
             }
             "-T" => {
                 taint_mode_arg = true;
@@ -281,6 +295,26 @@ fn run_interpreter() -> i32 {
                 loop_input = true;
                 loop_and_print = true;
             }
+            if has_shebang_flag(shebang, 'a') {
+                autosplit = true;
+            }
+            // `-FPATTERN` on the shebang sets the autosplit regex.
+            // `-F` in a shebang can be combined with other single-letter
+            // flags: `-anFx+` = `-a -n -F x+`. Find the `F` inside any
+            // `-…F…` token and take everything after as the regex.
+            // `-F` implies `-an` (perlrun).
+            for token in shebang.split_whitespace() {
+                if let Some(rest) = token.strip_prefix('-')
+                    && let Some(idx) = rest.find('F')
+                {
+                    let pat = &rest[idx + 1..];
+                    if !pat.is_empty() {
+                        autosplit = true;
+                        loop_input = true;
+                        autosplit_pattern = Some(pat.to_string());
+                    }
+                }
+            }
             // `-0NNN` on the shebang sets $/ to chr(NNN). Plain `-0`
             // (no digits) is chr(0). run/switch0.
             for token in shebang.split_whitespace() {
@@ -343,6 +377,25 @@ fn run_interpreter() -> i32 {
                 | S::LineMark(_) => top.push(stmt),
                 _ => body.push(stmt),
             }
+        }
+        // `-a` autosplit: prepend `@F = split / /, $_` (or the `-F`
+        // pattern) to the loop body. run/switcha, run/switchF.
+        if autosplit {
+            let pat = autosplit_pattern.clone().unwrap_or_else(|| " ".to_string());
+            let split_call = E::Call(
+                "split".to_string(),
+                vec![
+                    E::RegexLit(pat, String::new()),
+                    E::ScalarVar("_".to_string()),
+                ],
+            );
+            let split_stmt = S::Expr(E::Assign(
+                Box::new(E::ArrayVar("F".to_string())),
+                Box::new(split_call),
+            ));
+            let mut new_body = vec![split_stmt];
+            new_body.extend(body);
+            body = new_body;
         }
         let cond = E::BinOp(
             BinOp::DefOr,
