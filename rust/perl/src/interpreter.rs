@@ -6703,6 +6703,9 @@ impl Interpreter {
         match op {
             BinOp::LogAnd | BinOp::And => {
                 let l = self.eval_expr(left);
+                if self.pending_flow.is_some() {
+                    return l;
+                }
                 if !l.to_bool() {
                     return l;
                 }
