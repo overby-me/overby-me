@@ -1134,9 +1134,13 @@ impl Parser {
                 self.pos += 1;
             }
             self.eat(&Token::RParen);
-            if !s.is_empty() {
-                proto.push(s);
-            }
+            // Push even an empty prototype string — `sub f ()` has a
+            // declared (empty) prototype, distinct from `sub f` (no
+            // prototype). prototype(\&f) returns "" vs undef
+            // respectively. comp/proto. Encode with leading `(` so the
+            // interpreter can distinguish prototype-params from regular
+            // signature params.
+            proto.push(format!("({s}"));
         }
 
         // Parse attributes — record `:lvalue` so the sub can be called

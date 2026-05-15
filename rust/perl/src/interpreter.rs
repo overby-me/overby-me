@@ -7607,6 +7607,44 @@ impl Interpreter {
                 self.last_list_val = None;
                 result
             }
+            "prototype" => {
+                // `prototype(EXPR)` returns the prototype string of the
+                // sub referenced by EXPR — a coderef, a `\&NAME`, or a
+                // bareword/string naming the sub. Returns undef when the
+                // sub has no prototype declaration. EXPR is evaluated
+                // normally; `prototype(shift)` must shift @_. comp/proto.
+                let arg_val = if let Some(a) = args.first() {
+                    self.eval_expr(a)
+                } else {
+                    return Value::Undef;
+                };
+                let sub_name: Option<String> = match &arg_val {
+                    Value::CodeRef(n) => Some(n.clone()),
+                    Value::Str(s) => {
+                        let qualified = if s.contains("::") {
+                            s.clone()
+                        } else {
+                            format!("{}::{s}", self.package)
+                        };
+                        if self.subs.contains_key(&qualified) {
+                            Some(qualified)
+                        } else if self.subs.contains_key(s) {
+                            Some(s.clone())
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(name) = sub_name
+                    && let Some((params, _body)) = self.subs.get(&name)
+                    && let Some(p0) = params.first()
+                    && let Some(rest) = p0.strip_prefix('(')
+                {
+                    return Value::Str(rest.to_string());
+                }
+                Value::Undef
+            }
             "undef" => {
                 // undef EXPR — clear the lvalue and return undef
                 if let Some(arg) = args.first() {
@@ -11540,7 +11578,11 @@ impl Interpreter {
     }
 
     fn eval_args_with_proto(&mut self, args: &[Expr], params: &[String]) -> Vec<Value> {
-        let proto = params.first().map(String::as_str).unwrap_or("");
+        let raw = params.first().map(String::as_str).unwrap_or("");
+        // Empty-paren prototype `sub f ()` is stored as the bare `(`
+        // marker so `prototype(\&f)` can distinguish it from `sub f`
+        // (no prototype). Strip the marker for enforcement.
+        let proto = raw.strip_prefix('(').unwrap_or(raw);
         if proto.is_empty() {
             return args
                 .iter()
