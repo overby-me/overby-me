@@ -18072,6 +18072,17 @@ impl Interpreter {
             }
         };
 
+        // Bare `<>` reads from ARGV. If a test aliased ARGV to another
+        // glob (`*ARGV = *DATA;` — common run/switchn idiom), redirect
+        // to the aliased filehandle. run/switchn, run/switchp.
+        let effective_handle = if effective_handle.is_empty()
+            && let Some(target) = self.fh_aliases.get("ARGV").cloned()
+        {
+            self.last_read_fh = Some(target.clone());
+            target
+        } else {
+            effective_handle
+        };
         // <> or <STDIN> reads from stdin (line-mode only for now).
         if effective_handle.is_empty() || effective_handle == "STDIN" {
             let stdin = io::stdin();
