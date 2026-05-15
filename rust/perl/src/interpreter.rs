@@ -14345,7 +14345,12 @@ impl Interpreter {
             self.subs.get(&qualified)
         };
         let (params, body) = body_params?;
-        let is_const = params.is_empty() && !self.constant_upgraded.contains(&qualified) && {
+        // Reference perl inlines `sub NAME () { LITERAL }` (empty prototype +
+        // literal body) as a constant; bare `sub NAME { LITERAL }` stays a
+        // CODE entry. The parser encodes an empty prototype as the single-
+        // element vec ["("].
+        let empty_proto = params.len() == 1 && params[0] == "(";
+        let is_const = empty_proto && !self.constant_upgraded.contains(&qualified) && {
             let last = body.iter().rev().find(|s| !matches!(s, Stmt::LineMark(_)));
             matches!(
                 last,
@@ -16147,6 +16152,18 @@ impl Interpreter {
                     let mut n = String::new();
                     let mut depth = 1;
                     while i < chars.len() && depth > 0 {
+                        // `#` inside `${...}` is a Perl-syntax comment that
+                        // runs to end-of-line. If the matching `}` lies in
+                        // that comment, the brace is unclosed — reference
+                        // perl raises "Missing right curly or square
+                        // bracket … within pattern". base/lex test 79
+                        // (`s/${foo#}//e`).
+                        if chars[i] == '#' {
+                            while i < chars.len() && chars[i] != '\n' {
+                                i += 1;
+                            }
+                            continue;
+                        }
                         if chars[i] == '{' {
                             depth += 1;
                         } else if chars[i] == '}' {
@@ -16157,6 +16174,15 @@ impl Interpreter {
                         }
                         n.push(chars[i]);
                         i += 1;
+                    }
+                    if depth > 0 {
+                        let line = self.current_line;
+                        let file = self.current_file.clone();
+                        let msg = format!(
+                            "Missing right curly or square bracket at {file} line {line}, within pattern\nsyntax error at {file} line {line}, at EOF\nExecution of {file} aborted due to compilation errors.\n",
+                        );
+                        self.pending_flow = Some(Flow::Die(msg));
+                        return String::new();
                     }
                     if i < chars.len() {
                         i += 1;
