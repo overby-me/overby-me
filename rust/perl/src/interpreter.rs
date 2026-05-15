@@ -8559,6 +8559,8 @@ impl Interpreter {
                 let prev = unsafe { libc::alarm(secs) };
                 Value::Num(prev as f64)
             }
+            "getpid" => Value::Num(unsafe { libc::getpid() } as f64),
+            "getppid" => Value::Num(unsafe { libc::getppid() } as f64),
             "times" => {
                 // `times` — returns (user, system, cuser, csys) CPU
                 // times in seconds. Use libc::times for real values;
