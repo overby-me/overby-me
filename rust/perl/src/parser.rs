@@ -4965,6 +4965,10 @@ impl Parser {
                         | Token::Stat
                         | Token::Bless
                         | Token::Binmode
+                        // `myok do { … }` — `do BLOCK` and `do EXPR`
+                        // both evaluate to a value, so they're valid
+                        // first-arg starters for a parenless call.
+                        | Token::Do
                 ) && !matches!(self.tok(), Token::Ident(n) if n == "...")
                 {
                     // Function call without parentheses: func arg, ...
@@ -6215,7 +6219,52 @@ fn parse_interp_string(s: &str) -> Expr {
                         i += 1;
                     }
                 }
-                parts.push(InterpPart::ArrayVar(name));
+                // `@name[…]` — array slice; `@name{…}` — hash slice.
+                // Parse the bracketed expression and emit an ArraySlice
+                // / HashSlice expr so the interpolation evaluates it as
+                // a list. Brackets nest, parens nest. run/switchI uses
+                // `@INC[0..($#INC-1)]`.
+                if i < chars.len() && (chars[i] == '[' || chars[i] == '{') {
+                    let opener = chars[i];
+                    let closer = if opener == '[' { ']' } else { '}' };
+                    i += 1;
+                    let mut depth = 1;
+                    let mut inner = String::new();
+                    while i < chars.len() && depth > 0 {
+                        let c = chars[i];
+                        if c == opener {
+                            depth += 1;
+                            inner.push(c);
+                        } else if c == closer {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                            inner.push(c);
+                        } else {
+                            inner.push(c);
+                        }
+                        i += 1;
+                    }
+                    if i < chars.len() {
+                        i += 1; // skip closer
+                    }
+                    use crate::lexer::Lexer;
+                    let mut lex = Lexer::new(&inner);
+                    let toks = lex.tokenize();
+                    let tl = std::mem::take(&mut lex.token_lines);
+                    let f_over = std::mem::take(&mut lex.file_overrides);
+                    let mut p = Parser::new_with_lines_and_files(toks, tl, f_over);
+                    let inner_expr = p.parse_list_expr();
+                    let slice = if opener == '[' {
+                        Expr::ArraySlice(name, inner_expr)
+                    } else {
+                        Expr::HashSlice(name, inner_expr)
+                    };
+                    parts.push(InterpPart::Expr(Box::new(slice)));
+                } else {
+                    parts.push(InterpPart::ArrayVar(name));
+                }
             }
         } else if chars[i] == '\u{F0001}' {
             // Escaped $ placeholder (private-use plane to avoid colliding

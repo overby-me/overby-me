@@ -121,7 +121,13 @@ fn run_interpreter() -> i32 {
                     loop_and_print = true;
                 }
                 if before_e.contains('a') {
+                    // `-a` autosplit implies `-n` so `@F = split / /, $_`
+                    // fires inside an input loop. perlrun: "The -a switch
+                    // turns on autosplit mode when used with -n or -p"
+                    // — but reference perl also turns on the input loop
+                    // when -a is alone. run/switchF2.
                     autosplit = true;
+                    loop_input = true;
                 }
             }
             "-I" => {
@@ -148,6 +154,7 @@ fn run_interpreter() -> i32 {
             }
             "-a" => {
                 autosplit = true;
+                loop_input = true;
             }
             s if s.starts_with("-F") && s.len() > 2 => {
                 // `-FPAT` implies `-a` and `-n` (perlrun).
@@ -302,8 +309,14 @@ fn run_interpreter() -> i32 {
             // `-F` in a shebang can be combined with other single-letter
             // flags: `-anFx+` = `-a -n -F x+`. Find the `F` inside any
             // `-…F…` token and take everything after as the regex.
-            // `-F` implies `-an` (perlrun).
+            // `-F` implies `-an` (perlrun). Skip tokens that look like
+            // `-I…` (the `I` argument-flag consumes the rest of the
+            // token, so an inner `F` is part of the directory name —
+            // run/switchI uses `-IFoo::Bar`).
             for token in shebang.split_whitespace() {
+                if token.starts_with("-I") {
+                    continue;
+                }
                 if let Some(rest) = token.strip_prefix('-')
                     && let Some(idx) = rest.find('F')
                 {
@@ -313,6 +326,19 @@ fn run_interpreter() -> i32 {
                         loop_input = true;
                         autosplit_pattern = Some(pat.to_string());
                     }
+                }
+            }
+            // `-Idir` on the shebang adds an @INC entry. Reference
+            // perl unshifts each `-I` into @INC in left-to-right shebang
+            // order, so the rightmost shebang `-I` ends up at @INC[0]
+            // and the whole shebang block sits BEFORE the cmdline `-I`
+            // dirs. run/switchI uses `#!./perl -IFoo::Bar -IBla`, which
+            // expects @INC = [Bla, Foo::Bar, cmdline -I…, standard…].
+            for token in shebang.split_whitespace() {
+                if let Some(dir) = token.strip_prefix("-I")
+                    && !dir.is_empty()
+                {
+                    include_dirs.insert(0, dir.to_string());
                 }
             }
             // `-0NNN` on the shebang sets $/ to chr(NNN). Plain `-0`

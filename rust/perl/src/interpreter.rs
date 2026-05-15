@@ -4123,6 +4123,37 @@ impl Interpreter {
                             values.push(self.stringify_value(v));
                         }
                     }
+                    // List-producing operators evaluate in list context
+                    // here: grep/map/sort/reverse/slices/qw/ranges. Without
+                    // this `print grep { … } @x` would call eval_expr,
+                    // which forces scalar context (grep returns its count
+                    // rather than the matching items). run/switchI.
+                    Expr::Call(n, _)
+                        if matches!(
+                            n.as_str(),
+                            "grep" | "map" | "sort" | "reverse" | "keys" | "values"
+                                | "split"
+                        ) =>
+                    {
+                        for v in self.eval_list(arg) {
+                            if warnings_on && matches!(v, Value::Undef) {
+                                self.emit_warning(&format!(
+                                    "Use of uninitialized value in print at {warn_file} line {warn_line}.\n"
+                                ));
+                            }
+                            values.push(self.stringify_value(&v));
+                        }
+                    }
+                    Expr::ArraySlice(_, _) | Expr::HashSlice(_, _) | Expr::HashKVSlice(_, _) => {
+                        for v in self.eval_list(arg) {
+                            if warnings_on && matches!(v, Value::Undef) {
+                                self.emit_warning(&format!(
+                                    "Use of uninitialized value in print at {warn_file} line {warn_line}.\n"
+                                ));
+                            }
+                            values.push(self.stringify_value(&v));
+                        }
+                    }
                     _ => {
                         let v = self.eval_expr(arg);
                         if warnings_on && matches!(v, Value::Undef) {
@@ -10747,7 +10778,8 @@ impl Interpreter {
                     .iter()
                     .flat_map(|a| match a {
                         Expr::ArrayVar(name) => self.get_array(name),
-                        _ => vec![self.eval_expr(a)],
+                        // List context for slices, ranges, ()-lists.
+                        _ => self.eval_list(a),
                     })
                     .collect();
                 let mut results = Vec::new();
@@ -10825,11 +10857,15 @@ impl Interpreter {
                     return Value::Undef;
                 }
                 let block = &args[0];
+                // grep BLOCK LIST — each arg evaluates in list context so
+                // slices (`@a[…]`), ranges, and other list producers expand
+                // to all their elements. ArrayVar shortcut avoids cloning
+                // an autovivifier when the source is a plain `@name`.
                 let items: Vec<Value> = args[1..]
                     .iter()
                     .flat_map(|a| match a {
                         Expr::ArrayVar(name) => self.get_array(name),
-                        _ => vec![self.eval_expr(a)],
+                        _ => self.eval_list(a),
                     })
                     .collect();
                 let mut results = Vec::new();
@@ -11326,6 +11362,28 @@ impl Interpreter {
                 let prog = self
                     .eval_expr(args.first().unwrap_or(&Expr::StringLit(String::new())))
                     .to_str();
+                // fresh_perl_is / fresh_perl_like accept a `{ switches => [
+                // ...], stdin => "...", stderr => 1 }` hashref at args[2].
+                // Pull `switches` out so `-I`, `-w`, etc. propagate to the
+                // child. run/switchI tests 3-4 pass `-IBla2`.
+                let mut child_switches: Vec<String> = Vec::new();
+                let mut child_stdin: Option<String> = None;
+                if let Some(opts_e) = args.get(2) {
+                    let opts_v = self.eval_expr(opts_e);
+                    if let Value::HashRef(rc) = &opts_v {
+                        let h = rc.borrow();
+                        if let Some(sw) = h.get("switches")
+                            && let Value::ArrayRef(arr) = sw
+                        {
+                            for v in arr.borrow().iter() {
+                                child_switches.push(v.to_str());
+                            }
+                        }
+                        if let Some(sin) = h.get("stdin") {
+                            child_stdin = Some(sin.to_str());
+                        }
+                    }
+                }
                 // Pipe the program via stdin (so `$0` / die-line file label
                 // shows up as `-`, matching reference perl's `fresh_perl`
                 // which streams the program in the same way). Writing a
@@ -11336,8 +11394,19 @@ impl Interpreter {
                     .unwrap_or_else(|_| "perl".to_string());
                 use std::io::Write;
                 use std::process::Stdio;
-                let mut child = match std::process::Command::new(&exe)
-                    .arg("-")
+                let mut cmd = std::process::Command::new(&exe);
+                for sw in &child_switches {
+                    cmd.arg(sw);
+                }
+                if child_stdin.is_some() {
+                    // Caller wants to feed stdin themselves — pass prog
+                    // via `-e` so `<STDIN>` doesn't pick up the program
+                    // bytes by accident.
+                    cmd.arg("-e").arg(&prog);
+                } else {
+                    cmd.arg("-");
+                }
+                let mut child = match cmd
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
@@ -11347,7 +11416,11 @@ impl Interpreter {
                     Err(_) => return Value::Undef,
                 };
                 if let Some(mut stdin) = child.stdin.take() {
-                    let _ = stdin.write_all(prog.as_bytes());
+                    if let Some(s) = &child_stdin {
+                        let _ = stdin.write_all(s.as_bytes());
+                    } else {
+                        let _ = stdin.write_all(prog.as_bytes());
+                    }
                 }
                 let output = child.wait_with_output();
                 let results = match output {
@@ -12312,7 +12385,11 @@ impl Interpreter {
         let config_found = inc
             .iter()
             .any(|p| std::path::Path::new(p).join("Config.pm").exists());
-        if self.set_up_inc_called && !config_found {
+        // Tests that bypass set_up_inc (e.g. setting `@INC = '../lib'`
+        // directly) still trigger which_perl when they call runperl /
+        // fresh_perl_*. Fire the warning whenever Config.pm isn't on
+        // the active @INC. run/switchF2.
+        if !config_found {
             // Reference perl reports the line of the `require Config`
             // call inside test.pl's `which_perl` sub. The exact line
             // varies between perl 5.40 (line 970) and 5.42 (line 971),
