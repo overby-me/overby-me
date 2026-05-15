@@ -340,15 +340,23 @@ fn run_interpreter() -> i32 {
 }
 
 /// Check whether a Perl shebang line (e.g. `#!/usr/bin/perl -wT`)
-/// requests a single-letter flag. The shebang format is loose:
-/// after the path comes any number of `-flag` groups separated by
-/// whitespace; we look for `flag` inside any of those groups.
+/// requests a single-letter flag. Each `-flag` group's flag chars
+/// run until the first `=`/`:` argument separator, or end of token —
+/// so `-d:switchd_empty` declares `-d`, not also `-t` from the
+/// debugger module name. run/switchd-78586.
 fn has_shebang_flag(shebang: &str, flag: char) -> bool {
     for token in shebang.split_whitespace().skip(1) {
-        if let Some(rest) = token.strip_prefix('-')
-            && rest.contains(flag)
-        {
-            return true;
+        if let Some(rest) = token.strip_prefix('-') {
+            // Stop at the first arg separator (debugger spec `:NAME`,
+            // module-load `=NAME`, or any digit for `-0NNN`).
+            let flag_chars = rest
+                .chars()
+                .take_while(|c| !matches!(c, ':' | '=') && !c.is_ascii_digit() || *c == flag);
+            for c in flag_chars {
+                if c == flag {
+                    return true;
+                }
+            }
         }
     }
     false
