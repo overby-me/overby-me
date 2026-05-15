@@ -602,6 +602,21 @@ impl Interpreter {
         // $[ — array base index, always 0 in modern Perl.
         globals.vars.insert("[".to_string(), Value::Num(0.0));
 
+        // %SIG — Perl populates %SIG with all available signal names at
+        // startup. Tests like mro/recursion_dfs guard with `exists
+        // $SIG{ALRM}`. Reference perl gets this list from <signal.h>;
+        // hardcode the POSIX-standard set so the typical guards pass.
+        let mut sig_hash: HashMap<String, Value> = HashMap::new();
+        for sig in [
+            "ABRT", "ALRM", "BUS", "CHLD", "CLD", "CONT", "FPE", "HUP", "ILL", "INT", "IO", "IOT",
+            "KILL", "PIPE", "POLL", "PROF", "PWR", "QUIT", "RTMAX", "RTMIN", "SEGV", "STKFLT",
+            "STOP", "SYS", "TERM", "TRAP", "TSTP", "TTIN", "TTOU", "URG", "USR1", "USR2", "VTALRM",
+            "WINCH", "XCPU", "XFSZ",
+        ] {
+            sig_hash.insert(sig.to_string(), Value::Undef);
+        }
+        globals.hashes.insert("SIG".to_string(), sig_hash);
+
         // Pretend DynaLoader is loaded so test.pl's `is_miniperl`
         // (which checks `defined &DynaLoader::boot_DynaLoader`) returns
         // false — matching reference perl. This is what opens the door
@@ -4132,8 +4147,7 @@ impl Interpreter {
                     Expr::Call(n, _)
                         if matches!(
                             n.as_str(),
-                            "grep" | "map" | "sort" | "reverse" | "keys" | "values"
-                                | "split"
+                            "grep" | "map" | "sort" | "reverse" | "keys" | "values" | "split"
                         ) =>
                     {
                         for v in self.eval_list(arg) {
@@ -12399,7 +12413,7 @@ impl Interpreter {
             eprintln!(
                 "test.pl had problems loading Config: Can't locate Config.pm in @INC (you may need to install the Config module) (@INC entries checked: {}) at ./test.pl line {}.",
                 inc.join(" "),
-                line
+                line,
             );
         }
     }
