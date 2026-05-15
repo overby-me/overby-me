@@ -1815,6 +1815,11 @@ impl Parser {
                             | "push"
                             | "unshift"
                             | "splice"
+                            // Lexer-emitted prefix for `` `cmd` `` — treat
+                            // as an expression so `print `cmd`` runs the
+                            // command rather than printing the literal to
+                            // a phantom filehandle named "backtick".
+                            | "backtick"
                     )
                     && !self.known_subs.contains(&fh_name)
                 {

@@ -11198,6 +11198,7 @@ impl Interpreter {
                 let mut prog = String::new();
                 let mut switches: Vec<String> = Vec::new();
                 let mut prog_args: Vec<String> = Vec::new();
+                let mut progfile = String::new();
                 let mut want_stderr = false;
                 let mut want_stdin: Option<String> = None;
                 let mut i = 0;
@@ -11206,19 +11207,38 @@ impl Interpreter {
                     let val_e = &args[i + 1];
                     match key.as_str() {
                         "prog" => prog = self.eval_expr(val_e).to_str(),
+                        "progfile" => progfile = self.eval_expr(val_e).to_str(),
                         "stderr" => {
                             let v = self.eval_expr(val_e);
                             want_stderr = v.to_bool();
                         }
                         "stdin" => want_stdin = Some(self.eval_expr(val_e).to_str()),
                         "switches" => {
-                            for v in self.eval_list(val_e) {
-                                switches.push(v.to_str());
+                            // `switches => [...]` — arrayref must be
+                            // dereffed before iterating; eval_list on an
+                            // ArrayRef yields the ref itself as a single
+                            // item (not its elements).
+                            let v = self.eval_expr(val_e);
+                            if let Value::ArrayRef(rc) = &v {
+                                for item in rc.borrow().iter() {
+                                    switches.push(item.to_str());
+                                }
+                            } else {
+                                for item in self.eval_list(val_e) {
+                                    switches.push(item.to_str());
+                                }
                             }
                         }
                         "args" => {
-                            for v in self.eval_list(val_e) {
-                                prog_args.push(v.to_str());
+                            let v = self.eval_expr(val_e);
+                            if let Value::ArrayRef(rc) = &v {
+                                for item in rc.borrow().iter() {
+                                    prog_args.push(item.to_str());
+                                }
+                            } else {
+                                for item in self.eval_list(val_e) {
+                                    prog_args.push(item.to_str());
+                                }
                             }
                         }
                         _ => {}
@@ -11235,6 +11255,9 @@ impl Interpreter {
                 }
                 if !prog.is_empty() {
                     cmd.arg("-e").arg(&prog);
+                }
+                if !progfile.is_empty() {
+                    cmd.arg(&progfile);
                 }
                 for a in &prog_args {
                     cmd.arg(a);
