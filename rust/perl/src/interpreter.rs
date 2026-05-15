@@ -2828,6 +2828,32 @@ impl Interpreter {
                             if let Some(saves) = self.local_saves.last_mut() {
                                 saves.push((local_name.clone(), prev_scalar));
                             }
+                            // Bare `local *NAME` also localizes the sub
+                            // slot — save the current sub binding so a
+                            // subsequent `sub NAME { … }` (typically
+                            // via `eval`-string) doesn't permanently
+                            // shadow the original. op/method.
+                            let qualified = if local_name.contains("::") {
+                                local_name.clone()
+                            } else {
+                                format!("{}::{local_name}", self.package)
+                            };
+                            let prior_q = self.subs.get(&qualified).cloned();
+                            let prior_b = self.subs.get(&local_name).cloned();
+                            let bare_differs = local_name != qualified;
+                            if let Some(saves) = self.local_sub_saves.last_mut() {
+                                saves.push((qualified.clone(), prior_q));
+                                if bare_differs {
+                                    saves.push((local_name.clone(), prior_b));
+                                }
+                            }
+                            // Clear the sub slots so the body runs
+                            // without the prior binding (mirrors
+                            // reference perl localising the glob).
+                            self.subs.remove(&qualified);
+                            if bare_differs {
+                                self.subs.remove(&local_name);
+                            }
                             self.globals.vars.insert(local_name.clone(), Value::Undef);
                             self.fh_aliases.remove(&local_name);
                             if self.localized_globs.insert(local_name.clone())
