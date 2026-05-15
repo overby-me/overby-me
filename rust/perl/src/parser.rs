@@ -4692,7 +4692,14 @@ impl Parser {
                 // above.
                 if matches!(
                     name.as_str(),
-                    "time" | "times" | "wait" | "fork" | "getppid" | "getpid"
+                    "time"
+                        | "times"
+                        | "wait"
+                        | "fork"
+                        | "getppid"
+                        | "getpid"
+                        | "select"
+                        | "wantarray"
                 ) && !self.at(&Token::LParen)
                 {
                     return Expr::Call(name, Vec::new());

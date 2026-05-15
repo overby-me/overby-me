@@ -10067,6 +10067,17 @@ impl Interpreter {
                     Value::Num(1.0)
                 }
             }
+            "select" => {
+                // Minimal stub: `select` with no args returns the
+                // current default filehandle (we only ever have
+                // STDOUT). `select FH` changes the default; we accept
+                // the arg and return the prior name. op/select.
+                if args.is_empty() {
+                    return Value::Str("main::STDOUT".to_string());
+                }
+                let _ = self.eval_expr(&args[0]);
+                Value::Str("main::STDOUT".to_string())
+            }
             "open" => self.eval_open(args),
             "close" => self.eval_close(args),
             "read" | "sysread" => self.eval_read(args),
