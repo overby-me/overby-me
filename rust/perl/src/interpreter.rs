@@ -867,6 +867,7 @@ impl Interpreter {
                                 eprintln!(
                                     "BEGIN failed--compilation aborted at {file} line {end_line}."
                                 );
+                                self.run_end_blocks_for_compile_error();
                             }
                             self.exit_code = code;
                             return;
@@ -888,6 +889,79 @@ impl Interpreter {
                             eprintln!(
                                 "BEGIN failed--compilation aborted at {file} line {end_line}."
                             );
+                            self.run_end_blocks_for_compile_error();
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+                Stmt::FileMark(file) => {
+                    // Track `#line N FILE` directives at compile time so
+                    // any eager Stmt::Use that follows blames the right
+                    // file in chain diagnostics. Re-runs harmlessly at
+                    // runtime when included in main_stmts.
+                    self.current_file = file.clone();
+                    main_stmts.push(stmt.clone());
+                }
+                Stmt::LineMark(n) => {
+                    self.current_line = *n;
+                    main_stmts.push(stmt.clone());
+                }
+                Stmt::Use(_, _, end_line) => {
+                    // `use Module ARGS;` is sugar for `BEGIN { require
+                    // Module; Module->import(ARGS); }`. Run it eagerly in
+                    // source order so a subsequent `BEGIN { @INC = … }`
+                    // can't strip the search path before the use site is
+                    // resolved (which is what Perl does at compile time).
+                    // Don't push to main_stmts — the require+import has
+                    // already happened, no need to re-run at runtime.
+                    //
+                    // Before running, scan already-deferred main_stmts for
+                    // a failing `use` in a nested block (e.g. `{ use Foo;
+                    // … }` where Foo isnt on @INC). Reference perl errors
+                    // at the first failing compile-time use in source
+                    // order; without this pre-check our eager top-level
+                    // Use would race past the nested block and report the
+                    // wrong line. op/split, op/signatures.
+                    let mut ct = 0usize;
+                    if let Some(err) = compile_time_use_check(&main_stmts, &mut ct, self) {
+                        eprint!("{err}");
+                        self.run_end_blocks_for_compile_error();
+                        self.exit_code = 2;
+                        return;
+                    }
+                    let end_line = *end_line;
+                    match self.exec_stmt(stmt) {
+                        Flow::Exit(code) => {
+                            // `Stmt::Use` already printed the
+                            // `Can't locate …` / chain diagnostic
+                            // before returning Flow::Exit(2). Run END
+                            // blocks so test.pls "Looks like you
+                            // planned X tests but ran Y" footer fires
+                            // (reference perl runs END even when a
+                            // compile-time BEGIN aborts).
+                            let _ = end_line;
+                            if code != 0 {
+                                self.run_end_blocks_for_compile_error();
+                            }
+                            self.exit_code = code;
+                            return;
+                        }
+                        Flow::Die(msg) => {
+                            self.exit_code = 255;
+                            eprint!("{msg}");
+                            if !msg.ends_with('\n') {
+                                eprintln!();
+                            }
+                            let file = if self.current_file.is_empty() {
+                                "-e".to_string()
+                            } else {
+                                self.current_file.clone()
+                            };
+                            eprintln!(
+                                "BEGIN failed--compilation aborted at {file} line {end_line}."
+                            );
+                            self.run_end_blocks_for_compile_error();
                             return;
                         }
                         _ => {}
@@ -3123,7 +3197,6 @@ impl Interpreter {
                     "lib",
                     "bytes",
                     "diagnostics",
-                    "re",
                     "sort",
                     "version",
                     "builtin",
@@ -3201,8 +3274,30 @@ impl Interpreter {
                     if !already_loaded {
                         let _ = self.do_require(&filename);
                         // If require chained-failed (e.g. Tie/Array.pm tried to
-                        // load Carp and croaked), let that failure propagate.
+                        // load Carp and croaked), emit the "Compilation
+                        // failed in require" + "BEGIN failed--compilation
+                        // aborted" pair that reference perl tacks on at
+                        // the use site, then propagate.
                         if let Some(flow) = self.pending_flow.take() {
+                            let file = if self.current_file.is_empty() {
+                                "-e".to_string()
+                            } else {
+                                self.current_file.clone()
+                            };
+                            let line = if *end_line > 0 {
+                                *end_line
+                            } else {
+                                self.current_line
+                            };
+                            let chain_msg = format!(
+                                "Compilation failed in require at {file} line {line}.\nBEGIN failed--compilation aborted at {file} line {line}.\n"
+                            );
+                            if self.eval_depth > 0 {
+                                let prev = self.get_var("@").to_str();
+                                let full = format!("{prev}{chain_msg}");
+                                return Flow::Die(full);
+                            }
+                            eprint!("{chain_msg}");
                             return flow;
                         }
                     }
@@ -19087,7 +19182,6 @@ fn compile_time_use_check_in_inner(
         "lib",
         "bytes",
         "diagnostics",
-        "re",
         "sort",
         "version",
         "builtin",
