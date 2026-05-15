@@ -3443,6 +3443,30 @@ impl Interpreter {
                             return flow;
                         }
                     }
+                    // `use Foo VERSION LIST` — when the first arg looks
+                    // numeric, perl pops it and calls `Foo->VERSION(N)`
+                    // before `Foo->import(LIST)`. The op/leaky-magic
+                    // test uses this with a custom `tests::VERSION` that
+                    // accumulates a plan count.
+                    let mut import_args: &[Expr] = _args;
+                    let mut version_arg: Option<Value> = None;
+                    if let Some(first) = _args.first() {
+                        let is_numeric = matches!(first, Expr::IntLit(_) | Expr::FloatLit(_));
+                        if is_numeric {
+                            version_arg = Some(self.eval_expr(first));
+                            import_args = &_args[1..];
+                        }
+                    }
+                    if let Some(ver) = version_arg {
+                        let version_sub = format!("{module}::VERSION");
+                        if let Some((_params, body)) = self.subs.get(&version_sub).cloned() {
+                            let v_args = vec![Value::Str(module.clone()), ver];
+                            self.call_sub_named(&body, &v_args, Some(&version_sub));
+                            if let Some(flow) = self.pending_flow.take() {
+                                return flow;
+                            }
+                        }
+                    }
                     // `use Foo (args)` invokes `Foo->import(args)` after
                     // require. base.pm, parent.pm, Exporter, and most other
                     // modules rely on this to wire `@ISA`, export symbols,
@@ -3457,7 +3481,7 @@ impl Interpreter {
                     let import_sub = format!("{module}::import");
                     if self.subs.contains_key(&import_sub) {
                         let mut call_args: Vec<Value> = vec![Value::Str(module.clone())];
-                        for a in _args.iter() {
+                        for a in import_args.iter() {
                             call_args.extend(self.eval_list(a));
                         }
                         if let Some((_params, body)) = self.subs.get(&import_sub).cloned() {
