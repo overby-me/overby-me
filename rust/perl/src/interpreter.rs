@@ -3533,13 +3533,14 @@ impl Interpreter {
                 } else {
                     self.current_line
                 };
-                // Reference perl omits the "you may need to install"
-                // hint for single-letter module names (`use B;` etc.),
-                // empirically confirmed across 5.42 Perl. Match that.
-                let install_hint = if module.len() <= 1 {
-                    String::new()
-                } else {
+                // Reference perl only emits the "you may need to install"
+                // hint when the require target looks like a module file
+                // (`Foo.pm`, `Foo/Bar.pm`); plain `require "foo"` or
+                // single-letter packages don't get the hint. op/require_*.
+                let install_hint = if module.len() > 1 && filename.ends_with(".pm") {
                     format!(" (you may need to install the {module} module)")
+                } else {
+                    String::new()
                 };
                 let msg = format!(
                     "Can't locate {filename} in @INC{install_hint} (@INC entries checked: {inc_str}) at {file} line {line}.\nBEGIN failed--compilation aborted at {file} line {line}.\n"
@@ -3615,10 +3616,10 @@ impl Interpreter {
                         self.current_file.clone()
                     };
                     let line = self.current_line;
-                    let install_hint = if module.len() <= 1 {
-                        String::new()
-                    } else {
+                    let install_hint = if module.len() > 1 && filename.ends_with(".pm") {
                         format!(" (you may need to install the {module} module)")
+                    } else {
+                        String::new()
                     };
                     let msg = format!(
                         "Can't locate {filename} in @INC{install_hint} (@INC entries checked: {inc_str}) at {file} line {line}.\n"
