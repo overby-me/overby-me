@@ -10578,11 +10578,11 @@ impl Interpreter {
                         file_v,
                         line_v,
                         Value::Str(sub_name),
-                        Value::Num(1.0),   // hasargs
-                        Value::Undef,      // wantarray
-                        Value::Undef,      // evaltext
-                        Value::Num(0.0),   // is_require
-                        Value::Num(0.0),   // hints
+                        Value::Num(1.0),           // hasargs
+                        Value::Undef,              // wantarray
+                        Value::Undef,              // evaltext
+                        Value::Num(0.0),           // is_require
+                        Value::Num(0.0),           // hints
                         Value::Str(String::new()), // bitmask
                     ]);
                     pkg_v
@@ -13274,8 +13274,42 @@ impl Interpreter {
                         }
                     };
                     if let Some((_params, body)) = self.subs.get(&lookup_name).cloned() {
+                        // `goto &SUB` is a tail call: target should appear
+                        // to be called from the SAME caller as the original
+                        // sub. Reference perl's `caller()` reflects this.
+                        // We replicate by popping the current frame, calling
+                        // target (which pushes its own frame), then pushing
+                        // the saved frame back so the outer exit path pops
+                        // a balanced number of entries. Exporter::as_heavy
+                        // reads caller(1)[3] to dispatch `heavy_$caller`,
+                        // so this is required for Benchmark.pm to load.
+                        let saved_call_frame = self.call_stack.pop();
+                        let saved_sub_name = self.current_sub_stack.pop();
+                        let saved_sub_scope = self.current_sub_scope_start.pop();
+                        let (saved_pkg, saved_file, saved_line) = (
+                            self.package.clone(),
+                            self.current_file.clone(),
+                            self.current_line,
+                        );
+                        if let Some((ref pkg, ref file, line)) = saved_call_frame {
+                            self.package = pkg.clone();
+                            self.current_file = file.clone();
+                            self.current_line = line;
+                        }
                         return_val =
                             Some(self.call_sub_named(&body, &cur_args, Some(&lookup_name)));
+                        self.package = saved_pkg;
+                        self.current_file = saved_file;
+                        self.current_line = saved_line;
+                        if let Some(frame) = saved_call_frame {
+                            self.call_stack.push(frame);
+                        }
+                        if let Some(name) = saved_sub_name {
+                            self.current_sub_stack.push(name);
+                        }
+                        if let Some(start) = saved_sub_scope {
+                            self.current_sub_scope_start.push(start);
+                        }
                     } else {
                         return_val = Some(Value::Undef);
                     }
@@ -15760,16 +15794,35 @@ impl Interpreter {
                         // Alias the filehandle slot (used for I/O ops).
                         self.fh_aliases.insert(local_name.clone(), src.clone());
                         // Also install a sub alias: a call to local_name
-                        // dispatches to src (if src has a sub body).
+                        // dispatches to src (if src has a sub body). Track
+                        // the source's def package so package-qualified
+                        // variables (e.g. `our %Cache` inside Benchmark)
+                        // resolve through the original package even when
+                        // called via the imported alias. Required for
+                        // Exporter's `*main::timethese = \&Benchmark::timethese`
+                        // to behave identically to a Benchmark-package call.
                         if let Some(body) = self.subs.get(&src).cloned() {
-                            self.subs.insert(local_name, body);
+                            self.subs.insert(local_name.clone(), body);
+                            if let Some(pkg) = self.sub_def_package.get(&src).cloned() {
+                                self.sub_def_package.insert(local_name, pkg);
+                            } else if let Some((pkg, _)) = src.rsplit_once("::") {
+                                self.sub_def_package.insert(local_name, pkg.to_string());
+                            }
                         }
                     }
                     Value::CodeRef(src) => {
                         // `*foo = \&bar` — install foo as a sub pointing at
-                        // bar's body.
+                        // bar's body, propagating the source's def-package
+                        // so the aliased call runs with the original
+                        // module's package context (so `our %Cache` etc.
+                        // resolve to the same slot).
                         if let Some(body) = self.subs.get(&src).cloned() {
-                            self.subs.insert(local_name, body);
+                            self.subs.insert(local_name.clone(), body);
+                            if let Some(pkg) = self.sub_def_package.get(&src).cloned() {
+                                self.sub_def_package.insert(local_name, pkg);
+                            } else if let Some((pkg, _)) = src.rsplit_once("::") {
+                                self.sub_def_package.insert(local_name, pkg.to_string());
+                            }
                         }
                     }
                     Value::Str(s) => {

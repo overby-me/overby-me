@@ -2586,7 +2586,16 @@ impl Parser {
             }
             Token::NotMatch => {
                 self.pos += 1;
-                if let Token::RegexLit(pat, flags) | Token::QrLit(pat, flags) = self.tok() {
+                if let Token::Substitution(pat, repl, flags) = self.tok() {
+                    // `$x !~ s/PAT/REPL/` — apply substitution and negate
+                    // its boolean result (true when nothing matched).
+                    let p = pat.clone();
+                    let r = repl.clone();
+                    let f = flags.clone();
+                    self.pos += 1;
+                    let subst = Expr::Substitution(Box::new(left), p, r, f);
+                    Expr::UnaryOp(UnaryOp::LogNot, Box::new(subst))
+                } else if let Token::RegexLit(pat, flags) | Token::QrLit(pat, flags) = self.tok() {
                     let p = pat.clone();
                     let f = flags.clone();
                     self.pos += 1;
