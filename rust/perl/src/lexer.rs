@@ -3817,6 +3817,8 @@ impl Lexer {
 
 /// Idents that take an operand so `%` after them is a hash sigil,
 /// not modulus (e.g. `scalar %h` / `pos %h` without parens).
+/// Also covers list-operator names so `is *foo, …` lexes the `*foo`
+/// as a glob, not as multiplication. uni/parser.
 fn last_is_named_unary(last: Option<&Token>) -> bool {
     if matches!(last, Some(Token::Tell) | Some(Token::Eof)) {
         return true;
@@ -3828,6 +3830,10 @@ fn last_is_named_unary(last: Option<&Token>) -> bool {
             "scalar" | "pos" | "defined" | "exists" | "delete" | "ref"
             | "keys" | "values" | "each" | "wantarray"
             | "tie" | "untie" | "tied"
+            | "is" | "isnt" | "ok" | "like" | "unlike"
+            | "cmp_ok" | "is_deeply" | "fresh_perl_is" | "fresh_perl_like"
+            | "isa_ok" | "can_ok" | "diag" | "note"
+            | "plan" | "skip" | "skip_all" | "pass" | "fail" | "todo"
         )
     )
 }
