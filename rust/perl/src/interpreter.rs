@@ -17290,12 +17290,17 @@ impl Interpreter {
                         }
                     }
                     "split" => {
+                        // Regex literals carry variable references through
+                        // the raw pattern (`/$sep/`); interpolate before
+                        // compiling so `split /($a)/, $text` actually
+                        // tokenizes on the runtime value of `$a` instead of
+                        // searching for the literal text `$a`. run/fresh_perl.
                         let pat = if args.is_empty() {
                             " ".to_string()
                         } else if let Expr::RegexMatch(_, pat, _) = &args[0] {
-                            pat.clone()
+                            self.interp_regex_pattern(pat)
                         } else if let Expr::RegexLit(pat, _) = &args[0] {
-                            pat.clone()
+                            self.interp_regex_pattern(pat)
                         } else {
                             self.eval_expr(&args[0]).to_str()
                         };
@@ -17356,18 +17361,51 @@ impl Interpreter {
                             // field that `regex::split("")` would produce.
                             text.chars().map(|c| Value::Str(c.to_string())).collect()
                         } else if let Ok(re) = regex::Regex::new(&pat) {
-                            // Use splitn when a positive limit is given so
-                            // the tail field isn't split further. Without
-                            // this, capping the result via reverse-join used
-                            // the regex SOURCE (e.g. `\s*#\s*`) literally
-                            // instead of the actual matched delimiters,
-                            // corrupting the result.
-                            match limit {
-                                Some(n) if n > 0 => re
-                                    .splitn(&text, n as usize)
-                                    .map(|s| Value::Str(s.to_string()))
-                                    .collect(),
-                                _ => re.split(&text).map(|s| Value::Str(s.to_string())).collect(),
+                            // Perl's split with capture groups interleaves
+                            // captured group text between fields:
+                            // `split /(:=)/, "a:=b:=c"` → `(a, :=, b, :=, c)`.
+                            // Detect this via captures_len > 1 (group 0 is
+                            // the whole match).
+                            let has_captures = re.captures_len() > 1;
+                            let cap_n = re.captures_len();
+                            let n_limit = match limit {
+                                Some(n) if n > 0 => Some(n as usize),
+                                _ => None,
+                            };
+                            if has_captures {
+                                let mut result = Vec::new();
+                                let mut last = 0usize;
+                                let mut produced = 0usize;
+                                for cap in re.captures_iter(&text) {
+                                    if let Some(n) = n_limit
+                                        && produced + 1 >= n
+                                    {
+                                        break;
+                                    }
+                                    let full = cap.get(0).unwrap();
+                                    result.push(Value::Str(text[last..full.start()].to_string()));
+                                    produced += 1;
+                                    for i in 1..cap_n {
+                                        result.push(Value::Str(
+                                            cap.get(i)
+                                                .map(|m| m.as_str().to_string())
+                                                .unwrap_or_default(),
+                                        ));
+                                    }
+                                    last = full.end();
+                                }
+                                result.push(Value::Str(text[last..].to_string()));
+                                result
+                            } else {
+                                match limit {
+                                    Some(n) if n > 0 => re
+                                        .splitn(&text, n as usize)
+                                        .map(|s| Value::Str(s.to_string()))
+                                        .collect(),
+                                    _ => {
+                                        re.split(&text).map(|s| Value::Str(s.to_string())).collect()
+                                    }
+                                }
                             }
                         } else {
                             match limit {
