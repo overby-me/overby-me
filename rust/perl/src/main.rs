@@ -62,6 +62,8 @@ fn run_interpreter() -> i32 {
     let mut warnings_flag = false; // -w flag
     let mut taint_mode_arg = false; // -T flag
     let mut record_sep_override: Option<String> = None; // -0NNN flag
+    let mut loop_input = false; // -n flag (wrap script in while(<>) { … })
+    let mut loop_and_print = false; // -p flag (-n plus print $_ each iter)
 
     let mut i = 1;
     while i < args.len() {
@@ -109,6 +111,13 @@ fn run_interpreter() -> i32 {
                 if before_e.contains('T') {
                     taint_mode_arg = true;
                 }
+                if before_e.contains('n') {
+                    loop_input = true;
+                }
+                if before_e.contains('p') {
+                    loop_input = true;
+                    loop_and_print = true;
+                }
             }
             "-I" => {
                 i += 1;
@@ -124,6 +133,13 @@ fn run_interpreter() -> i32 {
             }
             "-l" => {
                 auto_newline = true;
+            }
+            "-n" => {
+                loop_input = true;
+            }
+            "-p" => {
+                loop_input = true;
+                loop_and_print = true;
             }
             "-T" => {
                 taint_mode_arg = true;
@@ -258,6 +274,13 @@ fn run_interpreter() -> i32 {
             if has_shebang_flag(shebang, 'w') {
                 warnings_flag = true;
             }
+            if has_shebang_flag(shebang, 'n') {
+                loop_input = true;
+            }
+            if has_shebang_flag(shebang, 'p') {
+                loop_input = true;
+                loop_and_print = true;
+            }
             // `-0NNN` on the shebang sets $/ to chr(NNN). Plain `-0`
             // (no digits) is chr(0). run/switch0.
             for token in shebang.split_whitespace() {
@@ -297,7 +320,59 @@ fn run_interpreter() -> i32 {
 
     // Parse
     let mut parser = Parser::new_with_lines_and_files(tokens, token_lines, file_overrides);
-    let program = parser.parse_program();
+    let mut program = parser.parse_program();
+
+    // `-n` / `-p` wraps the runtime portion in `while (<>) { … }`
+    // (and -p adds `continue { print or die "-p destination: $!\n"; }`).
+    // BEGIN/END/Sub etc. stay at top level — they're compile-time or
+    // global setup, not per-line work. run/switchn, run/switchp.
+    if loop_input {
+        use ast::{BinOp, Expr as E, Stmt as S, UnaryOp};
+        let mut top: Vec<S> = Vec::new();
+        let mut body: Vec<S> = Vec::new();
+        for stmt in program {
+            match &stmt {
+                S::Begin(_, _)
+                | S::End(_)
+                | S::Check(_)
+                | S::Init(_)
+                | S::Sub { .. }
+                | S::Package(_)
+                | S::Use(_, _, _)
+                | S::FileMark(_)
+                | S::LineMark(_) => top.push(stmt),
+                _ => body.push(stmt),
+            }
+        }
+        let cond = E::BinOp(
+            BinOp::DefOr,
+            Box::new(E::Assign(
+                Box::new(E::ScalarVar("_".to_string())),
+                Box::new(E::Diamond(String::new())),
+            )),
+            Box::new(E::BinOp(
+                BinOp::And,
+                Box::new(E::UnaryOp(
+                    UnaryOp::Not,
+                    Box::new(E::ScalarVar("_".to_string())),
+                )),
+                Box::new(E::IntLit(0)),
+            )),
+        );
+        let continue_body = if loop_and_print {
+            Some(vec![S::Print(None, vec![E::ScalarVar("_".to_string())])])
+        } else {
+            None
+        };
+        let while_stmt = S::While {
+            cond,
+            body,
+            continue_body,
+            label: None,
+        };
+        top.push(while_stmt);
+        program = top;
+    }
 
     // Execute
     let mut interp = Interpreter::new();
