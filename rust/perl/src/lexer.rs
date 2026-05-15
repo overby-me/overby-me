@@ -2107,8 +2107,18 @@ impl Lexer {
                                 || next.is_ascii_alphabetic()
                                 || next == '_';
                             if is_heredoc {
+                                // We don't yet know if the heredoc is
+                                // backtick-quoted (it could be `<<~`TAG``).
+                                // Provisionally reserve the slot; if
+                                // `read_heredoc_header` reports backtick,
+                                // we patch the slot to be a `backtick`
+                                // identifier and push the body placeholder
+                                // afterwards.
                                 let idx = tokens.len();
-                                let interp = self.read_heredoc_header(idx);
+                                let (interp, is_bt) = self.read_heredoc_header(idx + 1);
+                                if is_bt {
+                                    tokens.push(Token::Ident("backtick".to_string()));
+                                }
                                 // Provisional placeholder — replaced at
                                 // newline-drain. Type depends on whether
                                 // the tag was quoted: `<<'EOF'` → literal,
@@ -2118,6 +2128,18 @@ impl Lexer {
                                 } else {
                                     Token::StringLit(String::new())
                                 });
+                                if !is_bt {
+                                    // Fix up the index that read_heredoc_header
+                                    // recorded so it points to the placeholder
+                                    // we just pushed (we passed idx+1 above
+                                    // expecting the leading ident, but it
+                                    // wasn't actually emitted).
+                                    if let Some(ph) = self.pending_heredocs.last_mut()
+                                        && let HeredocTarget::Token(i) = &mut ph.target
+                                    {
+                                        *i = idx;
+                                    }
+                                }
                             } else {
                                 tokens.push(Token::ShiftLeft);
                             }
@@ -3576,7 +3598,10 @@ impl Lexer {
     /// heredoc (to be filled in after the current line ends). The real body
     /// is spliced in when the next newline is encountered. Returns whether
     /// the heredoc interpolates so the caller can pick the right token type.
-    fn read_heredoc_header(&mut self, placeholder_idx: usize) -> bool {
+    /// Returns (interpolate, is_backtick) — backtick heredocs need a leading
+    /// `Ident("backtick")` token so the parser sees `backtick "BODY"` and
+    /// emits `Expr::Backtick(_)` / `Expr::BacktickInterp(_)`.
+    fn read_heredoc_header(&mut self, placeholder_idx: usize) -> (bool, bool) {
         let mut indent = false;
         let mut interpolate = true;
 
@@ -3666,7 +3691,7 @@ impl Lexer {
             target: HeredocTarget::Token(placeholder_idx),
             start_line: self.current_line,
         });
-        interpolate
+        (interpolate, quote == Some('`'))
     }
 
     /// Scan a heredoc body line for nested `<<TAG` declarations, read each

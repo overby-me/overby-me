@@ -8852,6 +8852,17 @@ impl Interpreter {
                 self.set_global_var("^CHILD_ERROR_NATIVE", Value::Num(wait_status as f64));
                 Value::Num(wait_status as f64)
             }
+            "readpipe" => {
+                // `readpipe EXPR` — equivalent to `` `EXPR` `` /
+                // `qx/EXPR/`. With its `_` prototype, a missing
+                // argument is filled in with `$_` by the call site.
+                let cmd = if args.is_empty() {
+                    self.get_var("_").to_str()
+                } else {
+                    self.eval_expr(&args[0]).to_str()
+                };
+                self.run_backtick(&cmd)
+            }
             "exec" => {
                 // `exec LIST` — replace the current process. On success
                 // this doesn't return; on failure, leaves `$!` set and
