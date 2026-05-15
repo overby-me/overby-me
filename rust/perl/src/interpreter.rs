@@ -11516,13 +11516,20 @@ impl Interpreter {
                 Value::Undef
             }
             "mkdir" => {
+                // `mkdir DIR [, MASK]` — create a single directory.
+                // Reference perl's mkdir wraps the libc syscall, which
+                // fails (EEXIST) when DIR already exists. Using
+                // `create_dir_all` would silently succeed instead, so
+                // call `create_dir` and set $! on failure. op/mkdir.
                 if let Some(arg) = args.first() {
                     let dir = self.eval_expr(arg).to_str();
-                    Value::Num(if std::fs::create_dir_all(&dir).is_ok() {
-                        1.0
-                    } else {
-                        0.0
-                    })
+                    match std::fs::create_dir(&dir) {
+                        Ok(_) => Value::Num(1.0),
+                        Err(e) => {
+                            self.set_global_var("!", Value::Str(perl_io_err(&e)));
+                            Value::Num(0.0)
+                        }
+                    }
                 } else {
                     Value::Num(0.0)
                 }
