@@ -7176,13 +7176,12 @@ impl Interpreter {
         // expand it to the current sub's @_ so the called sub sees the
         // caller's args. op/args `&methimpl` tests.
         // `_amp_call_inherit_args` is the `&NAME` (no-parens) sentinel.
-        // Only inherit when we're inside a sub call (so the bare-name
-        // form at module top level doesn't accidentally pull in some
-        // outer-scope @_).
+        // Always forward the caller's current `@_` — at the top level
+        // that's the script's `@_` (often empty, but `BEGIN { @_ = … }`
+        // or explicit assignment can populate it). comp/proto.
         let inherit = args
             .iter()
-            .any(|a| matches!(a, Expr::Call(n, _) if n == "_amp_call_inherit_args"))
-            && !self.current_sub_stack.is_empty();
+            .any(|a| matches!(a, Expr::Call(n, _) if n == "_amp_call_inherit_args"));
         let inherited: Vec<Value>;
         let filtered: Vec<Expr>;
         let args: &[Expr] = if inherit {
@@ -11656,8 +11655,22 @@ impl Interpreter {
         let raw = params.first().map(String::as_str).unwrap_or("");
         // Empty-paren prototype `sub f ()` is stored as the bare `(`
         // marker so `prototype(\&f)` can distinguish it from `sub f`
-        // (no prototype). Strip the marker for enforcement.
-        let proto = raw.strip_prefix('(').unwrap_or(raw);
+        // (no prototype). Strip the marker for enforcement. When the
+        // marker is present and nothing follows it, the prototype is
+        // `()` — the sub takes no args; evaluate inputs for their
+        // side effects but pass nothing through. comp/proto test 9
+        // (`no_args +5` → `no_args() + 5`, not `no_args(+5)`).
+        let (proto, empty_proto) = if let Some(rest) = raw.strip_prefix('(') {
+            (rest, rest.is_empty())
+        } else {
+            (raw, false)
+        };
+        if empty_proto {
+            for a in args {
+                let _ = self.eval_expr(a);
+            }
+            return Vec::new();
+        }
         if proto.is_empty() {
             return args
                 .iter()
