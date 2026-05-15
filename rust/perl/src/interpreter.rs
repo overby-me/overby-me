@@ -10078,6 +10078,26 @@ impl Interpreter {
                 let _ = self.eval_expr(&args[0]);
                 Value::Str("main::STDOUT".to_string())
             }
+            "fileno" => {
+                // Standard filehandles return their POSIX fd numbers;
+                // other handles get undef (we don't track per-handle
+                // file descriptors yet). io/cloexec, op/exec.
+                let arg = args
+                    .first()
+                    .map(|a| self.eval_expr(a))
+                    .unwrap_or(Value::Undef);
+                let name = match &arg {
+                    Value::Glob(n) => n.trim_start_matches("main::").to_string(),
+                    Value::Str(s) => s.clone(),
+                    _ => return Value::Undef,
+                };
+                match name.as_str() {
+                    "STDIN" | "main::STDIN" => Value::Num(0.0),
+                    "STDOUT" | "main::STDOUT" => Value::Num(1.0),
+                    "STDERR" | "main::STDERR" => Value::Num(2.0),
+                    _ => Value::Undef,
+                }
+            }
             "open" => self.eval_open(args),
             "close" => self.eval_close(args),
             "read" | "sysread" => self.eval_read(args),
