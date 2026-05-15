@@ -6710,6 +6710,16 @@ impl Interpreter {
             }
             BinOp::LogOr | BinOp::Or => {
                 let l = self.eval_expr(left);
+                // If the left operand triggered a control-flow signal
+                // (Exit, Die, Return, …), don't evaluate the right —
+                // `do FILE` that ends with `exit` inside it sets
+                // `pending_flow = Some(Flow::Exit(N))` and returns
+                // undef; without this check `do FILE or die $@`
+                // would then evaluate `die $@`, raising an unrelated
+                // exception. re/regexp_nonull.t skip-path.
+                if self.pending_flow.is_some() {
+                    return l;
+                }
                 if l.to_bool() {
                     return l;
                 }
@@ -6717,6 +6727,9 @@ impl Interpreter {
             }
             BinOp::DefOr => {
                 let l = self.eval_expr(left);
+                if self.pending_flow.is_some() {
+                    return l;
+                }
                 if !l.is_undef() {
                     return l;
                 }
