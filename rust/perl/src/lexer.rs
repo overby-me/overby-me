@@ -1948,6 +1948,20 @@ impl Lexer {
                         // Typeglob like *FH / *pkg::name.
                         let name = self.read_ident();
                         tokens.push(Token::Glob(name));
+                    } else if self.ch().is_ascii_digit()
+                        && (tokens.last().map(|t| t.expects_operand()).unwrap_or(true)
+                            || last_is_named_unary(tokens.last()))
+                    {
+                        // Numeric typeglob like `*1` (used by op/method
+                        // tests for `local *1 = sub { … }`). Reference
+                        // perl allows all-digit glob names; treat the
+                        // digits as the name and emit Token::Glob.
+                        let mut name = String::new();
+                        while self.ch().is_ascii_digit() {
+                            name.push(self.ch());
+                            self.pos += 1;
+                        }
+                        tokens.push(Token::Glob(name));
                     } else {
                         tokens.push(Token::Star);
                     }
