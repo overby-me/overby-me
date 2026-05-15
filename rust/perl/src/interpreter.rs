@@ -115,6 +115,10 @@ pub struct Interpreter {
     /// eager Use's Flow::Exit arm checks this to avoid emitting a
     /// duplicate. op/coreamp vs op/filehandle.
     use_chain_emitted_begin_failed: bool,
+    /// Currently-selected filehandle name (default `main::STDOUT`).
+    /// `select FH` swaps in the new name and returns the previous.
+    /// uni/select, op/select.
+    selected_fh: String,
     /// Set while resolving list-context list assignment (`(LIST) = …`)
     /// so `assign_to` knows lvalue subs with empty bodies should be a
     /// silent no-op rather than dying. op/sub_lval tests 32-34.
@@ -702,6 +706,7 @@ impl Interpreter {
             init_blocks: Vec::new(),
             in_die_handler: 0,
             use_chain_emitted_begin_failed: false,
+            selected_fh: "main::STDOUT".to_string(),
             assign_list_ctx: false,
             local_hash_elem_saves: Vec::new(),
             local_array_len_saves: Vec::new(),
@@ -10134,15 +10139,34 @@ impl Interpreter {
                 }
             }
             "select" => {
-                // Minimal stub: `select` with no args returns the
-                // current default filehandle (we only ever have
-                // STDOUT). `select FH` changes the default; we accept
-                // the arg and return the prior name. op/select.
+                // `select FH` returns the previously-current
+                // filehandle and sets the new default. We track the
+                // name only — output still goes to STDOUT in our impl.
+                // op/select, uni/select.
                 if args.is_empty() {
-                    return Value::Str("main::STDOUT".to_string());
+                    return Value::Str(self.selected_fh.clone());
                 }
-                let _ = self.eval_expr(&args[0]);
-                Value::Str("main::STDOUT".to_string())
+                let arg = self.eval_expr(&args[0]);
+                let new_fh = match &arg {
+                    Value::Glob(n) => {
+                        let s = n.trim_start_matches("main::");
+                        if s.contains("::") {
+                            n.clone()
+                        } else {
+                            format!("main::{s}")
+                        }
+                    }
+                    Value::Str(s) if !s.is_empty() => {
+                        if s.contains("::") {
+                            s.clone()
+                        } else {
+                            format!("main::{s}")
+                        }
+                    }
+                    _ => return Value::Str(self.selected_fh.clone()),
+                };
+                let prev = std::mem::replace(&mut self.selected_fh, new_fh);
+                Value::Str(prev)
             }
             "fileno" => {
                 // Standard filehandles return their POSIX fd numbers;
