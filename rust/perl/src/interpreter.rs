@@ -58,13 +58,15 @@ pub enum RegexPosTarget {
     AliasRc(usize),
 }
 
+type SubBody = (Vec<String>, Vec<Stmt>);
+
 pub struct Interpreter {
     // Scope stack: last is innermost
     scopes: Vec<Scope>,
     // Global scope
     globals: Scope,
     // Subroutines
-    subs: HashMap<String, (Vec<String>, Vec<Stmt>)>,
+    subs: HashMap<String, SubBody>,
     /// Subs declared via `sub NAME;` / `sub NAME (PROTO);` with no body
     /// — these exist (`exists &NAME` is true) but are NOT defined
     /// (`defined &NAME` is false). They share storage with `subs` (with
@@ -188,6 +190,10 @@ pub struct Interpreter {
     // (local_name, previous_target). `None` previous means the slot was
     // absent before the local, so restore by removing the alias.
     local_fh_alias_saves: Vec<Vec<(String, Option<String>)>>,
+    /// `local *NAME = sub { … }` — snapshot the prior sub binding so
+    /// scope exit restores it. None means the slot was unbound, so
+    /// restore by removing the entry. op/method tests 6-12.
+    local_sub_saves: Vec<Vec<(String, Option<SubBody>)>>,
     // File handles for reading
     read_handles: HashMap<String, BufReader<File>>,
     /// In-memory read filehandles backed by a scalar string: `open FH, "<", \$str`.
@@ -614,6 +620,7 @@ impl Interpreter {
             local_array_saves: Vec::new(),
             local_each_cursor_saves: Vec::new(),
             local_fh_alias_saves: Vec::new(),
+            local_sub_saves: Vec::new(),
             read_handles: HashMap::new(),
             string_read_handles: HashMap::new(),
             string_write_handles: HashMap::new(),
@@ -2761,7 +2768,49 @@ impl Interpreter {
                             // to an unopened state so subsequent print/say/
                             // printf to the bare name silently discards output
                             // (op/yadayada tests 32-34 use `local *STDOUT`).
+                            //
+                            // `local *NAME = sub { … }` (with init) installs
+                            // a temporary sub at NAME and snapshots the
+                            // previous binding so scope exit restores it.
+                            // op/method tests 6-12 (`local *1 = sub { 123 }`).
                             let local_name = name.trim_start_matches('*').to_string();
+                            // If the init is a sub/coderef, register a
+                            // temporary sub and save the prior binding.
+                            let init_is_sub = init
+                                .as_ref()
+                                .map(|e| matches!(e, Expr::AnonSub(_, _)))
+                                .unwrap_or(false);
+                            if init_is_sub {
+                                // Install under both bare-name and
+                                // qualified-name keys so call sites that
+                                // look up either form pick up the local
+                                // override. Save both prior bindings so
+                                // scope exit restores them.
+                                let qualified = if local_name.contains("::") {
+                                    local_name.clone()
+                                } else {
+                                    format!("{}::{local_name}", self.package)
+                                };
+                                let prior_q = self.subs.get(&qualified).cloned();
+                                let prior_b = self.subs.get(&local_name).cloned();
+                                if let Some(saves) = self.local_sub_saves.last_mut() {
+                                    saves.push((qualified.clone(), prior_q));
+                                    if local_name != qualified {
+                                        saves.push((local_name.clone(), prior_b));
+                                    }
+                                }
+                                let cv = self.eval_expr(init.as_ref().unwrap());
+                                if let Value::CodeRef(src_name) = &cv
+                                    && let Some(body) = self.subs.get(src_name).cloned()
+                                {
+                                    let bare_differs = local_name != qualified;
+                                    self.subs.insert(qualified, body.clone());
+                                    if bare_differs {
+                                        self.subs.insert(local_name.clone(), body);
+                                    }
+                                }
+                                continue;
+                            }
                             let prev_fh = self.fh_aliases.get(&local_name).cloned();
                             if let Some(saves) = self.local_fh_alias_saves.last_mut() {
                                 saves.push((local_name.clone(), prev_fh));
@@ -12866,6 +12915,19 @@ impl Interpreter {
                 }
             }
         }
+        // Restore subs displaced by `local *NAME = sub { … }`.
+        if let Some(saves) = self.local_sub_saves.pop() {
+            for (name, prior) in saves.into_iter().rev() {
+                match prior {
+                    Some(body) => {
+                        self.subs.insert(name, body);
+                    }
+                    None => {
+                        self.subs.remove(&name);
+                    }
+                }
+            }
+        }
         if let Some(saves) = self.local_hash_elem_saves.pop() {
             for (hash, key, prior) in saves.into_iter().rev() {
                 if let Some(arr_name) = hash.strip_prefix('@') {
@@ -14158,6 +14220,7 @@ impl Interpreter {
         self.local_each_cursor_saves.push(Vec::new());
         self.local_aliased_array_saves.push(Vec::new());
         self.local_fh_alias_saves.push(Vec::new());
+        self.local_sub_saves.push(Vec::new());
         self.local_hash_elem_saves.push(Vec::new());
         self.local_array_len_saves
             .push(std::collections::HashMap::new());
