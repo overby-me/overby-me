@@ -17176,6 +17176,7 @@ impl Interpreter {
         // 493, 496, 973.
         let (pattern, self_iter_groups) = rewrite_self_iteration_count(&pattern);
         let pattern = substitute_constant_runtime_regex(&pattern);
+        let code_block_iter_info = detect_iter_blocks(&pattern);
         let (pattern, code_blocks) = extract_regex_code_blocks(&pattern);
         let pattern = expand_inline_aa_case_insensitive(&pattern);
         // Unroll (?R)/(?0) BEFORE flag transforms, otherwise
@@ -17462,7 +17463,14 @@ impl Interpreter {
                     // declared in an earlier block stays in scope while
                     // a later block reads the localised value.
                     // re/regexp 652, 653.
-                    let joined = code_blocks.join(";");
+                    let abs_match_start = start + group_starts[0].unwrap_or(0);
+                    let joined = compose_regex_code(
+                        &code_blocks,
+                        &code_block_iter_info,
+                        text,
+                        abs_match_start,
+                        end,
+                    );
                     let v = self.eval_string(&joined);
                     self.set_global_var("^R", v);
                     self.set_global_var("&", saved_amp);
@@ -17587,7 +17595,14 @@ impl Interpreter {
                         let saved_pos = self.set_pos_for_code_block(end, text);
                         let saved_amp = self.get_var("&");
                         let saved_1 = self.get_var("1");
-                        let joined = code_blocks.join(";");
+                        let abs_match_start = start + group_starts[0].unwrap_or(0);
+                        let joined = compose_regex_code(
+                            &code_blocks,
+                            &code_block_iter_info,
+                            text,
+                            abs_match_start,
+                            end,
+                        );
                         let v = self.eval_string(&joined);
                         self.set_global_var("^R", v);
                         self.set_global_var("&", saved_amp);
@@ -29777,6 +29792,255 @@ fn substitute_constant_runtime_regex(pattern: &str) -> String {
 /// That's loose compared to reference perl (which only runs blocks on
 /// branches actually visited) but correct for the simple cases in
 /// base/lex tests 69–70 (`/(?{print ...})/`).
+/// Join regex code blocks into one eval-ready string, repeating each
+/// block that lives inside a `(LIT_ATOM(?{...}))*` quantifier by its
+/// iteration count (derived from the matched substring length minus
+/// the post-quantifier match length, divided by atom length). re/regexp
+/// 653.
+fn compose_regex_code(
+    blocks: &[String],
+    iter_info: &[Option<(String, String)>],
+    text: &str,
+    match_start: usize,
+    match_end: usize,
+) -> String {
+    let matched = &text[match_start..match_end];
+    let mut parts: Vec<String> = Vec::with_capacity(blocks.len());
+    for (idx, code) in blocks.iter().enumerate() {
+        let count = iter_info
+            .get(idx)
+            .and_then(|info| info.as_ref())
+            .map(|(atom, post)| iter_count(matched, atom, post))
+            .unwrap_or(1);
+        if count <= 1 {
+            parts.push(code.clone());
+        } else {
+            for _ in 0..count {
+                parts.push(code.clone());
+            }
+        }
+    }
+    parts.join(";")
+}
+
+fn iter_count(matched: &str, atom: &str, post: &str) -> usize {
+    if atom.is_empty() {
+        return 1;
+    }
+    let post_clean = strip_code_blocks_from_pattern(post);
+    let mut latest_match_pos: Option<usize> = None;
+    if let Ok(re) = fancy_regex::Regex::new(&format!("^(?:{post_clean})$")) {
+        for pos in 0..=matched.len() {
+            if !matched.is_char_boundary(pos) {
+                continue;
+            }
+            if let Ok(Some(_)) = re.captures(&matched[pos..]) {
+                latest_match_pos = Some(pos);
+            }
+        }
+    }
+    if let Some(p) = latest_match_pos {
+        let atom_bytes = atom.len();
+        if atom_bytes > 0 && p % atom_bytes == 0 {
+            return p / atom_bytes;
+        }
+    }
+    1
+}
+
+fn strip_code_blocks_from_pattern(pat: &str) -> String {
+    let chars: Vec<char> = pat.chars().collect();
+    let mut out = String::with_capacity(pat.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            out.push(chars[i]);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if i + 2 < chars.len()
+            && chars[i] == '('
+            && chars[i + 1] == '?'
+            && (chars[i + 2] == '{'
+                || (chars[i + 2] == '?' && i + 3 < chars.len() && chars[i + 3] == '{'))
+        {
+            let body_start = if chars[i + 2] == '?' { i + 4 } else { i + 3 };
+            let mut depth = 1;
+            let mut j = body_start;
+            while j < chars.len() && depth > 0 {
+                if chars[j] == '\\' && j + 1 < chars.len() {
+                    j += 2;
+                    continue;
+                }
+                if chars[j] == '{' {
+                    depth += 1;
+                } else if chars[j] == '}' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                j += 1;
+            }
+            if j < chars.len() && chars[j] == '}' {
+                j += 1;
+            }
+            if j < chars.len() && chars[j] == ')' {
+                j += 1;
+            }
+            i = j;
+            continue;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+/// Returns repeat-counts hint for each code block, indexed parallel to
+/// `code_blocks`. None means "run once"; Some(n) means "run n times,
+/// based on the containing `(...)*` quantifier's iteration count derived
+/// from the matched substring length".
+fn detect_iter_blocks(pattern: &str) -> Vec<Option<(String, String)>> {
+    // For each `(?{...})` we walk back to find an enclosing `(...)*` /
+    // `(...)+`. If found, record (atom_before_code, post_pattern_after_group_close).
+    // The interpreter will compute iter count = (full_match_len - post_match_len) / atom_len.
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out: Vec<Option<(String, String)>> = Vec::new();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            i += 1;
+            continue;
+        }
+        if !in_class
+            && c == '('
+            && i + 2 < chars.len()
+            && chars[i + 1] == '?'
+            && (chars[i + 2] == '{'
+                || (chars[i + 2] == '?' && i + 3 < chars.len() && chars[i + 3] == '{'))
+        {
+            // We're at a code block. Walk back to find enclosing
+            // `(...) *` or `(...) +`.
+            let info = find_enclosing_iter(&chars, i);
+            out.push(info);
+            // Skip past this block's body and closing.
+            let body_start = if chars[i + 2] == '?' { i + 4 } else { i + 3 };
+            let mut depth = 1;
+            let mut j = body_start;
+            while j < chars.len() && depth > 0 {
+                if chars[j] == '\\' && j + 1 < chars.len() {
+                    j += 2;
+                    continue;
+                }
+                if chars[j] == '{' {
+                    depth += 1;
+                } else if chars[j] == '}' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                j += 1;
+            }
+            if j < chars.len() && chars[j] == '}' {
+                j += 1;
+            }
+            if j < chars.len() && chars[j] == ')' {
+                j += 1;
+            }
+            i = j;
+            continue;
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Walk back from position `code_pos` (the `(` of `(?{...})`) to find
+/// the enclosing `(...)*` / `(...)+`. Returns Some((atom_str, post_str))
+/// where atom_str is the LITERAL prefix of the group's body before
+/// `(?{...})`, and post_str is everything after the `)*`/`)+`.
+fn find_enclosing_iter(chars: &[char], code_pos: usize) -> Option<(String, String)> {
+    // Walk back to find an unmatched `(`.
+    let mut depth: i32 = 0;
+    let mut k = code_pos;
+    let mut paren_open = None;
+    while k > 0 {
+        k -= 1;
+        if k > 0 && chars[k - 1] == '\\' {
+            continue;
+        }
+        if chars[k] == ')' {
+            depth += 1;
+        } else if chars[k] == '(' {
+            if depth == 0 {
+                paren_open = Some(k);
+                break;
+            }
+            depth -= 1;
+        }
+    }
+    let paren_open = paren_open?;
+    // The group must be capturing or non-capturing (we don't handle others).
+    // Find the matching `)` for this `(`.
+    let mut d = 1;
+    let mut j = paren_open + 1;
+    while j < chars.len() && d > 0 {
+        if chars[j] == '\\' && j + 1 < chars.len() {
+            j += 2;
+            continue;
+        }
+        if chars[j] == '(' {
+            d += 1;
+        } else if chars[j] == ')' {
+            d -= 1;
+            if d == 0 {
+                break;
+            }
+        }
+        j += 1;
+    }
+    if d != 0 || j >= chars.len() {
+        return None;
+    }
+    let group_close = j;
+    let after = group_close + 1;
+    if after >= chars.len() || (chars[after] != '*' && chars[after] != '+') {
+        return None;
+    }
+    // Atom: chars between `(` (skipping `?:` if non-capturing) and code_pos.
+    let atom_start = if paren_open + 2 < chars.len()
+        && chars[paren_open + 1] == '?'
+        && chars[paren_open + 2] == ':'
+    {
+        paren_open + 3
+    } else {
+        paren_open + 1
+    };
+    let atom: String = chars[atom_start..code_pos].iter().collect();
+    // Post-pattern: skip the quantifier (and modifier) chars.
+    let mut post_start = after + 1;
+    if post_start < chars.len() && (chars[post_start] == '?' || chars[post_start] == '+') {
+        post_start += 1;
+    }
+    let post: String = chars[post_start..].iter().collect();
+    Some((atom, post))
+}
+
 fn extract_regex_code_blocks(pattern: &str) -> (String, Vec<String>) {
     let chars: Vec<char> = pattern.chars().collect();
     let mut out = String::new();
