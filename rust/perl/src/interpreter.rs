@@ -24433,6 +24433,7 @@ fn inline_simple_recursion_pass(pattern: &str) -> String {
                     && let Ok(n) = num_str.parse::<usize>()
                     && let Some((_, body)) = groups.iter().find(|(num, _)| *num == n)
                     && !body_has_recursion_ref(body)
+                    && !body_has_inner_capture(body)
                 {
                     let body = fold_accept_in_substituted_body(body);
                     out.push_str("(?:");
@@ -24467,6 +24468,7 @@ fn inline_simple_recursion_pass(pattern: &str) -> String {
                         && let Some((_, body)) =
                             groups.iter().find(|(num, _)| *num as i64 == target)
                         && !body_has_recursion_ref(body)
+                        && !body_has_inner_capture(body)
                     {
                         let body = fold_accept_in_substituted_body(body);
                         out.push_str("(?:");
@@ -24494,6 +24496,7 @@ fn inline_simple_recursion_pass(pattern: &str) -> String {
                     let name: String = chars[start..k].iter().collect();
                     if let Some((_, body)) = lookup_named_group(pattern, &name)
                         && !body_has_recursion_ref(&body)
+                        && !body_has_inner_capture(&body)
                     {
                         let body = fold_accept_in_substituted_body(&body);
                         out.push_str("(?:");
@@ -24834,6 +24837,8 @@ fn body_has_inner_capture(body: &str) -> bool {
                         return true;
                     }
                 }
+            } else if i + 1 < chars.len() && chars[i + 1] == '*' {
+                // (*VERB) — control verb, not a capturing group.
             } else {
                 return true;
             }
@@ -24916,6 +24921,7 @@ fn expand_recursive_helper(
     let mut out = String::with_capacity(pat.len());
     let mut i = 0;
     let mut in_class = false;
+    let mut captures_seen: usize = 0;
     while i < chars.len() {
         let c = chars[i];
         if c == '\\' && i + 1 < chars.len() {
@@ -24956,7 +24962,7 @@ fn expand_recursive_helper(
                         let body = fold_accept_in_substituted_body(body);
                         let expanded_body = if body_has_inner_capture(&body) {
                             *counter += 1;
-                            rename_named_captures(&body, *counter)
+                            rename_named_captures_with_outer(&body, *counter, captures_seen)
                         } else {
                             Some(body.clone())
                         };
@@ -25034,7 +25040,7 @@ fn expand_recursive_helper(
                         let body = fold_accept_in_substituted_body(&body);
                         let expanded_body = if body_has_inner_capture(&body) {
                             *counter += 1;
-                            rename_named_captures(&body, *counter)
+                            rename_named_captures_with_outer(&body, *counter, captures_seen)
                         } else {
                             Some(body.clone())
                         };
@@ -25059,6 +25065,23 @@ fn expand_recursive_helper(
                 }
             }
         }
+        // Track capture groups encountered in `pat` so subsequent
+        // recursive substitutions know which `\N` are external.
+        if !in_class && c == '(' {
+            let is_capturing = if i + 1 < chars.len() && chars[i + 1] == '?' {
+                if i + 2 < chars.len() && chars[i + 2] == '<' {
+                    !(i + 3 < chars.len() && (chars[i + 3] == '=' || chars[i + 3] == '!'))
+                } else {
+                    (i + 2 < chars.len() && chars[i + 2] == '\'')
+                        || (i + 3 < chars.len() && chars[i + 2] == 'P' && chars[i + 3] == '<')
+                }
+            } else {
+                true
+            };
+            if is_capturing {
+                captures_seen += 1;
+            }
+        }
         out.push(c);
         i += 1;
     }
@@ -25073,6 +25096,16 @@ fn expand_recursive_helper(
 /// recursive expansion for palindrome-style patterns (re/regexp 1165,
 /// 1367).
 fn rename_named_captures(body: &str, id: usize) -> Option<String> {
+    rename_named_captures_with_outer(body, id, 0)
+}
+
+/// Like `rename_named_captures`, but `outer_count` is the number of
+/// capture groups in the surrounding pattern that exist BEFORE this
+/// body's substitution point. `\N` backrefs with N <= outer_count are
+/// treated as external (kept as-is); higher N is local-only and forces
+/// a bail. This lets bodies like `(.)(?4)(\1)` substitute when `\1`
+/// references an outer group that survives substitution.
+fn rename_named_captures_with_outer(body: &str, id: usize, outer_count: usize) -> Option<String> {
     let chars: Vec<char> = body.chars().collect();
     let mut out = String::with_capacity(body.len() + 16);
     let mut i = 0;
@@ -25104,8 +25137,25 @@ fn rename_named_captures(body: &str, id: usize) -> Option<String> {
                     continue;
                 }
             }
-            // \N numbered backref — can't safely renumber.
+            // \N numbered backref — keep if N <= outer_count (external),
+            // bail otherwise (would have referred to a local capture
+            // that we just converted to non-capturing).
             if chars[i + 1].is_ascii_digit() {
+                let mut k = i + 1;
+                let mut num_str = String::new();
+                while k < chars.len() && chars[k].is_ascii_digit() {
+                    num_str.push(chars[k]);
+                    k += 1;
+                }
+                if let Ok(n) = num_str.parse::<usize>()
+                    && n > 0
+                    && n <= outer_count
+                {
+                    out.push('\\');
+                    out.push_str(&num_str);
+                    i = k;
+                    continue;
+                }
                 return None;
             }
             out.push(c);
