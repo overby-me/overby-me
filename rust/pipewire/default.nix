@@ -2913,6 +2913,10 @@
         tool = "pipewire";
         name = "c-absolute-conf";
       }
+      {
+        tool = "spa-acp-tool";
+        name = "help-cmd";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
