@@ -548,7 +548,7 @@ fn write_info(out: &mut String, info: &InfoData, indent: usize, level: usize) {
             push_newline_indent(out, indent, inner);
             out.push_str(&format!("\"state\": \"{}\",", node_state_name(i.state)));
             push_newline_indent(out, indent, inner);
-            out.push_str(&format!("\"error\": {},", json_null_or_string(&i.error)));
+            out.push_str(&format!("\"error\": {},", json_value_or_null(&i.error)));
             push_newline_indent(out, indent, inner);
             out.push_str("\"props\": ");
             write_props(out, &i.props, indent, inner);
@@ -643,12 +643,14 @@ fn write_params(
 }
 
 fn node_state_name(s: u32) -> &'static str {
-    match s {
-        0 => "error",
-        1 => "creating",
-        2 => "suspended",
-        3 => "idle",
-        4 => "running",
+    // C: PW_NODE_STATE_ERROR=-1, CREATING=0, SUSPENDED=1, IDLE=2, RUNNING=3.
+    // The protocol encodes state as Id (u32), so -1 arrives as 0xFFFFFFFF.
+    match s as i32 {
+        -1 => "error",
+        0 => "creating",
+        1 => "suspended",
+        2 => "idle",
+        3 => "running",
         _ => "unknown",
     }
 }
@@ -666,17 +668,9 @@ fn link_state_name(s: i32) -> &'static str {
     }
 }
 
-fn json_null_or_string(s: &str) -> String {
-    if s.is_empty() {
-        "null".to_string()
-    } else {
-        format!("\"{}\"", json_escape(s))
-    }
-}
-
-// Like json_null_or_string, but recognizes the "(null)" sentinel that
-// our String-typed decoders use to stand in for a POD None (NULL string
-// pointer in C). C's put_value emits unquoted `null` in that case.
+// Recognizes the "(null)" sentinel that our String-typed decoders use to
+// stand in for a POD None (NULL string pointer in C). C's put_value
+// emits unquoted JSON `null` in that case.
 fn json_value_or_null(s: &str) -> String {
     if s == "(null)" {
         "null".to_string()
