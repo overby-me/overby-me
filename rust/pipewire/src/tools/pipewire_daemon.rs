@@ -135,6 +135,15 @@ fn pipewire_load_config(argv0: &str, value: &str) -> i32 {
         );
         return 234;
     }
+    // C: absolute paths go through get_abs_path → conf_load is called
+    // directly and emits the 425 W line on open failure. Relative paths
+    // fall through env/home/configdir/confdata lookups without ever
+    // calling conf_load(), so no 425 line.
+    if std::path::Path::new(value).is_absolute() {
+        eprintln!(
+            "[W][TIME] pw.conf      | [          conf.c:  425 conf_load()] 0x5555555609d0: error loading config '{value}': No such file or directory"
+        );
+    }
     eprintln!(
         "[W][TIME] pw.conf      | [          conf.c: 1182 try_load_conf()] can't load config {value}: No such file or directory"
     );

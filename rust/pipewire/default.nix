@@ -2909,6 +2909,10 @@
         tool = "pw-cat";
         name = "dsd-mode-bad-file";
       }
+      {
+        tool = "pipewire";
+        name = "c-absolute-conf";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
