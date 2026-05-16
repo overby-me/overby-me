@@ -24952,17 +24952,27 @@ fn expand_recursive_helper(
                     let body = groups.iter().find(|(num, _)| *num == n).map(|(_, b)| b);
                     if let Some(body) = body
                         && depth > 0
-                        && !body_has_inner_capture(body)
                     {
-                        out.push_str("(?:");
-                        out.push_str(&expand_recursive_helper(
-                            body,
-                            groups,
-                            orig_pattern,
-                            depth - 1,
-                            counter,
-                        ));
-                        out.push(')');
+                        let body = fold_accept_in_substituted_body(body);
+                        let expanded_body = if body_has_inner_capture(&body) {
+                            *counter += 1;
+                            rename_named_captures(&body, *counter)
+                        } else {
+                            Some(body.clone())
+                        };
+                        if let Some(renamed) = expanded_body {
+                            out.push_str("(?:");
+                            out.push_str(&expand_recursive_helper(
+                                &renamed,
+                                groups,
+                                orig_pattern,
+                                depth - 1,
+                                counter,
+                            ));
+                            out.push(')');
+                        } else {
+                            out.push_str("(?!)");
+                        }
                     } else {
                         out.push_str("(?!)");
                     }
@@ -24973,15 +24983,26 @@ fn expand_recursive_helper(
             // (?R)
             if chars[i + 2] == 'R' && i + 3 < chars.len() && chars[i + 3] == ')' {
                 if depth > 0 {
-                    out.push_str("(?:");
-                    out.push_str(&expand_recursive_helper(
-                        orig_pattern,
-                        groups,
-                        orig_pattern,
-                        depth - 1,
-                        counter,
-                    ));
-                    out.push(')');
+                    let body = fold_accept_in_substituted_body(orig_pattern);
+                    let expanded_body = if body_has_inner_capture(&body) {
+                        *counter += 1;
+                        rename_named_captures(&body, *counter)
+                    } else {
+                        Some(body.clone())
+                    };
+                    if let Some(renamed) = expanded_body {
+                        out.push_str("(?:");
+                        out.push_str(&expand_recursive_helper(
+                            &renamed,
+                            groups,
+                            orig_pattern,
+                            depth - 1,
+                            counter,
+                        ));
+                        out.push(')');
+                    } else {
+                        out.push_str("(?!)");
+                    }
                 } else {
                     out.push_str("(?!)");
                 }
