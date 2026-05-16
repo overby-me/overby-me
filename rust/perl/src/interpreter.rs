@@ -17295,10 +17295,13 @@ impl Interpreter {
                 let end = start + group_ends[0].unwrap();
                 if !code_blocks.is_empty() {
                     let saved_pos = self.set_pos_for_code_block(end, text);
-                    for code in &code_blocks {
-                        let v = self.eval_string(code);
-                        self.set_global_var("^R", v);
-                    }
+                    // Execute all blocks in one eval so that `local`
+                    // declared in an earlier block stays in scope while
+                    // a later block reads the localised value.
+                    // re/regexp 652, 653.
+                    let joined = code_blocks.join(";");
+                    let v = self.eval_string(&joined);
+                    self.set_global_var("^R", v);
                     self.restore_pos_after_code_block(saved_pos);
                 }
                 return (true, end);
@@ -17411,10 +17414,9 @@ impl Interpreter {
                     let end = start + group_ends[0].unwrap();
                     if !code_blocks.is_empty() {
                         let saved_pos = self.set_pos_for_code_block(end, text);
-                        for code in &code_blocks {
-                            let v = self.eval_string(code);
-                            self.set_global_var("^R", v);
-                        }
+                        let joined = code_blocks.join(";");
+                        let v = self.eval_string(&joined);
+                        self.set_global_var("^R", v);
                         self.restore_pos_after_code_block(saved_pos);
                     }
                     (true, end)
