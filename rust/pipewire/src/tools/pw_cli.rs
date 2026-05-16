@@ -503,7 +503,7 @@ fn run_destroy(argv0: &str, cmd_name: &str, remote: Option<&str>, args: &[&str])
         }
     };
 
-    let global = if let Ok(id) = target.parse::<u32>() {
+    let global = if let Some(id) = parse_u32_autobase(target) {
         snap.globals.iter().find(|g| g.id == id)
     } else {
         let mut sorted: Vec<&RegistryGlobal> = snap.globals.iter().collect();
@@ -518,6 +518,32 @@ fn run_destroy(argv0: &str, cmd_name: &str, remote: Option<&str>, args: &[&str])
     // Found — but we don't actually issue the destroy request. Treat
     // as silent success. (Real destroy needs registry.destroy + reply.)
     0
+}
+
+// Mirror libc's `strtoul(s, NULL, 0)` for parsing object IDs: `0x` prefix
+// means hex, leading `0` means octal, otherwise decimal. C's pw-cli uses
+// `spa_atou32(arg, &id, 0)` which delegates to this base-0 parse, so
+// `info 0x10` and `info 010` look up id 16 and id 8 respectively.
+fn parse_u32_autobase(s: &str) -> Option<u32> {
+    let trimmed = s.trim_start();
+    if let Some(hex) = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+    {
+        if hex.is_empty() {
+            return None;
+        }
+        u32::from_str_radix(hex, 16).ok()
+    } else if let Some(oct) = trimmed.strip_prefix('0') {
+        if oct.is_empty() {
+            // Bare "0" — decimal zero, not octal.
+            Some(0)
+        } else {
+            u32::from_str_radix(oct, 8).ok()
+        }
+    } else {
+        trimmed.parse::<u32>().ok()
+    }
 }
 
 fn run_info(argv0: &str, cmd_name: &str, remote: Option<&str>, args: &[&str]) -> i32 {
@@ -553,7 +579,7 @@ fn run_info(argv0: &str, cmd_name: &str, remote: Option<&str>, args: &[&str]) ->
         let mut v: Vec<&RegistryGlobal> = snap.globals.iter().collect();
         v.sort_by_key(|g| g.id);
         v
-    } else if let Ok(id) = target.parse::<u32>() {
+    } else if let Some(id) = parse_u32_autobase(target) {
         snap.globals.iter().filter(|g| g.id == id).collect()
     } else {
         // Mirror C `find_global`: try numeric first, otherwise match on

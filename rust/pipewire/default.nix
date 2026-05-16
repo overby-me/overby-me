@@ -3338,6 +3338,14 @@
       }
       {
         tool = "pw-cli";
+        name = "info-hex-id";
+      }
+      {
+        tool = "pw-cli";
+        name = "info-octal-id";
+      }
+      {
+        tool = "pw-cli";
         name = "bad-flag";
       }
       {
