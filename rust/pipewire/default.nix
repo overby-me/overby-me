@@ -2833,6 +2833,14 @@
         tool = "pw-mon";
         name = "empty-color";
       }
+      {
+        tool = "pw-dump";
+        name = "empty-color";
+      }
+      {
+        tool = "pw-config";
+        name = "empty-color";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a

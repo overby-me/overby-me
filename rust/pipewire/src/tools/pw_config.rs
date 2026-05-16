@@ -104,8 +104,10 @@ pub fn main(raw_args: &[String]) -> i32 {
                 // Color output is already off by default in non-tty mode.
             }
             s if s.starts_with("--color=") => {
+                // C: bare `--color` defaults; `--color=` rejects empty
+                // value the same as any unknown color name.
                 let val = &s["--color=".len()..];
-                if !matches!(val, "" | "never" | "always" | "auto") {
+                if !matches!(val, "never" | "always" | "auto") {
                     eprintln!("Unknown color: {val}");
                     print_help(argv0);
                     return u8::MAX as i32;

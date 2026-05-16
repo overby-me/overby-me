@@ -114,8 +114,12 @@ pub fn main(raw_args: &[String]) -> i32 {
                 // Bare flag → defaults to "auto"; OK.
             }
             s if s.starts_with("--color=") => {
+                // C: `--color=` (with `=`) sets optarg to "" — getopt
+                // distinguishes that from bare `--color` (optarg=NULL).
+                // Bare form accepts default; empty value fails the
+                // auto/never/always match like any other unknown value.
                 let val = &s["--color=".len()..];
-                if !matches!(val, "" | "never" | "always" | "auto") {
+                if !matches!(val, "never" | "always" | "auto") {
                     eprintln!("Unknown color: {val}");
                     print_help(argv0);
                     return 255;
