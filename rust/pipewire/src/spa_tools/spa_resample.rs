@@ -71,9 +71,12 @@ pub fn main(raw_args: &[String]) -> i32 {
                 }
                 i += 1;
             }
+            s if s.starts_with("--cutoff=") => {
+                emit_cutoff(&s["--cutoff=".len()..]);
+                i += 1;
+            }
             s if s.starts_with("--cpuflags=")
                 || s.starts_with("--window=")
-                || s.starts_with("--cutoff=")
                 || s.starts_with("--taps=")
                 || s.starts_with("--param=") =>
             {
@@ -108,9 +111,12 @@ pub fn main(raw_args: &[String]) -> i32 {
                 }
                 i += 1;
             }
+            s if s.starts_with("-u") && s.len() > 2 => {
+                emit_cutoff(&s[2..]);
+                i += 1;
+            }
             s if (s.starts_with("-c")
                 || s.starts_with("-w")
-                || s.starts_with("-u")
                 || s.starts_with("-t")
                 || s.starts_with("-p"))
                 && s.len() > 2 =>
@@ -165,6 +171,9 @@ pub fn main(raw_args: &[String]) -> i32 {
                             print_help(argv0);
                             return 0;
                         }
+                    }
+                    "-u" | "--cutoff" => {
+                        emit_cutoff(val);
                     }
                     _ => {}
                 }
@@ -260,6 +269,47 @@ fn atoi_i32(s: &str) -> i32 {
 // C: `ret = atoi(optarg); if (ret <= 0) { error "bad rate <orig>" }`.
 fn bad_rate(v: &str) -> Option<&str> {
     if atoi_i32(v) <= 0 { Some(v) } else { None }
+}
+
+// C: `data.config.cutoff = strtod(optarg, NULL); fprintf(stderr, "%f\n", ...)`.
+// Mirrors libc printf "%f" formatting (6 fractional digits, "nan"/"-nan"/
+// "inf"/"-inf" for non-finite values — note Rust's default Display prints
+// "NaN" with uppercase, so we hand-format).
+fn emit_cutoff(s: &str) {
+    let v = strtod(s);
+    if v.is_nan() {
+        if v.is_sign_negative() {
+            eprintln!("-nan");
+        } else {
+            eprintln!("nan");
+        }
+    } else {
+        eprintln!("{v:.6}");
+    }
+}
+
+// Mirror libc's strtod: skip leading whitespace, parse the longest valid
+// float prefix, return 0.0 if nothing matches. Rust's f64::parse requires
+// the whole string to be a valid float, so we walk backward to find the
+// longest accepted prefix (matches strtod's "consume prefix" behavior on
+// inputs like "1.5xyz").
+fn strtod(s: &str) -> f64 {
+    let trimmed = s.trim_start();
+    if trimmed.is_empty() {
+        return 0.0;
+    }
+    if let Ok(v) = trimmed.parse::<f64>() {
+        return v;
+    }
+    for len in (1..trimmed.len()).rev() {
+        if !trimmed.is_char_boundary(len) {
+            continue;
+        }
+        if let Ok(v) = trimmed[..len].parse::<f64>() {
+            return v;
+        }
+    }
+    0.0
 }
 
 fn is_valid_format(v: &str) -> bool {

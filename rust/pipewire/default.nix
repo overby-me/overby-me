@@ -2709,6 +2709,42 @@
         tool = "spa-resample";
         name = "quality-wraps-positive";
       }
+      {
+        tool = "spa-resample";
+        name = "cutoff-basic";
+      }
+      {
+        tool = "spa-resample";
+        name = "cutoff-invalid";
+      }
+      {
+        tool = "spa-resample";
+        name = "cutoff-precision";
+      }
+      {
+        tool = "spa-resample";
+        name = "cutoff-inf";
+      }
+      {
+        tool = "spa-resample";
+        name = "cutoff-nan";
+      }
+      {
+        tool = "spa-resample";
+        name = "cutoff-trailing-junk";
+      }
+      {
+        tool = "spa-resample";
+        name = "cutoff-short-attached";
+      }
+      {
+        tool = "spa-resample";
+        name = "cutoff-short-separated";
+      }
+      {
+        tool = "spa-resample";
+        name = "cutoff-long-separated";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
