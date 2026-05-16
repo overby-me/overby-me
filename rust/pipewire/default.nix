@@ -2941,6 +2941,22 @@
         tool = "spa-json-dump";
         name = "unknown-version-long";
       }
+      {
+        tool = "pw-loopback";
+        name = "missing-arg-n";
+      }
+      {
+        tool = "pw-loopback";
+        name = "missing-arg-l";
+      }
+      {
+        tool = "pw-loopback";
+        name = "missing-arg-d";
+      }
+      {
+        tool = "pw-loopback";
+        name = "missing-arg-c";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
