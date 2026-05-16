@@ -3013,6 +3013,14 @@
         tool = "spa-resample";
         name = "missing-arg-p";
       }
+      {
+        tool = "pipewire-pulse";
+        name = "short-c-no-arg";
+      }
+      {
+        tool = "pipewire-pulse";
+        name = "short-P-no-arg";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
