@@ -250,10 +250,11 @@ fn tick_seconds(tempo_uspqn: u32, division: u16) -> f64 {
         }
         return 0.0;
     }
+    // C's midifile divides by `info.division` directly (no clamp);
+    // when division=0 the result is NaN/inf, which the C printer then
+    // emits as "nan"/"-nan"/"inf". We let the same NaN propagate so
+    // event times match C byte-for-byte on malformed division=0 files.
     let tpqn = (division & 0x7fff) as f64;
-    if tpqn == 0.0 {
-        return 0.0;
-    }
     (tempo_uspqn as f64 / 1_000_000.0) / tpqn
 }
 
@@ -651,7 +652,19 @@ fn dump_mem(out: &mut String, label: &str, data: &[u8]) {
 
 pub fn format_event(ev: &Event) -> String {
     let mut s = String::new();
-    s.push_str(&format!("track:{:>2} sec:{:.6} ", ev.track, ev.sec));
+    // C uses printf "%f" which emits "nan"/"-nan"/"inf" for non-finite
+    // values; Rust's default Display prints "NaN" with caps. Hand-format
+    // the sec field to match.
+    let sec_str = if ev.sec.is_nan() {
+        if ev.sec.is_sign_negative() {
+            "-nan".to_string()
+        } else {
+            "nan".to_string()
+        }
+    } else {
+        format!("{:.6}", ev.sec)
+    };
+    s.push_str(&format!("track:{:>2} sec:{sec_str} ", ev.track));
     let d = &ev.data;
     if d.is_empty() {
         return s;

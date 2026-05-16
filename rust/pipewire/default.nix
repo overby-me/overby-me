@@ -3025,6 +3025,10 @@
         tool = "pw-mididump";
         name = "long-force-midi-no-arg";
       }
+      {
+        tool = "pw-mididump";
+        name = "division-zero";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
