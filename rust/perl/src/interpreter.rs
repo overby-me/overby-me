@@ -847,6 +847,58 @@ impl Interpreter {
         self.globals.vars.insert("^W".to_string(), Value::Num(1.0));
     }
 
+    /// Entry point used when the top-level parser produced a deferred
+    /// syntax error. Walks BEGIN blocks (which may install
+    /// `$SIG{__DIE__}`) so the handler sees the parse-error message,
+    /// then propagates the error. comp/final_line_num — the test
+    /// installs the die handler inside BEGIN and expects to inspect
+    /// `__LINE__` when `print 1+` hits EOF mid-expression.
+    pub fn run_with_parse_error(&mut self, program: &[Stmt], err: &str) {
+        self.set_global_var("^GLOBAL_PHASE", Value::Str("START".to_string()));
+        Self::hoist_subs_in_blocks(program, &mut self.subs, "main");
+        self.push_scope();
+        for stmt in program {
+            if let Stmt::Begin(body, _) = stmt {
+                let _ = self.exec_stmts(body);
+                if matches!(self.pending_flow, Some(Flow::Exit(_))) {
+                    if let Some(Flow::Exit(c)) = self.pending_flow.take() {
+                        self.exit_code = c;
+                    }
+                    return;
+                }
+            }
+        }
+        // Fire `$SIG{__DIE__}` if installed; then propagate the error.
+        // Reference perl only emits the trailing `Execution of FILE
+        // aborted due to compilation errors.` line when the handler
+        // DIDN'T run a clean `exit` — a handler that prints + exits
+        // suppresses the banner. comp/final_line_num.
+        let handler = self.get_hash_element("SIG", "__DIE__");
+        if let Value::CodeRef(name) = handler
+            && let Some((_params, body)) = self.subs.get(&name).cloned()
+        {
+            self.in_die_handler += 1;
+            self.call_sub_named(
+                &body,
+                std::slice::from_ref(&Value::Str(err.to_string())),
+                Some(&name),
+            );
+            self.in_die_handler -= 1;
+            if let Some(Flow::Exit(c)) = self.pending_flow.take() {
+                self.exit_code = c;
+                return;
+            }
+        }
+        eprint!("{err}");
+        let file = if self.current_file.is_empty() {
+            "-e".to_string()
+        } else {
+            self.current_file.clone()
+        };
+        eprintln!("Execution of {file} aborted due to compilation errors.");
+        self.exit_code = 255;
+    }
+
     pub fn run(&mut self, program: &[Stmt]) {
         // ${^GLOBAL_PHASE} starts as "START" while BEGIN blocks run.
         self.set_global_var("^GLOBAL_PHASE", Value::Str("START".to_string()));
@@ -11571,6 +11623,18 @@ impl Interpreter {
                     Ok(o) => o,
                     Err(_) => return Value::Undef,
                 };
+                // Set `$?` so callers can inspect the child's exit status.
+                // Perl encodes the wait(2) value: low 8 bits = signal, high
+                // 8 bits = exit code. op/recurse test 28 (`is($?, 0, …)`
+                // after a clean child).
+                let status_code = if let Some(c) = output.status.code() {
+                    (c as i64) << 8
+                } else {
+                    // Killed by signal; encode the signal in low byte.
+                    use std::os::unix::process::ExitStatusExt;
+                    output.status.signal().unwrap_or(0) as i64
+                };
+                self.set_global_var("?", Value::Num(status_code as f64));
                 // Try strict UTF-8 decode first; fall back to latin-1
                 // (one char per byte) for invalid UTF-8. op/print test 3
                 // (raw overlong bytes) and op/join test 42 (`:utf8`-

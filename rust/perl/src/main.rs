@@ -382,6 +382,26 @@ fn run_interpreter() -> i32 {
     let mut parser = Parser::new_with_lines_and_files(tokens, token_lines, file_overrides);
     let mut program = parser.parse_program();
 
+    // File-level parse errors abort compilation. We only propagate
+    // errors that include `at EOF` — that's the truly-unrecoverable
+    // case (e.g. `print 1+` with nothing after). Other parser-recorded
+    // errors (`near "TOKEN"` style from primary's recovery path) get
+    // ignored at the top level; reference perl reaches the runtime
+    // for those and only fails on whatever actually breaks at exec
+    // time. comp/final_line_num covers the EOF-die case.
+    let pending_parse_error = parser
+        .error
+        .take()
+        .filter(|err| err.contains("at EOF"))
+        .map(|err| {
+            let file_label = if script_file.is_empty() {
+                "-e"
+            } else {
+                script_file.as_str()
+            };
+            err.replace("{FILE}", file_label)
+        });
+
     // `-n` / `-p` wraps the runtime portion in `while (<>) { … }`
     // (and -p adds `continue { print or die "-p destination: $!\n"; }`).
     // BEGIN/END/Sub etc. stay at top level — they're compile-time or
@@ -488,7 +508,11 @@ fn run_interpreter() -> i32 {
         }
     }
     interp.set_inc(&all_dirs);
-    interp.run(&program);
+    if let Some(err) = pending_parse_error {
+        interp.run_with_parse_error(&program, &err);
+    } else {
+        interp.run(&program);
+    }
 
     interp.exit_code
 }

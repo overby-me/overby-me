@@ -4831,6 +4831,7 @@ impl Parser {
                         && !self.at(&Token::RParen)
                         && !self.at(&Token::RBrace)
                         && !self.at(&Token::RBracket)
+                        && !self.at(&Token::EOF)
                         && !matches!(
                             self.tok(),
                             Token::Question
@@ -5071,8 +5072,19 @@ impl Parser {
                         | Token::NumGe
                 );
                 if (is_terminator || is_binop_no_lhs) && self.error.is_none() {
-                    let line = self.current_line();
                     let at_eof = matches!(here, Token::EOF);
+                    // Use the LAST non-EOF token's line when we're at
+                    // EOF — current_line() returns 0 past the end of
+                    // tokens, but reference perl blames the line of
+                    // the last real source token. comp/final_line_num.
+                    let line = if at_eof {
+                        // self.pos points at the EOF position; the
+                        // previous index is the last real token.
+                        let prev = self.pos.saturating_sub(1);
+                        self.token_lines.get(prev).copied().unwrap_or_else(|| self.current_line())
+                    } else {
+                        self.current_line()
+                    };
                     let where_ = if at_eof {
                         ", at EOF".to_string()
                     } else {
