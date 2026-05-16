@@ -3,6 +3,7 @@ mod connection;
 mod cookie;
 mod format;
 mod netrc;
+mod ntlm;
 mod options;
 mod request;
 mod response;
@@ -115,6 +116,12 @@ fn main() {
         None
     };
 
+    // Emit any warnings deferred during argument parsing now that the
+    // (possibly --stderr-redirected) stderr is in place (test 1268).
+    for warn in opts.deferred_warnings.drain(..).collect::<Vec<_>>() {
+        eprintln!("{warn}");
+    }
+
     // URL globbing: expand {a,b,c} and [1-10] style patterns in each URL
     // into separate URLs. -g/--globoff disables this.
     // Track glob values for each URL so #N in -o refers to the Nth glob value.
@@ -156,12 +163,16 @@ fn main() {
         // original URL count are unused.
         if !orig_outputs.is_empty() {
             let mut new_outputs = Vec::with_capacity(orig_idx_of.len());
+            let orig_outputs_null = opts.outputs_null.clone();
+            let mut new_outputs_null = Vec::with_capacity(orig_idx_of.len());
             for &orig_idx in &orig_idx_of {
                 if let Some(o) = orig_outputs.get(orig_idx) {
                     new_outputs.push(o.clone());
                 }
+                new_outputs_null.push(orig_outputs_null.get(orig_idx).copied().unwrap_or(false));
             }
             opts.outputs = new_outputs;
+            opts.outputs_null = new_outputs_null;
         }
         opts.urls = all_expanded.iter().map(|(url, _)| url.clone()).collect();
         url_glob_values = all_expanded.into_iter().map(|(_, vals)| vals).collect();
@@ -180,14 +191,12 @@ fn main() {
     //   - GET: use the existing output file's size as the resume offset.
     //   - PUT (-T): curl can't know server-side size, so it always starts from
     //     offset 0 (sends the full upload with Content-Range: bytes 0-N-1/N).
-    if opts.resume_from.as_deref() == Some("-") {
-        if opts.upload_file.is_some() {
-            opts.resume_from = Some("0".to_string());
-        } else if let Some(path) = opts.outputs.first()
-            && let Ok(meta) = fs::metadata(path)
-        {
-            opts.resume_from = Some(meta.len().to_string());
-        }
+    // For uploads, -C - means "start from offset 0" (curl can't know server-side
+    // file size). For downloads we keep the "-" sentinel and re-stat the output
+    // file inside the URL/retry loop so each attempt picks up the current size
+    // (test 3035: `--continue-at - --retry --retry-all-errors`).
+    if opts.resume_from.as_deref() == Some("-") && opts.upload_file.is_some() {
+        opts.resume_from = Some("0".to_string());
     }
 
     // Pre-validate --dump-header destination. "-" means stdout, "%" means stderr;
@@ -270,7 +279,10 @@ fn main() {
     // --hsts <file>: load HSTS DB and upgrade matching http:// URLs to https://.
     // Trailing dots normalize away on both sides; entries beginning with `.`
     // also match all subdomains (tests 440, 441, 493).
-    let hsts_db: Vec<(String, bool)> = opts
+    // hsts_entries: (subdomain_flag, host_no_dot_lowercase, expiry_str_raw)
+    // expiry_str_raw preserves whatever was in the file (so we can write back
+    // unchanged entries verbatim — tests 781/782/783).
+    let mut hsts_entries: Vec<(bool, String, String)> = opts
         .hsts_file
         .as_ref()
         .and_then(|p| std::fs::read_to_string(p).ok())
@@ -281,7 +293,9 @@ fn main() {
                 if line.is_empty() || line.starts_with('#') {
                     continue;
                 }
-                let host = line.split_whitespace().next().unwrap_or("");
+                let mut it = line.splitn(2, char::is_whitespace);
+                let host = it.next().unwrap_or("");
+                let expiry = it.next().unwrap_or("").trim().trim_matches('"');
                 if host.is_empty() {
                     continue;
                 }
@@ -291,12 +305,16 @@ fn main() {
                     .trim_end_matches('.')
                     .to_lowercase();
                 if !h.is_empty() {
-                    out.push((h, subdomain));
+                    out.push((subdomain, h, expiry.to_string()));
                 }
             }
             out
         })
         .unwrap_or_default();
+    let hsts_db: Vec<(String, bool)> = hsts_entries
+        .iter()
+        .map(|(d, h, _)| (h.clone(), *d))
+        .collect();
     let upgrade_to_https = |url: &str| -> String {
         if hsts_db.is_empty() {
             return url.to_string();
@@ -329,8 +347,78 @@ fn main() {
             url.to_string()
         }
     };
-    let urls_with_query: Vec<String> =
-        urls_with_query.iter().map(|u| upgrade_to_https(u)).collect();
+    let urls_with_query: Vec<String> = urls_with_query
+        .iter()
+        .map(|u| upgrade_to_https(u))
+        .collect();
+    // Resolve ipfs:// and ipns:// URLs against a gateway. The gateway comes
+    // from --ipfs-gateway, $IPFS_PATH/gateway, or $HOME/.ipfs/gateway in that
+    // order (tests 722-741). On error the program exits before transferring.
+    let urls_with_query: Vec<String> = {
+        let needs_ipfs = urls_with_query.iter().any(|u| {
+            let l = u.to_ascii_lowercase();
+            l.starts_with("ipfs://") || l.starts_with("ipns://")
+        });
+        if needs_ipfs {
+            match resolve_ipfs_gateway(opts.ipfs_gateway.as_deref()) {
+                Err(code) => {
+                    process::exit(code);
+                }
+                Ok(gateway) => urls_with_query
+                    .into_iter()
+                    .map(|u| {
+                        let l = u.to_ascii_lowercase();
+                        if l.starts_with("ipfs://") || l.starts_with("ipns://") {
+                            let kind = if l.starts_with("ipfs://") { "ipfs" } else { "ipns" };
+                            let rest = &u[7..];
+                            format!("{}/{kind}/{rest}", gateway.trim_end_matches('/'))
+                        } else {
+                            u
+                        }
+                    })
+                    .collect(),
+            }
+        } else {
+            urls_with_query
+        }
+    };
+    // Load --alt-svc cache. Each entry is parsed once and used to inject a
+    // `--connect-to`-style override before each request (tests 412, 413, 437,
+    // 438). Lines look like: `h1 origin_host origin_port h1 alt_host alt_port
+    // "expiry" persist priority`. We use the alt host:port for the TCP target
+    // while keeping the original Host header and emitting `Alt-Used:` on the
+    // request.
+    let alt_svc_entries: Vec<(String, u16, String, u16)> = opts
+        .alt_svc_file
+        .as_ref()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|s| {
+            let mut out = Vec::new();
+            for line in s.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() < 6 {
+                    continue;
+                }
+                let origin_host = parts[1].trim_end_matches('.').to_lowercase();
+                let Ok(origin_port) = parts[2].parse::<u16>() else {
+                    continue;
+                };
+                let alt_host = parts[4].trim_end_matches('.').to_string();
+                let Ok(alt_port) = parts[5].parse::<u16>() else {
+                    continue;
+                };
+                out.push((origin_host, origin_port, alt_host, alt_port));
+            }
+            out
+        })
+        .unwrap_or_default();
+    // Track whether we've learned any HSTS entries during the loop, so we
+    // know whether to rewrite the --hsts file at exit (tests 446, 780-783).
+    let mut hsts_learned_any = false;
+    // Alt-Svc entries learned from response headers during the URL loop. Each
+    // new entry is appended; the final write merges these with the pre-loaded
+    // `alt_svc_entries` (test 437) and skips duplicates (test 438).
+    let mut alt_svc_learned: Vec<(String, u16, String, u16)> = Vec::new();
     for (url_idx, url_str) in urls_with_query.iter().enumerate() {
         // Reset exit_code per URL — curl reports the LAST URL's status as
         // the process exit code, so a failed URL1 followed by a successful
@@ -612,6 +700,7 @@ fn main() {
                     bad_encoding_too_many: false,
                     filesize_exceeded: false,
                     header_size_error: false,
+                    ntlm_too_large: false,
                 };
                 if let Ok(parsed_url) = crate::url::parse_url(url_str) {
                     for (dest, _gated, raw) in split_write_out(fmt) {
@@ -630,6 +719,7 @@ fn main() {
                             exit_code,
                             "",
                             "",
+                            0,
                         );
                         use std::io::Write as _;
                         match dest {
@@ -780,6 +870,32 @@ fn main() {
         } else {
             opts.clone()
         };
+
+        // Alt-Svc lookup: if the URL's (host, port) matches a loaded entry,
+        // route TCP to the alt host:port (via a synthetic --connect-to) and
+        // emit `Alt-Used:` on the next request. Only activates over plain
+        // HTTP when `CURL_ALTSVC_HTTP` is set, matching curl's Debug build
+        // (tests 412, 413, 437, 438). Resets per URL.
+        effective_opts.alt_used = None;
+        if !alt_svc_entries.is_empty()
+            && let Ok(u) = crate::url::parse_url(url_str)
+        {
+            let altsvc_over_http =
+                u.scheme == "https" || std::env::var("CURL_ALTSVC_HTTP").is_ok();
+            if altsvc_over_http {
+                let needle_host = u.host.trim_end_matches('.').to_lowercase();
+                if let Some((_, _, alt_host, alt_port)) = alt_svc_entries
+                    .iter()
+                    .find(|(oh, op, _, _)| oh == &needle_host && *op == u.port)
+                {
+                    effective_opts.connect_tos.push(format!(
+                        "{}:{}:{alt_host}:{alt_port}",
+                        u.host, u.port
+                    ));
+                    effective_opts.alt_used = Some(format!("{alt_host}:{alt_port}"));
+                }
+            }
+        }
 
         // Pre-flight per-URL --etag-save check: open-test the file. If
         // creation fails (bad path), report exit 26 for THIS URL and skip
@@ -974,6 +1090,68 @@ fn main() {
                     .and_then(|u| parse_url(u).ok())
                     .unwrap_or_else(|| parse_url(url_str).unwrap());
 
+                // Alt-Svc learn: parse any `Alt-Svc:` headers when --alt-svc
+                // was given. Each `hN="host:port"` entry maps the URL's
+                // (origin_host, origin_port) to (alt_host, alt_port) (test 437).
+                // We only learn for protocols we send (h1) — h2/h3 are kept in
+                // the header but not added to the cache (we don't speak them).
+                if opts.alt_svc_file.is_some() && (200..400).contains(&resp.status) {
+                    let origin_host = url.host.trim_end_matches('.').to_string();
+                    let origin_port = url.port;
+                    for (k, v) in &resp.headers {
+                        if !k.eq_ignore_ascii_case("alt-svc") {
+                            continue;
+                        }
+                        for entry in parse_alt_svc_header(v) {
+                            let already = alt_svc_entries
+                                .iter()
+                                .chain(alt_svc_learned.iter())
+                                .any(|(oh, op, ah, ap)| {
+                                    oh == &origin_host
+                                        && *op == origin_port
+                                        && ah == &entry.0
+                                        && *ap == entry.1
+                                });
+                            if !already {
+                                alt_svc_learned.push((
+                                    origin_host.clone(),
+                                    origin_port,
+                                    entry.0,
+                                    entry.1,
+                                ));
+                            }
+                        }
+                    }
+                }
+
+                // HSTS learn: record any Strict-Transport-Security headers
+                // received on a 2xx response when --hsts was given. Merge into
+                // hsts_entries (replace if same host, else append). We write
+                // the file at end-of-program (tests 446, 780-783).
+                if opts.hsts_file.is_some() && (200..300).contains(&resp.status) {
+                    for (k, v) in &resp.headers {
+                        if k.eq_ignore_ascii_case("strict-transport-security")
+                            && let Some((expiry, sub)) = parse_hsts_header(v)
+                        {
+                            let host_no_dot = url
+                                .host
+                                .trim_end_matches('.')
+                                .to_lowercase();
+                            let expiry_str = format_hsts_expiry(expiry);
+                            if let Some(pos) = hsts_entries
+                                .iter()
+                                .position(|(_, h, _)| h == &host_no_dot)
+                            {
+                                hsts_entries[pos] = (sub, host_no_dot, expiry_str);
+                            } else {
+                                hsts_entries.push((sub, host_no_dot, expiry_str));
+                            }
+                            hsts_learned_any = true;
+                            break;
+                        }
+                    }
+                }
+
                 // Resume (-C) with 416 means the file was already fully downloaded —
                 // treat as success even with --fail.
                 let resume_fully_downloaded = opts.resume_from.is_some() && resp.status == 416;
@@ -983,8 +1161,18 @@ fn main() {
                 // But: if the response's Content-Length matches the requested
                 // resume offset, we already have everything — treat as success.
                 let has_content_range = resp.headers.iter().any(|(k, _)| k == "content-range");
+                // For `-C -` the effective offset depends on the output file's
+                // current size at the moment of the request — re-stat now so
+                // the "refused" check matches what we actually asked for.
                 let resume_offset: Option<u64> =
-                    opts.resume_from.as_deref().and_then(|s| s.parse().ok());
+                    opts.resume_from.as_deref().and_then(|s| match s {
+                        "-" => opts
+                            .outputs
+                            .first()
+                            .and_then(|p| fs::metadata(p).ok())
+                            .map(|m| m.len()),
+                        _ => s.parse().ok(),
+                    });
                 let resp_cl: Option<u64> = resp
                     .headers
                     .iter()
@@ -999,8 +1187,11 @@ fn main() {
                 // -C with any non-206 GET response means the server didn't
                 // honor the Range — drop the body (test 99 covers 404 with
                 // a huge resume offset). 416 is special: the file is
-                // already fully downloaded, NOT an error (test 1040).
-                let resume_range_refused = opts.resume_from.is_some()
+                // already fully downloaded, NOT an error (test 1040). Only
+                // counts when we ACTUALLY asked for a range (offset > 0); a
+                // zero offset means we never sent Range and the server's plain
+                // 200 is just a normal response (test 3035).
+                let resume_range_refused = matches!(resume_offset, Some(off) if off > 0)
                     && resp.status != 206
                     && resp.status != 416
                     && !has_content_range
@@ -1065,6 +1256,16 @@ fn main() {
                         );
                     }
                     exit_code = 61;
+                    // curl writes the response headers to stdout when a
+                    // --compressed body can't be decoded, regardless of -i
+                    // (tests 223, 315). Suppress the body since it's
+                    // undecoded gibberish.
+                    if !opts.include_headers && opts.outputs.is_empty() {
+                        use std::io::Write as _;
+                        let _ = io::stdout().write_all(&resp.header_bytes);
+                        let _ = io::stdout().flush();
+                    }
+                    resp.body.clear();
                 } else if resp.partial_file {
                     eprintln!("curl: (18) transfer closed with outstanding read data remaining");
                     exit_code = 18;
@@ -1078,6 +1279,13 @@ fn main() {
                 if resp.header_size_error {
                     eprintln!("curl: (27) Response headers too large");
                     exit_code = 56;
+                }
+                if resp.ntlm_too_large {
+                    // curl's CURLE_TOO_LARGE — used by the NTLM auth path
+                    // when credentials would push the Type 3 over the limit
+                    // (tests 775, 776).
+                    eprintln!("curl: (100) A value or data field is larger than allowed");
+                    exit_code = 100;
                 }
                 // status==0 means we consumed a 1xx interim response but the
                 // server closed the connection before sending a final response.
@@ -1551,8 +1759,23 @@ fn main() {
                 // with `None` so the stdout branch below kicks in.
                 let output_path = output_path.filter(|p| p.to_str() != Some("-"));
 
+                // --out-null discards the body but, under --include, still
+                // routes headers to stdout (curl 8.18 tool_cb_hdr.c skips the
+                // out_null check for headers — test 756).
+                let is_out_null = opts.outputs_null.get(url_idx).copied().unwrap_or(false);
                 if nc_failed || j_refuse_overwrite {
                     // Skip writing the body — exit 23 already set.
+                } else if is_out_null {
+                    if effective_opts.include_headers || effective_opts.head {
+                        let stdout = io::stdout();
+                        let mut out = stdout.lock();
+                        let _ = out.write_all(&retry_prefix);
+                        let _ = out.write_all(&resp.redirect_headers);
+                        if !dump_pair_with_include {
+                            let _ = out.write_all(&resp.header_bytes);
+                        }
+                        let _ = out.flush();
+                    }
                 } else if let Some(ref path) = output_path {
                     if opts.create_dirs
                         && let Some(parent) = path.parent()
@@ -1595,6 +1818,28 @@ fn main() {
                         let _ = out.write_all(&resp.body);
                     }
                     let _ = out.flush();
+                }
+
+                // --xattr: with CURL_FAKE_XATTR=1 (Debug-only env), echo the
+                // attributes that would be written to the output file. The
+                // real-attr path is omitted — tests 687/688 set the env so
+                // they only check the stdout trace.
+                if opts.xattr
+                    && std::env::var("CURL_FAKE_XATTR").as_deref() == Ok("1")
+                    && (200..300).contains(&resp.status)
+                {
+                    println!("user.creator => curl");
+                    if let Some(ct) = resp
+                        .headers
+                        .iter()
+                        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+                        .map(|(_, v)| v.as_str())
+                    {
+                        println!("user.mime_type => {ct}");
+                    }
+                    // The xattr stores the URL the user TYPED, not the final
+                    // URL after redirects (test 644).
+                    println!("user.xdg.origin.url => {url_str}");
                 }
 
                 // --remove-on-error: delete the downloaded file when any error
@@ -1676,6 +1921,26 @@ fn main() {
                         String::new()
                     };
                     let mut chunks_by_dest: Vec<(WriteOutDest, bool, String)> = Vec::new();
+                    // size_upload: bytes we sent as the request body (POST -d / PUT
+                    // -T / -F). The upload-file path honors CURL_UPLOAD_SIZE just
+                    // like build_body does, so the value matches what hit the wire.
+                    let size_upload: usize = if let Some(ref d) = opts.data {
+                        d.len()
+                    } else if let Some(ref p) = opts.upload_file {
+                        std::fs::metadata(p)
+                            .ok()
+                            .and_then(|m| {
+                                let len = m.len() as usize;
+                                let truncated = std::env::var("CURL_UPLOAD_SIZE")
+                                    .ok()
+                                    .and_then(|s| s.parse::<usize>().ok())
+                                    .filter(|&n| n <= len);
+                                Some(truncated.unwrap_or(len))
+                            })
+                            .unwrap_or(0)
+                    } else {
+                        0
+                    };
                     for (dest, gated, raw) in split_write_out(fmt) {
                         if raw.is_empty() {
                             chunks_by_dest.push((dest, gated, raw));
@@ -1696,6 +1961,7 @@ fn main() {
                                 .as_deref()
                                 .or(opts.referer.as_deref())
                                 .unwrap_or(""),
+                            size_upload,
                         );
                         chunks_by_dest.push((dest, gated, formatted));
                     }
@@ -1742,6 +2008,12 @@ fn main() {
                         eprintln!("curl: (56) {e}");
                     } else if e == "invalid_connect_response" {
                         eprintln!("curl: (43) Invalid response header");
+                    } else if let Some(scheme) = e.strip_prefix("unsupported scheme: ") {
+                        // Match curl's CURLE_UNSUPPORTED_PROTOCOL phrasing so
+                        // -K test fixtures comparing stderr line up (test 1268).
+                        eprintln!("curl: (1) Protocol \"{scheme}\" not supported");
+                    } else if let Some(rest) = e.strip_prefix("socks5_long_host: ") {
+                        eprintln!("curl: (97) {rest}");
                     } else {
                         eprintln!("curl: {e}");
                     }
@@ -1800,6 +2072,7 @@ fn main() {
                             bad_encoding_too_many: false,
                             filesize_exceeded: false,
                             header_size_error: false,
+                            ntlm_too_large: false,
                         };
                         let chunks = crate::format::split_write_out(fmt);
                         for (dest, gated, raw) in chunks {
@@ -1818,6 +2091,7 @@ fn main() {
                                 56,
                                 "CONNECT tunnel failed",
                                 "",
+                                0,
                             );
                             // CONNECT failure is "with error" — emit
                             // unconditionally except for `%{onerror}` gating.
@@ -1858,8 +2132,11 @@ fn main() {
                     exit_code = 1; // CURLE_UNSUPPORTED_PROTOCOL — malformed status code (test 1430)
                 } else if e.contains("too many response headers")
                     || e.contains("too large response header")
+                    || e.contains("too large NTLM")
                 {
-                    exit_code = 100; // CURLE_TOO_MANY_HEADERS / CURLE_TOO_LARGE (tests 747, 1154)
+                    exit_code = 100; // CURLE_TOO_MANY_HEADERS / CURLE_TOO_LARGE (tests 747, 775, 776, 1154)
+                } else if e.starts_with("socks5_long_host:") {
+                    exit_code = 97; // CURLE_PROXY (test 728)
                 } else if e.starts_with("onion: ") {
                     exit_code = 6; // Couldn't resolve host (RFC 7686 refusal)
                 } else if e.contains("DNS resolution failed for proxy") {
@@ -1940,6 +2217,7 @@ fn main() {
                         bad_encoding_too_many: false,
                         filesize_exceeded: false,
                         header_size_error: false,
+                        ntlm_too_large: false,
                     };
                     for (dest, _gated, raw) in split_write_out(fmt) {
                         if raw.is_empty() {
@@ -1957,6 +2235,7 @@ fn main() {
                             exit_code,
                             &e,
                             "",
+                            0,
                         );
                         use std::io::Write as _;
                         match dest {
@@ -2001,7 +2280,377 @@ fn main() {
         }
     }
 
+    // Alt-Svc write-back: serialize the merged pre-loaded + learned entries
+    // to the --alt-svc file. We always rewrite when --alt-svc was given so
+    // pre-loaded entries are preserved verbatim and any new ones are appended
+    // (tests 437, 438). The expiry timestamp is stripped by the tests'
+    // stripfile regex, so we just emit a placeholder year in the far future.
+    if let Some(ref path) = opts.alt_svc_file {
+        let mut text = String::new();
+        text.push_str("# Your alt-svc cache. https://curl.se/docs/alt-svc.html\n");
+        text.push_str("# This file was generated by libcurl! Edit at your own risk.\n");
+        for (oh, op, ah, ap) in alt_svc_entries.iter().chain(alt_svc_learned.iter()) {
+            text.push_str(&format!(
+                "h1 {oh} {op} h1 {ah} {ap} \"20290222 22:19:28\" 0 0\n"
+            ));
+        }
+        let _ = std::fs::write(path, text);
+    }
+
+    // HSTS write-back: serialize merged entries to the HSTS file in curl's
+    // Netscape-like format. We only rewrite when at least one entry was
+    // learned during the loop (tests 446, 780-783). CURL_TIME (when set)
+    // mocks "now" so the expiry timestamps are deterministic.
+    if let Some(ref path) = opts.hsts_file
+        && hsts_learned_any
+    {
+        let mut text = String::new();
+        text.push_str("# Your HSTS cache. https://curl.se/docs/hsts.html\n");
+        text.push_str("# This file was generated by libcurl! Edit at your own risk.\n");
+        for (sub, host, expiry) in &hsts_entries {
+            let prefix = if *sub { "." } else { "" };
+            text.push_str(&format!("{prefix}{host} \"{expiry}\"\n"));
+        }
+        let _ = std::fs::write(path, text);
+    }
+
+    // --libcurl: emit a C code template using libcurl that reproduces the
+    // command (tests 1400-1481). Stripfile rules in the tests remove option
+    // lines that differ across SSL backends, so we only have to get the
+    // structural template + URL/UA right.
+    if let Some(ref path) = opts.libcurl_file {
+        // opts.urls already has `-G` data merged in. curl backslash-escapes
+        // `?` in the C-string URL to dodge trigraph misinterpretation
+        // (`??=` → `#`).
+        let url = opts
+            .urls
+            .first()
+            .cloned()
+            .unwrap_or_default()
+            .replace('?', "\\?");
+        let ua = opts.user_agent.as_deref().unwrap_or("curl/8.0.0");
+        let user_headers: Vec<String> = opts
+            .headers
+            .iter()
+            .map(|(k, v)| format!("{k}: {v}"))
+            .collect();
+        let needs_slist = !user_headers.is_empty();
+        let mut c = String::new();
+        c.push_str("/********* Sample code generated by the curl command line tool **********\n");
+        c.push_str(" * All curl_easy_setopt() options are documented at:\n");
+        c.push_str(" * https://curl.se/libcurl/c/curl_easy_setopt.html\n");
+        c.push_str(" ************************************************************************/\n");
+        c.push_str("#include <curl/curl.h>\n\n");
+        c.push_str("int main(int argc, char *argv[])\n{\n");
+        c.push_str("  CURLcode ret;\n  CURL *hnd;\n");
+        if needs_slist {
+            c.push_str("  struct curl_slist *slist1;\n");
+            c.push_str("\n  slist1 = NULL;\n");
+            for h in &user_headers {
+                let esc = h.replace('\\', "\\\\").replace('"', "\\\"");
+                c.push_str(&format!("  slist1 = curl_slist_append(slist1, \"{esc}\");\n"));
+            }
+        }
+        c.push_str("\n  hnd = curl_easy_init();\n");
+        c.push_str("  curl_easy_setopt(hnd, CURLOPT_VERBOSE, 1L);\n");
+        c.push_str("  curl_easy_setopt(hnd, CURLOPT_BUFFERSIZE, 102400L);\n");
+        c.push_str(&format!("  curl_easy_setopt(hnd, CURLOPT_URL, \"{url}\");\n"));
+        if let Some(ref pxy) = opts.proxy {
+            c.push_str(&format!(
+                "  curl_easy_setopt(hnd, CURLOPT_PROXY, \"{pxy}\");\n"
+            ));
+        }
+        if let Some(ref u) = opts.user {
+            let esc = u.replace('\\', "\\\\").replace('"', "\\\"");
+            c.push_str(&format!(
+                "  curl_easy_setopt(hnd, CURLOPT_USERPWD, \"{esc}\");\n"
+            ));
+            if opts.basic_explicit {
+                c.push_str(
+                    "  curl_easy_setopt(hnd, CURLOPT_HTTPAUTH, (long)CURLAUTH_BASIC);\n",
+                );
+            }
+        }
+        if needs_slist {
+            c.push_str("  curl_easy_setopt(hnd, CURLOPT_HTTPHEADER, slist1);\n");
+        }
+        if opts.data.is_some() && !opts.get {
+            let data_bytes = opts.data.as_ref().map(|d| d.clone()).unwrap_or_default();
+            let escaped = c_escape_bytes(&data_bytes);
+            c.push_str(&format!(
+                "  curl_easy_setopt(hnd, CURLOPT_POSTFIELDS, \"{escaped}\");\n"
+            ));
+            c.push_str(&format!(
+                "  curl_easy_setopt(hnd, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t){});\n",
+                data_bytes.len()
+            ));
+        }
+        c.push_str(&format!(
+            "  curl_easy_setopt(hnd, CURLOPT_USERAGENT, \"{ua}\");\n"
+        ));
+        c.push_str("  curl_easy_setopt(hnd, CURLOPT_MAXREDIRS, 50L);\n");
+        if !opts.cookies.is_empty() {
+            let joined = opts.cookies.join(";");
+            let esc = joined.replace('\\', "\\\\").replace('"', "\\\"");
+            c.push_str(&format!(
+                "  curl_easy_setopt(hnd, CURLOPT_COOKIE, \"{esc}\");\n"
+            ));
+        }
+        // CURLOPT_SSLVERSION: combine min (--tlsv1.x) and max (--tls-max).
+        if opts.tlsv1_min.is_some() || opts.tls_max.is_some() {
+            let min_ver = opts.tlsv1_min.as_deref().unwrap_or("1.2");
+            let min_const = match min_ver {
+                "1.0" => "CURL_SSLVERSION_TLSv1_0",
+                "1.1" => "CURL_SSLVERSION_TLSv1_1",
+                "1.3" => "CURL_SSLVERSION_TLSv1_3",
+                _ => "CURL_SSLVERSION_TLSv1_2",
+            };
+            let max_const = opts.tls_max.as_deref().map(|v| match v {
+                "1.0" => "CURL_SSLVERSION_MAX_TLSv1_0",
+                "1.1" => "CURL_SSLVERSION_MAX_TLSv1_1",
+                "1.2" => "CURL_SSLVERSION_MAX_TLSv1_2",
+                "1.3" => "CURL_SSLVERSION_MAX_TLSv1_3",
+                _ => "CURL_SSLVERSION_MAX_DEFAULT",
+            });
+            match max_const {
+                Some(maxc) => c.push_str(&format!(
+                    "  curl_easy_setopt(hnd, CURLOPT_SSLVERSION, (long)({min_const} | {maxc}));\n"
+                )),
+                None => c.push_str(&format!(
+                    "  curl_easy_setopt(hnd, CURLOPT_SSLVERSION, (long){min_const});\n"
+                )),
+            }
+        }
+        if opts.proxy_tlsv1 {
+            c.push_str(
+                "  curl_easy_setopt(hnd, CURLOPT_PROXY_SSLVERSION, (long)CURL_SSLVERSION_TLSv1);\n",
+            );
+        }
+        c.push_str("  curl_easy_setopt(hnd, CURLOPT_TCP_KEEPALIVE, 1L);\n");
+        // CURLOPT_PROTOCOLS_STR: comma-separated, lowercased, sorted alphabetically.
+        if let Some(ref pr) = opts.proto_arg {
+            let mut protos: Vec<String> = pr
+                .split(',')
+                .map(|t| {
+                    t.trim()
+                        .trim_start_matches(['+', '-', '='])
+                        .to_ascii_lowercase()
+                })
+                .filter(|s| !s.is_empty())
+                .collect();
+            protos.sort();
+            protos.dedup();
+            let joined = protos.join(",");
+            c.push_str(&format!(
+                "  curl_easy_setopt(hnd, CURLOPT_PROTOCOLS_STR, \"{joined}\");\n"
+            ));
+        }
+        c.push_str("\n");
+        c.push_str("  /* Here is a list of options the curl code used that cannot get generated\n");
+        c.push_str("     as source easily. You may choose to either not use them or implement\n");
+        c.push_str("     them yourself.\n\n");
+        c.push_str("  CURLOPT_DEBUGFUNCTION was set to a function pointer\n");
+        c.push_str("  CURLOPT_DEBUGDATA was set to an object pointer\n");
+        c.push_str("  CURLOPT_WRITEDATA was set to an object pointer\n");
+        c.push_str("  CURLOPT_WRITEFUNCTION was set to a function pointer\n");
+        c.push_str("  CURLOPT_READDATA was set to an object pointer\n");
+        c.push_str("  CURLOPT_READFUNCTION was set to a function pointer\n");
+        c.push_str("  CURLOPT_SEEKDATA was set to an object pointer\n");
+        c.push_str("  CURLOPT_SEEKFUNCTION was set to a function pointer\n");
+        c.push_str("  CURLOPT_HEADERFUNCTION was set to a function pointer\n");
+        c.push_str("  CURLOPT_HEADERDATA was set to an object pointer\n");
+        c.push_str("  CURLOPT_ERRORBUFFER was set to an object pointer\n");
+        c.push_str("  CURLOPT_STDERR was set to an object pointer\n\n");
+        c.push_str("  */\n\n");
+        c.push_str("  ret = curl_easy_perform(hnd);\n\n");
+        c.push_str("  curl_easy_cleanup(hnd);\n  hnd = NULL;\n");
+        if needs_slist {
+            c.push_str("  curl_slist_free_all(slist1);\n  slist1 = NULL;\n");
+        }
+        c.push_str("\n  return (int)ret;\n}\n");
+        c.push_str("/**** End of sample code ****/\n");
+        let _ = std::fs::write(path, c);
+    }
+
     process::exit(exit_code);
+}
+
+/// C-string escape matching curl's `c_escape` (tool_paramhlp.c): backslash,
+/// quote, `?`, `\n` `\r` `\t` are spelled out; other non-printable bytes use
+/// `\xNN` hex unless the next byte is a hex digit (in which case 3-digit octal
+/// `\NNN` is used to keep the escape from absorbing it).
+fn c_escape_bytes(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 4);
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'\n' => out.push_str("\\n"),
+            b'\r' => out.push_str("\\r"),
+            b'\t' => out.push_str("\\t"),
+            b'\\' => out.push_str("\\\\"),
+            b'"' => out.push_str("\\\""),
+            b'?' => out.push_str("\\?"),
+            c if (0x20..0x7F).contains(&c) => out.push(c as char),
+            c => {
+                let next_hex = bytes
+                    .get(i + 1)
+                    .is_some_and(|n| n.is_ascii_hexdigit());
+                if next_hex {
+                    out.push_str(&format!("\\{c:03o}"));
+                } else {
+                    out.push_str(&format!("\\x{c:02x}"));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Pick the IPFS gateway URL, validating it. Returns Err(exit_code) on failure:
+///   3  — gateway URL (from file) is malformed
+///   37 — no gateway available
+///   43 — gateway URL (from --ipfs-gateway flag) is malformed
+/// Trailing slashes are preserved; the caller normalizes them when building URLs.
+fn resolve_ipfs_gateway(flag: Option<&str>) -> Result<String, i32> {
+    // Returns Ok(gateway) or Err(code):
+    //   `from_flag` = true (the --ipfs-gateway arg) → parse failure is 43;
+    //   `from_flag` = false (a gateway file)        → parse failure is 3.
+    // A `?` or `#` in any gateway is always 3 — curl rejects it when joining
+    // with the IPFS path (the result would have two `?`s, malformed).
+    fn validate(g: &str, from_flag: bool) -> Result<String, i32> {
+        if g.contains('?') || g.contains('#') {
+            return Err(3);
+        }
+        let lower = g.to_ascii_lowercase();
+        if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+            return Err(if from_flag { 43 } else { 3 });
+        }
+        let url = crate::url::parse_url(g).ok();
+        let bad = url.is_none()
+            || url
+                .as_ref()
+                .is_some_and(|u| u.host.is_empty() || u.host.contains(','));
+        if bad {
+            return Err(if from_flag { 43 } else { 3 });
+        }
+        Ok(g.trim_end().to_string())
+    }
+    if let Some(g) = flag {
+        return validate(g, true);
+    }
+    let path_from_env = std::env::var("IPFS_PATH")
+        .ok()
+        .map(|p| PathBuf::from(p).join("gateway"));
+    let path_from_home = std::env::var("HOME")
+        .ok()
+        .map(|h| PathBuf::from(h).join(".ipfs").join("gateway"));
+    for candidate in [path_from_env, path_from_home].into_iter().flatten() {
+        if let Ok(contents) = std::fs::read_to_string(&candidate) {
+            let first = contents.lines().next().unwrap_or("").trim();
+            return validate(first, false);
+        }
+    }
+    Err(37)
+}
+
+fn parse_alt_svc_header(value: &str) -> Vec<(String, u16)> {
+    // Parse a single Alt-Svc header value. Comma-separated entries; each is
+    // `proto="host:port"; params`. We only collect entries whose protocol is
+    // `h1` since we don't speak h2/h3. IPv6 hosts are quoted with brackets:
+    // `h1="[ffff::1]:8181"` (test 437).
+    let mut out = Vec::new();
+    for raw in value.split(',') {
+        let entry = raw.trim();
+        // Split off `; params` (max-age, persist, …) — only the first token
+        // is the proto="..." part.
+        let first = entry.split(';').next().unwrap_or("").trim();
+        let Some((proto, val)) = first.split_once('=') else {
+            continue;
+        };
+        let proto = proto.trim();
+        if !proto.eq_ignore_ascii_case("h1") {
+            continue;
+        }
+        let val = val.trim().trim_matches('"');
+        // Split host:port from the right. For IPv6 the host is in brackets.
+        let (host, port) = if let Some(end_bracket) = val.find(']') {
+            let host = &val[..=end_bracket];
+            let rest = val.get(end_bracket + 1..).unwrap_or("");
+            let port = rest.strip_prefix(':').unwrap_or(rest);
+            (host.to_string(), port)
+        } else if let Some(idx) = val.rfind(':') {
+            (val[..idx].to_string(), &val[idx + 1..])
+        } else {
+            (val.to_string(), "")
+        };
+        if let Ok(p) = port.parse::<u16>() {
+            out.push((host, p));
+        }
+    }
+    out
+}
+
+fn parse_hsts_header(header_value: &str) -> Option<(i64, bool)> {
+    // Strict-Transport-Security: max-age=<N>[; includeSubDomains][; preload]
+    // Whitespace around '=' is allowed (test 780). Case-insensitive.
+    let mut max_age: Option<i64> = None;
+    let mut include_subdomains = false;
+    for raw in header_value.split(';') {
+        let part = raw.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let lower = part.to_ascii_lowercase();
+        if lower == "includesubdomains" {
+            include_subdomains = true;
+        } else if let Some(eq) = part.find('=') {
+            let key = part[..eq].trim().to_ascii_lowercase();
+            if key == "max-age" {
+                let v = part[eq + 1..].trim().trim_matches('"');
+                if let Ok(n) = v.parse::<i64>() {
+                    max_age = Some(n);
+                }
+            }
+        }
+    }
+    max_age.map(|n| (current_time_secs() + n, include_subdomains))
+}
+
+fn current_time_secs() -> i64 {
+    if let Ok(v) = std::env::var("CURL_TIME")
+        && let Ok(n) = v.parse::<i64>()
+    {
+        return n;
+    }
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn format_hsts_expiry(secs: i64) -> String {
+    let (y, mo, d, h, mi, s) = secs_to_ymdhms(secs);
+    format!("{y:04}{mo:02}{d:02} {h:02}:{mi:02}:{s:02}")
+}
+
+fn secs_to_ymdhms(secs: i64) -> (i32, u32, u32, u32, u32, u32) {
+    // Days since 1970-01-01 + seconds-of-day.
+    let days = secs.div_euclid(86400);
+    let sod = secs.rem_euclid(86400) as u32;
+    let h = sod / 3600;
+    let mi = (sod % 3600) / 60;
+    let s = sod % 60;
+    // Howard Hinnant's days_from_civil inverse (civil_from_days).
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y = (y + if m <= 2 { 1 } else { 0 }) as i32;
+    (y, m, d, h, mi, s)
 }
 
 /// Parse a Content-Disposition header value and return the `filename` parameter

@@ -38,8 +38,33 @@ pub(crate) fn format_write_out(
     exit_code: i32,
     error_msg: &str,
     referer: &str,
+    size_upload: usize,
 ) -> String {
-    let mut result = fmt.to_string();
+    // %{json} is curl's catchall — render the same set of variables we
+    // expose individually into a single JSON object. The field order is
+    // strictly alphabetical with `curl_version` appended last, matching
+    // curl's static table in tool_writeout_json (tests 970, 972). We do
+    // the substitution up front so any leftover `%{…}` inside the JSON
+    // payload isn't re-processed below.
+    let fmt = if fmt.contains("%{json}") {
+        let json = render_write_out_json(
+            resp,
+            url,
+            num_connects,
+            num_redirects,
+            method,
+            filename_effective,
+            url_num,
+            exit_code,
+            error_msg,
+            referer,
+            size_upload,
+        );
+        fmt.replace("%{json}", &json)
+    } else {
+        fmt.to_string()
+    };
+    let mut result = fmt;
     // `%{http_code}` is always a 3-digit zero-padded code (curl pads when no
     // response was received, e.g. CONNECT-failure → "000", test 217).
     let http_code = format!("{:03}", resp.status);
@@ -58,6 +83,7 @@ pub(crate) fn format_write_out(
             .unwrap_or(""),
     );
     result = result.replace("%{size_download}", &resp.body.len().to_string());
+    result = result.replace("%{size_upload}", &size_upload.to_string());
     // size_header includes the (possibly suppressed) CONNECT response bytes
     // so `--suppress-connect-headers` doesn't undercount (test 1288).
     let visible_header_bytes = resp.header_bytes.len() + resp.connect_header_size;
@@ -221,6 +247,29 @@ pub(crate) fn format_write_out(
         json.push_str("\n}");
         result = result.replace("%{header_json}", &json);
     }
+    // %time{FMT} — strftime-like time formatting. CURL_TIME (Debug-only env
+    // for deterministic tests) acts as the wall-clock seconds since epoch;
+    // microseconds (`%f`) are CURL_TIME % 1000000 to match curl's fake
+    // micros (test 1981). Recognized specifiers: %Y %m %d %H %M %S %f %b %z %Z.
+    while let Some(start) = result.find("%time{") {
+        let after = &result[start + "%time{".len()..];
+        let Some(end_rel) = after.find('}') else { break };
+        let fmt = &after[..end_rel];
+        let total = std::env::var("CURL_TIME")
+            .ok()
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or_else(|| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0)
+            });
+        let micros = (total.rem_euclid(1_000_000)) as u32;
+        let secs = total;
+        let formatted = strftime(fmt, secs, micros);
+        let pat_end = start + "%time{".len() + end_rel + 1;
+        result.replace_range(start..pat_end, &formatted);
+    }
     // %header{NAME[:qualifier[:separator]]} — replace with value(s) of NAME.
     // Qualifier may be a 1-based index (Nth value), "last", or "all" (joined
     // with comma or the optional separator). Search the redirect chain plus
@@ -307,6 +356,332 @@ pub(crate) fn format_write_out(
     result = result.replace("\\n", "\n");
     result = result.replace("\\t", "\t");
     result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_write_out_json(
+    resp: &Response,
+    url: &ParsedUrl,
+    num_connects: usize,
+    num_redirects: usize,
+    method: &str,
+    filename_effective: Option<&std::path::Path>,
+    url_num: usize,
+    exit_code: i32,
+    error_msg: &str,
+    referer: &str,
+    size_upload: usize,
+) -> String {
+    fn json_string(out: &mut String, s: &str) {
+        out.push('"');
+        for c in s.chars() {
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+                c => out.push(c),
+            }
+        }
+        out.push('"');
+    }
+    fn opt_str(out: &mut String, key: &str, v: Option<&str>) {
+        out.push('"');
+        out.push_str(key);
+        out.push_str("\":");
+        match v {
+            Some(s) => json_string(out, s),
+            None => out.push_str("null"),
+        }
+    }
+    fn s(out: &mut String, key: &str, v: &str) {
+        out.push('"');
+        out.push_str(key);
+        out.push_str("\":");
+        json_string(out, v);
+    }
+    fn num(out: &mut String, key: &str, v: impl std::fmt::Display) {
+        out.push_str(&format!("\"{key}\":{v}"));
+    }
+    let curl_time: Option<i64> = std::env::var("CURL_TIME").ok().and_then(|v| v.parse().ok());
+    let debug_size: Option<usize> = std::env::var("CURL_DEBUG_SIZE")
+        .ok()
+        .and_then(|v| v.parse().ok());
+    let curl_version_env = std::env::var("CURL_VERSION").ok();
+    let curl_version = curl_version_env.as_deref().unwrap_or("curl/8.0.0");
+    let time_secs = match curl_time {
+        Some(n) => format!("{}.{:06}", n / 1_000_000, n % 1_000_000),
+        None => "0".to_string(),
+    };
+    let local = crate::connection::LOCAL_ADDR.with(|r| r.borrow().clone());
+    let (local_ip, real_local_port) = local.unwrap_or_default();
+    // CURL_TIME (Debug-only env) fakes live-data numerics — including
+    // local_port — for deterministic tests (970, 972).
+    let local_port: u64 = curl_time.map(|n| n as u64).unwrap_or(real_local_port as u64);
+    let http_connect =
+        crate::connection::CONNECT_RESP.with(|r| r.borrow().as_ref().map(|(s, _)| *s).unwrap_or(0));
+    let content_type = resp
+        .headers
+        .iter()
+        .find(|(k, _)| k == "content-content-type" || k == "content-type")
+        .map(|(_, v)| v.as_str())
+        .unwrap_or("");
+    let port_str = if url.scheme.is_empty() {
+        String::new()
+    } else {
+        url.port.to_string()
+    };
+    let (path_only, query) = url
+        .path
+        .split_once('?')
+        .map(|(p, q)| (p.to_string(), q.to_string()))
+        .unwrap_or((url.path.clone(), String::new()));
+    let (u, p) = match url.userinfo.as_deref() {
+        Some(ui) => ui.split_once(':').unwrap_or((ui, "")),
+        None => ("", ""),
+    };
+    let eff_raw = resp.final_url.as_deref().unwrap_or(&url.raw);
+    let eff = resp
+        .final_url
+        .as_deref()
+        .and_then(|u| crate::url::parse_url(u).ok())
+        .unwrap_or_else(|| url.clone());
+    let eff_port_str = if eff.scheme.is_empty() {
+        String::new()
+    } else {
+        eff.port.to_string()
+    };
+    let (eff_path, eff_query) = eff
+        .path
+        .split_once('?')
+        .map(|(p, q)| (p.to_string(), q.to_string()))
+        .unwrap_or((eff.path.clone(), String::new()));
+    let (eu, ep) = match eff.userinfo.as_deref() {
+        Some(ui) => ui.split_once(':').unwrap_or((ui, "")),
+        None => ("", ""),
+    };
+    let size_header = debug_size.unwrap_or(resp.header_bytes.len() + resp.connect_header_size);
+    let size_request = debug_size.unwrap_or(0);
+    let speed: i64 = curl_time.unwrap_or(0);
+
+    let mut out = String::with_capacity(2048);
+    out.push('{');
+    s(&mut out, "certs", "");
+    out.push(',');
+    num(&mut out, "conn_id", 0);
+    out.push(',');
+    s(&mut out, "content_type", content_type);
+    out.push(',');
+    opt_str(&mut out, "errormsg", if error_msg.is_empty() { None } else { Some(error_msg) });
+    out.push(',');
+    num(&mut out, "exitcode", exit_code);
+    out.push(',');
+    s(
+        &mut out,
+        "filename_effective",
+        filename_effective
+            .and_then(|p| p.to_str())
+            .unwrap_or(""),
+    );
+    out.push(',');
+    opt_str(&mut out, "ftp_entry_path", None);
+    out.push(',');
+    num(&mut out, "http_code", resp.status);
+    out.push(',');
+    num(&mut out, "http_connect", http_connect);
+    out.push(',');
+    s(&mut out, "http_version", "1.1");
+    out.push(',');
+    s(&mut out, "local_ip", &local_ip);
+    out.push(',');
+    num(&mut out, "local_port", local_port);
+    out.push(',');
+    s(&mut out, "method", method);
+    out.push(',');
+    num(&mut out, "num_certs", 0);
+    out.push(',');
+    num(&mut out, "num_connects", num_connects);
+    out.push(',');
+    num(&mut out, "num_headers", resp.headers.len());
+    out.push(',');
+    num(&mut out, "num_redirects", num_redirects);
+    out.push(',');
+    num(&mut out, "num_retries", 0);
+    out.push(',');
+    num(&mut out, "proxy_ssl_verify_result", 0);
+    out.push(',');
+    num(&mut out, "proxy_used", 0);
+    out.push(',');
+    opt_str(&mut out, "redirect_url", resp.redirect_url.as_deref());
+    out.push(',');
+    opt_str(&mut out, "referer", if referer.is_empty() { None } else { Some(referer) });
+    out.push(',');
+    s(&mut out, "remote_ip", &url.host);
+    out.push(',');
+    num(&mut out, "remote_port", url.port);
+    out.push(',');
+    num(&mut out, "response_code", resp.status);
+    out.push(',');
+    s(&mut out, "scheme", &url.scheme);
+    out.push(',');
+    num(&mut out, "size_download", resp.body.len());
+    out.push(',');
+    num(&mut out, "size_header", size_header);
+    out.push(',');
+    num(&mut out, "size_request", size_request);
+    out.push(',');
+    num(&mut out, "size_upload", size_upload);
+    out.push(',');
+    num(&mut out, "speed_download", speed);
+    out.push(',');
+    num(&mut out, "speed_upload", speed);
+    out.push(',');
+    num(&mut out, "ssl_verify_result", 0);
+    out.push(',');
+    num(&mut out, "time_appconnect", &time_secs);
+    out.push(',');
+    num(&mut out, "time_connect", &time_secs);
+    out.push(',');
+    num(&mut out, "time_namelookup", &time_secs);
+    out.push(',');
+    num(&mut out, "time_posttransfer", &time_secs);
+    out.push(',');
+    num(&mut out, "time_pretransfer", &time_secs);
+    out.push(',');
+    num(&mut out, "time_queue", &time_secs);
+    out.push(',');
+    num(&mut out, "time_redirect", &time_secs);
+    out.push(',');
+    num(&mut out, "time_starttransfer", &time_secs);
+    out.push(',');
+    num(&mut out, "time_total", &time_secs);
+    out.push(',');
+    num(&mut out, "tls_earlydata", 0);
+    out.push(',');
+    s(&mut out, "url", &url.raw);
+    out.push(',');
+    opt_str(&mut out, "url.fragment", url.fragment.as_deref());
+    out.push(',');
+    s(&mut out, "url.host", &url.host);
+    out.push(',');
+    opt_str(&mut out, "url.options", None);
+    out.push(',');
+    opt_str(&mut out, "url.password", if p.is_empty() && u.is_empty() { None } else { Some(p) });
+    out.push(',');
+    s(&mut out, "url.path", &path_only);
+    out.push(',');
+    opt_str(&mut out, "url.port", if port_str.is_empty() { None } else { Some(&port_str) });
+    out.push(',');
+    opt_str(&mut out, "url.query", if query.is_empty() { None } else { Some(&query) });
+    out.push(',');
+    s(&mut out, "url.scheme", &url.scheme);
+    out.push(',');
+    opt_str(&mut out, "url.user", if u.is_empty() { None } else { Some(u) });
+    out.push(',');
+    opt_str(&mut out, "url.zoneid", None);
+    out.push(',');
+    s(&mut out, "url_effective", eff_raw);
+    out.push(',');
+    opt_str(&mut out, "urle.fragment", eff.fragment.as_deref());
+    out.push(',');
+    s(&mut out, "urle.host", &eff.host);
+    out.push(',');
+    opt_str(&mut out, "urle.options", None);
+    out.push(',');
+    opt_str(&mut out, "urle.password", if ep.is_empty() && eu.is_empty() { None } else { Some(ep) });
+    out.push(',');
+    s(&mut out, "urle.path", &eff_path);
+    out.push(',');
+    opt_str(&mut out, "urle.port", if eff_port_str.is_empty() { None } else { Some(&eff_port_str) });
+    out.push(',');
+    opt_str(&mut out, "urle.query", if eff_query.is_empty() { None } else { Some(&eff_query) });
+    out.push(',');
+    s(&mut out, "urle.scheme", &eff.scheme);
+    out.push(',');
+    opt_str(&mut out, "urle.user", if eu.is_empty() { None } else { Some(eu) });
+    out.push(',');
+    opt_str(&mut out, "urle.zoneid", None);
+    out.push(',');
+    num(&mut out, "urlnum", url_num);
+    out.push(',');
+    num(&mut out, "xfer_id", 0);
+    out.push(',');
+    s(&mut out, "curl_version", curl_version);
+    out.push('}');
+    out
+}
+
+fn strftime(fmt: &str, secs: i64, micros: u32) -> String {
+    let (y, mo, d, h, mi, s) = secs_to_ymdhms(secs);
+    let bytes = fmt.as_bytes();
+    let mut out = String::with_capacity(fmt.len() + 16);
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 1 < bytes.len() {
+            let spec = bytes[i + 1] as char;
+            match spec {
+                'Y' => out.push_str(&format!("{y:04}")),
+                'm' => out.push_str(&format!("{mo:02}")),
+                'd' => out.push_str(&format!("{d:02}")),
+                'H' => out.push_str(&format!("{h:02}")),
+                'M' => out.push_str(&format!("{mi:02}")),
+                'S' => out.push_str(&format!("{s:02}")),
+                'f' => out.push_str(&format!("{micros:06}")),
+                'b' => out.push_str(month_abbr(mo)),
+                'z' => out.push_str("+0000"),
+                'Z' => out.push_str("UTC"),
+                '%' => out.push('%'),
+                other => {
+                    out.push('%');
+                    out.push(other);
+                }
+            }
+            i += 2;
+        } else {
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    out
+}
+
+fn month_abbr(m: u32) -> &'static str {
+    match m {
+        1 => "Jan",
+        2 => "Feb",
+        3 => "Mar",
+        4 => "Apr",
+        5 => "May",
+        6 => "Jun",
+        7 => "Jul",
+        8 => "Aug",
+        9 => "Sep",
+        10 => "Oct",
+        11 => "Nov",
+        12 => "Dec",
+        _ => "???",
+    }
+}
+
+fn secs_to_ymdhms(secs: i64) -> (i32, u32, u32, u32, u32, u32) {
+    let days = secs.div_euclid(86400);
+    let sod = secs.rem_euclid(86400) as u32;
+    let h = sod / 3600;
+    let mi = (sod % 3600) / 60;
+    let s = sod % 60;
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y = (y + if m <= 2 { 1 } else { 0 }) as i32;
+    (y, m, d, h, mi, s)
 }
 
 pub(crate) fn urlencode_field(val: &str) -> String {

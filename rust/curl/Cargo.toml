@@ -19,6 +19,14 @@ rustls-native-certs = "0.8"
 rustls-pemfile = "2"
 webpki-roots = "0.26"
 flate2 = "1"
+md-5 = "0.10"
+sha2 = "0.10"
+brotli-decompressor = "5"
+idna = "1"
+ruzstd = "0.8"
+md4 = "0.10"
+des = "0.8"
+cipher = "0.4"
 
 [profile.release]
 lto = true

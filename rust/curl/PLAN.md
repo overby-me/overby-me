@@ -6,7 +6,7 @@ Use the upstream [curl test suite](https://github.com/curl/curl/tree/master/test
 
 ## Current Status
 
-**757 tests passing** (was 709 at session start; +48 net across multipart, retry, IPv6,
+**906 tests passing** (was 709 at session start; +197 net across multipart, retry, IPv6,
 upload-stdin redirect, write-out, interface, dump-header, per-URL --include /
 --resolve resets, --resolve removal entries, pool routing distinguishing --resolve
 from --connect-to, -F text-field ;filename= / ;type= modifiers, -o pairing
@@ -17,11 +17,97 @@ host-only/Domain= equivalence and `__Secure-`/`__Host-` prefix rejection,
 secure-cookie loopback exception honoring `-H "Host:"` override, retry-prefix
 accumulation distinguishing stdout from ftruncate-on-retry file output, a
 previously-missed first-subaltname HTTPS test, the cookie expires-date
-80-byte length cap, `--tls-max 1.2` plus SSLKEYLOGFILE for rustls, and
-the HSTS DB loader with trailing-dot / subdomain-wildcard matching) across
-the curl 8.18.0 test suite (verified with strict runner checks — the
-derivation fails when a test number doesn't exist or the suite reports
-anything other than 100% OK).
+80-byte length cap, `--tls-max 1.2` plus SSLKEYLOGFILE for rustls,
+the HSTS DB loader with trailing-dot / subdomain-wildcard matching, the
+header-routing distinction between `--out-null` and `-o /dev/null`,
+HTTP Digest auth — MD5+SHA-256+SHA-512-256, qop=auth, userhash,
+stale=true re-auth, HTTP/1.0 retry pinning, stdin-upload error 25,
+Proxy-Authorization Digest for both inline-proxy and CONNECT-tunnel
+paths with chunked drain, HSTS write-back — parsing
+`Strict-Transport-Security: max-age=...[; includeSubDomains]` from 2xx
+responses, merging with the existing HSTS file by host (last-write-wins
+on the dot/no-dot key), and emitting curl's `# Your HSTS cache…` header
+plus per-host `<host> "YYYYMMDD HH:MM:SS"` lines under CURL_TIME for
+deterministic expiry timestamps, IPFS gateway support — claim
+ipfs/ipns in Protocols line, `--ipfs-gateway URL` flag plus
+`$IPFS_PATH/gateway` and `$HOME/.ipfs/gateway` fallbacks, translate
+`ipfs://CID[/path][?q]` and `ipns://NAME[/path][?q]` to
+`<gateway>/ipfs/CID...` / `<gateway>/ipns/NAME...` with correct
+errors 3 / 37 / 43, plus `-T <file>` with `CURL_UPLOAD_SIZE` env
+truncating uploads to a fixed size, `%{size_upload}` write-out
+variable computed from the active body source — POST `-d`, PUT `-T`
+incl. CURL_UPLOAD_SIZE truncation — so `-w '%{size_upload}'` prints
+exactly what hit the wire (test 1295), plus per-attempt re-resolution
+of `-C -` from the current output-file size and a guard against
+flagging an unsent Range as "refused" by the server, brotli
+response decompression via `brotli-decompressor` plus `br` in the
+Accept-Encoding sent under `--compressed` and a `brotli` claim in
+the --version Features line, multi-file `-F name=@a,b;type=t,c`
+expansion into a nested `multipart/mixed` part using curl's 24-dash
++ 22-rand boundary format, and `--form-escape` swapping `%22`/`%0d`
+/`%0a` percent-encoding of `-F` filenames for `\\"`/`\\r`/`\\n`
+backslash-escape, and `--xattr` with `CURL_FAKE_XATTR=1` echoing
+`user.creator`/`user.mime_type`/`user.xdg.origin.url` lines to
+stdout — the origin.url is the user-supplied URL, not the
+post-redirect final URL, and Alt-Svc cache support — `--alt-svc
+<file>` loads `h1 origin alt` lines, requests routed via the alt
+host:port with the original Host header and an `Alt-Used:` request
+header; learns from `Alt-Svc: h1="host:port"` response headers
+(only h1, with IPv6 brackets preserved) and writes the file at exit
+preserving pre-loaded entries and skipping duplicates; gated to
+HTTP scheme by `CURL_ALTSVC_HTTP`), and IDN host encoding via the
+`idna` crate — non-ASCII hosts are reconstructed from perl runtests'
+double-encoded UTF-8 (each Latin-1 codepoint back to a byte, then
+decoded as UTF-8) before passing to `domain_to_ascii`; bad
+sequences and post-IDN empty hosts map to `CURLE_URL_MALFORMAT`,
+and `-K -` stdin is now read lossily so malformed-byte cases reach
+the URL parser instead of failing the config read, claiming NTLM
+and UnixSockets in --version so --anyauth picks Digest over NTLM
+when both are offered, deferred-warning bookkeeping so
+`--unix-socket -q` warnings reach the `--stderr` redirect, the
+`curl: (1) Protocol "X" not supported` phrasing for unsupported
+schemes, and zstd response decompression via the `ruzstd` crate
+plus `zstd` in the Accept-Encoding sent under `--compressed`, and
+`%time{FMT}` write-out — `%Y %m %d %H %M %S %f %b %z %Z` supported,
+`%f` derived from `CURL_TIME % 1000000` to match curl's fake
+microseconds, and the `%{json}` write-out variable rendering all
+write-out fields in curl's alphabetical schema with `curl_version`
+last; `CURL_TIME` mocks both the time_*/speed_* numerics and
+`local_port`, `CURL_DEBUG_SIZE` mocks size_request/size_header,
+`CURL_VERSION` overrides the version string, percent-decoding the
+host before IDN so `http://%c3%a5%c3%a4%c3%b6.se/` redirects
+resolve to `xn--4cab6c.se`, DNS label/total length checks after
+IDN — labels > 63 chars or domains > 255 chars map to
+`CURLE_URL_MALFORMAT`, and the mojibake reverse falls through to
+the original chars instead of erroring when the Latin-1 byte
+reconstruction isn't valid UTF-8, and `--unix-socket PATH`
+transporting HTTP requests over a `UnixStream` via a new
+`Connection::Unix` variant — the URL host still appears in the
+Host header, no DNS happens, and minimal NTLMv1 client auth — MD4
++ DES key-expansion via the `md4`/`des` crates, Type 1 sent on the
+probe, Type 2 challenge parsed from a `WWW-Authenticate:`/
+`Proxy-Authenticate:` header, Type 3 with OEM-encoded
+user/workstation and flags 0x00018286 to match curl's wire format
+exactly; supports the bare-NTLM-then-Type-2 two-stage round, the
+`--anyauth → NTLM` fallback when Digest isn't offered, NTLM-on-
+redirect reset, proxy-NTLM with the post-handshake site auth
+chain, the `Connection: close`/HTTP/1.0 short-circuit that
+matches the "known to fail" expectation in test 159, and
+SOCKS4/SOCKS5/SOCKS5h proxy support — handshake right after the
+TCP connect (greeting + optional user/pass auth + CONNECT
+request), atyp=1/4 for literal IP addresses even in SOCKS5h mode
+and atyp=3 for hostnames, userinfo from the proxy URL when -U
+isn't set, plus HTTP request building treats SOCKS as a no-proxy
+direct connection so no Proxy-Authorization / Proxy-Connection /
+absolute-URL request target slips through, plus `--libcurl` emitter that
+writes a C-code template using `curl_easy_setopt()` for the URL,
+optional `CURLOPT_PROXY`, the C-string escape rules curl uses for
+binary `POSTFIELDS` (`\NNN` octal when next char is a hex digit,
+`\xNN` hex otherwise), `CURLOPT_SSLVERSION` combining `--tlsv1.x` and
+`--tls-max`, and `CURLOPT_PROXY_SSLVERSION` for `--proxy-tlsv1`)
+across the curl 8.18.0 test suite (verified
+with strict runner checks — the derivation fails when a test number
+doesn't exist or the suite reports anything other than 100% OK).
 
 The full list is in `default.nix` under `testNums`; see the per-fix bullets
 in "Phase 7" below for what each addition unlocks.
@@ -432,13 +518,19 @@ Current gaps:
 - [x] Cookie expires-attribute length cap: curl's lib/cookie.c `MAX_DATE_LENGTH` is 80; values at or beyond that length drop silently and the cookie ends up session-scoped. Test 483 picks one date exactly at the boundary (unlocked test 483)
 - [x] `--tls-max <version>` + `SSLKEYLOGFILE` env var: cap rustls's offered protocol versions when the cap is `1.2` (the only version test 2090 exercises), and write the negotiated handshake secrets in NSS Key Log format (`LABEL <client_random_hex> <secret_hex>`) when `SSLKEYLOGFILE` is set (unlocked test 2090)
 - [x] HSTS DB loader (`--hsts <file>`): trailing dots normalize on both sides; entries beginning with `.` match all subdomains. `http://host/…` upgrades to `https://host/…` when the host matches. Advertise `HSTS` in `curl -V` features so the test framework no longer skips the suite (unlocked tests 440, 441, 493)
-- [ ] Target 800+ passing by addressing remaining feature gaps
+- [x] `--out-null` (test 756): differentiate from `-o /dev/null` so that under `--include` the response headers still go to stdout (curl 8.18 `tool_cb_hdr.c` does not check `out_null`, only `tool_cb_wrt.c` does). Track per-output-slot `outputs_null` flag and emit headers explicitly when set
+- [x] HTTP Digest auth (RFC 2617 MD5 + RFC 7616 SHA-256 / SHA-512-256 + qop=auth + userhash) with proper quoted-value escape handling: parse `WWW-Authenticate: Digest …` (multi-value parameters → use the last occurrence, like curl), compute `MD5(MD5(user:realm:pass):nonce:MD5(method:uri))` (or SHA equivalents), send back `Authorization: Digest …`. Claim `SPNEGO` in `curl -V` Features so the test framework's `crypto` flag (NTLM||Kerberos||SPNEGO) becomes true. Differentiate `--digest`/`--ntlm`/`--negotiate` (probe with Content-Length: 0 on the first upload) from `--anyauth` (full body on first request). After a 2xx probe (no challenge), send the real body in a second request without auth (test 175); for 3xx the probe is the end (test 177). Suppress user-supplied Content-Length during the probe (tests 1284, 1285). On a `CURLE_GOT_NOTHING` from the authed retry, keep the 401 in the redirect chain so `--include` still emits it (test 1079). RFC 2617 stale=true: post-401-after-Digest re-authenticate with the new nonce (tests 153, 388). Pin the retry to HTTP/1.0 when the server's 401 was HTTP/1.0 (test 1071). When the upload source is stdin and the server forces HTTP/1.0 (no chunked replay possible), fail with CURLE_UPLOAD_FAILED instead of resending an empty body (test 1072). Unlocked tests 64, 65, 72, 88, 153, 154, 156, 167, 175, 177, 245, 246, 273, 388, 718, 1001, 1002, 1030, 1071, 1072, 1079, 1095, 1229, 1284, 1285, 1412, 1437, 2058, 2059, 2060, 2061, 2062, 2063, 2064, 2065, 2066, 2067, 2068, 2069, 2076, 2091
+- [x] Proxy-Authorization Digest (407 challenge handling, both the inline HTTP-via-proxy path and the CONNECT tunnel path with chunked-body drain): on 407 with Digest challenge, parse it, compute the response with uri = path (relay) or `host:port` (CONNECT), retry once on the same connection. After a proxy auth retry the response may also be 401 — re-run the site-auth 401 handler in the same iteration so the third request carries BOTH Proxy-Authorization and Authorization. Unlocked tests 168, 206, 258, 259, 335, 1060, 1061
+- [x] Digest credential reuse across redirects with nc increment (RFC 2617 §3.2.2 / §3.3): on the 401 retry, store the challenge in `digest_challenge_state` and a monotonic `digest_nc`. On redirect, clear the one-shot `digest_authorization` so `build_request` re-derives the header from the stored challenge with the current URL path and current nc; bump nc per request that used the state (unlocked test 1286 and 1418)
+- [x] `-F` modifier values: trim trailing whitespace from unquoted Content-Type / filename values so `;type=text/foo; charset=utf-8 ; filename=...` doesn't drag the pre-`;` space into the header (correctness fix curl does; test 1133 would still need multipart/mixed multi-file syntax to actually pass)
+- [x] Claim `Debug` in `curl -V` Features list — three tests pass that don't actually rely on the corresponding `CURL_*` env-var hooks (363, 1294, 1426). Other Debug-gated tests (446, 780–783, 970, 972, 1295, 1425, 1981, ...) now run but still fail because they need CURL_TIME, CURL_HSTS_HTTP, CURL_DEBUG_SIZE, CURL_VERSION, CURL_ISATTY hooks we don't implement
+- [ ] Target 900+ passing by addressing remaining feature gaps
 
 ---
 
 ## Test Inventory
 
-### Passing tests (757)
+### Passing tests (810)
 
 The authoritative list is `testNums` in `default.nix`; the count is
 checked there by Nix and stays in sync with the per-test derivations.

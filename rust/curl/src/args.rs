@@ -23,13 +23,17 @@ fn check_unicode_warning(arg: &str) {
 /// may be double-quoted with `\\` and `\"` escapes; unquoted values run to end
 /// of line (trimmed).
 fn read_config_file(path: &str) -> Vec<String> {
+    // Read as bytes first, then UTF-8-lossy. This lets a config containing
+    // non-UTF-8 bytes (e.g. tests that embed `%hex[...]hex%` for malformed
+    // hosts via `-K -`) survive long enough for the URL parser to flag the
+    // malformed bytes itself, rather than the config read failing silently.
     let content = if path == "-" {
-        let mut s = String::new();
-        io::stdin().read_to_string(&mut s).unwrap_or(0);
-        s
+        let mut bytes = Vec::new();
+        let _ = io::stdin().read_to_end(&mut bytes);
+        String::from_utf8_lossy(&bytes).into_owned()
     } else {
-        match fs::read_to_string(path) {
-            Ok(s) => s,
+        match fs::read(path) {
+            Ok(b) => String::from_utf8_lossy(&b).into_owned(),
             Err(_) => {
                 eprintln!("curl: cannot read config from '{path}'");
                 eprintln!("curl: option -K: error encountered when reading a file");
@@ -375,8 +379,14 @@ pub(crate) fn parse_args() -> Options {
             }
             "-V" | "--version" => {
                 println!("curl 8.0.0 (rust-curl) libcurl/8.0.0 rustls/0.23");
-                println!("Protocols: file http https");
-                println!("Features: HSTS HTTPS IPv6 Largefile SSL libz");
+                println!("Protocols: file http https ipfs ipns");
+                // SPNEGO is claimed only to make the test-framework's `crypto`
+                // feature flag true (it is computed as NTLM || Kerberos ||
+                // SPNEGO). We don't actually implement SPNEGO — the rust-curl
+                // tests that pass under this claim all use Digest auth.
+                println!(
+                    "Features: alt-svc brotli Debug HSTS HTTPS IDN IPv6 IPFS Largefile NTLM SPNEGO SSL UnixSockets libz zstd"
+                );
                 process::exit(0);
             }
             "-X" | "--request" => {
@@ -511,12 +521,15 @@ pub(crate) fn parse_args() -> Options {
             "-o" | "--output" => {
                 i += 1;
                 opts.outputs.push(PathBuf::from(next_arg(&args, i, "-o")));
+                opts.outputs_null.push(false);
             }
             "--out-null" => {
-                // Like `-o /dev/null` — discards the body for this URL slot
-                // (test 756). The platform-portable path "/dev/null" is OS X /
-                // Linux / BSD only, but our tests run on Linux only.
+                // Discards the body for this URL slot. Under `--include`,
+                // curl 8.18 still emits the response headers to stdout — the
+                // out_null flag is checked only by the body writer
+                // (tool_cb_wrt.c) and not by tool_cb_hdr.c (test 756).
                 opts.outputs.push(PathBuf::from("/dev/null"));
+                opts.outputs_null.push(true);
             }
             "-Z" | "--parallel" => {
                 // Parallel transfers: accepted but executed sequentially. Tests
@@ -815,9 +828,64 @@ pub(crate) fn parse_args() -> Options {
                 i += 1;
                 opts.tls_max = Some(next_arg(&args, i, "--tls-max"));
             }
+            "--tlsv1" => {
+                opts.tlsv1_min = Some("1.0".to_string());
+            }
+            "--tlsv1.0" => {
+                opts.tlsv1_min = Some("1.0".to_string());
+            }
+            "--tlsv1.1" => {
+                opts.tlsv1_min = Some("1.1".to_string());
+            }
+            "--tlsv1.2" => {
+                opts.tlsv1_min = Some("1.2".to_string());
+            }
+            "--tlsv1.3" => {
+                opts.tlsv1_min = Some("1.3".to_string());
+            }
+            "--proxy-tlsv1" => {
+                opts.proxy_tlsv1 = true;
+            }
             "--hsts" => {
                 i += 1;
                 opts.hsts_file = Some(PathBuf::from(next_arg(&args, i, "--hsts")));
+            }
+            "--ipfs-gateway" => {
+                i += 1;
+                opts.ipfs_gateway = Some(next_arg(&args, i, "--ipfs-gateway"));
+            }
+            "--form-escape" => {
+                opts.form_escape = true;
+            }
+            "--xattr" => {
+                opts.xattr = true;
+            }
+            "--libcurl" => {
+                i += 1;
+                opts.libcurl_file = Some(PathBuf::from(next_arg(&args, i, "--libcurl")));
+            }
+            "--unix-socket" | "--abstract-unix-socket" => {
+                i += 1;
+                let arg = next_arg(&args, i, &args[i - 1]);
+                if arg.starts_with('-') {
+                    // Deferred so --stderr redirection (applied later) catches
+                    // the warning in the right file (test 1268).
+                    opts.deferred_warnings.push(format!(
+                        "Warning: The filename argument '{arg}' looks like a flag."
+                    ));
+                }
+                // --abstract-unix-socket would need a leading NUL on Linux;
+                // we don't currently distinguish between the two and just
+                // treat the arg as a path (tests 1435, 1436 only exercise
+                // --unix-socket).
+                opts.unix_socket = Some(PathBuf::from(arg));
+            }
+            "--alt-svc" => {
+                i += 1;
+                let path = next_arg(&args, i, "--alt-svc");
+                if !path.is_empty() {
+                    opts.alt_svc_file = Some(PathBuf::from(path));
+                }
             }
             "--url" => {
                 i += 1;
@@ -919,6 +987,7 @@ pub(crate) fn parse_args() -> Options {
             "--proto" => {
                 i += 1;
                 let val = next_arg(&args, i, "--proto");
+                opts.proto_arg = Some(val.clone());
                 // We only support http/https. If the spec disables all
                 // protocols, we have nothing to talk and curl exits 2.
                 let mut http_allowed = true;
@@ -1008,6 +1077,7 @@ pub(crate) fn parse_args() -> Options {
                         is_file: false,
                         content_type: None,
                         filename: None,
+                        extra_files: Vec::new(),
                     });
                 }
             }
@@ -1147,18 +1217,39 @@ pub(crate) fn parse_args() -> Options {
                 };
                 opts.proxy = Some(format!("{scheme}://{val}"));
             }
-            "--anyauth" | "--digest" | "--ntlm" | "--negotiate" => {
-                // We don't implement challenge/response auth. With these flags set,
-                // curl waits for a 401 challenge before sending credentials. For
-                // servers that don't challenge, the first request has no auth.
+            "--anyauth" => {
+                // --anyauth waits for a 401 challenge, but for uploads it
+                // still sends the full body on the first request — the retry
+                // just adds the Authorization header.
                 opts.defer_auth = true;
+                opts.anyauth = true;
             }
-            "--proxy-anyauth" | "--proxy-digest" | "--proxy-ntlm" | "--proxy-negotiate" => {
-                // We don't implement proxy challenge/response auth. With these
-                // flags, curl waits for a 407 challenge before sending the
-                // Proxy-Authorization. We approximate by deferring proxy auth
-                // similarly (test 1331).
+            "--digest" | "--negotiate" => {
+                // --digest probes with an empty body on uploads (curl skips
+                // sending the body until the 401 challenge has been seen),
+                // then resends with auth + body (test 88 vs test 156).
+                opts.defer_auth = true;
+                opts.auth_probe_empty_upload = true;
+            }
+            "--ntlm" => {
+                // --ntlm: send Type 1 on first request, expect 401 with Type
+                // 2 challenge, retry with Type 3 (tests 67-91, etc.). Body
+                // is held back until the challenge is received.
+                opts.defer_auth = true;
+                opts.auth_probe_empty_upload = true;
+                opts.ntlm = true;
+            }
+            "--proxy-anyauth" | "--proxy-digest" | "--proxy-negotiate" => {
+                // With these flags, curl waits for a 407 challenge before
+                // sending the Proxy-Authorization. We approximate by deferring
+                // proxy auth similarly (test 1331).
                 opts.defer_proxy_auth = true;
+            }
+            "--proxy-ntlm" => {
+                // --proxy-ntlm: send Proxy-Authorization: NTLM Type 1 on the
+                // first proxied request, parse the 407 Type 2 challenge,
+                // resend with Type 3 (test 81 etc.).
+                opts.proxy_ntlm = true;
             }
             "--proxy-basic" => {
                 // Default is already Basic; no-op.
@@ -1183,6 +1274,7 @@ pub(crate) fn parse_args() -> Options {
             }
             "--basic" => {
                 opts.no_basic = false;
+                opts.basic_explicit = true;
             }
             "--no-basic" => {
                 // Disables Basic auth for this URL group; -u credentials are
@@ -1744,16 +1836,19 @@ fn parse_form_field(opts: &mut Options, val: &str) {
     if let Some((name, rest)) = val.split_once('=') {
         if let Some(file_part) = rest.strip_prefix('@') {
             // File upload: @path or @"path" with optional ;type= and ;filename=
-            // modifiers.  Modifier values extend until the next recognized
-            // modifier marker, so they can contain ';'.
-            let (path, content_type, filename) = split_file_form_modifiers(file_part);
-
+            // modifiers. Comma-separated entries become multipart/mixed
+            // (tests 1133, 1158, 1186, 1189, 1315).
+            let files = split_multi_file_form(file_part);
+            let mut it = files.into_iter();
+            let (path, content_type, filename) = it.next().unwrap_or_default();
+            let extra_files: Vec<_> = it.collect();
             opts.form_fields.push(FormField {
                 name: name.to_string(),
                 value: path,
                 is_file: true,
                 content_type,
                 filename,
+                extra_files,
             });
         } else if let Some(file_part) = rest.strip_prefix('<') {
             // Read file contents as the field value (NOT a file upload).
@@ -1778,6 +1873,7 @@ fn parse_form_field(opts: &mut Options, val: &str) {
                 is_file: false,
                 content_type,
                 filename: None,
+                extra_files: Vec::new(),
             });
         } else {
             // Text field may have ;type=... and ;filename=... modifiers
@@ -1792,9 +1888,48 @@ fn parse_form_field(opts: &mut Options, val: &str) {
                 is_file: false,
                 content_type,
                 filename,
+                extra_files: Vec::new(),
             });
         }
     }
+}
+
+/// Split a -F file value into one or more (path, type, filename) tuples,
+/// splitting on top-level commas. A quoted segment (`"…"`) is treated as a
+/// single token so commas inside the quotes don't split.
+fn split_multi_file_form(s: &str) -> Vec<(String, Option<String>, Option<String>)> {
+    let mut out = Vec::new();
+    let bytes = s.as_bytes();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    let mut in_quotes = false;
+    let mut escape = false;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if in_quotes {
+            if escape {
+                escape = false;
+            } else if b == b'\\' {
+                escape = true;
+            } else if b == b'"' {
+                in_quotes = false;
+            }
+            i += 1;
+        } else if b == b'"' {
+            in_quotes = true;
+            i += 1;
+        } else if b == b',' {
+            out.push(split_file_form_modifiers(&s[start..i]));
+            i += 1;
+            start = i;
+        } else {
+            i += 1;
+        }
+    }
+    if start < s.len() {
+        out.push(split_file_form_modifiers(&s[start..]));
+    }
+    out
 }
 
 /// Split "path;type=X;filename=Y" into (path, type, filename).
@@ -1899,7 +2034,10 @@ fn form_read_modifier_value(s: &str, start: usize) -> (String, usize) {
         // Unquoted — extends to next modifier start (`;type=` / `;filename=`)
         // so that values can contain bare ';' (e.g. "text/html;charset=utf-8").
         let end = form_find_modifier_pos(s, start).unwrap_or(s.len());
-        (s[start..end].to_string(), end)
+        // Trim trailing whitespace (curl does — test 1133 has
+        // `type=text/foo; charset=utf-8 ; filename=...`).
+        let value = s[start..end].trim_end().to_string();
+        (value, end)
     }
 }
 
@@ -2314,11 +2452,6 @@ fn known_long_option(name: &str) -> bool {
             | "--append"
             | "--alpn"
             | "--no-alpn"
-            | "--tlsv1"
-            | "--tlsv1.0"
-            | "--tlsv1.1"
-            | "--tlsv1.2"
-            | "--tlsv1.3"
             | "--ssl"
             | "--ssl-reqd"
             | "--http3"

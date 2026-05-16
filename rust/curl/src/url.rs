@@ -364,6 +364,75 @@ pub fn parse_url(raw: &str) -> Result<ParsedUrl, String> {
         return Err("empty host".into());
     }
 
+    // IDN: if the host has non-ASCII bytes (UTF-8) AND no IPv6 brackets,
+    // run it through punycode encoding (tests 165, 1034, 1035, 1448, 2046,
+    // 2047, 763). A round-trip failure (e.g. malformed UTF-8 in the host)
+    // maps to CURLE_URL_MALFORMAT (test 1034).
+    // Percent-decode the host into a UTF-8 string when it carries %-escapes.
+    // A Location: header for a non-ASCII hostname is typically delivered as
+    // `http://%c3%a5...se` and the percent-decoded bytes are the original
+    // UTF-8 — we want them as chars before running IDN (test 1448).
+    let host = if !host_port.starts_with('[') && host.contains('%') {
+        let bytes = host.as_bytes();
+        let mut decoded_bytes = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'%' && i + 2 < bytes.len() {
+                let hex = std::str::from_utf8(&bytes[i + 1..i + 3])
+                    .ok()
+                    .and_then(|s| u8::from_str_radix(s, 16).ok());
+                if let Some(b) = hex {
+                    decoded_bytes.push(b);
+                    i += 3;
+                    continue;
+                }
+            }
+            decoded_bytes.push(bytes[i]);
+            i += 1;
+        }
+        match String::from_utf8(decoded_bytes) {
+            Ok(s) => s,
+            Err(_) => host,
+        }
+    } else {
+        host
+    };
+
+    let host = if !host_port.starts_with('[') && !host.is_ascii() {
+        // Perl runtests passes %hex[...]hex% bytes via execve in a way that
+        // double-encodes them as UTF-8 (chr(0xc3) becomes the Ã character,
+        // which perl then encodes as the 2-byte UTF-8 sequence). curl uses
+        // mbstowcs which under C.UTF-8 decodes that as the original
+        // single-byte sequence. We replicate the same: if every char in the
+        // host fits in a byte (Latin-1) AND the reconstructed bytes parse as
+        // UTF-8, use the decoded form; otherwise pass the original chars to
+        // IDN unchanged. A failed reconstruction is NOT an error — the host
+        // may genuinely be non-Latin-1 (test 1448's percent-decoded UTF-8).
+        let input = if host.chars().all(|c| (c as u32) <= 0xFF) {
+            let bytes: Vec<u8> = host.chars().map(|c| c as u8).collect();
+            std::str::from_utf8(&bytes)
+                .map(String::from)
+                .unwrap_or_else(|_| host.clone())
+        } else {
+            host.clone()
+        };
+        let result = idna::domain_to_ascii(&input)
+            .map_err(|_| format!("malformed URL: bad IDN host: {host}"))?;
+        if result.is_empty() {
+            return Err(format!("malformed URL: empty host after IDN: {host}"));
+        }
+        // DNS label limits: each label max 63 chars, total domain ≤ 255 chars
+        // (test 1035). curl rejects with CURLE_URL_MALFORMAT.
+        if result.len() > 255
+            || result.split('.').any(|label| label.len() > 63)
+        {
+            return Err(format!("malformed URL: IDN host too long: {host}"));
+        }
+        result
+    } else {
+        host
+    };
+
     // Reject `:` characters in the (non-IPv6) host portion. After stripping
     // IPv6 brackets these would indicate rubbish like `host:8080:80` (test 1260).
     if !host_port.starts_with('[') && host.contains(':') {

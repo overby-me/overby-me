@@ -65,6 +65,9 @@ pub(crate) struct Response {
     pub(crate) bad_encoding_too_many: bool,
     pub(crate) filesize_exceeded: bool,
     pub(crate) header_size_error: bool,
+    /// True when an NTLM auth round failed because the credentials exceed
+    /// curl's input-length limit — maps to exit 100 (tests 775, 776).
+    pub(crate) ntlm_too_large: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -135,6 +138,7 @@ pub(crate) fn read_response(
                     bad_encoding_too_many: false,
                     filesize_exceeded: false,
                     header_size_error: false,
+            ntlm_too_large: false,
                 });
             }
             return Err("empty reply from server".into());
@@ -191,6 +195,7 @@ pub(crate) fn read_response(
                 bad_encoding_too_many: false,
                 filesize_exceeded: false,
                 header_size_error: false,
+            ntlm_too_large: false,
             });
         }
         header_bytes.extend_from_slice(line.as_bytes());
@@ -335,6 +340,7 @@ pub(crate) fn read_response(
                 bad_encoding_too_many: false,
                 filesize_exceeded: false,
                 header_size_error: false,
+            ntlm_too_large: false,
             });
         }
         let this_ending: &'static [u8] = if line.ends_with("\r\n") {
@@ -428,6 +434,7 @@ pub(crate) fn read_response(
                 bad_encoding_too_many: false,
                 filesize_exceeded: false,
                 header_size_error: false,
+            ntlm_too_large: false,
             });
         }
         pending_raw = Some(line.clone());
@@ -468,6 +475,7 @@ pub(crate) fn read_response(
             bad_encoding_too_many: false,
             filesize_exceeded: false,
             header_size_error: true,
+            ntlm_too_large: false,
         });
     }
     if accumulated_header_bytes + header_bytes.len() > MAX_TOTAL_HEADER_SIZE {
@@ -498,6 +506,7 @@ pub(crate) fn read_response(
             bad_encoding_too_many: false,
             filesize_exceeded: false,
             header_size_error: true,
+            ntlm_too_large: false,
         });
     }
 
@@ -531,6 +540,7 @@ pub(crate) fn read_response(
             bad_encoding_too_many: false,
             filesize_exceeded: false,
             header_size_error: false,
+            ntlm_too_large: false,
         });
     }
 
@@ -605,6 +615,7 @@ pub(crate) fn read_response(
             bad_encoding_too_many: false,
             filesize_exceeded: false,
             header_size_error: false,
+            ntlm_too_large: false,
         });
     }
     // Reject Transfer-Encoding values the client didn't request. Without
@@ -640,6 +651,7 @@ pub(crate) fn read_response(
             bad_encoding_too_many: false,
             filesize_exceeded: false,
             header_size_error: false,
+            ntlm_too_large: false,
         });
     }
     // Reject responses whose Transfer-Encoding stack has more than 5 layers,
@@ -672,6 +684,7 @@ pub(crate) fn read_response(
             bad_encoding_too_many: true,
             filesize_exceeded: false,
             header_size_error: false,
+            ntlm_too_large: false,
         });
     }
     // RFC 7231: only one Location header is allowed in a response.
@@ -727,6 +740,7 @@ pub(crate) fn read_response(
             bad_encoding_too_many: false,
             filesize_exceeded: false,
             header_size_error: false,
+            ntlm_too_large: false,
         });
     }
     // Collapse duplicate-but-identical Location headers to a single entry so
@@ -809,6 +823,7 @@ pub(crate) fn read_response(
             bad_encoding_too_many: false,
             filesize_exceeded: false,
             header_size_error: false,
+            ntlm_too_large: false,
         });
     }
     // If Content-Length is present but fails to parse as a non-negative integer,
@@ -862,6 +877,7 @@ pub(crate) fn read_response(
             bad_encoding_too_many: false,
             filesize_exceeded: false,
             header_size_error: false,
+            ntlm_too_large: false,
         });
     }
     let content_length: Option<usize> = if ignore_content_length {
@@ -927,6 +943,7 @@ pub(crate) fn read_response(
                 bad_encoding_too_many: false,
                 filesize_exceeded: true,
                 header_size_error: false,
+            ntlm_too_large: false,
             });
         }
     }
@@ -1005,6 +1022,8 @@ pub(crate) fn read_response(
                     } else {
                         true
                     }
+                } else if layer == &"br" {
+                    brotli_decompressor::BrotliDecompress(&mut &body[..], &mut decoded).is_ok()
                 } else {
                     false
                 };
@@ -1069,6 +1088,13 @@ pub(crate) fn read_response(
                 } else {
                     true
                 }
+            } else if layer == &"br" {
+                brotli_decompressor::BrotliDecompress(&mut &current[..], &mut decoded).is_ok()
+            } else if layer == &"zstd" {
+                match ruzstd::decoding::StreamingDecoder::new(&current[..]) {
+                    Ok(mut d) => d.read_to_end(&mut decoded).is_ok(),
+                    Err(_) => false,
+                }
             } else {
                 // Unknown encoding — leave as-is.
                 false
@@ -1117,6 +1143,7 @@ pub(crate) fn read_response(
         bad_encoding_too_many,
         filesize_exceeded: chunked_filesize_exceeded,
         header_size_error: false,
+            ntlm_too_large: false,
     })
 }
 

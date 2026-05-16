@@ -2,11 +2,211 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::time::Duration;
 
+use md5::{Digest, Md5};
+use sha2::{Sha256, Sha512_256};
+
 use crate::connection::connect;
 use crate::format::base64_encode;
 use crate::options::Options;
 use crate::response::{Response, read_response};
 use crate::url::{ParsedUrl, normalize_url_path, parse_url};
+
+fn quote_digest_value(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c == '"' || c == '\\' {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+fn md5_hex(input: &str) -> String {
+    let mut hasher = Md5::new();
+    hasher.update(input.as_bytes());
+    let result = hasher.finalize();
+    let mut s = String::with_capacity(32);
+    for b in result.iter() {
+        s.push_str(&format!("{b:02x}"));
+    }
+    s
+}
+
+fn sha256_hex(input: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    let result = hasher.finalize();
+    let mut s = String::with_capacity(64);
+    for b in result.iter() {
+        s.push_str(&format!("{b:02x}"));
+    }
+    s
+}
+
+fn sha512_256_hex(input: &str) -> String {
+    let mut hasher = Sha512_256::new();
+    hasher.update(input.as_bytes());
+    let result = hasher.finalize();
+    let mut s = String::with_capacity(64);
+    for b in result.iter() {
+        s.push_str(&format!("{b:02x}"));
+    }
+    s
+}
+
+/// Parse a single attribute value from a Digest WWW-Authenticate parameter list:
+/// keys may be unquoted (`algorithm=MD5`) or quoted (`realm="ream"`); names are
+/// matched case-insensitively. Duplicate keys: returns the LAST occurrence
+/// (curl behaviour — test 1437).
+fn parse_digest_attr(challenge: &str, name: &str) -> Option<String> {
+    let lc = challenge.to_lowercase();
+    let needle = format!("{}=", name.to_lowercase());
+    let mut idx = 0;
+    let mut last_value: Option<String> = None;
+    while let Some(pos) = lc[idx..].find(&needle) {
+        let abs = idx + pos;
+        // ensure preceding char is start-of-string, comma, space, or 'Digest '
+        if abs > 0 {
+            let prev = challenge.as_bytes()[abs - 1];
+            if !matches!(prev, b',' | b' ' | b'\t') {
+                idx = abs + needle.len();
+                continue;
+            }
+        }
+        let after = &challenge[abs + needle.len()..];
+        let value = if let Some(rest) = after.strip_prefix('"') {
+            // Quoted string: unescape `\X` → `X` (HTTP quoted-string rules).
+            // Stop at the first UNESCAPED `"`.
+            let mut unescaped = String::new();
+            let mut chars = rest.chars();
+            let mut closed = false;
+            while let Some(c) = chars.next() {
+                if c == '\\' {
+                    if let Some(next) = chars.next() {
+                        unescaped.push(next);
+                    }
+                } else if c == '"' {
+                    closed = true;
+                    break;
+                } else {
+                    unescaped.push(c);
+                }
+            }
+            if !closed {
+                return last_value;
+            }
+            unescaped
+        } else {
+            let end = after
+                .find(|c: char| c == ',' || c.is_ascii_whitespace())
+                .unwrap_or(after.len());
+            after[..end].to_string()
+        };
+        last_value = Some(value);
+        idx = abs + needle.len();
+    }
+    last_value
+}
+
+/// Compute the RFC 2617 Digest "response" value (basic mode, no qop=auth-int).
+///
+/// `HA1 = MD5(user:realm:pass)`, `HA2 = MD5(method:uri)`,
+/// `response = MD5(HA1:nonce:HA2)`. The qop="auth" variant adds nc and cnonce
+/// to the response computation.
+fn parse_connect_proxy_digest_challenge(response_bytes: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(response_bytes).ok()?;
+    for line in text.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.len() < 19 {
+            continue;
+        }
+        if line[..18].eq_ignore_ascii_case("Proxy-Authenticate") && line.as_bytes()[18] == b':' {
+            let after = line[19..].trim_start();
+            if after.len() >= 7 && after[..7].eq_ignore_ascii_case("Digest ") {
+                return Some(after[7..].to_string());
+            }
+        }
+    }
+    None
+}
+
+pub(crate) fn build_digest_auth(
+    user: &str,
+    pass: &str,
+    challenge: &str,
+    method: &str,
+    uri: &str,
+) -> Option<String> {
+    build_digest_auth_nc(user, pass, challenge, method, uri, 1)
+}
+
+pub(crate) fn build_digest_auth_nc(
+    user: &str,
+    pass: &str,
+    challenge: &str,
+    method: &str,
+    uri: &str,
+    nc: u32,
+) -> Option<String> {
+    let realm = parse_digest_attr(challenge, "realm")?;
+    let nonce = parse_digest_attr(challenge, "nonce")?;
+    let raw_algorithm = parse_digest_attr(challenge, "algorithm");
+    let algorithm = raw_algorithm
+        .as_deref()
+        .unwrap_or("MD5")
+        .to_uppercase();
+    let userhash = parse_digest_attr(challenge, "userhash")
+        .map(|v| v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let hash: fn(&str) -> String = match algorithm.as_str() {
+        "MD5" | "MD5-SESS" => md5_hex,
+        "SHA-256" | "SHA-256-SESS" => sha256_hex,
+        "SHA-512-256" | "SHA-512-256-SESS" => sha512_256_hex,
+        _ => return None,
+    };
+    let qop_raw = parse_digest_attr(challenge, "qop");
+    let ha1 = hash(&format!("{user}:{realm}:{pass}"));
+    let ha2 = hash(&format!("{method}:{uri}"));
+    let realm_q = quote_digest_value(&realm);
+    let nonce_q = quote_digest_value(&nonce);
+    // userhash=true: send H(user:realm) as the username (RFC 7616 §3.4.4).
+    let username_out = if userhash {
+        hash(&format!("{user}:{realm}"))
+    } else {
+        quote_digest_value(user)
+    };
+    let mut header = format!(
+        r#"Digest username="{username_out}", realm="{realm_q}", nonce="{nonce_q}", uri="{uri}""#
+    );
+    if let Some(qop_val) = qop_raw.as_deref()
+        && qop_val
+            .split(',')
+            .any(|q| q.trim().eq_ignore_ascii_case("auth"))
+    {
+        let cnonce = "0a4f113b";
+        let nc_s = format!("{nc:08x}");
+        let response = hash(&format!("{ha1}:{nonce}:{nc_s}:{cnonce}:auth:{ha2}"));
+        header.push_str(&format!(
+            r#", cnonce="{cnonce}", nc={nc_s}, qop=auth, response="{response}""#
+        ));
+    } else {
+        let response = hash(&format!("{ha1}:{nonce}:{ha2}"));
+        header.push_str(&format!(r#", response="{response}""#));
+    }
+    if let Some(opaque) = parse_digest_attr(challenge, "opaque") {
+        header.push_str(&format!(r#", opaque="{opaque}""#));
+    }
+    // Echo algorithm only if the server sent one (curl matches this — when the
+    // server defaults to MD5 implicitly, we don't add algorithm to the reply).
+    if raw_algorithm.is_some() {
+        header.push_str(&format!(", algorithm={algorithm}"));
+    }
+    if userhash {
+        header.push_str(", userhash=true");
+    }
+    Some(header)
+}
 
 fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) {
     let method = if let Some(ref m) = opts.method {
@@ -20,6 +220,24 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
     } else {
         "GET".into()
     };
+
+    // SOCKS proxies leave a transparent tunnel post-handshake — the HTTP
+    // layer treats them as a no-proxy direct connection (no absolute URL on
+    // the request line, no Proxy-Authorization, no Proxy-Connection).
+    let proxy_is_socks_p = opts
+        .proxy
+        .as_deref()
+        .and_then(|p| crate::connection::parse_proxy_with_scheme(p).ok())
+        .map(|(_, _, s)| {
+            matches!(
+                s,
+                crate::connection::ProxyScheme::Socks4
+                    | crate::connection::ProxyScheme::Socks4a
+                    | crate::connection::ProxyScheme::Socks5
+                    | crate::connection::ProxyScheme::Socks5h
+            )
+        })
+        .unwrap_or(false);
 
     // Pool downgrade: when reusing a connection whose prior response was
     // HTTP/1.0, downgrade this request to HTTP/1.0 too (test 1074). The
@@ -127,7 +345,11 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         && !opts.connect_tos.is_empty()
         && crate::connection::connect_to_override(&url.host, url.port, &opts.connect_tos).is_some();
     let request_target =
-        if opts.proxy.is_some() && url.scheme == "http" && !opts.proxy_tunnel && !connect_to_tunnel
+        if opts.proxy.is_some()
+            && url.scheme == "http"
+            && !opts.proxy_tunnel
+            && !connect_to_tunnel
+            && !proxy_is_socks_p
         {
             let default_port: u16 = 80;
             if url.port == default_port {
@@ -171,12 +393,35 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
     // Proxy-Authorization — sent when --proxy-user is set and we're going through a proxy.
     // curl sends Proxy-Authorization before site Authorization. With
     // --proxy-anyauth (and friends) curl waits for a 407 challenge before
-    // sending Proxy-Authorization (test 1331).
-    if let Some(ref proxy_user) = opts.proxy_user
+    // sending Proxy-Authorization (test 1331). SOCKS does its own auth
+    // during the handshake, so no Proxy-Authorization is sent on the wire.
+    if proxy_is_socks_p {
+        // Skip all Proxy-Authorization paths for SOCKS.
+    } else if let Some(proxy_digest) = opts.proxy_digest_authorization.as_deref() {
+        req.push_str(&format!("Proxy-Authorization: {proxy_digest}\r\n"));
+    } else if let Some(proxy_ntlm_hdr) = opts.proxy_ntlm_authorization.as_deref() {
+        // --proxy-ntlm follow-up: Type 3 stashed by the 407 handler.
+        req.push_str(&format!("Proxy-Authorization: {proxy_ntlm_hdr}\r\n"));
+    } else if opts.proxy_ntlm
+        && !opts.proxy_ntlm_done
+        && opts.proxy.is_some()
+        && !opts.proxy_tunnel
+        && opts.proxy_user.is_some()
+    {
+        // --proxy-ntlm initial: send Type 1 to elicit the 407 + Type 2.
+        // Skip once the connection has already been authenticated (test 169).
+        let t1 = crate::ntlm::type1_message();
+        let b64 = crate::ntlm::base64_encode(&t1);
+        req.push_str(&format!("Proxy-Authorization: NTLM {b64}\r\n"));
+    } else if let Some(ref proxy_user) = opts.proxy_user
         && opts.proxy.is_some()
         && !opts.proxy_tunnel
         && !opts.defer_proxy_auth
+        && !opts.proxy_ntlm
     {
+        // Skip Basic when --proxy-ntlm picked a different scheme — after the
+        // NTLM handshake the connection is authenticated and no header is
+        // needed (test 169).
         let encoded = base64_encode(proxy_user.as_bytes());
         req.push_str(&format!("Proxy-Authorization: Basic {encoded}\r\n"));
     }
@@ -186,7 +431,40 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
     // (e.g. http://user:pass@host.example/path). Skip entirely when --anyauth/--digest/
     // --ntlm is set (curl waits for server challenge).
     let auth_user = opts.user.as_deref().or(url.userinfo.as_deref());
-    if let Some(token) = opts.oauth2_bearer.as_deref() {
+    let digest_header_from_state = opts
+        .digest_challenge_state
+        .as_deref()
+        .and_then(|chal| {
+            auth_user
+                .and_then(|c| c.split_once(':').map(|(u, p)| (u.to_string(), p.to_string())))
+                .and_then(|(u, p)| {
+                    let uri = if url.path.is_empty() {
+                        "/".into()
+                    } else {
+                        url.path.clone()
+                    };
+                    build_digest_auth_nc(&u, &p, chal, &method, &uri, opts.digest_nc.max(1))
+                })
+        });
+    if let Some(ntlm_header) = opts.ntlm_authorization.as_deref() {
+        // --ntlm follow-up: the 401 handler computed the Type 3 response and
+        // stashed it here. Replaces the Type 1 we sent on the probe.
+        req.push_str(&format!("Authorization: {ntlm_header}\r\n"));
+    } else if opts.ntlm && !opts.ntlm_done && (opts.user.is_some() || url.userinfo.is_some()) {
+        // --ntlm initial: send Type 1 to elicit the Type 2 challenge.
+        // Skipped once the connection has already been authenticated
+        // (test 1100 — redirect on a NTLM-authenticated connection has no
+        // Authorization header).
+        let t1 = crate::ntlm::type1_message();
+        let b64 = crate::ntlm::base64_encode(&t1);
+        req.push_str(&format!("Authorization: NTLM {b64}\r\n"));
+    } else if let Some(digest_header) = opts.digest_authorization.as_deref() {
+        // --digest follow-up: the 401 handler in perform() computed the full
+        // Digest challenge response and stashed it here.
+        req.push_str(&format!("Authorization: {digest_header}\r\n"));
+    } else if let Some(ref hdr) = digest_header_from_state {
+        req.push_str(&format!("Authorization: {hdr}\r\n"));
+    } else if let Some(token) = opts.oauth2_bearer.as_deref() {
         // --oauth2-bearer takes precedence over -u/userinfo Basic auth and
         // adds an `Authorization: Bearer <token>` header. On cross-host
         // redirects the bearer is dropped along with regular Authorization
@@ -195,7 +473,11 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
     } else if let Some(user) = auth_user
         && !opts.defer_auth
         && !opts.no_basic
+        && !opts.ntlm
     {
+        // Basic suppressed when NTLM is the chosen scheme — NTLM Type 1
+        // would have been sent above, and after auth completes the
+        // connection no longer needs an Authorization header (test 1100).
         let encoded = base64_encode(user.as_bytes());
         req.push_str(&format!("Authorization: Basic {encoded}\r\n"));
     }
@@ -206,31 +488,47 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         // Append "-" if the range has no dash (e.g. "-r 4" → "Range: bytes=4-").
         let range_suffix = if range.contains('-') { "" } else { "-" };
         req.push_str(&format!("Range: bytes={range}{range_suffix}\r\n"));
-    } else if let Some(ref resume) = opts.resume_from
-        && resume != "-"
-    {
-        if is_upload {
-            // PUT with -C N: send Content-Range: bytes N-END/TOTAL
-            if let Some(ref path) = opts.upload_file
-                && let Ok(meta) = fs::metadata(path)
-            {
-                let total = meta.len();
-                let start: u64 = resume.parse().unwrap_or(0);
-                if start < total {
-                    let end = total - 1;
-                    req.push_str(&format!("Content-Range: bytes {start}-{end}/{total}\r\n"));
-                }
-            }
+    } else if let Some(ref resume) = opts.resume_from {
+        // `-C -` for a download: re-stat the output file each request so a
+        // retry picks up the partial content from the previous attempt
+        // (test 3035). For uploads `-C -` was already resolved to "0" earlier.
+        let effective_resume: Option<String> = if resume == "-" {
+            opts.outputs
+                .first()
+                .and_then(|p| fs::metadata(p).ok())
+                .map(|m| m.len().to_string())
         } else {
-            // GET with -C N: send Range: bytes=N-
-            req.push_str(&format!("Range: bytes={resume}-\r\n"));
+            Some(resume.clone())
+        };
+        if let Some(resume) = effective_resume {
+            if is_upload {
+                // PUT with -C N: send Content-Range: bytes N-END/TOTAL
+                if let Some(ref path) = opts.upload_file
+                    && let Ok(meta) = fs::metadata(path)
+                {
+                    let total = meta.len();
+                    let start: u64 = resume.parse().unwrap_or(0);
+                    if start < total {
+                        let end = total - 1;
+                        req.push_str(&format!(
+                            "Content-Range: bytes {start}-{end}/{total}\r\n"
+                        ));
+                    }
+                }
+            } else if let Ok(off) = resume.parse::<u64>()
+                && off > 0
+            {
+                // GET with -C N: send Range: bytes=N- (skip when N=0).
+                req.push_str(&format!("Range: bytes={off}-\r\n"));
+            }
         }
     }
 
     // For HTTP-via-proxy (no CONNECT tunnel), --proxy-header values are sent
     // on the same request as -H, so check both lists when deciding whether to
     // emit a default header (e.g. Proxy-Connection).
-    let proxy_headers_active = opts.proxy.is_some() && url.scheme == "http" && !opts.proxy_tunnel;
+    let proxy_headers_active =
+        opts.proxy.is_some() && url.scheme == "http" && !opts.proxy_tunnel && !proxy_is_socks_p;
     let has_custom = |name: &str| {
         let in_headers = opts
             .headers
@@ -256,6 +554,13 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         req.push_str("Accept: */*\r\n");
     }
 
+    // Alt-Used: emitted when a loaded --alt-svc cache entry rerouted this
+    // request's TCP target. The header carries the alt host:port so the
+    // server can detect the routing (test 412).
+    if let Some(ref alt) = opts.alt_used {
+        req.push_str(&format!("Alt-Used: {alt}\r\n"));
+    }
+
     // Proxy-Connection header — curl sends this for HTTP proxy requests.
     // Suppressed for tunneled HTTP-via-CONNECT (test 2050) since the
     // request travels through the tunnel, not directly to the proxy.
@@ -265,6 +570,7 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         && !opts.proxy_tunnel
         && !connect_to_tunnel
         && !opts.no_keepalive
+        && !proxy_is_socks_p
         && !has_custom("proxy-connection")
     {
         req.push_str("Proxy-Connection: Keep-Alive\r\n");
@@ -285,7 +591,7 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
 
     // Accept-Encoding.
     if opts.compressed {
-        req.push_str("Accept-Encoding: gzip, deflate\r\n");
+        req.push_str("Accept-Encoding: gzip, deflate, br, zstd\r\n");
     }
 
     // --tr-encoding: emit Connection: TE after Accept-Encoding. If the user
@@ -414,11 +720,20 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
     // until after we emit Content-Length: curl orders Content-Length first
     // and then the (boundary-appended) Content-Type (test 669).
     let mut deferred_content_type: Option<(String, String)> = None;
+    // During --digest empty-body probe, suppress user-supplied Content-Length
+    // (we emit our own Content-Length: 0 below).
+    let suppress_user_content_length = opts.defer_auth
+        && opts.auth_probe_empty_upload
+        && opts.digest_authorization.is_none()
+        && (opts.upload_file.is_some() || opts.data.is_some());
     for (key, val) in user_header_iter {
         if key.eq_ignore_ascii_case("host") {
             continue;
         }
         if val.is_empty() {
+            continue;
+        }
+        if suppress_user_content_length && key.eq_ignore_ascii_case("content-length") {
             continue;
         }
         if key.eq_ignore_ascii_case("content-type")
@@ -451,7 +766,35 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         }
     }
 
-    let body = build_body(opts, boundary.as_deref());
+    // --digest/--ntlm/--negotiate (but NOT --anyauth) probes with an empty
+    // body for PUT/POST so the body isn't wasted on the 401 challenge — curl
+    // sends Content-Length: 0 first, gets the challenge, then resends with
+    // auth and the real body. After we've computed digest_authorization the
+    // probe is over (test 88 vs test 156).
+    // NTLM Type 1 also goes out with an empty body — the body waits for the
+    // Type 2 challenge so it isn't burned on a request that's certain to 401
+    // (tests 155, 170).
+    let ntlm_probe = opts.ntlm
+        && !opts.ntlm_done
+        && opts.ntlm_authorization.is_none()
+        && (opts.upload_file.is_some() || opts.data.is_some() || !opts.form_fields.is_empty());
+    let proxy_ntlm_probe = opts.proxy_ntlm
+        && !opts.proxy_ntlm_done
+        && opts.proxy_ntlm_authorization.is_none()
+        && opts.proxy.is_some()
+        && !opts.proxy_tunnel
+        && (opts.upload_file.is_some() || opts.data.is_some() || !opts.form_fields.is_empty());
+    let auth_probe_empty = (opts.defer_auth
+        && opts.auth_probe_empty_upload
+        && opts.digest_authorization.is_none()
+        && (opts.upload_file.is_some() || opts.data.is_some()))
+        || ntlm_probe
+        || proxy_ntlm_probe;
+    let body = if auth_probe_empty {
+        Some(Vec::new())
+    } else {
+        build_body(opts, boundary.as_deref())
+    };
 
     if let Some(ref body) = body {
         // Set Content-Type and Content-Length if not already set by custom headers.
@@ -470,7 +813,10 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
 
         let content_len_hdr = format!("Content-Length: {}\r\n", body.len());
         // Content-Length and Transfer-Encoding: chunked are mutually exclusive.
-        let emit_content_length = !has_content_length && !user_chunked;
+        // During the --digest empty-body probe we ALWAYS emit Content-Length: 0
+        // (overriding any user-supplied Content-Length) so the server sees the
+        // probe correctly (test 1284, 1285).
+        let emit_content_length = (!has_content_length && !user_chunked) || auth_probe_empty;
 
         // Emit Content-Length first.
         if emit_content_length {
@@ -492,12 +838,19 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         });
         let do_expect_handshake = auto_expect || (user_expect && !http10);
 
-        // Content-Type comes before Expect (matches curl ordering).
+        // Content-Type comes before Expect (matches curl ordering). For the
+        // auth probe (NTLM Type 1 / digest probe) the multipart Content-Type
+        // is suppressed — the empty body has no MIME boundary to declare and
+        // curl skips it (test 170). Urlencoded `-d` data still emits its
+        // static Content-Type so the server can see the form encoding even
+        // for the probe (test 267).
         if !has_content_type {
             if let Some(ref b) = boundary {
-                req.push_str(&format!(
-                    "Content-Type: multipart/form-data; boundary={b}\r\n"
-                ));
+                if !auth_probe_empty {
+                    req.push_str(&format!(
+                        "Content-Type: multipart/form-data; boundary={b}\r\n"
+                    ));
+                }
             } else if opts.data.is_some() {
                 req.push_str("Content-Type: application/x-www-form-urlencoded\r\n");
             }
@@ -572,40 +925,94 @@ fn build_body(opts: &Options, boundary: Option<&str>) -> Option<Vec<u8>> {
         for field in &opts.form_fields {
             body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
             if field.is_file {
-                let is_stdin = field.value == "-";
-                // The display filename (for Content-Disposition) may be
-                // overridden by ;filename=, but Content-Type guessing always
-                // uses the ORIGINAL file path (matching curl behavior).
-                let orig_filename = if is_stdin {
-                    "-"
+                if !field.extra_files.is_empty() {
+                    // Multi-file: outer Content-Disposition (no filename) +
+                    // Content-Type: multipart/mixed; boundary=INNER. Each file
+                    // becomes a Content-Disposition: attachment part inside.
+                    let inner = multipart_boundary();
+                    body.extend_from_slice(
+                        format!(
+                            "Content-Disposition: {disposition}; name=\"{}\"\r\n\
+                             Content-Type: multipart/mixed; boundary={inner}\r\n\r\n",
+                            field.name
+                        )
+                        .as_bytes(),
+                    );
+                    let first = (
+                        field.value.clone(),
+                        field.content_type.clone(),
+                        field.filename.clone(),
+                    );
+                    for (path, ct_opt, fn_opt) in
+                        std::iter::once(first).chain(field.extra_files.iter().cloned())
+                    {
+                        body.extend_from_slice(format!("--{inner}\r\n").as_bytes());
+                        let orig_filename = std::path::Path::new(&path)
+                            .file_name()
+                            .and_then(|f| f.to_str())
+                            .unwrap_or("file");
+                        let display_filename = fn_opt.as_deref().unwrap_or(orig_filename);
+                        let ct = ct_opt
+                            .as_deref()
+                            .unwrap_or_else(|| guess_content_type(orig_filename));
+                        let safe_filename = if opts.form_escape {
+                            mime_backslash_escape(display_filename)
+                        } else {
+                            mime_percent_encode(display_filename)
+                        };
+                        body.extend_from_slice(
+                            format!(
+                                "Content-Disposition: attachment; filename=\"{safe_filename}\"\r\n\
+                                 Content-Type: {ct}\r\n\r\n",
+                            )
+                            .as_bytes(),
+                        );
+                        if let Ok(data) = fs::read(&path) {
+                            body.extend_from_slice(&data);
+                        }
+                        body.extend_from_slice(b"\r\n");
+                    }
+                    body.extend_from_slice(format!("--{inner}--\r\n").as_bytes());
                 } else {
-                    std::path::Path::new(&field.value)
-                        .file_name()
-                        .and_then(|f| f.to_str())
-                        .unwrap_or("file")
-                };
-                let display_filename = field.filename.as_deref().unwrap_or(orig_filename);
-                let ct = field
-                    .content_type
-                    .as_deref()
-                    .unwrap_or_else(|| guess_content_type(orig_filename));
-                // Percent-encode \", \r, \n in the display filename
-                // (matching curl's mime_content_disposition encoding).
-                let safe_filename = mime_percent_encode(display_filename);
-                body.extend_from_slice(
-                    format!(
-                        "Content-Disposition: {disposition}; name=\"{}\"; filename=\"{safe_filename}\"\r\n\
-                         Content-Type: {ct}\r\n\r\n",
-                        field.name
-                    )
-                    .as_bytes(),
-                );
-                if is_stdin {
-                    let mut data = Vec::new();
-                    let _ = io::stdin().read_to_end(&mut data);
-                    body.extend_from_slice(&data);
-                } else if let Ok(data) = fs::read(&field.value) {
-                    body.extend_from_slice(&data);
+                    let is_stdin = field.value == "-";
+                    // The display filename (for Content-Disposition) may be
+                    // overridden by ;filename=, but Content-Type guessing always
+                    // uses the ORIGINAL file path (matching curl behavior).
+                    let orig_filename = if is_stdin {
+                        "-"
+                    } else {
+                        std::path::Path::new(&field.value)
+                            .file_name()
+                            .and_then(|f| f.to_str())
+                            .unwrap_or("file")
+                    };
+                    let display_filename = field.filename.as_deref().unwrap_or(orig_filename);
+                    let ct = field
+                        .content_type
+                        .as_deref()
+                        .unwrap_or_else(|| guess_content_type(orig_filename));
+                    // Percent-encode \", \r, \n in the display filename
+                    // (matching curl's mime_content_disposition encoding).
+                    let safe_filename = if opts.form_escape {
+                        mime_backslash_escape(display_filename)
+                    } else {
+                        mime_percent_encode(display_filename)
+                    };
+                    body.extend_from_slice(
+                        format!(
+                            "Content-Disposition: {disposition}; name=\"{}\"; filename=\"{safe_filename}\"\r\n\
+                             Content-Type: {ct}\r\n\r\n",
+                            field.name
+                        )
+                        .as_bytes(),
+                    );
+                    if is_stdin {
+                        let mut data = Vec::new();
+                        let _ = io::stdin().read_to_end(&mut data);
+                        body.extend_from_slice(&data);
+                    } else if let Ok(data) = fs::read(&field.value) {
+                        body.extend_from_slice(&data);
+                    }
                 }
             } else {
                 // `-F=value` (empty name) emits just `Content-Disposition:
@@ -616,7 +1023,11 @@ fn build_body(opts: &Options, boundary: Option<&str>) -> Option<Vec<u8>> {
                 let cd = if field.name.is_empty() {
                     format!("Content-Disposition: {disposition}\r\n")
                 } else if let Some(ref fname) = field.filename {
-                    let safe = mime_percent_encode(fname);
+                    let safe = if opts.form_escape {
+                        mime_backslash_escape(fname)
+                    } else {
+                        mime_percent_encode(fname)
+                    };
                     format!(
                         "Content-Disposition: {disposition}; name=\"{}\"; filename=\"{safe}\"\r\n",
                         field.name
@@ -661,6 +1072,15 @@ fn build_body(opts: &Options, boundary: Option<&str>) -> Option<Vec<u8>> {
         {
             data.drain(..start);
         }
+        // CURL_UPLOAD_SIZE (Debug-gated env): truncate the upload to a fixed
+        // number of bytes — simulates a "growing file" where curl committed to
+        // a size at start-of-upload (test 447).
+        if let Ok(s) = std::env::var("CURL_UPLOAD_SIZE")
+            && let Ok(n) = s.parse::<usize>()
+            && n <= data.len()
+        {
+            data.truncate(n);
+        }
         return Some(data);
     }
 
@@ -677,6 +1097,24 @@ fn mime_percent_encode(s: &str) -> String {
             b'"' => out.push_str("%22"),
             b'\r' => out.push_str("%0d"),
             b'\n' => out.push_str("%0a"),
+            _ => out.push(b as char),
+        }
+    }
+    out
+}
+
+fn mime_backslash_escape(s: &str) -> String {
+    // --form-escape mode: escape `"`/`\r`/`\n`/`\\` with a leading backslash
+    // instead of percent-encoding them (test 1186, 1189).
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'\\' | b'"' => {
+                out.push('\\');
+                out.push(b as char);
+            }
+            b'\r' => out.push_str("\\r"),
+            b'\n' => out.push_str("\\n"),
             _ => out.push(b as char),
         }
     }
@@ -1226,12 +1664,61 @@ fn is_stale_pool_error(e: &str) -> bool {
         || e.contains("Connection reset")
 }
 
+fn is_got_nothing_error(e: &str) -> bool {
+    e.contains("empty reply") || e.contains("failed to read status line")
+}
+
 fn execute_request_inner(
     url: &ParsedUrl,
     opts: &Options,
     accumulated_header_bytes: usize,
 ) -> Result<Response, String> {
-    let (mut conn, connect_response) = connect(url, opts)?;
+    // On a CONNECT-tunnel 407 with a Digest challenge, compute the response
+    // and retry once with Proxy-Authorization: Digest on the CONNECT line
+    // (tests 206, 1060, 1061). The retry needs its own `opts` so we don't
+    // contaminate the live one.
+    let (mut conn, connect_response) = match connect(url, opts) {
+        Ok(v) => v,
+        Err(e) if e.contains("CONNECT tunnel failed, response 407")
+            && opts.proxy_user.is_some()
+            && opts.connect_proxy_digest_authorization.is_none() =>
+        {
+            let connect_bytes = crate::connection::CONNECT_RESP
+                .with(|r| r.borrow().clone())
+                .map(|(_, b)| b)
+                .unwrap_or_default();
+            let chal = parse_connect_proxy_digest_challenge(&connect_bytes);
+            let proxy_creds = opts.proxy_user.as_deref().and_then(|c| {
+                c.split_once(':')
+                    .map(|(u, p)| (u.to_string(), p.to_string()))
+            });
+            let (tgt_host, tgt_port) = crate::connection::connect_to_override(
+                &url.host,
+                url.port,
+                &opts.connect_tos,
+            )
+            .unwrap_or_else(|| (url.host.clone(), url.port));
+            let target = if tgt_host.contains(':') {
+                format!("[{}]:{}", tgt_host, tgt_port)
+            } else {
+                format!("{}:{}", tgt_host, tgt_port)
+            };
+            let digest_header = chal.and_then(|c| {
+                proxy_creds
+                    .as_ref()
+                    .and_then(|(u, p)| build_digest_auth(u, p, &c, "CONNECT", &target))
+            });
+            if let Some(header) = digest_header {
+                let mut retry_opts = opts.clone();
+                retry_opts.connect_proxy_digest_authorization = Some(header);
+                retry_opts.defer_proxy_auth = false;
+                connect(url, &retry_opts)?
+            } else {
+                return Err(e);
+            }
+        }
+        Err(e) => return Err(e),
+    };
     // --haproxy-protocol: prepend a PROXY v1 header to the connection
     // before the HTTP request (test 3028). For proxy-tunneled requests
     // (CONNECT) the header goes onto the established tunnel.
@@ -1969,6 +2456,12 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
         }
 
         let mut resp = execute_request(&url, &opts, redirect_headers.len())?;
+        // After issuing a request that used the stored Digest challenge
+        // state (i.e. one set by an earlier 401 retry), bump nc so the next
+        // request increments per RFC 2617 §3.2.2 (test 1286).
+        if opts.digest_challenge_state.is_some() && opts.digest_authorization.is_none() {
+            opts.digest_nc = opts.digest_nc.saturating_add(1).max(2);
+        }
         // `num_connects` counts NEW TCP connects only — reused pool entries
         // don't bump it (test 2051's `%{num_connects}` is 0 on reuse).
         if !crate::connection::POOL_REUSED.with(|h| *h.borrow()) {
@@ -1981,12 +2474,161 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
         // is a no-op when no retry happens.
         absorb_response_cookies(&mut opts, &resp, &url);
 
-        // --anyauth: when the server replies 401 with a Basic challenge,
-        // retry the same request with Basic auth so credentials are sent in
-        // the follow-up. We only support Basic, so skip if the WWW-Authenticate
-        // header doesn't offer it (test 1204).
-        if resp.status == 401 && opts.defer_auth && (opts.user.is_some() || url.userinfo.is_some())
+        // --anyauth/--digest/--ntlm: when the server replies 401, parse the
+        // challenge(s) and resend with the strongest scheme we support.
+        // Digest is preferred over Basic (RFC 7235). NTLM is tried only when
+        // --ntlm is in effect or --anyauth got an NTLM-only challenge.
+        // After a redirect with --ntlm we re-enter even with `defer_auth =
+        // false`, since the post-redirect challenge needs a fresh round-trip.
+        let creds_present = opts.user.is_some() || url.userinfo.is_some();
+        if resp.status == 401
+            && creds_present
+            && (opts.defer_auth || (opts.ntlm && opts.ntlm_authorization.is_none()))
         {
+            // NTLM handling — split into the Type-2 case (challenge already
+            // received) and the bare-NTLM case (we need to send Type 1).
+            // WWW-Authenticate may be a single scheme per header OR multiple
+            // comma-separated schemes in one header (test 76).
+            let auth_schemes: Vec<String> = resp
+                .headers
+                .iter()
+                .filter(|(k, _)| k.eq_ignore_ascii_case("www-authenticate"))
+                .flat_map(|(_, v)| v.split(',').map(|s| s.trim().to_string()))
+                .collect();
+            let offers_ntlm = auth_schemes.iter().any(|s| {
+                let l = s.to_ascii_lowercase();
+                l == "ntlm" || l.starts_with("ntlm ")
+            });
+            let offers_digest_now = auth_schemes
+                .iter()
+                .any(|s| s.to_ascii_lowercase().starts_with("digest "));
+            // --anyauth without --digest/--ntlm explicit: choose NTLM only when
+            // the server didn't also offer Digest (Digest still wins, per
+            // test 70). Once chosen, set opts.ntlm so the NTLM Type-1 path
+            // below sends the probe.
+            if !opts.ntlm && offers_ntlm && !offers_digest_now {
+                opts.ntlm = true;
+            }
+            if opts.ntlm && opts.ntlm_authorization.is_none() {
+                let t2_b64 = resp.headers.iter().find_map(|(k, v)| {
+                    if k.eq_ignore_ascii_case("www-authenticate") {
+                        let t = v.trim_start();
+                        t.strip_prefix("NTLM ")
+                            .or_else(|| t.strip_prefix("ntlm "))
+                            .map(str::trim)
+                    } else {
+                        None
+                    }
+                });
+                let creds = opts
+                    .user
+                    .as_deref()
+                    .or(url.userinfo.as_deref())
+                    .and_then(|c| {
+                        c.split_once(':').map(|(u, p)| (u.to_string(), p.to_string()))
+                    });
+                // A Type 2 too large to parse is curl's CURLE_TOO_LARGE
+                // (test 776) — surface even if we can't extract the
+                // challenge.
+                if let Some(t2) = t2_b64
+                    && t2.len() > 65_000
+                {
+                    resp.ntlm_too_large = true;
+                    resp.body.clear();
+                    return Ok(resp);
+                }
+                if let Some(t2) = t2_b64
+                    && let Some(challenge) = crate::ntlm::parse_type2_challenge(t2)
+                    && let Some((u, p)) = creds
+                {
+                    // NTLM is connection-bound. If the 401 carried
+                    // `Connection: close` or the response was HTTP/1.0, a
+                    // fresh TCP connect would invalidate the negotiation —
+                    // curl just stops (test 159 is intentionally "known to
+                    // fail" for that reason).
+                    let conn_close = resp.headers.iter().any(|(k, v)| {
+                        k.eq_ignore_ascii_case("connection")
+                            && v.to_ascii_lowercase().contains("close")
+                    });
+                    if !conn_close && !resp.http10_response {
+                        let t3 = match crate::ntlm::type3_message_checked(&u, &p, &challenge) {
+                            Some(b) => b,
+                            None => {
+                                resp.ntlm_too_large = true;
+                                resp.body.clear();
+                                return Ok(resp);
+                            }
+                        };
+                        let b64 = crate::ntlm::base64_encode(&t3);
+                        redirect_headers.extend_from_slice(&resp.header_bytes);
+                        opts.defer_auth = false;
+                        opts.ntlm_authorization = Some(format!("NTLM {b64}"));
+                        let r = execute_request(&url, &opts, redirect_headers.len())?;
+                        resp = r;
+                        connects += 1;
+                        // Mark the connection as NTLM-authenticated so a
+                        // follow-redirect on the same pooled connection
+                        // doesn't re-trigger the Type 1 → Type 2 → Type 3
+                        // dance (test 1100).
+                        if resp.status != 401 {
+                            opts.ntlm_done = true;
+                            opts.ntlm_authorization = None;
+                        }
+                    }
+                } else if offers_ntlm {
+                    // Bare `WWW-Authenticate: NTLM` (no Type 2 yet) → retry
+                    // with the NTLM Type 1 message. The server will respond
+                    // with Type 2, handled on the next iteration of this loop.
+                    redirect_headers.extend_from_slice(&resp.header_bytes);
+                    opts.defer_auth = false;
+                    let r = execute_request(&url, &opts, redirect_headers.len())?;
+                    resp = r;
+                    connects += 1;
+                    if resp.status == 401 {
+                        let t2_b64 = resp.headers.iter().find_map(|(k, v)| {
+                            if k.eq_ignore_ascii_case("www-authenticate") {
+                                let t = v.trim_start();
+                                t.strip_prefix("NTLM ")
+                                    .or_else(|| t.strip_prefix("ntlm "))
+                                    .map(str::trim)
+                            } else {
+                                None
+                            }
+                        });
+                        let creds2 = opts.user.as_deref().or(url.userinfo.as_deref()).and_then(
+                            |c| c.split_once(':').map(|(u, p)| (u.to_string(), p.to_string())),
+                        );
+                        if let Some(t2) = t2_b64
+                            && let Some(challenge) = crate::ntlm::parse_type2_challenge(t2)
+                            && let Some((u, p)) = creds2
+                        {
+                            let t3 = match crate::ntlm::type3_message_checked(&u, &p, &challenge) {
+                            Some(b) => b,
+                            None => {
+                                resp.ntlm_too_large = true;
+                                resp.body.clear();
+                                return Ok(resp);
+                            }
+                        };
+                            let b64 = crate::ntlm::base64_encode(&t3);
+                            redirect_headers.extend_from_slice(&resp.header_bytes);
+                            opts.ntlm_authorization = Some(format!("NTLM {b64}"));
+                            let r = execute_request(&url, &opts, redirect_headers.len())?;
+                            resp = r;
+                            connects += 1;
+                        }
+                    }
+                }
+            }
+            let digest_challenge = resp.headers.iter().find_map(|(k, v)| {
+                if k.eq_ignore_ascii_case("www-authenticate") {
+                    let trimmed = v.trim_start();
+                    if trimmed.len() >= 7 && trimmed[..7].eq_ignore_ascii_case("Digest ") {
+                        return Some(trimmed[7..].to_string());
+                    }
+                }
+                None
+            });
             let offers_basic = resp.headers.iter().any(|(k, v)| {
                 k.eq_ignore_ascii_case("www-authenticate")
                     && v.split(',').any(|tok| {
@@ -1996,7 +2638,81 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                             .is_some_and(|s| s.eq_ignore_ascii_case("basic"))
                     })
             });
-            if offers_basic {
+            let auth_creds = opts.user.as_deref().or(url.userinfo.as_deref());
+            let creds_parsed = auth_creds.and_then(|c| {
+                c.split_once(':')
+                    .map(|(u, p)| (u.to_string(), p.to_string()))
+            });
+            let digest_header_and_chal = digest_challenge.and_then(|chal| {
+                creds_parsed.as_ref().and_then(|(u, p)| {
+                    let method = if let Some(ref m) = opts.method {
+                        m.clone()
+                    } else if opts.head {
+                        "HEAD".into()
+                    } else if opts.data.is_some() || !opts.form_fields.is_empty() {
+                        "POST".into()
+                    } else if opts.upload_file.is_some() {
+                        "PUT".into()
+                    } else {
+                        "GET".into()
+                    };
+                    let uri = if url.path.is_empty() {
+                        "/".to_string()
+                    } else {
+                        url.path.clone()
+                    };
+                    build_digest_auth_nc(u, p, &chal, &method, &uri, 1)
+                        .map(|h| (h, chal))
+                })
+            });
+            if let Some((header, chal)) = digest_header_and_chal {
+                // If the upload source is stdin and HTTP/1.0 forces no
+                // chunked encoding, we cannot replay the body — match curl's
+                // CURLE_UPLOAD_FAILED (exit 25) and bail without re-sending
+                // (test 1072).
+                let is_stdin_upload = opts.upload_file.as_deref().and_then(|p| p.to_str())
+                    == Some("-")
+                    || opts.upload_file.as_deref().and_then(|p| p.to_str()) == Some(".");
+                if resp.http10_response && is_stdin_upload {
+                    resp.upload_redirect_failed = true;
+                    return Ok(resp);
+                }
+                redirect_headers.extend_from_slice(&resp.header_bytes);
+                opts.defer_auth = false;
+                opts.digest_authorization = Some(header);
+                opts.digest_challenge_state = Some(chal);
+                opts.digest_nc = 2; // next request after the retry uses nc=2
+                // If the server spoke HTTP/1.0 (e.g. `HTTP/1.0 401 ...
+                // swsclose`), pin the retry to HTTP/1.0 since the connection
+                // was closed and a fresh one has to use the same version
+                // (test 1071, 1072).
+                let saved_http_version = opts.http_version.clone();
+                if resp.http10_response && opts.http_version.is_none() {
+                    opts.http_version = Some("1.0".into());
+                }
+                let r = match execute_request(&url, &opts, redirect_headers.len()) {
+                    Ok(r) => Ok(r),
+                    Err(e) if is_got_nothing_error(&e) => {
+                        // Server closed without sending a response to the
+                        // authed retry. Keep the 401 headers in the redirect
+                        // chain and surface CURLE_GOT_NOTHING via status=0
+                        // (test 1079).
+                        resp.status = 0;
+                        resp.header_bytes.clear();
+                        resp.body.clear();
+                        Err(())
+                    }
+                    Err(e) => {
+                        opts.http_version = saved_http_version;
+                        return Err(e);
+                    }
+                };
+                opts.http_version = saved_http_version;
+                if let Ok(r) = r {
+                    resp = r;
+                    connects += 1;
+                }
+            } else if offers_basic {
                 // Capture the 401 headers as part of the redirect chain so
                 // -i shows both responses.
                 redirect_headers.extend_from_slice(&resp.header_bytes);
@@ -2009,10 +2725,275 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
             }
         }
 
+        // RFC 2617 stale=true: server says the nonce we used is now stale,
+        // and includes a fresh one. Recompute Digest and retry once (test
+        // 388). We get here when the previous request already sent Digest
+        // (digest_authorization is set) and the response is another 401.
+        if resp.status == 401
+            && opts.digest_authorization.is_some()
+            && (opts.user.is_some() || url.userinfo.is_some())
+        {
+            let stale_challenge = resp.headers.iter().find_map(|(k, v)| {
+                if k.eq_ignore_ascii_case("www-authenticate") {
+                    let trimmed = v.trim_start();
+                    if trimmed.len() >= 7 && trimmed[..7].eq_ignore_ascii_case("Digest ") {
+                        let rest = &trimmed[7..];
+                        if parse_digest_attr(rest, "stale")
+                            .map(|s| s.eq_ignore_ascii_case("true"))
+                            .unwrap_or(false)
+                        {
+                            return Some(rest.to_string());
+                        }
+                    }
+                }
+                None
+            });
+            if let Some(chal) = stale_challenge {
+                let auth_creds = opts.user.as_deref().or(url.userinfo.as_deref());
+                let creds_parsed = auth_creds.and_then(|c| {
+                    c.split_once(':')
+                        .map(|(u, p)| (u.to_string(), p.to_string()))
+                });
+                if let Some((u, p)) = creds_parsed {
+                    let method = if let Some(ref m) = opts.method {
+                        m.clone()
+                    } else if opts.head {
+                        "HEAD".into()
+                    } else if opts.data.is_some() || !opts.form_fields.is_empty() {
+                        "POST".into()
+                    } else if opts.upload_file.is_some() {
+                        "PUT".into()
+                    } else {
+                        "GET".into()
+                    };
+                    let uri = if url.path.is_empty() {
+                        "/".to_string()
+                    } else {
+                        url.path.clone()
+                    };
+                    if let Some(header) = build_digest_auth(&u, &p, &chal, &method, &uri) {
+                        redirect_headers.extend_from_slice(&resp.header_bytes);
+                        opts.digest_authorization = Some(header);
+                        resp = execute_request(&url, &opts, redirect_headers.len())?;
+                        connects += 1;
+                    }
+                }
+            }
+        }
+
+        // --digest/--ntlm with an upload probe: if the probe got a 2xx
+        // (server accepted but didn't challenge), we still need to send the
+        // real body in a second request — without an Authorization header
+        // (tests 175, 176). A redirect (3xx) or other failure stops here
+        // (test 177).
+        if (200..300).contains(&resp.status)
+            && opts.defer_auth
+            && opts.auth_probe_empty_upload
+            && (opts.upload_file.is_some() || opts.data.is_some())
+            && opts.digest_authorization.is_none()
+            && opts.ntlm_authorization.is_none()
+        {
+            redirect_headers.extend_from_slice(&resp.header_bytes);
+            opts.defer_auth = false;
+            opts.auth_probe_empty_upload = false;
+            // Send the body but NO Authorization (server didn't ask).
+            opts.no_basic = true;
+            // Suppress the auto NTLM Type 1 on this no-auth retry by
+            // pretending the connection is already authenticated.
+            let saved_ntlm_done = opts.ntlm_done;
+            if opts.ntlm {
+                opts.ntlm_done = true;
+            }
+            resp = execute_request(&url, &opts, redirect_headers.len())?;
+            opts.ntlm_done = saved_ntlm_done;
+            opts.no_basic = false;
+            connects += 1;
+        }
+
         // Proxy 407 challenge with --proxy-anyauth/digest/ntlm/negotiate:
-        // resend with Proxy-Authorization (Basic only) and any cookies the
-        // 407 set on the proxy response (test 1331).
+        // resend with Proxy-Authorization (Digest preferred, then Basic) and
+        // any cookies the 407 set on the proxy response (test 1331, 168).
+        // --proxy-ntlm: 407 carries Proxy-Authenticate: NTLM <b64-Type 2>.
+        // Parse it and retry with Proxy-Authorization: NTLM <Type 3> (test 81).
+        let did_proxy_auth_retry = resp.status == 407
+            && opts.defer_proxy_auth
+            && opts.proxy_user.is_some();
+        if resp.status == 407
+            && opts.proxy_ntlm
+            && opts.proxy_ntlm_authorization.is_none()
+            && opts.proxy_user.is_some()
+        {
+            let t2_b64 = resp.headers.iter().find_map(|(k, v)| {
+                if k.eq_ignore_ascii_case("proxy-authenticate") {
+                    let t = v.trim_start();
+                    t.strip_prefix("NTLM ")
+                        .or_else(|| t.strip_prefix("ntlm "))
+                        .map(str::trim)
+                } else {
+                    None
+                }
+            });
+            let proxy_creds = opts.proxy_user.as_deref().and_then(|c| {
+                c.split_once(':').map(|(u, p)| (u.to_string(), p.to_string()))
+            });
+            if let Some(t2) = t2_b64
+                && let Some(challenge) = crate::ntlm::parse_type2_challenge(t2)
+                && let Some((u, p)) = proxy_creds
+            {
+                let t3 = match crate::ntlm::type3_message_checked(&u, &p, &challenge) {
+                    Some(b) => b,
+                    None => {
+                        // NTLM credentials over the limit — surface as
+                        // CURLE_TOO_LARGE (test 775, 776) but keep the 401
+                        // response headers so they still appear in stdout/-i.
+                        // The body is discarded to match curl which stops
+                        // writing as soon as it decides the auth retry can't
+                        // proceed.
+                        resp.ntlm_too_large = true;
+                        resp.body.clear();
+                        return Ok(resp);
+                    }
+                };
+                let b64 = crate::ntlm::base64_encode(&t3);
+                redirect_headers.extend_from_slice(&resp.header_bytes);
+                opts.proxy_ntlm_authorization = Some(format!("NTLM {b64}"));
+                let r = execute_request(&url, &opts, redirect_headers.len())?;
+                resp = r;
+                connects += 1;
+                // Type 3 succeeded — proxy is now authenticated for the
+                // remainder of this TCP connection. Drop the stored header
+                // AND the auto-Type-1 trigger so subsequent requests don't
+                // repeat either (test 169's site 401-Digest retry must not
+                // carry Proxy-Authorization: NTLM).
+                if resp.status != 407 {
+                    opts.proxy_ntlm_authorization = None;
+                    opts.proxy_ntlm_done = true;
+                }
+                // After proxy NTLM finishes, the site may issue 401 with its
+                // own auth challenge. Run the site digest/basic flow against
+                // the new response (test 169 chains proxy NTLM → site Digest).
+                if resp.status == 401
+                    && (opts.user.is_some() || url.userinfo.is_some())
+                {
+                    let site_digest = resp.headers.iter().find_map(|(k, v)| {
+                        if k.eq_ignore_ascii_case("www-authenticate") {
+                            let t = v.trim_start();
+                            if t.len() >= 7 && t[..7].eq_ignore_ascii_case("Digest ") {
+                                return Some(t[7..].to_string());
+                            }
+                        }
+                        None
+                    });
+                    let site_creds = opts
+                        .user
+                        .as_deref()
+                        .or(url.userinfo.as_deref())
+                        .and_then(|c| {
+                            c.split_once(':').map(|(u, p)| (u.to_string(), p.to_string()))
+                        });
+                    if let Some(chal) = site_digest
+                        && let Some((u, p)) = site_creds
+                    {
+                        let method = if let Some(ref m) = opts.method {
+                            m.clone()
+                        } else if opts.head {
+                            "HEAD".into()
+                        } else if opts.data.is_some() || !opts.form_fields.is_empty() {
+                            "POST".into()
+                        } else if opts.upload_file.is_some() {
+                            "PUT".into()
+                        } else {
+                            "GET".into()
+                        };
+                        let uri = if url.path.is_empty() {
+                            "/".to_string()
+                        } else {
+                            url.path.clone()
+                        };
+                        if let Some(header) =
+                            build_digest_auth_nc(&u, &p, &chal, &method, &uri, 1)
+                        {
+                            redirect_headers.extend_from_slice(&resp.header_bytes);
+                            opts.defer_auth = false;
+                            opts.digest_authorization = Some(header);
+                            opts.digest_challenge_state = Some(chal);
+                            opts.digest_nc = 2;
+                            let r =
+                                execute_request(&url, &opts, redirect_headers.len())?;
+                            resp = r;
+                            connects += 1;
+                        }
+                    }
+                }
+            }
+        }
         if resp.status == 407 && opts.defer_proxy_auth && opts.proxy_user.is_some() {
+            let proxy_digest_challenge = resp.headers.iter().find_map(|(k, v)| {
+                if k.eq_ignore_ascii_case("proxy-authenticate") {
+                    let trimmed = v.trim_start();
+                    if trimmed.len() >= 7 && trimmed[..7].eq_ignore_ascii_case("Digest ") {
+                        return Some(trimmed[7..].to_string());
+                    }
+                }
+                None
+            });
+            let proxy_offers_ntlm = resp.headers.iter().any(|(k, v)| {
+                k.eq_ignore_ascii_case("proxy-authenticate") && {
+                    let t = v.trim_start().to_ascii_lowercase();
+                    t == "ntlm" || t.starts_with("ntlm ")
+                }
+            });
+            // --proxy-anyauth: if Digest isn't offered but NTLM is, switch
+            // to NTLM and continue with the Type 1 → Type 2 → Type 3 dance
+            // inline (test 243). Done here so we don't have to re-enter the
+            // outer auth loop.
+            if proxy_digest_challenge.is_none() && proxy_offers_ntlm && !opts.proxy_ntlm {
+                opts.proxy_ntlm = true;
+                opts.defer_proxy_auth = false;
+                redirect_headers.extend_from_slice(&resp.header_bytes);
+                // Type 1 retry.
+                let r = execute_request(&url, &opts, redirect_headers.len())?;
+                resp = r;
+                connects += 1;
+                if resp.status == 407 {
+                    let t2_b64 = resp.headers.iter().find_map(|(k, v)| {
+                        if k.eq_ignore_ascii_case("proxy-authenticate") {
+                            let t = v.trim_start();
+                            t.strip_prefix("NTLM ")
+                                .or_else(|| t.strip_prefix("ntlm "))
+                                .map(str::trim)
+                        } else {
+                            None
+                        }
+                    });
+                    let proxy_creds2 = opts.proxy_user.as_deref().and_then(|c| {
+                        c.split_once(':').map(|(u, p)| (u.to_string(), p.to_string()))
+                    });
+                    if let Some(t2) = t2_b64
+                        && let Some(challenge) = crate::ntlm::parse_type2_challenge(t2)
+                        && let Some((u, p)) = proxy_creds2
+                    {
+                        let t3 = match crate::ntlm::type3_message_checked(&u, &p, &challenge) {
+                            Some(b) => b,
+                            None => {
+                                resp.ntlm_too_large = true;
+                                resp.body.clear();
+                                return Ok(resp);
+                            }
+                        };
+                        let b64 = crate::ntlm::base64_encode(&t3);
+                        redirect_headers.extend_from_slice(&resp.header_bytes);
+                        opts.proxy_ntlm_authorization = Some(format!("NTLM {b64}"));
+                        let r = execute_request(&url, &opts, redirect_headers.len())?;
+                        resp = r;
+                        connects += 1;
+                        if resp.status != 407 {
+                            opts.proxy_ntlm_authorization = None;
+                            opts.proxy_ntlm_done = true;
+                        }
+                    }
+                }
+            }
             let offers_basic = resp.headers.iter().any(|(k, v)| {
                 k.eq_ignore_ascii_case("proxy-authenticate")
                     && v.split(',').any(|tok| {
@@ -2022,11 +3003,94 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                             .is_some_and(|s| s.eq_ignore_ascii_case("basic"))
                     })
             });
-            if offers_basic {
+            let proxy_creds = opts
+                .proxy_user
+                .as_deref()
+                .and_then(|c| c.split_once(':').map(|(u, p)| (u.to_string(), p.to_string())));
+            let proxy_digest_header = proxy_digest_challenge.and_then(|chal| {
+                proxy_creds.as_ref().and_then(|(u, p)| {
+                    let method = if let Some(ref m) = opts.method {
+                        m.clone()
+                    } else if opts.head {
+                        "HEAD".into()
+                    } else if opts.data.is_some() || !opts.form_fields.is_empty() {
+                        "POST".into()
+                    } else if opts.upload_file.is_some() {
+                        "PUT".into()
+                    } else {
+                        "GET".into()
+                    };
+                    let uri = if url.path.is_empty() {
+                        "/".to_string()
+                    } else {
+                        url.path.clone()
+                    };
+                    build_digest_auth(u, p, &chal, &method, &uri)
+                })
+            });
+            if let Some(header) = proxy_digest_header {
+                redirect_headers.extend_from_slice(&resp.header_bytes);
+                opts.defer_proxy_auth = false;
+                opts.proxy_digest_authorization = Some(header);
+                resp = execute_request(&url, &opts, redirect_headers.len())?;
+                connects += 1;
+            } else if offers_basic {
                 redirect_headers.extend_from_slice(&resp.header_bytes);
                 opts.defer_proxy_auth = false;
                 // Apply cookies that came in via the 407 response — the
                 // cookie engine may have stored them on the matching host.
+                resp = execute_request(&url, &opts, redirect_headers.len())?;
+                connects += 1;
+            }
+        }
+
+        // After a proxy auth retry, the server may still require auth (401).
+        // Re-run the 401 handler so we add Authorization: Digest on top of
+        // the now-permanent Proxy-Authorization: Digest (test 168).
+        if did_proxy_auth_retry
+            && resp.status == 401
+            && opts.defer_auth
+            && (opts.user.is_some() || url.userinfo.is_some())
+        {
+            let digest_challenge = resp.headers.iter().find_map(|(k, v)| {
+                if k.eq_ignore_ascii_case("www-authenticate") {
+                    let trimmed = v.trim_start();
+                    if trimmed.len() >= 7 && trimmed[..7].eq_ignore_ascii_case("Digest ") {
+                        return Some(trimmed[7..].to_string());
+                    }
+                }
+                None
+            });
+            let auth_creds = opts.user.as_deref().or(url.userinfo.as_deref());
+            let creds_parsed = auth_creds.and_then(|c| {
+                c.split_once(':')
+                    .map(|(u, p)| (u.to_string(), p.to_string()))
+            });
+            let digest_header = digest_challenge.and_then(|chal| {
+                creds_parsed.as_ref().and_then(|(u, p)| {
+                    let method = if let Some(ref m) = opts.method {
+                        m.clone()
+                    } else if opts.head {
+                        "HEAD".into()
+                    } else if opts.data.is_some() || !opts.form_fields.is_empty() {
+                        "POST".into()
+                    } else if opts.upload_file.is_some() {
+                        "PUT".into()
+                    } else {
+                        "GET".into()
+                    };
+                    let uri = if url.path.is_empty() {
+                        "/".to_string()
+                    } else {
+                        url.path.clone()
+                    };
+                    build_digest_auth(u, p, &chal, &method, &uri)
+                })
+            });
+            if let Some(header) = digest_header {
+                redirect_headers.extend_from_slice(&resp.header_bytes);
+                opts.defer_auth = false;
+                opts.digest_authorization = Some(header);
                 resp = execute_request(&url, &opts, redirect_headers.len())?;
                 connects += 1;
             }
@@ -2397,6 +3461,31 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                     ));
                 }
 
+                // Clear the one-shot Digest header so the new URL re-derives
+                // it via digest_challenge_state with an incremented nc and
+                // the new URI (test 1286).
+                opts.digest_authorization = None;
+                // NTLM is per-connection — a redirect on a connection that
+                // is closing (`Connection: close` or HTTP/1.0) restarts the
+                // negotiation (Type 1 → Type 2 → Type 3). When the
+                // connection persists (test 1100), NTLM auth carries over
+                // and the redirected request sends no Authorization at all.
+                let redir_closes = resp.headers.iter().any(|(k, v)| {
+                    k.eq_ignore_ascii_case("connection")
+                        && v.to_ascii_lowercase().contains("close")
+                }) || resp.http10_response;
+                if redir_closes {
+                    opts.ntlm_authorization = None;
+                    opts.proxy_ntlm_authorization = None;
+                    opts.ntlm_done = false;
+                    opts.proxy_ntlm_done = false;
+                }
+                // For --anyauth we re-probe the new origin no matter what
+                // (the new URL could advertise different schemes — test 90).
+                if opts.anyauth {
+                    opts.ntlm = false;
+                    opts.defer_auth = true;
+                }
                 if opts.verbose {
                     eprintln!("* Following redirect to {current_url}");
                 }
