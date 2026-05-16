@@ -17080,6 +17080,7 @@ impl Interpreter {
         let pattern = truncate_at_first_accept(&pattern);
         let pattern = collapse_lazy_plus_then(&pattern);
         let pattern = prune_alternations_after_prune(&pattern);
+        let pattern = fold_accept_in_lookaround(&pattern);
         let pattern = strip_control_verbs(&pattern);
         let pattern = strip_quantifier_after_empty_lookaround(&pattern);
         let pattern = strip_k_anchor(&pattern);
@@ -27383,6 +27384,212 @@ fn prune_alternations_after_prune(pattern: &str) -> String {
         k += 1;
     }
     out
+}
+
+/// Fold `(*ACCEPT)` semantics inside lookbehind/lookahead bodies.
+/// Inside a `(?<=(A(*ACCEPT)|B)POST)` (or `(?<!...)`, `(?=...)`,
+/// `(?!...)`), the ACCEPT branch should match A without trying POST.
+/// fancy_regex doesn't honour control verbs, so rewrite the body as
+/// `(A|B POST)` — the ACCEPT branch loses POST, other branches keep
+/// it. re/regexp 2099, 2100, 2102, 2103.
+fn fold_accept_in_lookaround(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class {
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if i + 3 < chars.len()
+            && c == '('
+            && chars[i + 1] == '?'
+            && (chars[i + 2] == '<' || chars[i + 2] == '=' || chars[i + 2] == '!')
+        {
+            let (prefix_len, header) = match chars[i + 2] {
+                '<' if chars[i + 3] == '=' => (4, "(?<="),
+                '<' if chars[i + 3] == '!' => (4, "(?<!"),
+                '=' => (3, "(?="),
+                '!' => (3, "(?!"),
+                _ => (0, ""),
+            };
+            if prefix_len > 0 {
+                let body_start = i + prefix_len;
+                let mut depth = 1;
+                let mut k = body_start;
+                let mut local_in_class = false;
+                while k < chars.len() && depth > 0 {
+                    if chars[k] == '\\' && k + 1 < chars.len() {
+                        k += 2;
+                        continue;
+                    }
+                    if !local_in_class && chars[k] == '[' {
+                        local_in_class = true;
+                    } else if local_in_class && chars[k] == ']' {
+                        local_in_class = false;
+                    } else if !local_in_class && chars[k] == '(' {
+                        depth += 1;
+                    } else if !local_in_class && chars[k] == ')' {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    k += 1;
+                }
+                if depth == 0 {
+                    let body: String = chars[body_start..k].iter().collect();
+                    if let Some(folded) = fold_accept_in_body(&body) {
+                        out.push_str(header);
+                        out.push_str(&folded);
+                        out.push(')');
+                        i = k + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+fn fold_accept_in_body(body: &str) -> Option<String> {
+    let chars: Vec<char> = body.chars().collect();
+    if chars.is_empty() || chars[0] != '(' {
+        return None;
+    }
+    let mut depth = 1;
+    let mut k = 1;
+    let mut local_in_class = false;
+    while k < chars.len() && depth > 0 {
+        if chars[k] == '\\' && k + 1 < chars.len() {
+            k += 2;
+            continue;
+        }
+        if !local_in_class && chars[k] == '[' {
+            local_in_class = true;
+        } else if local_in_class && chars[k] == ']' {
+            local_in_class = false;
+        } else if !local_in_class && chars[k] == '(' {
+            depth += 1;
+        } else if !local_in_class && chars[k] == ')' {
+            depth -= 1;
+            if depth == 0 {
+                break;
+            }
+        }
+        k += 1;
+    }
+    if depth != 0 {
+        return None;
+    }
+    // Determine group prefix to preserve capture semantics.
+    let group_inner: String = chars[1..k].iter().collect();
+    let post: String = chars[k + 1..].iter().collect();
+    let (group_prefix, alt_source) = if let Some(rest) = group_inner.strip_prefix("?:") {
+        ("?:", rest.to_string())
+    } else if group_inner.starts_with('?') {
+        return None;
+    } else {
+        ("", group_inner.clone())
+    };
+    let alts = split_top_alternations(&alt_source);
+    if alts.len() < 2 {
+        return None;
+    }
+    if !alts.iter().any(|a| a.contains("(*ACCEPT)")) {
+        return None;
+    }
+    let new_alts: Vec<String> = alts
+        .iter()
+        .map(|alt| {
+            if alt.contains("(*ACCEPT)") {
+                format!("({})", alt.replace("(*ACCEPT)", ""))
+            } else {
+                format!("({alt}){post}")
+            }
+        })
+        .collect();
+    if group_prefix == "?:" {
+        Some(format!("(?:{})", new_alts.join("|")))
+    } else {
+        // Branch reset (?|...) so all alternatives share group 1.
+        Some(format!("(?|{})", new_alts.join("|")))
+    }
+}
+
+fn split_top_alternations(s: &str) -> Vec<String> {
+    let chars: Vec<char> = s.chars().collect();
+    let mut alts: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut d = 0;
+    let mut in_class = false;
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            cur.push(c);
+            cur.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            cur.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            cur.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class && c == '(' {
+            d += 1;
+            cur.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class && c == ')' {
+            d -= 1;
+            cur.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class && c == '|' && d == 0 {
+            alts.push(std::mem::take(&mut cur));
+            i += 1;
+            continue;
+        }
+        cur.push(c);
+        i += 1;
+    }
+    alts.push(cur);
+    alts
 }
 
 fn strip_control_verbs(pattern: &str) -> String {
