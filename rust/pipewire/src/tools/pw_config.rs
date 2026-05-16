@@ -178,16 +178,18 @@ pub fn main(raw_args: &[String]) -> i32 {
     // explicitly directed the search and nothing turned up.
     let user_directed = !opt_prefix.is_empty() || opt_name != "pipewire.conf";
     if user_directed && configs.is_empty() {
-        // Mirror C's log preamble. With a prefix set, an extra W line
-        // from conf_load() appears (it tries to fopen the prefixed path
-        // directly). The `0x...` pointer in that W line varies per-run,
-        // but tests normalize it via sed.
+        // Mirror C's log preamble. C's get_config_path tries `get_abs_path`
+        // first; if the prefix is absolute, conf_load() is called directly
+        // and emits the 425 W line on open failure. For relative prefixes
+        // get_config_path falls through env/home/configdir/confdata lookups
+        // and returns 0 without ever calling conf_load (just a debug log).
+        // The `0x...` pointer in the W line varies per-run; tests normalize it.
         let attempted = if opt_prefix.is_empty() {
             opt_name.clone()
         } else {
             format!("{}/{}", opt_prefix, opt_name)
         };
-        if !opt_prefix.is_empty() {
+        if std::path::Path::new(&opt_prefix).is_absolute() {
             eprintln!(
                 "[W][TIME] pw.conf      | [          conf.c:  425 conf_load()] 0x5555555609d0: error loading config '{attempted}': No such file or directory"
             );
