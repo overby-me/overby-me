@@ -2889,6 +2889,14 @@
         tool = "pw-cli";
         name = "empty-cmd";
       }
+      {
+        tool = "pw-cli";
+        name = "comment-only";
+      }
+      {
+        tool = "pw-cli";
+        name = "comment-after-cmd";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a

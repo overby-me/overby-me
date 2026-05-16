@@ -182,13 +182,17 @@ fn run_positional(argv0: &str, remote: Option<String>, positional: Vec<&str>) ->
     // buffer, then splits on whitespace. So `pw-cli "ls Core"` and
     // `pw-cli ls Core` both parse to command="ls", rest=["Core"].
     let joined: String = positional.join(" ");
-    let mut split = joined.split_whitespace();
+    // C's parse() truncates the buffer at the first '#' (line comment),
+    // then strips whitespace. Empty/whitespace-only input is a no-op.
+    let stripped = match joined.split_once('#') {
+        Some((before, _)) => before,
+        None => joined.as_str(),
+    };
+    let mut split = stripped.split_whitespace();
     let cmd = match split.next() {
         Some(c) => c,
         None => {
-            // C's parse() returns true (success, no output) on
-            // empty/whitespace-only input — `pw-cli ""` should be a
-            // silent no-op, not a help dump.
+            // Silent no-op like C parse() does for empty input.
             return 0;
         }
     };
