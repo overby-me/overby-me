@@ -2969,6 +2969,26 @@
         tool = "pw-profiler";
         name = "short-remote-no-arg";
       }
+      {
+        tool = "pw-container";
+        name = "missing-arg-r";
+      }
+      {
+        tool = "pw-container";
+        name = "missing-arg-P";
+      }
+      {
+        tool = "pw-reserve";
+        name = "short-name-no-arg";
+      }
+      {
+        tool = "pw-reserve";
+        name = "short-appname-no-arg";
+      }
+      {
+        tool = "pw-reserve";
+        name = "short-priority-no-arg";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
