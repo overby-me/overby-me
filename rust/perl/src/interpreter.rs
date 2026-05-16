@@ -24896,7 +24896,8 @@ fn expand_recursive_to_depth(pattern: &str, max_depth: usize) -> String {
     if groups.is_empty() {
         return pattern.to_string();
     }
-    expand_recursive_helper(pattern, &groups, pattern, max_depth)
+    let mut counter: usize = 0;
+    expand_recursive_helper(pattern, &groups, pattern, max_depth, &mut counter)
 }
 
 fn expand_recursive_helper(
@@ -24904,6 +24905,7 @@ fn expand_recursive_helper(
     groups: &[(usize, String)],
     orig_pattern: &str,
     depth: usize,
+    counter: &mut usize,
 ) -> String {
     let chars: Vec<char> = pat.chars().collect();
     let mut out = String::with_capacity(pat.len());
@@ -24953,6 +24955,7 @@ fn expand_recursive_helper(
                             groups,
                             orig_pattern,
                             depth - 1,
+                            counter,
                         ));
                         out.push(')');
                     } else {
@@ -24971,6 +24974,7 @@ fn expand_recursive_helper(
                         groups,
                         orig_pattern,
                         depth - 1,
+                        counter,
                     ));
                     out.push(')');
                 } else {
@@ -24997,16 +25001,29 @@ fn expand_recursive_helper(
                     let body = lookup_named_group(orig_pattern, &name).map(|(_, b)| b);
                     if let Some(body) = body
                         && depth > 0
-                        && !body_has_inner_capture(&body)
                     {
-                        out.push_str("(?:");
-                        out.push_str(&expand_recursive_helper(
-                            &body,
-                            groups,
-                            orig_pattern,
-                            depth - 1,
-                        ));
-                        out.push(')');
+                        let expanded_body = if body_has_inner_capture(&body) {
+                            // Body has inner captures — try renaming them to
+                            // a unique suffix so duplicates don't conflict.
+                            // Fails on unnamed `()` captures or `\N` backrefs.
+                            *counter += 1;
+                            rename_named_captures(&body, *counter)
+                        } else {
+                            Some(body.clone())
+                        };
+                        if let Some(renamed) = expanded_body {
+                            out.push_str("(?:");
+                            out.push_str(&expand_recursive_helper(
+                                &renamed,
+                                groups,
+                                orig_pattern,
+                                depth - 1,
+                                counter,
+                            ));
+                            out.push(')');
+                        } else {
+                            out.push_str("(?!)");
+                        }
                     } else {
                         out.push_str("(?!)");
                     }
@@ -25019,6 +25036,153 @@ fn expand_recursive_helper(
         i += 1;
     }
     out
+}
+
+/// Rename named captures in `body` so they don't collide when the body
+/// is duplicated by recursive expansion. `(?<NAME>...)` becomes
+/// `(?<NAME__RID>...)`, `\k<NAME>` becomes `\k<NAME__RID>`, etc. Bails
+/// (returns None) on unnamed `()` captures or `\N` numbered backrefs —
+/// renumbering them would alter the surrounding group count. Used by
+/// recursive expansion for palindrome-style patterns (re/regexp 1165,
+/// 1367).
+fn rename_named_captures(body: &str, id: usize) -> Option<String> {
+    let chars: Vec<char> = body.chars().collect();
+    let mut out = String::with_capacity(body.len() + 16);
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            // \k<NAME> / \k'NAME' — rename named backref.
+            if chars[i + 1] == 'k' && i + 2 < chars.len() {
+                let (open, close) = if chars[i + 2] == '<' {
+                    ('<', '>')
+                } else if chars[i + 2] == '\'' {
+                    ('\'', '\'')
+                } else {
+                    out.push(c);
+                    out.push(chars[i + 1]);
+                    i += 2;
+                    continue;
+                };
+                let nstart = i + 3;
+                let mut k = nstart;
+                while k < chars.len() && chars[k] != close {
+                    k += 1;
+                }
+                if k < chars.len() {
+                    let name: String = chars[nstart..k].iter().collect();
+                    out.push_str(&format!("\\k{open}{name}__R{id}{close}"));
+                    i = k + 1;
+                    continue;
+                }
+            }
+            // \N numbered backref — can't safely renumber.
+            if chars[i + 1].is_ascii_digit() {
+                return None;
+            }
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class {
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if c == '(' {
+            if i + 1 < chars.len() && chars[i + 1] == '?' && i + 2 < chars.len() {
+                let p2 = chars[i + 2];
+                // (?P=NAME) — Python-style named backref.
+                if p2 == 'P' && i + 3 < chars.len() && chars[i + 3] == '=' {
+                    let nstart = i + 4;
+                    let mut k = nstart;
+                    while k < chars.len() && chars[k] != ')' {
+                        k += 1;
+                    }
+                    if k < chars.len() {
+                        let name: String = chars[nstart..k].iter().collect();
+                        out.push_str(&format!("(?P={name}__R{id})"));
+                        i = k + 1;
+                        continue;
+                    }
+                }
+                // (?<NAME>...) — but NOT (?<=...) / (?<!...).
+                if p2 == '<' {
+                    if i + 3 < chars.len() && (chars[i + 3] == '=' || chars[i + 3] == '!') {
+                        out.push(c);
+                        i += 1;
+                        continue;
+                    }
+                    let nstart = i + 3;
+                    let mut k = nstart;
+                    while k < chars.len() && chars[k] != '>' {
+                        k += 1;
+                    }
+                    if k < chars.len() {
+                        let name: String = chars[nstart..k].iter().collect();
+                        out.push_str(&format!("(?<{name}__R{id}>"));
+                        i = k + 1;
+                        continue;
+                    }
+                }
+                // (?'NAME'...).
+                if p2 == '\'' {
+                    let nstart = i + 3;
+                    let mut k = nstart;
+                    while k < chars.len() && chars[k] != '\'' {
+                        k += 1;
+                    }
+                    if k < chars.len() {
+                        let name: String = chars[nstart..k].iter().collect();
+                        out.push_str(&format!("(?'{name}__R{id}'"));
+                        i = k + 1;
+                        continue;
+                    }
+                }
+                // (?P<NAME>...).
+                if p2 == 'P' && i + 3 < chars.len() && chars[i + 3] == '<' {
+                    let nstart = i + 4;
+                    let mut k = nstart;
+                    while k < chars.len() && chars[k] != '>' {
+                        k += 1;
+                    }
+                    if k < chars.len() {
+                        let name: String = chars[nstart..k].iter().collect();
+                        out.push_str(&format!("(?P<{name}__R{id}>"));
+                        i = k + 1;
+                        continue;
+                    }
+                }
+                // Other (?...) forms — pass through.
+                out.push(c);
+                i += 1;
+                continue;
+            }
+            // Unnamed `(...)` — convert to non-capturing so duplicating
+            // the body doesn't add captures. We've already bailed on
+            // `\N` numbered backrefs, so this is safe.
+            out.push_str("(?:");
+            i += 1;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    Some(out)
 }
 
 /// Rewrite numeric backrefs `\N` that target groups inside a branch
