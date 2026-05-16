@@ -7319,6 +7319,23 @@ impl Interpreter {
             return Value::Undef;
         }
 
+        // Multiconcat: chains of `.` containing a tied scalar require
+        // special eval order. Reference perl's multiconcat op defers
+        // non-tied scalar reads until after the first tied FETCH —
+        // `$a.$t.$a.$t` (with $t tied; FETCH mutates $a) yields
+        // `b1c1b1c2` because $a is captured AFTER FETCH#1. We detect
+        // the chain shape and apply this semantics. opbasic/concat
+        // test 253 (RT #132595).
+        if let BinOp::Concat = op
+            && let Some(operands) = flatten_concat_chain(left, right)
+            && operands
+                .iter()
+                .any(|e| matches!(e, Expr::ScalarVar(n) | Expr::MyVar(n) | Expr::LocalVar(n)
+                    if self.tied_scalars.contains_key(n)))
+        {
+            return self.eval_multiconcat(&operands);
+        }
+
         // Short-circuit operators
         match op {
             BinOp::LogAnd | BinOp::And => {
@@ -12972,6 +12989,91 @@ impl Interpreter {
     /// right. Returns the handler's value (which may be a non-string,
     /// e.g. another blessed ref). Falls back to plain `to_str` concat
     /// for non-overloaded operands.
+    /// Multiconcat: evaluate a `.`-chain with tied-scalar semantics
+    /// matching reference perl's pp_multiconcat optimisation. ALL
+    /// non-tied scalar reads share a single snapshot taken right
+    /// after the first tied FETCH — `$a.$t.$a.$t` (with $t.FETCH
+    /// mutating $a) yields `b1c1b1c2` because both $a positions read
+    /// the post-FETCH#1 value of $a even though FETCH#2 later
+    /// reassigns it. opbasic/concat RT #132595.
+    fn eval_multiconcat(&mut self, operands: &[Expr]) -> Value {
+        let mut parts: Vec<Option<String>> = vec![None; operands.len()];
+        let mut deferred: Vec<usize> = Vec::new();
+        let mut any_flagged = false;
+        let mut snapshot: Option<std::collections::HashMap<String, Value>> = None;
+        for (i, op) in operands.iter().enumerate() {
+            let is_scalar_var = matches!(
+                op,
+                Expr::ScalarVar(_) | Expr::MyVar(_) | Expr::LocalVar(_)
+            );
+            let var_name = match op {
+                Expr::ScalarVar(n) | Expr::MyVar(n) | Expr::LocalVar(n) => Some(n.clone()),
+                _ => None,
+            };
+            let is_tied = var_name
+                .as_ref()
+                .is_some_and(|n| self.tied_scalars.contains_key(n));
+            if is_scalar_var && !is_tied {
+                if let Some(snap) = &snapshot {
+                    let v = var_name
+                        .as_ref()
+                        .and_then(|n| snap.get(n))
+                        .cloned()
+                        .unwrap_or_else(|| self.eval_expr(op));
+                    if v.is_utf8_flagged() {
+                        any_flagged = true;
+                    }
+                    parts[i] = Some(self.stringify_value(&v));
+                } else {
+                    deferred.push(i);
+                }
+            } else {
+                let v = self.eval_expr(op);
+                if v.is_utf8_flagged() {
+                    any_flagged = true;
+                }
+                parts[i] = Some(self.stringify_value(&v));
+                if is_tied && snapshot.is_none() {
+                    // Take a snapshot of every non-tied scalar referenced
+                    // in this chain. Subsequent non-tied reads use this
+                    // snapshot (even if FETCH later mutates the var).
+                    let mut snap = std::collections::HashMap::new();
+                    for op2 in operands.iter() {
+                        if let Expr::ScalarVar(n) | Expr::MyVar(n) | Expr::LocalVar(n) = op2
+                            && !self.tied_scalars.contains_key(n)
+                            && !snap.contains_key(n)
+                        {
+                            snap.insert(n.clone(), self.get_var(n));
+                        }
+                    }
+                    for j in deferred.drain(..) {
+                        let v = match &operands[j] {
+                            Expr::ScalarVar(n) | Expr::MyVar(n) | Expr::LocalVar(n) => snap
+                                .get(n)
+                                .cloned()
+                                .unwrap_or_else(|| self.eval_expr(&operands[j])),
+                            _ => self.eval_expr(&operands[j]),
+                        };
+                        if v.is_utf8_flagged() {
+                            any_flagged = true;
+                        }
+                        parts[j] = Some(self.stringify_value(&v));
+                    }
+                    snapshot = Some(snap);
+                }
+            }
+        }
+        for j in deferred {
+            let v = self.eval_expr(&operands[j]);
+            if v.is_utf8_flagged() {
+                any_flagged = true;
+            }
+            parts[j] = Some(self.stringify_value(&v));
+        }
+        let combined: String = parts.into_iter().flatten().collect();
+        Value::Str(combined, any_flagged)
+    }
+
     fn concat_with_overload(&mut self, l: &Value, r: &Value) -> Value {
         let lp = Self::ref_ptr(l);
         let rp = Self::ref_ptr(r);
@@ -21169,6 +21271,28 @@ fn is_lvalue_shape(expr: &Expr) -> bool {
             | Expr::LocalVar(_)
             | Expr::ArrayLen(_)
     )
+}
+
+/// Flatten a left-associated `a . b . c . d` chain (parsed as
+/// `((a.b).c).d`) into the per-operand vec `[a, b, c, d]`. Returns None
+/// if the LHS isn't a Concat (single binop — caller should use the
+/// normal pairwise path).
+fn flatten_concat_chain(left: &Expr, right: &Expr) -> Option<Vec<Expr>> {
+    if !matches!(left, Expr::BinOp(BinOp::Concat, _, _)) {
+        return None;
+    }
+    fn flatten(e: &Expr, out: &mut Vec<Expr>) {
+        if let Expr::BinOp(BinOp::Concat, l, r) = e {
+            flatten(l, out);
+            flatten(r, out);
+        } else {
+            out.push(e.clone());
+        }
+    }
+    let mut operands = Vec::new();
+    flatten(left, &mut operands);
+    operands.push(right.clone());
+    Some(operands)
 }
 
 /// Canonicalise a foreach source expression to a cache key when it is
