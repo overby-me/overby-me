@@ -2785,6 +2785,14 @@
         tool = "pw-dot";
         name = "ortho-flag";
       }
+      {
+        tool = "pw-mididump";
+        name = "system-common-reject";
+      }
+      {
+        tool = "pw-mididump";
+        name = "realtime-reject";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a

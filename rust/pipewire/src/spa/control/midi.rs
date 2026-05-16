@@ -341,21 +341,20 @@ fn read_event(t: &mut Track) -> Result<DecodedEvent, ParseError> {
         t.pos += len;
         return Ok(DecodedEvent::Meta { meta_type, payload });
     } else {
-        // Other system-realtime / common bytes
-        t.running_status = 0;
+        // C's midifile.c switch on status only allows 0x80-0xEF (channel),
+        // 0xF0/0xF7 (sysex), 0xFF (meta). System common (0xF1-0xF6) and
+        // realtime (0xF8-0xFE) bytes hit the `default: return -EINVAL`
+        // branch — the event loop stops without printing them. Mirror
+        // that here so SMF files containing stray bytes don't produce
+        // output the C tool wouldn't.
+        return err("invalid SMF status byte");
     }
 
-    // Channel events.
-    let nybble = status & 0xf0;
-    let data_count = match nybble {
+    // Channel events: data byte count from high nybble.
+    let payload_count = match status & 0xf0 {
         0x80 | 0x90 | 0xa0 | 0xb0 | 0xe0 => 2,
         0xc0 | 0xd0 => 1,
-        _ => 0, // 0xf1..0xf6 / 0xf8..0xfe
-    };
-    let payload_count = match status {
-        0xf1 | 0xf3 => 1,
-        0xf2 => 2,
-        _ => data_count,
+        _ => unreachable!("status >= 0xf0 handled above"),
     };
     let mut data = vec![status];
     for _ in 0..payload_count {
