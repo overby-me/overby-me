@@ -631,15 +631,21 @@ fn write_flags(out: &mut String, value: u64, flags: &[(u64, &str)]) {
 fn write_params(
     out: &mut String,
     params: &[crate::pipewire_lib::client::ParamInfo],
-    _indent: usize,
-    _level: usize,
+    indent: usize,
+    level: usize,
 ) {
     // pw-dump's params include each param's value (enum-params follow-up).
-    // We don't yet enumerate params, so emit an empty object — the C tool
-    // never emits param values for which info.params[i].flags & READ == 0
-    // either, so this matches when no param is readable.
+    // We don't yet enumerate params, so emit an empty object. C uses
+    // put_begin+put_end which inserts newlines + indent even for empty
+    // dicts when indent > 0; match that.
     let _ = params;
-    out.push_str("{}");
+    if indent == 0 {
+        out.push_str("{}");
+    } else {
+        out.push('{');
+        push_newline_indent(out, indent, level);
+        out.push('}');
+    }
 }
 
 fn node_state_name(s: u32) -> &'static str {
