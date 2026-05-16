@@ -17295,6 +17295,11 @@ impl Interpreter {
                 let end = start + group_ends[0].unwrap();
                 if !code_blocks.is_empty() {
                     let saved_pos = self.set_pos_for_code_block(end, text);
+                    // Save outer match vars so an inner `m//` inside a
+                    // code block doesn't bleed into the outer $&/$1/…
+                    // result. re/regexp 655.
+                    let saved_amp = self.get_var("&");
+                    let saved_1 = self.get_var("1");
                     // Execute all blocks in one eval so that `local`
                     // declared in an earlier block stays in scope while
                     // a later block reads the localised value.
@@ -17302,6 +17307,8 @@ impl Interpreter {
                     let joined = code_blocks.join(";");
                     let v = self.eval_string(&joined);
                     self.set_global_var("^R", v);
+                    self.set_global_var("&", saved_amp);
+                    self.set_global_var("1", saved_1);
                     self.restore_pos_after_code_block(saved_pos);
                 }
                 return (true, end);
@@ -17414,9 +17421,13 @@ impl Interpreter {
                     let end = start + group_ends[0].unwrap();
                     if !code_blocks.is_empty() {
                         let saved_pos = self.set_pos_for_code_block(end, text);
+                        let saved_amp = self.get_var("&");
+                        let saved_1 = self.get_var("1");
                         let joined = code_blocks.join(";");
                         let v = self.eval_string(&joined);
                         self.set_global_var("^R", v);
+                        self.set_global_var("&", saved_amp);
+                        self.set_global_var("1", saved_1);
                         self.restore_pos_after_code_block(saved_pos);
                     }
                     (true, end)
@@ -29345,6 +29356,25 @@ fn substitute_constant_runtime_regex(pattern: &str) -> String {
                     // Numeric literal — stringified value is the
                     // pattern. re/regexp 1703, 1705.
                     Some(trimmed.to_string())
+                } else if let Some(num_part) = trimmed.strip_prefix('$')
+                    && !num_part.is_empty()
+                    && num_part.chars().all(|c| c.is_ascii_digit())
+                {
+                    // `$N` — backref to captured group N. (??{$1}) acts
+                    // like \1: match the previously captured text.
+                    // re/regexp 655.
+                    Some(format!("\\{num_part}"))
+                } else if let Some((_, str_part)) = trimmed.split_once("&&")
+                    && let s = str_part.trim()
+                    && s.starts_with('"')
+                    && s.ends_with('"')
+                    && s.len() >= 2
+                {
+                    // `EXPR && "STRING"` — assume EXPR is truthy at match
+                    // time (since the captured group already matched),
+                    // so the runtime regex is literally "STRING".
+                    // re/regexp 1065.
+                    Some(s[1..s.len() - 1].to_string())
                 } else if let Some(rest) = trimmed.strip_prefix("chr ") {
                     // `chr N` — codepoint literal. re/regexp 1112+.
                     let arg = rest.trim();
