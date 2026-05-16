@@ -479,7 +479,14 @@ pub struct Interpreter {
     call_stack: Vec<(String, String, usize)>,
     // Pending sub return triggered inside eval_expr (e.g., `return` in a do-block)
     pending_return: Option<Value>,
+    /// Sequence number for `(eval N)` references in compile errors.
+    /// Reference perl increments this on every `eval STRING` call.
     eval_counter: usize,
+    /// True once `_charnames.pm` has hit a require failure in this
+    /// run. Subsequent `\N{NAME}` uses emit "Attempt to reload" rather
+    /// than the original "Can't locate" message — matching reference
+    /// perl's caching of the failed require.
+    charnames_load_failed: bool,
     // Pending flow (Last/Next/Die/Exit) raised from inside a sub call that
     // has to propagate past the sub's return-value handshake. Consumed by
     // the caller's statement-execution loop.
@@ -718,6 +725,7 @@ impl Interpreter {
             call_stack: Vec::new(),
             pending_return: None,
             eval_counter: 0,
+            charnames_load_failed: false,
             pending_flow: None,
             eval_depth: 0,
             file_scopes: HashMap::new(),
@@ -772,6 +780,49 @@ impl Interpreter {
 
     pub fn set_current_file(&mut self, file: &str) {
         self.current_file = file.to_string();
+    }
+
+    /// True if `code` references a named character `\N{NAME}` (i.e.,
+    /// not `\N{U+HEX}` or `\N{COUNT}` — those don't need Name.pm).
+    fn code_uses_charnames(&self, code: &str) -> bool {
+        let chars: Vec<char> = code.chars().collect();
+        let mut i = 0;
+        while i + 2 < chars.len() {
+            if chars[i] == '\\' && chars[i + 1] == 'N' && chars[i + 2] == '{' {
+                let mut k = i + 3;
+                while k < chars.len() && chars[k] != '}' {
+                    k += 1;
+                }
+                if k < chars.len() {
+                    let body: String = chars[i + 3..k].iter().collect();
+                    let trimmed = body.trim();
+                    let is_codepoint = trimmed.starts_with("U+")
+                        || trimmed.starts_with("u+")
+                        || (!trimmed.is_empty()
+                            && trimmed
+                                .chars()
+                                .all(|c| c.is_ascii_digit() || c == ',' || c.is_whitespace()));
+                    if !is_codepoint && !trimmed.is_empty() {
+                        return true;
+                    }
+                    i = k + 1;
+                    continue;
+                }
+            }
+            i += 1;
+        }
+        false
+    }
+
+    fn unicore_name_in_inc(&self) -> bool {
+        for v in self.get_array("INC") {
+            let p = v.to_str();
+            let candidate = format!("{p}/unicore/Name.pm");
+            if std::path::Path::new(&candidate).is_file() {
+                return true;
+            }
+        }
+        false
     }
 
     fn shared_undef_ref(&mut self) -> std::rc::Rc<std::cell::RefCell<Value>> {
@@ -19584,6 +19635,31 @@ impl Interpreter {
     // --- Eval string ---
 
     fn eval_string(&mut self, code: &str) -> Value {
+        // \N{NAME} (named char, not \N{U+HEX} or \N{COUNT}) requires
+        // unicore/Name.pm — die like reference perl when it can't be
+        // located. re/regexp.t test 1725 onwards.
+        if self.code_uses_charnames(code) && !self.unicore_name_in_inc() {
+            self.eval_counter += 1;
+            let n = self.eval_counter;
+            let msg = if self.charnames_load_failed {
+                format!(
+                    "Attempt to reload _charnames.pm aborted.\nCompilation failed in require at (eval {n}) line 1.\nBEGIN failed--compilation aborted at (eval {n}) line 1.\n"
+                )
+            } else {
+                self.charnames_load_failed = true;
+                let inc_str = self
+                    .get_array("INC")
+                    .iter()
+                    .map(|v| v.to_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!(
+                    "Can't locate unicore/Name.pm in @INC (you may need to install the unicore::Name module) (@INC entries checked: {inc_str}) at ../lib/_charnames.pm line 10.\nBEGIN failed--compilation aborted at ../lib/_charnames.pm line 10.\nCompilation failed in require at (eval {n}) line 2.\nBEGIN failed--compilation aborted at (eval {n}) line 2.\n"
+                )
+            };
+            self.set_global_var("@", Value::Str(msg, false));
+            return Value::Undef;
+        }
         // DB-package magic: when an `eval STRING` runs inside a sub
         // *defined in* package `DB` (Perls debugger convention),
         // reference perl resolves identifiers against the *callers*
