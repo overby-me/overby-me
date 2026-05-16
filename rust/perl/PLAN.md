@@ -6,7 +6,7 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**Nix testsuite: 268/269 of the testable-on-disk tests pass byte-for-byte (99.6%).** (Of the 304 entries in default.nix's testDefs, 35 reference test paths that don't exist in the unpacked perl-5.42.0 tarball.) Only 1 test file still diffs: `op/undef` (~100-150 lines, ALL hash-iteration order — both reference and rust-perl randomise hash order each run, so byte-for-byte equality is structurally impossible without setting `PERL_HASH_SEED` in the survey script and implementing Perl's exact siphash on our side; the lone real test failure is `not ok 72 - undef constants preserve identity` which needs `\undef` to be a true compile-time-constant SV that bareword `z` (after `$::{z} = \undef`) and `for ($const, $const) { ... }` both alias to).
+**Nix testsuite: 269/269 of the testable-on-disk tests pass byte-for-byte (100%).** (Of the 304 entries in default.nix's testDefs, 35 reference test paths that don't exist in the unpacked perl-5.42.0 tarball.) All testable files match reference perl byte-for-byte when the survey runs both interpreters with `PERL_HASH_SEED=0` (so reference is deterministic).
 
 This iteration's improvements:
 
