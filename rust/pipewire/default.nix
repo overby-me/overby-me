@@ -2957,6 +2957,18 @@
         tool = "pw-loopback";
         name = "missing-arg-c";
       }
+      {
+        tool = "pw-profiler";
+        name = "short-output-no-arg";
+      }
+      {
+        tool = "pw-profiler";
+        name = "short-iterations-no-arg";
+      }
+      {
+        tool = "pw-profiler";
+        name = "short-remote-no-arg";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
