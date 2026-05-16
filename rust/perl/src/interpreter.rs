@@ -542,28 +542,28 @@ impl Interpreter {
         // Set up default special variables
         globals
             .vars
-            .insert("/".to_string(), Value::Str("\n".to_string()));
+            .insert("/".to_string(), Value::Str("\n".to_string(), false));
         globals.vars.insert("\\".to_string(), Value::Undef);
         globals.vars.insert(",".to_string(), Value::Undef);
         globals.vars.insert("_".to_string(), Value::Undef);
         // $" — list separator (default space)
         globals
             .vars
-            .insert("\"".to_string(), Value::Str(" ".to_string()));
+            .insert("\"".to_string(), Value::Str(" ".to_string(), false));
         // $| — autoflush (default 0)
         globals.vars.insert("|".to_string(), Value::Num(0.0));
         globals
             .vars
-            .insert("^O".to_string(), Value::Str("linux".to_string()));
+            .insert("^O".to_string(), Value::Str("linux".to_string(), false));
         globals
             .vars
-            .insert("@".to_string(), Value::Str(String::new()));
+            .insert("@".to_string(), Value::Str(String::new(), false));
         globals
             .vars
-            .insert("0".to_string(), Value::Str("perl".to_string()));
+            .insert("0".to_string(), Value::Str("perl".to_string(), false));
         globals
             .vars
-            .insert("!".to_string(), Value::Str(String::new()));
+            .insert("!".to_string(), Value::Str(String::new(), false));
         // $$ — current process id
         globals
             .vars
@@ -571,7 +571,7 @@ impl Interpreter {
         // $; — subscript separator (default \x1c)
         globals
             .vars
-            .insert(";".to_string(), Value::Str("\u{1c}".to_string()));
+            .insert(";".to_string(), Value::Str("\u{1c}".to_string(), false));
         // $^X — path to the Perl executable. Reference perl sets this
         // from argv[0]: a PATH-resolved invocation gives "perl"
         // (basename), a full-path invocation gives the full path. Our
@@ -590,6 +590,7 @@ impl Interpreter {
                 std::env::args()
                     .next()
                     .unwrap_or_else(|| "perl".to_string()),
+                false,
             ),
         );
         // $] — Perl version as a decimal: "5.042000" for Perl 5.42.0.
@@ -598,13 +599,13 @@ impl Interpreter {
         // target byte-for-byte.
         globals
             .vars
-            .insert("]".to_string(), Value::Str("5.042000".to_string()));
+            .insert("]".to_string(), Value::Str("5.042000".to_string(), false));
         // $^V — version object (v5.42.0). Some tests check this in
         // string context, so we provide the v-string. Comparison with
         // version() objects isn't supported.
         globals
             .vars
-            .insert("^V".to_string(), Value::Str("v5.42.0".to_string()));
+            .insert("^V".to_string(), Value::Str("v5.42.0".to_string(), false));
         // $; — already set above.
         // $^W — warnings flag (0 by default).
         globals.vars.insert("^W".to_string(), Value::Num(0.0));
@@ -784,7 +785,7 @@ impl Interpreter {
         // Initial @INC seed from main.rs's `-I` flags. Bypass `set_array`
         // so the user-modification flag stays clear; `inc_user_modified`
         // only flips when the running program reassigns @INC at runtime.
-        let items: Vec<Value> = dirs.iter().map(|d| Value::Str(d.clone())).collect();
+        let items: Vec<Value> = dirs.iter().map(|d| Value::Str(d.clone(), false)).collect();
         self.globals.arrays.insert("INC".to_string(), items);
     }
 
@@ -792,7 +793,7 @@ impl Interpreter {
     /// Backed by a scalar-string read handle so `<DATA>` / `readline DATA`
     /// reads one record at a time.
     pub fn set_data_section(&mut self, data: String) {
-        let cell = std::rc::Rc::new(std::cell::RefCell::new(Value::Str(data)));
+        let cell = std::rc::Rc::new(std::cell::RefCell::new(Value::Str(data, false)));
         self.string_read_handles
             .insert("DATA".to_string(), (cell, 0));
     }
@@ -836,7 +837,7 @@ impl Interpreter {
     pub fn set_special_var(&mut self, name: &str, val: &str) {
         self.globals
             .vars
-            .insert(name.to_string(), Value::Str(val.to_string()));
+            .insert(name.to_string(), Value::Str(val.to_string(), false));
     }
 
     /// Enable global warnings (driven by the `-w` command-line switch).
@@ -854,7 +855,7 @@ impl Interpreter {
     /// installs the die handler inside BEGIN and expects to inspect
     /// `__LINE__` when `print 1+` hits EOF mid-expression.
     pub fn run_with_parse_error(&mut self, program: &[Stmt], err: &str) {
-        self.set_global_var("^GLOBAL_PHASE", Value::Str("START".to_string()));
+        self.set_global_var("^GLOBAL_PHASE", Value::Str("START".to_string(), false));
         Self::hoist_subs_in_blocks(program, &mut self.subs, "main");
         self.push_scope();
         for stmt in program {
@@ -880,7 +881,7 @@ impl Interpreter {
             self.in_die_handler += 1;
             self.call_sub_named(
                 &body,
-                std::slice::from_ref(&Value::Str(err.to_string())),
+                std::slice::from_ref(&Value::Str(err.to_string(), false)),
                 Some(&name),
             );
             self.in_die_handler -= 1;
@@ -901,7 +902,7 @@ impl Interpreter {
 
     pub fn run(&mut self, program: &[Stmt]) {
         // ${^GLOBAL_PHASE} starts as "START" while BEGIN blocks run.
-        self.set_global_var("^GLOBAL_PHASE", Value::Str("START".to_string()));
+        self.set_global_var("^GLOBAL_PHASE", Value::Str("START".to_string(), false));
         // First pass: collect sub definitions and BEGIN blocks
         // Pre-pass: also walk `package NAME { sub … }` blocks so subs
         // defined in a package block are registered before main runs.
@@ -1230,7 +1231,7 @@ impl Interpreter {
         // CHECK phase: run CHECK blocks in reverse registration order with
         // ${^GLOBAL_PHASE} = "CHECK". Perl runs them at end-of-compilation,
         // just before INITs, in LIFO order.
-        self.set_global_var("^GLOBAL_PHASE", Value::Str("CHECK".to_string()));
+        self.set_global_var("^GLOBAL_PHASE", Value::Str("CHECK".to_string(), false));
         let check_blocks: Vec<(Vec<Stmt>, Option<String>)> =
             self.check_blocks.clone().into_iter().rev().collect();
         for (body, origin) in &check_blocks {
@@ -1249,7 +1250,7 @@ impl Interpreter {
         }
 
         // INIT phase: run INIT blocks in registration order.
-        self.set_global_var("^GLOBAL_PHASE", Value::Str("INIT".to_string()));
+        self.set_global_var("^GLOBAL_PHASE", Value::Str("INIT".to_string(), false));
         let init_blocks: Vec<(Vec<Stmt>, Option<String>)> = self.init_blocks.clone();
         for (body, origin) in &init_blocks {
             let pushed = if let Some(o) = origin {
@@ -1267,7 +1268,7 @@ impl Interpreter {
         }
 
         // Main program runs in "RUN" phase per ${^GLOBAL_PHASE}.
-        self.set_global_var("^GLOBAL_PHASE", Value::Str("RUN".to_string()));
+        self.set_global_var("^GLOBAL_PHASE", Value::Str("RUN".to_string(), false));
 
         // Execute main program. Propagate exit_code from Flow::Exit so the
         // caller's `exit_code` field (used by main.rs's std::process::exit)
@@ -1338,7 +1339,7 @@ impl Interpreter {
         self.run_end_blocks_for_compile_error();
 
         // DESTRUCT: phase flips, then we destroy globals that are blessed.
-        self.set_global_var("^GLOBAL_PHASE", Value::Str("DESTRUCT".to_string()));
+        self.set_global_var("^GLOBAL_PHASE", Value::Str("DESTRUCT".to_string(), false));
         self.run_global_destructors();
 
         // Honor `$? = N` set inside an END block — Perl uses `$?` (or its
@@ -1362,7 +1363,7 @@ impl Interpreter {
     /// failure) so test.pls END runs and emits its
     /// "Looks like you planned X tests but ran Y." footer.
     fn run_end_blocks_for_compile_error(&mut self) {
-        self.set_global_var("^GLOBAL_PHASE", Value::Str("END".to_string()));
+        self.set_global_var("^GLOBAL_PHASE", Value::Str("END".to_string(), false));
         let end_blocks: Vec<(Vec<Stmt>, Option<String>)> =
             self.end_blocks.clone().into_iter().rev().collect();
         for (body, origin) in &end_blocks {
@@ -2480,7 +2481,7 @@ impl Interpreter {
                             Flow::Last(l) if l.is_none() || l == *label => return Flow::None,
                             Flow::None => return Flow::None,
                             other => {
-                                self.set_global_var("@", Value::Str(String::new()));
+                                self.set_global_var("@", Value::Str(String::new(), false));
                                 return other;
                             }
                         }
@@ -2904,7 +2905,7 @@ impl Interpreter {
                             let prev_arr: Vec<Value> = self
                                 .get_hash(var_name)
                                 .into_iter()
-                                .flat_map(|(k, v)| vec![Value::Str(k), v])
+                                .flat_map(|(k, v)| vec![Value::Str(k, false), v])
                                 .collect();
                             // Stash hash as kv list under a sentinel-prefixed
                             // name so restore_locals knows to rebuild as hash.
@@ -3144,7 +3145,7 @@ impl Interpreter {
                             let prev_arr: Vec<Value> = self
                                 .get_hash(var_name)
                                 .into_iter()
-                                .flat_map(|(k, v)| vec![Value::Str(k), v])
+                                .flat_map(|(k, v)| vec![Value::Str(k, false), v])
                                 .collect();
                             if let Some(saves) = self.local_array_saves.last_mut() {
                                 saves.push((format!("%{var_name}"), prev_arr));
@@ -3667,7 +3668,7 @@ impl Interpreter {
                     if let Some(ver) = version_arg {
                         let version_sub = format!("{module}::VERSION");
                         if let Some((_params, body)) = self.subs.get(&version_sub).cloned() {
-                            let v_args = vec![Value::Str(module.clone()), ver];
+                            let v_args = vec![Value::Str(module.clone(), false), ver];
                             self.call_sub_named(&body, &v_args, Some(&version_sub));
                             if let Some(flow) = self.pending_flow.take() {
                                 return flow;
@@ -3693,7 +3694,7 @@ impl Interpreter {
                     let import_sub = resolve_method_via_isa(self, module, "import")
                         .unwrap_or_else(|| format!("{module}::import"));
                     if self.subs.contains_key(&import_sub) {
-                        let mut call_args: Vec<Value> = vec![Value::Str(module.clone())];
+                        let mut call_args: Vec<Value> = vec![Value::Str(module.clone(), false)];
                         for a in import_args.iter() {
                             call_args.extend(self.eval_list(a));
                         }
@@ -3795,7 +3796,7 @@ impl Interpreter {
                 // particular config keys are absent.
                 if filename == "Config.pm" && !self.inc_user_modified {
                     self.required_files.insert(filename.clone());
-                    self.set_hash_element("INC", &filename, Value::Str(filename.clone()));
+                    self.set_hash_element("INC", &filename, Value::Str(filename.clone(), false));
                     return Flow::None;
                 }
                 let inc = self.get_array("INC");
@@ -3959,7 +3960,7 @@ impl Interpreter {
                     } else if args.is_empty() {
                         self.get_var("@")
                     } else {
-                        Value::Str(msg.clone())
+                        Value::Str(msg.clone(), false)
                     };
                     // Suppress recursive __DIE__ firing via a depth flag — a
                     // handler that itself calls die would otherwise loop.
@@ -3995,7 +3996,7 @@ impl Interpreter {
                             let line = self.current_line;
                             let new_val = self.call_sub_named(
                                 &body,
-                                &[prev.clone(), Value::Str(file), Value::Num(line as f64)],
+                                &[prev.clone(), Value::Str(file, false), Value::Num(line as f64)],
                                 Some(&mname),
                             );
                             self.pending_die_value = Some(new_val.clone());
@@ -4065,7 +4066,7 @@ impl Interpreter {
                 if let Value::CodeRef(name) = handler
                     && let Some((_params, body)) = self.subs.get(&name).cloned()
                 {
-                    self.call_sub_named(&body, &[Value::Str(final_msg)], Some(&name));
+                    self.call_sub_named(&body, &[Value::Str(final_msg, false)], Some(&name));
                 } else {
                     eprint!("{final_msg}");
                 }
@@ -4074,7 +4075,7 @@ impl Interpreter {
 
             Stmt::Eval(arg) => match arg.as_ref() {
                 EvalArg::Block(body) => {
-                    self.set_global_var("@", Value::Str(String::new()));
+                    self.set_global_var("@", Value::Str(String::new(), false));
                     self.push_scope();
                     self.eval_depth += 1;
                     let flow = self.exec_stmts(body);
@@ -4088,7 +4089,7 @@ impl Interpreter {
                             if let Some(v) = self.pending_die_value.take() {
                                 self.set_global_var("@", v);
                             } else {
-                                self.set_global_var("@", Value::Str(msg));
+                                self.set_global_var("@", Value::Str(msg, false));
                             }
                             // Clear any leftover pending_flow from
                             // sub-die unwinding inside the eval body.
@@ -4111,7 +4112,7 @@ impl Interpreter {
                             let msg = format!(
                                 "Can't \"goto\" into the middle of a foreach loop at {file} line {line}.\n"
                             );
-                            self.set_global_var("@", Value::Str(msg));
+                            self.set_global_var("@", Value::Str(msg, false));
                             let _ = label;
                             Flow::None
                         }
@@ -4119,7 +4120,7 @@ impl Interpreter {
                         other => {
                             // Eval completed without die — clear $@ so inner errors
                             // do not leak (e.g. eval { eval { die }; return }).
-                            self.set_global_var("@", Value::Str(String::new()));
+                            self.set_global_var("@", Value::Str(String::new(), false));
                             other
                         }
                     }
@@ -4426,7 +4427,7 @@ impl Interpreter {
                 if let Some(rc) = self.string_write_handles.get(&resolved) {
                     let mut s = rc.borrow().to_str();
                     s.push_str(text);
-                    *rc.borrow_mut() = Value::Str(s);
+                    *rc.borrow_mut() = Value::Str(s, false);
                     return;
                 }
                 let _ = io::stderr().write_all(&bytes);
@@ -4440,7 +4441,7 @@ impl Interpreter {
                 if let Some(rc) = self.string_write_handles.get(&resolved) {
                     let mut s = rc.borrow().to_str();
                     s.push_str(text);
-                    *rc.borrow_mut() = Value::Str(s);
+                    *rc.borrow_mut() = Value::Str(s, false);
                     return;
                 }
                 let _ = io::stdout().write_all(&bytes);
@@ -4454,7 +4455,7 @@ impl Interpreter {
                 if let Some(rc) = self.string_write_handles.get(&resolved) {
                     let mut s = rc.borrow().to_str();
                     s.push_str(text);
-                    *rc.borrow_mut() = Value::Str(s);
+                    *rc.borrow_mut() = Value::Str(s, false);
                     return;
                 }
                 let _ = io::stdout().write_all(&bytes);
@@ -4468,7 +4469,17 @@ impl Interpreter {
         match expr {
             Expr::IntLit(n) => Value::Num(*n as f64),
             Expr::FloatLit(n) => Value::Num(*n),
-            Expr::StringLit(s) => Value::Str(apply_case_modifiers(s)),
+            Expr::StringLit(s) => {
+                // A literal containing any char > U+00FF requires UTF-8
+                // representation (it can't be stored as latin1), so it's
+                // implicitly "upgraded" — set the UTF-8 flag. Latin1
+                // chars (0..=0xFF) leave the flag off so `"\xFF"`
+                // doesn't pretend to be UTF-8 encoded. op/length /
+                // opbasic/concat byte-vs-char tests depend on this.
+                let processed = apply_case_modifiers(s);
+                let utf8 = processed.chars().any(|c| (c as u32) > 0xFF);
+                Value::Str(processed, utf8)
+            }
             Expr::Undef => Value::Undef,
             Expr::RegexLit(pat, flags) => {
                 // Perl's qr// returns a compiled-regex scalar that `ref()`
@@ -4486,7 +4497,7 @@ impl Interpreter {
                         self.current_file.clone()
                     };
                     let line = self.current_line;
-                    self.set_global_var("@", Value::Str(format!("{err} at {file} line {line}.\n")));
+                    self.set_global_var("@", Value::Str(format!("{err} at {file} line {line}.\n"), false));
                     self.pending_flow = Some(Flow::Die(format!("{err} at {file} line {line}.\n")));
                     return Value::Undef;
                 }
@@ -4495,7 +4506,7 @@ impl Interpreter {
             Expr::QW(words) => {
                 // In scalar context, returns last element
                 if let Some(last) = words.last() {
-                    Value::Str(last.clone())
+                    Value::Str(last.clone(), false)
                 } else {
                     Value::Undef
                 }
@@ -4529,7 +4540,7 @@ impl Interpreter {
                 // false under boolean context; non-empty returns the count.
                 let n = self.get_hash(name).len();
                 if n == 0 {
-                    Value::Str(String::new())
+                    Value::Str(String::new(), false)
                 } else {
                     Value::Num(n as f64)
                 }
@@ -4601,10 +4612,10 @@ impl Interpreter {
                         // Perl's magical string increment: if the scalar is a
                         // defined string matching /^[A-Za-z]*[0-9]*\z/ and
                         // non-empty, increment as a string ("aa" → "ab").
-                        if let Value::Str(s) = &val {
+                        if let Value::Str(s, _) = &val {
                             if is_magic_inc_string(s) {
                                 let next = magic_string_inc(s);
-                                (Value::Str(next), val.clone())
+                                (Value::Str(next, false), val.clone())
                             } else {
                                 let n = val.to_num();
                                 (Value::Num(n + 1.0), Value::Num(n))
@@ -5045,7 +5056,7 @@ impl Interpreter {
                                 .unwrap_or(Value::Undef);
                             match v {
                                 Value::ArrayRef(r) => r,
-                                Value::Str(_) | Value::Num(_) => {
+                                Value::Str(_, _) | Value::Num(_) => {
                                     // Symbolic ref: `@{$name} = LIST`,
                                     // `@{4} = LIST`. Stringify and assign
                                     // the global array slot directly.
@@ -5553,7 +5564,7 @@ impl Interpreter {
                                 if let Some(m) = caps.get(i) {
                                     self.set_global_var(
                                         &i.to_string(),
-                                        Value::Str(m.as_str().to_string()),
+                                        Value::Str(m.as_str().to_string(), false),
                                     );
                                 } else {
                                     self.set_global_var(&i.to_string(), Value::Undef);
@@ -5608,7 +5619,7 @@ impl Interpreter {
                                     if let Some(c) = m.get(j) {
                                         self.set_global_var(
                                             &j.to_string(),
-                                            Value::Str(c.as_str().to_string()),
+                                            Value::Str(c.as_str().to_string(), false),
                                         );
                                     } else {
                                         self.set_global_var(&j.to_string(), Value::Undef);
@@ -5661,7 +5672,7 @@ impl Interpreter {
                                 if let Some(c) = m.get(j) {
                                     self.set_global_var(
                                         &j.to_string(),
-                                        Value::Str(c.as_str().to_string()),
+                                        Value::Str(c.as_str().to_string(), false),
                                     );
                                 } else {
                                     self.set_global_var(&j.to_string(), Value::Undef);
@@ -5689,9 +5700,9 @@ impl Interpreter {
                         // assign the modified text back to the target.
                         if flags.contains('r') || inner_flags.contains('r') {
                             let _ = count;
-                            Value::Str(new_text)
+                            Value::Str(new_text, false)
                         } else {
-                            self.assign_to(target, Value::Str(new_text));
+                            self.assign_to(target, Value::Str(new_text, false));
                             Value::Num(count as f64)
                         }
                     }
@@ -5820,7 +5831,7 @@ impl Interpreter {
                                     if let Some(c) = m.get(j) {
                                         self.set_global_var(
                                             &j.to_string(),
-                                            Value::Str(c.as_str().to_string()),
+                                            Value::Str(c.as_str().to_string(), false),
                                         );
                                     } else {
                                         self.set_global_var(&j.to_string(), Value::Undef);
@@ -5862,7 +5873,7 @@ impl Interpreter {
                                 if let Some(c) = m.get(j) {
                                     self.set_global_var(
                                         &j.to_string(),
-                                        Value::Str(c.as_str().to_string()),
+                                        Value::Str(c.as_str().to_string(), false),
                                     );
                                 } else {
                                     self.set_global_var(&j.to_string(), Value::Undef);
@@ -5887,9 +5898,9 @@ impl Interpreter {
                         };
                         if flags.contains('r') || inner_flags.contains('r') {
                             let _ = count;
-                            Value::Str(new_text)
+                            Value::Str(new_text, false)
                         } else {
-                            self.assign_to(target, Value::Str(new_text));
+                            self.assign_to(target, Value::Str(new_text, false));
                             Value::Num(count as f64)
                         }
                     }
@@ -6217,7 +6228,7 @@ impl Interpreter {
                 // Perl's `defined` returns `""` for false (like other boolean
                 // builtins — `1` for true, empty string for false).
                 if val.is_undef() {
-                    Value::Str(String::new())
+                    Value::Str(String::new(), false)
                 } else {
                     Value::Num(1.0)
                 }
@@ -6316,7 +6327,7 @@ impl Interpreter {
                             .unwrap_or(Value::Undef);
                         let arr_rc = match inner_val {
                             Value::ArrayRef(r) => r,
-                            Value::Str(_) | Value::Num(_) => {
+                            Value::Str(_, _) | Value::Num(_) => {
                                 let name = inner_val.to_str();
                                 let qname = self.qualify_global(&name);
                                 if let Some(rc) = self.aliased_arrays.get(qname.as_str()) {
@@ -6606,7 +6617,7 @@ impl Interpreter {
                         let inner = self.eval_expr(&dargs[0]);
                         match &inner {
                             Value::ArrayRef(r) => Value::ArrayRef(r.clone()),
-                            Value::Str(_) | Value::Num(_) => {
+                            Value::Str(_, _) | Value::Num(_) => {
                                 let name = inner.to_str();
                                 let qname = self.qualify_global(&name);
                                 let rc = if let Some(rc) = self.aliased_arrays.get(qname.as_str()) {
@@ -6630,7 +6641,7 @@ impl Interpreter {
                         let inner = self.eval_expr(&dargs[0]);
                         match &inner {
                             Value::HashRef(r) => Value::HashRef(r.clone()),
-                            Value::Str(_) | Value::Num(_) => {
+                            Value::Str(_, _) | Value::Num(_) => {
                                 let name = inner.to_str();
                                 let qname = self.qualify_global(&name);
                                 let rc = if let Some(rc) = self.aliased_hashes.get(qname.as_str()) {
@@ -6750,9 +6761,9 @@ impl Interpreter {
                         // (handled in assign_to: assignment replaces
                         // `$re` with a ScalarRef to the new value).
                         Value::Regex(pat, flags, _) => {
-                            return Value::Str(format!("(?^{flags}:{pat})"));
+                            return Value::Str(format!("(?^{flags}:{pat})"), false);
                         }
-                        Value::Str(s) if !s.is_empty() => self.get_var(&s),
+                        Value::Str(s, _) if !s.is_empty() => self.get_var(&s),
                         other => {
                             if extras == 0 {
                                 return Value::Undef;
@@ -6869,7 +6880,7 @@ impl Interpreter {
                         }
                         Flow::Die(msg) => {
                             self.pop_scope();
-                            self.set_global_var("@", Value::Str(msg.clone()));
+                            self.set_global_var("@", Value::Str(msg.clone(), false));
                             // Propagate the die out of the `do { … }`
                             // block so the surrounding eval catches it.
                             // Without this, `do { die }; 1;` inside an
@@ -6915,11 +6926,11 @@ impl Interpreter {
                 let path = self.eval_expr(path_expr).to_str();
                 let body = match std::fs::read_to_string(&path) {
                     Ok(b) => {
-                        self.set_global_var("@", Value::Str(String::new()));
+                        self.set_global_var("@", Value::Str(String::new(), false));
                         b
                     }
                     Err(e) => {
-                        self.set_global_var("!", Value::Str(perl_io_err(&e)));
+                        self.set_global_var("!", Value::Str(perl_io_err(&e), false));
                         return Value::Undef;
                     }
                 };
@@ -6933,7 +6944,7 @@ impl Interpreter {
                 let parse_err = parser.error.take();
                 if let Some(err) = lex_err.or(parse_err) {
                     let filled = err.replace("{FILE}", &path);
-                    self.set_global_var("@", Value::Str(filled));
+                    self.set_global_var("@", Value::Str(filled, false));
                     return Value::Undef;
                 }
                 let saved_file = std::mem::replace(&mut self.current_file, path.clone());
@@ -6953,7 +6964,7 @@ impl Interpreter {
                             break;
                         }
                         Flow::Die(msg) => {
-                            self.set_global_var("@", Value::Str(msg));
+                            self.set_global_var("@", Value::Str(msg, false));
                             self.scopes = saved_scopes;
                             self.current_file = saved_file;
                             self.current_line = saved_line;
@@ -7071,7 +7082,7 @@ impl Interpreter {
                     // `&$name(...)` where $name is a string / number —
                     // symbolic sub call. Under `use strict 'refs'`,
                     // die before any lookup (op/method test 8).
-                    Value::Str(_) | Value::Num(_) => {
+                    Value::Str(_, _) | Value::Num(_) => {
                         let name = callee_val.to_str();
                         let file = if self.current_file.is_empty() {
                             "-e".to_string()
@@ -7158,7 +7169,7 @@ impl Interpreter {
                 // Top of call_context is the *current* sub's caller ctx.
                 match self.call_context.last().copied() {
                     Some(2) => Value::Num(1.0),
-                    Some(1) => Value::Str(String::new()),
+                    Some(1) => Value::Str(String::new(), false),
                     _ => Value::Undef,
                 }
             }
@@ -7171,7 +7182,7 @@ impl Interpreter {
                 // `$o` itself. Plain non-overloaded interpolation still
                 // builds a String result via stringify_value.
                 let mut has_overload_concat = false;
-                let mut acc: Value = Value::Str(String::new());
+                let mut acc: Value = Value::Str(String::new(), false);
                 let mut result = String::new();
                 let mut accumulating = true;
                 for part in parts {
@@ -7180,7 +7191,7 @@ impl Interpreter {
                             if accumulating {
                                 result.push_str(s);
                             } else {
-                                acc = self.concat_with_overload(&acc, &Value::Str(s.clone()));
+                                acc = self.concat_with_overload(&acc, &Value::Str(s.clone(), false));
                             }
                         }
                         InterpPart::ScalarVar(name) => {
@@ -7201,7 +7212,7 @@ impl Interpreter {
                                     .is_some()
                             {
                                 has_overload_concat = true;
-                                acc = Value::Str(std::mem::take(&mut result));
+                                acc = Value::Str(std::mem::take(&mut result), false);
                                 accumulating = false;
                             }
                             if accumulating {
@@ -7281,11 +7292,11 @@ impl Interpreter {
                     // unchanged — case modifiers don't apply when the
                     // chain ends in a non-string ref.
                     if !result.is_empty() {
-                        acc = self.concat_with_overload(&acc, &Value::Str(result));
+                        acc = self.concat_with_overload(&acc, &Value::Str(result, false));
                     }
                     return acc;
                 }
-                Value::Str(apply_case_modifiers(&result))
+                Value::Str(apply_case_modifiers(&result), false)
             }
 
             _ => Value::Undef,
@@ -7356,7 +7367,7 @@ impl Interpreter {
                 return if l ^ r {
                     Value::Num(1.0)
                 } else {
-                    Value::Str(String::new())
+                    Value::Str(String::new(), false)
                 };
             }
             _ => {}
@@ -7426,7 +7437,7 @@ impl Interpreter {
             BinOp::Repeat => {
                 let s = l.to_str();
                 let n = r.to_num() as usize;
-                Value::Str(s.repeat(n))
+                Value::Str(s.repeat(n), false)
             }
 
             BinOp::NumEq => bool_value(l.to_num() == r.to_num()),
@@ -7467,16 +7478,31 @@ impl Interpreter {
             }
 
             BinOp::StrEq => {
-                // Go through stringify_value so a `""` overload on a
-                // blessed ref operand fires (mro/c3_with_overload).
-                let ls = self.stringify_value(l);
-                let rs = self.stringify_value(r);
-                bool_value(ls == rs)
+                // Under `use bytes`, reference perl compares the byte
+                // view of each operand: a UTF-8-flagged string yields
+                // its UTF-8 encoding; an unflagged string yields one
+                // latin1 byte per char. So `pack("U", 0xFF)` and
+                // `"\xc3\xbf"` compare equal under bytes mode (both
+                // are c3 bf in bytes). opbasic/concat #26905,
+                // op/length `byte_utf8a_to_utf8n` checks.
+                if self.bytes_mode {
+                    bool_value(l.to_bytes() == r.to_bytes())
+                } else {
+                    // Go through stringify_value so a `""` overload on a
+                    // blessed ref operand fires (mro/c3_with_overload).
+                    let ls = self.stringify_value(l);
+                    let rs = self.stringify_value(r);
+                    bool_value(ls == rs)
+                }
             }
             BinOp::StrNe => {
-                let ls = self.stringify_value(l);
-                let rs = self.stringify_value(r);
-                bool_value(ls != rs)
+                if self.bytes_mode {
+                    bool_value(l.to_bytes() != r.to_bytes())
+                } else {
+                    let ls = self.stringify_value(l);
+                    let rs = self.stringify_value(r);
+                    bool_value(ls != rs)
+                }
             }
             BinOp::StrLt => {
                 let ls = self.stringify_value(l);
@@ -7526,7 +7552,7 @@ impl Interpreter {
                 if l.to_bool() ^ r.to_bool() {
                     Value::Num(1.0)
                 } else {
-                    Value::Str(String::new())
+                    Value::Str(String::new(), false)
                 }
             }
 
@@ -7543,7 +7569,7 @@ impl Interpreter {
                 // `-`. If it starts with `-`, swap to `+`; with `+`,
                 // swap to `-`. Otherwise numeric negate. `use integer`
                 // does NOT change this textual behaviour.
-                if let Value::Str(s) = &val
+                if let Value::Str(s, _) = &val
                     && let Some(first) = s.chars().next()
                 {
                     // `-"-N"` where the rest is purely numeric returns
@@ -7559,17 +7585,17 @@ impl Interpreter {
                         if rest_is_numeric(&rest) {
                             return Value::Num(rest.parse::<f64>().unwrap_or(0.0));
                         }
-                        return Value::Str(format!("+{rest}"));
+                        return Value::Str(format!("+{rest}"), false);
                     }
                     if first == '+' {
                         let rest: String = s.chars().skip(1).collect();
                         if rest_is_numeric(&rest) {
                             return Value::Num(-rest.parse::<f64>().unwrap_or(0.0));
                         }
-                        return Value::Str(format!("-{rest}"));
+                        return Value::Str(format!("-{rest}"), false);
                     }
                     if first.is_ascii_alphabetic() || first == '_' {
-                        return Value::Str(format!("-{s}"));
+                        return Value::Str(format!("-{s}"), false);
                     }
                 }
                 Value::Num(-val.to_num())
@@ -7583,7 +7609,7 @@ impl Interpreter {
                 let val = self.eval_expr(expr);
                 // Perl's ! returns "" (empty string) for true, 1 for false
                 if val.to_bool() {
-                    Value::Str(String::new())
+                    Value::Str(String::new(), false)
                 } else {
                     Value::Num(1.0)
                 }
@@ -7591,7 +7617,7 @@ impl Interpreter {
             UnaryOp::Not => {
                 let val = self.eval_expr(expr);
                 if val.to_bool() {
-                    Value::Str(String::new())
+                    Value::Str(String::new(), false)
                 } else {
                     Value::Num(1.0)
                 }
@@ -7624,9 +7650,9 @@ impl Interpreter {
             }
             UnaryOp::PreInc => {
                 let val = self.eval_expr(expr);
-                let new_val = if let Value::Str(s) = &val {
+                let new_val = if let Value::Str(s, _) = &val {
                     if is_magic_inc_string(s) {
-                        Value::Str(magic_string_inc(s))
+                        Value::Str(magic_string_inc(s), false)
                     } else {
                         Value::Num(val.to_num() + 1.0)
                     }
@@ -7642,7 +7668,7 @@ impl Interpreter {
                 self.assign_to(expr, new_val.clone());
                 new_val
             }
-            UnaryOp::Ref => Value::Str("REF".to_string()),
+            UnaryOp::Ref => Value::Str("REF".to_string(), false),
         }
     }
 
@@ -7764,9 +7790,9 @@ impl Interpreter {
         }
         match name {
             "Internals::stack_refcounted" => return Value::Num(0.0),
-            "__FILE__" => return Value::Str(self.current_file.clone()),
+            "__FILE__" => return Value::Str(self.current_file.clone(), false),
             "__LINE__" => return Value::Num(self.current_line as f64),
-            "__PACKAGE__" => return Value::Str(self.package.clone()),
+            "__PACKAGE__" => return Value::Str(self.package.clone(), false),
             "__SUB__" | "CORE::__SUB__" => {
                 // Reference perl returns a CV ref to the currently
                 // executing sub (named or anon). Outside any sub
@@ -7910,7 +7936,7 @@ impl Interpreter {
                     let line = self.current_line;
                     format!("{raw} at {file} line {line}.\n")
                 };
-                self.set_global_var("@", Value::Str(msg.clone()));
+                self.set_global_var("@", Value::Str(msg.clone(), false));
                 self.pending_flow = Some(Flow::Die(msg));
                 Value::Undef
             }
@@ -7936,7 +7962,7 @@ impl Interpreter {
                 if let Value::CodeRef(name) = handler
                     && let Some((_params, body)) = self.subs.get(&name).cloned()
                 {
-                    self.call_sub_named(&body, &[Value::Str(msg)], Some(&name));
+                    self.call_sub_named(&body, &[Value::Str(msg, false)], Some(&name));
                 } else {
                     eprint!("{msg}");
                 }
@@ -8022,7 +8048,7 @@ impl Interpreter {
                     }
                     // Write back to lvalue (target arg).
                     if !flags.contains('r') {
-                        self.assign_to(&args[0], Value::Str(out));
+                        self.assign_to(&args[0], Value::Str(out, false));
                     }
                     if name == "_tr_count" {
                         Value::Num(if count > 0 { 0.0 } else { 1.0 })
@@ -8096,7 +8122,7 @@ impl Interpreter {
                     }
                     // Assign back to STR.
                     let new_str = String::from_utf8_lossy(&bytes).to_string();
-                    self.assign_to(&args[0], Value::Str(new_str));
+                    self.assign_to(&args[0], Value::Str(new_str, false));
                     return Value::Num(val as f64);
                 }
                 // Read mode.
@@ -8192,12 +8218,12 @@ impl Interpreter {
                 // declared prototype (op/cproto). Unknown CORE names
                 // die with "Can't find an opnumber for NAME", which we
                 // emit via pending_flow so the surrounding eval catches it.
-                if let Value::Str(s) = &arg_val
+                if let Value::Str(s, _) = &arg_val
                     && let Some(rest) = s.strip_prefix("CORE::")
                 {
                     if let Some(p) = core_builtin_prototype(rest) {
                         return match p {
-                            Some(proto) => Value::Str(proto.to_string()),
+                            Some(proto) => Value::Str(proto.to_string(), false),
                             None => Value::Undef,
                         };
                     } else {
@@ -8210,7 +8236,7 @@ impl Interpreter {
                 }
                 let sub_name: Option<String> = match &arg_val {
                     Value::CodeRef(n) => Some(n.clone()),
-                    Value::Str(s) => {
+                    Value::Str(s, _) => {
                         let qualified = if s.contains("::") {
                             s.clone()
                         } else {
@@ -8231,7 +8257,7 @@ impl Interpreter {
                     && let Some(p0) = params.first()
                     && let Some(rest) = p0.strip_prefix('(')
                 {
-                    return Value::Str(rest.to_string());
+                    return Value::Str(rest.to_string(), false);
                 }
                 Value::Undef
             }
@@ -8381,7 +8407,7 @@ impl Interpreter {
                 } else {
                     self.eval_expr(&args[0])
                 };
-                Value::Str(val.to_str().trim().to_string())
+                Value::Str(val.to_str().trim().to_string(), false)
             }
             "true" => Value::Num(1.0),
             "false" => Value::Num(0.0),
@@ -8410,7 +8436,7 @@ impl Interpreter {
                             return Value::Undef;
                         }
                         match self.blessed_refs.get(&ptr) {
-                            Some(c) => Value::Str(c.clone()),
+                            Some(c) => Value::Str(c.clone(), false),
                             None => Value::Undef,
                         }
                     }
@@ -8427,7 +8453,7 @@ impl Interpreter {
                         if t.is_empty() {
                             Value::Undef
                         } else {
-                            Value::Str(t.to_string())
+                            Value::Str(t.to_string(), false)
                         }
                     }
                     _ => Value::Num(1.0),
@@ -8442,13 +8468,17 @@ impl Interpreter {
                 if matches!(val, Value::Undef) {
                     Value::Undef
                 } else {
-                    // Perl's length() counts characters by default, or
-                    // bytes under `use bytes`.
-                    let s = val.to_str();
+                    // length() returns char count by default. Under
+                    // `use bytes`, returns the byte-view length: for
+                    // UTF-8-flagged strings (e.g. `pack("U", N)`)
+                    // that's the UTF-8 encoding length; for unflagged
+                    // strings each char ≤ 255 is one latin1 byte.
+                    // op/length distinguishes `pack("U", 0xFF)` (2)
+                    // from `"\xFF"` (1) under bytes mode.
                     let n = if self.bytes_mode {
-                        s.len()
+                        val.to_bytes().len()
                     } else {
-                        s.chars().count()
+                        val.to_str().chars().count()
                     };
                     Value::Num(n as f64)
                 }
@@ -8467,21 +8497,27 @@ impl Interpreter {
                     if self.bytes_mode && !num.is_nan() && num.is_finite() {
                         // `use bytes`: chr(-1) == \xFF, chr(-2) == \xFE, etc.
                         let byte = ((num as i64) & 0xFF) as u8;
-                        Value::Str((byte as char).to_string())
+                        Value::Str((byte as char).to_string(), false)
                     } else {
-                        Value::Str("\u{FFFD}".to_string())
+                        Value::Str("\u{FFFD}".to_string(), false)
                     }
                 } else {
                     let n = num as u32;
+                    // chr(N) for N > 0xFF sets the UTF-8 flag (the
+                    // codepoint can't be stored in 1 latin1 byte).
+                    // Codepoints ≤ 0xFF stay unflagged. Matches
+                    // reference perl: `utf8::is_utf8(chr 0x100)` true,
+                    // `utf8::is_utf8(chr 0xFF)` false.
+                    let flagged = n > 0xFF;
                     match char::from_u32(n) {
-                        Some(c) => Value::Str(c.to_string()),
+                        Some(c) => Value::Str(c.to_string(), flagged),
                         None => {
                             // Perl allows surrogates (0xD800-0xDFFF) and
                             // codepoints above 0x10FFFF. We can't store
                             // these as valid UTF-8 in a Rust String, so
                             // use an internal tagged marker that our ord()
                             // recognises and decodes back to the codepoint.
-                            Value::Str(format!("\x00\\x{{{:X}}}", n))
+                            Value::Str(format!("\x00\\x{{{:X}}}", n), flagged)
                         }
                     }
                 }
@@ -8512,7 +8548,7 @@ impl Interpreter {
                 } else {
                     self.eval_expr(&args[0])
                 };
-                Value::Str(val.to_str().to_lowercase())
+                Value::Str(val.to_str().to_lowercase(), false)
             }
             "uc" => {
                 let val = if args.is_empty() {
@@ -8520,7 +8556,7 @@ impl Interpreter {
                 } else {
                     self.eval_expr(&args[0])
                 };
-                Value::Str(val.to_str().to_uppercase())
+                Value::Str(val.to_str().to_uppercase(), false)
             }
             "chomp" => {
                 let val = if args.is_empty() {
@@ -8536,9 +8572,9 @@ impl Interpreter {
                     0.0
                 };
                 if args.is_empty() {
-                    self.set_var("_", Value::Str(s));
+                    self.set_var("_", Value::Str(s, false));
                 } else {
-                    self.assign_to(&args[0], Value::Str(s));
+                    self.assign_to(&args[0], Value::Str(s, false));
                 }
                 Value::Num(removed)
             }
@@ -8551,11 +8587,11 @@ impl Interpreter {
                 let mut s = val.to_str();
                 let ch = s.pop().map(|c| c.to_string()).unwrap_or_default();
                 if args.is_empty() {
-                    self.set_var("_", Value::Str(s));
+                    self.set_var("_", Value::Str(s, false));
                 } else {
-                    self.assign_to(&args[0], Value::Str(s));
+                    self.assign_to(&args[0], Value::Str(s, false));
                 }
-                Value::Str(ch)
+                Value::Str(ch, false)
             }
             "substr" => {
                 let s_val = self.eval_expr(&args[0]);
@@ -8665,9 +8701,9 @@ impl Interpreter {
                         new_chars.extend(chars[end..].iter().copied());
                         new_chars.into_iter().collect()
                     };
-                    self.assign_to(&args[0], Value::Str(new_s));
+                    self.assign_to(&args[0], Value::Str(new_s, false));
                 }
-                Value::Str(result)
+                Value::Str(result, false)
             }
             "index" => {
                 let s = self.eval_expr(&args[0]).to_str();
@@ -8743,7 +8779,7 @@ impl Interpreter {
                 // every arg position by one and the canonical
                 // `bless \(my $z = $_[1]), $_[0]` body would build the
                 // wrong object.
-                let mut init_args: Vec<Value> = vec![Value::Str(class.clone())];
+                let mut init_args: Vec<Value> = vec![Value::Str(class.clone(), false)];
                 init_args.extend(args[2..].iter().flat_map(|a| self.eval_list(a)));
                 let key = format!("{class}::TIESCALAR");
                 let obj = if let Some((_p, body)) = self.subs.get(&key).cloned() {
@@ -8870,7 +8906,7 @@ impl Interpreter {
                 self.rand_seed = Some(new_seed);
                 self.rand_state = if new_seed == 0 { 1 } else { new_seed };
                 if matches!(user_seed, Some(n) if n == 0.0) {
-                    return Value::Str("0 but true".to_string());
+                    return Value::Str("0 but true".to_string(), false);
                 }
                 Value::Num(new_seed as i64 as f64)
             }
@@ -8989,7 +9025,7 @@ impl Interpreter {
                     tm.tm_year + 1900,
                 );
                 self.last_list_val = Some(list);
-                Value::Str(scalar)
+                Value::Str(scalar, false)
             }
             "pos" => {
                 // `pos($var)` / `pos(*glob)` — current `/g` match offset
@@ -9065,7 +9101,7 @@ impl Interpreter {
                 let line = self.current_line;
                 let msg = format!("Unimplemented at {file} line {line}.\n");
                 self.pending_flow = Some(Flow::Die(msg.clone()));
-                self.set_global_var("@", Value::Str(msg));
+                self.set_global_var("@", Value::Str(msg, false));
                 return Value::Undef;
             }
             "_state_expr" => {
@@ -9212,7 +9248,7 @@ impl Interpreter {
                 match Command::new(&prog).args(&prog_args).status() {
                     Ok(s) => std::process::exit(s.code().unwrap_or(0)),
                     Err(e) => {
-                        self.set_global_var("!", Value::Str(perl_io_err(&e)));
+                        self.set_global_var("!", Value::Str(perl_io_err(&e), false));
                         Value::Num(0.0)
                     }
                 }
@@ -9266,6 +9302,7 @@ impl Interpreter {
                 // a `__WARN__` handler that mutates a variable seen
                 // later in the list affects the value we read for it.
                 let mut parts: Vec<String> = Vec::new();
+                let mut any_flagged = false;
                 let mut pending: std::collections::VecDeque<Value> =
                     std::collections::VecDeque::new();
                 let mut arg_idx = 1usize;
@@ -9287,21 +9324,27 @@ impl Interpreter {
                             "Use of uninitialized value in join or string at {file} line {line}.\n"
                         ));
                     }
+                    if v.is_utf8_flagged() {
+                        any_flagged = true;
+                    }
                     parts.push(self.stringify_value(&v));
                 }
                 if parts.len() <= 1 {
-                    return Value::Str(parts.join(""));
+                    return Value::Str(parts.join(""), any_flagged);
                 }
                 let sep_val = if let Some(v) = sep_val_eager {
                     v
                 } else {
                     self.eval_expr(&args[0])
                 };
+                if sep_val.is_utf8_flagged() {
+                    any_flagged = true;
+                }
                 // Dispatch overload `""` for blessed separators —
                 // op/join test 27 (`join $overloaded, LIST` calls the
                 // stringifier once on the separator, not per-element).
                 let sep = self.stringify_value(&sep_val);
-                Value::Str(parts.join(&sep))
+                Value::Str(parts.join(&sep), any_flagged)
             }
             "split" => {
                 // Get the pattern — handle RegexLit specially
@@ -9323,25 +9366,25 @@ impl Interpreter {
                 let limit: Option<i64> = args.get(2).map(|a| self.eval_expr(a).to_num() as i64);
                 let parts: Vec<Value> = if pat == " " {
                     text.split_whitespace()
-                        .map(|s| Value::Str(s.to_string()))
+                        .map(|s| Value::Str(s.to_string(), false))
                         .collect()
                 } else if let Ok(re) = regex::Regex::new(&pat) {
                     match limit {
                         Some(n) if n > 0 => re
                             .splitn(&text, n as usize)
-                            .map(|s| Value::Str(s.to_string()))
+                            .map(|s| Value::Str(s.to_string(), false))
                             .collect(),
-                        _ => re.split(&text).map(|s| Value::Str(s.to_string())).collect(),
+                        _ => re.split(&text).map(|s| Value::Str(s.to_string(), false)).collect(),
                     }
                 } else {
                     match limit {
                         Some(n) if n > 0 => text
                             .splitn(n as usize, pat.as_str())
-                            .map(|s| Value::Str(s.to_string()))
+                            .map(|s| Value::Str(s.to_string(), false))
                             .collect(),
                         _ => text
                             .split(&pat)
-                            .map(|s| Value::Str(s.to_string()))
+                            .map(|s| Value::Str(s.to_string(), false))
                             .collect(),
                     }
                 };
@@ -9349,11 +9392,11 @@ impl Interpreter {
             }
             "sprintf" => {
                 if args.is_empty() {
-                    return Value::Str(String::new());
+                    return Value::Str(String::new(), false);
                 }
                 let fmt = self.eval_expr(&args[0]).to_str();
                 let vals: Vec<Value> = args[1..].iter().map(|a| self.eval_expr(a)).collect();
-                Value::Str(self.sprintf_impl(&fmt, &vals))
+                Value::Str(self.sprintf_impl(&fmt, &vals), false)
             }
             "push" => {
                 // Unwrap a leading `my @arr` block-deref to the bare ArrayVar
@@ -9412,7 +9455,7 @@ impl Interpreter {
                     // push @{$n}, …` reaches `@Foo::ISA` (used by base.pm to
                     // wire up `@ISA` of the inheriting package).
                     let existing = self.get_var(name);
-                    if matches!(existing, Value::Str(_) | Value::Num(_)) {
+                    if matches!(existing, Value::Str(_, _) | Value::Num(_)) {
                         let arr_name = existing.to_str();
                         let mut arr = self.get_array(&arr_name);
                         for arg in &args[1..] {
@@ -9458,7 +9501,7 @@ impl Interpreter {
                             }
                             Value::Num(r.borrow().len() as f64)
                         }
-                        Value::Str(_) | Value::Num(_) => {
+                        Value::Str(_, _) | Value::Num(_) => {
                             // Symbolic ref: `push @{4}, ...` — resolve to
                             // global @4 and push there.
                             let name = last.to_str();
@@ -9619,7 +9662,7 @@ impl Interpreter {
                 items.reverse();
                 if items.len() == 1 {
                     // Scalar context: reverse string
-                    Value::Str(items[0].to_str().chars().rev().collect())
+                    Value::Str(items[0].to_str().chars().rev().collect(), false)
                 } else {
                     Value::Num(items.len() as f64) // scalar context
                 }
@@ -9737,9 +9780,9 @@ impl Interpreter {
                 let key = entry.0[entry.1].clone();
                 entry.1 += 1;
                 let v = hash.get(&key).cloned().unwrap_or(Value::Undef);
-                self.last_list_val = Some(vec![Value::Str(key.clone()), v.clone()]);
+                self.last_list_val = Some(vec![Value::Str(key.clone(), false), v.clone()]);
                 // Scalar context returns the key.
-                Value::Str(key)
+                Value::Str(key, false)
             }
             "exists" => {
                 if let Some(a) = args.first() {
@@ -10151,7 +10194,7 @@ impl Interpreter {
                                 for k in &keys_v {
                                     let v = h.remove(k).unwrap_or(Value::Undef);
                                     if is_kv {
-                                        out.push(Value::Str(k.clone()));
+                                        out.push(Value::Str(k.clone(), false));
                                     }
                                     out.push(v.resolve());
                                 }
@@ -10176,7 +10219,7 @@ impl Interpreter {
                                     for k in &keys_v {
                                         let v = h.remove(k).unwrap_or(Value::Undef);
                                         if is_kv {
-                                            out.push(Value::Str(k.clone()));
+                                            out.push(Value::Str(k.clone(), false));
                                         }
                                         out.push(v.resolve());
                                     }
@@ -10187,7 +10230,7 @@ impl Interpreter {
                                     for k in &keys_v {
                                         let v = h.remove(k).unwrap_or(Value::Undef);
                                         if is_kv {
-                                            out.push(Value::Str(k.clone()));
+                                            out.push(Value::Str(k.clone(), false));
                                         }
                                         out.push(v.resolve());
                                     }
@@ -10298,7 +10341,7 @@ impl Interpreter {
                 } else {
                     self.eval_expr(&args[0])
                 };
-                Value::Str(self.ref_class(&val))
+                Value::Str(self.ref_class(&val), false)
             }
             // `$#{ EXPR }` — block-form last-index. EXPR is taken in
             // scalar context (last value of a list). If it's an array
@@ -10322,7 +10365,7 @@ impl Interpreter {
                     .unwrap_or(Value::Undef);
                 match v {
                     Value::ArrayRef(r) => Value::Num((r.borrow().len() as i64 - 1) as f64),
-                    Value::Str(_) | Value::Num(_) => {
+                    Value::Str(_, _) | Value::Num(_) => {
                         let name = v.to_str();
                         let arr = self.get_array(&name);
                         Value::Num((arr.len() as i64 - 1) as f64)
@@ -10356,10 +10399,10 @@ impl Interpreter {
                     Value::ScalarRef(r) => r.borrow().clone(),
                     // `${qr/…/}` — dereferencing a regex yields its
                     // stringified pattern (`(?^:…)`). op/qr 24-25.
-                    Value::Regex(pat, flags, _) => Value::Str(format!("(?^{flags}:{pat})")),
+                    Value::Regex(pat, flags, _) => Value::Str(format!("(?^{flags}:{pat})"), false),
                     // Symbolic ref: `${EXPR}` where EXPR is a string names
                     // the global scalar. Matches Perl under `no strict 'refs'`.
-                    Value::Str(s) if !s.is_empty() => {
+                    Value::Str(s, _) if !s.is_empty() => {
                         let name = normalize_ctrl_var_name(&s);
                         self.get_var(&name)
                     }
@@ -10389,7 +10432,7 @@ impl Interpreter {
                     } else {
                         v.into_iter().last().unwrap_or(Value::Undef)
                     }
-                } else if matches!(last, Value::Str(_) | Value::Num(_)) {
+                } else if matches!(last, Value::Str(_, _) | Value::Num(_)) {
                     // Symbolic ref: `@{'name'}` / `@{$name}` / `@{4}`
                     // where the value names a global array. Matches
                     // Perl under `no strict 'refs'` — numeric and
@@ -10524,7 +10567,7 @@ impl Interpreter {
                     for v in self.eval_list(a) {
                         let k = v.to_str();
                         let val = h.get(&k).cloned().unwrap_or(Value::Undef);
-                        out.push(Value::Str(k));
+                        out.push(Value::Str(k, false));
                         out.push(val);
                     }
                 }
@@ -10570,7 +10613,7 @@ impl Interpreter {
                     let h = r.borrow();
                     let mut flat = Vec::with_capacity(h.len() * 2);
                     for (k, v) in h.iter() {
-                        flat.push(Value::Str(k.clone()));
+                        flat.push(Value::Str(k.clone(), false));
                         flat.push(v.clone());
                     }
                     self.last_list_val = Some(flat.clone());
@@ -10592,7 +10635,7 @@ impl Interpreter {
                     .flat_map(|a| self.eval_list(a))
                     .map(|v| v.to_str())
                     .collect();
-                Value::Str(parts.join(&sep))
+                Value::Str(parts.join(&sep), false)
             }
             // test.pl installs this via eval-string iff it isn't already
             // present; providing it directly avoids one `(eval N)` tick
@@ -10644,7 +10687,7 @@ impl Interpreter {
                 // the current sub's caller context.
                 match self.call_context.last().copied() {
                     Some(2) => Value::Num(1.0),
-                    Some(1) => Value::Str(String::new()),
+                    Some(1) => Value::Str(String::new(), false),
                     _ => Value::Undef,
                 }
             }
@@ -10669,8 +10712,8 @@ impl Interpreter {
                     None
                 };
                 if let Some((pkg, file, line)) = frame {
-                    let pkg_v = Value::Str(pkg.clone());
-                    let file_v = Value::Str(file.clone());
+                    let pkg_v = Value::Str(pkg.clone(), false);
+                    let file_v = Value::Str(file.clone(), false);
                     let line_v = Value::Num(*line as f64);
                     // The sub name at frame N is the sub at
                     // current_sub_stack[len-1-N] (parallel stack).
@@ -10689,13 +10732,13 @@ impl Interpreter {
                         pkg_v.clone(),
                         file_v,
                         line_v,
-                        Value::Str(sub_name),
+                        Value::Str(sub_name, false),
                         Value::Num(1.0),           // hasargs
                         Value::Undef,              // wantarray
                         Value::Undef,              // evaltext
                         Value::Num(0.0),           // is_require
                         Value::Num(0.0),           // hints
-                        Value::Str(String::new()), // bitmask
+                        Value::Str(String::new(), false), // bitmask
                     ]);
                     pkg_v
                 } else {
@@ -10734,7 +10777,7 @@ impl Interpreter {
                 // name only — output still goes to STDOUT in our impl.
                 // op/select, uni/select.
                 if args.is_empty() {
-                    return Value::Str(self.selected_fh.clone());
+                    return Value::Str(self.selected_fh.clone(), false);
                 }
                 let arg = self.eval_expr(&args[0]);
                 let new_fh = match &arg {
@@ -10746,17 +10789,17 @@ impl Interpreter {
                             format!("main::{s}")
                         }
                     }
-                    Value::Str(s) if !s.is_empty() => {
+                    Value::Str(s, _) if !s.is_empty() => {
                         if s.contains("::") {
                             s.clone()
                         } else {
                             format!("main::{s}")
                         }
                     }
-                    _ => return Value::Str(self.selected_fh.clone()),
+                    _ => return Value::Str(self.selected_fh.clone(), false),
                 };
                 let prev = std::mem::replace(&mut self.selected_fh, new_fh);
-                Value::Str(prev)
+                Value::Str(prev, false)
             }
             "fileno" => {
                 // Standard filehandles return their POSIX fd numbers;
@@ -10768,7 +10811,7 @@ impl Interpreter {
                     .unwrap_or(Value::Undef);
                 let name = match &arg {
                     Value::Glob(n) => n.trim_start_matches("main::").to_string(),
-                    Value::Str(s) => s.clone(),
+                    Value::Str(s, _) => s.clone(),
                     _ => return Value::Undef,
                 };
                 match name.as_str() {
@@ -10820,7 +10863,7 @@ impl Interpreter {
                 if let Some(arg) = args.first() {
                     match arg {
                         Expr::DoBlock(body) => {
-                            self.set_global_var("@", Value::Str(String::new()));
+                            self.set_global_var("@", Value::Str(String::new(), false));
                             self.push_scope();
                             self.eval_depth += 1;
                             let flow = self.exec_stmts(body);
@@ -10831,16 +10874,16 @@ impl Interpreter {
                                     if let Some(v) = self.pending_die_value.take() {
                                         self.set_global_var("@", v);
                                     } else {
-                                        self.set_global_var("@", Value::Str(msg));
+                                        self.set_global_var("@", Value::Str(msg, false));
                                     }
                                     Value::Undef
                                 }
                                 Flow::Return(v) => {
-                                    self.set_global_var("@", Value::Str(String::new()));
+                                    self.set_global_var("@", Value::Str(String::new(), false));
                                     v
                                 }
                                 _ => {
-                                    self.set_global_var("@", Value::Str(String::new()));
+                                    self.set_global_var("@", Value::Str(String::new(), false));
                                     self.last_expr_val.clone()
                                 }
                             }
@@ -10868,7 +10911,7 @@ impl Interpreter {
                                     .cloned()
                                     .unwrap_or(Value::Undef)
                                 {
-                                    Value::Str(s) => s.is_empty(),
+                                    Value::Str(s, _) => s.is_empty(),
                                     _ => true,
                                 };
                                 if !at_empty {
@@ -10936,15 +10979,12 @@ impl Interpreter {
                 Value::Num(1.0)
             }
             "utf8::is_utf8" => {
-                // We don't track a UTF-8 flag; reference perls heuristic
-                // is "is the string considered to have characters above
-                // 0x7F encoded in UTF-8 internally". Approximate by
-                // checking whether any character has codepoint > 0x7F.
+                // Reports the per-string UTF-8 flag. True iff the
+                // string was explicitly upgraded (pack U, `"\x{N}"`
+                // with N > 255, concat with another flagged string).
                 if !args.is_empty() {
                     let v = self.eval_expr(&args[0]);
-                    let s = v.to_str();
-                    let has_high = s.chars().any(|c| c as u32 > 0x7F);
-                    Value::Num(if has_high { 1.0 } else { 0.0 })
+                    Value::Num(if v.is_utf8_flagged() { 1.0 } else { 0.0 })
                 } else {
                     Value::Num(0.0)
                 }
@@ -10955,37 +10995,48 @@ impl Interpreter {
                 if fmt == "d" && args.len() > 1 {
                     let n = self.eval_expr(&args[1]).to_num();
                     let bytes = n.to_ne_bytes();
-                    Value::Str(String::from_utf8_lossy(&bytes).to_string())
+                    Value::Str(String::from_utf8_lossy(&bytes).to_string(), false)
                 } else if (fmt == "W" || fmt == "U" || fmt == "C") && args.len() > 1 {
-                    // Single codepoint/byte
+                    // Single codepoint/byte. `pack("U", N)` produces a
+                    // UTF-8 flagged string: even for codepoints < 256
+                    // the result is conceptually "upgraded", so under
+                    // `use bytes` its length is the UTF-8 byte count
+                    // rather than the char count. op/length / opbasic
+                    // /concat tests rely on this for tests that compare
+                    // `pack("U", 0xFF)` with `"\xc3\xbf"`.
                     let n = self.eval_expr(&args[1]).to_num() as u32;
+                    let flagged = fmt == "U";
                     if let Some(c) = char::from_u32(n) {
-                        Value::Str(c.to_string())
+                        Value::Str(c.to_string(), flagged)
                     } else {
-                        Value::Str(String::new())
+                        Value::Str(String::new(), flagged)
                     }
                 } else if (fmt == "a*" || fmt == "A*" || fmt == "a" || fmt == "A") && args.len() > 1
                 {
-                    // Binary string: take the underlying UTF-8 bytes verbatim.
-                    // 'a' takes only the first byte; 'a*' takes everything.
-                    let s = self.eval_expr(&args[1]).to_str();
+                    // `pack 'a*' STR` produces an UNFLAGGED byte string
+                    // whose chars are the UTF-8 byte values of the
+                    // source. For UTF-8 flagged sources this expands
+                    // each codepoint to its multi-byte encoding; for
+                    // unflagged sources the latin1 chars pass through.
+                    // 'a' takes the first byte only; 'a*' takes all.
+                    let v = self.eval_expr(&args[1]);
+                    let bytes: Vec<u8> = if v.is_utf8_flagged() {
+                        v.to_str().into_bytes()
+                    } else {
+                        v.to_str().chars().map(|c| c as u32 as u8).collect()
+                    };
                     if fmt == "a" || fmt == "A" {
-                        // SAFETY: UTF-8 bytes interpreted as latin-1 chars are
-                        // valid char values (0..=255 maps to a single byte each).
-                        let first = s.bytes().next();
-                        match first {
-                            Some(b) => Value::Str((b as char).to_string()),
-                            None => Value::Str(String::new()),
+                        match bytes.first().copied() {
+                            Some(b) => Value::Str((b as char).to_string(), false),
+                            None => Value::Str(String::new(), false),
                         }
                     } else {
-                        // 'a*': preserve all bytes verbatim. Our strings are
-                        // already stored as UTF-8 in a Rust String, so the
-                        // underlying byte sequence is the same as Perl's
-                        // SvPV. `use bytes` callers compare on byte content.
-                        Value::Str(s)
+                        let chars: String =
+                            bytes.into_iter().map(|b| b as char).collect();
+                        Value::Str(chars, false)
                     }
                 } else {
-                    Value::Str(String::new())
+                    Value::Str(String::new(), false)
                 }
             }
             "unpack" => {
@@ -10997,8 +11048,9 @@ impl Interpreter {
                 // exclusively and the historical fallback was last).
                 if args.len() >= 2 {
                     let fmt = self.eval_expr(&args[0]).to_str();
-                    let data = self.eval_expr(&args[1]).to_str();
-                    Self::unpack_list(&fmt, &data)
+                    let v = self.eval_expr(&args[1]);
+                    let bytes = v.to_bytes();
+                    Self::unpack_list(&fmt, &bytes)
                         .last()
                         .cloned()
                         .unwrap_or(Value::Undef)
@@ -11220,7 +11272,7 @@ impl Interpreter {
                     .get(&class)
                     .cloned()
                     .unwrap_or_else(|| "dfs".to_string());
-                return Value::Str(kind);
+                return Value::Str(kind, false);
             }
             "mro::get_linear_isa" => {
                 let class = args
@@ -11245,7 +11297,7 @@ impl Interpreter {
                 } else {
                     mro_linear_dfs(self, &class)
                 };
-                let arr: Vec<Value> = linear.into_iter().map(Value::Str).collect();
+                let arr: Vec<Value> = linear.into_iter().map(Value::str).collect();
                 return Value::ArrayRef(std::rc::Rc::new(std::cell::RefCell::new(arr)));
             }
             "mro::get_isarev" => {
@@ -11272,7 +11324,7 @@ impl Interpreter {
                     }
                 }
                 subs.sort();
-                let arr: Vec<Value> = subs.into_iter().map(Value::Str).collect();
+                let arr: Vec<Value> = subs.into_iter().map(Value::str).collect();
                 return Value::ArrayRef(std::rc::Rc::new(std::cell::RefCell::new(arr)));
             }
             "mro::is_universal" => {
@@ -11450,7 +11502,7 @@ impl Interpreter {
                 if layer.is_empty() {
                     return Value::Undef;
                 }
-                return Value::Str(layer);
+                return Value::Str(layer, false);
             }
             "bless" => {
                 // `bless REF, CLASS` — tag REF with CLASS so `ref(REF)` /
@@ -11495,11 +11547,11 @@ impl Interpreter {
                     .map(|a| self.eval_expr(a).to_str())
                     .unwrap_or_default();
                 let matches = glob_match(&pat);
-                self.last_list_val = Some(matches.iter().cloned().map(Value::Str).collect());
+                self.last_list_val = Some(matches.iter().cloned().map(Value::str).collect());
                 matches
                     .into_iter()
                     .last()
-                    .map(Value::Str)
+                    .map(Value::str)
                     .unwrap_or(Value::Undef)
             }
             "chdir" => {
@@ -11509,7 +11561,7 @@ impl Interpreter {
                     if std::env::set_current_dir(path).is_ok() {
                         Value::Num(1.0)
                     } else {
-                        self.set_global_var("!", Value::Str(format!("No such file or directory")));
+                        self.set_global_var("!", Value::Str(format!("No such file or directory"), false));
                         Value::Num(0.0)
                     }
                 } else {
@@ -11649,7 +11701,7 @@ impl Interpreter {
                 if want_stderr {
                     out.push_str(&decode(&output.stderr));
                 }
-                Value::Str(out)
+                Value::Str(out, false)
             }
             "fresh_perl" | "fresh_perl_is" | "fresh_perl_like" => {
                 // Run a Perl program in a subprocess — the upstream test.pl
@@ -11757,7 +11809,7 @@ impl Interpreter {
                     Err(_) => String::new(),
                 };
                 if name == "fresh_perl" {
-                    return Value::Str(results);
+                    return Value::Str(results, false);
                 }
                 // fresh_perl_is / fresh_perl_like — compare and emit TAP via
                 // the test.pl `is`/`like` helpers so count/name handling is
@@ -11825,7 +11877,7 @@ impl Interpreter {
                     match std::fs::create_dir(&dir) {
                         Ok(_) => Value::Num(1.0),
                         Err(e) => {
-                            self.set_global_var("!", Value::Str(perl_io_err(&e)));
+                            self.set_global_var("!", Value::Str(perl_io_err(&e), false));
                             Value::Num(0.0)
                         }
                     }
@@ -12525,32 +12577,32 @@ impl Interpreter {
     /// and the byte-mode hex emitter `U0 (H2)*` plus its non-grouped
     /// `U0 H*` variant (used by t/op/chr.t's `hexes()` helper). Anything
     /// else falls back to an empty list.
-    fn unpack_list(fmt: &str, data: &str) -> Vec<Value> {
+    fn unpack_list(fmt: &str, bytes: &[u8]) -> Vec<Value> {
         let trimmed = fmt.trim();
         match trimmed {
-            "W*" | "U*" => Self::decode_codepoints(data)
-                .into_iter()
-                .map(|cp| Value::Num(cp as f64))
-                .collect(),
-            "C*" => Self::extended_utf8_bytes(data)
-                .into_iter()
-                .map(|b| Value::Num(b as f64))
-                .collect(),
-            // `U0 (H2)*` — switch to byte mode, then emit one 2-digit
-            // (lowercase) hex string per byte. The `(H2)*` group repeats
-            // until the bytes run out.
-            "U0 (H2)*" | "U0(H2)*" => Self::extended_utf8_bytes(data)
-                .into_iter()
-                .map(|b| Value::Str(format!("{b:02x}")))
-                .collect(),
-            // `U0 H*` — same byte-mode switch, but `H*` ungroups into a
-            // single hex string covering every byte.
-            "U0 H*" | "U0H*" => {
-                let s: String = Self::extended_utf8_bytes(data)
+            "W*" | "U*" => {
+                // Codepoint lists: decode the byte sequence as
+                // extended UTF-8.
+                let data = match std::str::from_utf8(bytes) {
+                    Ok(s) => s.to_string(),
+                    Err(_) => bytes.iter().map(|&b| b as char).collect(),
+                };
+                Self::decode_codepoints(&data)
                     .into_iter()
-                    .map(|b| format!("{b:02x}"))
-                    .collect();
-                vec![Value::Str(s)]
+                    .map(|cp| Value::Num(cp as f64))
+                    .collect()
+            }
+            "C*" => bytes
+                .iter()
+                .map(|&b| Value::Num(b as f64))
+                .collect(),
+            "U0 (H2)*" | "U0(H2)*" => bytes
+                .iter()
+                .map(|&b| Value::Str(format!("{b:02x}"), false))
+                .collect(),
+            "U0 H*" | "U0H*" => {
+                let s: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+                vec![Value::Str(s, false)]
             }
             _ => Vec::new(),
         }
@@ -12948,7 +13000,7 @@ impl Interpreter {
         {
             return self.call_sub_named(
                 &body,
-                &[l.clone(), r.clone(), Value::Str(String::new())],
+                &[l.clone(), r.clone(), Value::Str(String::new(), false)],
                 Some(&name),
             );
         }
@@ -12961,11 +13013,24 @@ impl Interpreter {
                 Some(&name),
             );
         }
-        Value::Str(format!(
-            "{}{}",
-            self.stringify_value(l),
-            self.stringify_value(r)
-        ))
+        // Under `use bytes`, reference perl concatenates the BYTE
+        // VIEWS of the operands rather than upgrading the
+        // unflagged operand: `"\xB6" . "\x{100}"` under bytes mode
+        // becomes 3 bytes (b6 c4 80) instead of the 4-byte
+        // upgrade-then-concat (c2 b6 c4 80). The result is
+        // unflagged. Outside bytes mode, the usual upgrade-and-
+        // concat rule applies: result is UTF-8 flagged iff either
+        // operand was. opbasic/concat #26905 tests 21-24.
+        if self.bytes_mode {
+            let mut bytes = l.to_bytes();
+            bytes.extend(r.to_bytes());
+            let chars: String = bytes.into_iter().map(|b| b as char).collect();
+            return Value::Str(chars, false);
+        }
+        Value::Str(
+            format!("{}{}", self.stringify_value(l), self.stringify_value(r)),
+            l.is_utf8_flagged() || r.is_utf8_flagged(),
+        )
     }
 
     /// Numify a value, dispatching `use overload q|0+| => sub {...}`
@@ -12985,7 +13050,7 @@ impl Interpreter {
         {
             let ret = self.call_sub_named(
                 &body,
-                &[v.clone(), Value::Undef, Value::Str(String::new())],
+                &[v.clone(), Value::Undef, Value::Str(String::new(), false)],
                 Some(&handler_name),
             );
             return ret.to_num();
@@ -13026,7 +13091,7 @@ impl Interpreter {
             {
                 let ret = self.call_sub_named(
                     &body,
-                    &[v.clone(), Value::Undef, Value::Str(String::new())],
+                    &[v.clone(), Value::Undef, Value::Str(String::new(), false)],
                     Some(&handler_name),
                 );
                 return ret.to_str();
@@ -13326,7 +13391,7 @@ impl Interpreter {
                         self.package = pkg;
                     }
                     self.call_context.pop();
-                    self.set_global_var("@", Value::Str(msg.clone()));
+                    self.set_global_var("@", Value::Str(msg.clone(), false));
                     self.pending_return = None;
                     // Bubble up as a die from the caller. Inside eval,
                     // the eval block stops on Flow::Die and sets $@.
@@ -13575,7 +13640,7 @@ impl Interpreter {
                         self.package = pkg;
                     }
                     self.call_context.pop();
-                    self.set_global_var("@", Value::Str(msg.clone()));
+                    self.set_global_var("@", Value::Str(msg.clone(), false));
                     // Re-raise via pending_flow so an `eval { return f() }`
                     // surrounding our caller catches the die instead of
                     // treating the (undef) return as success. Without
@@ -13826,7 +13891,7 @@ impl Interpreter {
         }
         // Check lexical scopes from innermost to outermost. If the
         // slot holds a `Value::Alias`, follow the Rc transparently so
-        // pattern-matches like `if let Value::Str(s) = …` still see
+        // pattern-matches like `if let Value::Str(s, _) = …` still see
         // the underlying value (alias-promoted closure-captured slots
         // would otherwise escape as `Value::Alias` and break those
         // matches — see Stmt::Sub closure capture).
@@ -14081,7 +14146,7 @@ impl Interpreter {
                 // are bad. Check the inner variant first so `\$foo` works
                 // when $foo is just a number.
                 match &*inner {
-                    Value::Undef | Value::Str(_) | Value::Num(_) => {
+                    Value::Undef | Value::Str(_, _) | Value::Num(_) => {
                         let n = inner.to_num();
                         if n < 0.0 {
                             Some(
@@ -14695,7 +14760,7 @@ impl Interpreter {
         if is_const {
             let last = body.iter().rev().find(|s| !matches!(s, Stmt::LineMark(_)));
             let v = match last {
-                Some(Stmt::Expr(Expr::StringLit(s))) => Value::Str(s.clone()),
+                Some(Stmt::Expr(Expr::StringLit(s))) => Value::Str(s.clone(), false),
                 Some(Stmt::Expr(Expr::IntLit(n))) => Value::Num(*n as f64),
                 Some(Stmt::Expr(Expr::FloatLit(n))) => Value::Num(*n),
                 _ => Value::Undef,
@@ -15290,7 +15355,7 @@ impl Interpreter {
         if let Value::CodeRef(name) = handler
             && let Some((_params, body)) = self.subs.get(&name).cloned()
         {
-            self.call_sub_named(&body, &[Value::Str(msg.to_string())], Some(&name));
+            self.call_sub_named(&body, &[Value::Str(msg.to_string(), false)], Some(&name));
         } else {
             let _ = io::stderr().write_all(msg.as_bytes());
         }
@@ -15381,7 +15446,7 @@ impl Interpreter {
             // 4-arg substr expects the replacement as a literal at the
             // arg position. Wrap the runtime value into a literal Expr.
             let val_expr = match &val {
-                Value::Str(s) => Expr::StringLit(s.clone()),
+                Value::Str(s, _) => Expr::StringLit(s.clone()),
                 Value::Num(n) => Expr::FloatLit(*n),
                 _ => Expr::StringLit(val.to_str()),
             };
@@ -15478,7 +15543,7 @@ impl Interpreter {
         {
             let mut new_args = sub_args.clone();
             let val_expr = match &val {
-                Value::Str(s) => Expr::StringLit(s.clone()),
+                Value::Str(s, _) => Expr::StringLit(s.clone()),
                 Value::Num(n) => Expr::FloatLit(*n),
                 _ => Expr::StringLit(val.to_str()),
             };
@@ -15772,7 +15837,7 @@ impl Interpreter {
                     } else {
                         format!("{pkg}::{name}")
                     };
-                    self.set_global_var("AUTOLOAD", Value::Str(qname));
+                    self.set_global_var("AUTOLOAD", Value::Str(qname, false));
                     let synthetic = Expr::Call(autoload_name, args.clone());
                     return self.assign_to(&synthetic, val);
                 }
@@ -15867,7 +15932,7 @@ impl Interpreter {
                             *r.borrow_mut() = val;
                         }
                     }
-                    Value::Str(s) if !s.is_empty() => {
+                    Value::Str(s, _) if !s.is_empty() => {
                         let vname = normalize_ctrl_var_name(&s);
                         self.set_var(&vname, val);
                     }
@@ -15949,7 +16014,7 @@ impl Interpreter {
                             }
                         }
                     }
-                    Value::Str(s) => {
+                    Value::Str(s, _) => {
                         // `*foo = "Bar"` — same as `*foo = *Bar`. Strip an
                         // optional leading `*` and qualify with the current
                         // package if the name is bare. Then alias the scalar
@@ -16314,7 +16379,7 @@ impl Interpreter {
                     Value::ScalarRef(r) => {
                         *r.borrow_mut() = val;
                     }
-                    Value::Str(s) if !s.is_empty() => {
+                    Value::Str(s, _) if !s.is_empty() => {
                         // Strip a leading `*` so symbolic refs match
                         // glob-form aliases set via `*foo = "*Bar"`,
                         // which also strip the leading `*`. Without
@@ -16365,7 +16430,7 @@ impl Interpreter {
                     Value::ArrayRef(r) => {
                         resize(&mut r.borrow_mut(), new_len);
                     }
-                    Value::Str(_) | Value::Num(_) => {
+                    Value::Str(_, _) | Value::Num(_) => {
                         let name = v.to_str();
                         let mut arr = self.get_array(&name);
                         resize(&mut arr, new_len);
@@ -16842,7 +16907,7 @@ impl Interpreter {
             };
             let line = self.current_line;
             let msg = format!("{err} at {file} line {line}.\n");
-            self.set_global_var("@", Value::Str(msg.clone()));
+            self.set_global_var("@", Value::Str(msg.clone(), false));
             self.pending_flow = Some(Flow::Die(msg));
             return (false, start);
         }
@@ -17116,7 +17181,7 @@ impl Interpreter {
                     &named,
                 );
                 if let Some(mark) = &regmark {
-                    self.set_global_var("REGMARK", Value::Str(mark.clone()));
+                    self.set_global_var("REGMARK", Value::Str(mark.clone(), false));
                 }
                 let end = start + group_ends[0].unwrap();
                 if !code_blocks.is_empty() {
@@ -17232,7 +17297,7 @@ impl Interpreter {
                         &named,
                     );
                     if let Some(mark) = &regmark {
-                        self.set_global_var("REGMARK", Value::Str(mark.clone()));
+                        self.set_global_var("REGMARK", Value::Str(mark.clone(), false));
                     }
                     let end = start + group_ends[0].unwrap();
                     if !code_blocks.is_empty() {
@@ -17267,7 +17332,7 @@ impl Interpreter {
         self.clear_stale_captures(new_max);
         for i in 1..group_strs.len() {
             if let Some(s) = &group_strs[i] {
-                self.set_global_var(&i.to_string(), Value::Str(s.clone()));
+                self.set_global_var(&i.to_string(), Value::Str(s.clone(), false));
             } else {
                 self.set_global_var(&i.to_string(), Value::Undef);
             }
@@ -17276,16 +17341,16 @@ impl Interpreter {
             std::collections::HashMap::new();
         for (n, v) in named {
             if let Some(s) = v {
-                named_hash.insert(n.clone(), Value::Str(s.clone()));
+                named_hash.insert(n.clone(), Value::Str(s.clone(), false));
             }
         }
         self.globals.hashes.insert("+".to_string(), named_hash);
         let m0_start = group_starts[0].unwrap();
         let m0_end = group_ends[0].unwrap();
         let m0_str = group_strs[0].clone().unwrap();
-        self.set_global_var("&", Value::Str(m0_str));
-        self.set_global_var("`", Value::Str(text[..start + m0_start].to_string()));
-        self.set_global_var("'", Value::Str(text[start + m0_end..].to_string()));
+        self.set_global_var("&", Value::Str(m0_str, false));
+        self.set_global_var("`", Value::Str(text[..start + m0_start].to_string(), false));
+        self.set_global_var("'", Value::Str(text[start + m0_end..].to_string(), false));
 
         let mut last_cap: Option<String> = None;
         for i in (1..group_strs.len()).rev() {
@@ -17295,8 +17360,8 @@ impl Interpreter {
             }
         }
         if let Some(s) = last_cap {
-            self.set_global_var("+", Value::Str(s.clone()));
-            self.set_global_var("^N", Value::Str(s));
+            self.set_global_var("+", Value::Str(s.clone(), false));
+            self.set_global_var("^N", Value::Str(s, false));
         } else {
             self.set_global_var("+", Value::Undef);
             self.set_global_var("^N", Value::Undef);
@@ -17442,7 +17507,7 @@ impl Interpreter {
                     for v in self.eval_list(ke) {
                         let k = v.to_str();
                         let val = h.get(&k).cloned().unwrap_or(Value::Undef);
-                        out.push(Value::Str(k));
+                        out.push(Value::Str(k, false));
                         out.push(val);
                     }
                 }
@@ -17670,20 +17735,20 @@ impl Interpreter {
                 if let Value::HashRef(r) = v {
                     r.borrow()
                         .iter()
-                        .flat_map(|(k, v)| vec![Value::Str(k.clone()), v.clone()])
+                        .flat_map(|(k, v)| vec![Value::Str(k.clone(), false), v.clone()])
                         .collect()
                 } else {
                     Vec::new()
                 }
             }
-            Expr::QW(words) => words.iter().map(|w| Value::Str(w.clone())).collect(),
+            Expr::QW(words) => words.iter().map(|w| Value::Str(w.clone(), false)).collect(),
             Expr::HashVar(name) => {
                 // Flatten the hash into (k1, v1, k2, v2, ...) — this is what
                 // Perl hands back when a hash appears in list context, so
                 // `%copy = %orig` / `@pairs = %h` work.
                 let h = self.get_hash(name);
                 h.into_iter()
-                    .flat_map(|(k, v)| vec![Value::Str(k), v])
+                    .flat_map(|(k, v)| vec![Value::Str(k, false), v])
                     .collect()
             }
             Expr::Range(start, end) => {
@@ -17692,7 +17757,7 @@ impl Interpreter {
                 // `"aa" .. "bz"`), enumerate via Perl's string ++ rules.
                 let sv = self.eval_expr(start);
                 let ev = self.eval_expr(end);
-                if let (Value::Str(ss), Value::Str(es)) = (&sv, &ev) {
+                if let (Value::Str(ss, _), Value::Str(es, _)) = (&sv, &ev) {
                     if is_magic_inc_string(ss)
                         && is_magic_inc_string(es)
                         && !ss.chars().all(|c| c.is_ascii_digit())
@@ -17702,7 +17767,7 @@ impl Interpreter {
                         while cur.len() < es.len()
                             || (cur.len() == es.len() && cur.as_str() <= es.as_str())
                         {
-                            out.push(Value::Str(cur.clone()));
+                            out.push(Value::Str(cur.clone(), false));
                             if cur == *es {
                                 break;
                             }
@@ -17775,12 +17840,12 @@ impl Interpreter {
                                     for i in 1..caps.len() {
                                         out.push(
                                             caps.get(i)
-                                                .map(|m| Value::Str(m.as_str().to_string()))
+                                                .map(|m| Value::Str(m.as_str().to_string(), false))
                                                 .unwrap_or(Value::Undef),
                                         );
                                     }
                                 } else if let Some(m) = caps.get(0) {
-                                    out.push(Value::Str(m.as_str().to_string()));
+                                    out.push(Value::Str(m.as_str().to_string(), false));
                                 }
                             }
                             // Update pos for /g (advance to last match
@@ -17806,7 +17871,7 @@ impl Interpreter {
                             for i in 1..caps.len() {
                                 let v = caps
                                     .get(i)
-                                    .map(|m| Value::Str(m.as_str().to_string()))
+                                    .map(|m| Value::Str(m.as_str().to_string(), false))
                                     .unwrap_or(Value::Undef);
                                 self.set_global_var(&i.to_string(), v);
                             }
@@ -17814,7 +17879,7 @@ impl Interpreter {
                                 (1..caps.len())
                                     .map(|i| {
                                         caps.get(i)
-                                            .map(|m| Value::Str(m.as_str().to_string()))
+                                            .map(|m| Value::Str(m.as_str().to_string(), false))
                                             .unwrap_or(Value::Undef)
                                     })
                                     .collect()
@@ -18087,7 +18152,7 @@ impl Interpreter {
                                 for k in &keys_v {
                                     let v = h.remove(k).unwrap_or(Value::Undef);
                                     if is_kv {
-                                        out.push(Value::Str(k.clone()));
+                                        out.push(Value::Str(k.clone(), false));
                                     }
                                     out.push(v.resolve());
                                 }
@@ -18112,7 +18177,7 @@ impl Interpreter {
                                     for k in &keys_v {
                                         let v = h.remove(k).unwrap_or(Value::Undef);
                                         if is_kv {
-                                            out.push(Value::Str(k.clone()));
+                                            out.push(Value::Str(k.clone(), false));
                                         }
                                         out.push(v.resolve());
                                     }
@@ -18120,7 +18185,7 @@ impl Interpreter {
                                     for k in &keys_v {
                                         let v = h.remove(k).unwrap_or(Value::Undef);
                                         if is_kv {
-                                            out.push(Value::Str(k.clone()));
+                                            out.push(Value::Str(k.clone(), false));
                                         }
                                         out.push(v.resolve());
                                     }
@@ -18219,8 +18284,9 @@ impl Interpreter {
                     }
                     "unpack" if args.len() >= 2 => {
                         let fmt = self.eval_expr(&args[0]).to_str();
-                        let data = self.eval_expr(&args[1]).to_str();
-                        Self::unpack_list(&fmt, &data)
+                        let v = self.eval_expr(&args[1]);
+                        let bytes = v.to_bytes();
+                        Self::unpack_list(&fmt, &bytes)
                     }
                     "keys" => {
                         if let Some(arr) = self.resolve_array_arg(args.first()) {
@@ -18233,7 +18299,7 @@ impl Interpreter {
                             return Vec::new();
                         };
                         self.each_cursors.remove(&cursor_key);
-                        hash.keys().map(|k| Value::Str(k.clone())).collect()
+                        hash.keys().map(|k| Value::Str(k.clone(), false)).collect()
                     }
                     "values" => {
                         if let Some(arr) = self.resolve_array_arg(args.first()) {
@@ -18365,15 +18431,15 @@ impl Interpreter {
                                     }
                                 }
                                 head.push(text[tail_start..].to_string());
-                                head.into_iter().map(Value::Str).collect()
+                                head.into_iter().map(Value::str).collect()
                             } else {
-                                parts.into_iter().map(Value::Str).collect()
+                                parts.into_iter().map(Value::str).collect()
                             }
                         } else if pat.is_empty() {
                             // `split //, STR` — split at every char boundary.
                             // Perl's semantics don't include the leading empty
                             // field that `regex::split("")` would produce.
-                            text.chars().map(|c| Value::Str(c.to_string())).collect()
+                            text.chars().map(|c| Value::Str(c.to_string(), false)).collect()
                         } else if let Ok(re) = regex::Regex::new(&pat) {
                             // Perl's split with capture groups interleaves
                             // captured group text between fields:
@@ -18396,26 +18462,27 @@ impl Interpreter {
                                         break;
                                     }
                                     let full = cap.get(0).unwrap();
-                                    result.push(Value::Str(text[last..full.start()].to_string()));
+                                    result.push(Value::Str(text[last..full.start()].to_string(), false));
                                     for i in 1..cap_n {
                                         result.push(Value::Str(
                                             cap.get(i)
                                                 .map(|m| m.as_str().to_string())
                                                 .unwrap_or_default(),
+                                            false,
                                         ));
                                     }
                                     last = full.end();
                                 }
-                                result.push(Value::Str(text[last..].to_string()));
+                                result.push(Value::Str(text[last..].to_string(), false));
                                 result
                             } else {
                                 match limit {
                                     Some(n) if n > 0 => re
                                         .splitn(&text, n as usize)
-                                        .map(|s| Value::Str(s.to_string()))
+                                        .map(|s| Value::Str(s.to_string(), false))
                                         .collect(),
                                     _ => {
-                                        re.split(&text).map(|s| Value::Str(s.to_string())).collect()
+                                        re.split(&text).map(|s| Value::Str(s.to_string(), false)).collect()
                                     }
                                 }
                             }
@@ -18423,11 +18490,11 @@ impl Interpreter {
                             match limit {
                                 Some(n) if n > 0 => text
                                     .splitn(n as usize, pat.as_str())
-                                    .map(|s| Value::Str(s.to_string()))
+                                    .map(|s| Value::Str(s.to_string(), false))
                                     .collect(),
                                 _ => text
                                     .split(&pat)
-                                    .map(|s| Value::Str(s.to_string()))
+                                    .map(|s| Value::Str(s.to_string(), false))
                                     .collect(),
                             }
                         };
@@ -18435,7 +18502,7 @@ impl Interpreter {
                         // positive limit preserves them; 0 / no limit strips.
                         let keep_trailing = matches!(limit, Some(n) if n > 0);
                         if !keep_trailing {
-                            while matches!(items.last(), Some(Value::Str(s)) if s.is_empty()) {
+                            while matches!(items.last(), Some(Value::Str(s, _)) if s.is_empty()) {
                                 items.pop();
                             }
                         }
@@ -18586,7 +18653,7 @@ impl Interpreter {
 
         // Decide record separator ($/):
         //   - Value::Undef          → slurp to EOF
-        //   - Value::Str("")        → paragraph mode (split on /\n{2,}/)
+        //   - Value::Str("", false)        → paragraph mode (split on /\n{2,}/)
         //   - Value::ScalarRef(N)   → fixed-width read of N bytes
         //   - anything else         → stringified, read until that terminator
         let rs = self.get_var("/");
@@ -18644,7 +18711,7 @@ impl Interpreter {
             let mut line = String::new();
             return match stdin.lock().read_line(&mut line) {
                 Ok(0) => Value::Undef,
-                Ok(_) => Value::Str(line),
+                Ok(_) => Value::Str(line, false),
                 Err(_) => Value::Undef,
             };
         }
@@ -18709,7 +18776,7 @@ impl Interpreter {
             let new_offset = offset + consumed;
             self.string_read_handles
                 .insert(effective_handle.clone(), (rc, new_offset));
-            return Value::Str(String::from_utf8_lossy(&slice).into_owned());
+            return Value::Str(String::from_utf8_lossy(&slice).into_owned(), false);
         }
 
         let Some(reader) = self.read_handles.get_mut(&effective_handle) else {
@@ -18721,7 +18788,7 @@ impl Interpreter {
                 let mut buf = String::new();
                 match reader.read_to_string(&mut buf) {
                     Ok(0) => Value::Undef,
-                    Ok(_) => Value::Str(buf),
+                    Ok(_) => Value::Str(buf, false),
                     Err(_) => Value::Undef,
                 }
             }
@@ -18739,7 +18806,7 @@ impl Interpreter {
                     Value::Undef
                 } else {
                     buf.truncate(filled);
-                    Value::Str(String::from_utf8_lossy(&buf).into_owned())
+                    Value::Str(String::from_utf8_lossy(&buf).into_owned(), false)
                 }
             }
             ReadMode::Until(sep) => {
@@ -18771,7 +18838,7 @@ impl Interpreter {
                 if out.is_empty() {
                     Value::Undef
                 } else {
-                    Value::Str(String::from_utf8_lossy(&out).into_owned())
+                    Value::Str(String::from_utf8_lossy(&out).into_owned(), false)
                 }
             }
             ReadMode::Paragraph => {
@@ -18831,7 +18898,7 @@ impl Interpreter {
                 if out.is_empty() {
                     Value::Undef
                 } else {
-                    Value::Str(String::from_utf8_lossy(&out).into_owned())
+                    Value::Str(String::from_utf8_lossy(&out).into_owned(), false)
                 }
             }
         }
@@ -18863,7 +18930,7 @@ impl Interpreter {
                 // Generate a unique filehandle name and store it in the variable
                 self.fh_counter += 1;
                 fh_name = format!("__anon_fh_{}", self.fh_counter);
-                self.set_var(name, Value::Str(fh_name.clone()));
+                self.set_var(name, Value::Str(fh_name.clone(), false));
             }
             Expr::ScalarVar(name) => {
                 let val = self.get_var(name);
@@ -18871,7 +18938,7 @@ impl Interpreter {
                     // Auto-vivify: generate a name
                     self.fh_counter += 1;
                     fh_name = format!("__anon_fh_{}", self.fh_counter);
-                    self.set_var(name, Value::Str(fh_name.clone()));
+                    self.set_var(name, Value::Str(fh_name.clone(), false));
                 } else {
                     fh_name = val.to_str();
                 }
@@ -18899,7 +18966,7 @@ impl Interpreter {
                     ">" | ">>" => {
                         // For write/append, start with empty (or keep) contents.
                         if mode == ">" {
-                            *r.borrow_mut() = Value::Str(String::new());
+                            *r.borrow_mut() = Value::Str(String::new(), false);
                         }
                         self.string_write_handles.insert(resolved, r.clone());
                     }
@@ -18988,7 +19055,7 @@ impl Interpreter {
                     Value::Num(1.0)
                 }
                 Err(e) => {
-                    self.set_global_var("!", Value::Str(perl_io_err(&e)));
+                    self.set_global_var("!", Value::Str(perl_io_err(&e), false));
                     Value::Undef
                 }
             }
@@ -19000,7 +19067,7 @@ impl Interpreter {
                     Value::Num(1.0)
                 }
                 Err(e) => {
-                    self.set_global_var("!", Value::Str(perl_io_err(&e)));
+                    self.set_global_var("!", Value::Str(perl_io_err(&e), false));
                     Value::Undef
                 }
             }
@@ -19030,7 +19097,7 @@ impl Interpreter {
             if chars_fit_in_byte {
                 let src_bytes: Vec<u8> = full.chars().map(|c| c as u8).collect();
                 if offset >= src_bytes.len() {
-                    self.assign_to(&args[1], Value::Str(String::new()));
+                    self.assign_to(&args[1], Value::Str(String::new(), false));
                     return Value::Num(0.0);
                 }
                 let end = (offset + len).min(src_bytes.len());
@@ -19042,12 +19109,12 @@ impl Interpreter {
                 let s: String = src_bytes[offset..end].iter().map(|&b| b as char).collect();
                 self.string_read_handles
                     .insert(handle, (rc, offset + consumed));
-                self.assign_to(&args[1], Value::Str(s));
+                self.assign_to(&args[1], Value::Str(s, false));
                 return Value::Num(consumed as f64);
             }
             let bytes = full.as_bytes();
             if offset >= bytes.len() {
-                self.assign_to(&args[1], Value::Str(String::new()));
+                self.assign_to(&args[1], Value::Str(String::new(), false));
                 return Value::Num(0.0);
             }
             let end = (offset + len).min(bytes.len());
@@ -19056,7 +19123,7 @@ impl Interpreter {
             let s = String::from_utf8_lossy(slice).into_owned();
             self.string_read_handles
                 .insert(handle, (rc, offset + consumed));
-            self.assign_to(&args[1], Value::Str(s));
+            self.assign_to(&args[1], Value::Str(s, false));
             return Value::Num(consumed as f64);
         }
         let reader = match self.read_handles.get_mut(&handle) {
@@ -19071,7 +19138,7 @@ impl Interpreter {
         buf.truncate(n);
         let s = String::from_utf8_lossy(&buf).into_owned();
         // Write into the target scalar (args[1]).
-        self.assign_to(&args[1], Value::Str(s));
+        self.assign_to(&args[1], Value::Str(s, false));
         Value::Num(n as f64)
     }
 
@@ -19155,7 +19222,7 @@ impl Interpreter {
     fn run_backtick(&self, cmd: &str) -> Value {
         use std::process::Command;
         match Command::new("sh").arg("-c").arg(cmd).output() {
-            Ok(output) => Value::Str(String::from_utf8_lossy(&output.stdout).to_string()),
+            Ok(output) => Value::Str(String::from_utf8_lossy(&output.stdout).to_string(), false),
             Err(_) => Value::Undef,
         }
     }
@@ -19185,7 +19252,7 @@ impl Interpreter {
         // narrows @INC.
         if matches!(filename, "Carp.pm" | "warnings/register.pm") {
             self.required_files.insert(filename.to_string());
-            self.set_hash_element("INC", filename, Value::Str(filename.to_string()));
+            self.set_hash_element("INC", filename, Value::Str(filename.to_string(), false));
             return Value::Num(1.0);
         }
 
@@ -19214,7 +19281,7 @@ impl Interpreter {
             Ok(c) => c,
             Err(_) => {
                 let msg = format!("Can't locate {} in @INC (@INC contains: .)\n", filename);
-                self.set_global_var("@", Value::Str(msg));
+                self.set_global_var("@", Value::Str(msg, false));
                 return Value::Undef;
             }
         };
@@ -19223,7 +19290,7 @@ impl Interpreter {
         let canon = path.to_string_lossy().to_string();
         self.required_files.insert(filename.to_string());
         // Set %INC entry
-        self.set_hash_element("INC", filename, Value::Str(canon.clone()));
+        self.set_hash_element("INC", filename, Value::Str(canon.clone(), false));
 
         // Execute the file using the run method (which handles BEGIN, subs, etc.)
         let saved_file = self.current_file.clone();
@@ -19252,7 +19319,7 @@ impl Interpreter {
         let mut parser = Parser::new_with_lines_and_files(tokens, token_lines, file_overrides);
         let stmts = parser.parse_program();
 
-        self.set_global_var("@", Value::Str(String::new()));
+        self.set_global_var("@", Value::Str(String::new(), false));
 
         let origin = self.current_file.clone();
         // If this file has been loaded before (re-require), reuse its scope so
@@ -19347,7 +19414,7 @@ impl Interpreter {
                     break;
                 }
                 Flow::Die(msg) => {
-                    self.set_global_var("@", Value::Str(msg));
+                    self.set_global_var("@", Value::Str(msg, false));
                     early_return = Some(Value::Undef);
                     break;
                 }
@@ -19556,7 +19623,7 @@ impl Interpreter {
                 self.failed_eval_subs.insert(n);
             }
             let filled = err.replace("{FILE}", &self.current_file);
-            self.set_global_var("@", Value::Str(filled));
+            self.set_global_var("@", Value::Str(filled, false));
             self.current_file = saved_file;
             self.current_line = saved_line;
             return Value::Undef;
@@ -19567,7 +19634,7 @@ impl Interpreter {
         // check does when the module isn't on disk.
         let mut ct_line: usize = 1;
         if let Some(err) = compile_time_use_check(&stmts, &mut ct_line, self) {
-            self.set_global_var("@", Value::Str(err));
+            self.set_global_var("@", Value::Str(err, false));
             self.current_file = saved_file;
             self.current_line = saved_line;
             return Value::Undef;
@@ -19619,10 +19686,10 @@ impl Interpreter {
                 && let Some((_params, body)) = self.subs.get(&name).cloned()
             {
                 self.in_die_handler += 1;
-                self.call_sub_named(&body, &[Value::Str(err.clone())], Some(&name));
+                self.call_sub_named(&body, &[Value::Str(err.clone(), false)], Some(&name));
                 self.in_die_handler -= 1;
             }
-            self.set_global_var("@", Value::Str(err));
+            self.set_global_var("@", Value::Str(err, false));
             self.current_file = saved_file;
             self.current_line = saved_line;
             return Value::Undef;
@@ -19642,16 +19709,16 @@ impl Interpreter {
                 && let Some((_params, body)) = self.subs.get(&name).cloned()
             {
                 self.in_die_handler += 1;
-                self.call_sub_named(&body, &[Value::Str(err.clone())], Some(&name));
+                self.call_sub_named(&body, &[Value::Str(err.clone(), false)], Some(&name));
                 self.in_die_handler -= 1;
             }
-            self.set_global_var("@", Value::Str(err));
+            self.set_global_var("@", Value::Str(err, false));
             self.current_file = saved_file;
             self.current_line = saved_line;
             return Value::Undef;
         }
 
-        self.set_global_var("@", Value::Str(String::new()));
+        self.set_global_var("@", Value::Str(String::new(), false));
         self.push_scope();
 
         // First pass: run BEGIN blocks at compile time, like `run()`.
@@ -19664,7 +19731,7 @@ impl Interpreter {
             if let Stmt::Begin(body, _) = stmt {
                 match self.exec_stmts(body) {
                     Flow::Die(msg) => {
-                        self.set_global_var("@", Value::Str(msg));
+                        self.set_global_var("@", Value::Str(msg, false));
                         self.pop_scope();
                         self.current_file = saved_file;
                         self.current_line = saved_line;
@@ -19729,14 +19796,14 @@ impl Interpreter {
                     // Clear `$@` when the eval-string exits via `return`
                     // so an inner `eval q{die}` followed by `return` does not
                     // leak the inner error to the caller.
-                    self.set_global_var("@", Value::Str(String::new()));
+                    self.set_global_var("@", Value::Str(String::new(), false));
                     self.pop_scope();
                     self.current_file = saved_file;
                     self.current_line = saved_line;
                     return v;
                 }
                 Flow::Die(msg) => {
-                    self.set_global_var("@", Value::Str(msg));
+                    self.set_global_var("@", Value::Str(msg, false));
                     self.pop_scope();
                     self.current_file = saved_file;
                     self.current_line = saved_line;
@@ -20064,7 +20131,7 @@ fn bool_value(b: bool) -> Value {
     if b {
         Value::Num(1.0)
     } else {
-        Value::Str(String::new())
+        Value::Str(String::new(), false)
     }
 }
 
@@ -28912,7 +28979,7 @@ fn bitwise_str_or_num(
     num_op: fn(i64, i64) -> i64,
     truncate: bool,
 ) -> Value {
-    let byte_safe = |v: &Value| matches!(v, Value::Str(s) if s.chars().all(|c| (c as u32) < 256));
+    let byte_safe = |v: &Value| matches!(v, Value::Str(s, _) if s.chars().all(|c| (c as u32) < 256));
     if byte_safe(l) && byte_safe(r) {
         let lb: Vec<u8> = l.to_str().chars().map(|c| c as u8).collect();
         let rb: Vec<u8> = r.to_str().chars().map(|c| c as u8).collect();
@@ -28929,7 +28996,7 @@ fn bitwise_str_or_num(
                 ) as char
             })
             .collect();
-        Value::Str(out)
+        Value::Str(out, false)
     } else {
         Value::Num(num_op(l.to_num() as i64, r.to_num() as i64) as f64)
     }

@@ -10,7 +10,19 @@ use std::rc::Rc;
 #[derive(Clone, Debug)]
 pub enum Value {
     Undef,
-    Str(String),
+    /// String scalar with a per-string UTF-8 flag (a.k.a. "SvUTF8" in
+    /// reference perl). When the flag is true the string was upgraded
+    /// to UTF-8 — e.g. via `pack("U", N)`, `Encode::decode`, or any
+    /// concat with another flagged scalar. When false the string is a
+    /// byte sequence (latin1/ASCII), and `length` under `use bytes`
+    /// returns its char count (each char ≤ 255 is one latin1 byte)
+    /// rather than its UTF-8 byte length. Most call sites construct
+    /// unflagged strings; use `Value::utf8_str(s)` when explicitly
+    /// upgrading. opbasic/concat #26905 and op/length `use bytes`
+    /// tests depend on this flag to distinguish `"\xFF"` (1 latin1
+    /// byte) from `pack("U", 0xFF)` (the same codepoint but 2 UTF-8
+    /// bytes when viewed as bytes).
+    Str(String, bool),
     Num(f64),
     /// Reference to an array — stringifies as `ARRAY(0x...)`.
     ArrayRef(Rc<RefCell<Vec<Value>>>),
@@ -61,10 +73,57 @@ impl Value {
         }
     }
 
+    /// Construct an unflagged byte/latin1 string scalar — the default
+    /// shape produced by literals, numeric coercion, format!, etc.
+    pub fn str(s: impl Into<String>) -> Value {
+        Value::Str(s.into(), false)
+    }
+
+    /// Construct a UTF-8-flagged string scalar. Used by `pack("U", …)`,
+    /// `Encode::decode`, and other paths that produce explicitly-
+    /// upgraded strings. Tracked separately so `length` under
+    /// `use bytes` matches reference perl's char-vs-byte distinction.
+    pub fn utf8_str(s: impl Into<String>) -> Value {
+        Value::Str(s.into(), true)
+    }
+
+    /// True if the value is a UTF-8-flagged string. False for
+    /// unflagged strings, numbers, refs, etc.
+    pub fn is_utf8_flagged(&self) -> bool {
+        matches!(self, Value::Str(_, true))
+            || matches!(self, Value::Alias(rc) if rc.borrow().is_utf8_flagged())
+    }
+
+    /// Byte-level view of the scalar — the same byte sequence reference
+    /// perl exposes under `use bytes`. UTF-8-flagged strings yield their
+    /// extended UTF-8 encoding (so `chr(0xD800)`, stored internally as
+    /// the surrogate-marker `"\x00\x{D800}"`, returns the 3 bytes
+    /// `ed a0 80` rather than the marker's literal bytes). Unflagged
+    /// strings map each Unicode scalar to its latin1 byte. Non-string
+    /// values stringify first.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match self {
+            Value::Str(s, true) => {
+                // Flagged: decode our extended-codepoint markers (used
+                // for surrogates and codepoints > U+10FFFF) then
+                // re-encode as extended UTF-8.
+                let cps = decode_codepoints(s);
+                let mut out = Vec::new();
+                for cp in cps {
+                    encode_extended_utf8(cp, &mut out);
+                }
+                out
+            }
+            Value::Str(s, false) => s.chars().map(|c| c as u32 as u8).collect(),
+            Value::Alias(rc) => rc.borrow().to_bytes(),
+            other => other.to_str().chars().map(|c| c as u32 as u8).collect(),
+        }
+    }
+
     pub fn to_str(&self) -> String {
         match self {
             Value::Undef => String::new(),
-            Value::Str(s) => s.clone(),
+            Value::Str(s, _) => s.clone(),
             Value::Num(n) => format_number(*n),
             Value::ArrayRef(r) => format!("ARRAY(0x{:x})", Rc::as_ptr(r) as usize),
             Value::HashRef(r) => format!("HASH(0x{:x})", Rc::as_ptr(r) as usize),
@@ -101,7 +160,7 @@ impl Value {
         match self {
             Value::Undef => 0.0,
             Value::Num(n) => *n,
-            Value::Str(s) => parse_number(s),
+            Value::Str(s, _) => parse_number(s),
             // References stringify then parse as "ARRAY(0x..)" etc. — the
             // numeric coercion returns 0 since there are no leading digits.
             // References numerify to their pointer address (the same
@@ -133,7 +192,7 @@ impl Value {
         match self {
             Value::Undef => false,
             Value::Num(n) => *n != 0.0 && !n.is_nan(),
-            Value::Str(s) => !s.is_empty() && s != "0",
+            Value::Str(s, _) => !s.is_empty() && s != "0",
             // References are always true (they stringify to non-"" non-"0").
             Value::ArrayRef(_)
             | Value::HashRef(_)
@@ -182,6 +241,81 @@ impl Value {
             },
             _ => "",
         }
+    }
+}
+
+/// Decode a Rust string (potentially containing our internal
+/// `"\x00\x{HHHH}"` markers used for surrogates and codepoints above
+/// U+10FFFF) into a sequence of codepoints.
+pub(crate) fn decode_codepoints(s: &str) -> Vec<u32> {
+    let bytes = s.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0 && bytes.get(i + 1..i + 4) == Some(b"\\x{") {
+            if let Some(end_off) = bytes[i + 4..].iter().position(|&b| b == b'}') {
+                let hex_str = std::str::from_utf8(&bytes[i + 4..i + 4 + end_off]).unwrap_or("");
+                if let Ok(cp) = u32::from_str_radix(hex_str, 16) {
+                    out.push(cp);
+                    i += 4 + end_off + 1;
+                    continue;
+                }
+            }
+        }
+        let first = bytes[i];
+        let len = if first < 0xC0 {
+            1
+        } else if first < 0xE0 {
+            2
+        } else if first < 0xF0 {
+            3
+        } else {
+            4
+        };
+        let end = (i + len).min(bytes.len());
+        if let Ok(piece) = std::str::from_utf8(&bytes[i..end]) {
+            if let Some(c) = piece.chars().next() {
+                out.push(c as u32);
+            }
+        }
+        i = end;
+    }
+    out
+}
+
+/// Encode a codepoint as extended (loose) UTF-8 — the 1992 FSS/UTF-8
+/// form that allows up to 6 bytes per codepoint and does not exclude
+/// surrogates. Used by `to_bytes` on UTF-8-flagged strings so
+/// `chr(0xD800)` round-trips as `ed a0 80` rather than the literal
+/// marker bytes.
+pub(crate) fn encode_extended_utf8(cp: u32, out: &mut Vec<u8>) {
+    if cp < 0x80 {
+        out.push(cp as u8);
+    } else if cp < 0x800 {
+        out.push(0xC0 | ((cp >> 6) as u8));
+        out.push(0x80 | ((cp & 0x3F) as u8));
+    } else if cp < 0x10000 {
+        out.push(0xE0 | ((cp >> 12) as u8));
+        out.push(0x80 | (((cp >> 6) & 0x3F) as u8));
+        out.push(0x80 | ((cp & 0x3F) as u8));
+    } else if cp < 0x20_0000 {
+        out.push(0xF0 | ((cp >> 18) as u8));
+        out.push(0x80 | (((cp >> 12) & 0x3F) as u8));
+        out.push(0x80 | (((cp >> 6) & 0x3F) as u8));
+        out.push(0x80 | ((cp & 0x3F) as u8));
+    } else if cp < 0x400_0000 {
+        out.push(0xF8 | ((cp >> 24) as u8));
+        out.push(0x80 | (((cp >> 18) & 0x3F) as u8));
+        out.push(0x80 | (((cp >> 12) & 0x3F) as u8));
+        out.push(0x80 | (((cp >> 6) & 0x3F) as u8));
+        out.push(0x80 | ((cp & 0x3F) as u8));
+    } else {
+        out.push(0xFC | ((cp >> 30) as u8));
+        out.push(0x80 | (((cp >> 24) & 0x3F) as u8));
+        out.push(0x80 | (((cp >> 18) & 0x3F) as u8));
+        out.push(0x80 | (((cp >> 12) & 0x3F) as u8));
+        out.push(0x80 | (((cp >> 6) & 0x3F) as u8));
+        out.push(0x80 | ((cp & 0x3F) as u8));
     }
 }
 
