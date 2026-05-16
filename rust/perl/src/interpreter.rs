@@ -965,7 +965,7 @@ impl Interpreter {
                     self.current_line = *n;
                     main_stmts.push(stmt.clone());
                 }
-                Stmt::Use(_, _, end_line) => {
+                Stmt::Use(module, _, end_line) => {
                     // `use Module ARGS;` is sugar for `BEGIN { require
                     // Module; Module->import(ARGS); }`. Run it eagerly in
                     // source order so a subsequent `BEGIN { @INC = … }`
@@ -973,6 +973,23 @@ impl Interpreter {
                     // resolved (which is what Perl does at compile time).
                     // Don't push to main_stmts — the require+import has
                     // already happened, no need to re-run at runtime.
+                    //
+                    // Exception: lexical pragmas that mutate runtime
+                    // state (`use bytes`, `use strict`, `use warnings`,
+                    // `use feature`, `use integer`, `use utf8`) need to
+                    // take effect at their LEXICAL position in source
+                    // order so code earlier in the file isn't affected.
+                    // Push those to main_stmts so they re-run at runtime
+                    // at their proper position. op/length tests rely on
+                    // `length($a)` before `use bytes;` returning char
+                    // count.
+                    if matches!(
+                        module.as_str(),
+                        "bytes" | "strict" | "warnings" | "feature" | "integer" | "utf8"
+                    ) {
+                        main_stmts.push(stmt.clone());
+                        continue;
+                    }
                     //
                     // Before running, scan already-deferred main_stmts for
                     // a failing `use` in a nested block (e.g. `{ use Foo;
