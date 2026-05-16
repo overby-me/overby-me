@@ -280,6 +280,15 @@ pub struct Interpreter {
     /// `$_[0]` name. Stored alongside `pos_offsets`; lookups walk
     /// the alias chain to find the right key. op/pos defelem tests.
     pos_offsets_by_rc: HashMap<usize, usize>,
+    /// foreach-active aliases for lvalue source expressions like
+    /// `for my $V (pos $X) { … }`. Maps a canonicalised lvalue key
+    /// (e.g. `pos:X`) to a shared Rc holding the current iteration
+    /// value. Nested foreach loops over the same lvalue see the same
+    /// Rc, so `for my $one(pos $x) { for my $two(pos $x) { $two = …; } }`
+    /// has `$one` and `$two` aliased to the same backing slot. op/pos
+    /// test 29 (`no assertion failure when getting pos clobbers ref
+    /// with undef`).
+    foreach_lvalue_aliases: HashMap<String, std::rc::Rc<std::cell::RefCell<Value>>>,
     /// Transient target for `pos` to point at during `(?{...})` regex
     /// code-block evaluation. Set by the RegexMatch / Substitution arms
     /// before invoking `regex_match_pos`; cleared after. Inside the code
@@ -663,6 +672,7 @@ impl Interpreter {
             deleted_slots: HashMap::new(),
             pos_offsets: HashMap::new(),
             pos_offsets_by_rc: HashMap::new(),
+            foreach_lvalue_aliases: HashMap::new(),
             regex_code_block_pos_target: None,
             readonly_vars: std::collections::HashSet::new(),
             last_popped_underscore: None,
@@ -1964,7 +1974,28 @@ impl Interpreter {
                         }
                     }
                 }
-                let items = self.eval_list(list);
+                // Detect `for my $V (LVALUE)` where LVALUE is a single
+                // magic-lvalue expression like `pos $X`. Use a shared
+                // Rc-backed Alias so nested foreach loops over the same
+                // lvalue see the same backing slot — required for
+                // op/pos test 29 (`$one = \1; $two = undef;` propagates
+                // because $one and $two share storage).
+                let lvalue_key = foreach_lvalue_key(list);
+                let (items, owned_lvalue_key) = if let Some(ref key) = lvalue_key {
+                    let initial = self.eval_expr(list);
+                    let (rc, owned) =
+                        if let Some(existing) = self.foreach_lvalue_aliases.get(key).cloned() {
+                            (existing, false)
+                        } else {
+                            let new_rc = std::rc::Rc::new(std::cell::RefCell::new(initial));
+                            self.foreach_lvalue_aliases
+                                .insert(key.clone(), new_rc.clone());
+                            (new_rc, true)
+                        };
+                    (vec![Value::Alias(rc)], owned.then(|| key.clone()))
+                } else {
+                    (self.eval_list(list), None)
+                };
 
                 // Save the loop variable's current value for restoration
                 let saved_var = self.get_var(var);
@@ -2262,6 +2293,9 @@ impl Interpreter {
                 self.pop_scope();
                 // Restore the loop variable to its pre-loop value
                 self.set_var(var, saved_var);
+                if let Some(ref key) = owned_lvalue_key {
+                    self.foreach_lvalue_aliases.remove(key);
+                }
                 Flow::None
             }
 
@@ -20987,6 +21021,22 @@ fn is_lvalue_shape(expr: &Expr) -> bool {
             | Expr::LocalVar(_)
             | Expr::ArrayLen(_)
     )
+}
+
+/// Canonicalise a foreach source expression to a cache key when it is
+/// a magic-lvalue form like `pos $X` that needs shared aliasing across
+/// nested foreach loops (so `for my $one(pos $x) { for my $two(pos $x) }`
+/// has $one and $two refer to the same backing storage). Returns None
+/// for sources that don't need special aliasing.
+fn foreach_lvalue_key(expr: &Expr) -> Option<String> {
+    if let Expr::Call(name, args) = expr
+        && name == "pos"
+        && args.len() == 1
+        && let Expr::ScalarVar(var) = &args[0]
+    {
+        return Some(format!("pos:{var}"));
+    }
+    None
 }
 
 /// Names of internal helper "calls" emitted by the parser that
