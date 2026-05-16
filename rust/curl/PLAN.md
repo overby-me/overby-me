@@ -6,14 +6,19 @@ Use the upstream [curl test suite](https://github.com/curl/curl/tree/master/test
 
 ## Current Status
 
-**748 tests passing** (was 709 at session start; +39 net across multipart, retry, IPv6,
+**752 tests passing** (was 709 at session start; +43 net across multipart, retry, IPv6,
 upload-stdin redirect, write-out, interface, dump-header, per-URL --include /
 --resolve resets, --resolve removal entries, pool routing distinguishing --resolve
 from --connect-to, -F text-field ;filename= / ;type= modifiers, -o pairing
-with original (pre-glob) URLs, `-h` inside `-K` config file with no URL, and
-treating "unsupported protocol" as fatal across the URL list) across the curl
-8.18.0 test suite (verified with strict runner checks — the derivation fails
-when a test number doesn't exist or the suite reports anything other than 100% OK).
+with original (pre-glob) URLs, `-h` inside `-K` config file with no URL,
+treating "unsupported protocol" as fatal across the URL list, URL glob
+"too many {} sets" diagnostic, secure-cookie path-prefix protection with
+host-only/Domain= equivalence and `__Secure-`/`__Host-` prefix rejection,
+secure-cookie loopback exception honoring `-H "Host:"` override, retry-prefix
+accumulation distinguishing stdout from ftruncate-on-retry file output, and a
+previously-missed first-subaltname HTTPS test) across the curl 8.18.0 test
+suite (verified with strict runner checks — the derivation fails when a test
+number doesn't exist or the suite reports anything other than 100% OK).
 
 The full list is in `default.nix` under `testNums`; see the per-fix bullets
 in "Phase 7" below for what each addition unlocks.
@@ -415,13 +420,19 @@ Current gaps:
 - [x] `-h` inside a `-K` config file with no URL: print help, exit 2 ("no URL specified") so curl validates URL count after config processing (unlocked test 748)
 - [x] Treat "unsupported scheme" / "unsupported protocol" as fatal across the URL list only when the FIRST URL has the bad scheme — curl's `serial_transfers` calls `create_transfer` for URL1 outside the loop and returns immediately on CURLE_UNSUPPORTED_PROTOCOL (test 760), but for later URLs it just sets returncode and continues so the per-URL `-w` survey keeps emitting for the failed slots (test 423 regression fix)
 - [x] **List hygiene**: dropped test 197 from `testNums`; the `retry_prefix.clear()` on success (added for test 198) made test 197's "expected both responses in stdout" diverge — keeping the 198 behavior is the right tradeoff, so 197 is genuinely unreachable without changing 198's verdict
-- [ ] Target 750+ passing by addressing remaining feature gaps
+- [x] URL glob "too many {} sets" diagnostic: count literal/set patterns (curl's `pnum`) and error after 256, matching curl's `tool_urlglob.c` byte-for-byte (position calc skips the unincremented `}`; output truncated to fit curl's `text[512]` so the trailing caret is omitted when the URL fills the buffer) (unlocked test 761)
+- [x] RFC 6265bis cookie name prefixes: `__Secure-` requires the Secure attribute, `__Host-` requires Secure + no Domain + Path=/. Live responses only; file-loaded jars stay trusted. Case-sensitive (a different-cased variant is not subject to the rule) — unlocked test 1561
+- [x] Secure-cookie protection: switched from name-only match to curl `replace_existing()`'s path-prefix rule (lib/cookie.c). For existing path `/A` the prefix is the segment up to the next `/`; a new non-secure cookie is rejected only when its path starts with that prefix. Domain match is case-insensitive after stripping the leading dot, so a host-only secure cookie still blocks a `Domain=` overlay (preserves test 414, unlocked test 1561)
+- [x] Secure-cookie loopback exception (psl_loopback_p) uses the logical request host (`-H "Host:"` override when present), not the connection IP — an HTTP request to `www.example.com` via 127.0.0.1 must NOT pick up secure cookies (unlocked test 1561 alongside test 61)
+- [x] `--retry` accumulates failed attempts into stdout (no rewind possible) but truncates them away when the destination is a regular file (curl `ftruncate`'s between retries). Differentiated by checking `effective_opts.outputs[url_idx]` — unblocks test 197 while keeping test 198
+- [x] Add test 3001: HTTPS localhost with last-subaltname cert was already passing under our rustls chain, just missing from `testNums`
+- [ ] Target 800+ passing by addressing remaining feature gaps
 
 ---
 
 ## Test Inventory
 
-### Passing tests (748)
+### Passing tests (752)
 
 The authoritative list is `testNums` in `default.nix`; the count is
 checked there by Nix and stays in sync with the per-test derivations.

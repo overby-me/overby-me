@@ -5,6 +5,18 @@ pub(crate) fn expand_glob(url: &str) -> Result<Vec<(String, Vec<String>)>, Strin
     let mut out: Vec<(String, Vec<String>)> = vec![(String::new(), Vec::new())];
     let bytes = url.as_bytes();
     let mut i = 0;
+    // Mirror curl's `pos`: 1-based char index that advances for every consumed
+    // char EXCEPT the `}` that closes a `{…}` set (case '}' in glob_set never
+    // increments `*posp`). Used only to compute the position reported in
+    // glob-error messages (test 761).
+    let mut pos: usize = 1;
+    // Mirror curl's `pnum`: count of patterns added so far. A "pattern" is
+    // either a literal segment between sets/ranges or a `{…}` / `[…]` glob.
+    // Curl errors when this would exceed 255 (`if(glob->pnum < 255)` check in
+    // add_glob, with palloc starting at 2 and doubling). Limiting at 255 keeps
+    // our behaviour byte-identical for the diagnostic.
+    let mut pnum: usize = 0;
+    let mut literal_pending = false;
     while i < bytes.len() {
         let c = bytes[i];
         // Backslash escapes glob metachars (\{, \}, \[, \]) — emit only the next char.
@@ -16,17 +28,33 @@ pub(crate) fn expand_glob(url: &str) -> Result<Vec<(String, Vec<String>)>, Strin
                     item.0.push(next as char);
                 }
                 i += 2;
+                pos += 2;
+                literal_pending = true;
                 continue;
             }
         }
         if c == b'{' {
+            // Flush a pending literal segment as one pattern before the set.
+            if literal_pending {
+                pnum += 1;
+                literal_pending = false;
+            }
             if let Some(end) = find_matching(bytes, i, b'{', b'}') {
+                // pos after parsing the set: advance over `{` and inner chars
+                // but not `}` (matches curl). For `{a}` the delta is 2.
+                let pos_delta = end - i; // bytes from `{` to `}` inclusive minus 1 (skip `}`)
+                let pos_at_close = pos + pos_delta;
+                pnum += 1;
+                if pnum > 255 {
+                    return Err(format_glob_error("too many {} sets", pos_at_close, url));
+                }
                 let alts: Vec<String> = std::str::from_utf8(&bytes[i + 1..end])
                     .unwrap_or("")
                     .split(',')
                     .map(|s| s.to_string())
                     .collect();
                 out = cross(out, alts);
+                pos = pos_at_close;
                 i = end + 1;
                 continue;
             }
@@ -38,7 +66,18 @@ pub(crate) fn expand_glob(url: &str) -> Result<Vec<(String, Vec<String>)>, Strin
                 let spec = std::str::from_utf8(&bytes[i + 1..end]).unwrap_or("");
                 match parse_range(spec) {
                     Ok(Some(expanded)) => {
+                        if literal_pending {
+                            pnum += 1;
+                            literal_pending = false;
+                        }
+                        let pos_delta = end - i;
+                        let pos_at_close = pos + pos_delta;
+                        pnum += 1;
+                        if pnum > 255 {
+                            return Err(format_glob_error("too many [] ranges", pos_at_close, url));
+                        }
                         out = cross(out, expanded);
+                        pos = pos_at_close;
                         i = end + 1;
                         continue;
                     }
@@ -69,9 +108,35 @@ pub(crate) fn expand_glob(url: &str) -> Result<Vec<(String, Vec<String>)>, Strin
         for item in out.iter_mut() {
             item.0.push(c as char);
         }
+        literal_pending = true;
         i += 1;
+        pos += 1;
     }
     Ok(out)
+}
+
+// Mirrors curl's tool_urlglob.c text[512] truncation so long URLs cut off
+// the trailing `\n<spaces>^` (test 761's expected stderr).
+fn format_glob_error(err: &str, pos: usize, url: &str) -> String {
+    let head = format!("{err} in URL position {pos}:\n");
+    let tail = format!("\n{}^", " ".repeat(pos - 1));
+    // curl's text[512] is null-terminated, so 511 usable bytes.
+    const TEXT_CAP: usize = 511;
+    let mut text = String::with_capacity(TEXT_CAP);
+    text.push_str(&head);
+    let url_room = TEXT_CAP.saturating_sub(text.len());
+    if url.len() <= url_room {
+        text.push_str(url);
+        let remaining = TEXT_CAP.saturating_sub(text.len());
+        if tail.len() <= remaining {
+            text.push_str(&tail);
+        } else {
+            text.push_str(&tail[..remaining]);
+        }
+    } else {
+        text.push_str(&url[..url_room]);
+    }
+    format!("curl: (3) {text}")
 }
 
 fn find_matching(bytes: &[u8], start: usize, open: u8, close: u8) -> Option<usize> {

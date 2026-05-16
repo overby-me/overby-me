@@ -352,10 +352,14 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> (Vec<u8>, Option<Vec<u8>>) 
         .split_once('?')
         .map(|(p, _)| p)
         .unwrap_or(&url.path);
+    // The secure-cookie loopback exception uses the logical request host
+    // (`-H "Host:"` override when present), not the connect IP. Otherwise an
+    // HTTP request to www.example.com via a 127.0.0.1 connect would pick up
+    // secure cookies that belong only on HTTPS (test 1561).
     let cookie_header = build_cookie_header(
         cookie_match_host,
         cookie_request_path,
-        url.scheme == "https" || is_loopback_host(&url.host),
+        url.scheme == "https" || is_loopback_host(cookie_match_host),
         opts,
     );
     if !cookie_header.is_empty() {
@@ -710,6 +714,23 @@ fn guess_content_type(filename: &str) -> &'static str {
 /// File cookies apply domain/path matching; inline cookies are sent verbatim.
 fn is_loopback_host(host: &str) -> bool {
     host == "127.0.0.1" || host == "::1" || host == "localhost" || host.ends_with(".localhost")
+}
+
+/// curl's `replace_existing()` path-prefix rule (lib/cookie.c): a non-secure
+/// cookie may overlay an existing secure cookie only when the new path falls
+/// OUTSIDE the existing path's first directory segment. For existing path
+/// `/a` (no inner '/'), the prefix is the whole `/a`. For `/1561/login`, the
+/// prefix is just `/1561` (chopped at the next '/'). The new cookie is
+/// rejected when its path equals or starts with that prefix.
+fn secure_path_overlay(existing_path: &str, new_path: &str) -> bool {
+    if !existing_path.starts_with('/') {
+        return false;
+    }
+    let prefix_len = match existing_path.get(1..).and_then(|s| s.find('/')) {
+        Some(idx) => idx + 1, // include the leading '/' that we skipped
+        None => existing_path.len(),
+    };
+    new_path.len() >= prefix_len && new_path[..prefix_len] == existing_path[..prefix_len]
 }
 
 fn build_cookie_header(host: &str, path: &str, secure_req: bool, opts: &Options) -> String {
@@ -1124,9 +1145,20 @@ fn absorb_response_cookies(opts: &mut Options, resp: &Response, url: &ParsedUrl)
             let new_secure = fields[3].eq_ignore_ascii_case("TRUE");
             let from_https = url.scheme == "https";
             if !from_https && !new_secure {
+                // curl stores the domain without the leading dot regardless of
+                // whether the cookie was set host-only or with a Domain attr.
+                // We keep the dot in the Netscape line, so strip it before
+                // comparing so a host-only secure cookie still blocks a Domain=
+                // overlay (test 414).
+                let new_dom_key = new_dom.strip_prefix('.').unwrap_or(new_dom);
                 let blocked = opts.memory_cookies.iter().any(|existing| {
                     let ef: Vec<&str> = existing.split('\t').collect();
-                    ef.len() >= 7 && ef[5] == nn && ef[3].eq_ignore_ascii_case("TRUE")
+                    if ef.len() < 7 || ef[5] != nn || !ef[3].eq_ignore_ascii_case("TRUE") {
+                        return false;
+                    }
+                    let ed = ef[0].strip_prefix("#HttpOnly_").unwrap_or(ef[0]);
+                    let ed_key = ed.strip_prefix('.').unwrap_or(ed);
+                    ed_key.eq_ignore_ascii_case(new_dom_key) && secure_path_overlay(ef[2], np)
                 });
                 if blocked {
                     continue;

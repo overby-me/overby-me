@@ -867,10 +867,19 @@ fn main() {
                         }
                         // Final attempt succeeded after retry. Without
                         // --fail / --fail-with-body, curl drops the failed
-                        // attempts' output so only the success appears
-                        // (test 198). With --fail set, the failed attempts
-                        // stay visible (tests 1633, 1634).
-                        if !opts.fail && !opts.fail_with_body && r.status < 400 {
+                        // attempts' output when the destination is a regular
+                        // file (it ftruncates between retries — test 198).
+                        // For stdout (or `-o -`), there is no rewind, so all
+                        // attempts accumulate (test 197). With --fail the
+                        // failed attempts stay in either case (tests 1633,
+                        // 1634).
+                        let to_stdout = !effective_opts.remote_name
+                            && !effective_opts.remote_header_name
+                            && match effective_opts.outputs.get(url_idx) {
+                                None => true,
+                                Some(p) => p.to_str() == Some("-"),
+                            };
+                        if !opts.fail && !opts.fail_with_body && r.status < 400 && !to_stdout {
                             retry_prefix.clear();
                         }
                         resp = Some(r);

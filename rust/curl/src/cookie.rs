@@ -309,6 +309,21 @@ pub(crate) fn parse_set_cookie_ex(
         expires
     };
 
+    // RFC 6265bis cookie name prefixes (case-sensitive; only the live-response
+    // path enforces them — file-loaded jars are trusted to be well-formed):
+    //   `__Secure-`: requires the Secure attribute.
+    //   `__Host-`:   requires Secure AND no Domain attribute AND Path=/.
+    // Test 1561 set `__Secure-SID=12345; Domain=…` (no Secure) and several
+    // `__Host-SID` variants that violate the rules — all should be dropped.
+    if validate_domain {
+        if name.starts_with("__Secure-") && !secure {
+            return None;
+        }
+        if name.starts_with("__Host-") && (!secure || domain_attr.is_some() || path != "/") {
+            return None;
+        }
+    }
+
     // Reject Secure cookies received over non-HTTPS (live responses only).
     // Exception: treat 127.0.0.1, ::1 and *.localhost as trustworthy origins
     // per W3C "Secure Contexts", matching curl's psl_loopback_p() exception.
@@ -407,6 +422,20 @@ pub(crate) fn load_cookies_from_file(
     cookies
 }
 
+/// curl's `replace_existing()` path-prefix rule (lib/cookie.c): a non-secure
+/// cookie may overlay an existing secure cookie only when the new path falls
+/// OUTSIDE the existing path's first directory segment.
+fn secure_path_overlay(existing_path: &str, new_path: &str) -> bool {
+    if !existing_path.starts_with('/') {
+        return false;
+    }
+    let prefix_len = match existing_path.get(1..).and_then(|s| s.find('/')) {
+        Some(idx) => idx + 1,
+        None => existing_path.len(),
+    };
+    new_path.len() >= prefix_len && new_path[..prefix_len] == existing_path[..prefix_len]
+}
+
 pub(crate) fn save_cookie_jar(
     path: &PathBuf,
     url: &ParsedUrl,
@@ -431,15 +460,25 @@ pub(crate) fn save_cookie_jar(
             .strip_prefix("#HttpOnly_")
             .unwrap_or(&cookie.domain)
             .to_string();
-        if from_http
-            && !cookie.secure
-            && let Some(existing) = cookies.iter().find(|c| {
+        // Curl's lib/cookie.c replace_existing() rejects a non-secure cookie
+        // when an existing secure cookie shares (domain, name) AND the new
+        // path falls under the existing path's first segment. Domain match is
+        // case-insensitive after stripping the leading dot, so a host-only
+        // secure cookie still blocks a Domain= overlay (test 414).
+        let new_dom_key = domain_key.strip_prefix('.').unwrap_or(&domain_key);
+        if from_http && !cookie.secure {
+            let blocked = cookies.iter().any(|c| {
+                if !c.secure || c.name != cookie.name {
+                    return false;
+                }
                 let d = c.domain.strip_prefix("#HttpOnly_").unwrap_or(&c.domain);
-                d == domain_key && c.path == cookie.path && c.name == cookie.name
-            })
-            && existing.secure
-        {
-            return;
+                let ed_key = d.strip_prefix('.').unwrap_or(d);
+                ed_key.eq_ignore_ascii_case(new_dom_key)
+                    && secure_path_overlay(&c.path, &cookie.path)
+            });
+            if blocked {
+                return;
+            }
         }
         let mut replaced = false;
         cookies.retain(|c| {
