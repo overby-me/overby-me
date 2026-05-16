@@ -2929,6 +2929,18 @@
         tool = "pw-mididump";
         name = "format-2-smf";
       }
+      {
+        tool = "spa-resample";
+        name = "unknown-version-long";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "unknown-version-long";
+      }
+      {
+        tool = "spa-json-dump";
+        name = "unknown-version-long";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
