@@ -17074,6 +17074,14 @@ impl Interpreter {
         // so `(?(?{0})...)` / `(?(?{1})...)` can see the code-block
         // body and pick the right branch.
         let pattern = rewrite_nonexistent_group_conditionals(&pattern);
+        // Detect `^(X\1?){M}$` and `^(X(?(1)\1)){M}$` patterns where the
+        // backref refers to this group itself — rewrite to a flat chain
+        // of M named captures so fancy_regex can match (it doesn't
+        // support self-modifying backrefs). Records `self_iter_remap`
+        // so post-match capture extraction collapses the M groups back
+        // to a single $1 holding the last iteration's value. re/regexp
+        // 493, 496, 973.
+        let (pattern, self_iter_groups) = rewrite_self_iteration_count(&pattern);
         let pattern = substitute_constant_runtime_regex(&pattern);
         let (pattern, code_blocks) = extract_regex_code_blocks(&pattern);
         let pattern = expand_inline_aa_case_insensitive(&pattern);
@@ -17332,6 +17340,12 @@ impl Interpreter {
                     .flatten()
                     .map(|n| (n.to_string(), caps.name(n).map(|m| m.as_str().to_string())))
                     .collect();
+                apply_self_iter_remap(
+                    self_iter_groups,
+                    &mut group_starts,
+                    &mut group_ends,
+                    &mut group_strs,
+                );
                 self.populate_match_vars(
                     text,
                     start,
@@ -17456,6 +17470,12 @@ impl Interpreter {
                             }
                         }
                     }
+                    apply_self_iter_remap(
+                        self_iter_groups,
+                        &mut group_starts,
+                        &mut group_ends,
+                        &mut group_strs,
+                    );
                     let named: Vec<(String, Option<String>)> =
                         named_captures_from_pattern(&fancy_pat, &group_strs);
                     self.populate_match_vars(
@@ -27008,6 +27028,136 @@ fn translate_pl_underscore_aliases(pattern: &str) -> String {
 /// Rewrite to `(NO)(YES)*` — same observable $&, with a small loss of
 /// fidelity on group numbering (the YES becomes group N+1 instead of
 /// being re-stored into group N). re/regexp 499, 500 (GH 7754).
+/// Detect `^(X\1?){M}$` or `^(X(?(1)\1)){M}$` (and the unanchored or
+/// other-anchor variants) where the self-backref makes fancy_regex
+/// give up. Rewrite to a chain of M named captures so each iteration
+/// references the previous one — `(?<g1>X)(?<g2>X\k<g1>?)(?<g3>X\k<g2>?)...`.
+/// Returns the rewritten pattern and `Some(M)` so the caller can collapse
+/// the final M captures back to a single `$1` after the match. When no
+/// rewrite applies, returns the original pattern unchanged and None.
+fn rewrite_self_iteration_count(pattern: &str) -> (String, Option<usize>) {
+    let chars: Vec<char> = pattern.chars().collect();
+    // Find `(` at position p, matching it with the leading anchor/start.
+    // We expect the entire pattern to be `^?(BODY){M}$?`.
+    let mut i = 0;
+    let mut prefix = String::new();
+    if chars.first() == Some(&'^') {
+        prefix.push('^');
+        i = 1;
+    }
+    if chars.get(i).copied() != Some('(') {
+        return (pattern.to_string(), None);
+    }
+    // Find matching `)`.
+    let group_start = i;
+    let body_start = i + 1;
+    let mut depth = 1;
+    let mut k = body_start;
+    let mut local_in_class = false;
+    while k < chars.len() && depth > 0 {
+        if chars[k] == '\\' && k + 1 < chars.len() {
+            k += 2;
+            continue;
+        }
+        if !local_in_class && chars[k] == '[' {
+            local_in_class = true;
+        } else if local_in_class && chars[k] == ']' {
+            local_in_class = false;
+        } else if !local_in_class && chars[k] == '(' {
+            depth += 1;
+        } else if !local_in_class && chars[k] == ')' {
+            depth -= 1;
+            if depth == 0 {
+                break;
+            }
+        }
+        k += 1;
+    }
+    if depth != 0 {
+        return (pattern.to_string(), None);
+    }
+    let body: String = chars[body_start..k].iter().collect();
+    // Check the body shape: either `X\1?` or `X(?(1)\1)`.
+    // X must be a single literal char (alphanumeric or escaped form).
+    let bchars: Vec<char> = body.chars().collect();
+    let (x_str, x_len) = if bchars.first().copied() == Some('\\') && bchars.len() >= 2 {
+        (format!("\\{}", bchars[1]), 2)
+    } else if !bchars.is_empty() {
+        (bchars[0].to_string(), 1)
+    } else {
+        return (pattern.to_string(), None);
+    };
+    let rest: String = bchars[x_len..].iter().collect();
+    let is_simple_selfref = rest == "\\1?";
+    let is_cond_selfref = rest == "(?(1)\\1)";
+    if !is_simple_selfref && !is_cond_selfref {
+        return (pattern.to_string(), None);
+    }
+    // Next chars after `)` should be `{M}` then optionally `$`.
+    let mut q = k + 1;
+    if chars.get(q).copied() != Some('{') {
+        return (pattern.to_string(), None);
+    }
+    q += 1;
+    let mut count_str = String::new();
+    while q < chars.len() && chars[q].is_ascii_digit() {
+        count_str.push(chars[q]);
+        q += 1;
+    }
+    if count_str.is_empty() || chars.get(q).copied() != Some('}') {
+        return (pattern.to_string(), None);
+    }
+    q += 1;
+    let m: usize = count_str
+        .parse()
+        .ok()
+        .filter(|&n: &usize| n > 1 && n < 64)
+        .unwrap_or(0);
+    if m == 0 {
+        return (pattern.to_string(), None);
+    }
+    let mut suffix = String::new();
+    while q < chars.len() {
+        suffix.push(chars[q]);
+        q += 1;
+    }
+    // Build rewritten pattern.
+    let mut rewritten = prefix;
+    for idx in 1..=m {
+        if idx == 1 {
+            rewritten.push_str(&format!("(?<g{idx}>{x_str})"));
+        } else {
+            let prev = idx - 1;
+            rewritten.push_str(&format!("(?<g{idx}>{x_str}\\k<g{prev}>?)"));
+        }
+    }
+    rewritten.push_str(&suffix);
+    let _ = group_start;
+    (rewritten, Some(m))
+}
+
+/// Collapse the M captures introduced by `rewrite_self_iteration_count`
+/// back to a single `$1` holding the LAST iteration's match.
+fn apply_self_iter_remap(
+    iter_groups: Option<usize>,
+    group_starts: &mut Vec<Option<usize>>,
+    group_ends: &mut Vec<Option<usize>>,
+    group_strs: &mut Vec<Option<String>>,
+) {
+    let Some(m) = iter_groups else {
+        return;
+    };
+    if m == 0 || m >= group_strs.len() {
+        return;
+    }
+    group_starts[1] = group_starts[m];
+    group_ends[1] = group_ends[m];
+    group_strs[1] = group_strs[m].clone();
+    group_starts.truncate(2);
+    group_ends.truncate(2);
+    group_strs.truncate(2);
+}
+
 fn rewrite_self_conditional_iteration(pattern: &str) -> String {
     let chars: Vec<char> = pattern.chars().collect();
     let mut out = String::with_capacity(pattern.len());
