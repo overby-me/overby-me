@@ -33,6 +33,10 @@ Siz = "Siz"
 gir = "gir"
 # restat = ninja build system keyword (re-stat output files)
 restat = "restat"
+# DWARF attribute name DW_AT_endianity (DWARF 3 spec, dwarf.h:DW_AT_endianity = 0x65)
+endianity = "endianity"
+# DWARF section name .debug_aranges / .zdebug_aranges (Address Range Table)
+aranges = "aranges"
 # Nd = Unicode General Category for Decimal Digit (used in \p{Nd} regex props)
 Nd = "Nd"
 

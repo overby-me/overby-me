@@ -207,7 +207,6 @@
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Cavif-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/cavif-rs/default.nix) | [GitHub](https://github.com/kornelski/cavif-rs) | AVIF image encoder |
 | [Layout 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/layout/default.nix) | [GitHub](https://github.com/nadavrot/layout) | Graphviz dot renderer |
 | [Vibe 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/vibe.nix) | [GitHub](https://github.com/TornaxO7/vibe) | Desktop audio visualizer |
 | [Wondermagick 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/wondermagick/default.nix) | [GitHub](https://github.com/Shnatsel/wondermagick) | Memory-safe ImageMagick replacement |
@@ -216,7 +215,6 @@
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Age-plugin-fido2prf 🐹](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/age-plugin-fido2prf.nix) | [GitHub](https://github.com/FiloSottile/typage) | FIDO2 PRF plugin for age |
 | [Forkfs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/forkfs.nix) | [GitHub](https://github.com/SUPERCILEX/forkfs) | Filesystem change sandbox for processes |
 | [Hakoniwa 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/hakoniwa.nix) | [GitHub](https://github.com/souk4711/hakoniwa) | Process isolation tool |
 
@@ -232,8 +230,6 @@
 | Package | Homepage | Description |
 |-|-|-|
 | [Busd 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/busd.nix) | [GitHub](https://github.com/dbus2/busd) | D-Bus bus implementation |
-| [Cpx 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/cpx.nix) | [GitHub](https://github.com/11happy/cpx) | Reimagined cp command |
-| [Lacy 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/lacy.nix) | [GitHub](https://github.com/timothebot/lacy) | Fast cd alternative |
 | [Sunsetc 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/sunsetc.nix) | [GitHub](https://github.com/mkj/sunset) | SSH client and server |
 
 </details>
@@ -425,7 +421,7 @@
 | ✅ | Distro | [NixOS 🌐❄️](https://github.com/NixOS/nixpkgs) | [Spectrum OS ❄️](https://spectrum-os.org) | [OCI 📖](https://github.com/opencontainers/runtime-spec), [Distrobox](https://github.com/89luca89/distrobox) | [Fedora Silverblue](https://fedoraproject.org/silverblue) |
 | ✅ | Kernel | [Zen Linux Kernel 🌐💣🦀](https://github.com/zen-kernel/zen-kernel) | [Asterinas 🦀](https://github.com/asterinas/asterinas), [Redox OS 🦀](https://gitlab.redox-os.org/redox-os/redox) | [Wine 💣](https://www.winehq.org), [Darling 💣](https://www.darlinghq.org) | [Microsoft NT 🔒🇺🇸](https://en.wikipedia.org/wiki/Architecture_of_Windows_NT), [Apple XNU 💣🇺🇸](https://github.com/apple-oss-distributions/xnu) |
 | 🚧 | Libc | [Glibc 💣](https://en.wikipedia.org/wiki/Glibc) | [Musl 💣](https://www.musl-libc.org), [Relibc 🦀](https://github.com/redox-os/relibc) | [Gcompat 💣](https://git.adelielinux.org/adelie/gcompat) | |
-| 🚧 | Init System | [Systemd 💣](https://github.com/systemd/systemd) | [Redox Init 🦀](https://gitlab.redox-os.org/redox-os/init), [Systemd-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/systemd) | ⬅️ | |
+| 🚧 | Init System | [Systemd 💣](https://github.com/systemd/systemd) | [Redox Init 🦀](https://gitlab.redox-os.org/redox-os/init), [Synit 🦀](https://git.syndicate-lang.org/synit/synit), [Systemd-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/systemd) | ⬅️ | |
 | 🚧 | Inter-process Communication | [Dbus 💣](https://gitlab.freedesktop.org/dbus/dbus) | [Zlink 🦀](https://github.com/z-galaxy/zlink) | [Zbus 🦀](https://github.com/dbus2/zbus), [Busd 🦀](https://github.com/dbus2/busd) | |
 | 🚫 | Multimedia Server | [Pipewire 💣](https://gitlab.freedesktop.org/pipewire/pipewire) | [Pipewire-native-rs 🦀](https://gitlab.freedesktop.org/pipewire/pipewire-native-rs) | ⬅️ | [Pulseaudio 💣](https://gitlab.freedesktop.org/pulseaudio/pulseaudio) |
 | 🚫 | XR Runtime | [Monado 💣](https://gitlab.freedesktop.org/monado/monado) | | [OpenXR 📖](https://www.khronos.org/openxr) | [Arcan 💣](https://github.com/letoram/arcan) |
@@ -473,7 +469,7 @@
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
 | ✅ | WebAssembly Runtime | [Wasmtime 🦀](https://github.com/bytecodealliance/wasmtime) | | [WASI 📖](https://wasi.dev) | |
-| ✅ | ECMAScript Runtime | [Deno 🦀](https://github.com/denoland/deno) | | [Deno Node APIs](https://docs.deno.com/runtime/reference/node_apis) | [Node.js 💣](https://github.com/nodejs/node) |
+| ✅ | ECMAScript Runtime | [Deno 🦀](https://github.com/denoland/deno) | [Bun 🦀](https://github.com/oven-sh/bun) | [Deno Node APIs](https://docs.deno.com/runtime/reference/node_apis) | [Node.js 💣](https://github.com/nodejs/node) |
 | ✅ | Container Runtime | [Youki 🦀](https://github.com/containers/youki) | | [OCI 📖](https://github.com/opencontainers/runtime-spec) | [Runc 🐹](https://github.com/opencontainers/runc) |
 | ✅ | Virtualization | [Cloud Hypervisor 🦀](https://github.com/cloud-hypervisor/cloud-hypervisor) | | [KVM 📖](https://en.wikipedia.org/wiki/Kernel-based_Virtual_Machine) | [QEMU 💣](https://github.com/qemu/qemu) |
 | 🚧 | Meta Database | [Hasura λ➡️🦀](https://github.com/hasura/graphql-engine) | [Surrealdb ⏳🦀](https://github.com/surrealdb/surrealdb) | [GraphQL](https://graphql.org) | |
@@ -566,7 +562,7 @@
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
 | ✅ | Language | [Rust 🦀](https://github.com/rust-lang/rust) | | [cxx 🦀](https://github.com/dtolnay/cxx), [bindgen 🦀](https://github.com/rust-lang/rust-bindgen), [GCC-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/gcc) | [C 💣](https://en.wikipedia.org/wiki/C_(programming_language)), [C++ 💣](https://en.wikipedia.org/wiki/C%2B%2B) |
-| 🚧 | Compiler Framework | [Mlir 💣](https://github.com/llvm/llvm-project/tree/main/mlir), [LLVM 💣](https://github.com/llvm/llvm-project) | [Cranelift 🦀](https://github.com/bytecodealliance/wasmtime/tree/main/cranelift) | ⬅️ | |
+| 🚧 | Compiler Framework | [Mlir 💣](https://github.com/llvm/llvm-project/tree/main/mlir), [LLVM 💣](https://github.com/llvm/llvm-project) | [Cranelift 🦀](https://github.com/bytecodealliance/wasmtime/tree/main/cranelift), [Krabby 🦀](https://codeberg.org/bal-e/krabby) | ⬅️ | |
 | 🚧 | Linker | [Mold 💣](https://github.com/rui314/mold) | [Wild 🦀](https://github.com/davidlattimore/wild) | [Binutils-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/binutils) | [GNU ld 💣](https://sourceware.org/binutils) |
 | ✅ | Formatter | [Rustfmt 🦀](https://github.com/rust-lang/rustfmt) | | 🆗 | |
 | ✅ | Linter | [Clippy 🦀](https://github.com/rust-lang/rust-clippy) | | 🆗 | |
@@ -631,9 +627,9 @@
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
 | ✅ | Local LLM | [Devstral 2 🇪🇺](https://mistral.ai/news/devstral-2-vibe-cli) | [EuroLLM 🇪🇺](https://eurollm.io) | 🆗 | |
-| ✅ | Hosted LLM | [Mistral Large 🇪🇺](https://mistral.ai/products/premier#702), [Claude Opus 4.6 🔒🇺🇸](https://claude.ai) | | 🆗 | |
+| ✅ | Hosted LLM | [Mistral Large 🇪🇺](https://mistral.ai/products/premier#702) | | 🆗 | [Claude Opus 4.7 🔒🇺🇸](https://claude.ai) |
 | ✅ | Local Provider | [Ollama 🐹🏡🇪🇺](https://github.com/ollama/ollama) | | 🆗 | |
-| ✅ | Hosted Provider | [Mistral 🇪🇺](https://mistral.ai), [Anthropic Claude ⚖️🇺🇸](https://claude.ai) | [Lumo 🇪🇺](https://lumo.proton.me) | 🆗 | [OpenAI 🔒🇺🇸](https://openai.com) |
+| ✅ | Hosted Provider | [Mistral 🇪🇺](https://mistral.ai) | [Lumo 🇪🇺](https://lumo.proton.me) | 🆗 | [OpenAI 🔒🇺🇸](https://openai.com), [Anthropic Claude ⚖️🇺🇸](https://claude.ai) |
 | ✅ | Personal AI Assistant | [IronClaw 🦀🏡](https://github.com/nearai/ironclaw) | | 🆗 | [OpenClaw 🐒🏡](https://github.com/openclaw/openclaw) |
 | 🚧 | TTS/STT | | [Vox 🦀](https://github.com/rtk-ai/vox) | 🆗 | |
 
