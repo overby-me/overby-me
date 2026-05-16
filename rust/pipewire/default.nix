@@ -2793,6 +2793,30 @@
         tool = "pw-mididump";
         name = "realtime-reject";
       }
+      {
+        tool = "pw-mididump";
+        name = "program-change";
+      }
+      {
+        tool = "pw-mididump";
+        name = "channel-pressure";
+      }
+      {
+        tool = "pw-mididump";
+        name = "time-signature";
+      }
+      {
+        tool = "pw-mididump";
+        name = "sysex-escape";
+      }
+      {
+        tool = "pw-mididump";
+        name = "marker-meta";
+      }
+      {
+        tool = "pw-mididump";
+        name = "cue-point-meta";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
