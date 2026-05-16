@@ -3021,6 +3021,10 @@
         tool = "pipewire-pulse";
         name = "short-P-no-arg";
       }
+      {
+        tool = "pw-mididump";
+        name = "long-force-midi-no-arg";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
