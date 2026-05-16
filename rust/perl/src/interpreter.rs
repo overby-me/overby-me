@@ -482,6 +482,10 @@ pub struct Interpreter {
     /// Sequence number for `(eval N)` references in compile errors.
     /// Reference perl increments this on every `eval STRING` call.
     eval_counter: usize,
+    /// Scalar var names whose PV was freed by the `undef` op (as
+    /// opposed to being assigned `undef`). Tracked for Devel::Peek::Dump
+    /// to report `PV = 0` vs `PV = 0x...`. op/undef tests 75-76.
+    freshly_undeffed: HashSet<String>,
     /// True once `_charnames.pm` has hit a require failure in this
     /// run. Subsequent `\N{NAME}` uses emit "Attempt to reload" rather
     /// than the original "Can't locate" message — matching reference
@@ -725,6 +729,7 @@ impl Interpreter {
             call_stack: Vec::new(),
             pending_return: None,
             eval_counter: 0,
+            freshly_undeffed: HashSet::new(),
             charnames_load_failed: false,
             pending_flow: None,
             eval_depth: 0,
@@ -823,6 +828,21 @@ impl Interpreter {
             }
         }
         false
+    }
+
+    /// Seed `%Config::Config` with the minimum keys test scripts probe
+    /// after `use Config` / `require Config`. We don't ship the full
+    /// Config.pm shape; just the `extensions` key listing the dynamic
+    /// extensions we satisfy via builtins (so `_have_dynamic_extension`
+    /// in test.pl doesn't skip those tests).
+    fn populate_minimal_config(&mut self) {
+        let extensions = "Devel/Peek";
+        let mut h = std::collections::HashMap::new();
+        h.insert(
+            "extensions".to_string(),
+            Value::Str(extensions.to_string(), false),
+        );
+        self.globals.hashes.insert("Config::Config".to_string(), h);
     }
 
     fn shared_undef_ref(&mut self) -> std::rc::Rc<std::cell::RefCell<Value>> {
@@ -3846,6 +3866,15 @@ impl Interpreter {
                 // path when Config is compiled-in but the test's
                 // particular config keys are absent.
                 if filename == "Config.pm" && !self.inc_user_modified {
+                    self.required_files.insert(filename.clone());
+                    self.set_hash_element("INC", &filename, Value::Str(filename.clone(), false));
+                    self.populate_minimal_config();
+                    return Flow::None;
+                }
+                // `require Devel::Peek` — we bundle a minimal builtin
+                // implementation so `Devel::Peek::Dump` works for the
+                // common SV-allocation introspection tests.
+                if filename == "Devel/Peek.pm" {
                     self.required_files.insert(filename.clone());
                     self.set_hash_element("INC", &filename, Value::Str(filename.clone(), false));
                     return Flow::None;
@@ -8385,7 +8414,12 @@ impl Interpreter {
                                 }
                             }
                         }
-                        _ => self.assign_to(arg, Value::Undef),
+                        _ => {
+                            self.assign_to(arg, Value::Undef);
+                            if let Expr::ScalarVar(n) = arg {
+                                self.freshly_undeffed.insert(n.clone());
+                            }
+                        }
                     }
                 }
                 Value::Undef
@@ -10749,6 +10783,44 @@ impl Interpreter {
                 }
                 Value::Num(1.0)
             }
+            "Devel::Peek::Dump" => {
+                let arg = args.first();
+                let var_name = match arg {
+                    Some(Expr::ScalarVar(n)) | Some(Expr::MyVar(n)) | Some(Expr::LocalVar(n)) => {
+                        Some(n.clone())
+                    }
+                    _ => None,
+                };
+                let val = arg.map(|a| self.eval_expr(a)).unwrap_or(Value::Undef);
+                let freshly_undeffed = var_name
+                    .as_ref()
+                    .map(|n| self.freshly_undeffed.contains(n))
+                    .unwrap_or(false);
+                let addr: usize = var_name.as_ref().map_or(0x100, |n| {
+                    n.bytes()
+                        .fold(0x7fffu64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64))
+                        as usize
+                });
+                if freshly_undeffed {
+                    // After `undef $x` reference perl emits SV header,
+                    // REFCNT, FLAGS, PV = 0 — and nothing else.
+                    eprintln!(
+                        "SV = PV(0x{addr:x}) at 0x{addr:x}\n  REFCNT = 1\n  FLAGS = ()\n  PV = 0"
+                    );
+                } else {
+                    let s = val.to_str();
+                    let cur = s.chars().count();
+                    let pv_line = if matches!(val, Value::Undef) {
+                        format!("  PV = 0x{addr:x} \"\"\\0")
+                    } else {
+                        format!("  PV = 0x{addr:x} {s:?}\\0")
+                    };
+                    eprintln!(
+                        "SV = PV(0x{addr:x}) at 0x{addr:x}\n  REFCNT = 1\n  FLAGS = ()\n{pv_line}\n  CUR = {cur}\n  LEN = {cur}"
+                    );
+                }
+                Value::Undef
+            }
             "re::is_regexp" => {
                 let val = args
                     .first()
@@ -11667,6 +11739,7 @@ impl Interpreter {
                 self.maybe_emit_config_load_warning();
                 // Build %args from the call arguments.
                 let mut prog = String::new();
+                let mut progs: Vec<String> = Vec::new();
                 let mut switches: Vec<String> = Vec::new();
                 let mut prog_args: Vec<String> = Vec::new();
                 let mut progfile = String::new();
@@ -11678,6 +11751,19 @@ impl Interpreter {
                     let val_e = &args[i + 1];
                     match key.as_str() {
                         "prog" => prog = self.eval_expr(val_e).to_str(),
+                        "progs" => {
+                            // `progs => [...]` — ARRAYREF of -e snippets.
+                            let v = self.eval_expr(val_e);
+                            if let Value::ArrayRef(rc) = &v {
+                                for item in rc.borrow().iter() {
+                                    progs.push(item.to_str());
+                                }
+                            } else {
+                                for item in self.eval_list(val_e) {
+                                    progs.push(item.to_str());
+                                }
+                            }
+                        }
                         "progfile" => progfile = self.eval_expr(val_e).to_str(),
                         "stderr" => {
                             let v = self.eval_expr(val_e);
@@ -11726,6 +11812,9 @@ impl Interpreter {
                 }
                 if !prog.is_empty() {
                     cmd.arg("-e").arg(&prog);
+                }
+                for p in &progs {
+                    cmd.arg("-e").arg(p);
                 }
                 if !progfile.is_empty() {
                     cmd.arg(&progfile);
@@ -14087,6 +14176,10 @@ impl Interpreter {
 
     fn set_var(&mut self, name: &str, val: Value) {
         let key = canon_var(name).to_string();
+        // Any assignment (even `= undef`) clears the freshly_undeffed
+        // tracker — Devel::Peek `PV = 0` only reports for the `undef`
+        // op path. op/undef tests 75-76.
+        self.freshly_undeffed.remove(&key);
         // Tied scalars: route writes through `class::STORE(obj, val)`.
         // Skip when we're already inside a tie handler so a STORE that
         // itself writes the same tied scalar doesn't recurse forever.
