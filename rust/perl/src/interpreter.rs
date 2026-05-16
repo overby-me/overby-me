@@ -24434,8 +24434,9 @@ fn inline_simple_recursion_pass(pattern: &str) -> String {
                     && let Some((_, body)) = groups.iter().find(|(num, _)| *num == n)
                     && !body_has_recursion_ref(body)
                 {
+                    let body = fold_accept_in_substituted_body(body);
                     out.push_str("(?:");
-                    out.push_str(body);
+                    out.push_str(&body);
                     out.push(')');
                     i = k + 1;
                     continue;
@@ -24467,8 +24468,9 @@ fn inline_simple_recursion_pass(pattern: &str) -> String {
                             groups.iter().find(|(num, _)| *num as i64 == target)
                         && !body_has_recursion_ref(body)
                     {
+                        let body = fold_accept_in_substituted_body(body);
                         out.push_str("(?:");
-                        out.push_str(body);
+                        out.push_str(&body);
                         out.push(')');
                         i = k + 1;
                         continue;
@@ -24493,6 +24495,7 @@ fn inline_simple_recursion_pass(pattern: &str) -> String {
                     if let Some((_, body)) = lookup_named_group(pattern, &name)
                         && !body_has_recursion_ref(&body)
                     {
+                        let body = fold_accept_in_substituted_body(&body);
                         out.push_str("(?:");
                         out.push_str(&body);
                         out.push(')');
@@ -25004,10 +25007,11 @@ fn expand_recursive_helper(
                     if let Some(body) = body
                         && depth > 0
                     {
+                        // ACCEPT inside a GOSUB body terminates only the
+                        // local subroutine call, not the outer match —
+                        // fold alternations with `(*ACCEPT)` accordingly.
+                        let body = fold_accept_in_substituted_body(&body);
                         let expanded_body = if body_has_inner_capture(&body) {
-                            // Body has inner captures — try renaming them to
-                            // a unique suffix so duplicates don't conflict.
-                            // Fails on unnamed `()` captures or `\N` backrefs.
                             *counter += 1;
                             rename_named_captures(&body, *counter)
                         } else {
@@ -27467,6 +27471,73 @@ fn fold_accept_in_lookaround(pattern: &str) -> String {
                         i = k + 1;
                         continue;
                     }
+                }
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Apply `(*ACCEPT)`-fold to a body about to be substituted via GOSUB.
+/// Recurses into nested groups so multiple ACCEPT alternations all
+/// get folded. Returns the body unchanged if there's nothing to fold.
+fn fold_accept_in_substituted_body(body: &str) -> String {
+    let chars: Vec<char> = body.chars().collect();
+    let mut out = String::with_capacity(body.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class && c == '(' {
+            let mut depth = 1;
+            let mut k = i + 1;
+            let mut local_in_class = false;
+            while k < chars.len() && depth > 0 {
+                if chars[k] == '\\' && k + 1 < chars.len() {
+                    k += 2;
+                    continue;
+                }
+                if !local_in_class && chars[k] == '[' {
+                    local_in_class = true;
+                } else if local_in_class && chars[k] == ']' {
+                    local_in_class = false;
+                } else if !local_in_class && chars[k] == '(' {
+                    depth += 1;
+                } else if !local_in_class && chars[k] == ')' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                k += 1;
+            }
+            if depth == 0 {
+                let group_text: String = chars[i..=k].iter().collect();
+                let post: String = chars[k + 1..].iter().collect();
+                let candidate = format!("{group_text}{post}");
+                if let Some(folded) = fold_accept_in_body(&candidate) {
+                    out.push_str(&folded);
+                    return out;
                 }
             }
         }
