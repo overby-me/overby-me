@@ -289,14 +289,23 @@ fn emit_cutoff(s: &str) {
 }
 
 // Mirror libc's strtod: skip leading whitespace, parse the longest valid
-// float prefix, return 0.0 if nothing matches. Rust's f64::parse requires
-// the whole string to be a valid float, so we walk backward to find the
-// longest accepted prefix (matches strtod's "consume prefix" behavior on
-// inputs like "1.5xyz").
+// float prefix, return 0.0 if nothing matches. Handles decimal floats
+// (Rust f64::parse) and hex floats like "0x1.5p0" (not supported by
+// Rust's parser). Walks backward to find the longest accepted prefix so
+// "1.5xyz" → 1.5 (strtod's "consume prefix" behavior).
 fn strtod(s: &str) -> f64 {
     let trimmed = s.trim_start();
     if trimmed.is_empty() {
         return 0.0;
+    }
+    // Hex float: detect 0x/0X prefix (with optional sign) up front, since
+    // f64::parse doesn't recognize them.
+    let hex_start = trimmed
+        .strip_prefix('+')
+        .or_else(|| trimmed.strip_prefix('-'))
+        .unwrap_or(trimmed);
+    if hex_start.starts_with("0x") || hex_start.starts_with("0X") {
+        return parse_hex_float_prefix(trimmed);
     }
     if let Ok(v) = trimmed.parse::<f64>() {
         return v;
@@ -310,6 +319,88 @@ fn strtod(s: &str) -> f64 {
         }
     }
     0.0
+}
+
+// Parse a C-style hex float prefix: `[+-]?0[xX][hex]*(\.[hex]*)?([pP][+-]?[0-9]+)?`.
+// Returns 0.0 if no hex digits found. Stops at the first non-matching
+// byte (strtod-style prefix consumption).
+fn parse_hex_float_prefix(s: &str) -> f64 {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    let negative = match bytes.first() {
+        Some(b'-') => {
+            i += 1;
+            true
+        }
+        Some(b'+') => {
+            i += 1;
+            false
+        }
+        _ => false,
+    };
+    // Skip "0x" or "0X".
+    i += 2;
+    let mut value: f64 = 0.0;
+    let mut saw_digit = false;
+    while i < bytes.len() {
+        if let Some(d) = (bytes[i] as char).to_digit(16) {
+            value = value * 16.0 + d as f64;
+            saw_digit = true;
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    if i < bytes.len() && bytes[i] == b'.' {
+        i += 1;
+        let mut scale: f64 = 1.0 / 16.0;
+        while i < bytes.len() {
+            if let Some(d) = (bytes[i] as char).to_digit(16) {
+                value += d as f64 * scale;
+                scale /= 16.0;
+                saw_digit = true;
+                i += 1;
+            } else {
+                break;
+            }
+        }
+    }
+    if !saw_digit {
+        return 0.0;
+    }
+    // Optional binary exponent: [pP][+-]?[0-9]+.
+    if i < bytes.len() && (bytes[i] == b'p' || bytes[i] == b'P') {
+        let exp_start = i;
+        i += 1;
+        let exp_neg = match bytes.get(i) {
+            Some(b'-') => {
+                i += 1;
+                true
+            }
+            Some(b'+') => {
+                i += 1;
+                false
+            }
+            _ => false,
+        };
+        let digits_start = i;
+        let mut exp: i32 = 0;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            exp = exp
+                .saturating_mul(10)
+                .saturating_add((bytes[i] - b'0') as i32);
+            i += 1;
+        }
+        if i == digits_start {
+            // 'p' not followed by digits — strtod ignores the exponent.
+            i = exp_start;
+        } else {
+            let signed = if exp_neg { -exp } else { exp };
+            value *= 2.0_f64.powi(signed);
+        }
+    }
+    let _ = i; // i is the prefix length; we just need the value.
+    if negative { -value } else { value }
 }
 
 fn is_valid_format(v: &str) -> bool {

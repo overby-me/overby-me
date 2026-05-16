@@ -2745,6 +2745,26 @@
         tool = "spa-resample";
         name = "cutoff-long-separated";
       }
+      {
+        tool = "spa-resample";
+        name = "cutoff-hex";
+      }
+      {
+        tool = "spa-resample";
+        name = "cutoff-hex-negative";
+      }
+      {
+        tool = "spa-resample";
+        name = "cutoff-hex-no-exp";
+      }
+      {
+        tool = "spa-resample";
+        name = "cutoff-negative";
+      }
+      {
+        tool = "spa-resample";
+        name = "cutoff-neg-nan";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
