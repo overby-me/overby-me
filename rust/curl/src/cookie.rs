@@ -262,7 +262,14 @@ pub(crate) fn parse_set_cookie_ex(
                         }
                     }
                     "expires" => {
-                        if !has_max_age && let Some(ts) = parse_http_date(val) {
+                        // curl's lib/cookie.c MAX_DATE_LENGTH = 80; dates at
+                        // or beyond that length are skipped (the cookie ends
+                        // up as a session cookie). Test 483 picks one date
+                        // exactly at the boundary to verify this.
+                        if !has_max_age
+                            && val.len() < 80
+                            && let Some(ts) = parse_http_date(val)
+                        {
                             // Epoch (0) is a valid "already expired" date used
                             // for cookie deletion.  Use 1 so it is not confused
                             // with the session-cookie sentinel (0).
