@@ -2917,6 +2917,18 @@
         tool = "spa-acp-tool";
         name = "help-cmd";
       }
+      {
+        tool = "pw-mididump";
+        name = "sequencer-specific";
+      }
+      {
+        tool = "pw-mididump";
+        name = "midi-port-meta";
+      }
+      {
+        tool = "pw-mididump";
+        name = "format-2-smf";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
