@@ -2817,6 +2817,18 @@
         tool = "pw-mididump";
         name = "cue-point-meta";
       }
+      {
+        tool = "pw-cat";
+        name = "bad-channels-zero";
+      }
+      {
+        tool = "pw-cat";
+        name = "bad-channels-negative";
+      }
+      {
+        tool = "pw-cat";
+        name = "bad-channels-overflow";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
