@@ -2765,6 +2765,26 @@
         tool = "spa-resample";
         name = "cutoff-neg-nan";
       }
+      {
+        tool = "pw-dot";
+        name = "all-flag";
+      }
+      {
+        tool = "pw-dot";
+        name = "smart-flag";
+      }
+      {
+        tool = "pw-dot";
+        name = "detail-flag";
+      }
+      {
+        tool = "pw-dot";
+        name = "lr-flag";
+      }
+      {
+        tool = "pw-dot";
+        name = "ortho-flag";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a

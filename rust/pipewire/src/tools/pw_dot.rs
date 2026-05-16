@@ -106,8 +106,24 @@ pub fn main(raw_args: &[String]) -> i32 {
             s if s.starts_with("-j") && s.len() > 2 => {
                 json_input = Some(s[2..].to_string());
             }
-            "-a" | "--all" | "-s" | "--smart" | "-d" | "--detail" | "-L" | "--lr" | "-9"
-            | "--90" => {}
+            // No-arg flags with informational stderr messages. C prints
+            // these inline from the option-parse switch (case 'a': etc.),
+            // so they appear in argv order across the merged stream.
+            "-a" | "--all" => {
+                eprintln!("all option enabled");
+            }
+            "-s" | "--smart" => {
+                eprintln!("smart option enabled");
+            }
+            "-d" | "--detail" => {
+                eprintln!("detail option enabled");
+            }
+            "-L" | "--lr" => {
+                eprintln!("set rank direction to LR");
+            }
+            "-9" | "--90" => {
+                eprintln!("orthogonal edges enabled");
+            }
             s if s.starts_with("--") => {
                 eprintln!("{argv0}: unrecognized option '{s}'");
                 print_help(argv0);
