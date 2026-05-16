@@ -3029,6 +3029,10 @@
         tool = "pw-mididump";
         name = "division-zero";
       }
+      {
+        tool = "pw-mididump";
+        name = "key-sig-out-of-range";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a

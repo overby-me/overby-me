@@ -789,17 +789,19 @@ fn format_meta(out: &mut String, ev: &Event) {
             ));
         }
         0x59 if meta.len() >= 2 => {
-            let sf = meta[0] as i8;
+            // C reads sf as `int sf = meta[0]` — implicit u8 → int
+            // (positive), so -7 becomes 249. Match that quirk.
+            let sf = meta[0] as i32;
             let kind = if sf > 0 { "sharps" } else { "flats" };
             let table = if meta[1] == 0 {
                 &MAJOR_KEYS
             } else {
                 &MINOR_KEYS
             };
-            let idx = ((sf as i32) + 9).clamp(0, 18) as usize;
+            let idx = (sf + 9).clamp(0, 18) as usize;
             out.push_str(&format!(
                 "Key Signature: {} {}: {}",
-                sf.abs(),
+                sf.unsigned_abs(),
                 kind,
                 table[idx],
             ));
