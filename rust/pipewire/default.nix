@@ -3250,6 +3250,18 @@
       }
       {
         tool = "pw-cli";
+        name = "disconnect-bad-id";
+      }
+      {
+        tool = "pw-cli";
+        name = "switch-remote-bad-id";
+      }
+      {
+        tool = "pw-cli";
+        name = "sr-alias-bad-id";
+      }
+      {
+        tool = "pw-cli";
         name = "bad-flag";
       }
       {

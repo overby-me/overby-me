@@ -241,6 +241,36 @@ fn run_positional(argv0: &str, remote: Option<String>, positional: Vec<&str>) ->
                 }
             }
         }
+        // do_disconnect / do_switch_remote: if given an explicit remote
+        // id, C's find_var(idx, TYPE_REMOTE) returns NULL for anything
+        // not in the (per-process REPL) remote table and the command
+        // errors with `Remote <idx> does not exist`. Our non-REPL mode
+        // only ever has the implicit id 0, so any non-zero id misses.
+        // C's atoi parses leading sign + digits, returning 0 for garbage
+        // — so `disconnect foo` looks up remote 0 and silently succeeds.
+        "disconnect" | "dis" | "switch-remote" | "sr" if !rest.is_empty() => {
+            let arg = rest[0];
+            let mut chars = arg.trim_start().chars().peekable();
+            let neg = matches!(chars.peek(), Some('-'));
+            if neg || matches!(chars.peek(), Some('+')) {
+                chars.next();
+            }
+            let mut n: i32 = 0;
+            for c in chars {
+                if let Some(d) = c.to_digit(10) {
+                    n = n.wrapping_mul(10).wrapping_add(d as i32);
+                } else {
+                    break;
+                }
+            }
+            let idx = if neg { n.wrapping_neg() } else { n };
+            if idx == 0 {
+                0
+            } else {
+                eprintln!("Error: \"Remote {idx} does not exist\"");
+                1
+            }
+        }
         "connect" | "con" | "disconnect" | "dis" | "switch-remote" | "sr" => 0,
         // Commands we don't implement but whose usage error matches
         // upstream byte-for-byte. Each one's `parse()`-side error is
