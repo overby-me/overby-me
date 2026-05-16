@@ -6,7 +6,7 @@ Use the upstream [curl test suite](https://github.com/curl/curl/tree/master/test
 
 ## Current Status
 
-**753 tests passing** (was 709 at session start; +44 net across multipart, retry, IPv6,
+**754 tests passing** (was 709 at session start; +45 net across multipart, retry, IPv6,
 upload-stdin redirect, write-out, interface, dump-header, per-URL --include /
 --resolve resets, --resolve removal entries, pool routing distinguishing --resolve
 from --connect-to, -F text-field ;filename= / ;type= modifiers, -o pairing
@@ -16,10 +16,11 @@ treating "unsupported protocol" as fatal across the URL list, URL glob
 host-only/Domain= equivalence and `__Secure-`/`__Host-` prefix rejection,
 secure-cookie loopback exception honoring `-H "Host:"` override, retry-prefix
 accumulation distinguishing stdout from ftruncate-on-retry file output, a
-previously-missed first-subaltname HTTPS test, and the cookie expires-date
-80-byte length cap) across the curl 8.18.0 test suite (verified with strict
-runner checks — the derivation fails when a test number doesn't exist or the
-suite reports anything other than 100% OK).
+previously-missed first-subaltname HTTPS test, the cookie expires-date
+80-byte length cap, and `--tls-max 1.2` plus SSLKEYLOGFILE for rustls)
+across the curl 8.18.0 test suite (verified with strict runner checks —
+the derivation fails when a test number doesn't exist or the suite reports
+anything other than 100% OK).
 
 The full list is in `default.nix` under `testNums`; see the per-fix bullets
 in "Phase 7" below for what each addition unlocks.
@@ -428,13 +429,14 @@ Current gaps:
 - [x] `--retry` accumulates failed attempts into stdout (no rewind possible) but truncates them away when the destination is a regular file (curl `ftruncate`'s between retries). Differentiated by checking `effective_opts.outputs[url_idx]` — unblocks test 197 while keeping test 198
 - [x] Add test 3001: HTTPS localhost with last-subaltname cert was already passing under our rustls chain, just missing from `testNums`
 - [x] Cookie expires-attribute length cap: curl's lib/cookie.c `MAX_DATE_LENGTH` is 80; values at or beyond that length drop silently and the cookie ends up session-scoped. Test 483 picks one date exactly at the boundary (unlocked test 483)
+- [x] `--tls-max <version>` + `SSLKEYLOGFILE` env var: cap rustls's offered protocol versions when the cap is `1.2` (the only version test 2090 exercises), and write the negotiated handshake secrets in NSS Key Log format (`LABEL <client_random_hex> <secret_hex>`) when `SSLKEYLOGFILE` is set (unlocked test 2090)
 - [ ] Target 800+ passing by addressing remaining feature gaps
 
 ---
 
 ## Test Inventory
 
-### Passing tests (753)
+### Passing tests (754)
 
 The authoritative list is `testNums` in `default.nix`; the count is
 checked there by Nix and stays in sync with the per-test derivations.

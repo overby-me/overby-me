@@ -1,7 +1,36 @@
 use std::fs;
-use std::sync::Arc;
+use std::io::Write;
+use std::sync::{Arc, Mutex};
 
 use crate::options::Options;
+
+/// NSS Key Log format writer: each line is `LABEL <client_random_hex> <secret_hex>`.
+/// Used by SSLKEYLOGFILE to let Wireshark decrypt captures (test 2090).
+#[derive(Debug)]
+struct EnvKeyLog {
+    file: Mutex<std::fs::File>,
+}
+
+impl rustls::KeyLog for EnvKeyLog {
+    fn log(&self, label: &str, client_random: &[u8], secret: &[u8]) {
+        if let Ok(mut f) = self.file.lock() {
+            let line = format!(
+                "{label} {} {}\n",
+                hex_encode(client_random),
+                hex_encode(secret)
+            );
+            let _ = f.write_all(line.as_bytes());
+        }
+    }
+}
+
+fn hex_encode(b: &[u8]) -> String {
+    let mut s = String::with_capacity(b.len() * 2);
+    for byte in b {
+        s.push_str(&format!("{byte:02x}"));
+    }
+    s
+}
 
 pub(crate) fn make_tls_config(opts: &Options) -> Result<Arc<rustls::ClientConfig>, String> {
     let mut root_store = rustls::RootCertStore::empty();
@@ -32,9 +61,20 @@ pub(crate) fn make_tls_config(opts: &Options) -> Result<Arc<rustls::ClientConfig
         }
     }
 
-    let builder = rustls::ClientConfig::builder().with_root_certificates(root_store);
+    // Apply --tls-max by selecting a subset of rustls's default protocol
+    // versions. With "1.2" we drop TLS 1.3 from the offer so the negotiation
+    // pins to 1.2 (test 2090 needs CLIENT_RANDOM key log, which the test
+    // verifies under TLS 1.2 where the secret format is stable).
+    let provider = rustls::crypto::ring::default_provider();
+    let builder_root = match opts.tls_max.as_deref() {
+        Some("1.2") => rustls::ClientConfig::builder_with_provider(provider.into())
+            .with_protocol_versions(&[&rustls::version::TLS12])
+            .map_err(|e| format!("tls config: {e}"))?
+            .with_root_certificates(root_store),
+        _ => rustls::ClientConfig::builder().with_root_certificates(root_store),
+    };
 
-    let config = if let Some(ref cert_path) = opts.cert {
+    let mut config = if let Some(ref cert_path) = opts.cert {
         let cert_pem =
             fs::read(cert_path).map_err(|e| format!("failed to read client cert: {e}"))?;
         let certs = rustls_pemfile::certs(&mut &cert_pem[..])
@@ -47,12 +87,23 @@ pub(crate) fn make_tls_config(opts: &Options) -> Result<Arc<rustls::ClientConfig
             .map_err(|e| format!("failed to parse client key PEM: {e}"))?
             .ok_or_else(|| "no private key found in PEM".to_string())?;
 
-        builder
+        builder_root
             .with_client_auth_cert(certs, key)
             .map_err(|e| format!("client auth setup failed: {e}"))?
     } else {
-        builder.with_no_client_auth()
+        builder_root.with_no_client_auth()
     };
+
+    if let Some(path) = std::env::var_os("SSLKEYLOGFILE")
+        && let Ok(file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+    {
+        config.key_log = Arc::new(EnvKeyLog {
+            file: Mutex::new(file),
+        });
+    }
 
     Ok(Arc::new(config))
 }

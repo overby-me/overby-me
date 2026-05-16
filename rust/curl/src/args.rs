@@ -811,6 +811,10 @@ pub(crate) fn parse_args() -> Options {
                 i += 1;
                 opts.cert_key = Some(PathBuf::from(next_arg(&args, i, "--key")));
             }
+            "--tls-max" => {
+                i += 1;
+                opts.tls_max = Some(next_arg(&args, i, "--tls-max"));
+            }
             "--url" => {
                 i += 1;
                 let val = next_arg(&args, i, "--url");

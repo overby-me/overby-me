@@ -13,6 +13,7 @@ path = "src/main.rs"
 rustls = { version = "0.23", default-features = false, features = [
   "ring",
   "std",
+  "tls12",
 ] }
 rustls-native-certs = "0.8"
 rustls-pemfile = "2"
