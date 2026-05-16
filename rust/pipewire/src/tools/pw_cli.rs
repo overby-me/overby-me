@@ -186,7 +186,9 @@ fn run_positional(argv0: &str, remote: Option<String>, positional: Vec<&str>) ->
     let cmd = match split.next() {
         Some(c) => c,
         None => {
-            print_help(argv0);
+            // C's parse() returns true (success, no output) on
+            // empty/whitespace-only input — `pw-cli ""` should be a
+            // silent no-op, not a help dump.
             return 0;
         }
     };

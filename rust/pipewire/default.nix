@@ -2885,6 +2885,10 @@
         tool = "pw-config";
         name = "missing-relative-prefix";
       }
+      {
+        tool = "pw-cli";
+        name = "empty-cmd";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
