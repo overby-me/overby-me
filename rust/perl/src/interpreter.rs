@@ -17130,7 +17130,8 @@ impl Interpreter {
         // 1685, 1691-1716, 1724, 2042.
         let has_any_i_flag = flags.contains('i') || pattern_has_inline_i_flag(&pattern);
         let pattern = if has_any_i_flag && !case_insensitive_aa {
-            let p = expand_ascii_ligatures(&pattern);
+            let p = swap_s_xdf_pairs(&pattern);
+            let p = expand_ascii_ligatures(&p);
             split_variable_lookbehind(&p)
         } else {
             pattern
@@ -28964,6 +28965,86 @@ fn split_variable_lookbehind(pattern: &str) -> String {
         i += 1;
     }
     out
+}
+
+/// Add swapped `\xDFs` / `s\xDF` form for cross-character ß↔ss /i
+/// folds (re/regexp 1724).
+fn swap_s_xdf_pairs(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if !in_class && c == '\\' && i + 1 < chars.len() {
+            // \xDF or \x{DF} possibly preceded by s/S.
+            let xdf_len = xdf_escape_len(&chars, i);
+            if xdf_len > 0 && i + xdf_len < chars.len() && matches!(chars[i + xdf_len], 's' | 'S') {
+                // \xDF + s/S pair — write swap.
+                let xdf: String = chars[i..i + xdf_len].iter().collect();
+                let s = chars[i + xdf_len];
+                out.push_str(&format!("(?:{xdf}{s}|{s}{xdf})"));
+                i += xdf_len + 1;
+                continue;
+            }
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && (c == 's' || c == 'S') {
+            let xdf_len = xdf_escape_len(&chars, i + 1);
+            if xdf_len > 0 {
+                let xdf: String = chars[i + 1..i + 1 + xdf_len].iter().collect();
+                out.push_str(&format!("(?:{c}{xdf}|{xdf}{c})"));
+                i += 1 + xdf_len;
+                continue;
+            }
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+        } else if in_class && c == ']' {
+            in_class = false;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Length (in chars from index `i`) of a `\xDF` or `\x{DF}` escape,
+/// or 0 if `chars[i..]` doesn't start with one.
+fn xdf_escape_len(chars: &[char], i: usize) -> usize {
+    if i + 1 >= chars.len() || chars[i] != '\\' || chars[i + 1] != 'x' {
+        return 0;
+    }
+    if i + 2 < chars.len() && chars[i + 2] == '{' {
+        let mut k = i + 3;
+        while k < chars.len() && chars[k] != '}' {
+            k += 1;
+        }
+        if k < chars.len() {
+            let body: String = chars[i + 3..k]
+                .iter()
+                .filter(|c| !c.is_whitespace() && **c != '_')
+                .collect();
+            if let Ok(cp) = u32::from_str_radix(&body, 16)
+                && cp == 0xDF
+            {
+                return k + 1 - i;
+            }
+        }
+        return 0;
+    }
+    if i + 3 < chars.len() && chars[i + 2].is_ascii_hexdigit() && chars[i + 3].is_ascii_hexdigit() {
+        let hex: String = chars[i + 2..i + 4].iter().collect();
+        if let Ok(cp) = u32::from_str_radix(&hex, 16)
+            && cp == 0xDF
+        {
+            return 4;
+        }
+    }
+    0
 }
 
 fn expand_ascii_ligatures(pattern: &str) -> String {
