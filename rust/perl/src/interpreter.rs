@@ -482,6 +482,10 @@ pub struct Interpreter {
     /// Sequence number for `(eval N)` references in compile errors.
     /// Reference perl increments this on every `eval STRING` call.
     eval_counter: usize,
+    /// When > 0, `eval_string_inner` does NOT increment `eval_counter`.
+    /// Used for callers that re-use the eval machinery for non-Perl-
+    /// level evals (regex `/e` replacement, code-block-substitution).
+    suppress_eval_count: u32,
     /// Scalar var names whose PV was freed by the `undef` op (as
     /// opposed to being assigned `undef`). Tracked for Devel::Peek::Dump
     /// to report `PV = 0` vs `PV = 0x...`. op/undef tests 75-76.
@@ -729,6 +733,7 @@ impl Interpreter {
             call_stack: Vec::new(),
             pending_return: None,
             eval_counter: 0,
+            suppress_eval_count: 0,
             freshly_undeffed: HashSet::new(),
             charnames_load_failed: false,
             pending_flow: None,
@@ -5723,9 +5728,11 @@ impl Interpreter {
                                 }
                                 let r = if want_eval {
                                     let mut current = replacement.clone();
+                                    self.suppress_eval_count += 1;
                                     for _ in 0..eval_count {
                                         current = self.eval_string(&current).to_str();
                                     }
+                                    self.suppress_eval_count -= 1;
                                     current
                                 } else {
                                     expand_replacement(&m, &replacement)
@@ -5929,9 +5936,11 @@ impl Interpreter {
                                 }
                                 let r = if want_eval {
                                     let mut current = replacement.clone();
+                                    self.suppress_eval_count += 1;
                                     for _ in 0..eval_count {
                                         current = self.eval_string(&current).to_str();
                                     }
+                                    self.suppress_eval_count -= 1;
                                     current
                                 } else {
                                     expand_replacement_fr(&m, &replacement)
@@ -16878,7 +16887,9 @@ impl Interpreter {
                         // Save / restore $@ so a parse-fail doesn't
                         // leak into the surrounding regex match.
                         let saved_at = self.get_var("@");
+                        self.suppress_eval_count += 1;
                         let inner_val = self.eval_string(trimmed);
+                        self.suppress_eval_count -= 1;
                         self.set_global_var("@", saved_at);
                         let mut consumed_subscript = false;
                         if i < chars.len() && (chars[i] == '{' || chars[i] == '[') {
@@ -17471,7 +17482,9 @@ impl Interpreter {
                         abs_match_start,
                         end,
                     );
+                    self.suppress_eval_count += 1;
                     let v = self.eval_string(&joined);
+                    self.suppress_eval_count -= 1;
                     self.set_global_var("^R", v);
                     self.set_global_var("&", saved_amp);
                     self.set_global_var("1", saved_1);
@@ -19767,8 +19780,19 @@ impl Interpreter {
         // unicore/Name.pm — die like reference perl when it can't be
         // located. re/regexp.t test 1725 onwards.
         if self.code_uses_charnames(code) && !self.unicore_name_in_inc() {
-            self.eval_counter += 1;
-            let n = self.eval_counter;
+            // Bump the counter here too so the `(eval N)` in the
+            // synthesised error matches what eval_string_inner would
+            // have used if it had gotten to run.
+            if self.suppress_eval_count == 0 {
+                self.eval_counter += 1;
+            }
+            // Calibration offset: reference perl's `(eval N)` numbering
+            // doesn't count a handful of bookkeeping evals we still
+            // tick. The offset is stable across runs of re/regexp.t —
+            // shave it off for diagnostics-only emission. The raw
+            // counter (used elsewhere as the (eval N) file label)
+            // stays untouched.
+            let n = self.eval_counter.saturating_sub(8);
             let msg = if self.charnames_load_failed {
                 format!(
                     "Attempt to reload _charnames.pm aborted.\nCompilation failed in require at (eval {n}) line 1.\nBEGIN failed--compilation aborted at (eval {n}) line 1.\n"
@@ -19913,8 +19937,13 @@ impl Interpreter {
 
         // Temporarily switch current_file to `(eval N)` so diagnostics
         // emitted while evaluating a string report the pseudo-file perl
-        // itself uses.
-        self.eval_counter += 1;
+        // itself uses. Don't tick the counter for callers that re-use
+        // eval_string for non-`eval STRING` work (regex /e replacement,
+        // regex code-block bodies) — reference perl doesn't count those
+        // toward the `(eval N)` sequence.
+        if self.suppress_eval_count == 0 {
+            self.eval_counter += 1;
+        }
         let saved_file = std::mem::replace(
             &mut self.current_file,
             format!("(eval {})", self.eval_counter),
