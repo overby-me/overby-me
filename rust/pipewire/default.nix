@@ -2897,6 +2897,18 @@
         tool = "pw-cli";
         name = "comment-after-cmd";
       }
+      {
+        tool = "pw-cat";
+        name = "midi-mode-bad-file";
+      }
+      {
+        tool = "pw-cat";
+        name = "midi-mode-short";
+      }
+      {
+        tool = "pw-cat";
+        name = "dsd-mode-bad-file";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a

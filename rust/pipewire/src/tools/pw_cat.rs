@@ -61,6 +61,12 @@ pub fn main(raw_args: &[String]) -> i32 {
 
     let mut mode_set = false;
     let mut raw_mode = false;
+    // Track the data-type override (--midi/--dsd/--sysex/--encoded/short
+    // equivalents). C's pw-cat starts with TYPE_PCM and switches based
+    // on these flags, which selects the file-IO library (midifile,
+    // dsdfile, sysex reader, sndfile). emit_open_error needs this to
+    // produce the right error template.
+    let mut force_type: Option<&str> = None;
     let mut explicit_remote: Option<String> = None;
     let mut positional_count: usize = 0;
     let mut positional_files: Vec<String> = Vec::new();
@@ -174,6 +180,15 @@ pub fn main(raw_args: &[String]) -> i32 {
                     if matches!(name, "--raw") {
                         raw_mode = true;
                     }
+                    if matches!(name, "--midi") {
+                        force_type = Some("midi");
+                    } else if matches!(name, "--dsd") {
+                        force_type = Some("dsd");
+                    } else if matches!(name, "--sysex") {
+                        force_type = Some("sysex");
+                    } else if matches!(name, "--encoded") {
+                        force_type = Some("encoded");
+                    }
                 } else if let Some(&long) = long_required.iter().find(|&&l| l == name) {
                     if has_inline {
                         // --foo=val (consumed inline). Capture the value
@@ -219,6 +234,14 @@ pub fn main(raw_args: &[String]) -> i32 {
                     }
                     if ch == 'a' {
                         raw_mode = true;
+                    }
+                    // Short equivalents of --midi/--dsd/--sysex/--encoded.
+                    match ch {
+                        'm' => force_type = Some("midi"),
+                        'd' => force_type = Some("dsd"),
+                        's' => force_type = Some("sysex"),
+                        'o' => force_type = Some("encoded"),
+                        _ => {}
                     }
                 } else if let Some(&(_, name)) = short_required.iter().find(|(c, _)| *c == ch) {
                     if i + 1 >= args.len() {
@@ -333,7 +356,7 @@ pub fn main(raw_args: &[String]) -> i32 {
                 // tool uses a different file-IO library and has a slightly
                 // different error template.
                 let file = positional_files.first().map(String::as_str).unwrap_or("");
-                emit_open_error(argv0, file, raw_mode);
+                emit_open_error(argv0, file, raw_mode, force_type);
             }
             Err(_) => {
                 eprintln!(
@@ -346,13 +369,15 @@ pub fn main(raw_args: &[String]) -> i32 {
     }
 }
 
-fn emit_open_error(argv0: &str, file: &str, raw_mode: bool) {
+fn emit_open_error(argv0: &str, file: &str, raw_mode: bool, force_type: Option<&str>) {
     // Probe what the open error would have been. C uses the strerror of
     // open/fopen — ENOENT, EACCES, EISDIR, ... — followed by a per-tool
     // "error: open failed:" line. We re-derive the strerror by inspecting
     // the file: missing → ENOENT, exists+unreadable → EACCES, directory
     // → EISDIR for write-mode tools, otherwise "Format not recognised" /
-    // equivalent.
+    // equivalent. `force_type` (Some("midi"|"dsd"|"sysex"|"encoded"))
+    // is set when the data-type was overridden via --midi/-m/etc. and
+    // takes precedence over argv0-based dispatch.
     let argv0_basename = argv0.rsplit('/').next().unwrap_or(argv0);
     let strerror_for = |f: &str, write_mode: bool| -> String {
         if f == "-" {
@@ -399,34 +424,40 @@ fn emit_open_error(argv0: &str, file: &str, raw_mode: bool) {
         print_help(argv0);
         return;
     }
-    match argv0_basename {
-        // MIDI-mode tools.
-        s if s.contains("midiplay")
-            || s.contains("midirecord")
-            || s.contains("midi2play")
-            || s.contains("midi2record") =>
-        {
+    // If a --midi/--dsd/--sysex/--encoded flag was set, it overrides
+    // the argv0-based dispatch (e.g. `pw-cat --midi` uses midifile, not
+    // sndfile). Compute the effective type once.
+    let effective_type = force_type.unwrap_or_else(|| match argv0_basename {
+        s if s.contains("midiplay") || s.contains("midirecord") => "midi",
+        s if s.contains("midi2play") || s.contains("midi2record") => "midi",
+        s if s.contains("sysex") => "sysex",
+        s if s.contains("dsdplay") => "dsd",
+        s if s.contains("encplay") => "encoded",
+        _ => "pcm",
+    });
+    match effective_type {
+        "midi" => {
             let err = normalize_midi(strerror_for(file, is_record));
             eprintln!("midifile: can't read midi file '{file}': {err}");
             eprintln!("error: open failed: {err}");
             print_help(argv0);
             emitted_help = true;
         }
-        s if s.contains("sysex") => {
+        "sysex" => {
             let err = normalize_midi(strerror_for(file, is_record));
             eprintln!("sysex: can't read file '{file}': {err}");
             eprintln!("error: open failed: {err}");
             print_help(argv0);
             emitted_help = true;
         }
-        s if s.contains("dsdplay") => {
+        "dsd" => {
             let err = normalize_midi(strerror_for(file, is_record));
             eprintln!("dsdfile: can't read dsd file '{file}': {err}");
             eprintln!("error: open failed: {err}");
             print_help(argv0);
             emitted_help = true;
         }
-        s if s.contains("encplay") => {
+        "encoded" => {
             // ffmpeg/avformat errors; we emit a simplified surrogate.
             // Pointer addresses vary per-run, but tests normalize them.
             eprintln!("[AVFormatContext @ 0x0000000000000000] Opening 'file:{file}' for reading");
