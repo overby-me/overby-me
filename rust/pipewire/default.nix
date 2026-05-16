@@ -2989,6 +2989,30 @@
         tool = "pw-reserve";
         name = "short-priority-no-arg";
       }
+      {
+        tool = "spa-resample";
+        name = "missing-arg-f";
+      }
+      {
+        tool = "spa-resample";
+        name = "missing-arg-q";
+      }
+      {
+        tool = "spa-resample";
+        name = "missing-arg-w";
+      }
+      {
+        tool = "spa-resample";
+        name = "missing-arg-u";
+      }
+      {
+        tool = "spa-resample";
+        name = "missing-arg-t";
+      }
+      {
+        tool = "spa-resample";
+        name = "missing-arg-p";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
