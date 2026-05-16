@@ -2841,6 +2841,38 @@
         tool = "pw-config";
         name = "empty-color";
       }
+      {
+        tool = "spa-acp-tool";
+        name = "card-no-args";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "get-volume-no-args";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "set-mute-no-args";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "set-port-no-args";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "set-port-one-arg";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "set-profile-no-args";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "set-volume-no-args";
+      }
+      {
+        tool = "spa-acp-tool";
+        name = "spr-no-args";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
