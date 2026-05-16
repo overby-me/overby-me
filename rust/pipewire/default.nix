@@ -3522,6 +3522,18 @@
       }
       {
         tool = "pw-dump";
+        name = "info-module";
+      }
+      {
+        tool = "pw-dump";
+        name = "info-factory";
+      }
+      {
+        tool = "pw-dump";
+        name = "info-core";
+      }
+      {
+        tool = "pw-dump";
         name = "structural-indent4";
       }
       {

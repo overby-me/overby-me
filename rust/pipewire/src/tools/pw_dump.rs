@@ -1,13 +1,36 @@
 // pw-dump: dump a running PipeWire registry as JSON.
 //
-// Phase-7 minimal mode: connects, walks the registry, emits one JSON object
-// per global with id/type/version/permissions/props (registry-side props
-// only — the C tool also binds each global and emits an "info" block;
-// that's deferred to the per-interface dumpers in Phase 8).
+// For each registry global we also bind a proxy and read its Info event,
+// which lets us emit the per-interface "info" block the C tool produces
+// (Module name/filename/args, Factory name/type/version, Client props,
+// Node ports+state+params, Device/Port/Link details). Core.Info is
+// captured during handshake and attached to the Core global.
 
-use crate::pipewire_lib::client::{Client, RegistryGlobal};
+use crate::pipewire_lib::client::{
+    Client, ClientInfo, CoreInfo, DeviceInfo, FactoryInfo, LinkInfo, ModuleInfo, NodeInfo,
+    PortInfo, RegistryGlobal,
+};
 use crate::pipewire_lib::interfaces;
 use crate::tools::common::{expand_short_clusters, print_version};
+
+/// Per-interface Info event payload for a bound global.
+#[derive(Debug, Clone)]
+enum InfoData {
+    Module(ModuleInfo),
+    Factory(FactoryInfo),
+    Client(ClientInfo),
+    Node(NodeInfo),
+    Port(PortInfo),
+    Device(DeviceInfo),
+    Link(LinkInfo),
+    Core(CoreInfo),
+}
+
+/// Registry global plus the (optional) bound-proxy Info event.
+struct GlobalEntry {
+    global: RegistryGlobal,
+    info: Option<InfoData>,
+}
 
 pub fn main(raw_args: &[String]) -> i32 {
     let argv0 = raw_args.first().map(String::as_str).unwrap_or("pw-dump");
@@ -193,12 +216,16 @@ pub fn main(raw_args: &[String]) -> i32 {
         }
     });
 
-    let mut sorted: Vec<&RegistryGlobal> = globals
+    let mut sorted: Vec<&GlobalEntry> = globals
         .iter()
-        .filter(|g| filter_id.is_none_or(|f| g.id == f))
-        .filter(|g| filter_iface.as_deref().is_none_or(|f| g.interface == f))
+        .filter(|e| filter_id.is_none_or(|f| e.global.id == f))
+        .filter(|e| {
+            filter_iface
+                .as_deref()
+                .is_none_or(|f| e.global.interface == f)
+        })
         .collect();
-    sorted.sort_by_key(|g| g.id);
+    sorted.sort_by_key(|e| e.global.id);
 
     let mut out = String::new();
     write_array(&mut out, &sorted, indent);
@@ -221,7 +248,7 @@ fn print_help(argv0: &str) {
     println!("  -s, --spa                             SPA JSON output");
 }
 
-fn collect_globals(remote: Option<&str>) -> Result<Vec<RegistryGlobal>, String> {
+fn collect_globals(remote: Option<&str>) -> Result<Vec<GlobalEntry>, String> {
     // PIPEWIRE_REMOTE supplies the socket name when -r wasn't given.
     let env_remote = std::env::var("PIPEWIRE_REMOTE").ok();
     let chosen: Option<String> = remote.map(String::from).or(env_remote);
@@ -238,14 +265,15 @@ fn collect_globals(remote: Option<&str>) -> Result<Vec<RegistryGlobal>, String> 
     }
     .map_err(|e| format!("connect: {e}"))?;
 
-    client
+    let registry_id = client
         .handshake("rust-pipewire-dump")
         .map_err(|e| format!("handshake: {e}"))?;
     let sync_seq = client
         .sync(interfaces::ID_CORE)
         .map_err(|e| format!("sync: {e}"))?;
 
-    let mut globals = Vec::new();
+    let mut globals: Vec<RegistryGlobal> = Vec::new();
+    let mut core_info: Option<CoreInfo> = None;
     loop {
         let msg = match client.read_message() {
             Ok(Some(m)) => m,
@@ -265,6 +293,12 @@ fn collect_globals(remote: Option<&str>) -> Result<Vec<RegistryGlobal>, String> 
             globals.retain(|g: &RegistryGlobal| g.id != rid);
         }
         if msg.id == interfaces::ID_CORE
+            && msg.opcode == interfaces::core_event::INFO
+            && let Ok(ci) = crate::pipewire_lib::client::decode_core_info(&msg.args)
+        {
+            core_info = Some(ci);
+        }
+        if msg.id == interfaces::ID_CORE
             && msg.opcode == interfaces::core_event::DONE
             && let Ok((_id, seq)) = crate::pipewire_lib::client::decode_core_done(&msg.args)
             && seq == sync_seq
@@ -272,27 +306,106 @@ fn collect_globals(remote: Option<&str>) -> Result<Vec<RegistryGlobal>, String> 
             break;
         }
     }
-    Ok(globals)
+
+    // Bind each global and collect its Info event. We do this sequentially
+    // (bind → sync → wait for Info+Done → continue). The C tool issues all
+    // binds + syncs up-front and demultiplexes the responses; that's more
+    // efficient but adds bookkeeping. Sequential is fine until the
+    // registry gets large.
+    let entries: Vec<GlobalEntry> = globals
+        .into_iter()
+        .map(|g| {
+            let info = if g.interface == interfaces::TYPE_CORE {
+                core_info.clone().map(InfoData::Core)
+            } else {
+                bind_info(&mut client, registry_id, &g).ok().flatten()
+            };
+            GlobalEntry { global: g, info }
+        })
+        .collect();
+    Ok(entries)
 }
 
-fn write_array(out: &mut String, globals: &[&RegistryGlobal], indent: usize) {
-    if globals.is_empty() {
+/// Bind the given global as a proxy, drive a sync round-trip, and return
+/// the decoded Info event (if the interface has one we know how to
+/// decode). Unknown interfaces return None silently; decode errors are
+/// also swallowed since the registry-side data is still useful.
+fn bind_info(
+    client: &mut Client,
+    registry_id: u32,
+    g: &RegistryGlobal,
+) -> Result<Option<InfoData>, String> {
+    let version = match g.interface.as_str() {
+        interfaces::TYPE_MODULE => interfaces::VERSION_MODULE,
+        interfaces::TYPE_FACTORY => interfaces::VERSION_FACTORY,
+        interfaces::TYPE_CLIENT => interfaces::VERSION_CLIENT,
+        interfaces::TYPE_NODE => interfaces::VERSION_NODE,
+        interfaces::TYPE_PORT => interfaces::VERSION_PORT,
+        interfaces::TYPE_DEVICE => interfaces::VERSION_DEVICE,
+        interfaces::TYPE_LINK => interfaces::VERSION_LINK,
+        _ => return Ok(None),
+    };
+
+    let proxy_id = client
+        .registry_bind(registry_id, g.id, &g.interface, version)
+        .map_err(|e| format!("{e}"))?;
+    let sync_seq = client
+        .sync(interfaces::ID_CORE)
+        .map_err(|e| format!("{e}"))?;
+
+    let mut raw_info: Option<Vec<crate::spa::pod::types::Value>> = None;
+    while let Some(msg) = client.read_message().map_err(|e| format!("{e}"))? {
+        if msg.id == proxy_id && msg.opcode == 0 {
+            // Opcode 0 is the Info event for every bindable interface.
+            raw_info = Some(msg.args);
+            continue;
+        }
+        if msg.id == interfaces::ID_CORE
+            && msg.opcode == interfaces::core_event::DONE
+            && let Ok((_id, seq)) = crate::pipewire_lib::client::decode_core_done(&msg.args)
+            && seq == sync_seq
+        {
+            break;
+        }
+    }
+
+    let args = match raw_info {
+        Some(a) => a,
+        None => return Ok(None),
+    };
+    use crate::pipewire_lib::client as cl;
+    let info = match g.interface.as_str() {
+        interfaces::TYPE_MODULE => cl::decode_module_info(&args).ok().map(InfoData::Module),
+        interfaces::TYPE_FACTORY => cl::decode_factory_info(&args).ok().map(InfoData::Factory),
+        interfaces::TYPE_CLIENT => cl::decode_client_info(&args).ok().map(InfoData::Client),
+        interfaces::TYPE_NODE => cl::decode_node_info(&args).ok().map(InfoData::Node),
+        interfaces::TYPE_PORT => cl::decode_port_info(&args).ok().map(InfoData::Port),
+        interfaces::TYPE_DEVICE => cl::decode_device_info(&args).ok().map(InfoData::Device),
+        interfaces::TYPE_LINK => cl::decode_link_info(&args).ok().map(InfoData::Link),
+        _ => None,
+    };
+    Ok(info)
+}
+
+fn write_array(out: &mut String, entries: &[&GlobalEntry], indent: usize) {
+    if entries.is_empty() {
         out.push_str("[]");
         return;
     }
     out.push('[');
-    for (i, g) in globals.iter().enumerate() {
+    for (i, e) in entries.iter().enumerate() {
         if i > 0 {
             out.push(',');
         }
         push_newline_indent(out, indent, 1);
-        write_global(out, g, indent, 1);
+        write_global(out, e, indent, 1);
     }
     push_newline_indent(out, indent, 0);
     out.push(']');
 }
 
-fn write_global(out: &mut String, g: &RegistryGlobal, indent: usize, level: usize) {
+fn write_global(out: &mut String, e: &GlobalEntry, indent: usize, level: usize) {
+    let g = &e.global;
     out.push('{');
     push_newline_indent(out, indent, level + 1);
     out.push_str(&format!("\"id\": {},", g.id));
@@ -303,12 +416,273 @@ fn write_global(out: &mut String, g: &RegistryGlobal, indent: usize, level: usiz
     push_newline_indent(out, indent, level + 1);
     out.push_str("\"permissions\": ");
     write_permissions(out, g.permissions);
-    out.push(',');
-    push_newline_indent(out, indent, level + 1);
-    out.push_str("\"props\": ");
-    write_props(out, &g.props, indent, level + 1);
+    // C: known interfaces (class table) emit only `info`; unknown
+    // interfaces (SecurityContext, Profiler, ClientNode, ...) fall back
+    // to registry `props`. Never both.
+    if let Some(info) = &e.info {
+        out.push(',');
+        push_newline_indent(out, indent, level + 1);
+        out.push_str("\"info\": ");
+        write_info(out, info, indent, level + 1);
+    } else {
+        out.push(',');
+        push_newline_indent(out, indent, level + 1);
+        out.push_str("\"props\": ");
+        write_props(out, &g.props, indent, level + 1);
+    }
     push_newline_indent(out, indent, level);
     out.push('}');
+}
+
+fn write_info(out: &mut String, info: &InfoData, indent: usize, level: usize) {
+    out.push('{');
+    let inner = level + 1;
+    match info {
+        InfoData::Core(i) => {
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!("\"cookie\": {},", i.cookie));
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!(
+                "\"user-name\": \"{}\",",
+                json_escape(&i.user_name)
+            ));
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!(
+                "\"host-name\": \"{}\",",
+                json_escape(&i.host_name)
+            ));
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!("\"version\": \"{}\",", json_escape(&i.version)));
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!("\"name\": \"{}\",", json_escape(&i.name)));
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"change-mask\": ");
+            write_flags(out, i.change_mask as u64, &[(1 << 0, "props")]);
+            out.push(',');
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"props\": ");
+            write_props(out, &i.props, indent, inner);
+        }
+        InfoData::Module(i) => {
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!("\"name\": \"{}\",", json_escape(&i.name)));
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!("\"filename\": \"{}\",", json_escape(&i.filename)));
+            push_newline_indent(out, indent, inner);
+            // C: put_value emits JSON null for a NULL string pointer; our
+            // decoder converts POD None into the sentinel "(null)" string
+            // (for text-mode parity), so map back to null here.
+            out.push_str(&format!("\"args\": {},", json_value_or_null(&i.args)));
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"change-mask\": ");
+            write_flags(out, i.change_mask as u64, &[(1 << 0, "props")]);
+            out.push(',');
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"props\": ");
+            write_props(out, &i.props, indent, inner);
+        }
+        InfoData::Factory(i) => {
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!("\"name\": \"{}\",", json_escape(&i.name)));
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!("\"type\": \"{}\",", json_escape(&i.object_type)));
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!("\"version\": {},", i.version));
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"change-mask\": ");
+            write_flags(out, i.change_mask as u64, &[(1 << 0, "props")]);
+            out.push(',');
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"props\": ");
+            write_props(out, &i.props, indent, inner);
+        }
+        InfoData::Client(i) => {
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"change-mask\": ");
+            write_flags(out, i.change_mask as u64, &[(1 << 0, "props")]);
+            out.push(',');
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"props\": ");
+            write_props(out, &i.props, indent, inner);
+        }
+        InfoData::Device(i) => {
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"change-mask\": ");
+            write_flags(
+                out,
+                i.change_mask as u64,
+                &[(1 << 0, "props"), (1 << 1, "params")],
+            );
+            out.push(',');
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"props\": ");
+            write_props(out, &i.props, indent, inner);
+            out.push(',');
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"params\": ");
+            write_params(out, &i.params, indent, inner);
+        }
+        InfoData::Node(i) => {
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!("\"max-input-ports\": {},", i.max_input_ports));
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!("\"max-output-ports\": {},", i.max_output_ports));
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"change-mask\": ");
+            write_flags(
+                out,
+                i.change_mask as u64,
+                &[
+                    (1 << 0, "input-ports"),
+                    (1 << 1, "output-ports"),
+                    (1 << 2, "state"),
+                    (1 << 3, "props"),
+                    (1 << 4, "params"),
+                ],
+            );
+            out.push(',');
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!("\"n-input-ports\": {},", i.n_input_ports));
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!("\"n-output-ports\": {},", i.n_output_ports));
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!("\"state\": \"{}\",", node_state_name(i.state)));
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!("\"error\": {},", json_null_or_string(&i.error)));
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"props\": ");
+            write_props(out, &i.props, indent, inner);
+            out.push(',');
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"params\": ");
+            write_params(out, &i.params, indent, inner);
+        }
+        InfoData::Port(i) => {
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!(
+                "\"direction\": \"{}\",",
+                if i.direction == 0 { "input" } else { "output" }
+            ));
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"change-mask\": ");
+            write_flags(
+                out,
+                i.change_mask as u64,
+                &[(1 << 0, "props"), (1 << 1, "params")],
+            );
+            out.push(',');
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"props\": ");
+            write_props(out, &i.props, indent, inner);
+            out.push(',');
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"params\": ");
+            write_params(out, &i.params, indent, inner);
+        }
+        InfoData::Link(i) => {
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!("\"output-node-id\": {},", i.output_node_id));
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!("\"output-port-id\": {},", i.output_port_id));
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!("\"input-node-id\": {},", i.input_node_id));
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!("\"input-port-id\": {},", i.input_port_id));
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"change-mask\": ");
+            write_flags(
+                out,
+                i.change_mask as u64,
+                &[(1 << 0, "state"), (1 << 1, "format"), (1 << 2, "props")],
+            );
+            out.push(',');
+            push_newline_indent(out, indent, inner);
+            out.push_str(&format!("\"state\": \"{}\",", link_state_name(i.state)));
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"format\": null,");
+            push_newline_indent(out, indent, inner);
+            out.push_str("\"props\": ");
+            write_props(out, &i.props, indent, inner);
+        }
+    }
+    push_newline_indent(out, indent, level);
+    out.push('}');
+}
+
+fn write_flags(out: &mut String, value: u64, flags: &[(u64, &str)]) {
+    out.push('[');
+    let mut first = true;
+    for (mask, name) in flags {
+        if value & *mask != 0 {
+            if !first {
+                out.push(',');
+            }
+            out.push_str(&format!(" \"{name}\""));
+            first = false;
+        }
+    }
+    if first {
+        out.push(']');
+    } else {
+        out.push_str(" ]");
+    }
+}
+
+fn write_params(
+    out: &mut String,
+    params: &[crate::pipewire_lib::client::ParamInfo],
+    _indent: usize,
+    _level: usize,
+) {
+    // pw-dump's params include each param's value (enum-params follow-up).
+    // We don't yet enumerate params, so emit an empty object — the C tool
+    // never emits param values for which info.params[i].flags & READ == 0
+    // either, so this matches when no param is readable.
+    let _ = params;
+    out.push_str("{}");
+}
+
+fn node_state_name(s: u32) -> &'static str {
+    match s {
+        0 => "error",
+        1 => "creating",
+        2 => "suspended",
+        3 => "idle",
+        4 => "running",
+        _ => "unknown",
+    }
+}
+
+fn link_state_name(s: i32) -> &'static str {
+    match s {
+        -2 => "error",
+        -1 => "unlinked",
+        0 => "init",
+        1 => "negotiating",
+        2 => "allocating",
+        3 => "paused",
+        4 => "active",
+        _ => "unknown",
+    }
+}
+
+fn json_null_or_string(s: &str) -> String {
+    if s.is_empty() {
+        "null".to_string()
+    } else {
+        format!("\"{}\"", json_escape(s))
+    }
+}
+
+// Like json_null_or_string, but recognizes the "(null)" sentinel that
+// our String-typed decoders use to stand in for a POD None (NULL string
+// pointer in C). C's put_value emits unquoted `null` in that case.
+fn json_value_or_null(s: &str) -> String {
+    if s == "(null)" {
+        "null".to_string()
+    } else {
+        format!("\"{}\"", json_escape(s))
+    }
 }
 
 fn write_permissions(out: &mut String, perms: u32) {
@@ -347,8 +721,12 @@ fn write_props(
         out.push_str("{}");
         return;
     }
+    // C's put_dict calls spa_dict_qsort first — keys are emitted in
+    // alphabetical order regardless of insertion order. Match that.
+    let mut sorted: Vec<&crate::pipewire_lib::client::DictItem> = items.iter().collect();
+    sorted.sort_by(|a, b| a.key.cmp(&b.key));
     out.push('{');
-    for (i, item) in items.iter().enumerate() {
+    for (i, item) in sorted.iter().enumerate() {
         if i > 0 {
             out.push(',');
         }
@@ -450,8 +828,12 @@ mod tests {
             4,
             &[("core.name", "pipewire-0")],
         );
+        let e0 = GlobalEntry {
+            global: g0,
+            info: None,
+        };
         let mut s = String::new();
-        write_array(&mut s, &[&g0], 2);
+        write_array(&mut s, &[&e0], 2);
         let expected = "[\n  {\n    \"id\": 0,\n    \"type\": \"PipeWire:Interface:Core\",\n    \"version\": 4,\n    \"permissions\": [ \"r\", \"w\", \"x\" ],\n    \"props\": {\n      \"core.name\": \"pipewire-0\"\n    }\n  }\n]";
         assert_eq!(s, expected);
     }
