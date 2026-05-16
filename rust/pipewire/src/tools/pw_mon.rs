@@ -68,8 +68,12 @@ pub fn main(raw_args: &[String]) -> i32 {
             "-N" | "--no-colors" | "-o" | "--hide-props" | "-a" | "--hide-params" | "-p"
             | "--print-separator" => {}
             s if s.starts_with("--color=") => {
+                // C: `--color=` (with `=`) sets optarg to "" — getopt
+                // distinguishes that from a bare `--color` (optarg=NULL).
+                // Bare form is "nothing to do"; an explicit empty value
+                // fails the auto/never/always match and prints the error.
                 let val = &s["--color=".len()..];
-                if !matches!(val, "" | "never" | "always" | "auto") {
+                if !matches!(val, "never" | "always" | "auto") {
                     eprintln!("Invalid color: {val}");
                     print_help(argv0);
                     return 255;

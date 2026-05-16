@@ -2829,6 +2829,10 @@
         tool = "pw-cat";
         name = "bad-channels-overflow";
       }
+      {
+        tool = "pw-mon";
+        name = "empty-color";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
