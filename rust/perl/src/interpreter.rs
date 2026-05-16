@@ -17074,6 +17074,7 @@ impl Interpreter {
         // unchanged. re/regexp 1167-1185.
         let pattern = inline_simple_recursion(&pattern);
         let pattern = expand_recursive_to_depth(&pattern, 6);
+        let pattern = lookbehind_leftmost_longest(&pattern);
         let pattern = rewrite_self_conditional_iteration(&pattern);
         let regmark = extract_first_mark_label(&pattern);
         let pattern = truncate_at_first_accept(&pattern);
@@ -28274,6 +28275,258 @@ fn ligature_parses(run: &str) -> Vec<String> {
 /// alternative has its own width. Only handles simple cases where
 /// the lookbehind body is a `(?:...|...)` form (the typical shape
 /// after `\xdf` /i expansion). re/regexp 2042.
+/// Inside positive/negative lookbehinds, convert lazy quantifiers to
+/// greedy and reorder top-level alternations within capture groups by
+/// descending length. Perl's lookbehind uses leftmost-longest
+/// semantics, but fancy_regex honours lazy/first-match order — so
+/// `(?<=(a??))` captures "" instead of "a", and `(?<=(|a|aa))` picks
+/// the empty branch. Pre-rewriting `(a??)` → `(a?)` and `(|a|aa)` →
+/// `(aa|a|)` lets fancy_regex produce the leftmost-longest match.
+/// re/regexp 2077, 2079.
+fn lookbehind_leftmost_longest(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len() + 16);
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class {
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if i + 3 < chars.len()
+            && c == '('
+            && chars[i + 1] == '?'
+            && chars[i + 2] == '<'
+            && (chars[i + 3] == '=' || chars[i + 3] == '!')
+        {
+            let body_start = i + 4;
+            let mut depth = 1;
+            let mut k = body_start;
+            let mut local_in_class = false;
+            while k < chars.len() && depth > 0 {
+                if chars[k] == '\\' && k + 1 < chars.len() {
+                    k += 2;
+                    continue;
+                }
+                if !local_in_class && chars[k] == '[' {
+                    local_in_class = true;
+                } else if local_in_class && chars[k] == ']' {
+                    local_in_class = false;
+                } else if !local_in_class && chars[k] == '(' {
+                    depth += 1;
+                } else if !local_in_class && chars[k] == ')' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                k += 1;
+            }
+            if depth == 0 {
+                let body: String = chars[body_start..k].iter().collect();
+                let kind = chars[i + 3];
+                let greedy = lazy_to_greedy_top(&body);
+                let reordered = reorder_simple_group_alternations(&greedy);
+                out.push_str(&format!("(?<{kind}{reordered})"));
+                i = k + 1;
+                continue;
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+fn lazy_to_greedy_top(body: &str) -> String {
+    let chars: Vec<char> = body.chars().collect();
+    let mut out = String::with_capacity(body.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class
+            && (c == '?' || c == '*' || c == '+')
+            && i + 1 < chars.len()
+            && chars[i + 1] == '?'
+        {
+            out.push(c);
+            i += 2;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+fn reorder_simple_group_alternations(body: &str) -> String {
+    let chars: Vec<char> = body.chars().collect();
+    let mut out = String::with_capacity(body.len() + 8);
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class && c == '(' && (i + 1 >= chars.len() || chars[i + 1] != '?') {
+            // Plain `(` capture — find matching `)`.
+            let mut depth = 1;
+            let mut k = i + 1;
+            let mut local_in_class = false;
+            while k < chars.len() && depth > 0 {
+                if chars[k] == '\\' && k + 1 < chars.len() {
+                    k += 2;
+                    continue;
+                }
+                if !local_in_class && chars[k] == '[' {
+                    local_in_class = true;
+                } else if local_in_class && chars[k] == ']' {
+                    local_in_class = false;
+                } else if !local_in_class && chars[k] == '(' {
+                    depth += 1;
+                } else if !local_in_class && chars[k] == ')' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                k += 1;
+            }
+            if depth == 0 {
+                let inner: String = chars[i + 1..k].iter().collect();
+                let reordered = reorder_top_alternation_by_length(&inner);
+                out.push('(');
+                out.push_str(&reordered);
+                out.push(')');
+                i = k + 1;
+                continue;
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+fn reorder_top_alternation_by_length(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut alts: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut d = 0;
+    let mut in_class = false;
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            cur.push(c);
+            cur.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            cur.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            cur.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class && c == '(' {
+            d += 1;
+            cur.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class && c == ')' {
+            d -= 1;
+            cur.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class && c == '|' && d == 0 {
+            alts.push(std::mem::take(&mut cur));
+            i += 1;
+            continue;
+        }
+        cur.push(c);
+        i += 1;
+    }
+    alts.push(cur);
+    if alts.len() < 2 {
+        return s.to_string();
+    }
+    let mut indexed: Vec<(usize, usize, String)> = alts
+        .into_iter()
+        .enumerate()
+        .map(|(idx, a)| (a.chars().count(), idx, a))
+        .collect();
+    indexed.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    indexed
+        .into_iter()
+        .map(|(_, _, a)| a)
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
 fn split_variable_lookbehind(pattern: &str) -> String {
     let chars: Vec<char> = pattern.chars().collect();
     let mut out = String::with_capacity(pattern.len());
