@@ -154,6 +154,17 @@ pub fn main(raw_args: &[String]) -> i32 {
         i += 1;
     }
 
+    // C's pw_conf_load_conf_for_context() (conf.c:1210) requires the
+    // config name to end in `.conf` and returns -EINVAL otherwise.
+    // Exit code 234 = (256 - 22) — C returns -EINVAL which truncates.
+    if !opt_name.ends_with(".conf") {
+        eprintln!(
+            "[E][TIME] pw.conf      | [          conf.c: 1210 pw_conf_load_conf_for_context()] config.name '{opt_name}' does not end with .conf"
+        );
+        eprintln!("error loading config: Invalid argument");
+        return 234;
+    }
+
     let prefix = if opt_prefix.is_empty() {
         None
     } else {

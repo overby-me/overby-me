@@ -2873,6 +2873,14 @@
         tool = "spa-acp-tool";
         name = "spr-no-args";
       }
+      {
+        tool = "pw-config";
+        name = "name-no-conf-suffix";
+      }
+      {
+        tool = "pw-config";
+        name = "name-empty";
+      }
     ];
 
     # POD comparison tests — built separately because they compile a
