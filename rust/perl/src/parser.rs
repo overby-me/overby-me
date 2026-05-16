@@ -5081,7 +5081,10 @@ impl Parser {
                         // self.pos points at the EOF position; the
                         // previous index is the last real token.
                         let prev = self.pos.saturating_sub(1);
-                        self.token_lines.get(prev).copied().unwrap_or_else(|| self.current_line())
+                        self.token_lines
+                            .get(prev)
+                            .copied()
+                            .unwrap_or_else(|| self.current_line())
                     } else {
                         self.current_line()
                     };

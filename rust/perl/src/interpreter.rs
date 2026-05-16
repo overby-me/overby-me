@@ -3996,7 +3996,11 @@ impl Interpreter {
                             let line = self.current_line;
                             let new_val = self.call_sub_named(
                                 &body,
-                                &[prev.clone(), Value::Str(file, false), Value::Num(line as f64)],
+                                &[
+                                    prev.clone(),
+                                    Value::Str(file, false),
+                                    Value::Num(line as f64),
+                                ],
                                 Some(&mname),
                             );
                             self.pending_die_value = Some(new_val.clone());
@@ -4497,7 +4501,10 @@ impl Interpreter {
                         self.current_file.clone()
                     };
                     let line = self.current_line;
-                    self.set_global_var("@", Value::Str(format!("{err} at {file} line {line}.\n"), false));
+                    self.set_global_var(
+                        "@",
+                        Value::Str(format!("{err} at {file} line {line}.\n"), false),
+                    );
                     self.pending_flow = Some(Flow::Die(format!("{err} at {file} line {line}.\n")));
                     return Value::Undef;
                 }
@@ -7191,7 +7198,8 @@ impl Interpreter {
                             if accumulating {
                                 result.push_str(s);
                             } else {
-                                acc = self.concat_with_overload(&acc, &Value::Str(s.clone(), false));
+                                acc =
+                                    self.concat_with_overload(&acc, &Value::Str(s.clone(), false));
                             }
                         }
                         InterpPart::ScalarVar(name) => {
@@ -7328,10 +7336,10 @@ impl Interpreter {
         // test 253 (RT #132595).
         if let BinOp::Concat = op
             && let Some(operands) = flatten_concat_chain(left, right)
-            && operands
-                .iter()
-                .any(|e| matches!(e, Expr::ScalarVar(n) | Expr::MyVar(n) | Expr::LocalVar(n)
-                    if self.tied_scalars.contains_key(n)))
+            && operands.iter().any(|e| {
+                matches!(e, Expr::ScalarVar(n) | Expr::MyVar(n) | Expr::LocalVar(n)
+                    if self.tied_scalars.contains_key(n))
+            })
         {
             return self.eval_multiconcat(&operands);
         }
@@ -9391,7 +9399,10 @@ impl Interpreter {
                             .splitn(&text, n as usize)
                             .map(|s| Value::Str(s.to_string(), false))
                             .collect(),
-                        _ => re.split(&text).map(|s| Value::Str(s.to_string(), false)).collect(),
+                        _ => re
+                            .split(&text)
+                            .map(|s| Value::Str(s.to_string(), false))
+                            .collect(),
                     }
                 } else {
                     match limit {
@@ -10750,11 +10761,11 @@ impl Interpreter {
                         file_v,
                         line_v,
                         Value::Str(sub_name, false),
-                        Value::Num(1.0),           // hasargs
-                        Value::Undef,              // wantarray
-                        Value::Undef,              // evaltext
-                        Value::Num(0.0),           // is_require
-                        Value::Num(0.0),           // hints
+                        Value::Num(1.0),                  // hasargs
+                        Value::Undef,                     // wantarray
+                        Value::Undef,                     // evaltext
+                        Value::Num(0.0),                  // is_require
+                        Value::Num(0.0),                  // hints
                         Value::Str(String::new(), false), // bitmask
                     ]);
                     pkg_v
@@ -11048,8 +11059,7 @@ impl Interpreter {
                             None => Value::Str(String::new(), false),
                         }
                     } else {
-                        let chars: String =
-                            bytes.into_iter().map(|b| b as char).collect();
+                        let chars: String = bytes.into_iter().map(|b| b as char).collect();
                         Value::Str(chars, false)
                     }
                 } else {
@@ -11578,7 +11588,10 @@ impl Interpreter {
                     if std::env::set_current_dir(path).is_ok() {
                         Value::Num(1.0)
                     } else {
-                        self.set_global_var("!", Value::Str(format!("No such file or directory"), false));
+                        self.set_global_var(
+                            "!",
+                            Value::Str(format!("No such file or directory"), false),
+                        );
                         Value::Num(0.0)
                     }
                 } else {
@@ -12609,10 +12622,7 @@ impl Interpreter {
                     .map(|cp| Value::Num(cp as f64))
                     .collect()
             }
-            "C*" => bytes
-                .iter()
-                .map(|&b| Value::Num(b as f64))
-                .collect(),
+            "C*" => bytes.iter().map(|&b| Value::Num(b as f64)).collect(),
             "U0 (H2)*" | "U0(H2)*" => bytes
                 .iter()
                 .map(|&b| Value::Str(format!("{b:02x}"), false))
@@ -12989,23 +12999,16 @@ impl Interpreter {
     /// right. Returns the handler's value (which may be a non-string,
     /// e.g. another blessed ref). Falls back to plain `to_str` concat
     /// for non-overloaded operands.
-    /// Multiconcat: evaluate a `.`-chain with tied-scalar semantics
-    /// matching reference perl's pp_multiconcat optimisation. ALL
-    /// non-tied scalar reads share a single snapshot taken right
-    /// after the first tied FETCH — `$a.$t.$a.$t` (with $t.FETCH
-    /// mutating $a) yields `b1c1b1c2` because both $a positions read
-    /// the post-FETCH#1 value of $a even though FETCH#2 later
-    /// reassigns it. opbasic/concat RT #132595.
+    /// pp_multiconcat: non-tied scalar reads share one snapshot,
+    /// taken right after the first tied FETCH. opbasic/concat #132595.
     fn eval_multiconcat(&mut self, operands: &[Expr]) -> Value {
         let mut parts: Vec<Option<String>> = vec![None; operands.len()];
         let mut deferred: Vec<usize> = Vec::new();
         let mut any_flagged = false;
         let mut snapshot: Option<std::collections::HashMap<String, Value>> = None;
         for (i, op) in operands.iter().enumerate() {
-            let is_scalar_var = matches!(
-                op,
-                Expr::ScalarVar(_) | Expr::MyVar(_) | Expr::LocalVar(_)
-            );
+            let is_scalar_var =
+                matches!(op, Expr::ScalarVar(_) | Expr::MyVar(_) | Expr::LocalVar(_));
             let var_name = match op {
                 Expr::ScalarVar(n) | Expr::MyVar(n) | Expr::LocalVar(n) => Some(n.clone()),
                 _ => None,
@@ -17070,6 +17073,7 @@ impl Interpreter {
         // (non-recursive) case. Truly recursive patterns are left
         // unchanged. re/regexp 1167-1185.
         let pattern = inline_simple_recursion(&pattern);
+        let pattern = expand_recursive_to_depth(&pattern, 6);
         let pattern = rewrite_self_conditional_iteration(&pattern);
         let regmark = extract_first_mark_label(&pattern);
         let pattern = truncate_at_first_accept(&pattern);
@@ -18541,7 +18545,9 @@ impl Interpreter {
                             // `split //, STR` — split at every char boundary.
                             // Perl's semantics don't include the leading empty
                             // field that `regex::split("")` would produce.
-                            text.chars().map(|c| Value::Str(c.to_string(), false)).collect()
+                            text.chars()
+                                .map(|c| Value::Str(c.to_string(), false))
+                                .collect()
                         } else if let Ok(re) = regex::Regex::new(&pat) {
                             // Perl's split with capture groups interleaves
                             // captured group text between fields:
@@ -18564,7 +18570,10 @@ impl Interpreter {
                                         break;
                                     }
                                     let full = cap.get(0).unwrap();
-                                    result.push(Value::Str(text[last..full.start()].to_string(), false));
+                                    result.push(Value::Str(
+                                        text[last..full.start()].to_string(),
+                                        false,
+                                    ));
                                     for i in 1..cap_n {
                                         result.push(Value::Str(
                                             cap.get(i)
@@ -18583,9 +18592,10 @@ impl Interpreter {
                                         .splitn(&text, n as usize)
                                         .map(|s| Value::Str(s.to_string(), false))
                                         .collect(),
-                                    _ => {
-                                        re.split(&text).map(|s| Value::Str(s.to_string(), false)).collect()
-                                    }
+                                    _ => re
+                                        .split(&text)
+                                        .map(|s| Value::Str(s.to_string(), false))
+                                        .collect(),
                                 }
                             }
                         } else {
@@ -24777,6 +24787,240 @@ fn body_has_recursion_ref(body: &str) -> bool {
     false
 }
 
+/// Returns true if `body` contains any capturing group. Bodies with
+/// inner captures can't be substituted recursively without renumbering.
+fn body_has_inner_capture(body: &str) -> bool {
+    let chars: Vec<char> = body.chars().collect();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            i += 1;
+            continue;
+        }
+        if in_class {
+            i += 1;
+            continue;
+        }
+        if c == '(' {
+            if i + 1 < chars.len() && chars[i + 1] == '?' {
+                if i + 2 < chars.len() {
+                    let p2 = chars[i + 2];
+                    if p2 == '<'
+                        && !(i + 3 < chars.len() && (chars[i + 3] == '=' || chars[i + 3] == '!'))
+                    {
+                        return true;
+                    }
+                    if p2 == '\'' {
+                        return true;
+                    }
+                    if p2 == 'P' && i + 3 < chars.len() && chars[i + 3] == '<' {
+                        return true;
+                    }
+                }
+            } else {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+/// Quick check for any recursive group reference in the pattern.
+/// Bypass expansion when there's nothing to do.
+fn pattern_has_recursion_ref(pattern: &str) -> bool {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if !in_class && chars[i] == '[' {
+            in_class = true;
+            i += 1;
+            continue;
+        }
+        if in_class && chars[i] == ']' {
+            in_class = false;
+            i += 1;
+            continue;
+        }
+        if in_class {
+            i += 1;
+            continue;
+        }
+        if i + 2 < chars.len() && chars[i] == '(' && chars[i + 1] == '?' {
+            let p2 = chars[i + 2];
+            if p2.is_ascii_digit() || p2 == 'R' || p2 == '&' {
+                return true;
+            }
+            if (p2 == '-' || p2 == '+') && i + 3 < chars.len() && chars[i + 3].is_ascii_digit() {
+                return true;
+            }
+            if p2 == 'P' && i + 3 < chars.len() && chars[i + 3] == '>' {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+/// Expand recursive group references `(?N)` / `(?&NAME)` / `(?P>NAME)`
+/// / `(?R)` up to `max_depth` levels of nesting. Bodies with inner
+/// capturing groups are not substituted (they'd renumber the
+/// surrounding groups); references to them collapse to `(?!)`.
+/// References that bottom out at max depth also collapse to `(?!)`,
+/// so fancy_regex never sees a recursive ref. Handles tests like
+/// `^(<(?:[^<>]+|(?1))*>)$` matching `<<><<<><>>>>` (re/regexp 1123,
+/// 1153) and the matching named-group variants.
+fn expand_recursive_to_depth(pattern: &str, max_depth: usize) -> String {
+    if !pattern_has_recursion_ref(pattern) {
+        return pattern.to_string();
+    }
+    let groups = collect_capture_group_bodies(pattern);
+    if groups.is_empty() {
+        return pattern.to_string();
+    }
+    expand_recursive_helper(pattern, &groups, pattern, max_depth)
+}
+
+fn expand_recursive_helper(
+    pat: &str,
+    groups: &[(usize, String)],
+    orig_pattern: &str,
+    depth: usize,
+) -> String {
+    let chars: Vec<char> = pat.chars().collect();
+    let mut out = String::with_capacity(pat.len());
+    let mut i = 0;
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            out.push(c);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if !in_class && c == '[' {
+            in_class = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_class && c == ']' {
+            in_class = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if !in_class && c == '(' && i + 2 < chars.len() && chars[i + 1] == '?' {
+            // (?N)
+            if chars[i + 2].is_ascii_digit() {
+                let mut k = i + 2;
+                let mut num_str = String::new();
+                while k < chars.len() && chars[k].is_ascii_digit() {
+                    num_str.push(chars[k]);
+                    k += 1;
+                }
+                if k < chars.len()
+                    && chars[k] == ')'
+                    && let Ok(n) = num_str.parse::<usize>()
+                {
+                    let body = groups.iter().find(|(num, _)| *num == n).map(|(_, b)| b);
+                    if let Some(body) = body
+                        && depth > 0
+                        && !body_has_inner_capture(body)
+                    {
+                        out.push_str("(?:");
+                        out.push_str(&expand_recursive_helper(
+                            body,
+                            groups,
+                            orig_pattern,
+                            depth - 1,
+                        ));
+                        out.push(')');
+                    } else {
+                        out.push_str("(?!)");
+                    }
+                    i = k + 1;
+                    continue;
+                }
+            }
+            // (?R)
+            if chars[i + 2] == 'R' && i + 3 < chars.len() && chars[i + 3] == ')' {
+                if depth > 0 {
+                    out.push_str("(?:");
+                    out.push_str(&expand_recursive_helper(
+                        orig_pattern,
+                        groups,
+                        orig_pattern,
+                        depth - 1,
+                    ));
+                    out.push(')');
+                } else {
+                    out.push_str("(?!)");
+                }
+                i += 4;
+                continue;
+            }
+            // (?&NAME) / (?P>NAME)
+            let name_start = if i + 3 < chars.len() && chars[i + 2] == '&' {
+                Some(i + 3)
+            } else if i + 4 < chars.len() && chars[i + 2] == 'P' && chars[i + 3] == '>' {
+                Some(i + 4)
+            } else {
+                None
+            };
+            if let Some(start) = name_start {
+                let mut k = start;
+                while k < chars.len() && chars[k] != ')' {
+                    k += 1;
+                }
+                if k < chars.len() {
+                    let name: String = chars[start..k].iter().collect();
+                    let body = lookup_named_group(orig_pattern, &name).map(|(_, b)| b);
+                    if let Some(body) = body
+                        && depth > 0
+                        && !body_has_inner_capture(&body)
+                    {
+                        out.push_str("(?:");
+                        out.push_str(&expand_recursive_helper(
+                            &body,
+                            groups,
+                            orig_pattern,
+                            depth - 1,
+                        ));
+                        out.push(')');
+                    } else {
+                        out.push_str("(?!)");
+                    }
+                    i = k + 1;
+                    continue;
+                }
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 /// Rewrite numeric backrefs `\N` that target groups inside a branch
 /// reset block so they match WHICHEVER alternation captured. The
 /// branch reset semantics mean groups 1, 2 (etc.) inside `(?|...)`
@@ -29103,7 +29347,8 @@ fn bitwise_str_or_num(
     num_op: fn(i64, i64) -> i64,
     truncate: bool,
 ) -> Value {
-    let byte_safe = |v: &Value| matches!(v, Value::Str(s, _) if s.chars().all(|c| (c as u32) < 256));
+    let byte_safe =
+        |v: &Value| matches!(v, Value::Str(s, _) if s.chars().all(|c| (c as u32) < 256));
     if byte_safe(l) && byte_safe(r) {
         let lb: Vec<u8> = l.to_str().chars().map(|c| c as u8).collect();
         let rb: Vec<u8> = r.to_str().chars().map(|c| c as u8).collect();
