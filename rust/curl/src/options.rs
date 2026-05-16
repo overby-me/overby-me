@@ -121,6 +121,8 @@ pub struct Options {
     pub(crate) cert_key: Option<PathBuf>,
     /// --tls-max <version>: cap TLS to this protocol version ("1.2", "1.3").
     pub(crate) tls_max: Option<String>,
+    /// --hsts <file>: load HSTS DB; upgrade http:// → https:// for matching hosts.
+    pub(crate) hsts_file: Option<PathBuf>,
     pub(crate) resume_from: Option<String>, // -C / --continue-at
     pub(crate) time_cond: Option<TimeCond>,
     /// --stderr: redirect stderr to file; "-" means stdout.
@@ -243,6 +245,7 @@ impl Default for Options {
             cert: None,
             cert_key: None,
             tls_max: None,
+            hsts_file: None,
             resume_from: None,
             time_cond: None,
             stderr_redirect: None,

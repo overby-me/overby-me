@@ -376,7 +376,7 @@ pub(crate) fn parse_args() -> Options {
             "-V" | "--version" => {
                 println!("curl 8.0.0 (rust-curl) libcurl/8.0.0 rustls/0.23");
                 println!("Protocols: file http https");
-                println!("Features: HTTPS IPv6 Largefile SSL libz");
+                println!("Features: HSTS HTTPS IPv6 Largefile SSL libz");
                 process::exit(0);
             }
             "-X" | "--request" => {
@@ -814,6 +814,10 @@ pub(crate) fn parse_args() -> Options {
             "--tls-max" => {
                 i += 1;
                 opts.tls_max = Some(next_arg(&args, i, "--tls-max"));
+            }
+            "--hsts" => {
+                i += 1;
+                opts.hsts_file = Some(PathBuf::from(next_arg(&args, i, "--hsts")));
             }
             "--url" => {
                 i += 1;
@@ -2338,7 +2342,6 @@ fn known_long_option(name: &str) -> bool {
             | "--http0.9"
             | "--no-http0.9"
             | "--alt-svc"
-            | "--hsts"
             | "--etag-compare"
             | "--etag-save"
             | "--keepalive-time"

@@ -267,6 +267,70 @@ fn main() {
             }
         })
         .collect();
+    // --hsts <file>: load HSTS DB and upgrade matching http:// URLs to https://.
+    // Trailing dots normalize away on both sides; entries beginning with `.`
+    // also match all subdomains (tests 440, 441, 493).
+    let hsts_db: Vec<(String, bool)> = opts
+        .hsts_file
+        .as_ref()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|s| {
+            let mut out = Vec::new();
+            for line in s.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                let host = line.split_whitespace().next().unwrap_or("");
+                if host.is_empty() {
+                    continue;
+                }
+                let subdomain = host.starts_with('.');
+                let h = host
+                    .trim_start_matches('.')
+                    .trim_end_matches('.')
+                    .to_lowercase();
+                if !h.is_empty() {
+                    out.push((h, subdomain));
+                }
+            }
+            out
+        })
+        .unwrap_or_default();
+    let upgrade_to_https = |url: &str| -> String {
+        if hsts_db.is_empty() {
+            return url.to_string();
+        }
+        let lower = url.to_ascii_lowercase();
+        if !lower.starts_with("http://") {
+            return url.to_string();
+        }
+        let rest = &url[7..];
+        let (authority, _tail) = rest.split_once('/').unwrap_or((rest, ""));
+        let host_with_port = authority.rsplit('@').next().unwrap_or(authority);
+        let host = host_with_port
+            .split(':')
+            .next()
+            .unwrap_or(host_with_port)
+            .trim_end_matches('.')
+            .to_lowercase();
+        let matched = hsts_db.iter().any(|(h, subdomain)| {
+            if host == *h {
+                true
+            } else if *subdomain {
+                host.ends_with(&format!(".{h}"))
+            } else {
+                false
+            }
+        });
+        if matched {
+            format!("https://{rest}")
+        } else {
+            url.to_string()
+        }
+    };
+    let urls_with_query: Vec<String> =
+        urls_with_query.iter().map(|u| upgrade_to_https(u)).collect();
     for (url_idx, url_str) in urls_with_query.iter().enumerate() {
         // Reset exit_code per URL — curl reports the LAST URL's status as
         // the process exit code, so a failed URL1 followed by a successful
