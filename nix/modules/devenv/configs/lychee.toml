@@ -17,6 +17,7 @@ exclude = [
   'https://cloudflare-dns.com/',
   'https://mail.overby.me/',
   'https://api.mistral.ai/',
+  'https://api.tokenfactory.nebius.com/',
   'https://console.mistral.ai/',
   'https://startpage.com/',
   'https://x.com/',

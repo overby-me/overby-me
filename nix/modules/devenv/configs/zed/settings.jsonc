@@ -33,5 +33,51 @@
 			"python": "python3",
 			"typescript": "deno"
 		}
+	},
+
+	"agent": {
+		"default_model": {
+			"provider": "openai_compatible/Nebius",
+			"model": "zai-org/GLM-5.1"
+		}
+	},
+
+	"language_models": {
+		"openai_compatible": {
+			// API key is read from the NEBIUS_API_KEY environment variable.
+			"Nebius": {
+				"api_url": "https://api.tokenfactory.nebius.com/v1",
+				"available_models": [
+					{
+						"name": "zai-org/GLM-5.1",
+						"display_name": "GLM 5.1 (Nebius)",
+						"max_tokens": 200000,
+						"max_output_tokens": 131072,
+						"capabilities": {
+							"tools": true,
+							"images": false,
+							"parallel_tool_calls": true,
+							"prompt_cache_key": false,
+							"chat_completions": true,
+							"interleaved_reasoning": true
+						}
+					},
+					{
+						"name": "deepseek-ai/DeepSeek-V4-Pro",
+						"display_name": "DeepSeek V4 Pro (Nebius)",
+						"max_tokens": 1000000,
+						"max_output_tokens": 32768,
+						"capabilities": {
+							"tools": true,
+							"images": false,
+							"parallel_tool_calls": true,
+							"prompt_cache_key": false,
+							"chat_completions": true,
+							"interleaved_reasoning": true
+						}
+					}
+				]
+			}
+		}
 	}
 }
