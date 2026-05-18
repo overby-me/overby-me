@@ -798,7 +798,8 @@
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
 | ✅ | Shell | [Nushell 🦪🦀](https://github.com/nushell/nushell) | | [Brush 🦀](https://github.com/reubeno/brush), [Bash-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/bash) | [Bash 💣](https://en.wikipedia.org/wiki/Bash_(Unix_shell)) |
-| ✅ | Shell Prompt | [Starship 🦀](https://github.com/starship/starship) | | 🆗 | |
+| ✅ | Prompt | [Starship 🦀](https://github.com/starship/starship) | | 🆗 | |
+| ✅ | Completion | [Carapace 🐹](https://github.com/carapace-sh/carapace-bin) | | 🆗 | |
 | ✅ | Core Utilities | [Nushell Builtins 🦪🦀](https://github.com/nushell/nushell) | | [Uutils 🦀](https://github.com/uutils/coreutils) | [Coreutils 💣](https://en.wikipedia.org/wiki/GNU_Core_Utilities) |
 | ✅ | List Files | [Nushell Ls 🦪🦀](https://github.com/nushell/nushell) | [Eza 🦀](https://github.com/eza-community/eza) | 🆗 | [Ls 💣](https://en.wikipedia.org/wiki/GNU_Core_Utilities) |
 | ✅ | Superuser | [Sudo-rs 🦀](https://github.com/memorysafety/sudo-rs) | | ⬅️ | [Sudo 💣](https://github.com/sudo-project/sudo) |
