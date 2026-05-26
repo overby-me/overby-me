@@ -15,12 +15,24 @@ Nix checks comparing rust-pipewire output against the reference C
 
 ## Current Status
 
-**762/762 Nix-level tests passing**, plus 43 internal Rust unit tests:
+**861/861 Nix-level tests passing**, plus the in-tree Rust unit tests:
 
-- 25 byte-identical comparison tests (`spa-json-dump`, every `pw-*`/`pipewire`
-  tool's `--help` output)
-- 5 SMF / `pw-mididump` parsing tests (1 passing, 4 still failing on a
-  shell-quoting / null-byte issue in their fixtures, not the parser)
+- ~750 byte-identical option-parsing comparison tests across every
+  user-facing tool (`spa-json-dump`, every `pw-*`/`pipewire*`/`spa-*`
+  binary). Covers `--help`/`--version` (long + short + `-h`/`-V`),
+  bad-flag/unknown-flag exit codes, missing-arg short and long forms,
+  `--FOO=value` getopt parity (required-arg flags accept inline,
+  attached, separated values; no-arg flags reject inline values),
+  `--` option-terminator handling, BSD-style getopt for `pw-v4l2`,
+  short clusters (`-hV`, `-Vh`, `-hp`), color flags
+  (`Invalid color`/`Unknown color`), connect-failure parity for
+  daemon-needing tools, environment-variable handling
+  (`PIPEWIRE_REMOTE`), and `pw-mididump --force-midi` handling
+- ~17 SMF / `pw-mididump` parsing tests covering multi-track,
+  key/time signature (incl. signed `sf` quirk), SMPTE offset,
+  channel prefix, sysex, poly/channel pressure, sequence-number,
+  pitch-wheel, copyright/marker/cue meta, `tick_seconds` NaN
+  propagation for `division=0`
 - 4 `pw-config paths` action tests (with drop-in `.conf.d/` support)
 - 1 SPA POD encode comparison harness covering 18 sub-cases — every shape
   produces bytes identical to the C `spa_pod_builder_*` API (verified by
@@ -28,25 +40,29 @@ Nix checks comparing rust-pipewire output against the reference C
 - 1 daemon-interop test (`proto-test-hello-info`) that spawns a real C
   pipewire daemon and confirms rust-pipewire's protocol-native client
   gets back `Core.Info` + `Registry.Global` events
-- **35 daemon-comparison tests** (`daemon-test-*`): both the C `pw-cli`
-  and rust-pipewire's `pw-cli` are run against the same daemon and the
-  outputs `diff`ed. Covers `ls Core | Module | Factory | SecurityContext
-  | Metadata`, the empty cases for `Node | Link | Port | Device`, full
-  `ls` (with the connecting client stripped), `ls Pi` (substring filter),
-  `info 0` (Core), `info <module-id>`, `info <factory-id>`, `info all`,
-  the byte-by-byte error cases (`info 9999`, `info <SecurityContext>`),
-  by-name lookup (`info Core`), `help`, `list-vars`, `list-remotes`,
-  `quit`, and 12 usage-error variants for the commands we don't yet
-  implement (load-module, unload-module, create-device, create-node,
-  destroy, enum-params, set-param, permissions, send-command,
-  get-permissions, create-link, export-node), plus a structural pw-dump
-  test that exercises the JSON output
-- **5 rich-daemon-comparison tests** (`rich-daemon-test-*`): same setup
-  with a pre-loaded `support.null-audio-sink` Node, so we exercise
-  Node/Port code paths — `ls Node`, `ls Port`, `ls Pi` (substring),
-  `info <node-id>` (with ports/state/params/props rendering
-  byte-for-byte identical), `info Node` (by-name), and `info all`
-- 22 POD round-trip + 2 SMF + 4 dict / JSON unit tests in-tree
+- **~60 daemon-comparison tests** (`daemon-test-*`) against a real
+  C pipewire daemon, diffing C-tool vs Rust-tool output. Covers
+  `pw-cli` `ls`/`info`/`help-cmd`/`list-vars`/`list-remotes`/`quit`
+  across every supported interface, hex/octal id parsing, by-name
+  lookup (Core, Module, Factory, SecurityContext, Metadata,
+  non-existent), `connect`/`disconnect`/`switch-remote` with the
+  bad-id error path, 24 `usage-*` error variants for unimplemented
+  commands (including all short aliases — `lm`/`um`/`cd`/`cn`/`d`/
+  `cl`/`en`/`e`/`s`/`sp`/`gp`/`c`), `pw-link` empty-input/empty-
+  output/empty-links/disconnect-no-args/connect-missing-input/
+  latency-only/links-empty-verbose-id, `pw-metadata list-empty`,
+  and `pw-dump` `structural` (with `--indent=4`/`--indent=0`),
+  `connect-fail`, plus the per-interface `info` block tests for
+  Core/Module/Factory
+- **~30 rich-daemon-comparison tests** (`rich-daemon-test-*`):
+  same setup with a pre-loaded `support.null-audio-sink` Node, so
+  we exercise Node/Port/Module/Factory/Metadata code paths byte-
+  for-byte — every `ls`/`info` variant (including by-name lookups
+  for Port/Module/Factory/SecurityContext), `info-bad-id`, `info-
+  module-{1,3,5}`, `help-cmd-rich`, plus all `pw-link` listing
+  variants (verbose, links, all-flags, input-id, output-verbose,
+  pattern filters) and `pw-metadata list`/`list-byname`
+- POD round-trip + SMF + dict/JSON unit tests in-tree
 
 The reference upstream is `pkgs.pipewire` (currently 1.6.3). The Nix
 derivation extracts `pkgs.pipewire.src` and runs tests against rust-pipewire
@@ -470,20 +486,32 @@ These work by reading config files / parsing user input only.
       to stderr matching upstream
 - [x] `pw-cli info all` — covers every global; matches upstream
 - [x] `pw-dump` — emits a JSON array of registry globals with id, type,
-      version, permissions, and props (registry-side only; the C tool's
-      richer per-class info-block is Phase 8 work)
+      version, permissions, props; binds each global and decodes the
+      per-class Info event for Core/Module/Factory/Client/Device/Node/
+      Port/Link (params/state/change-mask/sorted-props all byte-identical;
+      empty params block uses C's multi-line `{}` form)
+- [x] `pw-cli` `connect`/`disconnect`/`switch-remote` (parses unknown
+      remote id, prints upstream's exact error)
 - [ ] `pw-cli` — `enum-params`, `set-param`, `create-link`, `destroy`,
-      `permissions`, `send-command`
+      `permissions`, `send-command`, `create-device`, `create-node`,
+      `load-module`, `unload-module`, `export-node` (usage-error paths
+      done; real implementation pending — requires sender-side proxy
+      methods on Node/Device/Link interfaces)
 - [ ] `pw-cli` REPL mode (interactive line-edit loop)
-- [ ] `pw-cli connect`/`disconnect`/`switch-remote` (multi-remote support)
-- [ ] `pw-mon` — registry watcher
-- [ ] `pw-link` — link/unlink ports
-- [ ] `pw-metadata` — get/set metadata k/v on the metadata global
+- [ ] `pw-mon` — registry watcher (help/version/option-error parity
+      done; live registry event streaming pending — depends on long-
+      lived listener loop over `Registry.Global`/`Registry.GlobalRemove`)
+- [x] `pw-link` — listing modes (`-i`/`-o`/`-I`/`-l`/`-v`/all-flags/
+      pattern) byte-identical against rich daemon. Actual link create/
+      disconnect (`pw-link out in` / `pw-link -d <id>`) is the next
+      step — needs `Core.CreateObject(link-factory)` and `Registry.
+      Destroy`
+- [x] `pw-metadata` — `list` (against empty + rich daemons), `list-
+      byname` byte-identical. Set/clear values pending (`Metadata.
+      SetProperty`/`Metadata.Clear`)
 - [ ] `pw-loopback` — create a loopback node pair
 - [ ] `pw-top` — read the profiler global
 - [ ] `pw-profiler` — capture profiler stream
-- [ ] `pw-dump` "info" block per interface (binds each global, decodes
-      the per-class Info event for Node, Port, Device, Link, Profiler)
 
 Comparison test pattern: run our tool and the C tool against the **same**
 running daemon (the upstream C `pipewire`), check both produce
@@ -584,11 +612,17 @@ rust-pipewire" message and exit 0 (so package install scripts that probe
 | M7 ✓ | +40 daemon-comparison | `pw-cli list-objects` / `info` / `pw-dump` / 12 usage paths byte-match against same daemon (incl. Node/Port/Device with params + state) |
 | M8 ✓ | +30 stub helps | All 35 user-facing tools have byte-identical `--help` / `--version` / `-h` / `-V` parity, including the pw-cat multicall family and the SPA support tools |
 | M9 ✓ | +35 bad-flag/no-args | Every tool's getopt error path matches upstream's exact message and exit code — pw-cat → `invalid option -- 'V'`, pipewire daemons → 234 truncated -EINVAL, pw-v4l2 → BSD-style `illegal option`, spa-acp-tool → both messages |
-| **Now** | **600/600** 🎉 | Every test passes; every user-facing tool has byte-identical option parity. Includes: every short-alias of pw-cli's commands (`destroy`/`d`, `load-module`/`lm`, `unload-module`/`um`, `enum-params`/`e`, `set-param`/`s`, `send-command`/`c`, `get-permissions`/`gp`, `create-link`/`cl`, `export-node`/`en`), connect-then-error semantics (commands attempt connect, emit C's exact error on failure), rich-daemon variants of every ls/info subtest, pattern filtering for pw-link, mode-error messages (connect/disconnect), short cluster handling (`-hV` / `-Vh` / `-hp`), full `--FOO=value` getopt parity — required-arg flags accept inline values via `--FOO=val`, `-Xval` (attached short), and `-X val` (separated), no-arg flags reject inline values with `option 'X' doesn't allow an argument`, `Invalid color`/`Unknown color` for invalid color values, missing-arg errors, BSD-style getopt parity for pw-v4l2, `--` option-terminator handling, pw-top/pw-dot/pw-mon/pw-profiler/pw-container/pw-loopback connect-failure parity, pw-cli REPL connect-attempt with --remote, comprehensive SMF fixture coverage (multi-track, key/time signature, SMPTE offset, channel prefix, sysex, poly/channel pressure, sequence-number, pitch-wheel, copyright/marker/cue meta), and JSON-dump array/object/special-key/booleans/escaped/deep-nesting/array-of-arrays/dash-stdin edge cases |
-| M8 | ~80 | `pw-cli` / `pw-mon` / `pw-link` more commands, full pw-dump info-blocks |
-| M9 | ~180 | Stream API + `pw-cat` for WAV |
-| M10 | ~220 | Daemon hosts C clients |
-| M11 | informational `+ pwtest` | Upstream pwtest binaries via cdylib |
+| M10 ✓ | +252 option-parity | Full `--FOO=value` getopt parity across every tool, comprehensive SMF fixtures, JSON-dump edge cases, connect-failure parity for every daemon-needing tool |
+| M11 ✓ | +3 pw-dump info | Per-class info block for Core/Module/Factory in pw-dump (matches C's multi-line `{}` for empty params, signed `sf` quirk in SMF Key Signature, hex/octal id parsing) |
+| M12 ✓ | +2 rich-daemon pw-dump | `pw-dump <node-id>` and `pw-dump <port-id>` against rich daemon byte-match C — covers Node info block (max-input-ports/n-input-ports/state/props) and Port info block (direction/change-mask/props) |
+| **Now** | **863/863** 🎉 | All tests pass. Latest additions (M12): rich-daemon pw-dump tests for Node/Port info blocks. Full `pw-dump` (no id filter) against rich daemon revealed three concrete gaps to land next: (1) Node/Port `enum-params` follow-up after Info events, (2) Metadata items array, (3) "manager" client intention props |
+| M13 | ~880 | pw-dump `enum-params` follow-up: bind each Node/Port/Device after Info and call `EnumParams` for each `params` entry whose flags include READ, decoding the param POD via the JSON↔POD bridge — needed for full-registry byte-match |
+| M14 | ~900 | pw-dump full-registry test passes against rich daemon: connecting client identifies as "manager" intention, settings Metadata items dumped, registry ordering matches |
+| M15 | ~920 | pw-link create/disconnect; pw-metadata set/clear |
+| M16 | ~950 | pw-mon live registry watcher; pw-cli `enum-params` + `set-param` (params decode + JSON↔POD bridge) |
+| M17 | ~990 | Stream API + `pw-cat` for WAV |
+| M18 | ~1030 | Daemon hosts C clients |
+| M19 | informational `+ pwtest` | Upstream pwtest binaries via cdylib |
 
 ---
 

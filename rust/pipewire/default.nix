@@ -3182,6 +3182,14 @@
         tool = "pw-metadata";
         name = "list-byname";
       }
+      {
+        tool = "pw-dump";
+        name = "info-node-rich";
+      }
+      {
+        tool = "pw-dump";
+        name = "info-port-rich";
+      }
     ];
 
     # Daemon-comparison tests — spawn a real C pipewire daemon and run both
