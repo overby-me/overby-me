@@ -35,7 +35,7 @@
         description = "A pure Rust rewrite and drop-in replacement for pkg-config/pkgconf";
         homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/pkg-config";
         license = lib.licenses.isc;
-        maintainers = with lib.maintainers; [noverby];
+        maintainers = with lib.maintainers; [overby-me];
         mainProgram = "pkgconf";
       };
     };

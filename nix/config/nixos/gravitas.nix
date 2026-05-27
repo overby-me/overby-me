@@ -34,21 +34,21 @@
     android-tools
     {
       # Decrypt the user SSH keys at boot using the host SSH key (no
-      # Nitrokey touch needed) and drop them straight into ~noverby/.ssh.
+      # Nitrokey touch needed) and drop them straight into ~overby.me/.ssh.
       # The keys are also backed up in Bitwarden.
       age.secrets = {
-        noverby-id_ed25519 = {
+        overby-me-id_ed25519 = {
           file = inputs.self.secrets.id_ed25519;
-          path = "/home/noverby/.ssh/id_ed25519";
-          owner = "noverby";
+          path = "/home/overby.me/.ssh/id_ed25519";
+          owner = "overby.me";
           group = "users";
           mode = "600";
           symlink = false;
         };
-        noverby-id_rsa = {
+        overby-me-id_rsa = {
           file = inputs.self.secrets.id_rsa;
-          path = "/home/noverby/.ssh/id_rsa";
-          owner = "noverby";
+          path = "/home/overby.me/.ssh/id_rsa";
+          owner = "overby.me";
           group = "users";
           mode = "600";
           symlink = false;

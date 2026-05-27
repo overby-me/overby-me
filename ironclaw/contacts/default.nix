@@ -72,7 +72,7 @@
         description = "Contacts channel for IronClaw AI assistant via CardDAV";
         homepage = "https://tangled.org/overby.me/overby.me/tree/main/ironclaw/contacts";
         license = lib.licenses.mit;
-        maintainers = with lib.maintainers; [noverby];
+        maintainers = with lib.maintainers; [overby-me];
       };
     };
 }

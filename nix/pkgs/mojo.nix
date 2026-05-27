@@ -273,7 +273,7 @@ in
       description = "Mojo Programming Language";
       homepage = "https://www.modular.com/mojo";
       platforms = ["x86_64-linux" "aarch64-darwin"];
-      maintainers = with lib.maintainers; [noverby];
+      maintainers = with lib.maintainers; [overby-me];
       license = licenses.unfree;
     };
   }

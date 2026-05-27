@@ -45,7 +45,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
     description = "Data Exploration in the Terminal";
     homepage = "https://github.com/derekwisong/datui";
     license = lib.licenses.mit;
-    maintainers = with lib.maintainers; [noverby];
+    maintainers = with lib.maintainers; [overby-me];
     mainProgram = "datui";
   };
 })

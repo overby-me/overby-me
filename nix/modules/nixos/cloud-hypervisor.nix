@@ -25,7 +25,7 @@
       Type = "oneshot";
       RemainAfterExit = true;
       ExecStart = pkgs.writeShellScript "vmtap0-up" ''
-        ${pkgs.iproute2}/bin/ip tuntap add dev vmtap0 mode tap user noverby
+        ${pkgs.iproute2}/bin/ip tuntap add dev vmtap0 mode tap user overby.me
         ${pkgs.iproute2}/bin/ip addr add 192.168.100.1/24 dev vmtap0
         ${pkgs.iproute2}/bin/ip link set vmtap0 up
       '';

@@ -1,15 +1,15 @@
-# Overlay Flake lib as lib.noverby
-# and add noverby to lib.maintainers
+# Overlay Flake lib as lib.overby-me
+# and add overby-me to lib.maintainers
 (_: prev: {
   lib = prev.lib.extend (_: prevLib: {
-    noverby = prev.outputs.lib;
+    overby-me = prev.outputs.lib;
     maintainers =
       prevLib.maintainers
       // {
-        noverby = {
+        overby-me = {
           name = "Niclas Overby";
           email = "niclas@overby.me";
-          github = "noverby";
+          github = "overby-me";
           githubId = "2422942";
         };
       };

@@ -28,6 +28,6 @@ rustPlatform.buildRustPackage rec {
     homepage = "https://github.com/mkj/sunset";
     changelog = "https://github.com/mkj/sunset/blob/${src.rev}/changelog.md";
     license = lib.licenses.bsd0;
-    maintainers = with lib.maintainers; [noverby];
+    maintainers = with lib.maintainers; [overby-me];
   };
 }

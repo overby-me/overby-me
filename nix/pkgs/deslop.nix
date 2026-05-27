@@ -20,7 +20,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
     description = "Language Agnostic Ultra Fast Best Practice Analyzer";
     homepage = "https://github.com/chinmay-sawant/deslop";
     license = lib.licenses.mit;
-    maintainers = with lib.maintainers; [noverby];
+    maintainers = with lib.maintainers; [overby-me];
     mainProgram = "deslop";
   };
 })

@@ -96,7 +96,7 @@
         experimental-features = ["nix-command" "flakes"];
         # When on the device, prefer remote builders to avoid draining
         # battery and running out of memory during local rebuilds.
-        trusted-users = ["root" "noverby"];
+        trusted-users = ["root" "overby.me"];
       };
 
       # Disable NixOS manual (saves closure size and hides desktop icon).
@@ -116,7 +116,7 @@
       # bypass it to land directly on the desktop via touchscreen.
       services.displayManager.autoLogin = {
         enable = true;
-        user = "noverby";
+        user = "overby.me";
       };
 
       # Pre-configured WiFi network for headless SSH access.
@@ -226,7 +226,7 @@
       users = {
         mutableUsers = true;
 
-        users.noverby = {
+        users."overby.me" = {
           isNormalUser = true;
           description = "Niclas Overby";
           initialPassword = "changeme";
@@ -235,7 +235,7 @@
             "video"
             "wheel"
           ];
-          openssh.authorizedKeys.keys = [publicKeys.noverby-ssh-ed25519];
+          openssh.authorizedKeys.keys = [publicKeys.overby-me-ssh-ed25519];
         };
       };
 

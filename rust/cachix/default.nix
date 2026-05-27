@@ -34,7 +34,7 @@
         description = "Rust port of the Cachix CLI client for Nix binary cache hosting";
         homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/cachix";
         license = lib.licenses.mit;
-        maintainers = with lib.maintainers; [noverby];
+        maintainers = with lib.maintainers; [overby-me];
         mainProgram = "cachix";
       };
     };

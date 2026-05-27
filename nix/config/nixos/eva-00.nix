@@ -208,13 +208,13 @@ inputs.nixos-raspberrypi.lib.nixosSystem {
 
       # ── Users ───────────────────────────────────────────────────────
       users.users = {
-        root.openssh.authorizedKeys.keys = [publicKeys.noverby-ssh-ed25519];
+        root.openssh.authorizedKeys.keys = [publicKeys.overby-me-ssh-ed25519];
 
-        noverby = {
+        "overby.me" = {
           isNormalUser = true;
           description = "Niclas Overby";
           extraGroups = ["wheel"];
-          openssh.authorizedKeys.keys = [publicKeys.noverby-ssh-ed25519];
+          openssh.authorizedKeys.keys = [publicKeys.overby-me-ssh-ed25519];
         };
       };
 
@@ -223,7 +223,7 @@ inputs.nixos-raspberrypi.lib.nixosSystem {
       # ── Nix settings ────────────────────────────────────────────────
       nix = {
         settings = {
-          trusted-users = ["root" "noverby"];
+          trusted-users = ["root" "overby.me"];
           experimental-features = "nix-command flakes";
           substituters = [
             "https://overby-me.cachix.org"

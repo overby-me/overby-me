@@ -63,7 +63,7 @@ rustPlatform.buildRustPackage rec {
     description = "A desktop audio visualizer and shader player for your wayland wallpaper";
     homepage = "https://github.com/TornaxO7/vibe";
     license = lib.licenses.gpl2Only;
-    maintainers = with lib.maintainers; [noverby];
+    maintainers = with lib.maintainers; [overby-me];
     mainProgram = "vibe";
   };
 }

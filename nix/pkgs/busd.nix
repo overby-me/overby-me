@@ -20,7 +20,7 @@ rustPlatform.buildRustPackage rec {
     description = "A D-Bus bus (broker) implementation based on zbus";
     homepage = "https://github.com/dbus2/busd";
     license = lib.licenses.mit;
-    maintainers = with lib.maintainers; [noverby];
+    maintainers = with lib.maintainers; [overby-me];
     mainProgram = "busd";
   };
 }

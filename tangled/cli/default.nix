@@ -39,7 +39,7 @@
         description = "Rust CLI for Tangled, a decentralized git collaboration platform built on the AT Protocol";
         homepage = "https://tangled.org/vitorpy.com/tangled-cli";
         license = with lib.licenses; [mit asl20];
-        maintainers = with lib.maintainers; [noverby];
+        maintainers = with lib.maintainers; [overby-me];
         mainProgram = "tangled-cli";
       };
     };

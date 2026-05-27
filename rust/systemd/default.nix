@@ -35,7 +35,7 @@
           description = "A service manager that is able to run \"traditional\" systemd services, written in rust";
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/systemd";
           license = lib.licenses.mit;
-          maintainers = with lib.maintainers; [noverby];
+          maintainers = with lib.maintainers; [overby-me];
           mainProgram = "systemd";
         };
       };
@@ -81,7 +81,7 @@
           description = "A service manager that is able to run \"traditional\" systemd services, written in rust";
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/systemd";
           license = lib.licenses.mit;
-          maintainers = with lib.maintainers; [noverby];
+          maintainers = with lib.maintainers; [overby-me];
           mainProgram = "systemd";
         };
       };

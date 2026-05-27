@@ -72,7 +72,7 @@
         description = "Matrix channel for IronClaw AI assistant";
         homepage = "https://tangled.org/overby.me/overby.me/tree/main/ironclaw/matrix";
         license = lib.licenses.mit;
-        maintainers = with lib.maintainers; [noverby];
+        maintainers = with lib.maintainers; [overby-me];
       };
     };
 }

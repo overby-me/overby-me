@@ -9,7 +9,7 @@
       max-jobs = "auto";
       connect-timeout = 10;
       stalled-download-timeout = 10;
-      trusted-users = ["root" "noverby"];
+      trusted-users = ["root" "overby.me"];
       experimental-features = "nix-command flakes ca-derivations dynamic-derivations recursive-nix";
       system-features = ["benchmark" "big-parallel" "kvm" "nixos-test" "recursive-nix"];
       download-buffer-size = 1024 * 1024 * 1024;

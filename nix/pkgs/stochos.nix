@@ -31,7 +31,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
     description = "Keyboard driven mouse control";
     homepage = "https://github.com/museslabs/stochos";
     license = lib.licenses.gpl3Plus;
-    maintainers = with lib.maintainers; [noverby];
+    maintainers = with lib.maintainers; [overby-me];
     mainProgram = "stochos";
   };
 })

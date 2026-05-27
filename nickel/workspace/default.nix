@@ -22,7 +22,7 @@
         description = "A Nickel-powered workspace manager for Nix flakes";
         homepage = "https://tangled.org/overby.me/overby.me/tree/main/nickel/workspace";
         license = lib.licenses.mit;
-        maintainers = with lib.maintainers; [noverby];
+        maintainers = with lib.maintainers; [overby-me];
         mainProgram = "nickel-workspace";
       };
     };

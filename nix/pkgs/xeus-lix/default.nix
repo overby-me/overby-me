@@ -58,7 +58,7 @@ python3.pkgs.toPythonModule (stdenv.mkDerivation {
     description = "";
     homepage = "https://github.com/ptrpaws/xeus-lix";
     license = lib.licenses.lgpl21Only;
-    maintainers = with lib.maintainers; [noverby];
+    maintainers = with lib.maintainers; [overby-me];
     mainProgram = "xlix";
     platforms = lib.platforms.all;
   };

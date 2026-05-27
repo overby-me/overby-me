@@ -28,7 +28,7 @@ in
       longDescription = "XR virtual desktop for GNOME.";
       homepage = "https://github.com/wheaney/breezy-desktop";
       license = lib.licenses.gpl2Plus; # https://wiki.gnome.org/Projects/GnomeShell/Extensions/Review#Licensing
-      maintainers = with lib.maintainers; [noverby];
+      maintainers = with lib.maintainers; [overby-me];
     };
     passthru = {
       extensionPortalSlug = pname;

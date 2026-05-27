@@ -47,7 +47,7 @@ in {
   home.file = lib.mkIf hasSecrets (let
     inherit (secrets) publicKeys;
   in {
-    ".ssh/id_ed25519.pub".text = publicKeys.noverby-ssh-ed25519;
-    ".ssh/id_rsa.pub".text = publicKeys.noverby-ssh-rsa;
+    ".ssh/id_ed25519.pub".text = publicKeys.overby-me-ssh-ed25519;
+    ".ssh/id_rsa.pub".text = publicKeys.overby-me-ssh-rsa;
   });
 }

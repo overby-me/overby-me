@@ -1,7 +1,7 @@
 {inputs, ...}: {
   home = {
-    username = "noverby";
-    homeDirectory = "/home/noverby";
+    username = "overby.me";
+    homeDirectory = "/home/overby.me";
   };
   imports = with inputs.self.homeModules; [
     inputs.zen-browser.homeModules.default

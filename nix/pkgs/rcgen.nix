@@ -39,7 +39,7 @@ rustPlatform.buildRustPackage rec {
     description = "Generate X.509 certificates, CSRs";
     homepage = "https://github.com/rustls/rcgen";
     license = lib.licenses.mit;
-    maintainers = with lib.maintainers; [noverby];
+    maintainers = with lib.maintainers; [overby-me];
     mainProgram = "rustls-cert-gen";
   };
 }

@@ -63,7 +63,7 @@ rustPlatform.buildRustPackage {
     description = "COSMIC On-Screen Keyboard";
     homepage = "https://github.com/pop-os/cosmic-osk";
     license = lib.licenses.gpl3Only;
-    maintainers = with lib.maintainers; [noverby];
+    maintainers = with lib.maintainers; [overby-me];
     mainProgram = "cosmic-osk";
   };
 }

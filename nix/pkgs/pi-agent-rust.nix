@@ -54,7 +54,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
     homepage = "https://github.com/Dicklesworthstone/pi_agent_rust";
     changelog = "https://github.com/Dicklesworthstone/pi_agent_rust/blob/${finalAttrs.src.rev}/CHANGELOG.md";
     license = lib.licenses.unfree; # MIT with OpenAI/Anthropic restriction rider
-    maintainers = with lib.maintainers; [noverby];
+    maintainers = with lib.maintainers; [overby-me];
     mainProgram = "pi";
   };
 })

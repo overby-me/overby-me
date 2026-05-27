@@ -37,7 +37,7 @@
           description = "A TRAMP-inspired remote filesystem plugin for Nushell";
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/nushell/plugin-tramp";
           license = lib.licenses.mit;
-          maintainers = with lib.maintainers; [noverby];
+          maintainers = with lib.maintainers; [overby-me];
           mainProgram = "nu_plugin_tramp";
         };
       };
@@ -71,7 +71,7 @@
           description = "Lightweight RPC agent for nushell-plugin-tramp remote filesystem operations";
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/nushell/plugin-tramp";
           license = lib.licenses.mit;
-          maintainers = with lib.maintainers; [noverby];
+          maintainers = with lib.maintainers; [overby-me];
           mainProgram = "tramp-agent";
         };
       };

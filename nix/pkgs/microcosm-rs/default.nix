@@ -79,6 +79,6 @@ rustPlatform.buildRustPackage rec {
     description = "Rust atproto crates and services for microcosm";
     homepage = "https://github.com/at-microcosm/microcosm-rs";
     license = with lib.licenses; [agpl3Only];
-    maintainers = with lib.maintainers; [noverby];
+    maintainers = with lib.maintainers; [overby-me];
   };
 }

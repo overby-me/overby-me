@@ -72,7 +72,7 @@
         description = "Calendar channel for IronClaw AI assistant via CalDAV";
         homepage = "https://tangled.org/overby.me/overby.me/tree/main/ironclaw/calendar";
         license = lib.licenses.mit;
-        maintainers = with lib.maintainers; [noverby];
+        maintainers = with lib.maintainers; [overby-me];
       };
     };
 }

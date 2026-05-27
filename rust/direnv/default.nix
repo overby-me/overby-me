@@ -22,7 +22,7 @@
         description = "A Rust rewrite of direnv - unclutter your .profile";
         homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/direnv";
         license = lib.licenses.mit;
-        maintainers = with lib.maintainers; [noverby];
+        maintainers = with lib.maintainers; [overby-me];
         mainProgram = "direnv";
       };
     };

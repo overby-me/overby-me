@@ -40,7 +40,7 @@ rustPlatform.buildRustPackage rec {
     description = "Jupyter Notebook Viewer";
     homepage = "https://github.com/runtimed/runtimed/";
     license = lib.licenses.bsd3;
-    maintainers = with lib.maintainers; [noverby];
+    maintainers = with lib.maintainers; [overby-me];
     mainProgram = "sidecar";
   };
 }

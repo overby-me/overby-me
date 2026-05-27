@@ -34,7 +34,7 @@ rustPlatform.buildRustPackage {
     description = "Rusty notification daemon for Wayland";
     homepage = "https://github.com/bzglve/rustyfications";
     license = lib.licenses.mit;
-    maintainers = with lib.maintainers; [noverby];
+    maintainers = with lib.maintainers; [overby-me];
     platforms = lib.platforms.linux;
     mainProgram = "rustyfications";
   };

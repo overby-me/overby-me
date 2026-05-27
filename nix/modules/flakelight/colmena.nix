@@ -44,7 +44,7 @@ in {
     // lib.mapAttrs (name: cfg: {
       deployment = {
         targetHost = "${name}.overby.me";
-        targetUser = "noverby";
+        targetUser = "overby.me";
       };
       imports =
         [

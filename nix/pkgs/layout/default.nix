@@ -26,7 +26,7 @@ rustPlatform.buildRustPackage {
     description = "Layout is a rust library and a tool that renders Graphviz dot files";
     homepage = "https://github.com/nadavrot/layout";
     license = lib.licenses.mit;
-    maintainers = with lib.maintainers; [noverby];
+    maintainers = with lib.maintainers; [overby-me];
     mainProgram = "layout";
   };
 }

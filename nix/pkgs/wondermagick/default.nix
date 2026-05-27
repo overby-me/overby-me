@@ -25,7 +25,7 @@ rustPlatform.buildRustPackage {
     description = "Memory-safe replacement for imagemagick";
     homepage = "https://github.com/Shnatsel/wondermagick";
     license = lib.licenses.unfree; # FIXME: No upstream license https://github.com/Shnatsel/wondermagick/issues/23
-    maintainers = with lib.maintainers; [noverby];
+    maintainers = with lib.maintainers; [overby-me];
     mainProgram = "wm-convert";
   };
 }

@@ -36,7 +36,7 @@ in
       description = "A beautiful terminal social client for Mastodon and Bluesky";
       homepage = "https://github.com/ricardodantas/perch";
       license = lib.licenses.gpl3Only;
-      maintainers = with lib.maintainers; [noverby];
+      maintainers = with lib.maintainers; [overby-me];
       mainProgram = "perch";
     };
   })

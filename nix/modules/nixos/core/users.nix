@@ -6,11 +6,11 @@
   inherit (inputs.self.secrets) publicKeys;
 in {
   environment.profiles = ["$HOME/.local"];
-  users.users.noverby = {
+  users.users."overby.me" = {
     shell = pkgs.pkgsUnstable.nushell;
     isNormalUser = true;
     description = "Niclas Overby";
     extraGroups = ["networkmanager" "wheel" "docker" "libvirtd" "wireshark" "input" "kvm"];
-    openssh.authorizedKeys.keys = [publicKeys.noverby-ssh-ed25519];
+    openssh.authorizedKeys.keys = [publicKeys.overby-me-ssh-ed25519];
   };
 }

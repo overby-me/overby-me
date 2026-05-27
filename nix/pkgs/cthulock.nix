@@ -53,7 +53,7 @@ rustPlatform.buildRustPackage {
     description = "Wayland screen locker focused on customizability";
     homepage = "https://github.com/FriederHannenheim/cthulock";
     license = lib.licenses.gpl3Plus;
-    maintainers = with lib.maintainers; [noverby];
+    maintainers = with lib.maintainers; [overby-me];
     platforms = lib.platforms.linux;
     mainProgram = "cthulock";
   };

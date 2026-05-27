@@ -33,7 +33,7 @@ in
       description = "ForkFS allows you to sandbox a process's changes to your file system";
       homepage = "https://github.com/SUPERCILEX/forkfs";
       license = lib.licenses.asl20;
-      maintainers = with lib.maintainers; [noverby];
+      maintainers = with lib.maintainers; [overby-me];
       mainProgram = "forkfs";
     };
   }

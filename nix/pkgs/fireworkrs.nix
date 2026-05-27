@@ -20,7 +20,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
     description = "Play text art animations in your terminal";
     homepage = "https://github.com/crisidev/fireworkrs";
     license = lib.licenses.mit;
-    maintainers = with lib.maintainers; [noverby];
+    maintainers = with lib.maintainers; [overby-me];
     mainProgram = "fireworkrs";
   };
 })

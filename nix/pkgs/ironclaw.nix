@@ -12,7 +12,7 @@
   version = "0.18.0-mistral-fix2";
 
   src = fetchFromGitHub {
-    owner = "noverby";
+    owner = "overby-me";
     repo = "ironclaw";
     rev = "aeb6d57181e8163c4c23ada9e310cb545418a757";
     hash = "sha256-hdN+errcdbIl9BRRO/rxoiyTjyXiwwgDiMGkHqG2/1I=";
@@ -188,7 +188,7 @@ in
       description = "IronClaw – secure personal AI assistant (OpenClaw-inspired, written in Rust)";
       homepage = "https://github.com/nearai/ironclaw";
       license = with lib.licenses; [asl20 mit];
-      maintainers = with lib.maintainers; [noverby];
+      maintainers = with lib.maintainers; [overby-me];
       platforms = lib.platforms.linux;
       mainProgram = "ironclaw";
     };

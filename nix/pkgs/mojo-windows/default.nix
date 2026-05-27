@@ -198,6 +198,6 @@ in
       description = "KGEN runtime shim for cross-compiling Mojo programs to Windows (x86_64-pc-windows-gnu)";
       license = licenses.mit;
       platforms = platforms.linux;
-      maintainers = with lib.maintainers; [noverby];
+      maintainers = with lib.maintainers; [overby-me];
     };
   }

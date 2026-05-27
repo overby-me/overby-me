@@ -32,7 +32,7 @@
       description = "A wip jupyter raw kernel for nu";
       homepage = "https://github.com/cptpiepmatz/nu-jupyter-kernel";
       license = lib.licenses.mit;
-      maintainers = with lib.maintainers; [noverby];
+      maintainers = with lib.maintainers; [overby-me];
       mainProgram = "nu-jupyter-kernel";
     };
   };
