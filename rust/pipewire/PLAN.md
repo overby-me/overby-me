@@ -490,12 +490,16 @@ These work by reading config files / parsing user input only.
       per-class Info event for Core/Module/Factory/Client/Device/Node/
       Port/Link (params/state/change-mask/sorted-props all byte-identical;
       empty params block uses C's multi-line `{}` form). After Info we
-      now issue `EnumParams` per READ-flagged entry on Node/Port/Device,
+      issue `EnumParams` per READ-flagged entry on Node/Port/Device,
       collect the returned `Param` events, and render their PODs to JSON
-      via a SPA type registry (`SPA_TYPE_OBJECT_ParamIO` so far — Node
-      IO params Clock + Position byte-match for `pw-dump <node-id>`).
-      `SPA_TYPE_OBJECT_Format` + Choice rendering still pending for
-      Port EnumFormat byte-parity
+      via a SPA type registry (`SPA_TYPE_OBJECT_ParamIO` + `SPA_TYPE_
+      OBJECT_Format` so far). Choice rendering handles None/Range/Step/
+      Enum/Flags as labelled dicts (`{default, min, max}` /
+      `{default, alt1, alt2}` etc). Metadata globals get a separate bind
+      path that drains `Metadata.Property` events and renders them as the
+      `"metadata"` array. Connects with `remote.intention=manager` (tries
+      the `-manager` socket first, falls back to plain) so the connecting
+      Client global ends up in the same state as C's pw-dump
 - [x] `pw-cli` `connect`/`disconnect`/`switch-remote` (parses unknown
       remote id, prints upstream's exact error)
 - [ ] `pw-cli` — `enum-params`, `set-param`, `create-link`, `destroy`,
@@ -622,8 +626,8 @@ rust-pipewire" message and exit 0 (so package install scripts that probe
 | M11 ✓ | +3 pw-dump info | Per-class info block for Core/Module/Factory in pw-dump (matches C's multi-line `{}` for empty params, signed `sf` quirk in SMF Key Signature, hex/octal id parsing) |
 | M12 ✓ | +2 rich-daemon pw-dump | `pw-dump <node-id>` and `pw-dump <port-id>` against rich daemon byte-match C — covers Node info block (max-input-ports/n-input-ports/state/props) and Port info block (direction/change-mask/props) |
 | M13 ✓ | +1 enum-params (Node IO) | pw-dump's `enum-params` follow-up: bind each Node/Port/Device after Info and call `EnumParams` for each READ-flagged param; decode the per-param POD (`ParamIO` `id`+`size`) and emit the JSON form C's `put_pod_value` produces. First exercise: Node IO params (Clock + Position) byte-match for `pw-dump <node-id>` |
-| **Now** | **864/864** 🎉 | All tests pass. Remaining gaps for full-registry parity: (1) `SPA_TYPE_OBJECT_Format` table + Choice rendering (Range/Step/Enum/Flags) for Port EnumFormat values, (2) Metadata items array for `PipeWire:Interface:Metadata` globals, (3) "manager" client intention props |
-| M14 | ~900 | pw-dump full-registry test passes against rich daemon: Object-Format + Choice rendering, connecting client identifies as "manager" intention, settings Metadata items dumped, registry ordering matches |
+| M14 ✓ | +2 Port EnumFormat + Metadata | `SPA_TYPE_OBJECT_Format` property table (mediaType/mediaSubtype/format/rate/channels/position) + Choice rendering (None/Range/Step/Enum/Flags labelled dicts) for `pw-dump <port-id>`; Metadata binding + Property events drained + `metadata` items array rendered for `pw-dump <metadata-id>`; pw-dump connects with `remote.intention=manager` (tries `-manager` socket first, falls back to plain) so the connecting Client global matches C's |
+| **Now** | **866/866** 🎉 | All tests pass. Remaining gap for full-registry parity: PID-normalization for connecting Client global (`application.process.id`, `pipewire.sec.pid`, `pipewire.sec.gid`/`uid`, `object.serial`) since C and Rust pw-dump run as separate processes with different PIDs |
 | M15 | ~920 | pw-link create/disconnect; pw-metadata set/clear |
 | M16 | ~950 | pw-mon live registry watcher; pw-cli `enum-params` + `set-param` (params decode + JSON↔POD bridge) |
 | M17 | ~990 | Stream API + `pw-cat` for WAV |

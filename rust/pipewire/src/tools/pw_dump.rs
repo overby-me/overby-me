@@ -30,12 +30,27 @@ enum InfoData {
 /// can appear multiple times (e.g. multiple EnumFormat results).
 type ParamValue = (u32, crate::spa::pod::types::Value);
 
+/// One row in a Metadata global's items array, accumulated from
+/// `Metadata.Property` events after the bind.
+#[derive(Debug, Clone)]
+struct MetadataItem {
+    subject: u32,
+    key: String,
+    /// SPA type string ("Spa:String:JSON" → render value as nested JSON).
+    /// Empty when the metadata writer didn't supply a type.
+    type_: String,
+    value: String,
+}
+
 /// Registry global plus the (optional) bound-proxy Info event and any
 /// param values returned by EnumParams follow-ups.
 struct GlobalEntry {
     global: RegistryGlobal,
     info: Option<InfoData>,
     param_values: Vec<ParamValue>,
+    /// Items accumulated from Metadata.Property events. Only populated
+    /// for `PipeWire:Interface:Metadata` globals.
+    metadata: Vec<MetadataItem>,
 }
 
 pub fn main(raw_args: &[String]) -> i32 {
@@ -258,21 +273,15 @@ fn collect_globals(remote: Option<&str>) -> Result<Vec<GlobalEntry>, String> {
     // PIPEWIRE_REMOTE supplies the socket name when -r wasn't given.
     let env_remote = std::env::var("PIPEWIRE_REMOTE").ok();
     let chosen: Option<String> = remote.map(String::from).or(env_remote);
-    let mut client = match chosen.as_deref() {
-        Some(name) if name.starts_with('/') => Client::connect_path(std::path::Path::new(name)),
-        Some(name) => {
-            let runtime = std::env::var("PIPEWIRE_RUNTIME_DIR")
-                .or_else(|_| std::env::var("XDG_RUNTIME_DIR"))
-                .unwrap_or_else(|_| "/tmp".to_string());
-            let path = std::path::PathBuf::from(runtime).join(name);
-            Client::connect_path(&path)
-        }
-        None => Client::connect_default(),
-    }
-    .map_err(|e| format!("connect: {e}"))?;
+    // C pw-dump sets `remote.intention=manager` in context props before
+    // connecting; module-protocol-native's local-socket.c then tries
+    // `<name>-manager` first and falls back to `<name>`. Mirror that so we
+    // land on the manager socket when the daemon publishes one.
+    let mut client =
+        connect_with_intention_manager(chosen.as_deref()).map_err(|e| format!("connect: {e}"))?;
 
     let registry_id = client
-        .handshake("rust-pipewire-dump")
+        .handshake_with_intention("pw-dump", "manager")
         .map_err(|e| format!("handshake: {e}"))?;
     let sync_seq = client
         .sync(interfaces::ID_CORE)
@@ -325,7 +334,16 @@ fn collect_globals(remote: Option<&str>) -> Result<Vec<GlobalEntry>, String> {
                 GlobalEntry {
                     info: core_info.clone().map(InfoData::Core),
                     param_values: Vec::new(),
+                    metadata: Vec::new(),
                     global: g,
+                }
+            } else if g.interface == interfaces::TYPE_METADATA {
+                let items = bind_metadata(&mut client, registry_id, &g).unwrap_or_default();
+                GlobalEntry {
+                    global: g,
+                    info: None,
+                    param_values: Vec::new(),
+                    metadata: items,
                 }
             } else {
                 let (info, params) =
@@ -334,11 +352,110 @@ fn collect_globals(remote: Option<&str>) -> Result<Vec<GlobalEntry>, String> {
                     global: g,
                     info,
                     param_values: params,
+                    metadata: Vec::new(),
                 }
             }
         })
         .collect();
     Ok(entries)
+}
+
+/// Bind a `PipeWire:Interface:Metadata` global, drain the Property events
+/// the server emits on bind (one per existing entry), and return the items
+/// in arrival order. Matches the C tool's `metadata_property` handler
+/// which appends to a per-object list.
+fn bind_metadata(
+    client: &mut Client,
+    registry_id: u32,
+    g: &RegistryGlobal,
+) -> Result<Vec<MetadataItem>, String> {
+    let proxy_id = client
+        .registry_bind(
+            registry_id,
+            g.id,
+            &g.interface,
+            interfaces::VERSION_METADATA,
+        )
+        .map_err(|e| format!("{e}"))?;
+    let sync_seq = client
+        .sync(interfaces::ID_CORE)
+        .map_err(|e| format!("{e}"))?;
+    let mut items: Vec<MetadataItem> = Vec::new();
+    while let Some(msg) = client.read_message().map_err(|e| format!("{e}"))? {
+        if msg.id == proxy_id && msg.opcode == interfaces::metadata_event::PROPERTY {
+            if let Some(item) = decode_metadata_property(&msg.args) {
+                items.push(item);
+            }
+            continue;
+        }
+        if msg.id == interfaces::ID_CORE
+            && msg.opcode == interfaces::core_event::DONE
+            && let Ok((_id, seq)) = crate::pipewire_lib::client::decode_core_done(&msg.args)
+            && seq == sync_seq
+        {
+            break;
+        }
+    }
+    Ok(items)
+}
+
+/// Open a Unix socket connection mirroring C's `try_connect_name` with
+/// `intention=manager`: first try `<remote>-manager`, fall back to the
+/// plain `<remote>` if that fails. `remote` may be a path (`/`-prefixed)
+/// or just a socket name; for the latter we join with `PIPEWIRE_RUNTIME_DIR`
+/// (or `XDG_RUNTIME_DIR`).
+fn connect_with_intention_manager(
+    remote: Option<&str>,
+) -> Result<Client, crate::pipewire_lib::client::Error> {
+    let name = match remote {
+        Some(n) => n.to_string(),
+        None => "pipewire-0".to_string(),
+    };
+    if name.starts_with('/') {
+        // Absolute path: try -manager suffix, then bare.
+        let manager_path = format!("{name}-manager");
+        if let Ok(c) = Client::connect_path(std::path::Path::new(&manager_path)) {
+            return Ok(c);
+        }
+        return Client::connect_path(std::path::Path::new(&name));
+    }
+    let runtime = std::env::var("PIPEWIRE_RUNTIME_DIR")
+        .or_else(|_| std::env::var("XDG_RUNTIME_DIR"))
+        .unwrap_or_else(|_| "/tmp".to_string());
+    let base = std::path::PathBuf::from(&runtime);
+    let manager_path = base.join(format!("{name}-manager"));
+    if let Ok(c) = Client::connect_path(&manager_path) {
+        return Ok(c);
+    }
+    Client::connect_path(&base.join(&name))
+}
+
+/// Decode `Metadata.Property(subject, key, type, value)`. Each string
+/// field arrives as either a String POD or a None POD (sentinel for
+/// NULL in C). C's put_value turns NULL into the literal `null` in
+/// JSON, so we keep the "(null)" sentinel here and translate downstream.
+fn decode_metadata_property(args: &[crate::spa::pod::types::Value]) -> Option<MetadataItem> {
+    use crate::spa::pod::types::Value;
+    if args.len() < 4 {
+        return None;
+    }
+    let subject = match &args[0] {
+        Value::Int(n) => *n as u32,
+        _ => return None,
+    };
+    let str_or_null = |v: &Value| -> String {
+        match v {
+            Value::String(s) => s.clone(),
+            Value::None => "(null)".to_string(),
+            _ => String::new(),
+        }
+    };
+    Some(MetadataItem {
+        subject,
+        key: str_or_null(&args[1]),
+        type_: str_or_null(&args[2]),
+        value: str_or_null(&args[3]),
+    })
 }
 
 /// Bind the given global as a proxy, drive a sync round-trip, decode the
@@ -485,9 +602,12 @@ fn write_global(out: &mut String, e: &GlobalEntry, indent: usize, level: usize) 
     push_newline_indent(out, indent, level + 1);
     out.push_str("\"permissions\": ");
     write_permissions(out, g.permissions);
-    // C: known interfaces (class table) emit only `info`; unknown
-    // interfaces (SecurityContext, Profiler, ClientNode, ...) fall back
-    // to registry `props`. Never both.
+    // C dispatches on the per-interface class:
+    //   - known interfaces (Core/Module/Factory/Client/Node/Port/Device/
+    //     Link) → `"info"` block built from the bound proxy's Info event
+    //   - Metadata → registry `"props"` + `"metadata"` items array (no info)
+    //   - unknown interfaces (SecurityContext, Profiler, ClientNode, ...)
+    //     → registry `"props"` only
     if let Some(info) = &e.info {
         out.push(',');
         push_newline_indent(out, indent, level + 1);
@@ -498,9 +618,66 @@ fn write_global(out: &mut String, e: &GlobalEntry, indent: usize, level: usize) 
         push_newline_indent(out, indent, level + 1);
         out.push_str("\"props\": ");
         write_props(out, &g.props, indent, level + 1);
+        if g.interface == interfaces::TYPE_METADATA {
+            out.push(',');
+            push_newline_indent(out, indent, level + 1);
+            out.push_str("\"metadata\": ");
+            write_metadata(out, &e.metadata, indent, level + 1);
+        }
     }
     push_newline_indent(out, indent, level);
     out.push('}');
+}
+
+/// Render the metadata items array. Mirrors C's `metadata_dump`:
+/// each item is `{ "subject": <int>, "key": <auto>, "type": <auto>,
+/// "value": <auto> }`. `put_value` auto-detects bool/int/float, otherwise
+/// emits a quoted string. NULL maps to literal `null`.
+fn write_metadata(out: &mut String, items: &[MetadataItem], indent: usize, level: usize) {
+    if items.is_empty() {
+        out.push_str("[]");
+        return;
+    }
+    out.push('[');
+    for (i, it) in items.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        push_newline_indent(out, indent, level + 1);
+        out.push_str(&format!(
+            "{{ \"subject\": {}, \"key\": {}, \"type\": {}, \"value\": {} }}",
+            it.subject,
+            put_value_str(&it.key),
+            put_value_str(&it.type_),
+            put_value_str(&it.value)
+        ));
+    }
+    push_newline_indent(out, indent, level);
+    out.push(']');
+}
+
+/// Mirror C's `put_value(d, key, val)`: NULL → `null`; "true"/"false" →
+/// literal bool; integer-parseable → bare integer; float-parseable →
+/// bare number; else a quoted string.
+fn put_value_str(v: &str) -> String {
+    if v == "(null)" {
+        return "null".to_string();
+    }
+    if v == "true" || v == "false" {
+        return v.to_string();
+    }
+    if let Ok(n) = v.parse::<i64>()
+        && n.to_string() == v
+    {
+        return v.to_string();
+    }
+    if v.contains(['.', 'e', 'E'])
+        && let Ok(f) = v.parse::<f64>()
+        && f.is_finite()
+    {
+        return v.to_string();
+    }
+    format!("\"{}\"", json_escape(v))
 }
 
 fn write_info(
@@ -769,19 +946,24 @@ fn write_param_list(
             out.push(',');
         }
         push_newline_indent(out, indent, level + 1);
-        render_pod_value(out, v, indent, level + 1);
+        render_pod_value(out, v, None, indent, level + 1);
     }
     push_newline_indent(out, indent, level);
     out.push(']');
 }
 
 /// Render a SPA POD `Value` as JSON. Mirrors `put_pod_value` in
-/// `src/tools/pw-dump.c`. The hard cases live in `Object` (uses the SPA
-/// type registry to translate property keys/ids to short names) and
-/// `Choice` (emits a labelled dict for Range/Step/Enum/Flags).
+/// `src/tools/pw-dump.c`.
+///
+/// `enum_table` carries the property's `Id`-enum table down through
+/// recursion: an `Array of Id` or a `Choice<Id>` nested under an Object
+/// property uses the parent property's table to translate values. The
+/// `Object` case looks up a fresh table per inner property and recurses
+/// with that.
 fn render_pod_value(
     out: &mut String,
     v: &crate::spa::pod::types::Value,
+    enum_table: Option<crate::spa::types_registry::EnumTable>,
     indent: usize,
     level: usize,
 ) {
@@ -799,13 +981,7 @@ fn render_pod_value(
             // C's put_pod_value drops unknown shapes silently; emit null.
             out.push_str("null");
         }
-        Value::Id(id) => {
-            // Without a context-specific enum table the C tool prints
-            // "id-XXXXXXXX"; with one it prints the short name. We don't
-            // know the table at this point (it lives one level up in the
-            // Object render), so the Object render handles Id specially.
-            out.push_str(&format!("\"id-{id:08x}\""));
-        }
+        Value::Id(id) => render_id(out, *id, enum_table),
         Value::Rectangle(r) => {
             out.push_str(&format!(
                 "{{ \"width\": {}, \"height\": {} }}",
@@ -825,7 +1001,7 @@ fn render_pod_value(
                         out.push(',');
                     }
                     out.push(' ');
-                    render_pod_value(out, el, indent, level);
+                    render_pod_value(out, el, enum_table, indent, level);
                 }
                 out.push_str(" ]");
             }
@@ -842,7 +1018,7 @@ fn render_pod_value(
                     out.push(',');
                 }
                 push_newline_indent(out, indent, level + 1);
-                render_pod_value(out, el, indent, level + 1);
+                render_pod_value(out, el, enum_table, indent, level + 1);
             }
             push_newline_indent(out, indent, level);
             out.push(']');
@@ -862,17 +1038,110 @@ fn render_pod_value(
             let _ = controls;
             out.push_str("[]");
         }
-        Value::Choice { .. } => {
-            // Choice rendering is involved (Range/Step/Enum/Flags emit
-            // labelled dicts). It's not needed for Node IO params; we'll
-            // add it in the follow-up for Port EnumFormat.
-            out.push_str("null");
+        Value::Choice {
+            choice_type,
+            elements,
+            ..
+        } => render_pod_choice(out, *choice_type, elements, enum_table, indent, level),
+    }
+}
+
+/// Render a single `Value::Id` — short name from `enum_table` if present,
+/// else the `id-XXXXXXXX` C fallback.
+fn render_id(out: &mut String, id: u32, enum_table: Option<crate::spa::types_registry::EnumTable>) {
+    let name = enum_table.and_then(|t| crate::spa::types_registry::lookup_enum(t, id));
+    match name {
+        Some(n) => out.push_str(&format!("\"{}\"", json_escape(n))),
+        None => out.push_str(&format!("\"id-{id:08x}\"")),
+    }
+}
+
+/// Render `SPA_TYPE_Choice`. Mirrors C's labelled-dict scheme:
+/// - `SPA_CHOICE_None` (0): emit the first element directly (no dict).
+/// - `SPA_CHOICE_Range` (1): `{default, min, max}` inline.
+/// - `SPA_CHOICE_Step` (2): `{default, min, max, step}` inline.
+/// - `SPA_CHOICE_Enum` (3): `{default, alt1, alt2, ...}` multi-line.
+/// - `SPA_CHOICE_Flags` (4): `{default, flag1, flag2, ...}` multi-line.
+fn render_pod_choice(
+    out: &mut String,
+    choice_type: u32,
+    elements: &[crate::spa::pod::types::Value],
+    enum_table: Option<crate::spa::types_registry::EnumTable>,
+    indent: usize,
+    level: usize,
+) {
+    use crate::spa::pod::types::{
+        SPA_CHOICE_Enum, SPA_CHOICE_Flags, SPA_CHOICE_None, SPA_CHOICE_Range, SPA_CHOICE_Step,
+    };
+    if choice_type == SPA_CHOICE_None {
+        match elements.first() {
+            Some(v) => render_pod_value(out, v, enum_table, indent, level),
+            None => out.push_str("null"),
         }
+        return;
+    }
+    // C uses STATE_SIMPLE (single-line `{ k: v, k: v }`) for Range/Step
+    // and multi-line for Enum/Flags.
+    let simple = matches!(choice_type, c if c == SPA_CHOICE_Range || c == SPA_CHOICE_Step);
+    let (max_labels, label_fn): (usize, fn(usize) -> String) = match choice_type {
+        c if c == SPA_CHOICE_Range => (3, |i| ["default", "min", "max"][i.min(2)].to_string()),
+        c if c == SPA_CHOICE_Step => (4, |i| {
+            ["default", "min", "max", "step"][i.min(3)].to_string()
+        }),
+        c if c == SPA_CHOICE_Enum => (usize::MAX, |i| {
+            if i == 0 {
+                "default".to_string()
+            } else {
+                format!("alt{i}")
+            }
+        }),
+        c if c == SPA_CHOICE_Flags => (usize::MAX, |i| {
+            if i == 0 {
+                "default".to_string()
+            } else {
+                format!("flag{i}")
+            }
+        }),
+        _ => {
+            // Unknown choice type — emit empty dict to avoid breaking the
+            // surrounding JSON.
+            out.push_str("{}");
+            return;
+        }
+    };
+    if elements.is_empty() {
+        out.push_str(if simple { "{ }" } else { "{}" });
+        return;
+    }
+    out.push('{');
+    for (i, el) in elements.iter().enumerate() {
+        if i >= max_labels {
+            break;
+        }
+        if i > 0 {
+            out.push(',');
+        }
+        if simple {
+            out.push(' ');
+        } else {
+            push_newline_indent(out, indent, level + 1);
+        }
+        let label = label_fn(i);
+        out.push_str(&format!("\"{}\": ", json_escape(&label)));
+        render_pod_value(out, el, enum_table, indent, level + 1);
+    }
+    if simple {
+        out.push_str(" }");
+    } else {
+        push_newline_indent(out, indent, level);
+        out.push('}');
     }
 }
 
 /// Render a `Value::Object` using the SPA type registry to translate
 /// property keys (and `Id`-typed property values) into short names.
+/// Per-property enum tables are passed into the inner `render_pod_value`
+/// so nested Arrays-of-Id and Choices-of-Id pick up the right names.
 fn render_pod_object(
     out: &mut String,
     object_type: u32,
@@ -880,7 +1149,6 @@ fn render_pod_object(
     indent: usize,
     level: usize,
 ) {
-    use crate::spa::pod::types::Value;
     use crate::spa::types_registry::lookup_object_prop;
 
     if properties.is_empty() {
@@ -896,17 +1164,13 @@ fn render_pod_object(
         let key_name = info.map(|i| i.name).unwrap_or("unknown");
         push_newline_indent(out, indent, level + 1);
         out.push_str(&format!("\"{}\": ", json_escape(key_name)));
-        // Id-typed values pick up their short name from the per-property
-        // enum table when one is provided in the registry.
-        match (&prop.value, info.and_then(|i| i.enum_table)) {
-            (Value::Id(id), Some(table)) => {
-                match crate::spa::types_registry::lookup_enum(table, *id) {
-                    Some(name) => out.push_str(&format!("\"{}\"", json_escape(name))),
-                    None => out.push_str(&format!("\"id-{id:08x}\"")),
-                }
-            }
-            _ => render_pod_value(out, &prop.value, indent, level + 1),
-        }
+        render_pod_value(
+            out,
+            &prop.value,
+            info.and_then(|i| i.enum_table),
+            indent,
+            level + 1,
+        );
     }
     push_newline_indent(out, indent, level);
     out.push('}');
@@ -1108,6 +1372,7 @@ mod tests {
             global: g0,
             info: None,
             param_values: Vec::new(),
+            metadata: Vec::new(),
         };
         let mut s = String::new();
         write_array(&mut s, &[&e0], 2);

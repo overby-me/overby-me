@@ -226,6 +226,25 @@ impl Client {
     /// Send the standard handshake: Hello, UpdateProperties, GetRegistry.
     /// Returns the registry proxy id.
     pub fn handshake(&mut self, app_name: &str) -> Result<u32, Error> {
+        self.handshake_inner(&[("application.name", app_name)])
+    }
+
+    /// Like `handshake`, but additionally sends `remote.intention=<intention>`
+    /// in the UpdateProperties dict. Used by `pw-dump`/`pw-cli`/`pw-mon`
+    /// where the C tools set `PW_KEY_REMOTE_INTENTION` so the daemon
+    /// publishes manager-only globals on the bound client.
+    pub fn handshake_with_intention(
+        &mut self,
+        app_name: &str,
+        intention: &str,
+    ) -> Result<u32, Error> {
+        self.handshake_inner(&[
+            ("application.name", app_name),
+            ("remote.intention", intention),
+        ])
+    }
+
+    fn handshake_inner(&mut self, props: &[(&str, &str)]) -> Result<u32, Error> {
         let seq = self.alloc_seq();
         self.send(encode_call(
             ID_CORE,
@@ -237,7 +256,7 @@ impl Client {
         // The body of UpdateProperties is `Struct { Struct { Int(n_items),
         // String key, String val, ... } }`. encode_call already wraps args
         // in an outer Struct, so `args` itself must be the inner dict struct.
-        let dict = build_dict(&[("application.name", app_name)]);
+        let dict = build_dict(props);
         let seq = self.alloc_seq();
         self.send(encode_call(
             ID_CLIENT,

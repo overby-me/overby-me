@@ -3194,6 +3194,14 @@
         tool = "pw-dump";
         name = "info-node-with-params";
       }
+      {
+        tool = "pw-dump";
+        name = "info-port-with-params";
+      }
+      {
+        tool = "pw-dump";
+        name = "info-metadata";
+      }
     ];
 
     # Daemon-comparison tests — spawn a real C pipewire daemon and run both

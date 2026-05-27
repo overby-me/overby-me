@@ -135,6 +135,19 @@ pub mod device_event {
     pub const PARAM: u8 = 1;
 }
 
+/// Metadata method opcodes (from `pipewire/extensions/metadata.h`).
+pub mod metadata_method {
+    pub const ADD_LISTENER: u8 = 0;
+    pub const SET_PROPERTY: u8 = 1;
+    pub const CLEAR: u8 = 2;
+}
+
+/// Metadata event opcodes. The server emits one `PROPERTY` event per
+/// existing entry when a client first binds the global.
+pub mod metadata_event {
+    pub const PROPERTY: u8 = 0;
+}
+
 /// Strip the `PipeWire:Interface:` prefix from a type string. Mirrors the
 /// `spa_type_short_name` helper.
 pub fn short_name(t: &str) -> &str {
