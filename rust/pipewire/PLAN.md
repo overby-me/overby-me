@@ -489,7 +489,13 @@ These work by reading config files / parsing user input only.
       version, permissions, props; binds each global and decodes the
       per-class Info event for Core/Module/Factory/Client/Device/Node/
       Port/Link (params/state/change-mask/sorted-props all byte-identical;
-      empty params block uses C's multi-line `{}` form)
+      empty params block uses C's multi-line `{}` form). After Info we
+      now issue `EnumParams` per READ-flagged entry on Node/Port/Device,
+      collect the returned `Param` events, and render their PODs to JSON
+      via a SPA type registry (`SPA_TYPE_OBJECT_ParamIO` so far — Node
+      IO params Clock + Position byte-match for `pw-dump <node-id>`).
+      `SPA_TYPE_OBJECT_Format` + Choice rendering still pending for
+      Port EnumFormat byte-parity
 - [x] `pw-cli` `connect`/`disconnect`/`switch-remote` (parses unknown
       remote id, prints upstream's exact error)
 - [ ] `pw-cli` — `enum-params`, `set-param`, `create-link`, `destroy`,
@@ -615,9 +621,9 @@ rust-pipewire" message and exit 0 (so package install scripts that probe
 | M10 ✓ | +252 option-parity | Full `--FOO=value` getopt parity across every tool, comprehensive SMF fixtures, JSON-dump edge cases, connect-failure parity for every daemon-needing tool |
 | M11 ✓ | +3 pw-dump info | Per-class info block for Core/Module/Factory in pw-dump (matches C's multi-line `{}` for empty params, signed `sf` quirk in SMF Key Signature, hex/octal id parsing) |
 | M12 ✓ | +2 rich-daemon pw-dump | `pw-dump <node-id>` and `pw-dump <port-id>` against rich daemon byte-match C — covers Node info block (max-input-ports/n-input-ports/state/props) and Port info block (direction/change-mask/props) |
-| **Now** | **863/863** 🎉 | All tests pass. Latest additions (M12): rich-daemon pw-dump tests for Node/Port info blocks. Full `pw-dump` (no id filter) against rich daemon revealed three concrete gaps to land next: (1) Node/Port `enum-params` follow-up after Info events, (2) Metadata items array, (3) "manager" client intention props |
-| M13 | ~880 | pw-dump `enum-params` follow-up: bind each Node/Port/Device after Info and call `EnumParams` for each `params` entry whose flags include READ, decoding the param POD via the JSON↔POD bridge — needed for full-registry byte-match |
-| M14 | ~900 | pw-dump full-registry test passes against rich daemon: connecting client identifies as "manager" intention, settings Metadata items dumped, registry ordering matches |
+| M13 ✓ | +1 enum-params (Node IO) | pw-dump's `enum-params` follow-up: bind each Node/Port/Device after Info and call `EnumParams` for each READ-flagged param; decode the per-param POD (`ParamIO` `id`+`size`) and emit the JSON form C's `put_pod_value` produces. First exercise: Node IO params (Clock + Position) byte-match for `pw-dump <node-id>` |
+| **Now** | **864/864** 🎉 | All tests pass. Remaining gaps for full-registry parity: (1) `SPA_TYPE_OBJECT_Format` table + Choice rendering (Range/Step/Enum/Flags) for Port EnumFormat values, (2) Metadata items array for `PipeWire:Interface:Metadata` globals, (3) "manager" client intention props |
+| M14 | ~900 | pw-dump full-registry test passes against rich daemon: Object-Format + Choice rendering, connecting client identifies as "manager" intention, settings Metadata items dumped, registry ordering matches |
 | M15 | ~920 | pw-link create/disconnect; pw-metadata set/clear |
 | M16 | ~950 | pw-mon live registry watcher; pw-cli `enum-params` + `set-param` (params decode + JSON↔POD bridge) |
 | M17 | ~990 | Stream API + `pw-cat` for WAV |

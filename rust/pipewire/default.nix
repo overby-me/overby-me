@@ -3190,6 +3190,10 @@
         tool = "pw-dump";
         name = "info-port-rich";
       }
+      {
+        tool = "pw-dump";
+        name = "info-node-with-params";
+      }
     ];
 
     # Daemon-comparison tests — spawn a real C pipewire daemon and run both

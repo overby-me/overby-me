@@ -286,6 +286,37 @@ impl Client {
         Ok(new_id)
     }
 
+    /// Send `Node.EnumParams` / `Port.EnumParams` / `Device.EnumParams`.
+    /// Body is `Struct { Int seq, Id param_id, Int index, Int num, Pod filter }`.
+    /// The C tool passes `SPA_RESULT_RETURN_ASYNC(msg->seq)` for the `seq` arg
+    /// (`(1<<30) | (msg_seq & 0x3fff_ffff)`); we mirror that by passing the
+    /// outgoing message seq with the async bit set so a future
+    /// asynchronous-reply path lines up with upstream.
+    pub fn enum_params(
+        &mut self,
+        proxy_id: u32,
+        method_opcode: u8,
+        param_id: u32,
+        index: u32,
+        num: i32,
+    ) -> Result<u32, Error> {
+        let msg_seq = self.alloc_seq();
+        let async_seq = (1u32 << 30) | (msg_seq & 0x3fff_ffff);
+        self.send(encode_call(
+            proxy_id,
+            method_opcode,
+            msg_seq,
+            &[
+                Value::Int(async_seq as i32),
+                Value::Id(param_id),
+                Value::Int(index as i32),
+                Value::Int(num),
+                Value::None, // no filter
+            ],
+        ))?;
+        Ok(msg_seq)
+    }
+
     /// Send Core.Sync(id, seq) — server replies with Core.Done(id, seq) once
     /// it has processed every prior message. We pick a unique seq and return
     /// it so callers can wait for the matching Done.
@@ -599,6 +630,25 @@ pub fn decode_registry_global_remove(args: &[Value]) -> Result<u32, Error> {
     }
     let id = expect_int(&args[0], "Registry.GlobalRemove.id")? as u32;
     Ok(id)
+}
+
+/// Decode `Node.Param` / `Port.Param` / `Device.Param` (opcode 1):
+/// `Struct { Int seq, Id id, Int index, Int next, Pod param }`. The Pod
+/// arrives as whatever Value shape the param encodes (typically an
+/// Object).
+pub fn decode_param_event(args: &[Value]) -> Result<(i32, u32, u32, u32, Value), Error> {
+    if args.len() < 5 {
+        return Err(Error::UnexpectedShape("Param: not enough fields"));
+    }
+    let seq = expect_int(&args[0], "Param.seq")?;
+    let id = match &args[1] {
+        Value::Id(v) => *v,
+        _ => return Err(Error::UnexpectedShape("Param.id not Id")),
+    };
+    let index = expect_int(&args[2], "Param.index")? as u32;
+    let next = expect_int(&args[3], "Param.next")? as u32;
+    let param = args[4].clone();
+    Ok((seq, id, index, next, param))
 }
 
 /// Decode `Core.Done(id, seq)` (id=0, opcode=1).

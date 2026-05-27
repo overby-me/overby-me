@@ -26,10 +26,16 @@ enum InfoData {
     Core(CoreInfo),
 }
 
-/// Registry global plus the (optional) bound-proxy Info event.
+/// `(param_id, value)` returned by an EnumParams follow-up. The same id
+/// can appear multiple times (e.g. multiple EnumFormat results).
+type ParamValue = (u32, crate::spa::pod::types::Value);
+
+/// Registry global plus the (optional) bound-proxy Info event and any
+/// param values returned by EnumParams follow-ups.
 struct GlobalEntry {
     global: RegistryGlobal,
     info: Option<InfoData>,
+    param_values: Vec<ParamValue>,
 }
 
 pub fn main(raw_args: &[String]) -> i32 {
@@ -315,26 +321,39 @@ fn collect_globals(remote: Option<&str>) -> Result<Vec<GlobalEntry>, String> {
     let entries: Vec<GlobalEntry> = globals
         .into_iter()
         .map(|g| {
-            let info = if g.interface == interfaces::TYPE_CORE {
-                core_info.clone().map(InfoData::Core)
+            if g.interface == interfaces::TYPE_CORE {
+                GlobalEntry {
+                    info: core_info.clone().map(InfoData::Core),
+                    param_values: Vec::new(),
+                    global: g,
+                }
             } else {
-                bind_info(&mut client, registry_id, &g).ok().flatten()
-            };
-            GlobalEntry { global: g, info }
+                let (info, params) =
+                    bind_info(&mut client, registry_id, &g).unwrap_or((None, Vec::new()));
+                GlobalEntry {
+                    global: g,
+                    info,
+                    param_values: params,
+                }
+            }
         })
         .collect();
     Ok(entries)
 }
 
-/// Bind the given global as a proxy, drive a sync round-trip, and return
-/// the decoded Info event (if the interface has one we know how to
-/// decode). Unknown interfaces return None silently; decode errors are
-/// also swallowed since the registry-side data is still useful.
+/// Bind the given global as a proxy, drive a sync round-trip, decode the
+/// Info event, then (for Node/Port/Device) follow up with EnumParams for
+/// every params entry whose flags include READ — matching the C
+/// pw-dump's per-class `*_event_info` handler.
+///
+/// Returns `(Some(InfoData), params)` on success, `(None, [])` for
+/// unknown interfaces or decode failures. Param decode failures are
+/// swallowed since the Info-side data is still useful.
 fn bind_info(
     client: &mut Client,
     registry_id: u32,
     g: &RegistryGlobal,
-) -> Result<Option<InfoData>, String> {
+) -> Result<(Option<InfoData>, Vec<ParamValue>), String> {
     let version = match g.interface.as_str() {
         interfaces::TYPE_MODULE => interfaces::VERSION_MODULE,
         interfaces::TYPE_FACTORY => interfaces::VERSION_FACTORY,
@@ -343,7 +362,7 @@ fn bind_info(
         interfaces::TYPE_PORT => interfaces::VERSION_PORT,
         interfaces::TYPE_DEVICE => interfaces::VERSION_DEVICE,
         interfaces::TYPE_LINK => interfaces::VERSION_LINK,
-        _ => return Ok(None),
+        _ => return Ok((None, Vec::new())),
     };
 
     let proxy_id = client
@@ -371,7 +390,7 @@ fn bind_info(
 
     let args = match raw_info {
         Some(a) => a,
-        None => return Ok(None),
+        None => return Ok((None, Vec::new())),
     };
     use crate::pipewire_lib::client as cl;
     let info = match g.interface.as_str() {
@@ -384,7 +403,57 @@ fn bind_info(
         interfaces::TYPE_LINK => cl::decode_link_info(&args).ok().map(InfoData::Link),
         _ => None,
     };
-    Ok(info)
+
+    // Pull the params list out of the Info we just decoded, then fire
+    // EnumParams for each READ-flagged param id and collect the Param
+    // events. The C tool uses async per-param seq numbers — for our
+    // sequential client we issue all calls, then one final Core.Sync,
+    // and gather everything that arrives before the matching Done.
+    let (params_meta, method_opcode) = match (&info, g.interface.as_str()) {
+        (Some(InfoData::Node(n)), _) => (n.params.clone(), interfaces::node_method::ENUM_PARAMS),
+        (Some(InfoData::Port(p)), _) => (p.params.clone(), interfaces::port_method::ENUM_PARAMS),
+        (Some(InfoData::Device(d)), _) => {
+            (d.params.clone(), interfaces::device_method::ENUM_PARAMS)
+        }
+        _ => return Ok((info, Vec::new())),
+    };
+    let mut param_values: Vec<ParamValue> = Vec::new();
+    let mut any_sent = false;
+    for pi in &params_meta {
+        if pi.flags & interfaces::PARAM_INFO_READ == 0 {
+            continue;
+        }
+        if client
+            .enum_params(proxy_id, method_opcode, pi.id, 0, -1)
+            .is_ok()
+        {
+            any_sent = true;
+        }
+    }
+    if !any_sent {
+        return Ok((info, param_values));
+    }
+    let psync = client
+        .sync(interfaces::ID_CORE)
+        .map_err(|e| format!("{e}"))?;
+    while let Some(msg) = client.read_message().map_err(|e| format!("{e}"))? {
+        if msg.id == proxy_id && msg.opcode == interfaces::node_event::PARAM {
+            if let Ok((_seq, id, _index, _next, value)) =
+                crate::pipewire_lib::client::decode_param_event(&msg.args)
+            {
+                param_values.push((id, value));
+            }
+            continue;
+        }
+        if msg.id == interfaces::ID_CORE
+            && msg.opcode == interfaces::core_event::DONE
+            && let Ok((_id, seq)) = crate::pipewire_lib::client::decode_core_done(&msg.args)
+            && seq == psync
+        {
+            break;
+        }
+    }
+    Ok((info, param_values))
 }
 
 fn write_array(out: &mut String, entries: &[&GlobalEntry], indent: usize) {
@@ -423,7 +492,7 @@ fn write_global(out: &mut String, e: &GlobalEntry, indent: usize, level: usize) 
         out.push(',');
         push_newline_indent(out, indent, level + 1);
         out.push_str("\"info\": ");
-        write_info(out, info, indent, level + 1);
+        write_info(out, info, &e.param_values, indent, level + 1);
     } else {
         out.push(',');
         push_newline_indent(out, indent, level + 1);
@@ -434,7 +503,13 @@ fn write_global(out: &mut String, e: &GlobalEntry, indent: usize, level: usize) 
     out.push('}');
 }
 
-fn write_info(out: &mut String, info: &InfoData, indent: usize, level: usize) {
+fn write_info(
+    out: &mut String,
+    info: &InfoData,
+    param_values: &[ParamValue],
+    indent: usize,
+    level: usize,
+) {
     out.push('{');
     let inner = level + 1;
     match info {
@@ -520,7 +595,7 @@ fn write_info(out: &mut String, info: &InfoData, indent: usize, level: usize) {
             out.push(',');
             push_newline_indent(out, indent, inner);
             out.push_str("\"params\": ");
-            write_params(out, &i.params, indent, inner);
+            write_params(out, &i.params, param_values, indent, inner);
         }
         InfoData::Node(i) => {
             push_newline_indent(out, indent, inner);
@@ -555,7 +630,7 @@ fn write_info(out: &mut String, info: &InfoData, indent: usize, level: usize) {
             out.push(',');
             push_newline_indent(out, indent, inner);
             out.push_str("\"params\": ");
-            write_params(out, &i.params, indent, inner);
+            write_params(out, &i.params, param_values, indent, inner);
         }
         InfoData::Port(i) => {
             push_newline_indent(out, indent, inner);
@@ -577,7 +652,7 @@ fn write_info(out: &mut String, info: &InfoData, indent: usize, level: usize) {
             out.push(',');
             push_newline_indent(out, indent, inner);
             out.push_str("\"params\": ");
-            write_params(out, &i.params, indent, inner);
+            write_params(out, &i.params, param_values, indent, inner);
         }
         InfoData::Link(i) => {
             push_newline_indent(out, indent, inner);
@@ -631,21 +706,222 @@ fn write_flags(out: &mut String, value: u64, flags: &[(u64, &str)]) {
 fn write_params(
     out: &mut String,
     params: &[crate::pipewire_lib::client::ParamInfo],
+    values: &[ParamValue],
     indent: usize,
     level: usize,
 ) {
-    // pw-dump's params include each param's value (enum-params follow-up).
-    // We don't yet enumerate params, so emit an empty object. C uses
-    // put_begin+put_end which inserts newlines + indent even for empty
-    // dicts when indent > 0; match that.
-    let _ = params;
-    if indent == 0 {
-        out.push_str("{}");
-    } else {
-        out.push('{');
-        push_newline_indent(out, indent, level);
-        out.push('}');
+    // Mirror C's put_params:
+    //   put_begin "{"
+    //     for each param info (id, flags):
+    //       put_begin "<short-name>" "["
+    //         for each value with that id: put_pod
+    //       put_end "]"
+    //   put_end "}"
+    // STATE_SIMPLE (C's "compact" mode) is set when the param has no READ
+    // flag — i.e. the params list will always be empty in that case — so
+    // the `[ ]` is emitted on one line.
+    if params.is_empty() {
+        if indent == 0 {
+            out.push_str("{}");
+        } else {
+            out.push('{');
+            push_newline_indent(out, indent, level);
+            out.push('}');
+        }
+        return;
     }
+    out.push('{');
+    for (i, pi) in params.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        let inner = level + 1;
+        let short = crate::spa::types_registry::param_short_name(pi.id).unwrap_or("Unknown");
+        push_newline_indent(out, indent, inner);
+        out.push_str(&format!("\"{}\": ", json_escape(short)));
+        // The matching param values for this id (in arrival order).
+        let matches: Vec<&crate::spa::pod::types::Value> = values
+            .iter()
+            .filter_map(|(vid, v)| (*vid == pi.id).then_some(v))
+            .collect();
+        write_param_list(out, &matches, indent, inner);
+    }
+    push_newline_indent(out, indent, level);
+    out.push('}');
+}
+
+fn write_param_list(
+    out: &mut String,
+    values: &[&crate::spa::pod::types::Value],
+    indent: usize,
+    level: usize,
+) {
+    // C's put_array_* renders an empty list inline as `[ ]` and a non-
+    // empty list with one element per line. Both STATE_SIMPLE and the
+    // pretty path collapse the empty case.
+    if values.is_empty() {
+        out.push_str("[ ]");
+        return;
+    }
+    out.push('[');
+    for (i, v) in values.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        push_newline_indent(out, indent, level + 1);
+        render_pod_value(out, v, indent, level + 1);
+    }
+    push_newline_indent(out, indent, level);
+    out.push(']');
+}
+
+/// Render a SPA POD `Value` as JSON. Mirrors `put_pod_value` in
+/// `src/tools/pw-dump.c`. The hard cases live in `Object` (uses the SPA
+/// type registry to translate property keys/ids to short names) and
+/// `Choice` (emits a labelled dict for Range/Step/Enum/Flags).
+fn render_pod_value(
+    out: &mut String,
+    v: &crate::spa::pod::types::Value,
+    indent: usize,
+    level: usize,
+) {
+    use crate::spa::pod::types::Value;
+    match v {
+        Value::None => out.push_str("null"),
+        Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Value::Int(n) => out.push_str(&n.to_string()),
+        Value::Long(n) => out.push_str(&n.to_string()),
+        Value::Float(f) => render_float(out, *f as f64),
+        Value::Double(f) => render_float(out, *f),
+        Value::Fd(n) => out.push_str(&n.to_string()),
+        Value::String(s) => out.push_str(&format!("\"{}\"", json_escape(s))),
+        Value::Bytes(_) | Value::Bitmap(_) | Value::Pointer { .. } => {
+            // C's put_pod_value drops unknown shapes silently; emit null.
+            out.push_str("null");
+        }
+        Value::Id(id) => {
+            // Without a context-specific enum table the C tool prints
+            // "id-XXXXXXXX"; with one it prints the short name. We don't
+            // know the table at this point (it lives one level up in the
+            // Object render), so the Object render handles Id specially.
+            out.push_str(&format!("\"id-{id:08x}\""));
+        }
+        Value::Rectangle(r) => {
+            out.push_str(&format!(
+                "{{ \"width\": {}, \"height\": {} }}",
+                r.width, r.height
+            ));
+        }
+        Value::Fraction(f) => {
+            out.push_str(&format!("{{ \"num\": {}, \"denom\": {} }}", f.num, f.denom));
+        }
+        Value::Array { elements, .. } => {
+            if elements.is_empty() {
+                out.push_str("[ ]");
+            } else {
+                out.push('[');
+                for (i, el) in elements.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    out.push(' ');
+                    render_pod_value(out, el, indent, level);
+                }
+                out.push_str(" ]");
+            }
+        }
+        Value::Struct(items) => {
+            // C renders a Struct as "[ ... ]" with one element per line.
+            if items.is_empty() {
+                out.push_str("[]");
+                return;
+            }
+            out.push('[');
+            for (i, el) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                push_newline_indent(out, indent, level + 1);
+                render_pod_value(out, el, indent, level + 1);
+            }
+            push_newline_indent(out, indent, level);
+            out.push(']');
+        }
+        Value::Object {
+            object_type,
+            properties,
+            ..
+        } => {
+            render_pod_object(out, *object_type, properties, indent, level);
+        }
+        Value::Sequence { controls, .. } => {
+            // C renders a Sequence as a Struct-like list of (offset, type,
+            // value) triples — but it's only used for Control params,
+            // which we don't currently exercise. Stub to empty to avoid
+            // crashes.
+            let _ = controls;
+            out.push_str("[]");
+        }
+        Value::Choice { .. } => {
+            // Choice rendering is involved (Range/Step/Enum/Flags emit
+            // labelled dicts). It's not needed for Node IO params; we'll
+            // add it in the follow-up for Port EnumFormat.
+            out.push_str("null");
+        }
+    }
+}
+
+/// Render a `Value::Object` using the SPA type registry to translate
+/// property keys (and `Id`-typed property values) into short names.
+fn render_pod_object(
+    out: &mut String,
+    object_type: u32,
+    properties: &[crate::spa::pod::types::Property],
+    indent: usize,
+    level: usize,
+) {
+    use crate::spa::pod::types::Value;
+    use crate::spa::types_registry::lookup_object_prop;
+
+    if properties.is_empty() {
+        out.push_str("{}");
+        return;
+    }
+    out.push('{');
+    for (i, prop) in properties.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        let info = lookup_object_prop(object_type, prop.key);
+        let key_name = info.map(|i| i.name).unwrap_or("unknown");
+        push_newline_indent(out, indent, level + 1);
+        out.push_str(&format!("\"{}\": ", json_escape(key_name)));
+        // Id-typed values pick up their short name from the per-property
+        // enum table when one is provided in the registry.
+        match (&prop.value, info.and_then(|i| i.enum_table)) {
+            (Value::Id(id), Some(table)) => {
+                match crate::spa::types_registry::lookup_enum(table, *id) {
+                    Some(name) => out.push_str(&format!("\"{}\"", json_escape(name))),
+                    None => out.push_str(&format!("\"id-{id:08x}\"")),
+                }
+            }
+            _ => render_pod_value(out, &prop.value, indent, level + 1),
+        }
+    }
+    push_newline_indent(out, indent, level);
+    out.push('}');
+}
+
+fn render_float(out: &mut String, f: f64) {
+    // C uses spa_json_format_float which prints with stripped trailing
+    // zeros and a leading "0." for fractions. JSON requires finite
+    // numbers; non-finite values fall back to null.
+    if !f.is_finite() {
+        out.push_str("null");
+        return;
+    }
+    // Default Rust f64 → String formatting matches "1024", "0.5", etc.
+    out.push_str(&f.to_string());
 }
 
 fn node_state_name(s: u32) -> &'static str {
@@ -831,6 +1107,7 @@ mod tests {
         let e0 = GlobalEntry {
             global: g0,
             info: None,
+            param_values: Vec::new(),
         };
         let mut s = String::new();
         write_array(&mut s, &[&e0], 2);

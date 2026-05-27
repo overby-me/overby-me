@@ -93,6 +93,48 @@ pub mod client_method {
     pub const UPDATE_PERMISSIONS: u8 = 4;
 }
 
+/// Node method opcodes (from `src/pipewire/node.h::PW_NODE_METHOD_*`).
+pub mod node_method {
+    pub const ADD_LISTENER: u8 = 0;
+    pub const SUBSCRIBE_PARAMS: u8 = 1;
+    pub const ENUM_PARAMS: u8 = 2;
+    pub const SET_PARAM: u8 = 3;
+    pub const SEND_COMMAND: u8 = 4;
+}
+
+/// Node event opcodes (server → proxy).
+pub mod node_event {
+    pub const INFO: u8 = 0;
+    pub const PARAM: u8 = 1;
+}
+
+/// Port method opcodes (from `src/pipewire/port.h::PW_PORT_METHOD_*`).
+pub mod port_method {
+    pub const ADD_LISTENER: u8 = 0;
+    pub const SUBSCRIBE_PARAMS: u8 = 1;
+    pub const ENUM_PARAMS: u8 = 2;
+}
+
+/// Port event opcodes.
+pub mod port_event {
+    pub const INFO: u8 = 0;
+    pub const PARAM: u8 = 1;
+}
+
+/// Device method opcodes (from `src/pipewire/device.h::PW_DEVICE_METHOD_*`).
+pub mod device_method {
+    pub const ADD_LISTENER: u8 = 0;
+    pub const SUBSCRIBE_PARAMS: u8 = 1;
+    pub const ENUM_PARAMS: u8 = 2;
+    pub const SET_PARAM: u8 = 3;
+}
+
+/// Device event opcodes.
+pub mod device_event {
+    pub const INFO: u8 = 0;
+    pub const PARAM: u8 = 1;
+}
+
 /// Strip the `PipeWire:Interface:` prefix from a type string. Mirrors the
 /// `spa_type_short_name` helper.
 pub fn short_name(t: &str) -> &str {
