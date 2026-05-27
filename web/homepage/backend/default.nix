@@ -16,7 +16,7 @@
 
     packages = with pkgs; [
       openssl
-      scaleway-cli
+      #scaleway-cli
     ];
   };
 }

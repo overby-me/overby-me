@@ -11,7 +11,15 @@ in {
     package = pkgs.prek;
     hooks = {
       denolint.enable = false;
-      flake-checker.enable = true;
+      flake-checker = {
+        enable = true;
+        # flake-checker 0.2.11's hardcoded supported-branch list lags real
+        # releases (does not yet know about nixos-26.05). Disable that one
+        # check; outdated/owner checks still run.
+        entry = "${pkgs.writeShellScript "flake-checker-allow-current-release" ''
+          NIX_FLAKE_CHECKER_CHECK_SUPPORTED=false exec ${pkgs.flake-checker}/bin/flake-checker -f "$@"
+        ''}";
+      };
       biome.enable = true;
       alejandra.enable = true;
       deadnix.enable = true;

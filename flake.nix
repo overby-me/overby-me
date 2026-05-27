@@ -15,7 +15,7 @@
     };
 
     # Nix
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
     lix = {
       url = "git+https://git.lix.systems/lix-project/lix?ref=refs/tags/2.95.0";
@@ -36,7 +36,7 @@
       url = "github:nvmd/nixos-raspberrypi/main";
     };
     home-manager = {
-      url = "github:nix-community/home-manager";
+      url = "github:nix-community/home-manager/release-26.05";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     agenix = {
