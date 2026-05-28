@@ -11,23 +11,23 @@ in {
   programs.ssh = {
     enable = true;
     enableDefaultConfig = false;
-    matchBlocks = {
+    settings = {
       "*" = {
-        addKeysToAgent = "yes";
-        controlMaster = "auto";
-        controlPath = "~/.ssh/socket/%r@%h:%p";
-        controlPersist = "120";
-        forwardAgent = true;
-        serverAliveInterval = 5;
-        serverAliveCountMax = 3;
+        AddKeysToAgent = "yes";
+        ControlMaster = "auto";
+        ControlPath = "~/.ssh/socket/%r@%h:%p";
+        ControlPersist = "120";
+        ForwardAgent = true;
+        ServerAliveInterval = 5;
+        ServerAliveCountMax = 3;
       };
       localhost = {
-        hostname = "localhost";
-        user = config.home.username;
+        HostName = "localhost";
+        User = config.home.username;
       };
       "home.overby.me" = {
-        hostname = "home.overby.me";
-        user = config.home.username;
+        HostName = "home.overby.me";
+        User = config.home.username;
       };
     };
   };
