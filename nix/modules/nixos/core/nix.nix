@@ -7,6 +7,7 @@
     package = pkgs.pkgsUnstable.nixVersions.latest;
     settings = {
       max-jobs = "auto";
+      keep-going = true;
       connect-timeout = 10;
       stalled-download-timeout = 10;
       trusted-users = ["root" "overby.me"];
