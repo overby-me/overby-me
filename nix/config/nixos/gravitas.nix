@@ -15,11 +15,11 @@
   modules = with inputs.self.nixosModules; [
     inputs.nixos-hardware
     .nixosModules
-    .lenovo-thinkpad-p14s-amd-gen5
+    .dell-precision-3490-intel
     inputs.catppuccin.nixosModules.catppuccin
     inputs.home-manager.nixosModules.home-manager
     inputs.ragenix.nixosModules.default
-    inputs.self.hardware.thinkpad-t14-ryzen-7-pro
+    inputs.self.hardware.dell-precision-3491
     inputs.self.desktops.cosmic
     inputs.self.desktops.gnome
     inputs.self.desktops.xr
