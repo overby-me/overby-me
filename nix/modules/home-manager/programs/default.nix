@@ -19,7 +19,7 @@
     ./ssh.nix
     ./starship.nix
     ./tealdeer.nix
-    ./vscode
+    ./vscodium
     ./wezterm.nix
     ./zed-editor
     ./zellij.nix
