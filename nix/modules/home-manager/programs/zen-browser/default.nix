@@ -1,11 +1,7 @@
-{
-  pkgs,
-  lib,
-  ...
-}: {
+{lib, ...}: {
   programs.zen-browser = {
     enable = true;
-    nativeMessagingHosts = [pkgs.firefoxpwa];
+    #nativeMessagingHosts = [pkgs.firefoxpwa];
     profiles = rec {
       default = {
         isDefault = true;

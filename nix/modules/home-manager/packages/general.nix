@@ -17,7 +17,7 @@
       file-roller
       wireplumber
       gnome-disk-utility
-      firefoxpwa
+      #firefoxpwa
       cheese
       pavucontrol
       kooha
