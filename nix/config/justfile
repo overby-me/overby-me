@@ -2,7 +2,7 @@ build host:
     nixos-rebuild build --flake .#{{ host }} --print-build-logs
 
 switch host:
-    sudo nixos-rebuild switch --flake .#{{ host }} --print-build-logs
+    sudo nixos-rebuild switch --flake .#{{ host }} --print-build-logs --keep-going
 
 deploy host:
     colmena apply --on {{ host }} --verbose --impure
