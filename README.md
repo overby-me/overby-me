@@ -405,7 +405,7 @@
 | ✅ | Router | [Turris Omnia 🇪🇺](https://www.turris.com/en/products/omnia) | | |
 | 🚫 | Watch | [Garmin Fenix 7 🔒🇺🇸](https://foundation.mozilla.org/en/privacynotincluded/garmin-fenix) | [Polar 🇪🇺](https://www.polar.com), [Suunto 🇪🇺](https://www.suunto.com) | [PineTime 🇭🇰](https://www.pine64.org/pinetime) |
 | 🚫 | AR Glasses | [XReal Air 2 Pro 🔒🇨🇳](https://next.xreal.com/air2) | | [XReal Light 🔒🇨🇳](https://www.xreal.com/light) |
-| 🚫 | Earphones | [Shokz Openfit 2 🇨🇳](https://shokz.com/products/openfit2) | [Suunto Spark 🇪🇺](https://www.suunto.com/en-dk/Products/headphones/suunto-spark/) | [Shokz Openfit 🇨🇳](https://shokz.com/products/openfit) |
+| 🚧 | Earphones | [Shokz Openfit 2 🇨🇳](https://shokz.com/products/openfit2) | [Suunto Spark 🇪🇺](https://www.suunto.com/en-dk/Products/headphones/suunto-spark/) | [Shokz Openfit 🇨🇳](https://shokz.com/products/openfit) |
 | ✅ | E-book Reader | [reMarkable 2 🔒🇳🇴](https://remarkable.com/store/remarkable-2) | [PineNote 🇭🇰](https://pine64.org/devices/pinenote) | [reMarkable 1 🔒🇳🇴](https://remarkable.com/store/remarkable) |
 
 </details>
