@@ -127,24 +127,21 @@
   };
 
   outputs = inputs: let
-    # Extend nixpkgs lib with all builtins so that flakelight's evalModules
-    # propagates the merged lib to every module.  This lets all flakelight
-    # modules (and anything using pkgs.lib) write lib.readDir, lib.fromJSON,
-    # lib.unsafeDiscardStringContext, etc. instead of reaching for builtins.
-    extendedNixpkgs =
-      inputs.nixpkgs
+    flakelight = import "${inputs.flakelight}" (
+      inputs.flakelight.inputs
       // {
-        lib = inputs.nixpkgs.lib.extend (_: prev: builtins // prev);
-      };
-    flakelight = import "${inputs.flakelight}" (inputs.flakelight.inputs
-      // {
-        nixpkgs = extendedNixpkgs;
+        inherit (inputs) nixpkgs;
         self = inputs.flakelight;
-      });
+      }
+    );
   in
     flakelight.mkFlake ./. {
       inherit inputs;
-      systems = ["x86_64-linux" "aarch64-linux" "aarch64-darwin"];
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "aarch64-darwin"
+      ];
       nixpkgs.config = {
         allowUnfree = true;
       };
