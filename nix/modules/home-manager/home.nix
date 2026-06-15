@@ -37,7 +37,7 @@
     Templates.source = symlink "${homeDirectory}/Sync/Templates";
     ".local/share/wallpapers/current.png".source = "${
       (pkgs.nix-wallpaper.override {
-        preset = "catppuccin-mocha";
+        preset = "gruvbox-dark";
         logoSize = 10;
       })
     }/share/wallpapers/nixos-wallpaper.png";

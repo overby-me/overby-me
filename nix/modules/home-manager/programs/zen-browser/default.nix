@@ -1,4 +1,4 @@
-{lib, ...}: {
+_: {
   programs.zen-browser = {
     enable = true;
     #nativeMessagingHosts = [pkgs.firefoxpwa];
@@ -13,9 +13,6 @@
           "browser.ml.chat.sidebar" = true;
           "layout.spellcheckDefault" = 0;
         };
-        # Catppucccin
-        userChrome = lib.readFile ./userChrome.css;
-        userContent = lib.readFile ./userContent.css;
       };
       dev =
         default

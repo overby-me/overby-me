@@ -817,7 +817,7 @@
 
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
-| ✅ | Color Scheme | [Catppuccin](https://github.com/catppuccin/catppuccin) | [Frosted Effect](https://github.com/pop-os/cosmic-epoch/issues/604) | 🆗 | [Adwaita](https://gitlab.gnome.org/GNOME/libadwaita) |
+| ✅ | Color Scheme | [Cosmic Theme 🦀](https://github.com/pop-os/cosmic-theme) | [Frosted Effect](https://github.com/pop-os/cosmic-epoch/issues/604) | 🆗 | [Catppuccin](https://github.com/catppuccin/catppuccin) |
 | ✅ | Wallpaper | [Nix-wallpaper ❄️](https://github.com/lunik1/nix-wallpaper) | | 🆗 | |
 | ✅ | Design System | [Material You 🔒](https://m3.material.io) | | 🆗 | [Material Design 2 🔒](https://m2.material.io) |
 | ✅ | Desktop Environment | [Cosmic Epoch 🦀](https://github.com/pop-os/cosmic-epoch) | [Niri 🦀](https://github.com/YaLTeR/niri) | 🆗 | [Gnome Shell 💣](https://gitlab.gnome.org/GNOME/gnome-shell) |

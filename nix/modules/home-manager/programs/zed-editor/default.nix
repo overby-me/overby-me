@@ -25,7 +25,6 @@
       "just-ls"
       "cargo-appraiser"
       "cargo-tom"
-      "catppuccin-blur"
       "harper"
       "jj-lsp"
       "meson"
