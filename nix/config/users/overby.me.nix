@@ -23,12 +23,11 @@
       services
       claude-code
     ])
-    # Linux-only modules: external Linux apps (Zen Browser, Spicetify) plus
-    # the home modules that rely on systemd user units (systemd, vibe).
+    # Linux-only modules: the Zen Browser app plus the home modules that rely
+    # on systemd user units (systemd, vibe).
     ++ lib.optionals pkgs.stdenv.isLinux (
       with inputs.self.homeModules; [
         inputs.zen-browser.homeModules.default
-        inputs.spicetify-nix.homeManagerModules.spicetify
         systemd
         vibe
       ]

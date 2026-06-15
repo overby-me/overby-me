@@ -950,7 +950,6 @@
         "non-spatial-input": "non-spatial-input",
         "ragenix": "ragenix",
         "rust-overlay": "rust-overlay_2",
-        "spicetify-nix": "spicetify-nix",
         "systems": "systems",
         "tangled": "tangled",
         "zen-browser": "zen-browser"
@@ -1011,29 +1010,6 @@
       "original": {
         "owner": "oxalica",
         "repo": "rust-overlay",
-        "type": "github"
-      }
-    },
-    "spicetify-nix": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ],
-        "systems": [
-          "systems"
-        ]
-      },
-      "locked": {
-        "lastModified": 1779824049,
-        "narHash": "sha256-dWHVUjP03KSVG1PaLKA6j9EdxWSxSQvipMUIcSyuA/U=",
-        "owner": "Gerg-L",
-        "repo": "spicetify-nix",
-        "rev": "1362178e5f5f7a848c49fe9dee004ef8824f100a",
-        "type": "github"
-      },
-      "original": {
-        "owner": "Gerg-L",
-        "repo": "spicetify-nix",
         "type": "github"
       }
     },

@@ -95,11 +95,6 @@
     };
 
     # Styling
-    spicetify-nix = {
-      url = "github:Gerg-L/spicetify-nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.systems.follows = "systems";
-    };
     nix-wallpaper = {
       url = "github:lunik1/nix-wallpaper";
       inputs = {

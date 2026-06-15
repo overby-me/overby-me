@@ -28,12 +28,10 @@
       ./zellij.nix
       ./zoxide.nix
     ]
-    # Linux-only programs: spicetify patches the Linux Spotify client,
-    # obs-studio's plugin set is Linux-only, and Zen Browser has no
-    # aarch64-darwin build.
+    # Linux-only programs: obs-studio's plugin set is Linux-only, and Zen
+    # Browser has no aarch64-darwin build.
     ++ lib.optionals pkgs.stdenv.isLinux [
       ./obs-studio.nix
-      ./spicetify.nix
       ./zen-browser
     ];
 
