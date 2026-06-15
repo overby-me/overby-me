@@ -1,4 +1,4 @@
-{
+{lib, ...}: {
   packages = {
     rust-make = {
       lib,
@@ -214,12 +214,12 @@
     # Flatten "features/comments" to attr "rust-make-test-features-comments".
     mkCheck = path: let
       parts = builtins.split "/" path;
-      category = builtins.elemAt parts 0;
-      name = builtins.elemAt parts 2;
+      category = lib.elemAt parts 0;
+      name = lib.elemAt parts 2;
     in {
       name = "rust-make-test-${category}-${name}";
       value = pkgs: import ./testsuite.nix {inherit pkgs category name;};
     };
   in
-    builtins.listToAttrs (map mkCheck testNames);
+    lib.listToAttrs (map mkCheck testNames);
 }

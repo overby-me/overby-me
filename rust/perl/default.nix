@@ -1,4 +1,4 @@
-{
+{lib, ...}: {
   packages = {
     rust-perl = {
       lib,
@@ -1322,7 +1322,7 @@
       }
     ];
   in
-    builtins.listToAttrs (
+    lib.listToAttrs (
       map (t: {
         name = "rust-perl-test-${t.category}-${t.name}";
         value = pkgs:

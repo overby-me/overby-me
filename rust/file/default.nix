@@ -1,4 +1,4 @@
-{
+{lib, ...}: {
   packages = {
     rust-file = {
       lib,
@@ -71,27 +71,27 @@
     };
 
     hasSuffix = suffix: s: let
-      sl = builtins.stringLength s;
-      fl = builtins.stringLength suffix;
+      sl = lib.stringLength s;
+      fl = lib.stringLength suffix;
     in
-      fl <= sl && builtins.substring (sl - fl) fl s == suffix;
+      fl <= sl && lib.substring (sl - fl) fl s == suffix;
 
-    replaceDots = s: builtins.replaceStrings ["."] ["_"] s;
+    replaceDots = s: lib.replaceStrings ["."] ["_"] s;
 
     # Enumerate `db/<type>/<sample>` pairs at eval time. Skip the companion
     # `.source.txt` provenance files and any stored `.json` metadata — only
     # the binary samples are interesting as test inputs.
     dbDir = "${fileTestsSrc}/db";
-    typeEntries = builtins.readDir dbDir;
-    types = builtins.filter (t: typeEntries.${t} == "directory") (builtins.attrNames typeEntries);
+    typeEntries = lib.readDir dbDir;
+    types = lib.filter (t: typeEntries.${t} == "directory") (lib.attrNames typeEntries);
 
     samplesInType = type: let
-      entries = builtins.readDir "${dbDir}/${type}";
-      files = builtins.filter (f: entries.${f} == "regular") (builtins.attrNames entries);
+      entries = lib.readDir "${dbDir}/${type}";
+      files = lib.filter (f: entries.${f} == "regular") (lib.attrNames entries);
     in
-      builtins.filter (f: !(hasSuffix ".source.txt" f) && !(hasSuffix ".json" f)) files;
+      lib.filter (f: !(hasSuffix ".source.txt" f) && !(hasSuffix ".json" f)) files;
 
-    pairs = builtins.concatMap (type: map (file: {inherit type file;}) (samplesInType type)) types;
+    pairs = lib.concatMap (type: map (file: {inherit type file;}) (samplesInType type)) types;
 
     # Test attribute names embed `type` and `file`. The two parts are joined
     # by a `__` sentinel so filenames containing `-` don't collide with a
@@ -99,7 +99,7 @@
     # but plain alphanumerics make shell tab-completion cleaner.
     keyOf = p: "${replaceDots p.type}__${replaceDots p.file}";
   in
-    builtins.listToAttrs (
+    lib.listToAttrs (
       map (p: {
         name = "rust-file-test-${keyOf p}";
         value = pkgs:

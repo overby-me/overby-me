@@ -1,4 +1,4 @@
-{
+{lib, ...}: {
   packages = {
     rust-grep = {
       lib,
@@ -170,7 +170,7 @@
       "y2038-vs-32-bit"
     ];
   in
-    builtins.listToAttrs (
+    lib.listToAttrs (
       map (name: {
         name = "rust-grep-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};

@@ -1,4 +1,4 @@
-{
+{lib, ...}: {
   packages = {
     rust-binutils = {
       lib,
@@ -688,7 +688,7 @@
       }
     ];
 
-    customChecks = builtins.listToAttrs (
+    customChecks = lib.listToAttrs (
       map (t: {
         name = "rust-binutils-test-${t.tool}-${t.name}";
         value = pkgs:
@@ -700,10 +700,10 @@
       testDefs
     );
 
-    dejaGnuChecks = builtins.listToAttrs (
+    dejaGnuChecks = lib.listToAttrs (
       map (
         t: let
-          baseName = builtins.replaceStrings [".exp"] [""] t.exp;
+          baseName = lib.replaceStrings [".exp"] [""] t.exp;
         in {
           name = "rust-binutils-dejagnu-${baseName}";
           value = pkgs:

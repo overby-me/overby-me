@@ -1,4 +1,4 @@
-{
+{lib, ...}: {
   packages = {
     rust-ninja = {
       lib,
@@ -108,7 +108,7 @@
       "test_client_passes_MAKEFLAGS"
     ];
   in
-    builtins.listToAttrs (
+    lib.listToAttrs (
       (map (name: {
           name = "rust-ninja-test-${name}";
           value = pkgs: import ./testsuite.nix {inherit pkgs name;};

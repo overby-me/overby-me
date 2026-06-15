@@ -1,4 +1,4 @@
-{
+{lib, ...}: {
   packages = {
     rust-gzip = {
       lib,
@@ -101,7 +101,7 @@
       "znew-k"
     ];
   in
-    builtins.listToAttrs (
+    lib.listToAttrs (
       map (name: {
         name = "rust-gzip-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};

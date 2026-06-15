@@ -1,4 +1,4 @@
-{
+{lib, ...}: {
   packages = {
     rust-awk = {
       lib,
@@ -313,7 +313,7 @@
       "zeroflag"
     ];
   in
-    builtins.listToAttrs (
+    lib.listToAttrs (
       map (name: {
         name = "rust-awk-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};

@@ -1,4 +1,4 @@
-{
+{lib, ...}: {
   packages = {
     rust-flatpak = {
       lib,
@@ -281,12 +281,12 @@
       "install-subpath"
     ];
   in
-    builtins.listToAttrs (map (name: {
+    lib.listToAttrs (map (name: {
         name = "rust-flatpak-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};
       })
       testNames)
-    // builtins.listToAttrs (map (name: {
+    // lib.listToAttrs (map (name: {
         name = "rust-flatpak-vm-${name}";
         value = pkgs: import ./vmtest.nix {inherit pkgs name;};
       })

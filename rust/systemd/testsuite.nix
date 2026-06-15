@@ -466,7 +466,7 @@ in
       machine.succeed("cd /tmp/test-units && /etc/systemd-tests/patch-test.sh")
       units_dir = "/tmp/test-units"
 
-      env_exports = "${builtins.concatStringsSep "; " (builtins.attrValues (builtins.mapAttrs (k: v: "export ${k}='${v}'") testEnv))}"
+      env_exports = "${pkgs.lib.concatStringsSep "; " (pkgs.lib.attrValues (pkgs.lib.mapAttrs (k: v: "export ${k}='${v}'") testEnv))}"
       env_prefix = f"{env_exports}; " if env_exports else ""
       # Exec the script directly (not via `bash -x`) so the kernel sets
       # /proc/PID/comm to the script filename.  This is needed for

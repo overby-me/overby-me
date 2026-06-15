@@ -1,4 +1,4 @@
-{
+{lib, ...}: {
   packages = {
     rust-patchelf = {
       lib,
@@ -114,7 +114,7 @@
     ];
     testNames = srcTests ++ noRpathArchTests;
   in
-    builtins.listToAttrs (
+    lib.listToAttrs (
       map (name: {
         name = "rust-patchelf-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};

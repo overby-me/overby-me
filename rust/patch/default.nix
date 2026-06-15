@@ -1,4 +1,4 @@
-{
+{lib, ...}: {
   packages = {
     rust-patch = {
       lib,
@@ -114,7 +114,7 @@
       "unusual-blanks"
     ];
   in
-    builtins.listToAttrs (
+    lib.listToAttrs (
       map (name: {
         name = "rust-patch-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};

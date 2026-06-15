@@ -1,4 +1,4 @@
-{
+{lib, ...}: {
   packages = {
     rust-tar = {
       lib,
@@ -357,7 +357,7 @@
       "xform03"
     ];
   in
-    builtins.listToAttrs (
+    lib.listToAttrs (
       map (name: {
         name = "rust-tar-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};

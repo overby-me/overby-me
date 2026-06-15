@@ -1,4 +1,4 @@
-{
+{lib, ...}: {
   packages = {
     rust-sed = {
       lib,
@@ -124,7 +124,7 @@
       "xemacs"
     ];
   in
-    builtins.listToAttrs (
+    lib.listToAttrs (
       map (name: {
         name = "rust-sed-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};

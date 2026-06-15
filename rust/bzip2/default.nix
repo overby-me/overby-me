@@ -1,4 +1,4 @@
-{
+{lib, ...}: {
   packages = {
     rust-bzip2 = {
       lib,
@@ -98,7 +98,7 @@
       "bad-input"
     ];
   in
-    builtins.listToAttrs (
+    lib.listToAttrs (
       map (name: {
         name = "rust-bzip2-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};

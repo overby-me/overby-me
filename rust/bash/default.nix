@@ -1,4 +1,4 @@
-{
+{lib, ...}: {
   packages = {
     rust-bash = {
       lib,
@@ -148,7 +148,7 @@
       "vredir"
     ];
   in
-    builtins.listToAttrs (
+    lib.listToAttrs (
       map (name: {
         name = "rust-bash-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};

@@ -1,4 +1,4 @@
-{
+{lib, ...}: {
   devShells.rust-systemd = pkgs: {
     packages = with pkgs; [
       just
@@ -71,7 +71,7 @@
           project:
           let
             pkgs = import <nixpkgs> {};
-            members = builtins.attrValues (builtins.mapAttrs (_: m: m.build) project.workspaceMembers);
+            members = lib.attrValues (lib.mapAttrs (_: m: m.build) project.workspaceMembers);
           in
           pkgs.runCommand "rust-systemd" {} '''
             mkdir -p $out/bin
@@ -324,8 +324,8 @@
     # Upstream systemd integration test names (without TEST- prefix).
     # Each corresponds to test/units/TEST-{name}.sh in the systemd source.
     # Run with: nix build .#checks.x86_64-linux.rust-systemd-test-{name}
-    testFiles = builtins.filter (f: builtins.match ".*\.nix" f != null) (
-      builtins.attrNames (builtins.readDir ./integration-tests)
+    testFiles = lib.filter (f: lib.match ".*\.nix" f != null) (
+      lib.attrNames (lib.readDir ./integration-tests)
     );
     # Each test gets its check name from the filename (e.g. "04-journal-bsod.nix" -> "04-journal-bsod")
     # and the upstream test script name from t.name (e.g. "04-JOURNAL").
@@ -334,12 +334,12 @@
         f:
           (import (./integration-tests + "/${f}"))
           // {
-            _checkName = builtins.replaceStrings [".nix"] [""] f;
+            _checkName = lib.replaceStrings [".nix"] [""] f;
           }
       )
       testFiles;
   in
-    builtins.listToAttrs (
+    lib.listToAttrs (
       (map (t: {
           name = "rust-systemd-test-${t._checkName}";
           value = pkgs:

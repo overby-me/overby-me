@@ -1,4 +1,4 @@
-{
+{lib, ...}: {
   packages = {
     rust-meson = {
       lib,
@@ -1170,7 +1170,7 @@
       }
     ];
   in
-    builtins.listToAttrs (
+    lib.listToAttrs (
       map (t: {
         name = "rust-meson-test-${t.name}";
         value = pkgs:

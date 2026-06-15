@@ -1,4 +1,4 @@
-{
+{lib, ...}: {
   packages = {
     rust-xz = {
       lib,
@@ -228,9 +228,9 @@
     ];
 
     # Replace `_` with `-` so attribute names render nicely.
-    sanitize = builtins.replaceStrings ["_"] ["-"];
+    sanitize = lib.replaceStrings ["_"] ["-"];
 
-    scriptChecks = builtins.listToAttrs (map (s: {
+    scriptChecks = lib.listToAttrs (map (s: {
         name = "rust-xz-${sanitize s.name}";
         value = pkgs: (import ./testsuite.nix {inherit pkgs;}).script s;
       })
@@ -254,13 +254,13 @@
       "test_vli"
     ];
 
-    cTestChecks = builtins.listToAttrs (map (n: {
+    cTestChecks = lib.listToAttrs (map (n: {
         name = "rust-xz-${sanitize n}";
         value = pkgs: (import ./testsuite.nix {inherit pkgs;}).cTest n;
       })
       upstreamCTests);
 
-    goodChecks = builtins.listToAttrs (map (n: {
+    goodChecks = lib.listToAttrs (map (n: {
         name = "rust-xz-${sanitize n}";
         value = pkgs:
           (import ./testsuite.nix {inherit pkgs;}).file {
@@ -270,7 +270,7 @@
       })
       goodFiles);
 
-    badChecks = builtins.listToAttrs (map (n: {
+    badChecks = lib.listToAttrs (map (n: {
         name = "rust-xz-${sanitize n}";
         value = pkgs:
           (import ./testsuite.nix {inherit pkgs;}).file {

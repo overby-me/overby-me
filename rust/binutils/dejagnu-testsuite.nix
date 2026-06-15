@@ -25,7 +25,7 @@
   name =
     if expFile == "ALL"
     then "rust-binutils-dejagnu-all"
-    else "rust-binutils-dejagnu-${builtins.replaceStrings [".exp"] [""] expFile}";
+    else "rust-binutils-dejagnu-${pkgs.lib.replaceStrings [".exp"] [""] expFile}";
 in
   pkgs.runCommand name {
     nativeBuildInputs = [
