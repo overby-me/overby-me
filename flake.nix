@@ -175,6 +175,7 @@
         ./nix/modules/flakelight/devShellNames.nix
         ./nix/modules/flakelight/devenvConfigurations.nix
         ./nix/modules/flakelight/devenvModules.nix
+        ./nix/modules/flakelight/filterUnsupported.nix
         ./nix/modules/flakelight/hardware.nix
         ./nix/modules/flakelight/lib.nix
         ./nix/modules/flakelight/perSystemLib.nix
