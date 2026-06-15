@@ -24,6 +24,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/file";
           license = lib.licenses.mit;
           mainProgram = "file";
+          platforms = lib.platforms.linux;
         };
       };
 
@@ -53,6 +54,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/file";
           license = lib.licenses.mit;
           mainProgram = "file";
+          platforms = lib.platforms.linux;
         };
       };
   };
@@ -81,24 +83,15 @@
     # the binary samples are interesting as test inputs.
     dbDir = "${fileTestsSrc}/db";
     typeEntries = builtins.readDir dbDir;
-    types =
-      builtins.filter (t: typeEntries.${t} == "directory")
-      (builtins.attrNames typeEntries);
+    types = builtins.filter (t: typeEntries.${t} == "directory") (builtins.attrNames typeEntries);
 
     samplesInType = type: let
       entries = builtins.readDir "${dbDir}/${type}";
-      files =
-        builtins.filter (f: entries.${f} == "regular")
-        (builtins.attrNames entries);
+      files = builtins.filter (f: entries.${f} == "regular") (builtins.attrNames entries);
     in
-      builtins.filter
-      (f: !(hasSuffix ".source.txt" f) && !(hasSuffix ".json" f))
-      files;
+      builtins.filter (f: !(hasSuffix ".source.txt" f) && !(hasSuffix ".json" f)) files;
 
-    pairs =
-      builtins.concatMap (type:
-        map (file: {inherit type file;}) (samplesInType type))
-      types;
+    pairs = builtins.concatMap (type: map (file: {inherit type file;}) (samplesInType type)) types;
 
     # Test attribute names embed `type` and `file`. The two parts are joined
     # by a `__` sentinel so filenames containing `-` don't collide with a
@@ -106,7 +99,8 @@
     # but plain alphanumerics make shell tab-completion cleaner.
     keyOf = p: "${replaceDots p.type}__${replaceDots p.file}";
   in
-    builtins.listToAttrs (map (p: {
+    builtins.listToAttrs (
+      map (p: {
         name = "rust-file-test-${keyOf p}";
         value = pkgs:
           import ./testsuite.nix {
@@ -114,5 +108,6 @@
             inherit (p) type file;
           };
       })
-      pairs);
+      pairs
+    );
 }

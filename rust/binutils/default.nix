@@ -30,6 +30,7 @@
           description = "GNU binutils-compatible binary utilities written in Rust";
           license = lib.licenses.mit;
           mainProgram = "ar";
+          platforms = lib.platforms.linux;
         };
       };
 
@@ -65,6 +66,7 @@
           description = "GNU binutils-compatible binary utilities written in Rust (dev build, fast compile)";
           license = lib.licenses.mit;
           mainProgram = "ar";
+          platforms = lib.platforms.linux;
         };
       };
   };
@@ -686,7 +688,8 @@
       }
     ];
 
-    customChecks = builtins.listToAttrs (map (t: {
+    customChecks = builtins.listToAttrs (
+      map (t: {
         name = "rust-binutils-test-${t.tool}-${t.name}";
         value = pkgs:
           import ./testsuite.nix {
@@ -694,20 +697,25 @@
             inherit (t) tool name;
           };
       })
-      testDefs);
+      testDefs
+    );
 
-    dejaGnuChecks = builtins.listToAttrs (map (t: let
-        baseName = builtins.replaceStrings [".exp"] [""] t.exp;
-      in {
-        name = "rust-binutils-dejagnu-${baseName}";
-        value = pkgs:
-          import ./dejagnu-testsuite.nix {
-            inherit pkgs;
-            expFile = t.exp;
-            inherit (t) minPass maxFail;
-          };
-      })
-      dejaGnuTests);
+    dejaGnuChecks = builtins.listToAttrs (
+      map (
+        t: let
+          baseName = builtins.replaceStrings [".exp"] [""] t.exp;
+        in {
+          name = "rust-binutils-dejagnu-${baseName}";
+          value = pkgs:
+            import ./dejagnu-testsuite.nix {
+              inherit pkgs;
+              expFile = t.exp;
+              inherit (t) minPass maxFail;
+            };
+        }
+      )
+      dejaGnuTests
+    );
 
     # Single check that runs ALL upstream .exp files (informational, always passes)
     dejaGnuAll = {

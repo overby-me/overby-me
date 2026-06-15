@@ -24,6 +24,7 @@
       '';
 
       meta = {
+        platforms = lib.platforms.linux;
         description = "A GNU makeinfo-compatible Texinfo processor written in Rust";
         homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/texinfo";
         license = lib.licenses.mit;

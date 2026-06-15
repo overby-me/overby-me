@@ -24,6 +24,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/perl";
           license = lib.licenses.mit;
           mainProgram = "perl";
+          platforms = lib.platforms.linux;
         };
       };
 
@@ -53,6 +54,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/perl";
           license = lib.licenses.mit;
           mainProgram = "perl";
+          platforms = lib.platforms.linux;
         };
       };
   };
@@ -1320,7 +1322,8 @@
       }
     ];
   in
-    builtins.listToAttrs (map (t: {
+    builtins.listToAttrs (
+      map (t: {
         name = "rust-perl-test-${t.category}-${t.name}";
         value = pkgs:
           import ./testsuite.nix {
@@ -1328,5 +1331,6 @@
             inherit (t) category name;
           };
       })
-      testDefs);
+      testDefs
+    );
 }

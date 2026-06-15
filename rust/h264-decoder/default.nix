@@ -32,6 +32,7 @@
         license = lib.licenses.mit;
         maintainers = with lib.maintainers; [overby-me];
         mainProgram = "h264-decode";
+        platforms = lib.platforms.linux;
       };
     };
 }

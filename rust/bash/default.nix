@@ -28,6 +28,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/bash";
           license = lib.licenses.mit;
           mainProgram = "bash";
+          platforms = lib.platforms.linux;
         };
       };
 
@@ -61,6 +62,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/bash";
           license = lib.licenses.mit;
           mainProgram = "bash";
+          platforms = lib.platforms.linux;
         };
       };
   };
@@ -146,9 +148,11 @@
       "vredir"
     ];
   in
-    builtins.listToAttrs (map (name: {
+    builtins.listToAttrs (
+      map (name: {
         name = "rust-bash-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};
       })
-      testNames);
+      testNames
+    );
 }

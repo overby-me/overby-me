@@ -24,6 +24,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/sed";
           license = lib.licenses.mit;
           mainProgram = "sed";
+          platforms = lib.platforms.linux;
         };
       };
 
@@ -53,6 +54,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/sed";
           license = lib.licenses.mit;
           mainProgram = "sed";
+          platforms = lib.platforms.linux;
         };
       };
   };
@@ -122,9 +124,11 @@
       "xemacs"
     ];
   in
-    builtins.listToAttrs (map (name: {
+    builtins.listToAttrs (
+      map (name: {
         name = "rust-sed-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};
       })
-      testNames);
+      testNames
+    );
 }

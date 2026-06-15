@@ -36,6 +36,7 @@
         license = lib.licenses.mit;
         maintainers = with lib.maintainers; [overby-me];
         mainProgram = "cachix";
+        platforms = lib.platforms.linux;
       };
     };
 }

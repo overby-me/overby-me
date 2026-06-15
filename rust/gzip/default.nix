@@ -28,6 +28,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/gzip";
           license = lib.licenses.mit;
           mainProgram = "gzip";
+          platforms = lib.platforms.linux;
         };
       };
 
@@ -61,6 +62,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/gzip";
           license = lib.licenses.mit;
           mainProgram = "gzip";
+          platforms = lib.platforms.linux;
         };
       };
   };
@@ -99,9 +101,11 @@
       "znew-k"
     ];
   in
-    builtins.listToAttrs (map (name: {
+    builtins.listToAttrs (
+      map (name: {
         name = "rust-gzip-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};
       })
-      testNames);
+      testNames
+    );
 }

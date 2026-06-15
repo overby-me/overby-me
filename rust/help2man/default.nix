@@ -23,6 +23,7 @@
         homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/help2man";
         license = lib.licenses.mit;
         mainProgram = "help2man";
+        platforms = lib.platforms.linux;
       };
     };
 }

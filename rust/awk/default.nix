@@ -28,6 +28,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/awk";
           license = lib.licenses.mit;
           mainProgram = "awk";
+          platforms = lib.platforms.linux;
         };
       };
 
@@ -61,6 +62,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/awk";
           license = lib.licenses.mit;
           mainProgram = "awk";
+          platforms = lib.platforms.linux;
         };
       };
   };
@@ -311,9 +313,11 @@
       "zeroflag"
     ];
   in
-    builtins.listToAttrs (map (name: {
+    builtins.listToAttrs (
+      map (name: {
         name = "rust-awk-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};
       })
-      testNames);
+      testNames
+    );
 }

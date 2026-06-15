@@ -24,6 +24,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/tar";
           license = lib.licenses.mit;
           mainProgram = "tar";
+          platforms = lib.platforms.linux;
         };
       };
 
@@ -53,6 +54,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/tar";
           license = lib.licenses.mit;
           mainProgram = "tar";
+          platforms = lib.platforms.linux;
         };
       };
 
@@ -355,9 +357,11 @@
       "xform03"
     ];
   in
-    builtins.listToAttrs (map (name: {
+    builtins.listToAttrs (
+      map (name: {
         name = "rust-tar-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};
       })
-      testNames);
+      testNames
+    );
 }

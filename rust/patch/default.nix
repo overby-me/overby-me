@@ -24,6 +24,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/patch";
           license = lib.licenses.mit;
           mainProgram = "patch";
+          platforms = lib.platforms.linux;
         };
       };
 
@@ -53,6 +54,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/patch";
           license = lib.licenses.mit;
           mainProgram = "patch";
+          platforms = lib.platforms.linux;
         };
       };
   };
@@ -112,9 +114,11 @@
       "unusual-blanks"
     ];
   in
-    builtins.listToAttrs (map (name: {
+    builtins.listToAttrs (
+      map (name: {
         name = "rust-patch-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};
       })
-      testNames);
+      testNames
+    );
 }

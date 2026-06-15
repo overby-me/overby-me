@@ -33,6 +33,7 @@
         '';
 
         meta = {
+          platforms = lib.platforms.linux;
           description = "An xz-compatible LZMA compression tool written in Rust";
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/xz";
           license = lib.licenses.mit;
@@ -77,6 +78,7 @@
         '';
 
         meta = {
+          platforms = lib.platforms.linux;
           description = "rust-xz built in debug mode for the test suite";
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/xz";
           license = lib.licenses.mit;
@@ -196,21 +198,33 @@
     # an exit-77 ("skip") is treated as a failure so we never
     # silently miss coverage.
     upstreamScripts = [
-      { name = "test_files"; }
-      { name = "test_suffix"; }
+      {name = "test_files";}
+      {name = "test_suffix";}
       # `test_compress.sh` itself only does anything when called
       # with a generated/prepared input filename, so we drive it via
       # the three `test_compress_generated_*` wrappers below.
-      { name = "test_compress_generated_abc"; needsHelper = true;
-        compressFile = "compress_generated_abc"; }
-      { name = "test_compress_generated_random"; needsHelper = true;
-        compressFile = "compress_generated_random"; }
-      { name = "test_compress_generated_text"; needsHelper = true;
-        compressFile = "compress_generated_text"; }
+      {
+        name = "test_compress_generated_abc";
+        needsHelper = true;
+        compressFile = "compress_generated_abc";
+      }
+      {
+        name = "test_compress_generated_random";
+        needsHelper = true;
+        compressFile = "compress_generated_random";
+      }
+      {
+        name = "test_compress_generated_text";
+        needsHelper = true;
+        compressFile = "compress_generated_text";
+      }
       # `test_scripts.sh` exercises `xzdiff`/`xzgrep` shell wrappers
       # we don't ship, so it self-skips. Mark allowSkip so the
       # derivation is green without falsely claiming coverage.
-      { name = "test_scripts"; allowSkip = true; }
+      {
+        name = "test_scripts";
+        allowSkip = true;
+      }
     ];
 
     # Replace `_` with `-` so attribute names render nicely.
@@ -248,19 +262,21 @@
 
     goodChecks = builtins.listToAttrs (map (n: {
         name = "rust-xz-${sanitize n}";
-        value = pkgs: (import ./testsuite.nix {inherit pkgs;}).file {
-          name = n;
-          expect = "good";
-        };
+        value = pkgs:
+          (import ./testsuite.nix {inherit pkgs;}).file {
+            name = n;
+            expect = "good";
+          };
       })
       goodFiles);
 
     badChecks = builtins.listToAttrs (map (n: {
         name = "rust-xz-${sanitize n}";
-        value = pkgs: (import ./testsuite.nix {inherit pkgs;}).file {
-          name = n;
-          expect = "bad";
-        };
+        value = pkgs:
+          (import ./testsuite.nix {inherit pkgs;}).file {
+            name = n;
+            expect = "bad";
+          };
       })
       badFiles);
   in

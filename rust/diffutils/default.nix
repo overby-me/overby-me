@@ -29,6 +29,7 @@
         homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/diffutils";
         license = lib.licenses.mit;
         mainProgram = "diff";
+        platforms = lib.platforms.linux;
       };
     };
 }

@@ -24,6 +24,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/meson";
           license = lib.licenses.mit;
           mainProgram = "meson";
+          platforms = lib.platforms.linux;
         };
       };
   };
@@ -1169,7 +1170,8 @@
       }
     ];
   in
-    builtins.listToAttrs (map (t: {
+    builtins.listToAttrs (
+      map (t: {
         name = "rust-meson-test-${t.name}";
         value = pkgs:
           import ./testsuite.nix {
@@ -1177,9 +1179,9 @@
             inherit (t) name testDir;
           };
       })
-      tests)
+      tests
+    )
     // {
-      rust-meson-hello-world = pkgs:
-        import ./hello-world-test.nix {inherit pkgs;};
+      rust-meson-hello-world = pkgs: import ./hello-world-test.nix {inherit pkgs;};
     };
 }

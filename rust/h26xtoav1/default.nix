@@ -40,6 +40,7 @@
         license = lib.licenses.mit;
         maintainers = with lib.maintainers; [overby-me];
         mainProgram = "h26xtoav1";
+        platforms = lib.platforms.linux;
       };
     };
 }

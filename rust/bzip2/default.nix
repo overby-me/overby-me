@@ -29,6 +29,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/bzip2";
           license = lib.licenses.mit;
           mainProgram = "bzip2";
+          platforms = lib.platforms.linux;
         };
       };
 
@@ -63,6 +64,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/bzip2";
           license = lib.licenses.mit;
           mainProgram = "bzip2";
+          platforms = lib.platforms.linux;
         };
       };
   };
@@ -96,9 +98,11 @@
       "bad-input"
     ];
   in
-    builtins.listToAttrs (map (name: {
+    builtins.listToAttrs (
+      map (name: {
         name = "rust-bzip2-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};
       })
-      testNames);
+      testNames
+    );
 }

@@ -37,6 +37,7 @@
         license = lib.licenses.isc;
         maintainers = with lib.maintainers; [overby-me];
         mainProgram = "pkgconf";
+        platforms = lib.platforms.linux;
       };
     };
 }

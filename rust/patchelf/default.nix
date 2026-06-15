@@ -24,6 +24,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/patchelf";
           license = lib.licenses.mit;
           mainProgram = "patchelf";
+          platforms = lib.platforms.linux;
         };
       };
 
@@ -53,6 +54,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/patchelf";
           license = lib.licenses.mit;
           mainProgram = "patchelf";
+          platforms = lib.platforms.linux;
         };
       };
   };
@@ -112,9 +114,11 @@
     ];
     testNames = srcTests ++ noRpathArchTests;
   in
-    builtins.listToAttrs (map (name: {
+    builtins.listToAttrs (
+      map (name: {
         name = "rust-patchelf-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};
       })
-      testNames);
+      testNames
+    );
 }

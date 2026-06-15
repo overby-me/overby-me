@@ -34,6 +34,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/grep";
           license = lib.licenses.mit;
           mainProgram = "grep";
+          platforms = lib.platforms.linux;
         };
       };
   };
@@ -169,9 +170,11 @@
       "y2038-vs-32-bit"
     ];
   in
-    builtins.listToAttrs (map (name: {
+    builtins.listToAttrs (
+      map (name: {
         name = "rust-grep-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};
       })
-      testNames);
+      testNames
+    );
 }

@@ -22,6 +22,7 @@
         description = "A POSIX yacc/bison-compatible parser generator written in Rust";
         license = lib.licenses.mit;
         mainProgram = "bison";
+        platforms = lib.platforms.linux;
       };
     };
 }

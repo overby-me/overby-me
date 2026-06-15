@@ -23,6 +23,7 @@
         homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/curl";
         license = lib.licenses.mit;
         mainProgram = "curl";
+        platforms = lib.platforms.linux;
       };
     };
 }

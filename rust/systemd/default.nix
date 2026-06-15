@@ -4,7 +4,10 @@
       just
       (rust-bin.stable.latest.default.override {
         extensions = ["rust-src"];
-        targets = ["x86_64-unknown-linux-gnu" "x86_64-unknown-uefi"];
+        targets = [
+          "x86_64-unknown-linux-gnu"
+          "x86_64-unknown-uefi"
+        ];
       })
     ];
   };
@@ -37,6 +40,7 @@
           license = lib.licenses.mit;
           maintainers = with lib.maintainers; [overby-me];
           mainProgram = "systemd";
+          platforms = lib.platforms.linux;
         };
       };
 
@@ -44,7 +48,11 @@
       drowse,
       lib,
     }:
-      drowse.crate2nix {
+    # crate2nix constructs its own derivation and drops the `meta` we pass in,
+    # so re-apply meta.platforms via overrideAttrs to ensure meta.available is
+    # false on non-Linux (otherwise nix flake check forces it on darwin and the
+    # crate2nix builtins.outputOf usage fails).
+      (drowse.crate2nix {
         pname = "rust-systemd";
         version = "unstable";
 
@@ -83,8 +91,16 @@
           license = lib.licenses.mit;
           maintainers = with lib.maintainers; [overby-me];
           mainProgram = "systemd";
+          platforms = lib.platforms.linux;
         };
-      };
+      }).overrideAttrs
+      (old: {
+        meta =
+          (old.meta or {})
+          // {
+            platforms = lib.platforms.linux;
+          };
+      });
 
     rust-systemd-systemd = {
       runCommand,
@@ -95,7 +111,8 @@
       util-linuxMinimal,
       systemd,
     }:
-      runCommand "rust-systemd-systemd-${rust-systemd.version}" {
+      runCommand "rust-systemd-systemd-${rust-systemd.version}"
+      {
         nativeBuildInputs = [makeBinaryWrapper];
 
         passthru = {
@@ -126,7 +143,8 @@
           // {
             description = "rust-systemd packaged as a systemd drop-in replacement for NixOS";
           };
-      } ''
+      }
+      ''
                 mkdir -p $out
 
                 # Copy data/config files from systemd that NixOS modules expect
@@ -306,20 +324,23 @@
     # Upstream systemd integration test names (without TEST- prefix).
     # Each corresponds to test/units/TEST-{name}.sh in the systemd source.
     # Run with: nix build .#checks.x86_64-linux.rust-systemd-test-{name}
-    testFiles =
-      builtins.filter
-      (f: builtins.match ".*\.nix" f != null)
-      (builtins.attrNames (builtins.readDir ./integration-tests));
+    testFiles = builtins.filter (f: builtins.match ".*\.nix" f != null) (
+      builtins.attrNames (builtins.readDir ./integration-tests)
+    );
     # Each test gets its check name from the filename (e.g. "04-journal-bsod.nix" -> "04-journal-bsod")
     # and the upstream test script name from t.name (e.g. "04-JOURNAL").
-    tests = map (f:
-      (import (./integration-tests + "/${f}"))
-      // {
-        _checkName = builtins.replaceStrings [".nix"] [""] f;
-      })
-    testFiles;
+    tests =
+      map (
+        f:
+          (import (./integration-tests + "/${f}"))
+          // {
+            _checkName = builtins.replaceStrings [".nix"] [""] f;
+          }
+      )
+      testFiles;
   in
-    builtins.listToAttrs ((map (t: {
+    builtins.listToAttrs (
+      (map (t: {
           name = "rust-systemd-test-${t._checkName}";
           value = pkgs:
             import ./testsuite.nix {
@@ -345,5 +366,6 @@
               useUpstreamSystemd = true;
             };
         })
-        tests));
+        tests)
+    );
 }

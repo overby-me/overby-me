@@ -24,6 +24,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/ninja";
           license = lib.licenses.asl20;
           mainProgram = "ninja";
+          platforms = lib.platforms.linux;
         };
       };
 
@@ -53,6 +54,7 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/ninja";
           license = lib.licenses.asl20;
           mainProgram = "ninja";
+          platforms = lib.platforms.linux;
         };
       };
   };

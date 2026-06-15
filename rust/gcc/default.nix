@@ -39,6 +39,7 @@
         description = "A GCC-compatible C compiler written in Rust";
         license = lib.licenses.cc0;
         mainProgram = "gcc";
+        platforms = lib.platforms.linux;
       };
     };
 }
