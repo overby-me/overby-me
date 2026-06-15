@@ -4,7 +4,45 @@
   config,
   lib,
   ...
-}: {
+}: let
+  symlink = config.lib.file.mkOutOfStoreSymlink;
+  inherit (config.home) homeDirectory;
+
+  # Cross-platform files (work fine on both NixOS and nix-darwin).
+  commonFiles = {
+    "Work/proj".source = symlink "${homeDirectory}/Sync/Projects";
+    "Work/wiki".source = symlink "${homeDirectory}/Sync/Documents/Wiki";
+    "Work/tmp/.keep".source = lib.toFile "keep" "";
+    ".ssh/socket/.keep".source = lib.toFile "keep" "";
+    ".config/helix/config.toml".text = ''
+      # System  clipboard
+      p = "paste_clipboard_after"
+      P = "paste_clipboard_before"
+      y = "yank_to_clipboard"
+      Y = "yank_joined_to_clipboard"
+      R = "replace_selections_with_clipboard"
+      d = ["yank_to_clipboard", "delete_selection_noyank"]
+    '';
+  };
+
+  # Linux-only files: the standard XDG directory symlinks (on macOS these
+  # collide with Finder/iCloud-managed ~/Desktop, ~/Documents, etc.) and the
+  # nix-wallpaper desktop background.
+  linuxFiles = {
+    Pictures.source = symlink "${homeDirectory}/Sync/Pictures";
+    Documents.source = symlink "${homeDirectory}/Sync/Documents";
+    Desktop.source = symlink "${homeDirectory}/Sync/Desktop";
+    Videos.source = symlink "${homeDirectory}/Sync/Videos";
+    Music.source = symlink "${homeDirectory}/Sync/Music";
+    Templates.source = symlink "${homeDirectory}/Sync/Templates";
+    ".local/share/wallpapers/current.png".source = "${
+      (pkgs.nix-wallpaper.override {
+        preset = "catppuccin-mocha";
+        logoSize = 10;
+      })
+    }/share/wallpapers/nixos-wallpaper.png";
+  };
+in {
   home = {
     inherit stateVersion;
     enableDebugInfo = true;
@@ -13,7 +51,10 @@
       enableNushellIntegration = true;
     };
     shellAliases = {
-      xopen = "xdg-open";
+      xopen =
+        if pkgs.stdenv.isDarwin
+        then "open"
+        else "xdg-open";
       diff = "batdiff";
       git = "git-jj-wrapper";
       ga = "jj file track";
@@ -58,42 +99,18 @@
       firefox-dev = "firefox -start-debugger-server 6000 -P dev http://localhost:3000";
       zen-dev = "zen -start-debugger-server 6000 -P dev http://localhost:3000";
     };
-    sessionVariables = {
-      EDITOR = "vi";
-      VISUAL = "vi";
-      BATDIFF_USE_DELTA = "true";
-      PYTHON_HISTORY = "~/.local/share/python/history";
-      GRANTED_ALIAS_CONFIGURED = "true";
-      RTK_TELEMETRY_DISABLED = "1";
-      PROTON_ENABLE_WAYLAND = "1";
-    };
-    file = let
-      symlink = config.lib.file.mkOutOfStoreSymlink;
-      inherit (config.home) homeDirectory;
-    in {
-      Pictures.source = symlink "${homeDirectory}/Sync/Pictures";
-      Documents.source = symlink "${homeDirectory}/Sync/Documents";
-      Desktop.source = symlink "${homeDirectory}/Sync/Desktop";
-      Videos.source = symlink "${homeDirectory}/Sync/Videos";
-      Music.source = symlink "${homeDirectory}/Sync/Music";
-      Templates.source = symlink "${homeDirectory}/Sync/Templates";
-      "Work/proj".source = symlink "${homeDirectory}/Sync/Projects";
-      "Work/wiki".source = symlink "${homeDirectory}/Sync/Documents/Wiki";
-      "Work/tmp/.keep".source = lib.toFile "keep" "";
-      ".ssh/socket/.keep".source = lib.toFile "keep" "";
-      ".local/share/wallpapers/current.png".source = "${(pkgs.nix-wallpaper.override {
-        preset = "catppuccin-mocha";
-        logoSize = 10;
-      })}/share/wallpapers/nixos-wallpaper.png";
-      ".config/helix/config.toml".text = ''
-        # System  clipboard
-        p = "paste_clipboard_after"
-        P = "paste_clipboard_before"
-        y = "yank_to_clipboard"
-        Y = "yank_joined_to_clipboard"
-        R = "replace_selections_with_clipboard"
-        d = ["yank_to_clipboard", "delete_selection_noyank"]
-      '';
-    };
+    sessionVariables =
+      {
+        EDITOR = "vi";
+        VISUAL = "vi";
+        BATDIFF_USE_DELTA = "true";
+        PYTHON_HISTORY = "~/.local/share/python/history";
+        GRANTED_ALIAS_CONFIGURED = "true";
+        RTK_TELEMETRY_DISABLED = "1";
+      }
+      // lib.optionalAttrs pkgs.stdenv.isLinux {
+        PROTON_ENABLE_WAYLAND = "1";
+      };
+    file = commonFiles // lib.optionalAttrs pkgs.stdenv.isLinux linuxFiles;
   };
 }

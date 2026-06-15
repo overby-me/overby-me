@@ -1,7 +1,14 @@
-{lib, ...}: {
+{
+  lib,
+  pkgs,
+  ...
+}: {
   xdg = {
     enable = true;
-    mimeApps = {
+    # xdg.mimeApps writes .desktop association files, which only exist on
+    # Linux desktops. On Darwin, default-app handling is managed by
+    # LaunchServices instead.
+    mimeApps = lib.mkIf pkgs.stdenv.isLinux {
       enable = true;
       associations.added = let
         zenMimes = [
@@ -17,11 +24,13 @@
           "application/x-extension-xht"
         ];
       in
-        lib.listToAttrs (map (mime: {
+        lib.listToAttrs (
+          map (mime: {
             name = mime;
             value = "zen-beta.desktop";
           })
-          zenMimes);
+          zenMimes
+        );
       defaultApplications = let
         zedMimes = [
           "text/plain"
@@ -66,11 +75,13 @@
           "application/x-python"
         ];
       in
-        lib.listToAttrs (map (mime: {
+        lib.listToAttrs (
+          map (mime: {
             name = mime;
             value = "dev.zed.Zed.desktop";
           })
-          zedMimes);
+          zedMimes
+        );
     };
   };
 }

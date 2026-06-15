@@ -1,23 +1,38 @@
-{inputs, ...}: {
+{
+  inputs,
+  pkgs,
+  lib,
+  ...
+}: {
   home = {
     username = "overby.me";
-    homeDirectory = "/home/overby.me";
+    homeDirectory =
+      if pkgs.stdenv.isDarwin
+      then "/Users/overby.me"
+      else "/home/overby.me";
   };
-  imports = with inputs.self.homeModules; [
-    inputs.zen-browser.homeModules.default
-    inputs.spicetify-nix.homeManagerModules.spicetify
-    inputs.catppuccin.homeModules.catppuccin
-    inputs.ragenix.homeManagerModules.default
-    nushell-plugin-tramp
-    nix
-    home
-    systemd
-    packages
-    xdg
-    programs
-    services
-    catppuccin
-    vibe
-    claude-code
-  ];
+  imports =
+    (with inputs.self.homeModules; [
+      inputs.catppuccin.homeModules.catppuccin
+      inputs.ragenix.homeManagerModules.default
+      nushell-plugin-tramp
+      nix
+      home
+      packages
+      xdg
+      programs
+      services
+      catppuccin
+      claude-code
+    ])
+    # Linux-only modules: external Linux apps (Zen Browser, Spicetify) plus
+    # the home modules that rely on systemd user units (systemd, vibe).
+    ++ lib.optionals pkgs.stdenv.isLinux (
+      with inputs.self.homeModules; [
+        inputs.zen-browser.homeModules.default
+        inputs.spicetify-nix.homeManagerModules.spicetify
+        systemd
+        vibe
+      ]
+    );
 }
