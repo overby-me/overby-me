@@ -4,7 +4,6 @@
     file
     unixtools.xxd
     fd
-    tre
     hexyl
     dust
     ripgrep
