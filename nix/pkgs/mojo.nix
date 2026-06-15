@@ -11,7 +11,6 @@
   curl,
   libbsd,
   python3,
-  darwin ? {},
 }: let
   mblackPythonEnv = python3.withPackages (ps:
     with ps; [
@@ -80,19 +79,13 @@ in
         fixDarwinDylibNames
       ];
 
-    buildInputs =
-      lib.optionals isLinux [
-        stdenv.cc.cc.lib
-        libedit
-        zlib
-        curl
-        libbsd
-      ]
-      ++ lib.optionals isDarwin [
-        darwin.apple_sdk.frameworks.CoreFoundation
-        darwin.apple_sdk.frameworks.CoreServices
-        darwin.apple_sdk.frameworks.Security
-      ];
+    buildInputs = [
+      stdenv.cc.cc.lib
+      libedit
+      zlib
+      curl
+      libbsd
+    ];
 
     unpackPhase = ''
       for src in $srcs; do
