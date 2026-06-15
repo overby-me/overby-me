@@ -201,7 +201,6 @@
 | [Nu-jupyter-kernel 🦪](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/nu-jupyter-kernel.nix) | [GitHub](https://github.com/cptpiepmatz/nu-jupyter-kernel) | Jupyter Notebook kernel for Nushell |
 | [Rust-jupyter-kernel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/Rust-jupyter-kernel.nix) | [GitHub](https://github.com/evcxr/evcxr) | Jupyter Notebook kernel for Rust |
 | [Sidecar 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/sidecar/default.nix) | [GitHub](https://github.com/runtimed/runtimed/) | Jupyter Notebook viewer |
-| [Xeus-lix ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/xeus-lix/default.nix) | [GitHub](https://github.com/ptrpaws/xeus-lix) | Jupyter Notebook kernel for Nix |
 
 #### Media
 
