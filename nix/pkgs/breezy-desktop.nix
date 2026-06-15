@@ -29,6 +29,7 @@ in
       homepage = "https://github.com/wheaney/breezy-desktop";
       license = lib.licenses.gpl2Plus; # https://wiki.gnome.org/Projects/GnomeShell/Extensions/Review#Licensing
       maintainers = with lib.maintainers; [overby-me];
+      platforms = lib.platforms.linux;
     };
     passthru = {
       extensionPortalSlug = pname;

@@ -40,6 +40,7 @@ rustPlatform.buildRustPackage rec {
     homepage = "https://github.com/rustls/rcgen";
     license = lib.licenses.mit;
     maintainers = with lib.maintainers; [overby-me];
+    platforms = lib.platforms.linux;
     mainProgram = "rustls-cert-gen";
   };
 }

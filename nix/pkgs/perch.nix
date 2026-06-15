@@ -37,6 +37,7 @@ in
       homepage = "https://github.com/ricardodantas/perch";
       license = lib.licenses.gpl3Only;
       maintainers = with lib.maintainers; [overby-me];
+      platforms = lib.platforms.linux;
       mainProgram = "perch";
     };
   })

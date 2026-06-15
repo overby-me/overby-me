@@ -29,6 +29,7 @@ rustPlatform.buildRustPackage rec {
     homepage = "https://github.com/souk4711/hakoniwa";
     license = lib.licenses.lgpl3Only;
     maintainers = with lib.maintainers; [overby-me];
+    platforms = lib.platforms.linux;
     mainProgram = "hakoniwa";
   };
 }

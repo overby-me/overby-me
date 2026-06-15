@@ -34,6 +34,7 @@ in
       homepage = "https://github.com/SUPERCILEX/forkfs";
       license = lib.licenses.asl20;
       maintainers = with lib.maintainers; [overby-me];
+      platforms = lib.platforms.linux;
       mainProgram = "forkfs";
     };
   }

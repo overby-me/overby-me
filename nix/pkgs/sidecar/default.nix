@@ -26,7 +26,10 @@ rustPlatform.buildRustPackage rec {
     ln -s ${./Cargo.lock} Cargo.lock
   '';
 
-  cargoBuildFlags = ["-p" pname];
+  cargoBuildFlags = [
+    "-p"
+    pname
+  ];
 
   nativeBuildInputs = [
     rust-pkg-config
@@ -41,6 +44,7 @@ rustPlatform.buildRustPackage rec {
     homepage = "https://github.com/runtimed/runtimed/";
     license = lib.licenses.bsd3;
     maintainers = with lib.maintainers; [overby-me];
+    platforms = lib.platforms.linux;
     mainProgram = "sidecar";
   };
 }

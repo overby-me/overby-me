@@ -45,7 +45,15 @@ rustPlatform.buildRustPackage {
   # hardware keyboard).
   postInstall = ''
     wrapProgram $out/bin/cosmic-osk \
-      --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath ([libxkbcommon vulkan-loader] ++ lib.optionals stdenv.isLinux [wayland])}
+      --prefix LD_LIBRARY_PATH : ${
+      lib.makeLibraryPath (
+        [
+          libxkbcommon
+          vulkan-loader
+        ]
+        ++ lib.optionals stdenv.isLinux [wayland]
+      )
+    }
 
     install -Dm644 /dev/stdin $out/share/applications/com.system76.CosmicOSK.desktop <<EOF
     [Desktop Entry]
@@ -64,6 +72,7 @@ rustPlatform.buildRustPackage {
     homepage = "https://github.com/pop-os/cosmic-osk";
     license = lib.licenses.gpl3Only;
     maintainers = with lib.maintainers; [overby-me];
+    platforms = lib.platforms.linux;
     mainProgram = "cosmic-osk";
   };
 }

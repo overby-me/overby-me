@@ -56,7 +56,18 @@ rustPlatform.buildRustPackage rec {
     };
   };
 
-  cargoBuildFlags = ["-p" "constellation" "-p" "spacedust" "-p" "slingshot" "-p" "ufos" "-p" "pocket"];
+  cargoBuildFlags = [
+    "-p"
+    "constellation"
+    "-p"
+    "spacedust"
+    "-p"
+    "slingshot"
+    "-p"
+    "ufos"
+    "-p"
+    "pocket"
+  ];
 
   nativeBuildInputs = [
     rust-pkg-config
@@ -80,5 +91,7 @@ rustPlatform.buildRustPackage rec {
     homepage = "https://github.com/at-microcosm/microcosm-rs";
     license = with lib.licenses; [agpl3Only];
     maintainers = with lib.maintainers; [overby-me];
+    # Builds against the project's Linux-only rust-pkg-config toolchain.
+    platforms = lib.platforms.linux;
   };
 }

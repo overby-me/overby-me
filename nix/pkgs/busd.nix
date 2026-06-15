@@ -21,6 +21,7 @@ rustPlatform.buildRustPackage rec {
     homepage = "https://github.com/dbus2/busd";
     license = lib.licenses.mit;
     maintainers = with lib.maintainers; [overby-me];
+    platforms = lib.platforms.linux;
     mainProgram = "busd";
   };
 }

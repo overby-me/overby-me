@@ -47,14 +47,16 @@ rustPlatform.buildRustPackage rec {
   doCheck = false;
 
   postInstall = ''
-    wrapProgram $out/bin/$pname --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [
-      # Without wayland in library path, this warning is raised:
-      # "No windowing system present. Using surfaceless platform"
-      wayland
-      # Without vulkan-loader present, wgpu won't find any adapter
-      vulkan-loader
-      mesa
-    ]}
+    wrapProgram $out/bin/$pname --prefix LD_LIBRARY_PATH : ${
+      lib.makeLibraryPath [
+        # Without wayland in library path, this warning is raised:
+        # "No windowing system present. Using surfaceless platform"
+        wayland
+        # Without vulkan-loader present, wgpu won't find any adapter
+        vulkan-loader
+        mesa
+      ]
+    }
   '';
 
   LD_LIBRARY_PATH = "$LD_LIBRARY_PATH:${lib.makeLibraryPath buildInputs}";
@@ -64,6 +66,7 @@ rustPlatform.buildRustPackage rec {
     homepage = "https://github.com/TornaxO7/vibe";
     license = lib.licenses.gpl2Only;
     maintainers = with lib.maintainers; [overby-me];
+    platforms = lib.platforms.linux;
     mainProgram = "vibe";
   };
 }

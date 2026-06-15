@@ -33,16 +33,21 @@
       homepage = "https://github.com/cptpiepmatz/nu-jupyter-kernel";
       license = lib.licenses.mit;
       maintainers = with lib.maintainers; [overby-me];
+      platforms = lib.platforms.linux;
       mainProgram = "nu-jupyter-kernel";
     };
   };
 in
-  python3.pkgs.toPythonModule (runCommand "nu-jupyter-kernel"
+  python3.pkgs.toPythonModule (
+    runCommand "nu-jupyter-kernel"
     {
       buildInputs = [nu-jupyter-kernel];
-    } ''
+      meta.platforms = lib.platforms.linux;
+    }
+    ''
       export HOME=.
       ${nu-jupyter-kernel}/bin/nu-jupyter-kernel register --user
       mkdir -p $out/share/jupyter/kernels
       cp -r .local/share/jupyter/kernels/nu $out/share/jupyter/kernels
-    '')
+    ''
+  )
