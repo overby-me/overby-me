@@ -7,7 +7,6 @@
     [
       # Very serious tools
       genact
-      fortune-kind
     ]
     # microfetch is Linux-only in nixpkgs.
     ++ lib.optionals pkgs.stdenv.isLinux [
