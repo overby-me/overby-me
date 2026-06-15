@@ -126,16 +126,8 @@
     };
   };
 
-  outputs = inputs: let
-    flakelight = import "${inputs.flakelight}" (
-      inputs.flakelight.inputs
-      // {
-        inherit (inputs) nixpkgs;
-        self = inputs.flakelight;
-      }
-    );
-  in
-    flakelight.mkFlake ./. {
+  outputs = inputs:
+    inputs.flakelight ./. {
       inherit inputs;
       systems = [
         "x86_64-linux"
