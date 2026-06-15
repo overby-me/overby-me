@@ -6,7 +6,6 @@
     fd
     tre
     hexyl
-    git-filter-repo
     dust
     ripgrep
     ripgrep-all
