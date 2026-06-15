@@ -19,12 +19,12 @@
   # become valid URL components (%2Frun%2Fpostgresql).
   # Double the % signs so systemd doesn't interpret them as specifiers.
   urlEncodeHost = host:
-    builtins.replaceStrings ["/"] ["%%2F"] host;
+    lib.replaceStrings ["/"] ["%%2F"] host;
 
   # Build a flat WASM channels directory with patched capabilities configs.
   # IronClaw v0.18.0 loads WASM channels from WASM_CHANNELS_DIR as a flat
   # directory: <name>.wasm + <name>.capabilities.json per channel.
-  matrixConfigJson = builtins.toJSON {
+  matrixConfigJson = lib.toJSON {
     inherit (cfg.matrix) homeserver;
     dm_policy = cfg.matrix.dmPolicy;
     allow_from = cfg.matrix.allowFrom;
@@ -32,14 +32,14 @@
     require_mention = cfg.matrix.requireMention;
   };
 
-  blueskyConfigJson = builtins.toJSON {
+  blueskyConfigJson = lib.toJSON {
     pds_url = cfg.bluesky.pdsUrl;
     dm_policy = cfg.bluesky.dmPolicy;
     allow_from = cfg.bluesky.allowFrom;
     respond_to_mentions = cfg.bluesky.respondToMentions;
   };
 
-  signalConfigJson = builtins.toJSON {
+  signalConfigJson = lib.toJSON {
     api_url = cfg.signal.apiUrl;
     dm_policy = cfg.signal.dmPolicy;
     allow_from = cfg.signal.allowFrom;
@@ -47,7 +47,7 @@
     require_mention = cfg.signal.requireMention;
   };
 
-  mailConfigJson = builtins.toJSON {
+  mailConfigJson = lib.toJSON {
     jmap_url = cfg.mail.jmapUrl;
     dm_policy = cfg.mail.dmPolicy;
     allow_from = cfg.mail.allowFrom;
@@ -55,33 +55,33 @@
     send_from_name = cfg.mail.sendFromName;
   };
 
-  calendarConfigJson = builtins.toJSON {
+  calendarConfigJson = lib.toJSON {
     caldav_url = cfg.calendar.caldavUrl;
     calendar_name = cfg.calendar.calendarName;
     poll_interval_ms = cfg.calendar.pollIntervalMs;
   };
 
-  contactsConfigJson = builtins.toJSON {
+  contactsConfigJson = lib.toJSON {
     carddav_url = cfg.contacts.carddavUrl;
     addressbook_name = cfg.contacts.addressbookName;
   };
 
-  searxngConfigJson = builtins.toJSON {
+  searxngConfigJson = lib.toJSON {
     instance_url = cfg.searxng.instanceUrl;
   };
 
   # Extract hostname from a URL like "https://matrix.overby.me" -> "matrix.overby.me"
   extractHost = url:
-    builtins.head (builtins.match "https?://([^/:]+).*" url);
+    lib.head (lib.match "https?://([^/:]+).*" url);
 
-  matrixAllowlistJson = builtins.toJSON [
+  matrixAllowlistJson = lib.toJSON [
     {
       host = extractHost cfg.matrix.homeserver;
       path_prefix = "/_matrix/";
     }
   ];
 
-  blueskyAllowlistJson = builtins.toJSON [
+  blueskyAllowlistJson = lib.toJSON [
     {
       host = extractHost cfg.bluesky.pdsUrl;
       path_prefix = "/xrpc/";
@@ -89,7 +89,7 @@
   ];
 
   signalApiHost = extractHost cfg.signal.apiUrl;
-  signalAllowlistJson = builtins.toJSON [
+  signalAllowlistJson = lib.toJSON [
     {
       host = signalApiHost;
       path_prefix = "/";
@@ -97,7 +97,7 @@
   ];
 
   mailJmapHost = extractHost cfg.mail.jmapUrl;
-  mailAllowlistJson = builtins.toJSON [
+  mailAllowlistJson = lib.toJSON [
     {
       host = mailJmapHost;
       path_prefix = "/";
@@ -105,7 +105,7 @@
   ];
 
   calendarHost = extractHost cfg.calendar.caldavUrl;
-  calendarAllowlistJson = builtins.toJSON [
+  calendarAllowlistJson = lib.toJSON [
     {
       host = calendarHost;
       path_prefix = "/";
@@ -113,7 +113,7 @@
   ];
 
   contactsHost = extractHost cfg.contacts.carddavUrl;
-  contactsAllowlistJson = builtins.toJSON [
+  contactsAllowlistJson = lib.toJSON [
     {
       host = contactsHost;
       path_prefix = "/";
@@ -121,7 +121,7 @@
   ];
 
   searxngHost = extractHost cfg.searxng.instanceUrl;
-  searxngAllowlistJson = builtins.toJSON [
+  searxngAllowlistJson = lib.toJSON [
     {
       host = searxngHost;
       path_prefix = "/search";
@@ -211,7 +211,7 @@
     '';
 
   # List of channel names to auto-activate on startup.
-  activatedChannelsJson = builtins.toJSON cfg.activatedChannels;
+  activatedChannelsJson = lib.toJSON cfg.activatedChannels;
 in {
   options.services.ironclaw = {
     enable = lib.mkEnableOption "IronClaw AI assistant";
