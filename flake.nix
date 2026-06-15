@@ -35,6 +35,10 @@
     nixos-raspberrypi = {
       url = "github:nvmd/nixos-raspberrypi/main";
     };
+    nix-darwin = {
+      url = "github:nix-darwin/nix-darwin/nix-darwin-26.05";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     home-manager = {
       url = "github:nix-community/home-manager/release-26.05";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -174,6 +178,7 @@
 
       imports = [
         ./nix/modules/flakelight/colmena.nix
+        ./nix/modules/flakelight/darwin.nix
         ./nix/modules/flakelight/desktops.nix
         ./nix/modules/flakelight/devShellNames.nix
         ./nix/modules/flakelight/devenvConfigurations.nix
@@ -250,6 +255,8 @@
         flakelightModules = ["modules/flakelight"];
         nixosConfigurations = ["config/nixos"];
         nixosModules = ["modules/nixos"];
+        darwinConfigurations = ["config/darwin"];
+        darwinModules = ["modules/darwin"];
         homeConfigurations = ["config/home-manager"];
         homeModules = ["modules/home-manager"];
         devenvConfiguration = ["config/devenv"];
