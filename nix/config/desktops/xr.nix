@@ -3,7 +3,7 @@
     monado
     stardust-xr-server
     stardust-xr-kiara
-    #non-spatial-input
+    non-spatial-input
     #flatland
     #weston
   ];

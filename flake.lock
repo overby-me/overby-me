@@ -871,29 +871,6 @@
         "type": "github"
       }
     },
-    "non-spatial-input": {
-      "inputs": {
-        "crane": [
-          "crane"
-        ],
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1773920667,
-        "narHash": "sha256-XMyaoA1jGqKaSKNtt2L/BKGS3hdEeGMue87Ryb5KI90=",
-        "owner": "StardustXR",
-        "repo": "non-spatial-input",
-        "rev": "f14a78e4c572f24a63aa4e06629e42929f097388",
-        "type": "github"
-      },
-      "original": {
-        "owner": "StardustXR",
-        "repo": "non-spatial-input",
-        "type": "github"
-      }
-    },
     "ragenix": {
       "inputs": {
         "agenix": [
@@ -947,7 +924,6 @@
         "nixos-raspberrypi": "nixos-raspberrypi",
         "nixpkgs": "nixpkgs_3",
         "nixpkgs-unstable": "nixpkgs-unstable",
-        "non-spatial-input": "non-spatial-input",
         "ragenix": "ragenix",
         "rust-overlay": "rust-overlay_2",
         "systems": "systems",

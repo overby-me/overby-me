@@ -72,15 +72,6 @@
       };
     };
 
-    # XR
-    non-spatial-input = {
-      url = "github:StardustXR/non-spatial-input";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-        crane.follows = "crane";
-      };
-    };
-
     # Apps
     zen-browser = {
       url = "github:0xc000022070/zen-browser-flake";
