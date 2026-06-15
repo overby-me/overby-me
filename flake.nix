@@ -100,10 +100,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.systems.follows = "systems";
     };
-    catppuccin = {
-      url = "github:catppuccin/nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     nix-wallpaper = {
       url = "github:lunik1/nix-wallpaper";
       inputs = {

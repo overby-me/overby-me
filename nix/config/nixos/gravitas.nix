@@ -16,7 +16,6 @@
     inputs.nixos-hardware
     .nixosModules
     .dell-precision-3490-intel
-    inputs.catppuccin.nixosModules.catppuccin
     inputs.home-manager.nixosModules.home-manager
     inputs.ragenix.nixosModules.default
     inputs.self.hardware.dell-precision-3491
@@ -28,7 +27,6 @@
     core
     programs
     services
-    catppuccin
     home-manager
     cloud-hypervisor
     android-tools

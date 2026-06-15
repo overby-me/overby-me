@@ -13,7 +13,6 @@
   };
 
   modules = with inputs.self.nixosModules; [
-    inputs.catppuccin.nixosModules.catppuccin
     inputs.home-manager.nixosModules.home-manager
     inputs.self.hardware.dell-xps-9320
     inputs.self.desktops.cosmic
@@ -23,7 +22,6 @@
     core
     programs
     services
-    catppuccin
     home-manager
     cloud-hypervisor
     tangled-spindle-nix-engine

@@ -13,7 +13,6 @@
   };
   imports =
     (with inputs.self.homeModules; [
-      inputs.catppuccin.homeModules.catppuccin
       inputs.ragenix.homeManagerModules.default
       nushell-plugin-tramp
       nix
@@ -22,7 +21,6 @@
       xdg
       programs
       services
-      catppuccin
       claude-code
     ])
     # Linux-only modules: external Linux apps (Zen Browser, Spicetify) plus
