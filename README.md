@@ -244,6 +244,7 @@
 |-|-|-|
 | [Home Manager ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/config/home-manager) | [Home Manager](https://nix-community.github.io/home-manager/) | Home Manager configurations |
 | [NixOS ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/config/nixos) | [NixOS](https://nixos.org) | NixOS configurations |
+| [Nix Darwin ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/config/darwin) | [Nix Darwin](https://github.com/nix-darwin/nix-darwin) | Nix Darwin configurations |
 | [Devenv ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/config/devenv) | [Devenv](https://devenv.sh) | Devenv configurations |
 
 </details>
@@ -259,6 +260,7 @@
 | [Flakelight ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/modules/flakelight) | [GitHub](https://github.com/accelbread/flakelight) | Flakelight modules |
 | [Home Manager ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/modules/home-manager) | [Home Manager](https://nix-community.github.io/home-manager/) | Home Manager modules |
 | [NixOS ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/modules/nixos) | [NixOS](https://nixos.org) | NixOS modules |
+| [Nix Darwin ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/modules/darwin) | [Nix Darwin](https://github.com/nix-darwin/nix-darwin) | Nix Darwin modules |
 | [Devenv ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/modules/devenv) | [Devenv](https://devenv.sh) | Devenv modules |
 
 </details>
