@@ -1,5 +1,7 @@
 {src, ...}: {
   devShells.mojo-gui = pkgs: let
+    inherit (pkgs) lib stdenv;
+
     # Rust toolchain with Windows cross-compilation target (from rust-overlay).
     # This is NOT added to PATH (to avoid shadowing the devenv-provided Rust).
     # Instead, its sysroot is exposed via the `rust-sysroot-windows` helper script
@@ -9,66 +11,78 @@
       targets = ["x86_64-unknown-linux-gnu" "x86_64-pc-windows-gnu"];
     };
   in {
-    packages = with pkgs; [
-      # Build tools
-      just
-      mojo
-      mojo-windows
+    packages = with pkgs;
+      [
+        # Build tools
+        just
+        mojo
 
-      # Web renderer (WASM + TypeScript)
-      deno
-      wabt
-      llvmPackages_latest.llvm
-      llvmPackages_latest.lld
-      wasmtime.lib
-      wasmtime.dev
-      servo
-      jq
+        # Web renderer (WASM + TypeScript)
+        deno
+        wabt
+        llvmPackages_latest.llvm
+        llvmPackages_latest.lld
+        wasmtime.lib
+        wasmtime.dev
+        jq
 
-      # Desktop renderer (Blitz shim build)
-      pkg-config
-      cmake
-      python3
+        # Desktop renderer (Blitz shim build)
+        pkg-config
+        cmake
+        python3
 
-      # Desktop renderer (Wayland + GPU runtime deps)
-      fontconfig
-      freetype
-      libxkbcommon
-      wayland
-      vulkan-loader
-      vulkan-headers
-      libGL
+        # Desktop renderer (font runtime deps)
+        fontconfig
+        freetype
+      ]
+      # Linux-only dependencies:
+      #   - GPU/Wayland runtime libs (libGL is null on Darwin; macOS uses the
+      #     system OpenGL/Metal frameworks instead).
+      #   - Windows cross-compilation toolchain (mojo-windows is platforms.linux,
+      #     pkgsCross.mingwW64 + Wine target x86_64-pc-windows-gnu from Linux).
+      ++ lib.optionals stdenv.isLinux [
+        mojo-windows
 
-      # Windows cross-compilation (MinGW-w64 linker for x86_64-pc-windows-gnu)
-      # Strip nix-support/ to avoid setup hooks that set CC/AR/etc. to cross names,
-      # which would break native builds. We only need the binaries on PATH.
-      (symlinkJoin {
-        name = "mingw-w64-cc-noenv";
-        paths = [pkgsCross.mingwW64.stdenv.cc];
-        postBuild = "rm -rf $out/nix-support";
-      })
+        # Desktop renderer (Servo browser engine; broken on Darwin in nixpkgs)
+        servo
 
-      # Windows verification (Wine)
-      wine64Packages.stable
+        # Desktop renderer (Wayland + GPU runtime deps)
+        libxkbcommon
+        wayland
+        vulkan-loader
+        vulkan-headers
+        libGL
 
-      # Helper: prints the Rust sysroot path that includes x86_64-pc-windows-gnu std.
-      # Usage in justfile: _rust-sysroot-windows := `rust-sysroot-windows`
-      (writeShellScriptBin "rust-sysroot-windows" ''
-        echo -n "${rustWithWindows}"
-      '')
+        # Windows cross-compilation (MinGW-w64 linker for x86_64-pc-windows-gnu)
+        # Strip nix-support/ to avoid setup hooks that set CC/AR/etc. to cross names,
+        # which would break native builds. We only need the binaries on PATH.
+        (symlinkJoin {
+          name = "mingw-w64-cc-noenv";
+          paths = [pkgsCross.mingwW64.stdenv.cc];
+          postBuild = "rm -rf $out/nix-support";
+        })
 
-      # Helper: prints the MinGW-w64 library path (contains libpthread.a etc.)
-      # Usage in justfile: _mingw-lib-path := `mingw-lib-path`
-      (writeShellScriptBin "mingw-lib-path" ''
-        echo -n "${pkgsCross.mingwW64.windows.pthreads}/lib"
-      '')
+        # Windows verification (Wine)
+        wine64Packages.stable
 
-      # Helper: prints the MinGW-w64 mcfgthread library path
-      # Usage in justfile: _mingw-mcf-lib-path := `mingw-mcf-lib-path`
-      (writeShellScriptBin "mingw-mcf-lib-path" ''
-        echo -n "${pkgsCross.mingwW64.windows.mcfgthreads}/lib"
-      '')
-    ];
+        # Helper: prints the Rust sysroot path that includes x86_64-pc-windows-gnu std.
+        # Usage in justfile: _rust-sysroot-windows := `rust-sysroot-windows`
+        (writeShellScriptBin "rust-sysroot-windows" ''
+          echo -n "${rustWithWindows}"
+        '')
+
+        # Helper: prints the MinGW-w64 library path (contains libpthread.a etc.)
+        # Usage in justfile: _mingw-lib-path := `mingw-lib-path`
+        (writeShellScriptBin "mingw-lib-path" ''
+          echo -n "${pkgsCross.mingwW64.windows.pthreads}/lib"
+        '')
+
+        # Helper: prints the MinGW-w64 mcfgthread library path
+        # Usage in justfile: _mingw-mcf-lib-path := `mingw-mcf-lib-path`
+        (writeShellScriptBin "mingw-mcf-lib-path" ''
+          echo -n "${pkgsCross.mingwW64.windows.mcfgthreads}/lib"
+        '')
+      ];
   };
 
   # ── CI Check Derivations ──────────────────────────────────────────────
