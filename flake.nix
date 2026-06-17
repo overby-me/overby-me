@@ -78,12 +78,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.home-manager.follows = "home-manager";
     };
-    tangled = {
-      url = "git+https://tangled.org/tangled.org/core";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-      };
-    };
 
     # Styling
     nix-wallpaper = {
