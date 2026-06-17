@@ -9,9 +9,6 @@
   networking.hostName = hostname;
   networking.computerName = hostname;
 
-  # Allow installing unfree packages system-wide.
-  nixpkgs.config.allowUnfree = true;
-
   # Sensible macOS defaults. These map to `defaults write` settings and are
   # applied on `darwin-rebuild switch`.
   system.defaults = {
