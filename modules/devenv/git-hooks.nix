@@ -28,7 +28,7 @@ in {
       taplo.enable = true;
       typos = {
         enable = true;
-        settings.configPath = "./nix/modules/devenv/configs/typos.toml";
+        settings.configPath = "./modules/devenv/configs/typos.toml";
       };
       nickel-format = {
         enable = true;

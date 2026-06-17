@@ -128,6 +128,7 @@
 
   outputs = inputs:
     inputs.flakelight ./. {
+      nixDir = ./.;
       inherit inputs;
       systems = [
         "x86_64-linux"
@@ -140,19 +141,19 @@
       flakelight.builtinFormatters = false;
 
       imports = [
-        ./nix/modules/flakelight/colmena.nix
-        ./nix/modules/flakelight/darwin.nix
-        ./nix/modules/flakelight/desktops.nix
-        ./nix/modules/flakelight/devShellNames.nix
-        ./nix/modules/flakelight/devenvConfigurations.nix
-        ./nix/modules/flakelight/devenvModules.nix
-        ./nix/modules/flakelight/filterUnsupported.nix
-        ./nix/modules/flakelight/hardware.nix
-        ./nix/modules/flakelight/lib.nix
-        ./nix/modules/flakelight/perSystemLib.nix
-        ./nix/modules/flakelight/secrets.nix
-        ./nix/modules/flakelight/users.nix
-        ./nix/modules/flakelight/zedExtensions.nix
+        ./modules/flakelight/colmena.nix
+        ./modules/flakelight/darwin.nix
+        ./modules/flakelight/desktops.nix
+        ./modules/flakelight/devShellNames.nix
+        ./modules/flakelight/devenvConfigurations.nix
+        ./modules/flakelight/devenvModules.nix
+        ./modules/flakelight/filterUnsupported.nix
+        ./modules/flakelight/hardware.nix
+        ./modules/flakelight/lib.nix
+        ./modules/flakelight/perSystemLib.nix
+        ./modules/flakelight/secrets.nix
+        ./modules/flakelight/users.nix
+        ./modules/flakelight/zedExtensions.nix
 
         ./ironclaw/bluesky
         ./ironclaw/calendar
