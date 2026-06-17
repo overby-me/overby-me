@@ -11,7 +11,13 @@
         "@admin"
         "overby.me"
       ];
-      experimental-features = "nix-command flakes ca-derivations dynamic-derivations recursive-nix";
+      experimental-features = [
+        "nix-command"
+        "flakes"
+        "ca-derivations"
+        "dynamic-derivations"
+        "recursive-nix"
+      ];
       download-buffer-size = 1024 * 1024 * 1024;
       substituters = [
         "https://overby-me.cachix.org"
