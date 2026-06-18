@@ -45,6 +45,5 @@
 
       # ptrace-based syscall tracers; Linux-only (not available on Darwin).
       lurk
-      tracexec
     ];
 }
