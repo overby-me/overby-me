@@ -6,7 +6,6 @@
   ...
 }: {
   home-manager = {
-    inherit (inputs.self) users;
     useGlobalPkgs = true;
     useUserPackages = true;
     backupCommand = ''
