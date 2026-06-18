@@ -9,19 +9,19 @@ name = "systemd-resolved"
 path = "src/main.rs"
 
 [dependencies]
-zbus = "5"
+chrono = "0.4"
+fern = "0.7"
 libc = "0.2"
 log = "0.4"
-fern = "0.7"
-chrono = "0.4"
-signal-hook = "0.4"
 nix = { version = "0.31", features = [
-  "signal",
-  "process",
   "net",
-  "socket",
   "poll",
+  "process",
+  "signal",
+  "socket",
 ] }
+signal-hook = "0.4"
+zbus = "5"
 
 [dev-dependencies]
 tempfile = "3"

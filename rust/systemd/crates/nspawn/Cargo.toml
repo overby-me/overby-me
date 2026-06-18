@@ -12,13 +12,13 @@ path = "src/main.rs"
 libc = "0.2"
 log = "0.4"
 nix = { version = "0.31", features = [
-  "signal",
-  "process",
   "fs",
-  "mount",
-  "sched",
-  "socket",
   "hostname",
+  "mount",
+  "process",
+  "sched",
+  "signal",
+  "socket",
   "user",
 ] }
 

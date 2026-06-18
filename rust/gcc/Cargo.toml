@@ -27,9 +27,9 @@ name = "gcc-i686"
 path = "src/bin/gcc_i686.rs"
 
 [features]
-# Allow system GCC as a linker fallback.
-gcc_linker = []
 # Allow system GCC as an assembler fallback.
 gcc_assembler = []
+# Allow system GCC as a linker fallback.
+gcc_linker = []
 # Allow system GCC passthrough for -m16 mode (16-bit real-mode boot code).
 gcc_m16 = []

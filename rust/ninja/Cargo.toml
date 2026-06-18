@@ -8,9 +8,9 @@ license = "Apache-2.0"
 name = "ninja"
 path = "src/main.rs"
 
-[profile.release]
-lto = true
-strip = true
-
 [dependencies]
 libc = "0.2.185"
+
+[profile.release]
+strip = true
+lto = true

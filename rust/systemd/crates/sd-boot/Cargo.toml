@@ -5,5 +5,5 @@ authors = ["Niclas Overby <niclas@overby.me>"]
 edition = "2024"
 
 [dependencies]
-uefi = { version = "0.36", features = ["global_allocator", "panic_handler"] }
 log = "0.4"
+uefi = { version = "0.36", features = ["global_allocator", "panic_handler"] }

@@ -22,5 +22,5 @@ ureq = "3"
 which = "7"
 
 [profile.release]
-lto = true
 strip = true
+lto = true

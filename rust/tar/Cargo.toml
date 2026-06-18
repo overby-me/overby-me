@@ -9,15 +9,15 @@ name = "tar"
 path = "src/main.rs"
 
 [dependencies]
-tar = "0.4"
-flate2 = "1"
 bzip2 = "0.5"
-xz2 = "0.1"
-walkdir = "2"
-regex = "1.12.3"
-uzers = "0.12.2"
+flate2 = "1"
 libc = "0.2"
+regex = "1.12.3"
+tar = "0.4"
+uzers = "0.12.2"
+walkdir = "2"
+xz2 = "0.1"
 
 [profile.release]
-lto = true
 strip = true
+lto = true

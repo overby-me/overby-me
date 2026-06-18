@@ -12,5 +12,5 @@ path = "src/main.rs"
 regex = "1"
 
 [profile.release]
-lto = true
 strip = true
+lto = true

@@ -5,44 +5,44 @@ authors = ["Niclas Overby <niclas@overby.me>"]
 edition = "2024"
 
 [dependencies]
-signal-hook = "0.4"
+aes-gcm = "0.10"
+base64 = "0.22"
+chrono = "0.4"
+fern = "0.7"
 libc = "0.2"
+log = "0.4"
 nix = { version = "0.31", features = [
-  "user",
-  "process",
-  "mount",
-  "poll",
-  "fs",
-  "signal",
-  "socket",
   "event",
+  "fs",
   "hostname",
   "inotify",
+  "mount",
+  "poll",
+  "process",
+  "signal",
+  "socket",
+  "user",
 ] }
-log = "0.4"
-fern = "0.7"
-chrono = "0.4"
-threadpool = "1.8"
-serde_json = "1.0"
-serde = { version = "1.0", features = ["derive"] }
 regex = "1.12"
-aes-gcm = "0.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 sha2 = "0.10"
-base64 = "0.22"
+signal-hook = "0.4"
+threadpool = "1.8"
 
-lz4_flex = "0.11"
-zstd = "0.13"
-lzma-rs = "0.3"
-zbus = { version = "5", optional = true }
-shlex = "1.3"
 clap = { version = "4.5", features = ["derive"] }
+lz4_flex = "0.11"
+lzma-rs = "0.3"
+shlex = "1.3"
 shmemfdrs = "0.1"
 which = "8.0"
+zbus = { version = "5", optional = true }
+zstd = "0.13"
 
 [dev-dependencies]
 tempfile = "3"
 
 [features]
+cgroups = []
 dbus_support = ["zbus"]
 linux_eventfd = []
-cgroups = []

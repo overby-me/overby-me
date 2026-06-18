@@ -11,24 +11,24 @@ path = "src/main.rs"
 
 [dependencies]
 cpp_demangle = "0.4"
-iced-x86 = { version = "1.21", default-features = false, features = [
-  "std",
-  "decoder",
-  "gas",
-  "intel",
-] }
 flate2 = { version = "1", default-features = false, features = ["zlib"] }
-object = { version = "0.36", features = [
-  "read",
-  "write",
-  "elf",
-  "compression",
-] }
 gimli = { version = "0.31", default-features = false, features = [
   "read",
   "std",
 ] }
+iced-x86 = { version = "1.21", default-features = false, features = [
+  "decoder",
+  "gas",
+  "intel",
+  "std",
+] }
+object = { version = "0.36", features = [
+  "compression",
+  "elf",
+  "read",
+  "write",
+] }
 
 [profile.release]
-lto = true
 strip = true
+lto = true

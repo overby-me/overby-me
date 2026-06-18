@@ -16,29 +16,29 @@ clap = { version = "4", features = ["derive", "env"] }
 tokio = { version = "1", features = ["full"] }
 
 # HTTP client
-reqwest = { version = "0.12", features = [
+reqwest = { version = "0.12", default-features = false, features = [
   "json",
-  "stream",
   "rustls-tls",
-], default-features = false }
+  "stream",
+] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+base64 = "0.22"
 # Crypto
 ed25519-dalek = { version = "2", features = ["rand_core"] }
-sha2 = "0.10"
 md-5 = "0.10"
-base64 = "0.22"
+sha2 = "0.10"
 
+xz2 = "0.1"
 # Compression
 zstd = "0.13"
-xz2 = "0.1"
 
+futures-util = "0.3"
 # WebSocket
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
-futures-util = "0.3"
 
 # Config
 dirs = "6"
@@ -50,9 +50,9 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
+tempfile = "3"
+url = { version = "2", features = ["serde"] }
 # Misc
 uuid = { version = "1", features = ["serde"] }
-url = { version = "2", features = ["serde"] }
-chrono = { version = "0.4", features = ["serde"] }
-tempfile = "3"
-rand = "0.8"

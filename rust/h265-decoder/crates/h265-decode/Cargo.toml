@@ -2,9 +2,9 @@
 name = "h265-decode"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
-repository.workspace = true
 description = "A pure Rust H.265/HEVC decoder that parses NAL units and decodes frames to YUV/RGB"
+repository.workspace = true
+license.workspace = true
 
 [dependencies]
 log.workspace = true

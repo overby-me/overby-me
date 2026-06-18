@@ -19,5 +19,5 @@ rustls-pemfile = "2"
 webpki-roots = "0.26"
 
 [profile.release]
-lto = true
 strip = true
+lto = true

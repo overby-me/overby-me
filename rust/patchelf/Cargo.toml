@@ -13,5 +13,5 @@ goblin = "0.9"
 scroll = "0.12"
 
 [profile.release]
-lto = true
 strip = true
+lto = true

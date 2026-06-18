@@ -9,5 +9,5 @@ name = "systemd-escape"
 path = "src/main.rs"
 
 [dependencies]
-libsystemd = { path = "../libsystemd" }
 clap = { version = "4.5", features = ["derive"] }
+libsystemd = { path = "../libsystemd" }

@@ -2,17 +2,17 @@
 name = "h264-decode-cli"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
-repository.workspace = true
 description = "CLI tool for decoding H.264 video files to raw YUV/RGB frames"
+repository.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "h264-decode"
 path = "src/main.rs"
 
 [dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+env_logger = "0.11"
 h264-decode.workspace = true
 log.workspace = true
-env_logger = "0.11"
-clap = { version = "4", features = ["derive"] }
-anyhow = "1"

@@ -12,5 +12,5 @@ path = "src/main.rs"
 [dependencies]
 
 [profile.release]
-lto = true
 strip = true
+lto = true

@@ -17,13 +17,13 @@ libc = "0.2"
 libsystemd = { path = "../libsystemd" }
 log = "0.4"
 nix = { version = "0.31", features = [
-  "signal",
-  "process",
   "fs",
+  "inotify",
   "net",
   "poll",
+  "process",
+  "signal",
   "socket",
-  "inotify",
 ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

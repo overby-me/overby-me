@@ -2,21 +2,21 @@
 name = "h26xtoav1"
 version = "0.1.0"
 edition = "2024"
-license = "MIT"
-repository = "https://tangled.org/overby.me/overby.me/tree/main/rust/h26xtoav1"
 description = "A CLI tool to transcode H.264/H.265 video to AV1 using h264-decode/h265-decode and rav1e"
+repository = "https://tangled.org/overby.me/overby.me/tree/main/rust/h26xtoav1"
+license = "MIT"
 
 [[bin]]
 name = "h26xtoav1"
 path = "src/main.rs"
 
 [dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+env_logger = "0.11"
 h264-decode = { path = "../h264-decoder/crates/h264-decode" }
 h265-decode = { path = "../h265-decoder/crates/h265-decode" }
+log = "0.4"
 rav1e = { version = "0.8", default-features = false, features = [
   "signal_support",
 ] }
-clap = { version = "4", features = ["derive"] }
-anyhow = "1"
-log = "0.4"
-env_logger = "0.11"

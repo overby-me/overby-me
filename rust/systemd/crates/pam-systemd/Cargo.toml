@@ -6,8 +6,8 @@ edition = "2024"
 description = "PAM module for systemd-logind session management (pam_systemd equivalent)"
 
 [lib]
-name = "pam_systemd"
 crate-type = ["cdylib"]
+name = "pam_systemd"
 
 [dependencies]
 libc = "0.2"

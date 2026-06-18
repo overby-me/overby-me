@@ -9,18 +9,18 @@ name = "systemd-logind"
 path = "src/main.rs"
 
 [dependencies]
-zbus = "5"
 libc = "0.2"
 log = "0.4"
 nix = { version = "0.31", features = [
-  "signal",
-  "process",
   "fs",
   "ioctl",
   "poll",
+  "process",
+  "signal",
 ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+zbus = "5"
 
 [dev-dependencies]
 tempfile = "3"

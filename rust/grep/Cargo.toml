@@ -14,9 +14,9 @@ fancy-regex = "0.17"
 libc = "0.2"
 memmap2 = "0.9"
 regex = "1"
-rust-pcre2 = { path = "../pcre2", package = "rust-pcre2" }
+rust-pcre2 = { package = "rust-pcre2", path = "../pcre2" }
 walkdir = "2"
 
 [profile.release]
-lto = true
 strip = true
+lto = true

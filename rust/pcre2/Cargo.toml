@@ -14,5 +14,5 @@ name = "pcre2test"
 path = "src/bin/pcre2test.rs"
 
 [profile.release]
-lto = true
 strip = true
+lto = true

@@ -10,14 +10,14 @@ name = "perl"
 path = "src/main.rs"
 
 [dependencies]
-regex = "1"
-libc = "0.2"
 fancy-regex = "0.18.0"
 indexmap = "2"
+libc = "0.2"
+regex = "1"
 
 [build-dependencies]
 cc = "1"
 
 [profile.release]
-lto = true
 strip = true
+lto = true

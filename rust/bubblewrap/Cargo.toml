@@ -13,5 +13,5 @@ path = "src/main.rs"
 libc = "0.2"
 
 [profile.release]
-lto = true
 strip = true
+lto = true

@@ -1,13 +1,13 @@
 [workspace]
-members = ["crates/h265-decode"]
 resolver = "2"
+members = ["crates/h265-decode"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-license = "MIT"
-repository = "https://tangled.org/overby.me/overby.me/tree/main/rust/h265-decoder"
 description = "A pure Rust H.265/HEVC decoder library"
+repository = "https://tangled.org/overby.me/overby.me/tree/main/rust/h265-decoder"
+license = "MIT"
 
 [workspace.dependencies]
 h265-decode = { path = "crates/h265-decode" }

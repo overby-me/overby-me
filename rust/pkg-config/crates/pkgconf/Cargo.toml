@@ -3,10 +3,10 @@ name = "pkgconf"
 version = "0.1.0"
 edition = "2024"
 description = "A Rust rewrite and drop-in replacement for pkg-config/pkgconf"
-license = "ISC"
 readme = "../../README.md"
 repository = "https://tangled.org/overby.me/overby.me/tree/main/rust-pkg-config"
-keywords = ["pkg-config", "pkgconf", "build-tools"]
+license = "ISC"
+keywords = ["build-tools", "pkg-config", "pkgconf"]
 categories = ["command-line-utilities", "development-tools::build-utils"]
 
 [[bin]]
@@ -14,9 +14,9 @@ name = "pkgconf"
 path = "src/main.rs"
 
 [dependencies]
-libpkgconf = { path = "../libpkgconf" }
-clap = { version = "4", features = ["derive"] }
 anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+libpkgconf = { path = "../libpkgconf" }
 
 [dev-dependencies]
 assert_cmd = "2"

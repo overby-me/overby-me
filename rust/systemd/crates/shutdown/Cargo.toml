@@ -11,11 +11,11 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 libc = "0.2"
+log = "0.4"
 nix = { version = "0.31", features = [
+  "fs",
   "mount",
+  "process",
   "reboot",
   "signal",
-  "process",
-  "fs",
 ] }
-log = "0.4"

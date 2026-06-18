@@ -9,10 +9,10 @@ name = "systemd-homed"
 path = "src/main.rs"
 
 [dependencies]
-zbus = "5"
 libc = "0.2"
 log = "0.4"
-nix = { version = "0.31", features = ["signal", "process", "user", "fs"] }
+nix = { version = "0.31", features = ["fs", "process", "signal", "user"] }
+zbus = "5"
 
 [dev-dependencies]
 tempfile = "3"
