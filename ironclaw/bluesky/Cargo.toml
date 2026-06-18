@@ -3,21 +3,21 @@ name = "bluesky-channel"
 version = "0.1.0"
 edition = "2021"
 description = "Bluesky/AT Protocol channel for IronClaw AI assistant"
-license = "MIT"
 repository = "https://tangled.org/overby.me/overby.me/tree/main/ironclaw/bluesky"
+license = "MIT"
+
+[workspace]
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-wit-bindgen = "0.36"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+wit-bindgen = "0.36"
 
 [profile.release]
 opt-level = "s"
-lto = true
 strip = true
+lto = true
 codegen-units = 1
-
-[workspace]
