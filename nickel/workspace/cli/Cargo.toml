@@ -3,25 +3,25 @@ name = "nickel-workspace"
 version = "0.5.0"
 edition = "2024"
 description = "A Nickel-powered workspace manager for Nix flakes"
-license = "MIT"
-repository = "https://tangled.org/@overby.me/overby.me/tree/main/nickel-workspace"
 readme = "../README.md"
+repository = "https://tangled.org/@overby.me/overby.me/tree/main/nickel-workspace"
+license = "MIT"
 
 [[bin]]
 name = "nickel-workspace"
 path = "src/main.rs"
 
 [dependencies]
+anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
+owo-colors = "4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-anyhow = "1"
-walkdir = "2"
-owo-colors = "4"
-which = "7"
 tempfile = "3"
+walkdir = "2"
+which = "7"
 
 [profile.release]
+opt-level = "z"
 strip = true
 lto = true
-opt-level = "z"

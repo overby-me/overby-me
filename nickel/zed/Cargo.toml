@@ -5,8 +5,8 @@ edition = "2024"
 license = "MIT"
 
 [lib]
-path = "src/nickel.rs"
 crate-type = ["cdylib"]
+path = "src/nickel.rs"
 
 [dependencies]
 zed_extension_api = "0.7.0"
