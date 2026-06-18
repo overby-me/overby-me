@@ -2,14 +2,15 @@
   inputs,
   pkgs,
   lib,
+  config,
   ...
 }: {
   home = {
     username = "overby.me";
     homeDirectory =
       if pkgs.stdenv.isDarwin
-      then "/Users/overby.me"
-      else "/home/overby.me";
+      then "/Users/${config.home.username}"
+      else "/home/${config.home.username}";
   };
   imports =
     (with inputs.self.homeModules; [
