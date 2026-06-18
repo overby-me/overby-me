@@ -4,7 +4,6 @@
     uutils-coreutils-noprefix
     xkill
     lsof
-    skim
     #waypipe
     wl-color-picker
     cryptsetup
