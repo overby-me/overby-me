@@ -4,24 +4,24 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-dioxus = { version = "0.7" }
 cynic = { version = "3", features = ["http-reqwest"] }
+dioxus = { version = "0.7" }
+gloo-timers = { version = "0.3", features = ["futures"] }
+log = "0.4"
 reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-gloo-timers = { version = "0.3", features = ["futures"] }
-log = "0.4"
 wasm-logger = "0.2"
 web-sys = { version = "0.3", features = [
-  "Window",
-  "Navigator",
-  "Storage",
   "Document",
   "Element",
-  "Performance",
   "Location",
+  "Navigator",
+  "Performance",
+  "Storage",
+  "Window",
 ] }
 
 [features]
 default = ["web"]
-web = ["dioxus/web", "dioxus/router"]
+web = ["dioxus/router", "dioxus/web"]

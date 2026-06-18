@@ -4,37 +4,37 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-dioxus = { version = "0.7", features = ["web", "router"] }
+dioxus = { version = "0.7", features = ["router", "web"] }
+glam = "0.29"
+js-sys = "0.3"
+log = "0.4"
+manganis = "0.7"
+wasm-bindgen = "=0.2.108"
+wasm-bindgen-futures = "0.4"
+wasm-logger = "0.2"
 web-sys = { version = "0.3", features = [
-  "Window",
+  "CssStyleDeclaration",
   "Document",
+  "DomRect",
+  "Element",
   "HtmlCanvasElement",
-  "WebGlRenderingContext",
-  "WebGlProgram",
-  "WebGlShader",
-  "WebGlBuffer",
-  "WebGlTexture",
-  "WebGlUniformLocation",
-  "MouseEvent",
+  "HtmlElement",
   "HtmlImageElement",
+  "Location",
+  "MouseEvent",
   "Performance",
   "Url",
   "UrlSearchParams",
-  "Location",
-  "console",
-  "Element",
-  "HtmlElement",
-  "CssStyleDeclaration",
-  "DomRect",
+  "WebGlBuffer",
   "WebGlContextAttributes",
+  "WebGlProgram",
+  "WebGlRenderingContext",
+  "WebGlShader",
+  "WebGlTexture",
+  "WebGlUniformLocation",
+  "Window",
+  "console",
 ] }
-wasm-bindgen = "=0.2.108"
-wasm-bindgen-futures = "0.4"
-js-sys = "0.3"
-manganis = "0.7"
-glam = "0.29"
-log = "0.4"
-wasm-logger = "0.2"
 
 [profile.release]
 opt-level = "z"
