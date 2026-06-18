@@ -25,7 +25,13 @@ in {
       deadnix.enable = true;
       ripsecrets.enable = true;
       statix.enable = true;
-      taplo.enable = true;
+      tombi-format = {
+        enable = true;
+        name = "tombi-format";
+        entry = "${pkgs.tombi}/bin/tombi format --offline";
+        files = "\\.toml$";
+        pass_filenames = true;
+      };
       typos = {
         enable = true;
         settings.configPath = "./modules/devenv/configs/typos.toml";
