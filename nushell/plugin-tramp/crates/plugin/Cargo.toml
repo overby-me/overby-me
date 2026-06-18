@@ -23,19 +23,19 @@ openssh-sftp-client = { version = "0.15", features = ["openssh"] }
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
-# Serialization / MsgPack-RPC (for communicating with tramp-agent)
-serde = { workspace = true }
 rmp-serde = { workspace = true }
 rmpv = { workspace = true }
+# Serialization / MsgPack-RPC (for communicating with tramp-agent)
+serde = { workspace = true }
 
+async-trait = "0.1"
+base64 = "0.22"
 # Utilities
 bytes = "1"
-thiserror = "2"
-async-trait = "0.1"
 chrono = "0.4"
-base64 = "0.22"
-glob-match = "0.2"
 dirs = "6"
+glob-match = "0.2"
+thiserror = "2"
 
 # Terminal handling for `tramp shell` (raw mode, /dev/tty, winsize)
 libc = "0.2"
