@@ -507,6 +507,7 @@
 | ✅ | Pager | [Tailspin 🦀](https://github.com/bensadeh/tailspin) | | 🆗 | [Less 💣](https://github.com/gwsw/less) |
 | ✅ | Performance Profiler | [Samply 🦀](https://github.com/mstange/samply) | | 🆗 | [Perf 💣](https://perf.wiki.kernel.org/) |
 | ✅ | TCP Tunnel | [Bore 🦀](https://github.com/ekzhang/bore) | | 🆗 | |
+| 🚫 | Clipboard | | | 🆗 | [wl-clipboard 💣🇷🇺](https://github.com/bugaevc/wl-clipboard), [wl-clipboard-rs 🦀🇷🇺](https://github.com/YaLTeR/wl-clipboard-rs) |
 
 #### Version Control
 
