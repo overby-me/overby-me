@@ -539,6 +539,7 @@
 | ✅ | Formatter | [Alejandra 🦀](https://github.com/kamadorueda/alejandra) | | 🆗 | [Nixfmt λ](https://github.com/NixOS/nixfmt) |
 | ✅ | Static Analyzer | [Statix 🦀](https://github.com/oppiliappan/statix), [Deadnix 🦀](https://github.com/astro/deadnix), [Nixpkgs-Lint 🦀](https://github.com/nix-community/nixpkgs-lint) | | 🆗 | |
 | ✅ | Language Server | [Nil 🦀](https://github.com/oxalica/nil) | | [LSP 📖](https://github.com/microsoft/language-server-protocol) | [Nixd 💣](https://github.com/nix-community/nixd) |
+| ✅ | TOML Formatter | [Tombi 🦀](https://github.com/tombi-toml/tombi) | | 🆗 | [Taplo 🦀](https://github.com/tamasfe/taplo) |
 | ✅ | Binary Cache | [Harmonia 🦀](https://github.com/nix-community/harmonia) | [Attic 🦀](https://github.com/zhaofengli/attic) | [Cachix-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/cachix) | [Cachix 🔒λ](https://github.com/cachix/cachix) |
 | ✅ | Config Manager | [Home Manager 🌐❄️](https://github.com/nix-community/home-manager) | | 🆗 | |
 | ✅ | Repository Secrets | [Ragenix 🦀❄️](https://github.com/yaxitech/ragenix) | | 🆗 | [Agenix 🐹❄️](https://github.com/ryantm/agenix) |
