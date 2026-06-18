@@ -4,7 +4,6 @@
     uutils-coreutils-noprefix
     xkill
     lsof
-    wl-clipboard-rs
     skim
     #waypipe
     wl-color-picker
