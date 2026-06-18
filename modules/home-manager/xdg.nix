@@ -3,12 +3,12 @@
   pkgs,
   ...
 }: {
-  xdg = {
+  xdg = lib.mkIf pkgs.stdenv.isLinux {
     enable = true;
     # xdg.mimeApps writes .desktop association files, which only exist on
     # Linux desktops. On Darwin, default-app handling is managed by
     # LaunchServices instead.
-    mimeApps = lib.mkIf pkgs.stdenv.isLinux {
+    mimeApps = {
       enable = true;
       associations.added = let
         zenMimes = [
