@@ -12,10 +12,10 @@ name = "spindle-run"
 path = "src/main.rs"
 
 [dependencies]
-spindle-models = { workspace = true }
-spindle-engine = { workspace = true }
-tokio = { workspace = true }
 clap = { workspace = true }
 serde_yaml = { workspace = true }
+spindle-engine = { workspace = true }
+spindle-models = { workspace = true }
+tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

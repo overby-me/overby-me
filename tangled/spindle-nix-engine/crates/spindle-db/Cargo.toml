@@ -8,10 +8,10 @@ repository.workspace = true
 description = "SQLite database layer for tangled-spindle-nix"
 
 [dependencies]
-spindle-models = { workspace = true }
+chrono = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+spindle-models = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-chrono = { workspace = true }

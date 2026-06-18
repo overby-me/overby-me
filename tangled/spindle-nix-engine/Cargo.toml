@@ -1,23 +1,23 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/tangled-spindle",
-  "crates/spindle-run",
+  "crates/spindle-db",
   "crates/spindle-engine",
   "crates/spindle-jetstream",
   "crates/spindle-knot",
-  "crates/spindle-db",
-  "crates/spindle-rbac",
-  "crates/spindle-secrets",
-  "crates/spindle-queue",
   "crates/spindle-models",
+  "crates/spindle-queue",
+  "crates/spindle-rbac",
+  "crates/spindle-run",
+  "crates/spindle-secrets",
   "crates/spindle-xrpc",
+  "crates/tangled-spindle",
 ]
 
 [workspace.package]
 edition = "2024"
-license = "MIT"
 repository = "https://tangled.org/overby.me/overby.me/tree/main/nix-tangled-spindle"
+license = "MIT"
 
 [workspace.dependencies]
 # Async runtime
@@ -25,11 +25,11 @@ tokio = { version = "1", features = ["full"] }
 
 # HTTP / WebSocket
 axum = { version = "0.8", features = ["ws"] }
-tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 reqwest = { version = "0.12", default-features = false, features = [
   "json",
   "rustls-tls-webpki-roots",
 ] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 
 # Database
 rusqlite = { version = "0.34", features = ["bundled"] }
@@ -64,21 +64,21 @@ ring = "0.17"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
-uuid = { version = "1", features = ["v4", "serde"] }
 thiserror = "2"
 tokio-util = { version = "0.7", features = ["rt"] }
+uuid = { version = "1", features = ["serde", "v4"] }
 
+http-body-util = "0.1"
 # Testing
 tower = { version = "0.5", features = ["util"] }
-http-body-util = "0.1"
 
-# Workspace crates
-spindle-models = { path = "crates/spindle-models" }
+spindle-db = { path = "crates/spindle-db" }
 spindle-engine = { path = "crates/spindle-engine" }
 spindle-jetstream = { path = "crates/spindle-jetstream" }
 spindle-knot = { path = "crates/spindle-knot" }
-spindle-db = { path = "crates/spindle-db" }
+# Workspace crates
+spindle-models = { path = "crates/spindle-models" }
+spindle-queue = { path = "crates/spindle-queue" }
 spindle-rbac = { path = "crates/spindle-rbac" }
 spindle-secrets = { path = "crates/spindle-secrets" }
-spindle-queue = { path = "crates/spindle-queue" }
 spindle-xrpc = { path = "crates/spindle-xrpc" }

@@ -7,26 +7,26 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = { workspace = true }
+chrono = { workspace = true }
+reqwest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-reqwest = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
-chrono = { workspace = true }
 
-# AT Protocol OAuth
-atrium-oauth = { workspace = true }
-atrium-identity = { workspace = true }
 atrium-api = { workspace = true }
 atrium-common = { workspace = true }
+atrium-identity = { workspace = true }
+# AT Protocol OAuth
+atrium-oauth = { workspace = true }
 atrium-xrpc = { workspace = true }
 open = { workspace = true }
 
 # Optionally depend on ATrium XRPC client (wired later as endpoints solidify)
 atrium-xrpc-client = { workspace = true, optional = true }
 
-url = { workspace = true }
 flate2 = "1"
 serde_urlencoded = "0.7"
+url = { workspace = true }
 
 tangled-config = { path = "../tangled-config" }
 

@@ -8,18 +8,18 @@ repository.workspace = true
 description = "XRPC route handlers and service auth for tangled-spindle-nix"
 
 [dependencies]
-spindle-models = { workspace = true }
-spindle-db = { workspace = true }
-spindle-rbac = { workspace = true }
-spindle-secrets = { workspace = true }
 axum = { workspace = true }
-tokio = { workspace = true }
-reqwest = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
-tracing = { workspace = true }
 base64 = { workspace = true }
 bs58 = { workspace = true }
 k256 = { workspace = true }
 p256 = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+spindle-db = { workspace = true }
+spindle-models = { workspace = true }
+spindle-rbac = { workspace = true }
+spindle-secrets = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

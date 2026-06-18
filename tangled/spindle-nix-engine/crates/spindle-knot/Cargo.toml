@@ -8,13 +8,13 @@ repository.workspace = true
 description = "Knot event consumer for pipeline events in tangled-spindle-nix"
 
 [dependencies]
-spindle-models = { workspace = true }
-spindle-db = { workspace = true }
-tokio = { workspace = true }
-tokio-util = "0.7"
-tokio-tungstenite = { workspace = true }
+futures-util = "0.3"
 serde = { workspace = true }
 serde_json = { workspace = true }
+spindle-db = { workspace = true }
+spindle-models = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+tokio-util = "0.7"
 tracing = { workspace = true }
-futures-util = "0.3"

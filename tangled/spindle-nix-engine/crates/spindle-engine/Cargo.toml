@@ -8,15 +8,15 @@ repository.workspace = true
 description = "Engine trait and nix engine implementation for tangled-spindle-nix"
 
 [dependencies]
-spindle-models = { workspace = true }
-tokio = { workspace = true }
 async-trait = { workspace = true }
-thiserror = { workspace = true }
+hakoniwa = "1.3.1"
+hex = "0.4"
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
-tracing = { workspace = true }
 sha2 = "0.10"
-hex = "0.4"
-hakoniwa = "1.3.1"
 shell-escape = "0.1.5"
+spindle-models = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

@@ -8,11 +8,11 @@ repository.workspace = true
 description = "Shared model types for tangled-spindle-nix (Pipeline, Workflow, Step, LogLine, etc.)"
 
 [dependencies]
-serde = { workspace = true }
-serde_json = { workspace = true }
+base64 = { workspace = true }
 chrono = { workspace = true }
 regex = { workspace = true }
-base64 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

@@ -8,8 +8,8 @@ repository.workspace = true
 description = "RBAC enforcement (casbin-based) for tangled-spindle-nix"
 
 [dependencies]
+async-trait = { workspace = true }
 casbin = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
-async-trait = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }

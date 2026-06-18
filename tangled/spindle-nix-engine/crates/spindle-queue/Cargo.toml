@@ -8,7 +8,7 @@ repository.workspace = true
 description = "Bounded job queue with configurable workers for tangled-spindle-nix"
 
 [dependencies]
-tokio = { workspace = true }
-tracing = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true }
 tokio-util = { workspace = true }
+tracing = { workspace = true }

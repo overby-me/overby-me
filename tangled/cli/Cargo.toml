@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/*"]
 resolver = "2"
+members = ["crates/*"]
 
 [workspace.package]
 edition = "2021"
@@ -9,18 +9,18 @@ edition = "2021"
 # AT Protocol
 atrium-api = { version = "0.25", features = ["agent"] }
 atrium-common = "0.1"
-atrium-xrpc = "0.12"
-atrium-xrpc-client = "0.5"
 atrium-identity = "0.1"
 atrium-oauth = "0.1"
+atrium-xrpc = "0.12"
+atrium-xrpc-client = "0.5"
 
 # CLI
 clap = { version = "4.5", features = ["derive", "env", "unicode", "wrap_help"] }
 clap_complete = "4.5"
 
+futures = "0.3"
 # Async
 tokio = { version = "1.40", features = ["full"] }
-futures = "0.3"
 
 # HTTP & Serialization
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"] }
@@ -32,12 +32,12 @@ toml = "0.8"
 git2 = "0.19"
 git2-credentials = "0.13"
 
+colored = "2.1"
+console = "0.15"
+dialoguer = "0.11"
 # Terminal UI
 indicatif = "0.17"
-colored = "2.1"
 tabled = "0.16"
-dialoguer = "0.11"
-console = "0.15"
 
 # Storage
 dirs = "5.0"
@@ -47,19 +47,19 @@ keyring = { version = "3.6", features = ["sync-secret-service", "vendored"] }
 anyhow = "1.0"
 thiserror = "2.0"
 
+base64 = "0.22"
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
 open = "5"
-url = "2.5"
-base64 = "0.22"
 regex = "1.10"
+url = "2.5"
 
+futures-util = "0.3"
 # WebSocket
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
-futures-util = "0.3"
 
+assert_cmd = "2.0"
 # Testing
 mockito = "1.4"
-tempfile = "3.10"
-assert_cmd = "2.0"
 predicates = "3.1"
+tempfile = "3.10"

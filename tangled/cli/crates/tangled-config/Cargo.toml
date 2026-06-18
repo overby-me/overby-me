@@ -7,9 +7,9 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = { workspace = true }
+chrono = { workspace = true }
 dirs = { workspace = true }
 keyring = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 toml = { workspace = true }
-chrono = { workspace = true }
