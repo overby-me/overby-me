@@ -1,5 +1,26 @@
 # Run `touch .envrc && direnv export json` to apply changes to the repository.
 
+[default]
+extend-ignore-re = [
+  # Mesa OpenGL-over-Vulkan driver
+  "Zink",
+  "Automattic",
+  "Tre",
+  "tre",
+  "Importd",
+  "importd",
+  "Localed",
+  "Iinclude",
+  "localed",
+  "OIF",
+  "oif",
+  "GOST",
+  "Gost",
+  # GNU tar upstream test names (tests/extrac*.at in tar-1.35)
+  "extrac[0-9]+",
+  "extrac\\*",
+]
+
 [default.extend-words]
 # Perl 5 test-suite filename (op/aassign.t — array assign)
 aassign = "aassign"
@@ -39,28 +60,6 @@ endianity = "endianity"
 aranges = "aranges"
 # Nd = Unicode General Category for Decimal Digit (used in \p{Nd} regex props)
 Nd = "Nd"
-
-
-[default]
-extend-ignore-re = [
-  # Mesa OpenGL-over-Vulkan driver
-  "Zink",
-  "Automattic",
-  "Tre",
-  "tre",
-  "Importd",
-  "importd",
-  "Localed",
-  "Iinclude",
-  "localed",
-  "OIF",
-  "oif",
-  "GOST",
-  "Gost",
-  # GNU tar upstream test names (tests/extrac*.at in tar-1.35)
-  "extrac[0-9]+",
-  "extrac\\*",
-]
 
 [default.extend-identifiers]
 # GNU tar upstream test names (tests/extrac*.at in tar-1.35) — not typos.
