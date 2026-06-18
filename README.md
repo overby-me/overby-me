@@ -809,7 +809,7 @@
 | ✅ | Superuser | [Sudo-rs 🦀](https://github.com/memorysafety/sudo-rs) | | ⬅️ | [Sudo 💣](https://github.com/sudo-project/sudo) |
 | ✅ | Fortune | [Fortune-kind 🦀](https://github.com/cafkafk/fortune-kind) | | ⬅️ | [Fortune-mod 💣](https://github.com/shlomif/fortune-mod) |
 | ✅ | System Fetch | [Microfetch 🦀](https://github.com/NotAShelf/microfetch) | | 🆗 | |
-| ✅ | Fuzzy Finder | [Television 🦀](https://github.com/alexpasmantier/television) | | 🆗 | [Fzf 🐹](https://github.com/junegunn/fzf) |
+| ✅ | Fuzzy Finder | [Television 🦀](https://github.com/alexpasmantier/television) | | 🆗 | [Skim 🦀🇨🇳](https://github.com/skim-rs/skim), [Fzf 🐹](https://github.com/junegunn/fzf) |
 | ✅ | Benchmark | [Hyperfine 🦀](https://github.com/sharkdp/hyperfine) | | [Uutils Util-linux 🦀](https://github.com/uutils/util-linux) | [time 💣](https://en.wikipedia.org/wiki/Time_(Unix)) |
 
 </details>
