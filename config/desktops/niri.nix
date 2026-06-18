@@ -23,7 +23,6 @@
     satty
 
     # Clipboard
-    wl-clipboard-rs
     wl-clip-persist
 
     # OSD for volume/brightness

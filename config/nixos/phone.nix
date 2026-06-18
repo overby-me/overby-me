@@ -212,7 +212,6 @@
       environment.systemPackages = with pkgs; [
         # System utilities
         htop
-        wl-clipboard-rs
 
         # Networking (blueman removed — crashes under cross-compilation)
         # notify-send for desktop notifications (used by bt-agent wrapper)
