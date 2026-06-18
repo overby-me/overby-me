@@ -8,8 +8,8 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [lib]
-name = "mojo_xr"
 crate-type = ["cdylib", "rlib"]
+name = "mojo_xr"
 
 [dependencies]
 # Blitz packages — pinned to v0.2.0 release (same rev as desktop shim)
@@ -18,8 +18,8 @@ blitz = { git = "https://github.com/DioxusLabs/blitz", rev = "2f83df962205613166
 ] }
 blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "2f83df96220561316611ecf857e20cd1feed8ca0" }
 blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "2f83df96220561316611ecf857e20cd1feed8ca0" }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "2f83df96220561316611ecf857e20cd1feed8ca0" }
 blitz-paint = { git = "https://github.com/DioxusLabs/blitz", rev = "2f83df96220561316611ecf857e20cd1feed8ca0" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "2f83df96220561316611ecf857e20cd1feed8ca0" }
 
 # Rendering backend (must match Blitz v0.2.0's pinned versions exactly)
 anyrender = { version = "0.6" }
@@ -52,8 +52,8 @@ openxr = { version = "0.19", features = ["loaded"] }
 # dependency exactly (0.38) to avoid type conflicts when wrapping raw Vulkan
 # handles in wgpu via the HAL API.
 ash = { version = "0.38", default-features = false, features = [
-  "linked",
   "debug",
+  "linked",
 ] }
 
 # Note: markup5ever types (QualName, LocalName, etc.) are re-exported by blitz-dom.
@@ -64,5 +64,5 @@ ash = { version = "0.38", default-features = false, features = [
 
 [profile.release]
 opt-level = 2
-lto = "thin"
 strip = "symbols"
+lto = "thin"

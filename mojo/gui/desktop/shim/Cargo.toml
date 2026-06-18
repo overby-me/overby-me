@@ -8,8 +8,8 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [lib]
-name = "mojo_blitz"
 crate-type = ["cdylib", "rlib"]
+name = "mojo_blitz"
 
 [dependencies]
 # Blitz packages — pinned to v0.2.0 release
@@ -18,9 +18,9 @@ blitz = { git = "https://github.com/DioxusLabs/blitz", rev = "2f83df962205613166
 ] }
 blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "2f83df96220561316611ecf857e20cd1feed8ca0" }
 blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "2f83df96220561316611ecf857e20cd1feed8ca0" }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "2f83df96220561316611ecf857e20cd1feed8ca0" }
-blitz-shell = { git = "https://github.com/DioxusLabs/blitz", rev = "2f83df96220561316611ecf857e20cd1feed8ca0" }
 blitz-paint = { git = "https://github.com/DioxusLabs/blitz", rev = "2f83df96220561316611ecf857e20cd1feed8ca0" }
+blitz-shell = { git = "https://github.com/DioxusLabs/blitz", rev = "2f83df96220561316611ecf857e20cd1feed8ca0" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "2f83df96220561316611ecf857e20cd1feed8ca0" }
 
 # Rendering backend (must match Blitz v0.2.0's pinned versions exactly)
 anyrender = { version = "0.6" }
@@ -33,9 +33,9 @@ anyrender_vello = { version = "0.6" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 winit = { version = "0.30", default-features = false, features = [
+  "rwh_06",
   "wayland",
   "wayland-csd-adwaita",
-  "rwh_06",
 ] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -46,5 +46,5 @@ winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
 
 [profile.release]
 opt-level = 2
-lto = "thin"
 strip = "symbols"
+lto = "thin"
