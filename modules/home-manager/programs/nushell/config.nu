@@ -59,7 +59,12 @@ $env.config.hooks = {
     }
 }
 
-$env.PATH = ($env.PATH | split row (char esep))
+$env.PATH = ([
+  $"/etc/profiles/per-user/($env.USER)/bin"
+  "/run/current-system/sw/bin"
+  "/nix/var/nix/profiles/default/bin"
+] | append ($env.PATH | split row (char esep)) | uniq)
+
 
 def --env uo [] { let res = uf | $in; cd $res }
 
