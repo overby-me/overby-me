@@ -159,8 +159,3 @@ def jreset [] {
   let default_branch = (jj config get git.default-remote-bookmark? | default "main")
   jj squash --into (jj log -r $"roots(\@::($default_branch)\@origin)" --no-graph -T 'change_id' | lines | first)
 }
-
-# Use Zellij-cwd in Zed terminal
-if ($env.ZED_TERM?  == "true") and ($env.ZELLIJ? == null) {
-    zellij-cwd
-}

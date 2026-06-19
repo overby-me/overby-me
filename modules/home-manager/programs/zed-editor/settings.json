@@ -107,7 +107,9 @@
 	"terminal": {
 		"font_size": 11,
 		"line_height": "standard",
-		"shell": "system",
+		"shell": {
+			"program": "zellij-cwd"
+		},
 		"toolbar": {
 			"breadcrumbs": true
 		},
