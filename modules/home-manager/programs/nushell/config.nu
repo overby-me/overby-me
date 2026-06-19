@@ -59,13 +59,6 @@ $env.config.hooks = {
     }
 }
 
-$env.PATH = ([
-  $"/etc/profiles/per-user/($env.USER)/bin"
-  "/run/current-system/sw/bin"
-  "/nix/var/nix/profiles/default/bin"
-] | append ($env.PATH | split row (char esep)) | uniq)
-
-
 def --env uo [] { let res = uf | $in; cd $res }
 
 def jhash [] {jj log -r @ --no-graph -T 'commit_id' | tr -d '\\n' | wl-copy; jj log -r @ --no-graph -T 'commit_id'}
