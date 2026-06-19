@@ -19,7 +19,8 @@
       KeyRepeat = 2;
       NSAutomaticCapitalizationEnabled = false;
       NSAutomaticSpellingCorrectionEnabled = false;
-      "com.apple.swipescrolldirection" = false;
+      # Natural ("content tracks finger") scrolling for the trackpad.
+      "com.apple.swipescrolldirection" = true;
     };
 
     dock = {
