@@ -1,0 +1,17 @@
+[package]
+name = "rust-wclip"
+version = "0.1.0"
+edition = "2024"
+description = "An xclip-style Wayland clipboard tool written in Rust"
+license = "MIT"
+
+[[bin]]
+name = "wclip"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+
+[profile.release]
+strip = true
+lto = true

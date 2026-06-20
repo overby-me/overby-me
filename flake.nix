@@ -198,6 +198,7 @@
         ./rust/systemd
         ./rust/tar
         ./rust/texinfo
+        ./rust/wclip
         ./rust/xz
 
         ./slides

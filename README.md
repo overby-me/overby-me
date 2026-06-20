@@ -107,6 +107,7 @@
 | [Systemd-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/systemd) | Systemd replacement |
 | [Tar-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/tar) | GNU tar-compatible tape archive tool |
 | [Texinfo-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/texinfo) | GNU makeinfo-compatible Texinfo processor |
+| [Wclip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/wclip) | Wayland clipboard tool with an xclip-style CLI |
 | [Xz-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/xz) | xz-compatible compression tool |
 
 #### Mojo
