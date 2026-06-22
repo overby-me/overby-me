@@ -89,7 +89,7 @@ in {
       grep = "rg";
       man = "tldr";
       top = "btm";
-      cd = "z";
+      cd = "y";
       bg = "pueue";
       ping = "gping";
       time = "hyperfine";

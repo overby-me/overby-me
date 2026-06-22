@@ -15,6 +15,7 @@
       ./gh.nix
       ./git.nix
       ./jujutsu.nix
+      ./lacy.nix
       ./mergiraf.nix
       ./nix-index.nix
       ./nushell
@@ -26,7 +27,6 @@
       ./wezterm.nix
       ./zed-editor
       ./zellij.nix
-      ./zoxide.nix
     ]
     # Linux-only programs: obs-studio's plugin set is Linux-only, and Zen
     # Browser has no aarch64-darwin build.

@@ -768,7 +768,7 @@
 
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
-| ✅ | Change Directory | [Zoxide 🦀](https://github.com/ajeetdsouza/zoxide) | [Lacy 🦀](https://github.com/timothebot/lacy) | ⬅️ | [Bash Cd 💣](https://en.wikipedia.org/wiki/Bash_(Unix_shell)) |
+| ✅ | Change Directory | [Lacy 🦀](https://github.com/timothebot/lacy) | | ⬅️ | [Zoxide 🦀🇮🇳](https://github.com/ajeetdsouza/zoxide), [Bash Cd 💣](https://en.wikipedia.org/wiki/Bash_(Unix_shell)) |
 | ✅ | Copy | [Nushell Cp 🦪🦀](https://github.com/nushell/nushell) | [Cpx 🦀](https://github.com/11happy/cpx) | ⬅️ | [Bash Cp 💣](https://en.wikipedia.org/wiki/Bash_(Unix_shell)) |
 | ✅ | Directory Usage | [Dust 🦀](https://github.com/bootandy/dust) | | [Uutils 🦀](https://github.com/uutils/coreutils) | [Coreutils 💣](https://en.wikipedia.org/wiki/GNU_Core_Utilities) |
 | ✅ | Find Files | [Fd 🦀](https://github.com/sharkdp/fd) | | [Uutils Findutils 🦀](https://github.com/uutils/findutils) | [Findutils 💣](https://en.wikipedia.org/wiki/List_of_GNU_packages#Base_system) |
