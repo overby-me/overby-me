@@ -163,9 +163,6 @@
   claudeMdPath = "${config.home.homeDirectory}/.claude/CLAUDE.md";
 in {
   home = {
-    packages = [
-      pkgs.libnotify
-    ];
     file = {
       # RTK hook script (thin delegator → rtk rewrite)
       ".claude/hooks/rtk-rewrite.sh" = {
