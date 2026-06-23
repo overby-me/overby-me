@@ -16,7 +16,6 @@
     # Common
     just
     # Nix
-    nixd
     nil
     alejandra
     colmena
