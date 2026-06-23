@@ -6,7 +6,6 @@
   home.packages = with pkgs.pkgsUnstable;
     [
       # General dev
-      lazyjj
       glab
       granted
 
