@@ -8,9 +8,7 @@
   home-manager = {
     useGlobalPkgs = true;
     useUserPackages = true;
-    backupCommand = ''
-      ${pkgs.coreutils}/bin/mv -f "$1" "$1.hm-backup"
-    '';
+    backupFileExtension = "hm-backup";
     extraSpecialArgs = {
       inherit
         inputs
