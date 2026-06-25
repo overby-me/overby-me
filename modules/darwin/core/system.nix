@@ -40,6 +40,9 @@
 
       # Require password immediately after sleep/screensaver.
       screencapture.location = "~/Pictures/screenshots";
+
+      # Let the Fn (Globe) key fall through to the hidutil swap below (needs restart).
+      hitoolbox.AppleFnUsageType = "Do Nothing";
     };
 
     # Swap the left Control and Fn (Globe) keys via hidutil. enableKeyMapping is
