@@ -25,7 +25,11 @@ const Path = () => {
 	}
 
 	// Load node from path
-	return <PathLoader keys={[]} fullpath={fullpath} />;
+	return (
+		<Suspense fallback={null}>
+			<PathLoader keys={[]} fullpath={fullpath} />
+		</Suspense>
+	);
 };
 
 export default Path;

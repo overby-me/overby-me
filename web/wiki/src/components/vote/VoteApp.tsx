@@ -21,6 +21,7 @@ import {
 } from "@mui/material";
 import { useUserId } from "@nhost/react";
 import { HeaderCard, MimeAvatarId, MimeLoader } from "comps";
+import { txMutate } from "core/util";
 import { type Node, useSession } from "hooks";
 import {
 	type ChangeEventHandler,
@@ -118,12 +119,14 @@ const VoteApp = ({ node }: { node: Node }) => {
 		const name = new Date(
 			Date.now() + (session?.timeDiff ?? 0),
 		).toLocaleString();
-		await insert({
-			name,
-			mimeId: "vote/vote",
-			parentId: poll?.id,
-			data: vote.reduce((a, e, i) => (e ? a.concat(i) : a), [] as number[]),
-		});
+		await txMutate(() =>
+			insert({
+				name,
+				mimeId: "vote/vote",
+				parentId: poll?.id,
+				data: vote.reduce((a, e, i) => (e ? a.concat(i) : a), [] as number[]),
+			}),
+		);
 		setLoading(false);
 	};
 

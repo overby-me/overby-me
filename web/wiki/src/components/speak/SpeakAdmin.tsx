@@ -2,7 +2,7 @@ import { Clear, Lock, LockOpen, PlayArrow, Stop } from "@mui/icons-material";
 import { Button, ButtonGroup, TextField } from "@mui/material";
 import { AdminCard } from "comps";
 import type { Node } from "hooks";
-import { useState } from "react";
+import { startTransition, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const SpeakAdmin = ({ node, time }: { node: Node; time: number }) => {
@@ -15,23 +15,25 @@ const SpeakAdmin = ({ node, time }: { node: Node; time: number }) => {
 	const id = speakerlist?.id;
 
 	const handleRemoveSpeaks = () => {
-		children.delete({
-			_and: [
-				{ mimeId: { _eq: "speak/speak" } },
-				{
-					parentId: { _eq: id },
-				},
-			],
-		});
+		startTransition(() =>
+			children.delete({
+				_and: [
+					{ mimeId: { _eq: "speak/speak" } },
+					{
+						parentId: { _eq: id },
+					},
+				],
+			}),
+		);
 	};
 
 	const handleLockSpeak = (mutable: boolean) => {
-		update({ id, set: { mutable } });
+		startTransition(() => update({ id, set: { mutable } }));
 	};
 
 	const handleTimerSet = (time: number) => {
 		const updatedAt = new Date();
-		update({ id, set: { data: { time, updatedAt } } });
+		startTransition(() => update({ id, set: { data: { time, updatedAt } } }));
 	};
 
 	const owner = speakerlist?.isContextOwner;

@@ -1,6 +1,7 @@
 import { GroupAdd } from "@mui/icons-material";
 import { Fab } from "@mui/material";
 import { SheetReader } from "comps";
+import { txMutate } from "core/util";
 import type { Node } from "hooks";
 import { useTranslation } from "react-i18next";
 
@@ -18,7 +19,7 @@ const InvitesFab = ({ node }: { node: Node }) => {
 				email: r?.Email?.toLowerCase(),
 				parentId,
 			}));
-		await nodeMembers.insert({ members });
+		await txMutate(() => nodeMembers.insert({ members }));
 	};
 
 	return (

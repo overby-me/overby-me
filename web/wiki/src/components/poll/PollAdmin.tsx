@@ -2,6 +2,7 @@ import { Stop } from "@mui/icons-material";
 import { Button } from "@mui/material";
 import { AdminCard } from "comps";
 import type { Node } from "hooks";
+import { startTransition } from "react";
 import { useTranslation } from "react-i18next";
 
 const PollAdmin = ({ node }: { node: Node }) => {
@@ -28,7 +29,9 @@ const PollAdmin = ({ node }: { node: Node }) => {
 		.reduce((total, next) => (total ?? 0) + (next ?? 0), 0);
 
 	const handleStopPoll = () => {
-		update({ set: { mutable: false, data: { ...data, voters } } });
+		startTransition(() =>
+			update({ set: { mutable: false, data: { ...data, voters } } }),
+		);
 		//await refetch(() =>
 		//  node.query
 		//    ?.children({ where: { mimeId: { _eq: "vote/vote" } } })

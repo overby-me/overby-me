@@ -19,6 +19,7 @@ import { AddCommentButton, AutoButton } from "comps";
 import { order_by } from "gql";
 import { type Node, useLink, useScreen } from "hooks";
 import { IconId } from "mime";
+import { startTransition } from "react";
 import { useTranslation } from "react-i18next";
 import { TransitionGroup } from "react-transition-group";
 
@@ -95,7 +96,7 @@ const CommentList = ({ node }: { node: Node }) => {
 											<IconButton
 												color="primary"
 												onClick={() => {
-													$delete({ id });
+													startTransition(() => $delete({ id }));
 												}}
 												size="large"
 											>

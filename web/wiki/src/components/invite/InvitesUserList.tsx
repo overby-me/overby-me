@@ -10,6 +10,7 @@ import {
 } from "@mui/material";
 import { useUserEmail, useUserId } from "@nhost/react";
 import { HeaderCard, MimeAvatarId } from "comps";
+import { txMutate } from "core/util";
 import {
 	client,
 	type members_set_input,
@@ -18,7 +19,7 @@ import {
 	useMutation,
 	useSubscription,
 } from "gql";
-import { startTransition } from "react";
+import { Suspense, startTransition } from "react";
 import { useTranslation } from "react-i18next";
 
 const ListSuspense = () => {
@@ -129,44 +130,46 @@ const ListSuspense = () => {
 		},
 	);
 
-	const handleAcceptInvite = (id?: string, parentId?: string) => () => {
-		startTransition(async () => {
-			try {
-				await updateMember({
+	const handleAcceptInvite = (id?: string, parentId?: string) => async () => {
+		try {
+			await txMutate(() =>
+				updateMember({
 					args: { id, set: { accepted: true, nodeId: userId } },
-				});
-			} catch (_) {
-				await deleteMember({ args: { id } });
-				if (parentId && userId) {
-					await acceptExistingMember({
+				}),
+			);
+		} catch (_) {
+			await txMutate(() => deleteMember({ args: { id } }));
+			if (parentId && userId) {
+				await txMutate(() =>
+					acceptExistingMember({
 						args: { parentId, nodeId: userId },
-					});
-				}
+					}),
+				);
 			}
+		}
 
-			// Delete cache
+		// Delete cache. Wrap in a transition so the live subscription's re-read keeps
+		// the current UI visible instead of throwing React #426 on this click.
+		startTransition(() => {
 			// eslint-disable-next-line functional/immutable-data
 			client.cache.clear();
-			await resolve(
-				({ query }) =>
-					query
-						.membersAggregate({
-							where: {
-								_and: [
-									{ accepted: { _eq: false } },
-									{
-										_or: [
-											{ nodeId: { _eq: userId } },
-											{ email: { _eq: email } },
-										],
-									},
-								],
-							},
-						})
-						.aggregate?.count(),
-				{ cachePolicy: "no-cache" },
-			);
 		});
+		await resolve(
+			({ query }) =>
+				query
+					.membersAggregate({
+						where: {
+							_and: [
+								{ accepted: { _eq: false } },
+								{
+									_or: [{ nodeId: { _eq: userId } }, { email: { _eq: email } }],
+								},
+							],
+						},
+					})
+					.aggregate?.count(),
+			{ cachePolicy: "no-cache" },
+		);
 	};
 
 	return (
@@ -225,7 +228,9 @@ const InvitesUserList = () => {
 			}
 			title={t("invite.invitations")}
 		>
-			<ListSuspense />
+			<Suspense fallback={null}>
+				<ListSuspense />
+			</Suspense>
 		</HeaderCard>
 	);
 };

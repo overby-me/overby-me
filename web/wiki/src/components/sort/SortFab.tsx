@@ -1,8 +1,8 @@
 import { Save } from "@mui/icons-material";
 import { Fab, Tooltip } from "@mui/material";
+import { txMutate } from "core/util";
 import type { nodes } from "gql";
 import { type Node, useLink } from "hooks";
-import { startTransition } from "react";
 import { useTranslation } from "react-i18next";
 
 const SortFab = ({
@@ -16,14 +16,13 @@ const SortFab = ({
 	const link = useLink();
 	const update = node.useUpdate();
 
-	const handleClick = () => {
-		startTransition(async () => {
-			const proms = elements.map(({ id }, index: number) =>
-				update({ id, set: { index } }),
-			);
-			await Promise.all(proms);
-			link.push([]);
-		});
+	const handleClick = async () => {
+		await Promise.all(
+			elements.map(({ id }, index: number) =>
+				txMutate(() => update({ id, set: { index } })),
+			),
+		);
+		link.push([]);
 	};
 
 	return (

@@ -1,4 +1,5 @@
 import { Autocomplete, Button, Grid, TextField } from "@mui/material";
+import { txMutate } from "core/util";
 import { order_by, resolve } from "gql";
 import type { Node } from "hooks";
 import { startTransition, useEffect, useState } from "react";
@@ -26,10 +27,9 @@ const InvitesTextField = ({ node }: { node: Node }) => {
 			parentId: node.id,
 		}));
 
-		startTransition(async () => {
-			await nodeMembers.insert({ members });
-			setValue([]);
-		});
+		void txMutate(() => nodeMembers.insert({ members })).then(() =>
+			setValue([]),
+		);
 	};
 
 	useEffect(() => {
@@ -59,11 +59,11 @@ const InvitesTextField = ({ node }: { node: Node }) => {
 				inputValue ? [{ name: "N/A", email: inputValue, id: inputValue }] : [],
 			);
 
-			setOptions(newOptions);
+			// Wrap the real setter (after the await) — startTransition does not span
+			// an `await`, so the previous outer wrapper deferred nothing.
+			startTransition(() => setOptions(newOptions));
 		};
-		startTransition(() => {
-			fetch();
-		});
+		fetch();
 	}, [JSON.stringify(value), inputValue]);
 
 	return (

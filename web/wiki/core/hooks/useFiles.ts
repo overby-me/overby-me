@@ -36,12 +36,12 @@ const useFiles = ({
 							: Promise.resolve(null),
 					),
 				);
-				setFiles(preUrls.map((preUrl) => preUrl ?? ""));
+				// Wrap the real setter (after the await) — startTransition does not
+				// span an `await`, so the previous outer wrapper deferred nothing.
+				startTransition(() => setFiles(preUrls.map((preUrl) => preUrl ?? "")));
 			}
 		};
-		startTransition(() => {
-			fetch();
-		});
+		fetch();
 	}, [JSON.stringify(fileIds)]);
 
 	return files;

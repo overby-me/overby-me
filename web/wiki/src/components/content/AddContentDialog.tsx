@@ -17,6 +17,7 @@ import {
 import { FileUploader } from "comps";
 import { getKey } from "core/hooks/useNode";
 import { fromId } from "core/path";
+import { txMutate } from "core/util";
 import { resolve } from "gql";
 import { type Node, useLink, useSession } from "hooks";
 import { getName, IconId } from "mime";
@@ -180,10 +181,14 @@ const AddContentDialog = ({
 	const { insert: permInsert } = node.usePermissions();
 	const [_, setSession] = useSession();
 
-	const handleSubmit = () => {
-		startTransition(async () => {
-			try {
-				const { id, key } = await insert({
+	const handleSubmit = async () => {
+		try {
+			// Each mutation runs through txMutate so its in-flight suspense is a
+			// transition (mutationSuspense would otherwise re-suspend a visible
+			// boundary synchronously -> React #426). Wrapping the whole async body in
+			// startTransition does NOT work: only work before the first await counts.
+			const { id, key } = await txMutate(() =>
+				insert({
 					name: title,
 					key: ["vote/question", "vote/comment"].includes(mimeId)
 						? uuid()
@@ -196,52 +201,57 @@ const AddContentDialog = ({
 							: ["vote/question", "vote/comment"].includes(mimeId)
 								? { text }
 								: undefined,
+				}),
+			);
+			if (!key) return;
+
+			if (await resolve(({ query }) => query.mime({ id: mimeId })?.context)) {
+				await txMutate(() =>
+					update({ id: id!, set: { contextId: id, mutable: false } }),
+				);
+				const perms = contextPerm.map((perm) => ({
+					...perm,
+					contextId: id,
+					nodeId: id,
+					parents: JSON.stringify(perm.parents)
+						.replace("[", "{")
+						.replace("]", "}"),
+				}));
+				await txMutate(() => permInsert(perms));
+
+				const prefix = await resolve(({ query }) => {
+					const node = query.node({ id: id! });
+					return {
+						id: node?.id,
+						name: node?.name ?? "",
+						mime: node?.mimeId ?? "",
+						key: node?.key,
+					};
 				});
-				if (!key) return;
 
-				if (await resolve(({ query }) => query.mime({ id: mimeId })?.context)) {
-					await update({ id: id!, set: { contextId: id, mutable: false } });
-					const perms = contextPerm.map((perm) => ({
-						...perm,
-						contextId: id,
-						nodeId: id,
-						parents: JSON.stringify(perm.parents)
-							.replace("[", "{")
-							.replace("]", "}"),
-					}));
-					await permInsert(perms);
-
-					const prefix = await resolve(({ query }) => {
-						const node = query.node({ id: id! });
-						return {
-							id: node?.id,
-							name: node?.name ?? "",
-							mime: node?.mimeId ?? "",
-							key: node?.key,
-						};
-					});
-
-					const path = await fromId(id);
+				const path = await fromId(id);
+				// Session feeds suspending reads -> defer it.
+				startTransition(() =>
 					setSession({
 						prefix: {
 							...prefix,
 							path,
 						},
-					});
-				}
-
-				// Reset fields
-				setOpen(false);
-				setTitle(initTitle ?? "");
-				setText("");
-				setFileId(undefined);
-				setFileName(undefined);
-
-				if (redirect) link.push([key], app);
-			} catch (_) {
-				setError(t("content.contentNameExists"));
+					}),
+				);
 			}
-		});
+
+			// Reset fields (dialog/controlled-input state — keep urgent)
+			setOpen(false);
+			setTitle(initTitle ?? "");
+			setText("");
+			setFileId(undefined);
+			setFileName(undefined);
+
+			if (redirect) link.push([key], app);
+		} catch (_) {
+			setError(t("content.contentNameExists"));
+		}
 	};
 
 	useEffect(() => {

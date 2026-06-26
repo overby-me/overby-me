@@ -1,5 +1,6 @@
 import { compare } from "compare-versions";
 import platform from "platform";
+import { startTransition } from "react";
 
 const checkVersion = () => {
 	switch (platform.layout) {
@@ -21,4 +22,28 @@ const checkVersion = () => {
 	}
 };
 
-export { checkVersion };
+/**
+ * Fire a (possibly async) GQty mutation as a transition.
+ *
+ * The client enables `mutationSuspense`, so an in-flight mutation suspends the
+ * calling component. If that happens in response to synchronous input (a click
+ * handler that is not a transition) React throws error #426 and snaps the nearest
+ * already-revealed Suspense boundary to its fallback.
+ *
+ * This calls `fn()` synchronously inside `startTransition` so the in-flight
+ * suspense is marked non-urgent (old UI stays visible), while still returning the
+ * promise so callers can `await` it for sequencing / `awaitRefetchQueries`.
+ *
+ * Note: you cannot wrap an `async` function body in `startTransition` directly —
+ * only updates scheduled before the first `await` are part of the transition.
+ * Wrap each mutate call with this helper instead.
+ */
+const txMutate = <T>(fn: () => Promise<T>): Promise<T> => {
+	let promise!: Promise<T>;
+	startTransition(() => {
+		promise = fn();
+	});
+	return promise;
+};
+
+export { checkVersion, txMutate };

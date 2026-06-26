@@ -29,7 +29,7 @@ import {
 import { order_by } from "gql";
 import { type Node, useLink, useNode, useScreen } from "hooks";
 import { IconId } from "mime";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { TransitionGroup } from "react-transition-group";
 
@@ -81,7 +81,11 @@ const ChildListRaw = ({ node }: { node: Node }) => {
 			<TransitionGroup>
 				{children?.map(({ id }, index) => (
 					<Collapse key={id ?? 0}>
-						{id && <ChildListElement id={id} index={index} />}
+						{id && (
+							<Suspense fallback={null}>
+								<ChildListElement id={id} index={index} />
+							</Suspense>
+						)}
 					</Collapse>
 				))}
 				{children?.length === 0 && (

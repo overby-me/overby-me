@@ -30,12 +30,12 @@ const useFile = ({
 							}
 						: {}),
 				});
-				setFile(url);
+				// Wrap the real setter (after the await) — startTransition does not
+				// span an `await`, so the previous outer wrapper deferred nothing.
+				startTransition(() => setFile(url));
 			}
 		};
-		startTransition(() => {
-			fetch();
-		});
+		fetch();
 	}, [fileId]);
 
 	return file;

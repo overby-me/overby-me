@@ -55,7 +55,7 @@ const BreadcrumbsLink = ({
 				const scroll = document.querySelector("#scroll");
 				scroll?.scrollTo({ behavior: "smooth", top: 0 });
 			} else {
-				navigate(`/${keys.slice(0, index).join("/")}`);
+				startTransition(() => navigate(`/${keys.slice(0, index).join("/")}`));
 			}
 		} else setOpen([...new Array(index).fill(false), true]);
 	};

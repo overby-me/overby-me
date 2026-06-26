@@ -8,7 +8,7 @@ import {
 } from "@mui/material";
 import { AutoButton } from "comps";
 import type { Node } from "hooks";
-import { useState } from "react";
+import { startTransition, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const PublishButton = ({
@@ -26,7 +26,7 @@ const PublishButton = ({
 	const handler =
 		handlePublish ??
 		(() => {
-			update({ set: { mutable: false } });
+			startTransition(() => update({ set: { mutable: false } }));
 		});
 
 	if (!query?.mutable) return null;

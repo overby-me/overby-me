@@ -8,11 +8,12 @@ import {
 } from "@mui/icons-material";
 import { Avatar, SpeedDial, SpeedDialAction, Zoom } from "@mui/material";
 import { toHtml } from "core/document";
+import { txMutate } from "core/util";
 import { order_by, resolve } from "gql";
 import { type Node, useLink, useScreen, useSession } from "hooks";
 import HTMLtoDOCX from "html-to-docx";
 import { getLetter } from "mime";
-import { useState } from "react";
+import { startTransition, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const checkIfSuperParent = async (
@@ -205,12 +206,12 @@ const FolderDial = ({ node }: { node: Node }) => {
 			? { ...node, name: node.ownerName }
 			: { ...node, ownerName: undefined };
 
-		const newNode = await nodeInsert(nodeArgs);
+		const newNode = await txMutate(() => nodeInsert(nodeArgs));
 		if (typeof newNode.id !== "string") {
 			setSession({ selected: [] });
 			return;
 		}
-		await nodeMembers.insert({ members, parentId: newNode.id });
+		await txMutate(() => nodeMembers.insert({ members, parentId: newNode.id }));
 
 		if (!children) return;
 		for (const id of children) {
@@ -234,11 +235,13 @@ const FolderDial = ({ node }: { node: Node }) => {
 	};
 
 	const handleLockChildren = () => {
-		nodeUpdate({ set: { attachable: !query?.attachable } });
+		startTransition(() =>
+			nodeUpdate({ set: { attachable: !query?.attachable } }),
+		);
 	};
 
 	const handleLockContent = () => {
-		nodeUpdate({ set: { mutable: !query?.mutable } });
+		startTransition(() => nodeUpdate({ set: { mutable: !query?.mutable } }));
 	};
 
 	return (

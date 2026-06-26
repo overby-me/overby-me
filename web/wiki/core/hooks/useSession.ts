@@ -31,7 +31,10 @@ const useSession = (): [Session | null, SessionSetter] => {
 		const newSession =
 			!session || props === null ? props : { ...session, ...props };
 		localStorage.setItem("session", JSON.stringify(newSession));
-		if (setCtxSession) setCtxSession(newSession);
+		// Session feeds suspending reads (useNode/useApps via context). Mark the
+		// context update as non-urgent so a resulting re-suspend keeps the old UI
+		// visible instead of throwing React #426 ("suspended on synchronous input").
+		if (setCtxSession) startTransition(() => setCtxSession(newSession));
 	};
 
 	return [session, setSession];

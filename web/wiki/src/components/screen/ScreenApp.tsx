@@ -2,6 +2,7 @@ import { Grid } from "@mui/material";
 import { Box } from "@mui/system";
 import { MimeLoader, SpeakApp } from "comps";
 import type { Node } from "hooks";
+import { Suspense } from "react";
 
 const ScreenApp = ({ node }: { node: Node }) => {
 	const get = node.useSubsGet();
@@ -16,7 +17,13 @@ const ScreenApp = ({ node }: { node: Node }) => {
 				justifyContent="space-evenly"
 				spacing={1}
 			>
-				<Grid>{id && <MimeLoader id={id} mimeId={mimeId!} />}</Grid>
+				<Grid>
+					{id && (
+						<Suspense fallback={null}>
+							<MimeLoader id={id} mimeId={mimeId!} />
+						</Suspense>
+					)}
+				</Grid>
 				<Grid size={{ xs: 3 }}>
 					<SpeakApp node={node} />
 				</Grid>

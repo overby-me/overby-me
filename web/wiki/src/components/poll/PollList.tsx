@@ -13,7 +13,7 @@ import {
 import { HeaderCard } from "comps";
 import { type Node, useLink, useScreen } from "hooks";
 import { IconId } from "mime";
-import { Fragment, Suspense } from "react";
+import { Fragment, Suspense, startTransition } from "react";
 import { useTranslation } from "react-i18next";
 
 const PollListSuspense = ({ node }: { node: Node }) => {
@@ -26,7 +26,7 @@ const PollListSuspense = ({ node }: { node: Node }) => {
 	});
 	const handleDeletePoll = (id?: string) => () => {
 		if (!id) return;
-		$delete({ id });
+		startTransition(() => $delete({ id }));
 	};
 
 	const owner = query?.isContextOwner;

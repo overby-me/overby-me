@@ -12,6 +12,7 @@ import {
 	Slate,
 } from "comps";
 import type { CustomElement } from "core/types/slate";
+import { txMutate } from "core/util";
 import { parseISO } from "date-fns";
 import { resolve } from "gql";
 import { type Node, useFile, useLink } from "hooks";
@@ -93,10 +94,12 @@ const Editor = ({ node }: { node: Node }) => {
 				setAuthorError(t("content.addAtLeastOneAuthor"));
 				return;
 			}
-			await nodeMembers.delete();
-			await nodeMembers.insert({
-				members: members.map((member) => ({ ...member, mimeId: undefined })),
-			});
+			await txMutate(() => nodeMembers.delete());
+			await txMutate(() =>
+				nodeMembers.insert({
+					members: members.map((member) => ({ ...member, mimeId: undefined })),
+				}),
+			);
 		}
 		const newContent =
 			content?.length >= 1 &&
@@ -104,14 +107,16 @@ const Editor = ({ node }: { node: Node }) => {
 				? content.slice(1)
 				: content;
 
-		await update({
-			set: {
-				name,
-				data: { content: newContent, image: fileId },
-				mutable,
-				createdAt: date?.toISOString(),
-			},
-		});
+		await txMutate(() =>
+			update({
+				set: {
+					name,
+					data: { content: newContent, image: fileId },
+					mutable,
+					createdAt: date?.toISOString(),
+				},
+			}),
+		);
 		link.push([]);
 	};
 

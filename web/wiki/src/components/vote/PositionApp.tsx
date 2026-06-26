@@ -7,14 +7,23 @@ import {
 	QuestionList,
 } from "comps";
 import type { Node } from "hooks";
+import { Suspense } from "react";
 
 const PositionApp = ({ node }: { node: Node }) => (
 	<Stack spacing={1}>
 		<ContentApp node={node} add />
-		<CandidateList node={node} />
-		<QuestionList node={node} />
-		<PollList node={node} />
-		<FolderDial node={node} />
+		<Suspense fallback={null}>
+			<CandidateList node={node} />
+		</Suspense>
+		<Suspense fallback={null}>
+			<QuestionList node={node} />
+		</Suspense>
+		<Suspense fallback={null}>
+			<PollList node={node} />
+		</Suspense>
+		<Suspense fallback={null}>
+			<FolderDial node={node} />
+		</Suspense>
 	</Stack>
 );
 

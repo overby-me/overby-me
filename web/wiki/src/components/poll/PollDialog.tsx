@@ -11,6 +11,7 @@ import {
 	Switch,
 	Typography,
 } from "@mui/material";
+import { txMutate } from "core/util";
 import { type Node, useLink, useSession } from "hooks";
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -54,24 +55,27 @@ const PollDialog = ({
 
 	const handleAddPoll = async () => {
 		setLoading(true);
-		if (pollId) await update({ id: pollId, set: { mutable: false } });
+		if (pollId)
+			await txMutate(() => update({ id: pollId, set: { mutable: false } }));
 		const key = new Date(Date.now() + (session?.timeDiff ?? 0))
 			.toLocaleString()
 			.replaceAll("/", "");
-		const poll = await insert({
-			name: query?.name,
-			key,
-			mimeId: "vote/poll",
-			data: {
-				minVote: voteCount[0],
-				maxVote: voteCount[1],
-				hidden,
-				options: options,
-				nodeId,
-			},
-		});
+		const poll = await txMutate(() =>
+			insert({
+				name: query?.name,
+				key,
+				mimeId: "vote/poll",
+				data: {
+					minVote: voteCount[0],
+					maxVote: voteCount[1],
+					hidden,
+					options: options,
+					nodeId,
+				},
+			}),
+		);
 
-		await contextSet("active", poll.id ?? null);
+		await txMutate(() => contextSet("active", poll.id ?? null));
 		link.push([poll.key!]);
 		setLoading(false);
 	};

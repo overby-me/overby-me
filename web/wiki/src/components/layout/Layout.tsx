@@ -93,7 +93,7 @@ const Layout = ({ children }: { children: React.ReactElement }) => {
 	if (!showing || isLoading) return null;
 
 	if (searchParams.get("app") === "screen" || path.startsWith("user"))
-		return children;
+		return <Suspense fallback={null}>{children}</Suspense>;
 
 	return (
 		<Box sx={{ display: "flex" }}>
@@ -101,7 +101,7 @@ const Layout = ({ children }: { children: React.ReactElement }) => {
 				{largeScreen && <Box sx={{ p: 4 }} />}
 				{typeof window !== "undefined" && (
 					<Container sx={{ pl: 1, pr: 1, pt: 1 }} disableGutters>
-						{children}
+						<Suspense fallback={null}>{children}</Suspense>
 					</Container>
 				)}
 				<BottomBar setOpenDrawer={setOpenDrawer} />

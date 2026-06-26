@@ -41,11 +41,11 @@ const SortApp = ({ node }: { node: Node }) => {
 						})) ?? [],
 				{ cachePolicy: "no-cache" },
 			);
-			setList(children);
+			// Wrap the real setter (after the await) — startTransition does not span
+			// an `await`, so the previous outer wrapper deferred nothing.
+			startTransition(() => setList(children));
 		};
-		startTransition(() => {
-			fetch();
-		});
+		fetch();
 	}, [node.id]);
 
 	const handleDragEnd: OnDragEndResponder = ({ source, destination }) => {

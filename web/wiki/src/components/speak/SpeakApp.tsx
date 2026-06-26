@@ -33,11 +33,15 @@ const SpeakApp = ({ node }: { node: Node }) => {
 			<Grid container spacing={1}>
 				{!screen && (
 					<Grid size={{ xs: 12, md: 6 }}>
-						<SpeakAdmin node={node} time={time} />
+						<Suspense fallback={null}>
+							<SpeakAdmin node={node} time={time} />
+						</Suspense>
 					</Grid>
 				)}
 				<Grid size={{ xs: 12, md: !screen ? 6 : 12 }}>
-					<SpeakCard node={node} time={time} />
+					<Suspense fallback={null}>
+						<SpeakCard node={node} time={time} />
+					</Suspense>
 				</Grid>
 			</Grid>
 			{!screen && speakerlist?.id && (

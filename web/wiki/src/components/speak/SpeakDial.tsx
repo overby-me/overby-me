@@ -2,7 +2,7 @@ import { SpeedDial, SpeedDialAction, SpeedDialIcon } from "@mui/material";
 import { useUserDisplayName } from "@nhost/react";
 import { avatars } from "comps";
 import { type Node, useSession } from "hooks";
-import { useState } from "react";
+import { startTransition, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const SpeakDial = ({ node }: { node: Node }) => {
@@ -21,13 +21,15 @@ const SpeakDial = ({ node }: { node: Node }) => {
 		const time = new Date(
 			Date.now() + (session?.timeDiff ?? 0),
 		).toLocaleString();
-		insert({
-			name: displayName,
-			parentId: id,
-			key: `${displayName?.toLocaleLowerCase()}-${time}`,
-			mimeId: "speak/speak",
-			data: type,
-		});
+		startTransition(() =>
+			insert({
+				name: displayName,
+				parentId: id,
+				key: `${displayName?.toLocaleLowerCase()}-${time}`,
+				mimeId: "speak/speak",
+				data: type,
+			}),
+		);
 	};
 
 	return (

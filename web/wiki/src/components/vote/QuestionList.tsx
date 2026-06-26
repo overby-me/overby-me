@@ -20,6 +20,7 @@ import { AddQuestionButton, AutoButton } from "comps";
 import { order_by } from "gql";
 import { type Node, useLink, useScreen } from "hooks";
 import { IconId } from "mime";
+import { startTransition } from "react";
 import { useTranslation } from "react-i18next";
 import { TransitionGroup } from "react-transition-group";
 
@@ -98,7 +99,7 @@ const QuestionList = ({ node }: { node: Node }) => {
 												<IconButton
 													color="primary"
 													onClick={() => {
-														$delete({ id: child.id });
+														startTransition(() => $delete({ id: child.id }));
 													}}
 													size="large"
 												>

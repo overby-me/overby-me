@@ -19,6 +19,7 @@ import { useUserId } from "@nhost/react";
 import { avatars, getAvatarName } from "comps";
 import { order_by } from "gql";
 import { type Node, useScreen } from "hooks";
+import { startTransition } from "react";
 import { useTranslation } from "react-i18next";
 import { TransitionGroup } from "react-transition-group";
 
@@ -44,7 +45,7 @@ const SpeakCard = ({ node, time }: { node: Node; time: number }) => {
 	});
 
 	const handleRemoveSpeak = (id: string) => () => {
-		$delete({ id });
+		startTransition(() => $delete({ id }));
 	};
 
 	return (

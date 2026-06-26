@@ -16,6 +16,7 @@ import { nhost } from "nhost";
 import {
 	type ChangeEventHandler,
 	type FormEvent,
+	startTransition,
 	useEffect,
 	useState,
 } from "react";
@@ -45,7 +46,7 @@ const LoginForm = ({ mode }: { mode: Mode }) => {
 			!loading &&
 			isAuthenticated
 		) {
-			navigate("/");
+			startTransition(() => navigate("/"));
 		}
 	}, [isAuthenticated, loading, mode, navigate]);
 
@@ -109,7 +110,7 @@ const LoginForm = ({ mode }: { mode: Mode }) => {
 		if (error) {
 			// Already logged-in
 			if ([100].includes(error.status)) {
-				navigate("/");
+				startTransition(() => navigate("/"));
 				return;
 			}
 
@@ -134,7 +135,10 @@ const LoginForm = ({ mode }: { mode: Mode }) => {
 		// eslint-disable-next-line functional/immutable-data
 		client.cache.clear();
 
-		navigate(-1);
+		// cache.clear() invalidates every query, so the route we return to will
+		// re-read cold and suspend; defer the navigation so it loads without a
+		// synchronous fallback flash (React #426).
+		startTransition(() => navigate(-1));
 	};
 
 	const onRegister = async () => {
@@ -194,7 +198,7 @@ const LoginForm = ({ mode }: { mode: Mode }) => {
 			return;
 		}
 
-		navigate("/");
+		startTransition(() => navigate("/"));
 	};
 
 	const onSendResetEmail = async () => {

@@ -1,6 +1,7 @@
 import { Delete } from "@mui/icons-material";
 import { Button, Dialog, DialogActions, DialogTitle } from "@mui/material";
 import { AutoButton } from "comps";
+import { txMutate } from "core/util";
 import { type Node, useLink } from "hooks";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -13,8 +14,8 @@ const DeleteButton = ({ node }: { node: Node }) => {
 	const members = node.useMembers();
 
 	const handleDelete = async () => {
-		await members.delete();
-		await $delete();
+		await txMutate(() => members.delete());
+		await txMutate(() => $delete());
 		link.pop();
 	};
 
