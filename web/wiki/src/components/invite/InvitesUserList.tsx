@@ -12,14 +12,13 @@ import { useUserEmail, useUserId } from "@nhost/react";
 import { HeaderCard, MimeAvatarId } from "comps";
 import { txMutate } from "core/util";
 import {
-	client,
 	type members_set_input,
 	order_by,
 	resolve,
 	useMutation,
 	useSubscription,
 } from "gql";
-import { Suspense, startTransition } from "react";
+import { Suspense } from "react";
 import { useTranslation } from "react-i18next";
 
 const ListSuspense = () => {
@@ -148,15 +147,47 @@ const ListSuspense = () => {
 			}
 		}
 
-		// Delete cache. Wrap in a transition so the live subscription's re-read keeps
-		// the current UI visible instead of throwing React #426 on this click.
-		startTransition(() => {
-			// eslint-disable-next-line functional/immutable-data
-			client.cache.clear();
-		});
+		// Refresh the data affected by accepting this invite. The mutations above
+		// refetch the subscription-backed lists in this component, but HomeList's
+		// left-panel events/groups lists read a separate useQuery() cache root, and
+		// client.cache.clear() does not notify subscribers (so the panel never
+		// refreshed). Re-resolve HomeList's exact selections network-only: that
+		// writes the fresh lists back to the cache and notifies the panel, plus the
+		// pending-invite badge count. Keep the where/order_by in sync with HomeList.
 		await resolve(
-			({ query }) =>
-				query
+			({ query }) => ({
+				lists: userId
+					? ["wiki/event", "wiki/group"].map((mimeId) =>
+							query
+								.nodes({
+									order_by: [{ createdAt: order_by.desc }],
+									where: {
+										_and: [
+											{ mimeId: { _eq: mimeId } },
+											{
+												_or: [
+													{ ownerId: { _eq: userId } },
+													{
+														members: {
+															_and: [
+																{ accepted: { _eq: true } },
+																{ nodeId: { _eq: userId } },
+															],
+														},
+													},
+												],
+											},
+										],
+									},
+								})
+								.map((node) => ({
+									id: node.id,
+									name: node.name,
+									createdAt: node.createdAt,
+								})),
+						)
+					: [],
+				count: query
 					.membersAggregate({
 						where: {
 							_and: [
@@ -168,6 +199,7 @@ const ListSuspense = () => {
 						},
 					})
 					.aggregate?.count(),
+			}),
 			{ cachePolicy: "no-cache" },
 		);
 	};
