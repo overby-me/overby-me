@@ -5,13 +5,19 @@
 }: {
   home.packages = with pkgs.pkgsUnstable;
     [
+      # Cross-platform GUI/CLI apps (Linux and Darwin).
+      mpv
+      rclone
+      signal-desktop
+      slack
+    ]
+    # GNOME/PipeWire/Wayland desktop apps that only build/apply on Linux.
+    ++ lib.optionals pkgs.stdenv.isLinux [
       #bitwarden
       fragments
       evince
       #bitwarden-desktop
-      mpv
       dconf-editor
-      rclone
       gnome-network-displays
       gnome-system-monitor
       file-roller
@@ -23,10 +29,8 @@
       kooha
       rustdesk-flutter
     ]
-    ++ lib.optionals pkgs.stdenv.hostPlatform.isx86_64 (
-      with pkgs.pkgsUnstable; [
-        slack
-        onlyoffice-desktopeditors
-      ]
-    );
+    # Linux x86_64-only (not available on Darwin or aarch64).
+    ++ lib.optionals (pkgs.stdenv.isLinux && pkgs.stdenv.hostPlatform.isx86_64) [
+      onlyoffice-desktopeditors
+    ];
 }
