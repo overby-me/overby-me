@@ -24,6 +24,12 @@
       services
       claude-code
     ])
+    # Darwin-only: make home-manager GUI apps show up in Spotlight/Launchpad.
+    ++ lib.optionals pkgs.stdenv.isDarwin (
+      with inputs.self.homeModules; [
+        darwin-apps
+      ]
+    )
     # Linux-only modules: the Zen Browser app plus the home modules that rely
     # on systemd user units (systemd, vibe).
     ++ lib.optionals pkgs.stdenv.isLinux (
