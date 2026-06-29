@@ -13,16 +13,18 @@ in {
       return 0 2>/dev/null || true
     fi
 
-    ln -sf ${./biome-nix.jsonc} biome.jsonc
-    ln -sf ${./deno.jsonc} deno.jsonc
-    ln -sf ${./lychee.toml} lychee.toml
-    ln -sf ${./rumdl.toml} rumdl.toml
-    ln -sf ${./typos.toml} typos.toml
-    ln -sf ${./secretsignore} .secretsignore
-    ln -sf ${commitlintrc} .commitlintrc.yml
-    mkdir -p .zed && cp -f ${./zed/settings.jsonc} .zed/settings.json
-    cp -f ${./ai-rules.md} .rules
-    mkdir -p .claude/rules && cp -f ${./ai-rules.md} .claude/rules/rules.md
+    # Copy (not symlink) configs so they are real, writable files, not symlinks into the read-only Nix store.
+    install -m 644 ${./biome-nix.jsonc} biome.jsonc
+    install -m 644 ${./deno.jsonc} deno.jsonc
+    install -m 644 ${./lychee.toml} lychee.toml
+    install -m 644 ${./rumdl.toml} rumdl.toml
+    install -m 644 ${./typos.toml} typos.toml
+    install -m 644 ${./secretsignore} .secretsignore
+    install -m 644 ${commitlintrc} .commitlintrc.yml
+    install -D -m 644 ${./zed/settings.jsonc} .zed/settings.json
+    install -m 644 ${./ai-rules.md} .rules
+    install -D -m 644 ${./ai-rules.md} .claude/rules/rules.md
+
     # Generate tangled workflow YAML files from Nickel config
     if [ -f .tangled/workflows.ncl ]; then
       mkdir -p .tangled/workflows
