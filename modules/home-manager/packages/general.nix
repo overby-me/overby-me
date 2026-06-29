@@ -7,7 +7,6 @@
     [
       # Cross-platform GUI/CLI apps (Linux and Darwin).
       mpv
-      rclone
       signal-desktop
       slack
     ]
