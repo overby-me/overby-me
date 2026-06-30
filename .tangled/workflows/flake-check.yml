@@ -6,14 +6,12 @@ dependencies:
   - git
 engine: microvm
 env: {}
-environment:
-  CACHIX_NAME: overby-me
-  NIX_CONFIG: |-
-    experimental-features = nix-command flakes ca-derivations dynamic-derivations recursive-nix
-    max-jobs = auto
+environment: {}
 image: nixos
 steps:
   - command: |-
+      export NIX_CONFIG="experimental-features = nix-command flakes ca-derivations dynamic-derivations recursive-nix
+      max-jobs = auto"
       nix build .#rust-cachix
       export PATH="$(readlink -f result)/bin:$PATH"
       cachix --version
@@ -21,16 +19,20 @@ steps:
   - command: |-
       export PATH="$(readlink -f result)/bin:$PATH"
       mkdir -p $HOME/.config/nix
-      cachix use $CACHIX_NAME
+      cachix use overby-me
     name: Setup Cachix
   - command: |-
+      export NIX_CONFIG="experimental-features = nix-command flakes ca-derivations dynamic-derivations recursive-nix
+      max-jobs = auto"
       ulimit -n 65536
       printf '{"PWD":"%s"}' "$PWD" > .env
       nix flake check --max-jobs 1 --override-input env path:$(realpath $PWD/.env)
     name: Nix flake check
   - command: |-
+      export NIX_CONFIG="experimental-features = nix-command flakes ca-derivations dynamic-derivations recursive-nix
+      max-jobs = auto"
       export PATH="$(readlink -f result)/bin:$PATH"
-      nix flake archive --json --override-input env path:$(realpath $PWD/.env) | nix run nixpkgs#jq -- -r '.path,(.inputs|to_entries[].value.path)' | cachix push $CACHIX_NAME
+      nix flake archive --json --override-input env path:$(realpath $PWD/.env) | nix run nixpkgs#jq -- -r '.path,(.inputs|to_entries[].value.path)' | cachix push overby-me
     name: Push to Cachix
 when:
   - branch: '**'

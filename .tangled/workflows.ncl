@@ -10,22 +10,17 @@ let { WorkflowConfig, .. } = import "../nickel/contracts/tangled-workflow/workfl
     engine = "microvm",
     image = "nixos",
     dependencies = ["git"],
-    environment = {
-      CACHIX_NAME = "overby-me",
-      # On the microVM (NixOS) image, builds are realised by the system nix
-      # daemon, which ignores a per-step ~/.config/nix/nix.conf. Set the
-      # experimental features (notably dynamic-derivations) via NIX_CONFIG so
-      # every nix invocation in every step requests them; microVM steps run as
-      # the trusted root user, so the daemon honours them.
-      NIX_CONFIG = m%"
-        experimental-features = nix-command flakes ca-derivations dynamic-derivations recursive-nix
-        max-jobs = auto
-      "%,
-    },
+    # The microVM (NixOS) image's nix has none of the experimental features
+    # this flake needs, and the engine only injects per-step `environment`,
+    # not a workflow-level one. Rather than rely on env injection, each nix
+    # step exports NIX_CONFIG inline so the evaluating `nix` process always
+    # sees the features (notably dynamic-derivations) and max-jobs.
     steps = [
       {
         name = "Build Cachix",
         command = m%%"
+          export NIX_CONFIG="experimental-features = nix-command flakes ca-derivations dynamic-derivations recursive-nix
+          max-jobs = auto"
           nix build .#rust-cachix
           export PATH="$(readlink -f result)/bin:$PATH"
           cachix --version
@@ -36,12 +31,14 @@ let { WorkflowConfig, .. } = import "../nickel/contracts/tangled-workflow/workfl
         command = m%%"
           export PATH="$(readlink -f result)/bin:$PATH"
           mkdir -p $HOME/.config/nix
-          cachix use $CACHIX_NAME
+          cachix use overby-me
         "%%,
       },
       {
         name = "Nix flake check",
         command = m%%"
+          export NIX_CONFIG="experimental-features = nix-command flakes ca-derivations dynamic-derivations recursive-nix
+          max-jobs = auto"
           ulimit -n 65536
           printf '{"PWD":"%s"}' "$PWD" > .env
           nix flake check --max-jobs 1 --override-input env path:$(realpath $PWD/.env)
@@ -50,8 +47,10 @@ let { WorkflowConfig, .. } = import "../nickel/contracts/tangled-workflow/workfl
       {
         name = "Push to Cachix",
         command = m%%"
+          export NIX_CONFIG="experimental-features = nix-command flakes ca-derivations dynamic-derivations recursive-nix
+          max-jobs = auto"
           export PATH="$(readlink -f result)/bin:$PATH"
-          nix flake archive --json --override-input env path:$(realpath $PWD/.env) | nix run nixpkgs#jq -- -r '.path,(.inputs|to_entries[].value.path)' | cachix push $CACHIX_NAME
+          nix flake archive --json --override-input env path:$(realpath $PWD/.env) | nix run nixpkgs#jq -- -r '.path,(.inputs|to_entries[].value.path)' | cachix push overby-me
         "%%,
       },
     ],
