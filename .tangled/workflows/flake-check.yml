@@ -8,6 +8,9 @@ engine: microvm
 env: {}
 environment:
   CACHIX_NAME: overby-me
+  NIX_CONFIG: |-
+    experimental-features = nix-command flakes ca-derivations dynamic-derivations recursive-nix
+    max-jobs = auto
 image: nixos
 steps:
   - command: |-
@@ -18,8 +21,6 @@ steps:
   - command: |-
       export PATH="$(readlink -f result)/bin:$PATH"
       mkdir -p $HOME/.config/nix
-      echo "experimental-features = nix-command flakes ca-derivations dynamic-derivations recursive-nix" > $HOME/.config/nix/nix.conf
-      echo "max-jobs = auto" >> $HOME/.config/nix/nix.conf
       cachix use $CACHIX_NAME
     name: Setup Cachix
   - command: |-

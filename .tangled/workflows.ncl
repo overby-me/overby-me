@@ -10,7 +10,18 @@ let { WorkflowConfig, .. } = import "../nickel/contracts/tangled-workflow/workfl
     engine = "microvm",
     image = "nixos",
     dependencies = ["git"],
-    environment = { CACHIX_NAME = "overby-me" },
+    environment = {
+      CACHIX_NAME = "overby-me",
+      # On the microVM (NixOS) image, builds are realised by the system nix
+      # daemon, which ignores a per-step ~/.config/nix/nix.conf. Set the
+      # experimental features (notably dynamic-derivations) via NIX_CONFIG so
+      # every nix invocation in every step requests them; microVM steps run as
+      # the trusted root user, so the daemon honours them.
+      NIX_CONFIG = m%"
+        experimental-features = nix-command flakes ca-derivations dynamic-derivations recursive-nix
+        max-jobs = auto
+      "%,
+    },
     steps = [
       {
         name = "Build Cachix",
@@ -25,8 +36,6 @@ let { WorkflowConfig, .. } = import "../nickel/contracts/tangled-workflow/workfl
         command = m%%"
           export PATH="$(readlink -f result)/bin:$PATH"
           mkdir -p $HOME/.config/nix
-          echo "experimental-features = nix-command flakes ca-derivations dynamic-derivations recursive-nix" > $HOME/.config/nix/nix.conf
-          echo "max-jobs = auto" >> $HOME/.config/nix/nix.conf
           cachix use $CACHIX_NAME
         "%%,
       },
