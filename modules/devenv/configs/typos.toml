@@ -22,6 +22,12 @@ extend-ignore-re = [
 ]
 
 [default.extend-words]
+# ODF = OpenDocument Format (file-format abbreviation, Euro-Office core libs)
+odf = "odf"
+ODF = "ODF"
+Odf = "Odf"
+# "mis-detects" — valid hyphenated prefix in euro-office PLAN.md
+mis = "mis"
 # Perl 5 test-suite filename (op/aassign.t — array assign)
 aassign = "aassign"
 # Perl 5 test-suite filename (op/wantarray_thr.t — threaded variant)
@@ -93,6 +99,9 @@ extrac25 = "extrac25"
 
 [files]
 extend-exclude = [
+  # Euro-Office upstream patches (verbatim upstream code, incl. its own typos
+  # like BUIDLER in build_3rdparty.py context lines).
+  "pkgs/euro-office/patches/*",
   "web/wiki/core/i18n/locales/da/translation.json",
   "web/wiki-dioxus/src/i18n.rs",
   "config/secrets/*.age",
