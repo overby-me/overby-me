@@ -50,23 +50,13 @@
   cef = callPackage ./cef.nix {};
   # Phase 6: the Qt/CEF desktop integration libraries (macOS port).
   desktop-sdk = callPackage ./desktop-sdk.nix {inherit cef;};
-  # Phase 7: the macOS GUI application bundle (built from source, no Xcode).
+  # Phase 7: the GUI application.
+  #   * macOS: the Cocoa app bundle (app.nix), built from source without Xcode.
+  #   * Linux: the Qt application (app-linux.nix), built from desktop-apps/win-linux.
   app =
     if stdenv.hostPlatform.isDarwin
     then callPackage ./app.nix {inherit cef desktop-sdk core data desktop-common;}
-    else appGate;
-
-  # On Linux the native application is not wired up yet (the Qt/CEF host path).
-  appGate = throw ''
-    euro-office: the native desktop application is not wired up on this
-    platform yet.
-
-    On Linux the from-source path is viable (PLAN.md §10 option 1); until it
-    lands, build the genuine pieces:
-
-        nix build .#euro-office.data
-        nix build .#euro-office.desktop-common
-  '';
+    else callPackage ./app-linux.nix {inherit cef core data desktop-common;};
 in
   # The discoverable top-level package is the data bundle (a real, buildable
   # derivation) so the flake's package set evaluates and builds everywhere. The

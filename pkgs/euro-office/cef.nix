@@ -31,11 +31,25 @@
 # The desktop-sdk build links against the framework with
 #   -F"$out/Release" -framework "Chromium Embedded Framework"
 # and pairs it with desktop-sdk's own vendored `libcef_dll` wrapper sources.
+#
+# Linux
+# -----
+# On Linux there is no .framework: CEF ships `Release/libcef.so` plus a separate
+# `Resources/` tree (locales + .pak + icudtl.dat). nixpkgs already packages CEF
+# (`cef-binary`) from this same Spotify CDN, including the load-bearing
+# `patchelf --set-rpath` on `libcef.so`/`libEGL.so`/… that makes it loadable in
+# the Nix store. nixpkgs' default is a far newer branch (147), so we *pin it to
+# the same branch 109.1.18 the desktop-sdk wrapper is ABI-locked to* via
+# `.override`, reusing all of nixpkgs' ELF fixup. The desktop-sdk build still
+# supplies its OWN ABI-matched `libcef_dll` wrapper sources (as on macOS); from
+# this package it consumes `include/`, `Release/libcef.so` and `Resources/`.
 {
   lib,
+  stdenv,
   stdenvNoCC,
   fetchurl,
   cpio,
+  cef-binary,
 }: let
   sources = import ./sources.nix {inherit lib;};
   inherit (sources) cef;
@@ -43,8 +57,18 @@
   # The Spotify CDN URL-encodes the '+' characters in the version as %2B.
   encodedVersion = lib.replaceStrings ["+"] ["%2B"] cef.version;
   platformTag = "macosarm64";
-in
-  stdenvNoCC.mkDerivation {
+
+  # Linux: reuse nixpkgs' cef-binary derivation, pinned to EO's branch 109.
+  linux = cef-binary.override {
+    version = cef.cefVersion;
+    inherit (cef) gitRevision chromiumVersion;
+    srcHashes = {
+      x86_64-linux = cef.linux64.hash;
+      aarch64-linux = cef.linuxarm64.hash;
+    };
+  };
+
+  darwin = stdenvNoCC.mkDerivation {
     pname = "cef-binary";
     inherit (cef) version;
 
@@ -94,4 +118,8 @@ in
       maintainers = with lib.maintainers; [overby-me];
       platforms = ["aarch64-darwin"];
     };
-  }
+  };
+in
+  if stdenv.hostPlatform.isDarwin
+  then darwin
+  else linux

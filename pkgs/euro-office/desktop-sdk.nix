@@ -43,6 +43,15 @@
   zlib,
   hunspell,
   libsForQt5,
+  # Linux desktop host deps: ascdocumentscore links GTK3 + X11/xcb/xkbcommon
+  # (the QCefView/X11 hosting path), not Qt (Qt is only needed at configure for
+  # common.cmake's find_package(Qt5)). macOS uses the NSView path instead.
+  gtk3,
+  glib,
+  atk,
+  libx11,
+  libxcb,
+  libxkbcommon,
   cef,
 }: let
   sources = import ./sources.nix {inherit lib;};
@@ -92,6 +101,9 @@ in
       ./patches/0006-fix-doctrenderer-build-hash.cpp-against-OpenSSL-3.x-n.patch
       ./patches/0007-build-cmake-link-system-zlib-for-IWorkFile-on-macOS.patch
       ./patches/0008-build-cmake-resolve-desktop-Qt-CEF-ICU-from-system-on.patch
+      # Linux builds the doctrenderer subdir without a JS engine (no V8); see
+      # core.nix and ./PLAN.md (Linux, option B).
+      ./patches/0009-build-cmake-allow-building-doctrenderer-without-a-JS.patch
     ];
 
     # desktop-sdk's own CMake patches (CEF framework path on macOS, etc.).
@@ -110,23 +122,41 @@ in
       qttools
     ];
 
-    buildInputs = [
-      boost
-      icu
-      openssl
-      curl
-      zlib
-      hunspell
-      qtbase
-      qtsvg
-      qtmultimedia
-      cef
-    ];
+    buildInputs =
+      [
+        boost
+        icu
+        openssl
+        curl
+        zlib
+        hunspell
+        qtbase
+        qtsvg
+        qtmultimedia
+        cef
+      ]
+      # The Linux ascdocumentscore host links GTK3 + X11/xcb/xkbcommon directly
+      # (cefview.cpp's X11 windowing); macOS hosts CEF in NSViews instead.
+      ++ lib.optionals stdenv.hostPlatform.isLinux [
+        gtk3
+        glib
+        atk
+        libx11
+        libxcb
+        libxkbcommon
+      ];
 
     dontUseCmakeConfigure = true;
     # We build a library, not a Qt application bundle; Qt is only present so
     # common.cmake's find_package(Qt5) succeeds at configure time.
     dontWrapQtApps = true;
+
+    # The desktop-sdk sources (x2t.h, the CEF cefwrapper) use non-literal printf
+    # format strings, which nixpkgs' default `format` hardening turns into hard
+    # errors via -Werror=format-security. Upstream's toolchain doesn't enable it;
+    # disable that one hardening flag (the macOS path suppresses it in-tree with
+    # -Wno-error=format-security, patch 0001).
+    hardeningDisable = ["format"];
 
     katanaSrc = katana-parser;
     gumboSrc = gumbo-parser;
@@ -240,6 +270,7 @@ in
         -DBUILD_DESKTOP=ON \
         -DTHIRD_PARTY_PREPARED=TRUE \
         -DEO_USE_SYSTEM_LIBS=ON \
+        ${lib.optionalString stdenv.hostPlatform.isLinux "-DDISABLE_DOCT_RENDERER=ON"} \
         -DEO_CORE_3RD_PARTY_INSTALL_DIR="$EO_THIRD_PARTY_INSTALL_DIR" \
         -DEO_CORE_OUTPUT_DIR="$PWD/package" \
         -DEO_CORE_TOOLS_DIR="$PWD/package" \
@@ -290,11 +321,11 @@ in
     passthru = {inherit cef;};
 
     meta = {
-      description = "Euro-Office desktop-sdk Qt/CEF integration (from-source, macOS port)";
+      description = "Euro-Office desktop-sdk CEF integration (ascdocumentscore, from-source)";
       homepage = "https://github.com/Euro-Office/desktop-sdk";
       license = lib.licenses.agpl3Plus;
       sourceProvenance = with lib.sourceTypes; [fromSource];
       maintainers = with lib.maintainers; [overby-me];
-      platforms = ["aarch64-darwin"];
+      platforms = lib.platforms.darwin ++ lib.platforms.linux;
     };
   }

@@ -91,6 +91,12 @@ in
       ./patches/0006-fix-doctrenderer-build-hash.cpp-against-OpenSSL-3.x-n.patch
       ./patches/0007-build-cmake-link-system-zlib-for-IWorkFile-on-macOS.patch
       ./patches/0008-build-cmake-resolve-desktop-Qt-CEF-ICU-from-system-on.patch
+      # Linux has no JavaScriptCore (the macOS V8-free path) and we don't ship
+      # V8, so build a stub DoctRenderer/DocBuilder via -DDISABLE_DOCT_RENDERER.
+      # The desktop editor renders through CEF's own V8; core's headless
+      # DoctRenderer (mail-merge, x2t bin->PDF/HTML/image, DocBuilder) is unused
+      # by the GUI. See ./PLAN.md (Linux, option B).
+      ./patches/0009-build-cmake-allow-building-doctrenderer-without-a-JS.patch
     ];
 
     # install_name_tool (used in installPhase to fix tool RPATHs) ships with the
@@ -229,6 +235,7 @@ in
           -DCMAKE_BUILD_TYPE=Release \
           -DTHIRD_PARTY_PREPARED=TRUE \
           -DEO_USE_SYSTEM_LIBS=ON \
+          ${lib.optionalString stdenv.hostPlatform.isLinux "-DDISABLE_DOCT_RENDERER=ON"} \
           -DEO_CORE_3RD_PARTY_INSTALL_DIR="$EO_THIRD_PARTY_INSTALL_DIR" \
           -DEO_CORE_OUTPUT_DIR="$PWD/package" \
           -DEO_CORE_TOOLS_DIR="$PWD/package"
@@ -274,12 +281,14 @@ in
       find build -type f \( -name '*.dylib' -o -name '*.so*' \) \
         -exec cp -v {} "$out/lib/" \; 2>/dev/null || true
 
-      # The tool binaries are built with an RPATH of @loader_path (siblings),
-      # but installed into bin/ with the dylibs in ../lib. Add that search path.
+      # The tool binaries are built with an origin-relative RPATH (siblings),
+      # but installed into bin/ with the libraries in ../lib. Point them there.
+      # Mach-O uses @loader_path + install_name_tool; ELF uses $ORIGIN + patchelf.
       if [ -d "$out/bin" ]; then
         for exe in "$out/bin"/*; do
           [ -f "$exe" ] || continue
           install_name_tool -add_rpath "@loader_path/../lib" "$exe" 2>/dev/null || true
+          patchelf --add-rpath '$ORIGIN/../lib' "$exe" 2>/dev/null || true
         done
       fi
 

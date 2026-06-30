@@ -25,9 +25,22 @@
   # an ONLYOFFICE binary.
   cef = {
     version = "109.1.18+gf1c41e4+chromium-109.0.5414.120";
+    # Split form consumed by the Linux path (nixpkgs `cef-binary.override`,
+    # which assembles the CDN URL from these three parts + the platform tag).
+    cefVersion = "109.1.18";
+    gitRevision = "f1c41e4";
+    chromiumVersion = "109.0.5414.120";
     macosarm64 = {
       # URL-encoded '+' as %2B; see cef.nix for the full URL assembly.
       hash = "sha256-9z6O9aUVFYY5BMLPpAWcwmqbM/CVFanrnMrDTqMVOOk=";
+    };
+    # Linux prebuilt (the `_minimal` tarball nixpkgs' cef-binary fetches). Filled
+    # in on first build; Nix prints the real hash.
+    linux64 = {
+      hash = "sha256-ukuco3y3d7JW/fXhjJvbxm6/BgNn6FQjmGdrQru8Dlk=";
+    };
+    linuxarm64 = {
+      hash = lib.fakeHash;
     };
   };
 
