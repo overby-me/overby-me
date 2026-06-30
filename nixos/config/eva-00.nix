@@ -61,10 +61,10 @@ inputs.nixos-raspberrypi.lib.nixosSystem {
     {nixpkgs.overlays = [inputs.self.overlays.default];}
 
     # ── zswap ──────────────────────────────────────────────────────────
-    ../../modules/nixos/core/zswap.nix
+    ../modules/core/zswap.nix
 
     # ── IronClaw service module ─────────────────────────────────────────
-    ../../modules/nixos/services/ironclaw.nix
+    ../modules/services/ironclaw.nix
 
     # ── Machine configuration ───────────────────────────────────────────
     ({

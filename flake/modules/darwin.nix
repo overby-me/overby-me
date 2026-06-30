@@ -3,9 +3,9 @@
 # Flakelight has no built-in darwinConfigurations/darwinModules outputs, so this
 # mirrors flakelight's own nixosConfigurations.nix / nixosModules.nix builtins:
 #
-#   - `darwinModules`        — discovered from modules/darwin, exported as the
+#   - `darwinModules`        — discovered from darwin/modules, exported as the
 #                              flake's `darwinModules` output.
-#   - `darwinConfigurations` — discovered from config/darwin, each entry built
+#   - `darwinConfigurations` — discovered from darwin/config, each entry built
 #                              with `nix-darwin.lib.darwinSystem` and exported as
 #                              the flake's `darwinConfigurations` output.
 #

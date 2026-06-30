@@ -135,19 +135,19 @@
       flakelight.builtinFormatters = false;
 
       imports = [
-        ./modules/flakelight/colmena.nix
-        ./modules/flakelight/darwin.nix
-        ./modules/flakelight/desktops.nix
-        ./modules/flakelight/devShellNames.nix
-        ./modules/flakelight/devenvConfigurations.nix
-        ./modules/flakelight/devenvModules.nix
-        ./modules/flakelight/filterUnsupported.nix
-        ./modules/flakelight/hardware.nix
-        ./modules/flakelight/lib.nix
-        ./modules/flakelight/perSystemLib.nix
-        ./modules/flakelight/secrets.nix
-        ./modules/flakelight/users.nix
-        ./modules/flakelight/zedExtensions.nix
+        ./flake/modules/colmena.nix
+        ./flake/modules/darwin.nix
+        ./flake/modules/desktops.nix
+        ./flake/modules/devShellNames.nix
+        ./flake/modules/devenvConfigurations.nix
+        ./flake/modules/devenvModules.nix
+        ./flake/modules/filterUnsupported.nix
+        ./flake/modules/hardware.nix
+        ./flake/modules/lib.nix
+        ./flake/modules/perSystemLib.nix
+        ./flake/modules/secrets.nix
+        ./flake/modules/users.nix
+        ./flake/modules/zedExtensions.nix
 
         ./ironclaw/bluesky
         ./ironclaw/calendar
@@ -212,20 +212,19 @@
       ];
       nixDirAliases = {
         packages = ["pkgs"];
-        flakelightModules = ["modules/flakelight"];
-        nixosConfigurations = ["config/nixos"];
-        nixosModules = ["modules/nixos"];
-        darwinConfigurations = ["config/darwin"];
-        darwinModules = ["modules/darwin"];
-        homeConfigurations = ["config/home-manager"];
-        homeModules = ["modules/home-manager"];
-        devenvConfiguration = ["config/devenv"];
-        devenvModules = ["modules/devenv"];
-        secrets = ["config/secrets"];
-        users = ["config/users"];
-        hardware = ["config/hardware"];
-        desktops = ["config/desktops"];
-        withOverlays = ["config/with-overlays"];
+        flakelightModules = ["flake/modules"];
+        nixosConfigurations = ["nixos/config"];
+        nixosModules = ["nixos/modules"];
+        darwinConfigurations = ["darwin/config"];
+        darwinModules = ["darwin/modules"];
+        homeConfigurations = ["home-manager/config"];
+        homeModules = ["home-manager/modules"];
+        devenvConfiguration = ["devenv/config"];
+        devenvModules = ["devenv/modules"];
+        users = ["home-manager/users"];
+        hardware = ["nixos/hardware"];
+        desktops = ["nixos/desktops"];
+        withOverlays = ["with-overlays"];
       };
     };
 }

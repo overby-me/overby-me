@@ -34,7 +34,7 @@ in {
       };
       typos = {
         enable = true;
-        settings.configPath = "./modules/devenv/configs/typos.toml";
+        settings.configPath = "./devenv/modules/configs/typos.toml";
       };
       nickel-format = {
         enable = true;

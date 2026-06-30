@@ -24,7 +24,7 @@
 #                     To produce this directory from an age-encrypted key:
 #                       mkdir -p /tmp/phone-hostkeys
 #                       rage -d -i ~/.ssh/id_ed25519 \
-#                         config/secrets/phone-host-key.age \
+#                         secrets/phone-host-key.age \
 #                         -o /tmp/phone-hostkeys/ssh_host_ed25519_key
 #                       ssh-keygen -y -f /tmp/phone-hostkeys/ssh_host_ed25519_key \
 #                         > /tmp/phone-hostkeys/ssh_host_ed25519_key.pub

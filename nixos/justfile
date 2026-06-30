@@ -14,7 +14,7 @@ deploy-all:
     colmena apply --verbose --impure
 
 rekey:
-    cd secrets && agenix --rekey
+    cd ../secrets && agenix --rekey
 
 # Mobile device image building and flashing
 
@@ -23,7 +23,7 @@ _flake_dir := justfile_directory() / ".."
 
 decrypt-hostkey device:
     mkdir -p /tmp/{{ device }}-hostkeys
-    rage -d -i ~/.ssh/id_ed25519 secrets/{{ device }}-host-key.age -o /tmp/{{ device }}-hostkeys/ssh_host_ed25519_key
+    rage -d -i ~/.ssh/id_ed25519 ../secrets/{{ device }}-host-key.age -o /tmp/{{ device }}-hostkeys/ssh_host_ed25519_key
     chmod 600 /tmp/{{ device }}-hostkeys/ssh_host_ed25519_key
     ssh-keygen -y -f /tmp/{{ device }}-hostkeys/ssh_host_ed25519_key > /tmp/{{ device }}-hostkeys/ssh_host_ed25519_key.pub
 
