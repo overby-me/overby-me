@@ -2,11 +2,13 @@ clone:
   depth: 1
   skip: false
   submodules: false
-dependencies: {}
-engine: nix
+dependencies:
+  - git
+engine: microvm
 env: {}
 environment:
   CACHIX_NAME: overby-me
+image: nixos
 steps:
   - command: |-
       nix build .#rust-cachix

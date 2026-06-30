@@ -7,7 +7,9 @@ let { WorkflowConfig, .. } = import "../nickel/contracts/tangled-workflow/workfl
 {
   flake-check | WorkflowConfig = {
     when = [{ event = ["push"], branch = "**" }],
-    engine = "nix",
+    engine = "microvm",
+    image = "nixos",
+    dependencies = ["git"],
     environment = { CACHIX_NAME = "overby-me" },
     steps = [
       {
@@ -48,7 +50,9 @@ let { WorkflowConfig, .. } = import "../nickel/contracts/tangled-workflow/workfl
 
   mirror | WorkflowConfig = {
     when = [{ event = ["push"], branch = "main" }],
-    engine = "nix",
+    engine = "microvm",
+    image = "nixos",
+    dependencies = ["git"],
     steps = [
       {
         name = "Fetch full main history",

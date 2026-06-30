@@ -31,13 +31,58 @@ let { StepConfig, .. } = import "./step.ncl" in
     dependencies
       | Dependencies
       | doc m%"
-        Packages to install, keyed by Nix registry.
-        Keys follow nix registry syntax (e.g. "nixpkgs", "nixpkgs/nixpkgs-unstable",
-        "git+https://tangled.org/@example.com/my_pkg").
-        Values are lists of package attribute names.
+        Packages to install.
+        microvm engine: a flat list of package names, e.g. [ "go", "gcc" ]
+        (NixOS images only). Bare names resolve from nixpkgs; flake references
+        such as "github:nixos/nixpkgs#hello" are also accepted.
+        nixery/nix engines: a map keyed by Nix registry (e.g. "nixpkgs",
+        "nixpkgs/nixpkgs-unstable", "git+https://tangled.org/@example.com/my_pkg")
+        to lists of package attribute names.
       "%
       | default
       = {},
+
+    registry
+      | { _ : String }
+      | doc m%"
+        microvm only. Remaps flake references, the same way `nix registry` does,
+        letting you pin or alias the flakes used by "dependencies"
+        (e.g. nixpkgs = "github:nixos/nixpkgs/nixos-unstable").
+      "%
+      | optional,
+
+    caches
+      | { _ : String }
+      | doc m%"
+        microvm only. Map of Nix binary cache URL to its trusted public key,
+        used to substitute dependencies instead of building them.
+      "%
+      | optional,
+
+    services
+      | doc m%"
+        microvm only. Passed straight through to NixOS — anything you could
+        write under `services.*` in a NixOS configuration (e.g. a PostgreSQL
+        database) you can write here.
+      "%
+      | optional,
+
+    virtualisation
+      | doc m%"
+        microvm only. Passed straight through to NixOS — anything you could
+        write under `virtualisation.*` (e.g. virtualisation.docker.enable = true
+        to run Docker inside the VM).
+      "%
+      | optional,
+
+    image
+      | String
+      | doc m%"
+        microvm only. Guest image to boot. "nixos" (the default) enables the
+        full workflow-level configuration above; non-NixOS images such as
+        "alpine" support only plain package installation.
+      "%
+      | optional,
 
     env
       | { _ : String }

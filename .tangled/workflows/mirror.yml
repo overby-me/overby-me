@@ -2,10 +2,12 @@ clone:
   depth: 1
   skip: false
   submodules: false
-dependencies: {}
-engine: nix
+dependencies:
+  - git
+engine: microvm
 env: {}
 environment: {}
+image: nixos
 steps:
   - command: git fetch --unshallow origin main
     name: Fetch full main history
