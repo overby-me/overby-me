@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: overby.me <nix@overby.me>
+Date: Tue, 30 Jun 2026 00:00:00 +0000
+Subject: [PATCH] cmake: link CEF framework from CEF_ROOT on macOS
+
+The ascdocumentscore link step looked for the "Chromium Embedded
+Framework" under Common/3dParty/cef/${CORE_BUILDS_PLATFORM_PREFIX}/build,
+but CORE_BUILDS_PLATFORM_PREFIX is hardcoded to "linux_64" and that
+prebuilt layout does not exist on macOS.
+
+Point the framework search path (-F) at ${CEF_ROOT}/Release instead.
+CEF_ROOT is the standard CEF binary-distribution root (set by
+core/common.cmake's BUILD_DESKTOP path), whose Release/ directory holds
+"Chromium Embedded Framework.framework". Quote the whole option so the
+literal quotes are not passed through to ld as part of the path.
+---
+ ChromiumBasedEditors/lib/CMakeLists.txt | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/ChromiumBasedEditors/lib/CMakeLists.txt b/ChromiumBasedEditors/lib/CMakeLists.txt
+--- a/ChromiumBasedEditors/lib/CMakeLists.txt
++++ b/ChromiumBasedEditors/lib/CMakeLists.txt
+@@ -1142,7 +1142,11 @@ if(WIN32)
+         Urlmon OpenGL32 Crypt32 Imm32
+     )
+ elseif(APPLE)
+-    target_link_options(ascdocumentscore PRIVATE -F"${CORE_ROOT_DIR}/Common/3dParty/cef/${CORE_BUILDS_PLATFORM_PREFIX}/build")
++    # CEF framework lives in the CEF binary distribution (CEF_ROOT, set by
++    # core/common.cmake). The legacy path under Common/3dParty/cef does not
++    # exist on macOS (that prefix is hardcoded for Linux). Quote the whole
++    # option so CMake keeps "-F<path>" as a single argument.
++    target_link_options(ascdocumentscore PRIVATE "-F${CEF_ROOT}/Release")
+     target_link_libraries(ascdocumentscore PRIVATE
+         "-framework Security"
+         "-framework AVFoundation"
