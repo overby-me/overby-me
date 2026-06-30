@@ -190,6 +190,7 @@
 |-|-|-|
 | [Cosmic-osk 🦀](https://tangled.org/@overby.me/overby.me/tree/main/pkgs/cosmic-osk.nix) | [GitHub](https://github.com/pop-os/cosmic-osk) | COSMIC on-screen keyboard |
 | [Cthulock 🦀](https://tangled.org/@overby.me/overby.me/tree/main/pkgs/cthulock.nix) | [GitHub](https://github.com/FriederHannenheim/cthulock) | Wayland screen locker focused on customizability |
+| [Euro-Office 💣🇪🇺](https://tangled.org/@overby.me/overby.me/tree/main/pkgs/euro-office/default.nix) | [GitHub](https://github.com/Euro-Office/DesktopEditors) | Sovereign European fork of ONLYOFFICE DesktopEditors |
 | [Non-spatial-input 🦀](https://tangled.org/@overby.me/overby.me/tree/main/pkgs/non-spatial-input.nix) | [GitHub](https://github.com/StardustXR/non-spatial-input) | Non-spatial input drivers (eclipse/manifold) for Stardust XR |
 | [Rustyfications 🦀](https://tangled.org/@overby.me/overby.me/tree/main/pkgs/rustyfications.nix) | [GitHub](https://github.com/bzglve/rustyfications) | Rusty notification daemon for Wayland |
 | [Stochos 🦀](https://tangled.org/@overby.me/overby.me/tree/main/pkgs/stochos.nix) | [GitHub](https://github.com/museslabs/stochos) | Keyboard-driven mouse control for Wayland and X11 |
