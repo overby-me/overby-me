@@ -39,8 +39,8 @@
     ]
     ++ lib.optionals pkgs.stdenv.isLinux [
       # Tangled (server/CI tooling, not needed on Darwin workstations).
-      tangled-cli
-      tangled-spindle-nix-engine # spindle-run
+      #tangled-cli
+      #tangled-spindle-nix-engine # spindle-run
 
       # ptrace-based syscall tracers; Linux-only (not available on Darwin).
       lurk
