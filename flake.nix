@@ -143,6 +143,7 @@
         ./flake/modules/devenvModules.nix
         ./flake/modules/filterUnsupported.nix
         ./flake/modules/hardware.nix
+        ./flake/modules/homeConfigurations.nix
         ./flake/modules/lib.nix
         ./flake/modules/perSystemLib.nix
         ./flake/modules/secrets.nix
