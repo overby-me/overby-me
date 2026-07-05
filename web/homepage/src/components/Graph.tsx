@@ -192,10 +192,10 @@ const nodes = [
 		url: "https://lemmy.world/u/noverby",
 	},
 	{
-		id: "NeoDB",
-		desc: "NeoDB\nProfile",
-		icon: "neodb.avif",
-		url: "https://neodb.social/users/niclasoverby",
+		id: "PopFeed",
+		desc: "PopFeed\nProfile",
+		icon: "popfeed.avif",
+		url: "https://popfeed.social/profile/did:plc:eukcx4amfqmhfrnkix7zwm34",
 	},
 ];
 
@@ -219,7 +219,7 @@ const links = [
 	{ source: "Commerce", target: "GitHub" },
 	{ source: "Immerse", target: "PixelFed" },
 	{ source: "Immerse", target: "Rocksky" },
-	{ source: "Immerse", target: "NeoDB" },
+	{ source: "Immerse", target: "PopFeed" },
 	{ source: "Immerse", target: "Wikipedia" },
 	{ source: "Immerse", target: "HappyCow" },
 	{ source: "Immerse", target: "Lemmy" },
@@ -230,7 +230,7 @@ const links = [
 	{ source: "Give", target: "HappyCow" },
 	{ source: "Improve", target: "Codeberg" },
 	{ source: "Improve", target: "Tangled" },
-	{ source: "Improve", target: "NeoDB" },
+	{ source: "Improve", target: "PopFeed" },
 	{ source: "Bluesky", target: "Atmosphere" },
 	{ source: "Tangled", target: "Atmosphere" },
 	{ source: "Rocksky", target: "Atmosphere" },
@@ -241,7 +241,7 @@ const links = [
 	{ source: "PixelFed", target: "Fediverse" },
 	{ source: "Mastodon", target: "Fediverse" },
 	{ source: "Lemmy", target: "Fediverse" },
-	{ source: "NeoDB", target: "Fediverse" },
+	{ source: "PopFeed", target: "Fediverse" },
 ];
 
 const graphData: GraphData = {
