@@ -126,7 +126,7 @@ const nodes = [
 		id: "Mastodon",
 		desc: "Mastodon\nProfile",
 		icon: "mastodon.avif",
-		url: "https://mas.to/@niclasoverby",
+		url: "https://mastodon.social/@overby.me@bsky.brid.gy",
 	},
 	{
 		id: "Bluesky",
