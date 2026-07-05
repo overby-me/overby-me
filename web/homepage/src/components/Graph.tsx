@@ -61,13 +61,6 @@ const nodes = [
 		color: "#6a5acd",
 	},
 	{
-		id: "Fediverse",
-		desc: "Fediverse\nInfo",
-		icon: "fediverse.avif",
-		color: "#000000",
-		url: "https://fediverse.info",
-	},
-	{
 		id: "LinkedIn",
 		desc: "LinkedIn\nProfile",
 		icon: "linkedin.avif",
@@ -110,14 +103,6 @@ const nodes = [
 		color: "#00ffff",
 		opacity: 0.1,
 		url: "https://atproto.com/",
-	},
-	{
-		id: "Bridgy",
-		desc: "Bridgy Fed",
-		icon: "bridgy.avif",
-		color: "#ffffff",
-		opacity: 0.1,
-		url: "https://fed.brid.gy",
 	},
 	{
 		id: "GitHub",
@@ -234,14 +219,7 @@ const links = [
 	{ source: "Bluesky", target: "Atmosphere" },
 	{ source: "Tangled", target: "Atmosphere" },
 	{ source: "Rocksky", target: "Atmosphere" },
-	{ source: "Bridgy", target: "Atmosphere" },
-	{ source: "Atmosphere", target: "Bridgy" },
-	{ source: "Fediverse", target: "Bridgy" },
-	{ source: "Bridgy", target: "Fediverse" },
-	{ source: "PixelFed", target: "Fediverse" },
-	{ source: "Mastodon", target: "Fediverse" },
-	{ source: "Lemmy", target: "Fediverse" },
-	{ source: "PopFeed", target: "Fediverse" },
+	{ source: "PopFeed", target: "Atmosphere" },
 ];
 
 const graphData: GraphData = {
