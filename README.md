@@ -510,6 +510,7 @@
 | ✅ | Performance Profiler | [Samply 🦀](https://github.com/mstange/samply) | | 🆗 | [Perf 💣](https://perf.wiki.kernel.org/) |
 | ✅ | TCP Tunnel | [Bore 🦀](https://github.com/ekzhang/bore) | | 🆗 | |
 | ✅ | Clipboard | [Wclip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/wclip) | | 🆗 | [wl-clipboard 💣🇷🇺](https://github.com/bugaevc/wl-clipboard), [wl-clipboard-rs 🦀🇷🇺](https://github.com/YaLTeR/wl-clipboard-rs) |
+| ✅ | Keymapper | [Kanata 🦀](https://github.com/jtroo/kanata) | | 🆗 | [Keyd 💣](https://github.com/rvaiya/keyd) |
 
 #### Version Control
 

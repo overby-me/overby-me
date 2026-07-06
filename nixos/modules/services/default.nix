@@ -4,7 +4,7 @@
     ./flatpak.nix
     ./fwupd.nix
     ./ironclaw.nix
-    ./keyd.nix
+    ./kanata.nix
     ./ollama.nix
     ./openssh.nix
     ./printing.nix
