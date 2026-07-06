@@ -704,11 +704,11 @@
 
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
-| ✅ | [Book Cataloging](https://en.wikipedia.org/wiki/Social_cataloging_application) | [Neodb 🐍](https://github.com/neodb-social/neodb) | [Popfeed 🌀](https://popfeed.social/profile/overby.me) | 🆗 | [Amazon Goodreads 🔒🇺🇸](https://www.goodreads.com/niclasoverby) |
-| ✅ | [Film Cataloging](https://en.wikipedia.org/wiki/Social_cataloging_application) | [Neodb 🐍](https://github.com/neodb-social/neodb) | [Popfeed 🌀](https://popfeed.social/profile/overby.me) | 🆗 | [Letterboxd 🔒🇳🇿](https://letterboxd.com/niclasoverby), [Amazon IMDB 🔒🇺🇸](https://www.imdb.com) |
+| ✅ | [Book Cataloging](https://en.wikipedia.org/wiki/Social_cataloging_application) | [Popfeed 🌀](https://popfeed.social/profile/overby.me) |  | 🆗 | [Neodb 🐍](https://github.com/neodb-social/neodb), [Amazon Goodreads 🔒🇺🇸](https://www.goodreads.com/niclasoverby) |
+| ✅ | [Film Cataloging](https://en.wikipedia.org/wiki/Social_cataloging_application) | [Popfeed 🌀](https://popfeed.social/profile/overby.me) |  | 🆗 | [Neodb 🐍](https://github.com/neodb-social/neodb), [Letterboxd 🔒🇳🇿](https://letterboxd.com/niclasoverby), [Amazon IMDB 🔒🇺🇸](https://www.imdb.com) |
 | ✅ | [Music Cataloging](https://en.wikipedia.org/wiki/Social_cataloging_application) | [Rocksky 🇲🇬🌀](https://rocksky.app/profile/overby.me) | [Teal.fm 🌀](https://teal.fm), [Popfeed 🌀](https://popfeed.social/profile/overby.me) | 🆗 | [Spotify 🔒🇪🇺](https://open.spotify.com/user/1148979230) |
+| ✅ | [Game Cataloging](https://en.wikipedia.org/wiki/Social_cataloging_application) | [Popfeed 🌀](https://popfeed.social/profile/overby.me) |  | 🆗 | [Neodb 🐍](https://github.com/neodb-social/neodb) |
 | 🚫 | [Fitness Cataloging](https://en.wikipedia.org/wiki/Social_cataloging_application) | [Garmin Connect 🔒🇺🇸](https://connect.garmin.com) | [Fitsky 🌀](https://fitsky.app), [FitTrackee 🐍](https://github.com/SamR1/FitTrackee) | [GPX 📖](https://en.wikipedia.org/wiki/GPS_Exchange_Format) | [Strava 🔒🇺🇸](https://www.strava.com/athletes/116425039) |
-| ✅ | [Game Cataloging](https://en.wikipedia.org/wiki/Social_cataloging_application) | [Neodb 🐍](https://github.com/neodb-social/neodb) | [Popfeed 🌀](https://popfeed.social/profile/overby.me) | 🆗 | |
 | ✅ | [Food Cataloging](https://en.wikipedia.org/wiki/Social_cataloging_application) | [HappyCow 👁️🔒🇺🇸](https://www.happycow.net/members/profile/niclasoverby) | [OpenVegeMap](https://github.com/Rudloff/openvegemap) | 🆗 | |
 
 #### Discussion Platforms
