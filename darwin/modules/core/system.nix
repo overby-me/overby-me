@@ -41,15 +41,25 @@
       # Require password immediately after sleep/screensaver.
       screencapture.location = "~/Pictures/screenshots";
 
-      # Let the Fn (Globe) key fall through to the hidutil swap below (needs restart).
+      # Let the Fn (Globe) key fall through to the hidutil mapping below (needs restart).
       hitoolbox.AppleFnUsageType = "Do Nothing";
     };
 
-    # Swap the left Control and Fn (Globe) keys via hidutil. enableKeyMapping is
-    # required for any system.keyboard remapping to be applied.
+    # Get as close to a Linux/PC feel as macOS's 1:1 hidutil remapping allows:
+    # map the bottom-left Fn (Globe) key to Left Command so the pinky position
+    # used for Ctrl+C on Linux triggers the real macOS copy/paste (Cmd) chord.
+    # (hidutil cannot translate Ctrl-combos into Cmd-combos, so this is the
+    # closest native approximation.) enableKeyMapping is required for any
+    # system.keyboard remapping to be applied.
     keyboard = {
       enableKeyMapping = true;
-      swapLeftCtrlAndFn = true;
+      userKeyMapping = [
+        {
+          # Fn (Globe, 0xFF00000003) -> Left Command (0x7000000E3)
+          HIDKeyboardModifierMappingSrc = 1095216660483;
+          HIDKeyboardModifierMappingDst = 30064771299;
+        }
+      ];
     };
   };
 
