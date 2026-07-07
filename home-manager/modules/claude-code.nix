@@ -148,12 +148,19 @@
     jj status             # Working copy status
     jj log                # Commit log
     jj diff               # Show changes
-    jj describe -m "msg"  # Set commit message on working copy
-    jj new                # Start a new change
+    jj commit -m "msg"    # Finalize current change and start a new one on top
+    jj describe -m "msg"  # Only to amend a description (does NOT finalize)
     jj bookmark set <name> -r @-  # Set bookmark (like a branch)
     jj git push           # Push to remote
     jj git fetch          # Fetch from remote
     ```
+
+    **Always finish work by committing it. Prefer `jj commit -m "msg"` over
+    `jj describe -m "msg"`.** `jj commit` sets the description and creates a new
+    empty change on top in one step, so the finished work is actually committed and
+    not left in the working copy. Only use `jj describe` to fix an existing change's
+    description without finalizing it. Never end a task leaving completed changes
+    uncommitted.
 
     **Never push directly to the default branch (`main`/`master`) unless the user explicitly asks.**
     Create a feature bookmark and push that instead:
