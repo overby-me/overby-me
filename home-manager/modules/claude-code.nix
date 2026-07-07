@@ -119,6 +119,21 @@
 
     All other commands are automatically rewritten by the Claude Code hook.
 
+    ## Shell
+
+    **Commands most likely run in [nushell](https://www.nushell.sh/), not bash/POSIX sh.**
+    Nushell is the configured default shell (`$env.SHELL = nu`). Its syntax differs
+    from POSIX shells, so:
+
+    - Set environment variables with `$env.VAR = "value"`, not `VAR=value` or `export`.
+    - There are no `&&`/`||` shell operators; use `;` to sequence and nushell's own
+      logic (`if`, `try`/`catch`) for conditionals.
+    - Command substitution is `(cmd)`, not `$(cmd)` or backticks.
+    - Glob/redirection and quoting rules differ from bash.
+    - Prefer nushell pipelines and built-ins (`ls`, `where`, `get`, `to json`, ...)
+      over POSIX idioms.
+    - If you need POSIX syntax, invoke it explicitly, e.g. `bash -c "..."`.
+
     ## Version Control
 
     **Always use `jj` (Jujutsu) instead of `git` for all VCS operations.**
