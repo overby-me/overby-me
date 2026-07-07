@@ -119,6 +119,12 @@
 
     All other commands are automatically rewritten by the Claude Code hook.
 
+    ## Writing Style
+
+    **Never use em dashes (`—`) in any output, commit messages, code comments, or
+    documentation.** Rewrite the sentence, or use a comma, colon, parentheses, or a
+    period instead.
+
     ## Shell
 
     **Commands most likely run in [nushell](https://www.nushell.sh/), not bash/POSIX sh.**
