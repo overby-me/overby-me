@@ -22,7 +22,12 @@
   # Likewise, nushell never picks up the nix / home-manager profile PATH
   # entries that /etc/zshenv and hm-session-vars.sh add for POSIX shells.
   # Prepend them so `nix`, `proxy-tool` and other HM packages are on PATH.
+  #
+  # `/run/wrappers/bin` MUST come first: it holds the setuid wrappers (sudo,
+  # mount, ping, …). Without it here, `/run/current-system/sw/bin` — which ships
+  # a non-setuid sudo — shadows the real wrapper and breaks `sudo`.
   profilePaths = [
+    "/run/wrappers/bin"
     "/etc/profiles/per-user/${config.home.username}/bin"
     "${config.home.homeDirectory}/.nix-profile/bin"
     "/run/current-system/sw/bin"
