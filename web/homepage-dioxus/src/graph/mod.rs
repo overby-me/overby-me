@@ -97,6 +97,11 @@ pub fn Graph() -> Element {
                 textures: tex_manager.textures,
                 canvas_width: display_width as f32,
                 canvas_height: display_height as f32,
+                dragging_node: None,
+                drag_plane_point: glam::Vec3::ZERO,
+                drag_moved: false,
+                press_x: 0.0,
+                press_y: 0.0,
             }));
 
             state.set(Some(Rc::clone(&gs)));
@@ -109,7 +114,35 @@ pub fn Graph() -> Element {
     let onmousedown = move |evt: MouseEvent| {
         let (x, y) = mouse_client_xy(&evt);
         if let Some(ref gs) = *state.read() {
-            gs.borrow_mut().camera.on_mouse_down(x, y);
+            let mut gs = gs.borrow_mut();
+
+            // Grab a node if one is under the cursor; otherwise orbit the camera.
+            let view = gs.camera.view_matrix();
+            let proj = gs.camera.projection_matrix();
+            let hit = interaction::pick_node(
+                x,
+                y,
+                gs.canvas_width,
+                gs.canvas_height,
+                &view,
+                &proj,
+                &gs.simulation,
+            );
+
+            if let Some(hit) = hit {
+                let idx = hit.node_index;
+                let pos = gs.simulation.positions[idx];
+                gs.dragging_node = Some(idx);
+                gs.drag_plane_point = pos;
+                gs.drag_moved = false;
+                gs.press_x = x;
+                gs.press_y = y;
+                gs.simulation.pin(idx, pos);
+                // Reheat so the rest of the graph reacts while dragging.
+                gs.simulation.set_alpha_target(0.3);
+            } else {
+                gs.camera.on_mouse_down(x, y);
+            }
         }
     };
 
@@ -118,6 +151,44 @@ pub fn Graph() -> Element {
             let (x, y) = mouse_client_xy(&evt);
             if let Some(ref gs) = *state.read() {
                 let mut gs_mut = gs.borrow_mut();
+
+                // If a node is grabbed, drag it in the plane facing the camera
+                // that passes through its grab position (constant depth).
+                if let Some(idx) = gs_mut.dragging_node {
+                    if (x - gs_mut.press_x).hypot(y - gs_mut.press_y) > 4.0 {
+                        gs_mut.drag_moved = true;
+                    }
+                    let view = gs_mut.camera.view_matrix();
+                    let proj = gs_mut.camera.projection_matrix();
+                    let (origin, dir) = interaction::screen_ray(
+                        x,
+                        y,
+                        gs_mut.canvas_width,
+                        gs_mut.canvas_height,
+                        &view,
+                        &proj,
+                    );
+                    // Plane normal points from the scene toward the camera eye.
+                    let normal = gs_mut.camera.eye_position().normalize();
+                    let plane_point = gs_mut.drag_plane_point;
+                    if let Some(p) = interaction::intersect_plane(origin, dir, plane_point, normal)
+                    {
+                        gs_mut.simulation.pin(idx, p);
+                    }
+                    tooltip_text.set(Some(NODES[idx].desc.to_string()));
+                    let (sx, sy) = interaction::project_to_screen(
+                        gs_mut.simulation.positions[idx],
+                        &view,
+                        &proj,
+                        gs_mut.canvas_width,
+                        gs_mut.canvas_height,
+                    );
+                    tooltip_x.set(sx);
+                    tooltip_y.set(sy);
+                    cursor_pointer.set(true);
+                    return;
+                }
+
                 gs_mut.camera.on_mouse_move(x, y);
 
                 // Check hover
@@ -157,31 +228,20 @@ pub fn Graph() -> Element {
 
     let onmouseup = move |_evt: MouseEvent| {
         if let Some(ref gs) = *state.read() {
-            gs.borrow_mut().camera.on_mouse_up();
-        }
-    };
-
-    let onclick = move |evt: MouseEvent| {
-        let (x, y) = mouse_client_xy(&evt);
-        if let Some(ref gs) = *state.read() {
-            let gs_ref = gs.borrow();
-            let view = gs_ref.camera.view_matrix();
-            let proj = gs_ref.camera.projection_matrix();
-            let hit = interaction::pick_node(
-                x,
-                y,
-                gs_ref.canvas_width,
-                gs_ref.canvas_height,
-                &view,
-                &proj,
-                &gs_ref.simulation,
-            );
-
-            if let Some(hit) = hit
-                && let Some(url) = NODES[hit.node_index].url
-                && let Some(window) = web_sys::window()
-            {
-                let _ = window.location().set_href(url);
+            let mut gs = gs.borrow_mut();
+            if let Some(idx) = gs.dragging_node.take() {
+                // Release the node and let the reheated layout absorb it.
+                gs.simulation.unpin(idx);
+                gs.simulation.set_alpha_target(0.0);
+                // A grab that never moved is a click: follow the node's link.
+                if !gs.drag_moved
+                    && let Some(url) = NODES[idx].url
+                    && let Some(window) = web_sys::window()
+                {
+                    let _ = window.location().set_href(url);
+                }
+            } else {
+                gs.camera.on_mouse_up();
             }
         }
     };
@@ -209,7 +269,6 @@ pub fn Graph() -> Element {
                 onmousedown: onmousedown,
                 onmousemove: onmousemove,
                 onmouseup: onmouseup,
-                onclick: onclick,
                 onwheel: onwheel,
             }
             // Tooltip overlay
@@ -231,6 +290,14 @@ struct GraphState {
     textures: Rc<RefCell<std::collections::HashMap<String, web_sys::WebGlTexture>>>,
     canvas_width: f32,
     canvas_height: f32,
+    // Node-drag state: which node is grabbed, the screen-parallel plane it moves
+    // in, whether the pointer actually moved (drag vs click), and the press
+    // position used to tell those apart.
+    dragging_node: Option<usize>,
+    drag_plane_point: glam::Vec3,
+    drag_moved: bool,
+    press_x: f32,
+    press_y: f32,
 }
 
 type AnimationClosure = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;

@@ -18,7 +18,8 @@ impl Camera {
         Self {
             theta: 0.0,
             phi: std::f32::consts::FRAC_PI_4,
-            distance: 300.0,
+            // Frames the settled d3 layout (max radius ~115) with margin.
+            distance: 240.0,
             fov: 75.0_f32.to_radians(),
             near: 0.1,
             far: 10000.0,

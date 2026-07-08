@@ -85,7 +85,10 @@ impl TextureManager {
             textures.borrow_mut().insert(icon_name.clone(), tex);
         }
 
-        let img = HtmlImageElement::new().unwrap();
+        let Ok(img) = HtmlImageElement::new() else {
+            // The placeholder texture is already in place; skip the async load.
+            return;
+        };
         img.set_cross_origin(Some("anonymous"));
 
         let gl_clone = gl.clone();

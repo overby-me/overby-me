@@ -30,7 +30,9 @@ const SPRITE_FRAG: &str = r#"
     uniform sampler2D u_texture;
     void main() {
         vec4 color = texture2D(u_texture, v_uv);
-        if (color.a < 0.01) discard;
+        // Alpha cutout: only solid texels draw (and write depth), so icons
+        // occlude by true depth rather than draw order.
+        if (color.a < 0.5) discard;
         gl_FragColor = color;
     }
 "#;
@@ -193,38 +195,45 @@ impl Renderer {
         let view = camera.view_matrix();
         let proj = camera.projection_matrix();
 
-        // 1. Draw links
-        self.draw_links(gl, &view, &proj, &simulation.positions);
-
-        // 2. Draw particles
-        self.draw_particles(gl, &view, &proj, particle_positions);
-
-        // 3. Draw nodes (spheres + sprites)
-        // Disable depth writing for transparent objects
-        gl.depth_mask(false);
+        // Pass 1: opaque icon sprites, depth writing ON. The sprite shader
+        // discards transparent texels (alpha cutout), so icons occlude one
+        // another by true depth instead of draw order. This is what keeps the
+        // central node from hiding behind everything.
+        gl.depth_mask(true);
         for (i, node) in NODES.iter().enumerate() {
-            let pos = simulation.positions[i];
-
-            // Draw sphere if node has color
-            if let Some(color_str) = node.color {
-                let color = parse_hex_color(color_str);
-                let opacity = node.opacity.unwrap_or(0.4);
-                self.draw_sphere(gl, &view, &proj, pos, color, opacity);
-            }
-
-            // Draw icon sprite
-            let size = if node.id == "Niclas Overby" {
-                40.0
-            } else if node.color.is_some() {
-                20.0
-            } else {
-                18.0
-            };
-
+            let size = node_size(node);
             if let Some(tex) = textures.get(node.icon) {
-                self.draw_sprite(gl, &view, &proj, pos, size, tex);
+                self.draw_sprite(gl, &view, &proj, simulation.positions[i], size, tex);
             }
         }
+
+        // Pass 2: translucent elements, depth writing OFF so they blend against
+        // the opaque icons without corrupting the depth buffer. They are still
+        // depth-tested, so links/halos correctly disappear behind nearer nodes.
+        gl.depth_mask(false);
+
+        // Links and their flow particles sit behind the nodes.
+        self.draw_links(gl, &view, &proj, &simulation.positions);
+        self.draw_particles(gl, &view, &proj, particle_positions);
+
+        // Colored halo spheres, drawn back-to-front (farthest first in view
+        // space) so overlapping translucency composites correctly.
+        let mut halos: Vec<(usize, f32, &str)> = NODES
+            .iter()
+            .enumerate()
+            .filter_map(|(i, n)| {
+                let color = n.color?;
+                let view_z = (view * simulation.positions[i].extend(1.0)).z;
+                Some((i, view_z, color))
+            })
+            .collect();
+        halos.sort_by(|a, b| a.1.total_cmp(&b.1));
+        for (i, _, color_str) in halos {
+            let color = parse_hex_color(color_str);
+            let opacity = NODES[i].opacity.unwrap_or(0.4);
+            self.draw_sphere(gl, &view, &proj, simulation.positions[i], color, opacity);
+        }
+
         gl.depth_mask(true);
     }
 
@@ -539,6 +548,16 @@ fn create_sphere_mesh(
         index_buffer,
         index_count,
     })
+}
+
+fn node_size(node: &super::data::GraphNode) -> f32 {
+    if node.id == "Niclas Overby" {
+        40.0
+    } else if node.color.is_some() {
+        20.0
+    } else {
+        18.0
+    }
 }
 
 fn parse_hex_color(hex: &str) -> Vec3 {

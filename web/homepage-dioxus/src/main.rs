@@ -4,6 +4,8 @@ mod pages;
 use dioxus::prelude::*;
 use pages::{Index, Search, X, Yt};
 
+const MAIN_CSS: Asset = asset!("/assets/main.css");
+
 #[derive(Routable, Clone, PartialEq, Debug)]
 enum Route {
     #[route("/")]
@@ -24,6 +26,7 @@ fn main() {
 #[component]
 fn App() -> Element {
     rsx! {
+        document::Stylesheet { href: MAIN_CSS }
         Router::<Route> {}
     }
 }

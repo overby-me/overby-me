@@ -7,16 +7,15 @@ pub struct HitResult {
     pub node_index: usize,
 }
 
-/// Unproject screen coordinates to a ray in world space, test against node spheres.
-pub fn pick_node(
+/// Unproject screen coordinates into a world-space ray (origin, direction).
+pub fn screen_ray(
     screen_x: f32,
     screen_y: f32,
     canvas_width: f32,
     canvas_height: f32,
     view: &Mat4,
     proj: &Mat4,
-    simulation: &Simulation,
-) -> Option<HitResult> {
+) -> (Vec3, Vec3) {
     // Convert screen coords to NDC
     let ndc_x = (2.0 * screen_x / canvas_width) - 1.0;
     let ndc_y = 1.0 - (2.0 * screen_y / canvas_height);
@@ -38,8 +37,40 @@ pub fn pick_node(
         far_point.z / far_point.w,
     );
 
-    let ray_dir = (far - near).normalize();
-    let ray_origin = near;
+    (near, (far - near).normalize())
+}
+
+/// Intersect a ray with a plane defined by a point and normal. Returns the hit
+/// point, or None if the ray is parallel to (or points away from) the plane.
+pub fn intersect_plane(
+    origin: Vec3,
+    dir: Vec3,
+    plane_point: Vec3,
+    plane_normal: Vec3,
+) -> Option<Vec3> {
+    let denom = dir.dot(plane_normal);
+    if denom.abs() < 1e-6 {
+        return None;
+    }
+    let t = (plane_point - origin).dot(plane_normal) / denom;
+    if t < 0.0 {
+        return None;
+    }
+    Some(origin + dir * t)
+}
+
+/// Unproject screen coordinates to a ray in world space, test against node spheres.
+pub fn pick_node(
+    screen_x: f32,
+    screen_y: f32,
+    canvas_width: f32,
+    canvas_height: f32,
+    view: &Mat4,
+    proj: &Mat4,
+    simulation: &Simulation,
+) -> Option<HitResult> {
+    let (ray_origin, ray_dir) =
+        screen_ray(screen_x, screen_y, canvas_width, canvas_height, view, proj);
 
     let mut closest: Option<(usize, f32)> = None;
 
@@ -54,7 +85,7 @@ pub fn pick_node(
         };
 
         if let Some(t) = ray_sphere_intersect(ray_origin, ray_dir, center, radius)
-            && (closest.is_none() || t < closest.unwrap().1)
+            && closest.is_none_or(|(_, ct)| t < ct)
         {
             closest = Some((i, t));
         }

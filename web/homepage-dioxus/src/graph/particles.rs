@@ -17,7 +17,8 @@ impl ParticleSystem {
         }
         Self {
             t_values,
-            speed: 0.004,
+            // react-force-graph's default linkDirectionalParticleSpeed.
+            speed: 0.01,
         }
     }
 
