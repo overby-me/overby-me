@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+console_error_panic_hook = "0.1"
 cynic = { version = "3", features = ["http-reqwest"] }
 dioxus = { version = "0.7.9" }
 gloo-timers = { version = "0.3", features = ["futures"] }

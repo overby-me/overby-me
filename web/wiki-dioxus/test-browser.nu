@@ -316,6 +316,15 @@ def main [
     wd-set-timeouts $session_id 20000
     log-info $"Session: ($session_id)"
 
+    # Prime the origin once and clear any persisted session, so the first test
+    # starts logged-out. A session left by an earlier run (or `--keep`) would
+    # otherwise make `/` render the authenticated home and hide the login links
+    # the shell smoke test asserts on. Doing it once here (rather than a second
+    # in-test navigate) keeps each test to a single, race-free page load.
+    wd-navigate $session_id $"(base-url)/"
+    wd-wait-for-mount $session_id 40 | ignore
+    wd-execute $session_id 'try{localStorage.clear()}catch(e){}; return "ok"' | ignore
+
     # Run tests
     let r = (test-shell $session_id $timeout $passed $failed); $passed = $r.passed; $failed = $r.failed
 
