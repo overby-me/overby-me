@@ -316,10 +316,17 @@ pub struct MimesBoolExp {
 pub struct MembersBoolExp {
     #[cynic(rename = "_and", skip_serializing_if = "Option::is_none")]
     pub and: Option<Vec<MembersBoolExp>>,
+    #[cynic(rename = "_or", skip_serializing_if = "Option::is_none")]
+    pub or: Option<Vec<MembersBoolExp>>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub accepted: Option<BooleanComparisonExp>,
     #[cynic(skip_serializing_if = "Option::is_none")]
+    pub email: Option<StringComparisonExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub node_id: Option<UuidComparisonExp>,
+    // Boxed to break the NodesBoolExp <-> MembersBoolExp type cycle.
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<Box<NodesBoolExp>>,
 }
 
 #[derive(cynic::InputObject, Debug, Default)]
@@ -408,6 +415,195 @@ pub struct NodesInsertInput {
     pub mutable: Option<bool>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub index: Option<i32>,
+}
+
+// --- Invitations (pending memberships on groups / events) ---
+
+#[derive(cynic::QueryVariables, Debug)]
+pub struct MembersWhereVariables {
+    pub where_clause: MembersBoolExp,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "query_root",
+    variables = "MembersWhereVariables"
+)]
+pub struct InvitationsQuery {
+    #[arguments(where: $where_clause)]
+    pub members: Vec<InvitationFields>,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "members")]
+pub struct InvitationFields {
+    pub id: Uuid,
+    pub parent: Option<ParentNodeFields>,
+}
+
+#[derive(cynic::QueryVariables, Debug)]
+pub struct UpdateMemberVariables {
+    pub pk: MembersPkColumnsInput,
+    pub set: MembersSetInput,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "mutation_root",
+    variables = "UpdateMemberVariables"
+)]
+pub struct UpdateMemberMutation {
+    #[arguments(pk_columns: $pk, _set: $set)]
+    pub update_member: Option<UpdatedMember>,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "members")]
+pub struct UpdatedMember {
+    pub id: Uuid,
+}
+
+#[derive(cynic::InputObject, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "members_pk_columns_input"
+)]
+pub struct MembersPkColumnsInput {
+    pub id: Uuid,
+}
+
+#[derive(cynic::InputObject, Debug, Default)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "members_set_input"
+)]
+pub struct MembersSetInput {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub accepted: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<Uuid>,
+}
+
+#[derive(cynic::QueryVariables, Debug)]
+pub struct DeleteMemberVariables {
+    pub id: Uuid,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "mutation_root",
+    variables = "DeleteMemberVariables"
+)]
+pub struct DeleteMemberMutation {
+    #[arguments(id: $id)]
+    pub delete_member: Option<UpdatedMember>,
+}
+
+/// Filter for the home invitations list: pending (accepted=false) memberships on
+/// a group or event that belong to this user (by node id or invited email).
+fn invitations_where_clause(user_id: &str, email: &str) -> MembersBoolExp {
+    MembersBoolExp {
+        and: Some(vec![
+            MembersBoolExp {
+                accepted: Some(BooleanComparisonExp { eq: Some(false) }),
+                ..Default::default()
+            },
+            MembersBoolExp {
+                or: Some(vec![
+                    MembersBoolExp {
+                        node_id: Some(UuidComparisonExp {
+                            eq: Some(Uuid(user_id.to_string())),
+                            is_null: None,
+                        }),
+                        ..Default::default()
+                    },
+                    MembersBoolExp {
+                        email: Some(StringComparisonExp {
+                            eq: Some(email.to_string()),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                ]),
+                ..Default::default()
+            },
+            MembersBoolExp {
+                parent: Some(Box::new(NodesBoolExp {
+                    or: Some(vec![
+                        NodesBoolExp {
+                            mime_id: Some(StringComparisonExp {
+                                eq: Some("wiki/group".to_string()),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        },
+                        NodesBoolExp {
+                            mime_id: Some(StringComparisonExp {
+                                eq: Some("wiki/event".to_string()),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        },
+                    ]),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        ]),
+        ..Default::default()
+    }
+}
+
+/// The user's pending group/event invitations.
+pub async fn query_invitations(
+    access_token: Option<&str>,
+    user_id: &str,
+    email: &str,
+) -> Result<Vec<InvitationFields>, String> {
+    let where_clause = invitations_where_clause(user_id, email);
+    let operation = InvitationsQuery::build(MembersWhereVariables { where_clause });
+    let result = execute(access_token, operation).await?;
+    Ok(result
+        .members
+        .into_iter()
+        .filter(|m| m.parent.is_some())
+        .collect())
+}
+
+/// Accept an invitation: mark the membership accepted and bind it to the user.
+pub async fn accept_invitation(
+    access_token: Option<&str>,
+    member_id: &str,
+    user_id: &str,
+) -> Result<bool, String> {
+    use cynic::MutationBuilder;
+    let operation = UpdateMemberMutation::build(UpdateMemberVariables {
+        pk: MembersPkColumnsInput {
+            id: Uuid(member_id.to_string()),
+        },
+        set: MembersSetInput {
+            accepted: Some(true),
+            node_id: Some(Uuid(user_id.to_string())),
+        },
+    });
+    let result = execute(access_token, operation).await?;
+    Ok(result.update_member.is_some())
+}
+
+/// Decline an invitation by deleting the membership row.
+pub async fn decline_invitation(
+    access_token: Option<&str>,
+    member_id: &str,
+) -> Result<bool, String> {
+    use cynic::MutationBuilder;
+    let operation = DeleteMemberMutation::build(DeleteMemberVariables {
+        id: Uuid(member_id.to_string()),
+    });
+    let result = execute(access_token, operation).await?;
+    Ok(result.delete_member.is_some())
 }
 
 // --- Update mutation ---
@@ -984,5 +1180,22 @@ mod tests {
         };
         let json = serde_json::to_string(&exp).expect("serialize comparison exp");
         assert_eq!(json, r#"{"_eq":"wiki/event"}"#);
+    }
+
+    /// The invitations filter must omit null fields and carry the pending +
+    /// group/event + user/email conditions the home list depends on.
+    #[test]
+    fn invitations_where_clause_is_well_formed() {
+        let clause = invitations_where_clause("user-1", "me@example.com");
+        let json = serde_json::to_string(&clause).expect("serialize invitations clause");
+        assert!(!json.contains("null"), "must omit null fields: {json}");
+        assert!(json.contains("\"accepted\""), "missing accepted: {json}");
+        assert!(json.contains("\"_or\""), "missing _or (user/email): {json}");
+        assert!(json.contains("me@example.com"), "missing email: {json}");
+        assert!(json.contains("user-1"), "missing user id: {json}");
+        assert!(
+            json.contains("wiki/group") && json.contains("wiki/event"),
+            "missing parent mime filter: {json}"
+        );
     }
 }
