@@ -1,137 +1,77 @@
-# RadikalWiki Dioxus Port Plan
+# RadikalWiki Dioxus — test & fix plan
 
-Port of `web/wiki` (React/TypeScript) to Rust using [Dioxus](https://github.com/DioxusLabs/dioxus) targeting WebAssembly.
+Goal: get `web/wiki-dioxus` to behave like the reference React app in
+[`web/wiki`](../wiki) against the same NHost/Hasura backend (production is
+<https://radikal.wiki>; test with a real account — never commit credentials).
 
-## Architecture Decisions
+The initial port (scaffolding through all screens) is done; this plan is about
+**verifying each area against the real backend and fixing what's broken**.
 
-| Concern | React (original) | Dioxus (port) |
-|---------|------------------|---------------|
-| Language | TypeScript | Rust |
-| UI Framework | React 18 + MUI 7 | Dioxus 0.7 + custom CSS |
-| Routing | React Router 7 | Dioxus Router |
-| State | React Context + GQty | Dioxus signals + cynic |
-| GraphQL | GQty (auto-generated) | cynic (struct-first, schema-validated) |
-| Auth | @nhost/react | NHost REST API via reqwest |
-| Styling | Emotion CSS-in-JS + MUI | CSS modules / Tailwind-style utility classes |
-| i18n | i18next | rust-i18n |
-| Rich Text | Slate.js | Custom read-only renderer (write later) |
-| Charts | DevExpress | plotters (SVG) or charming |
-| Maps | MapLibre GL | maplibre-rs or JS interop |
-| Build | Rsbuild (RSPack) | dx (Dioxus CLI 0.7) |
+## How to test
 
-## Phases
+- **Unit** — `just test` covers pure logic (GraphQL filter serialization, path
+  helpers). Add a test whenever a bug turns out to be wire-format/logic shaped.
+- **Browser** — `just test-browser` drives the real app in headless Servo over
+  WebDriver (see [`README.md`](./README.md)). Unauthenticated smoke tests run by
+  default; `WIKI_EMAIL=… WIKI_PASSWORD=… just test-browser` adds authenticated
+  checks against the live backend.
+- **Manual** — `just dev` + Servo/Chrome. Watch Servo stderr for
+  `RadikalWiki starting…`, `log::*` output, and wasm traps.
 
-### Phase 1: Project Scaffolding
+Workflow for each area below: reproduce in `web/wiki`, reproduce in
+`wiki-dioxus`, diff the GraphQL the two send, fix, then lock it in with a unit
+test and/or a `test-browser.nu` assertion.
 
-- [x] Create Cargo.toml with dioxus (web feature), dioxus-router
-- [x] Create Dioxus.toml for dx CLI
-- [x] Create main.rs entry point
-- [x] Create justfile for dev/build commands
-- [x] Add default.nix for Nix integration
-- [x] Initial commit
+## Known issues (fix first)
 
-### Phase 2: App Shell & Routing
+1. **Flaky wasm panic on authenticated load (Servo).** Loading a page that
+   already has a stored session sometimes traps with `unreachable executed`
+   during instantiation; a fresh logged-out→login flow is reliable. Next steps:
+   - Add `console_error_panic_hook` in `main.rs` so traps print a real message
+     instead of a bare `unreachable` — the single highest-value change for
+     debugging everything else.
+   - Suspect a Dioxus signal borrow panic (`already borrowed`) on the first
+     authenticated render (drawer `HomeList` + `use_resource` reading
+     `SESSION`). Audit for `.read()`/`.write()` overlap across an `.await`.
+   - Confirm whether it also reproduces in Chrome/Firefox (likely Servo-only).
 
-- [x] Define route enum (Home, Login, Register, ResetPassword, SetPassword, Unverified, Path)
-- [x] Create Layout component (responsive shell with bottom bar / side drawer)
-- [x] Create SearchField, BreadCrumbs placeholder
-- [x] Wire up basic navigation
+2. **Navigation into a group/event.** `resolve_path` now walks from the root
+   node (key `root`), which matches how `path_from_id` builds URLs. Verify a
+   click on a drawer item actually opens the context (blocked from browser
+   verification by issue 1). The queries are confirmed correct against the API.
 
-### Phase 3: Authentication
+3. **Release build won't load in Servo** (`Module fetching failed`). Only the
+   debug build runs there. Fine for dev/testing; investigate before relying on
+   Servo for production-build checks (loads fine in Chrome/Firefox).
 
-- [x] NHost client (sign in, sign up, sign out, session refresh via REST)
-- [x] Session context (user id, email, display name, access token)
-- [x] Auth pages: Login, Register, ResetPassword, SetPassword, Unverified
-- [x] Auth-gated UI (show login/register when unauthenticated)
+## Parity areas to verify against web/wiki
 
-### Phase 4: GraphQL & Data Model
+Each needs a real-backend pass; `[?]` = not yet verified end to end.
 
-- [x] Set up cynic with schema.graphql
-- [x] Node query/mutation operations (query by id, query by path, insert, update, delete)
-- [x] use_node hook equivalent returning reactive node data
-- [x] Path resolution (recursive key-based lookup like PathLoader)
+- `[x]` Auth: sign in / register / reset — sign-in verified live.
+- `[x]` Home list: groups + events (owned or accepted member), events by year.
+- `[?]` **Drawer node tree** (`MenuList` in wiki): wiki swaps the home list for
+  a lazy, expandable child tree once inside a context. The Dioxus drawer only
+  renders the home list — port `MenuList` for in-context navigation.
+- `[?]` Folder view: child list, icons, "not submitted" state, ordering.
+- `[?]` Content: Slate.js JSON → read-only render; author line; attachments.
+- `[?]` File: image / video / audio / PDF / download.
+- `[?]` Editor: contenteditable save/publish (wiki uses Slate).
+- `[?]` Voting: policy / change / poll / position / candidate.
+- `[?]` Speak: speaker queue join/remove.
+- `[?]` Members + invites: list, invite by email, accept/decline.
+- `[?]` Sort: drag-and-drop reordering + save.
+- `[?]` Search: live results (uses the same `_ilike` filter now un-broken).
+- `[?]` Breadcrumbs, `?app=` routing, snackbars, i18n (Da/En), theme.
+- `[ ]` Not ported yet from wiki: admin, perm, map, screen — defer.
 
-### Phase 5: Content Rendering
+## Cross-cutting checks
 
-- [x] MimeLoader equivalent — route by node.mimeId
-- [x] FolderApp — list children with icons
-- [x] ContentApp — render Slate.js JSON as read-only HTML
-- [x] FileApp — display files (images, PDF embed, audio/video)
-- [x] HomeApp — welcome screen with login/register or greeting
-
-### Phase 6: Interactive Features
-
-- [x] EditorApp — contenteditable rich text editor with save/publish
-- [x] VoteApp / PolicyApp / PollApp — voting UI with poll options display
-- [x] SpeakApp — speaker queue with join/remove actions via GraphQL mutations
-- [x] MemberApp — member management with invite input
-- [x] SortApp — HTML5 drag-and-drop reordering with save
-
-### Phase 7: Polish
-
-- [x] i18n with Danish and English translations
-- [x] M3-inspired theming (light/dark toggle, color tokens)
-- [x] Error boundaries and loading states
-- [x] Responsive design (mobile drawer, desktop sidebar)
-- [x] Breadcrumb navigation
-- [x] GraphQL search with live results
-- [x] User menu popover with all options
-- [x] Language toggle (Da/En) in user menu
-- [x] App rail sidebar for large screens
-- [x] ?app= query parameter routing
-- [x] Full-path folder navigation
-- [x] Snackbar notifications
-
-### Phase 8: Build & Deploy
-
-- [x] Nix package derivation
-- [x] Optimized WASM build (dx build --release runs wasm-opt)
-- [x] Asset hashing (handled by Dioxus CLI manganis)
-
-## File Structure
-
-```text
-web/wiki-dioxus/
-├── PLAN.md
-├── Cargo.toml
-├── Dioxus.toml
-├── justfile
-├── default.nix
-├── assets/
-│   └── style.css            # M3-inspired theme (light/dark CSS vars)
-├── graphql/
-│   └── schema.graphql       # Hasura schema (from wiki/core/gql/schema.gql)
-└── src/
-    ├── main.rs              # Entry point, router setup, snackbar
-    ├── route.rs             # Route enum definition (#[derive(Routable)])
-    ├── nhost.rs             # NHost auth client (REST API)
-    ├── graphql.rs           # cynic GraphQL client + queries + mutations
-    ├── session.rs           # Session context (global signals + localStorage)
-    ├── i18n.rs              # Internationalization (Da/En inline translations)
-    ├── theme.rs             # Theme context (light/dark toggle)
-    ├── snackbar.rs          # Snackbar notification system
-    └── components/
-        ├── mod.rs
-        ├── layout.rs        # Layout, Breadcrumbs, SearchBar, UserMenu, AppRail, Drawer
-        ├── home.rs          # HomeApp (welcome screen)
-        ├── auth.rs          # Login, Register, ResetPassword, SetPassword, Unverified
-        ├── folder.rs        # FolderApp (child list with full-path navigation)
-        ├── content.rs       # ContentApp (Slate.js JSON read-only renderer)
-        ├── file.rs          # FileApp (image, video, audio, PDF, download)
-        ├── node.rs          # NodeApp (generic node viewer)
-        ├── loader.rs        # PathPage, MimeLoader, ?app= routing
-        ├── vote.rs          # VoteApp, PolicyApp, PollApp
-        ├── speak.rs         # SpeakApp (join/remove via mutations)
-        ├── member.rs        # MemberApp (member list + invite)
-        ├── editor.rs        # EditorApp (contenteditable + save)
-        └── sort.rs          # SortApp (HTML5 drag-and-drop)
-```
-
-## Notes
-
-- EditorApp uses `contenteditable` for editing — a full Slate.js port would need deeper JS interop
-- SortApp uses native HTML5 drag-and-drop events
-- Slate.js read-only rendering is fully implemented in pure Rust
-- GraphQL mutations are implemented for node insert/delete (used by SpeakApp)
-- The NHost GraphQL endpoint is at `https://{subdomain}.hasura.{region}.nhost.run/v1/graphql`
-- Auth endpoint is at `https://{subdomain}.auth.{region}.nhost.run/v1`
+- **GraphQL correctness:** every filtered query must omit unset fields (Hasura
+  rejects `null` comparison expressions). This bit the home list; grep for
+  `NodesBoolExp`/comparison structs when adding queries and prefer
+  `..Default::default()` + `skip_serializing_if`.
+- **Permissions:** queries run with the user token; compare row visibility with
+  `web/wiki` for the same account.
+- **Field naming:** cynic maps snake_case Rust fields to camelCase GraphQL
+  (`mime_id` → `mimeId`); the schema is camelCase.

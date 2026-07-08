@@ -1,16 +1,26 @@
 {
-  devShells.wiki-dioxus = pkgs: {
-    packages = with pkgs; [
-      which
-      just
-      cargo
-      rustc
-      rust-analyzer
-      dioxus-cli
-      wasm-bindgen-cli
-      binaryen
-      lld
-    ];
+  devShells.wiki-dioxus = pkgs: let
+    inherit (pkgs) lib stdenv;
+  in {
+    packages = with pkgs;
+      [
+        which
+        just
+        cargo
+        rustc
+        rust-analyzer
+        dioxus-cli
+        wasm-bindgen-cli
+        binaryen
+        lld
+        # Browser testing (test-browser.nu): headless Servo driven over WebDriver.
+        curl
+        jq
+      ]
+      # Servo is broken on Darwin in nixpkgs; browser tests are Linux-only.
+      ++ lib.optionals stdenv.isLinux [
+        servo
+      ];
   };
 
   packages.wiki-dioxus-frontend = {

@@ -14,3 +14,12 @@ fmt:
 
 clippy:
     cargo clippy --target wasm32-unknown-unknown -- -D warnings
+
+# Unit tests (host target — GraphQL serialization, path helpers, etc.)
+test:
+    cargo test
+
+# Browser smoke tests: build, serve, and drive the app in headless Servo.
+# Set WIKI_EMAIL / WIKI_PASSWORD to also run the authenticated tests.
+test-browser *ARGS:
+    nu test-browser.nu {{ARGS}}
