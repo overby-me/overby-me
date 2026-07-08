@@ -6,9 +6,12 @@
   devShells.homepage-dioxus = pkgs: {
     packages = with pkgs; [
       just
-      binaryen
+      cargo
+      rustc
+      rust-analyzer
       dioxus-cli
-      wasm-pack
+      wasm-bindgen-cli
+      binaryen
     ];
   };
 }
