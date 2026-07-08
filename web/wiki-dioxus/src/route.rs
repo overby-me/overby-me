@@ -29,6 +29,12 @@ pub enum Route {
     #[route("/user/unverified")]
     Unverified {},
 
-    #[route("/:..segments")]
-    PathPage { segments: Vec<String> },
+    // `app` carries the `?app=` query (vote/speak/member/editor/sort). Modelling
+    // it in the route keeps Dioxus from stripping the query on navigation, so
+    // the app rail and deep links work; absent, it is None (URL has no `app=`).
+    #[route("/:..segments?:app")]
+    PathPage {
+        segments: Vec<String>,
+        app: Option<String>,
+    },
 }

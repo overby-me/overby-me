@@ -157,7 +157,10 @@ fn SearchBar(
                                 let key = node.key.clone();
                                 let on_close = on_close;
                                 move |_| {
-                                    nav.push(Route::PathPage { segments: vec![key.clone()] });
+                                    nav.push(Route::PathPage {
+                                        segments: vec![key.clone()],
+                                        app: None,
+                                    });
                                     on_close.call(());
                                 }
                             },
@@ -186,7 +189,7 @@ fn Breadcrumbs() -> Element {
     let route = use_route::<Route>();
 
     let segments: Vec<String> = match &route {
-        Route::PathPage { segments } => segments.clone(),
+        Route::PathPage { segments, .. } => segments.clone(),
         _ => vec![],
     };
 
@@ -201,6 +204,7 @@ fn Breadcrumbs() -> Element {
                     Link {
                         to: Route::PathPage {
                             segments: segments[..=i].to_vec(),
+                            app: None,
                         },
                         "{segment}"
                     }
@@ -213,38 +217,70 @@ fn Breadcrumbs() -> Element {
 /// App rail — vertical icon navigation for large screens
 #[component]
 fn AppRail() -> Element {
+    let session = use_session();
+    let is_auth = session.read().is_authenticated();
     let route = use_route::<Route>();
     let segments: Vec<String> = match &route {
-        Route::PathPage { segments } => segments.clone(),
+        Route::PathPage { segments, .. } => segments.clone(),
         _ => vec![],
+    };
+
+    let current_app = match &route {
+        Route::PathPage { app, .. } => app.clone(),
+        _ => None,
     };
 
     if segments.is_empty() {
         return rsx! {};
     }
 
-    let apps = [
+    // The apps operate on the context (the first path segment), mirroring the
+    // React `useApps`: Home, Folder, and — when signed in — Speak and Vote. The
+    // app is part of the route's query, so these navigate client-side and the
+    // resolver swaps the view without a reload.
+    let context = segments.first().cloned().unwrap_or_default();
+
+    let mut apps: Vec<(&str, String, Route, bool)> = vec![
+        ("app/home", t("common.home"), Route::HomeApp {}, false),
         (
-            "member",
-            super::loader::mime_icon("app/member"),
-            t("mime.members"),
+            "app/folder",
+            t("mime.folder"),
+            Route::PathPage {
+                segments: vec![context.clone()],
+                app: None,
+            },
+            current_app.is_none(),
         ),
-        (
-            "speak",
-            super::loader::mime_icon("app/speak"),
-            t("mime.speak"),
-        ),
-        ("vote", super::loader::mime_icon("app/vote"), t("mime.vote")),
     ];
+    if is_auth {
+        apps.push((
+            "app/speak",
+            t("mime.speak"),
+            Route::PathPage {
+                segments: vec![context.clone()],
+                app: Some("speak".to_string()),
+            },
+            current_app.as_deref() == Some("speak"),
+        ));
+        apps.push((
+            "app/vote",
+            t("mime.vote"),
+            Route::PathPage {
+                segments: vec![context.clone()],
+                app: Some("vote".to_string()),
+            },
+            current_app.as_deref() == Some("vote"),
+        ));
+    }
 
     rsx! {
-        for (_app_id , icon , label) in apps.iter() {
+        for (mime_id , label , to , active) in apps.into_iter() {
             Link {
-                to: Route::PathPage { segments: segments.clone() },
-                class: "btn-icon",
+                to,
+                class: if active { "btn-icon active" } else { "btn-icon" },
                 style: "flex-direction: column; gap: 2px; width: 56px; height: 56px;",
                 title: "{label}",
-                span { style: "font-size: 20px;", "{icon}" }
+                span { style: "font-size: 20px;", "{super::loader::mime_icon(mime_id)}" }
                 span { style: "font-size: 10px; color: var(--md-on-surface-variant);", "{label}" }
             }
         }
@@ -400,7 +436,7 @@ fn DrawerContent() -> Element {
     let session = use_session();
     let route = use_route::<Route>();
     let segments: Vec<String> = match &route {
-        Route::PathPage { segments } => segments.clone(),
+        Route::PathPage { segments, .. } => segments.clone(),
         _ => vec![],
     };
     let is_auth = session.read().is_authenticated();
@@ -595,7 +631,10 @@ fn DrawerNodeItem(
             class: if selected { "list-item selected" } else { "list-item" },
             style: "cursor: pointer; {indent}",
             onclick: move |_| {
-                nav.push(Route::PathPage { segments: nav_path.clone() });
+                nav.push(Route::PathPage {
+                    segments: nav_path.clone(),
+                    app: None,
+                });
             },
             div { class: "avatar small", "{icon}" }
             div { class: "list-item-text",
@@ -737,7 +776,7 @@ fn ContextItem(node: graphql::ContextNodeFields) -> Element {
                 spawn(async move {
                     if let Ok(segments) = graphql::path_from_id(token.as_deref(), &node_id).await {
                         if !segments.is_empty() {
-                            nav.push(Route::PathPage { segments });
+                            nav.push(Route::PathPage { segments, app: None });
                         }
                     }
                 });

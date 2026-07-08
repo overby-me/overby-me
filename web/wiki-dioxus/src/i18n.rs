@@ -59,6 +59,38 @@ fn en_translations() -> HashMap<String, serde_json::Value> {
     serde_json::from_str(EN_JSON).unwrap_or_default()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The embedded JSON must parse and contain the sections the components use.
+    /// A malformed blob would parse to an empty map and every key would silently
+    /// fall back to itself (e.g. the literal "vote.noVoteNow" rendered on screen).
+    #[test]
+    fn translations_parse_and_cover_component_keys() {
+        for (lang, map) in [("en", en_translations()), ("da", da_translations())] {
+            assert!(!map.is_empty(), "{lang} translations failed to parse");
+            for key in [
+                "common.home",
+                "vote.noVoteNow",
+                "vote.castVote",
+                "vote.amendments",
+                "speak.emptyList",
+                "speak.joinSpeakerList",
+                "poll.managePoll",
+                "sort.saveSorting",
+                "invite.nameOrEmail",
+                "mime.vote",
+            ] {
+                assert!(
+                    lookup_key(&map, key).is_some(),
+                    "{lang} missing translation for {key}"
+                );
+            }
+        }
+    }
+}
+
 fn da_translations() -> HashMap<String, serde_json::Value> {
     serde_json::from_str(DA_JSON).unwrap_or_default()
 }
@@ -164,6 +196,53 @@ const EN_JSON: &str = r#"{
         "documentUnavailable": "The document is not available",
         "notFoundOrNoAccess": "This may be because the document does not exist, or you do not have access to it.",
         "maybeLoginForAccess": "You may be able to access the document by logging in:"
+    },
+    "vote": {
+        "newAmendment": "New Amendment",
+        "newComment": "New Comment",
+        "question": "Question",
+        "noAmendments": "No amendments",
+        "noComments": "No comments",
+        "noQuestions": "No questions",
+        "amendments": "Amendments",
+        "questions": "Questions",
+        "hasVotingRight": "You have voting rights",
+        "noVotingRight": "You do not have voting rights",
+        "hasNotVoted": "You have not voted",
+        "hasVoted": "You have voted",
+        "updateStatus": "Update status",
+        "noVoteNow": "No vote right now",
+        "castVote": "Vote",
+        "voteCount": "Number of votes"
+    },
+    "speak": {
+        "manageSpeakerList": "Manage Speaker List",
+        "joinSpeakerList": "Join the speaker list",
+        "open": "Open",
+        "close": "Close",
+        "talk": "Talk",
+        "question": "Question",
+        "clarify": "Clarify",
+        "misunderstood": "Misunderstood",
+        "procedure": "Procedure",
+        "speakerList": "Speaker List",
+        "removeFromList": "Remove from speaker list",
+        "emptyList": "The speaker list is empty"
+    },
+    "poll": {
+        "managePoll": "Manage Poll",
+        "hideResult": "Hide result"
+    },
+    "sort": {
+        "saveSorting": "Save sorting"
+    },
+    "invite": {
+        "addAccess": "Add access",
+        "noInvitations": "No invitations",
+        "invitations": "Invitations",
+        "invite": "Invite",
+        "nameOrEmail": "Name or Email",
+        "acceptInvitation": "Accept invitation to {{name}}"
     },
     "mime": {
         "group": "Group",
@@ -282,6 +361,53 @@ const DA_JSON: &str = r#"{
         "documentUnavailable": "Dokumentet er ikke tilg\u00e6ngeligt",
         "notFoundOrNoAccess": "Dette kan v\u00e6re fordi dokumentet ikke eksisterer, eller du ikke har adgang til det.",
         "maybeLoginForAccess": "Du kan muligvis f\u00e5 adgang til dokumentet ved at logge ind:"
+    },
+    "vote": {
+        "newAmendment": "Nyt \u00c6ndringsforslag",
+        "newComment": "Ny Kommentar",
+        "question": "Sp\u00f8rgsm\u00e5l",
+        "noAmendments": "Ingen \u00e6ndringsforslag",
+        "noComments": "Ingen kommentarer",
+        "noQuestions": "Ingen sp\u00f8rgsm\u00e5l",
+        "amendments": "\u00c6ndringsforslag",
+        "questions": "Sp\u00f8rgsm\u00e5l",
+        "hasVotingRight": "Du har stemmeret",
+        "noVotingRight": "Du har ikke stemmeret",
+        "hasNotVoted": "Du har ikke stemt",
+        "hasVoted": "Du har stemt",
+        "updateStatus": "Opdater status",
+        "noVoteNow": "Ingen afstemning nu",
+        "castVote": "Stem",
+        "voteCount": "Antal stemmer"
+    },
+    "speak": {
+        "manageSpeakerList": "Administrer Talerlisten",
+        "joinSpeakerList": "Kom p\u00e5 talerlisten",
+        "open": "\u00c5ben",
+        "close": "Luk",
+        "talk": "Tal",
+        "question": "Sp\u00f8rgsm\u00e5l",
+        "clarify": "Opklar",
+        "misunderstood": "Misforst\u00e5et",
+        "procedure": "Procedure",
+        "speakerList": "Talerliste",
+        "removeFromList": "Fjern fra talerliste",
+        "emptyList": "Talerlisten er tom"
+    },
+    "poll": {
+        "managePoll": "Administrer Afstemning",
+        "hideResult": "Skjul resultatet"
+    },
+    "sort": {
+        "saveSorting": "Gem sortering"
+    },
+    "invite": {
+        "addAccess": "Tilf\u00f8j adgang",
+        "noInvitations": "Ingen invitationer",
+        "invitations": "Invitationer",
+        "invite": "Inviter",
+        "nameOrEmail": "Navn eller Email",
+        "acceptInvitation": "Accepter invitation til {{name}}"
     },
     "mime": {
         "group": "Gruppe",

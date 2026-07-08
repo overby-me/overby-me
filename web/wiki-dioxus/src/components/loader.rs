@@ -21,18 +21,21 @@ use super::vote::{PolicyApp, PollApp, VoteApp};
 /// only re-runs for reactive reads inside its closure, not for a changed prop, so
 /// without this the view would keep showing the previously resolved node.
 #[component]
-pub fn PathPage(segments: Vec<String>) -> Element {
-    // Join with a separator that cannot appear in node keys (not "/", which a
-    // lint mistakes for filesystem path joining) so the key is unique per path.
+pub fn PathPage(segments: Vec<String>, app: Option<String>) -> Element {
+    // Re-key the resolver on the path (not the app) so navigating between two
+    // paths remounts and refetches, while switching apps at the same path just
+    // re-renders and swaps the view without a redundant query. Join with a
+    // separator that cannot appear in node keys (not "/", which a lint mistakes
+    // for filesystem path joining) so the key is unique per path.
     let key = segments.join("\u{1f}");
     rsx! {
-        PathResolver { key: "{key}", segments }
+        PathResolver { key: "{key}", segments, app }
     }
 }
 
 /// Resolves a path to a node and renders the matching app. Remounted per path.
 #[component]
-fn PathResolver(segments: Vec<String>) -> Element {
+fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
     let session = use_session();
     let access_token = session.read().access_token.clone();
     let segments_clone = segments.clone();
@@ -46,21 +49,8 @@ fn PathResolver(segments: Vec<String>) -> Element {
     let result = node_future.read().clone();
     match result {
         Some(Ok(Some(node))) => {
-            // Check for ?app= query parameter
-            let app_param = web_sys::window()
-                .and_then(|w| w.location().search().ok())
-                .and_then(|s| {
-                    s.trim_start_matches('?').split('&').find_map(|pair| {
-                        let mut parts = pair.splitn(2, '=');
-                        if parts.next() == Some("app") {
-                            parts.next().map(String::from)
-                        } else {
-                            None
-                        }
-                    })
-                });
-
-            match app_param.as_deref() {
+            // The active app comes from the route's `?app=` query.
+            match app.as_deref() {
                 Some("vote") => rsx! { VoteApp { node } },
                 Some("speak") => rsx! { SpeakApp { node } },
                 Some("member") => rsx! { MemberApp { node } },

@@ -310,6 +310,36 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         log-warn "context has no folder-item children — skipping child-nav check"
     }
 
+    # ── App rail switches apps via the ?app= route query (client-side) ────
+    # Go back to the context, then click the Vote rail item and confirm the URL
+    # gains ?app=vote and the vote view renders. Click via JS on the anchor
+    # (WebDriver's click can land on an inner span the router doesn't intercept).
+    let ctx_path = (wd-execute $session_id 'return "/"+location.pathname.split("/")[1]')
+    wd-navigate $session_id $"(base-url)($ctx_path)"
+    if (wd-wait-for-element $session_id ".app-rail a" 15) {
+        let clicked_vote = (wd-execute $session_id 'var a=[...document.querySelectorAll(".app-rail a")].find(function(x){return (x.getAttribute("href")||"").includes("app=vote")}); if(a){a.click(); return "y"} return "n"')
+        if $clicked_vote == "y" {
+            mut switched = false
+            for _ in 1..($timeout) {
+                let s = (wd-execute $session_id 'return location.search')
+                if ($s | default "" | str contains "app=vote") { $switched = true; break }
+                sleep 500ms
+            }
+            sleep 1sec
+            if $switched {
+                log-ok "app rail routes to ?app=vote"; $p = $p + 1
+            } else {
+                let search = (wd-execute $session_id 'return location.search')
+                log-fail $"app rail did not set ?app=vote; got: ($search)"; $fl = $fl + 1
+            }
+            let r = (assert-exists $session_id "vote app renders" "#main .card" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+        } else {
+            log-warn "no vote rail item — skipping app-switch check"
+        }
+    } else {
+        log-warn "app rail not found — skipping app-switch check"
+    }
+
     { passed: $p, failed: $fl }
 }
 

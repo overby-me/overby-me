@@ -55,7 +55,7 @@ fn FolderItem(node: ChildNodeFields, parent_path: Vec<String>) -> Element {
 
     rsx! {
         Link {
-            to: Route::PathPage { segments: full_path },
+            to: Route::PathPage { segments: full_path, app: None },
             class: "folder-item",
             div { class: "avatar small", "{icon}" }
             div { class: "list-item-text",
