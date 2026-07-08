@@ -84,23 +84,14 @@ let { StepConfig, .. } = import "./step.ncl" in
       "%
       | optional,
 
-    env
-      | { _ : String }
-      | doc m%"
-        Global environment variables injected into every step (shorthand).
-        Takes precedence over "environment" when both are set.
-      "%
-      | default
-      = {},
-
     environment
       | { _ : String }
       | doc m%"
-        Global environment variables injected into every step.
-        "env" is the preferred shorthand; both are accepted for compatibility.
+        Global environment variables injected into every step. Omitted from the
+        generated YAML when empty (tangled rejects an unknown "env" field and
+        needs no explicit empty map here).
       "%
-      | default
-      = {},
+      | optional,
 
     steps
       | Array StepConfig

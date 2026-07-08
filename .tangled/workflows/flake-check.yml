@@ -5,8 +5,6 @@ clone:
 dependencies:
   - git
 engine: microvm
-env: {}
-environment: {}
 image: nixos
 steps:
   - command: |-
