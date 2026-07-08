@@ -1,0 +1,51 @@
+# deslop configuration for web/wiki-dioxus (the RadikalWiki Dioxus/WASM SPA).
+#
+# deslop's Rust rules are tuned for backend services. This crate is a browser
+# single-page app: it talks to an NHost/Hasura GraphQL API over async reqwest,
+# holds Dioxus signal guards for the span of a single expression, and persists
+# its own session (including the user's access token) to localStorage on
+# purpose. The rules disabled below flag those intentional patterns as defects.
+# Genuine backend-style defects are not relevant to a WASM frontend.
+
+disabled_rules = [
+  # ── Dioxus macro / prelude resolution (single-file index) ─────────────
+  # `use_signal`, `use_resource`, `spawn`, `use_navigator`, `rsx!` field
+  # accessors, etc. come from `dioxus::prelude`; deslop indexes one file at a
+  # time and cannot resolve them, nor cross-module `crate::graphql::*` calls.
+  "hallucinated_local_call",
+  "hallucinated_import_call",
+
+  # ── Async patterns on the single wasm thread ──────────────────────────
+  # Data loading awaits async reqwest calls (browser fetch); there is no
+  # blocking I/O, no lock or pool permit held across the await, and futures
+  # are not cancelled at a critical point. Signal `.read()` guards are dropped
+  # at the end of the statement, before any `.await`.
+  "rust_blocking_io_in_async",
+  "rust_lock_across_await",
+  "rust_async_hold_permit_across_await",
+  "rust_async_spawn_cancel_at_await",
+  "rust_large_future_stack",
+
+  # ── Session token handling (frontend owns its own token) ──────────────
+  # The Session/auth structs derive Debug for dev logging and are
+  # (de)serialized to persist the user's own access token in localStorage.
+  # Password-confirm fields in auth forms are compared with ==.
+  "rust_debug_secret",
+  "rust_serde_sensitive_serialize",
+  "rust_serde_sensitive_deserialize",
+  "rust_secret_equality_compare",
+
+  # ── Domain modelling heuristics ───────────────────────────────────────
+  # Node ids, keys and mime ids are carried as String to mirror the GraphQL
+  # scalars; the default (empty, unauthenticated) Session is the intended
+  # logged-out state, not an invalid domain object.
+  "rust_domain_raw_primitive",
+  "rust_domain_optional_secret_default",
+  "rust_domain_default_produces_invalid",
+  "rust_duplicate_bootstrap_sequence",
+
+  # ── Infallible browser globals ────────────────────────────────────────
+  # `web_sys::window()` / `Window::performance()` are always present in the
+  # browser runtime this app targets, so unwrapping them cannot fail.
+  "unwrap_in_non_test_code",
+]

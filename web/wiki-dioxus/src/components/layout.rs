@@ -440,27 +440,174 @@ fn DrawerContent() -> Element {
     }
 }
 
-/// HomeList — shows user's groups and events
+/// The result of loading the user's contexts: (groups, events).
+type ContextLists = (
+    Vec<graphql::ContextNodeFields>,
+    Vec<graphql::ContextNodeFields>,
+);
+
+/// HomeList — shows the user's groups and events, loaded from GraphQL.
 #[component]
 fn HomeList() -> Element {
-    let _session = use_session();
-    // TODO: Query user's groups and events from GraphQL using _session.access_token
-    // For now, show section headers with placeholder
+    let session = use_session();
+    let user_id = session.read().user.as_ref().map(|u| u.id.clone());
+    let access_token = session.read().access_token.clone();
+
+    let contexts = use_resource(move || {
+        let token = access_token.clone();
+        let user_id = user_id.clone();
+        async move {
+            let Some(user_id) = user_id else {
+                return Ok::<ContextLists, String>((Vec::new(), Vec::new()));
+            };
+            let groups = graphql::query_contexts(token.as_deref(), &user_id, "wiki/group").await?;
+            let events = graphql::query_contexts(token.as_deref(), &user_id, "wiki/event").await?;
+            Ok((groups, events))
+        }
+    });
+
+    let state = contexts.read().clone();
+    let hint_style = "padding: 4px 16px; color: var(--md-on-surface-variant);";
+
     rsx! {
         div { style: "margin-top: 16px;",
+            // Groups
             h4 { class: "title-small", style: "padding: 8px 16px; color: var(--md-on-surface-variant);",
                 "{t(\"layout.groups\")}"
             }
-            p { class: "body-medium", style: "padding: 4px 16px; color: var(--md-on-surface-variant);",
-                "{t(\"layout.noGroups\")}"
-            }
+            {match &state {
+                None => rsx! {
+                    p { class: "body-medium", style: "{hint_style}", "…" }
+                },
+                Some(Err(e)) => rsx! {
+                    p { class: "body-medium", style: "{hint_style}", "{e}" }
+                },
+                Some(Ok((groups, _))) if groups.is_empty() => rsx! {
+                    p { class: "body-medium", style: "{hint_style}", "{t(\"layout.noGroups\")}" }
+                },
+                Some(Ok((groups, _))) => rsx! {
+                    div { class: "list",
+                        for node in groups.iter() {
+                            ContextItem { key: "{node.id.0}", node: node.clone() }
+                        }
+                    }
+                },
+            }}
 
+            // Events, grouped by year (newest first)
             h4 { class: "title-small", style: "padding: 8px 16px; margin-top: 8px; color: var(--md-on-surface-variant);",
                 "{t(\"layout.events\")}"
             }
-            p { class: "body-medium", style: "padding: 4px 16px; color: var(--md-on-surface-variant);",
-                "{t(\"layout.noEvents\")}"
+            {match &state {
+                None => rsx! {
+                    p { class: "body-medium", style: "{hint_style}", "…" }
+                },
+                Some(Err(e)) => rsx! {
+                    p { class: "body-medium", style: "{hint_style}", "{e}" }
+                },
+                Some(Ok((_, events))) if events.is_empty() => rsx! {
+                    p { class: "body-medium", style: "{hint_style}", "{t(\"layout.noEvents\")}" }
+                },
+                Some(Ok((_, events))) => rsx! {
+                    for (year , items) in group_by_year(events) {
+                        div { key: "{year}",
+                            p { class: "label-medium",
+                                style: "padding: 4px 16px; font-weight: 600; color: var(--md-on-surface-variant);",
+                                "{year}"
+                            }
+                            div { class: "list",
+                                for node in items.iter() {
+                                    ContextItem { key: "{node.id.0}", node: node.clone() }
+                                }
+                            }
+                        }
+                    }
+                },
+            }}
+        }
+    }
+}
+
+/// A single group/event entry. Clicking resolves the node's path and navigates.
+#[component]
+fn ContextItem(node: graphql::ContextNodeFields) -> Element {
+    let session = use_session();
+    let nav = use_navigator();
+    let name = node.name.clone();
+    let node_id = node.id.0.clone();
+    let abbr = abbrev_context_name(&name);
+
+    rsx! {
+        div {
+            class: "list-item",
+            style: "cursor: pointer;",
+            onclick: move |_| {
+                let node_id = node_id.clone();
+                let token = session.read().access_token.clone();
+                spawn(async move {
+                    if let Ok(segments) = graphql::path_from_id(token.as_deref(), &node_id).await {
+                        if !segments.is_empty() {
+                            nav.push(Route::PathPage { segments });
+                        }
+                    }
+                });
+            },
+            div { class: "avatar small secondary", "{abbr}" }
+            div { class: "list-item-text",
+                div { class: "list-item-primary", "{name}" }
             }
         }
+    }
+}
+
+/// Group events into (year, events) buckets, preserving the input order. Since
+/// events arrive newest-first, buckets come out in descending-year order.
+fn group_by_year(
+    events: &[graphql::ContextNodeFields],
+) -> Vec<(String, Vec<graphql::ContextNodeFields>)> {
+    let mut out: Vec<(String, Vec<graphql::ContextNodeFields>)> = Vec::new();
+    for event in events {
+        let year = event
+            .created_at
+            .as_ref()
+            .and_then(|t| t.0.get(0..4))
+            .unwrap_or("")
+            .to_string();
+        match out.last_mut() {
+            Some((last_year, items)) if *last_year == year => items.push(event.clone()),
+            _ => out.push((year, vec![event.clone()])),
+        }
+    }
+    out
+}
+
+/// Abbreviate a context name into a short avatar badge (ported from the React
+/// `abrivContextName`): keep capitalised words, collapse each to its acronym or
+/// initial, and join at most three of them.
+fn abbrev_context_name(name: &str) -> String {
+    fn upper_count(word: &str) -> usize {
+        word.chars().filter(|c| c.is_uppercase()).count()
+    }
+
+    let words: Vec<String> = name
+        .trim()
+        .split(' ')
+        .filter(|w| !w.is_empty())
+        .filter(|w| {
+            let first = w.chars().next().unwrap();
+            let has_digit = w.chars().any(|c| c.is_ascii_digit());
+            (first.is_uppercase() && !(has_digit && w.chars().count() > 1)) || upper_count(w) > 1
+        })
+        .map(|w| match w {
+            "Hovedbestyrelsesmøde" => "HB".to_string(),
+            "Landsmøde" => "LM".to_string(),
+            _ if upper_count(w) > 1 => w.to_string(),
+            _ => w.chars().next().unwrap().to_string(),
+        })
+        .collect();
+
+    match words.len() {
+        1..=3 => words.concat(),
+        _ => String::new(),
     }
 }

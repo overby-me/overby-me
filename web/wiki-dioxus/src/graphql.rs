@@ -157,9 +157,33 @@ pub struct MimeFields {
     pub context: bool,
 }
 
+// --- Context nodes (groups / events) for the home list ---
+
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "nodes")]
+pub struct ContextNodeFields {
+    pub id: Uuid,
+    pub name: String,
+    pub key: String,
+    pub mime_id: Option<String>,
+    pub parent_id: Option<Uuid>,
+    pub created_at: Option<Timestamptz>,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "query_root",
+    variables = "NodesWhereVariables"
+)]
+pub struct ContextsWhereQuery {
+    #[arguments(where: $where_clause)]
+    pub nodes: Vec<ContextNodeFields>,
+}
+
 // --- Input types ---
 
-#[derive(cynic::InputObject, Debug)]
+#[derive(cynic::InputObject, Debug, Default)]
 #[cynic(
     schema_path = "graphql/schema.graphql",
     graphql_type = "nodes_bool_exp"
@@ -167,12 +191,29 @@ pub struct MimeFields {
 pub struct NodesBoolExp {
     #[cynic(rename = "_and")]
     pub and: Option<Vec<NodesBoolExp>>,
+    #[cynic(rename = "_or")]
+    pub or: Option<Vec<NodesBoolExp>>,
     pub key: Option<StringComparisonExp>,
     pub name: Option<StringComparisonExp>,
     pub parent_id: Option<UuidComparisonExp>,
+    pub mime_id: Option<StringComparisonExp>,
+    pub owner_id: Option<UuidComparisonExp>,
+    pub members: Option<MembersBoolExp>,
 }
 
-#[derive(cynic::InputObject, Debug)]
+#[derive(cynic::InputObject, Debug, Default)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "members_bool_exp"
+)]
+pub struct MembersBoolExp {
+    #[cynic(rename = "_and")]
+    pub and: Option<Vec<MembersBoolExp>>,
+    pub accepted: Option<BooleanComparisonExp>,
+    pub node_id: Option<UuidComparisonExp>,
+}
+
+#[derive(cynic::InputObject, Debug, Default)]
 #[cynic(
     schema_path = "graphql/schema.graphql",
     graphql_type = "String_comparison_exp"
@@ -186,7 +227,7 @@ pub struct StringComparisonExp {
     pub is_null: Option<bool>,
 }
 
-#[derive(cynic::InputObject, Debug)]
+#[derive(cynic::InputObject, Debug, Default)]
 #[cynic(
     schema_path = "graphql/schema.graphql",
     graphql_type = "uuid_comparison_exp"
@@ -196,6 +237,16 @@ pub struct UuidComparisonExp {
     pub eq: Option<Uuid>,
     #[cynic(rename = "_is_null")]
     pub is_null: Option<bool>,
+}
+
+#[derive(cynic::InputObject, Debug, Default)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "Boolean_comparison_exp"
+)]
+pub struct BooleanComparisonExp {
+    #[cynic(rename = "_eq")]
+    pub eq: Option<bool>,
 }
 
 // --- Mutations ---
@@ -330,16 +381,11 @@ pub async fn query_node_by_key(
             NodesBoolExp {
                 key: Some(StringComparisonExp {
                     eq: Some(key.to_string()),
-                    ilike: None,
-                    is_null: None,
+                    ..Default::default()
                 }),
-                parent_id: None,
-                name: None,
-                and: None,
+                ..Default::default()
             },
             NodesBoolExp {
-                key: None,
-                name: None,
                 parent_id: Some(match parent_id {
                     Some(id) => UuidComparisonExp {
                         eq: Some(Uuid(id.to_string())),
@@ -350,12 +396,10 @@ pub async fn query_node_by_key(
                         is_null: Some(true),
                     },
                 }),
-                and: None,
+                ..Default::default()
             },
         ]),
-        key: None,
-        name: None,
-        parent_id: None,
+        ..Default::default()
     };
 
     let operation = NodesWhereQuery::build(NodesWhereVariables { where_clause });
@@ -432,20 +476,106 @@ pub async fn search_nodes(
     let where_clause = NodesBoolExp {
         and: Some(vec![NodesBoolExp {
             name: Some(StringComparisonExp {
-                eq: None,
                 ilike: Some(format!("%{query}%")),
-                is_null: None,
+                ..Default::default()
             }),
-            key: None,
-            parent_id: None,
-            and: None,
+            ..Default::default()
         }]),
-        key: None,
-        name: None,
-        parent_id: None,
+        ..Default::default()
     };
 
     let operation = NodesWhereQuery::build(NodesWhereVariables { where_clause });
     let result = execute(access_token, operation).await?;
     Ok(result.nodes)
+}
+
+/// Fetch the user's context nodes (groups or events) of a given mime type.
+/// Matches nodes the user owns or has an accepted membership in, newest first.
+pub async fn query_contexts(
+    access_token: Option<&str>,
+    user_id: &str,
+    mime_id: &str,
+) -> Result<Vec<ContextNodeFields>, String> {
+    let owned = NodesBoolExp {
+        owner_id: Some(UuidComparisonExp {
+            eq: Some(Uuid(user_id.to_string())),
+            is_null: None,
+        }),
+        ..Default::default()
+    };
+    let member = NodesBoolExp {
+        members: Some(MembersBoolExp {
+            and: Some(vec![
+                MembersBoolExp {
+                    accepted: Some(BooleanComparisonExp { eq: Some(true) }),
+                    ..Default::default()
+                },
+                MembersBoolExp {
+                    node_id: Some(UuidComparisonExp {
+                        eq: Some(Uuid(user_id.to_string())),
+                        is_null: None,
+                    }),
+                    ..Default::default()
+                },
+            ]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let where_clause = NodesBoolExp {
+        and: Some(vec![
+            NodesBoolExp {
+                mime_id: Some(StringComparisonExp {
+                    eq: Some(mime_id.to_string()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            NodesBoolExp {
+                or: Some(vec![owned, member]),
+                ..Default::default()
+            },
+        ]),
+        ..Default::default()
+    };
+
+    let operation = ContextsWhereQuery::build(NodesWhereVariables { where_clause });
+    let mut result = execute(access_token, operation).await?;
+    // Newest first (the API returns no guaranteed order).
+    result.nodes.sort_by(|a, b| {
+        let a_ts = a.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
+        let b_ts = b.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
+        b_ts.cmp(a_ts)
+    });
+    Ok(result.nodes)
+}
+
+/// Resolve the path (list of keys from the root's child down to the node) for a
+/// node id by walking up the parent chain. Mirrors the React `fromId` helper:
+/// the root node contributes no segment.
+pub async fn path_from_id(access_token: Option<&str>, id: &str) -> Result<Vec<String>, String> {
+    let mut segments: Vec<String> = Vec::new();
+    let mut current = Some(id.to_string());
+    // Guard against cycles / unexpectedly deep trees.
+    for _ in 0..32 {
+        let Some(node_id) = current.take() else {
+            break;
+        };
+        let operation = NodeByIdQuery::build(NodeByIdVariables { id: Uuid(node_id) });
+        let data = execute(access_token, operation).await?;
+        match data.node {
+            Some(node) => match node.parent_id {
+                Some(parent) => {
+                    segments.push(node.key);
+                    current = Some(parent.0);
+                }
+                // Reached the root — stop without adding its key.
+                None => break,
+            },
+            None => break,
+        }
+    }
+    segments.reverse();
+    Ok(segments)
 }
