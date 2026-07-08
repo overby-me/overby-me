@@ -5,6 +5,7 @@
 
   devShells.homepage-dioxus = pkgs: {
     packages = with pkgs; [
+      which
       just
       cargo
       rustc
