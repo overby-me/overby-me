@@ -1295,7 +1295,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "homepage-dioxus"
+name = "homepage"
 version = "0.1.0"
 dependencies = [
  "dioxus",

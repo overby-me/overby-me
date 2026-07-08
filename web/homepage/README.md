@@ -46,7 +46,7 @@ just dev
 just build
 ```
 
-The static site is written to `target/dx/homepage-dioxus/release/web/public`.
+The static site is written to `target/dx/homepage/release/web/public`.
 
 ### Clean
 
