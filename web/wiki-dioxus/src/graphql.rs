@@ -399,6 +399,56 @@ pub struct NodesInsertInput {
     pub index: Option<i32>,
 }
 
+// --- Update mutation ---
+
+#[derive(cynic::QueryVariables, Debug)]
+pub struct UpdateNodeVariables {
+    pub pk: NodesPkColumnsInput,
+    pub set: NodesSetInput,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "mutation_root",
+    variables = "UpdateNodeVariables"
+)]
+pub struct UpdateNodeMutation {
+    #[arguments(pk_columns: $pk, _set: $set)]
+    pub update_node: Option<UpdatedNode>,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "nodes")]
+pub struct UpdatedNode {
+    pub id: Uuid,
+}
+
+#[derive(cynic::InputObject, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "nodes_pk_columns_input"
+)]
+pub struct NodesPkColumnsInput {
+    pub id: Uuid,
+}
+
+#[derive(cynic::InputObject, Debug, Default)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "nodes_set_input"
+)]
+pub struct NodesSetInput {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub data: Option<Jsonb>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub mutable: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub index: Option<i32>,
+}
+
 #[derive(cynic::QueryVariables, Debug)]
 pub struct DeleteNodeVariables {
     pub id: Uuid,
@@ -581,6 +631,25 @@ pub async fn insert_node(
     let operation = InsertNodeMutation::build(InsertNodeVariables { object: input });
     let result = execute(access_token, operation).await?;
     Ok(result.insert_node)
+}
+
+/// Update a node's mutable columns (name / data / mutable / index). The jsonb
+/// `data` is passed as a GraphQL variable, not inlined (inlining a JSON object
+/// into the mutation string is invalid GraphQL and silently failed).
+pub async fn update_node(
+    access_token: Option<&str>,
+    id: &str,
+    set: NodesSetInput,
+) -> Result<bool, String> {
+    use cynic::MutationBuilder;
+    let operation = UpdateNodeMutation::build(UpdateNodeVariables {
+        pk: NodesPkColumnsInput {
+            id: Uuid(id.to_string()),
+        },
+        set,
+    });
+    let result = execute(access_token, operation).await?;
+    Ok(result.update_node.is_some())
 }
 
 /// Delete a node by ID

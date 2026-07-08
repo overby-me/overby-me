@@ -28,19 +28,13 @@ pub fn SortApp(node: NodeWithChildren) -> Element {
             spawn(async move {
                 saving.set(true);
 
-                // Update each child's index via GraphQL
+                // Persist each child's new index.
                 for (i, item) in current_items.iter().enumerate() {
-                    let query = format!(
-                        r#"mutation {{
-                            updateNode(
-                                pk_columns: {{ id: "{}" }},
-                                _set: {{ index: {i} }}
-                            ) {{ id }}
-                        }}"#,
-                        item.id.0,
-                    );
-
-                    let _ = graphql::execute_raw(token.as_deref(), &query).await;
+                    let set = graphql::NodesSetInput {
+                        index: Some(i32::try_from(i).unwrap_or(0)),
+                        ..Default::default()
+                    };
+                    let _ = graphql::update_node(token.as_deref(), &item.id.0, set).await;
                 }
 
                 show_snackbar(&t("sort.saveSorting"));

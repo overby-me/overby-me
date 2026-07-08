@@ -36,30 +36,20 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
             spawn(async move {
                 saving.set(true);
 
-                // Build content as Slate-compatible JSON
+                // Build content as Slate-compatible JSON.
                 let content_json = build_slate_content(&content_val);
-                let data = serde_json::json!({
-                    "content": content_json,
-                });
+                let data = serde_json::json!({ "content": content_json });
 
-                // Use raw GraphQL mutation to update node
-                let query = format!(
-                    r#"mutation {{
-                        updateNode(
-                            pk_columns: {{ id: "{node_id}" }},
-                            _set: {{
-                                name: "{}",
-                                data: {},
-                                mutable: {mutable}
-                            }}
-                        ) {{ id }}
-                    }}"#,
-                    title_val.replace('"', "\\\""),
-                    serde_json::to_string(&data).unwrap_or_default(),
-                );
+                let set = graphql::NodesSetInput {
+                    name: Some(title_val),
+                    data: Some(graphql::Jsonb(data)),
+                    mutable: Some(mutable),
+                    ..Default::default()
+                };
 
-                match graphql::execute_raw(token.as_deref(), &query).await {
-                    Ok(_) => show_snackbar(&t("common.save")),
+                match graphql::update_node(token.as_deref(), &node_id, set).await {
+                    Ok(true) => show_snackbar(&t("common.save")),
+                    Ok(false) => show_snackbar(&t("error.somethingWentWrong")),
                     Err(e) => {
                         log::error!("Save failed: {e}");
                         show_snackbar(&t("error.somethingWentWrong"));
