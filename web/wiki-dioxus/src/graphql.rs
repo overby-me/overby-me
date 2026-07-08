@@ -389,13 +389,24 @@ pub struct InsertedNode {
     graphql_type = "nodes_insert_input"
 )]
 pub struct NodesInsertInput {
+    // Unset fields must be omitted, not sent as `null`: Hasura rejects an
+    // explicit null for the non-null columns (e.g. `mutable`), which silently
+    // broke every insert that left a field unset (votes, speaker entries, …).
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub mime_id: Option<String>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<Uuid>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub context_id: Option<Uuid>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub data: Option<Jsonb>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub mutable: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub index: Option<i32>,
 }
 
@@ -660,6 +671,73 @@ pub async fn delete_node(access_token: Option<&str>, id: &str) -> Result<bool, S
     });
     let result = execute(access_token, operation).await?;
     Ok(result.delete_node.is_some())
+}
+
+/// How many votes the given user has already cast on a poll (used to show the
+/// "you have voted" state and hide the ballot). Own votes are visible to the
+/// voter via row permissions.
+pub async fn count_user_votes(
+    access_token: Option<&str>,
+    poll_id: &str,
+    user_id: &str,
+) -> Result<usize, String> {
+    let where_clause = NodesBoolExp {
+        and: Some(vec![
+            NodesBoolExp {
+                parent_id: Some(UuidComparisonExp {
+                    eq: Some(Uuid(poll_id.to_string())),
+                    is_null: None,
+                }),
+                ..Default::default()
+            },
+            NodesBoolExp {
+                mime_id: Some(StringComparisonExp {
+                    eq: Some("vote/vote".to_string()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            NodesBoolExp {
+                owner_id: Some(UuidComparisonExp {
+                    eq: Some(Uuid(user_id.to_string())),
+                    is_null: None,
+                }),
+                ..Default::default()
+            },
+        ]),
+        ..Default::default()
+    };
+    let operation = NodesWhereQuery::build(NodesWhereVariables { where_clause });
+    let result = execute(access_token, operation).await?;
+    Ok(result.nodes.len())
+}
+
+/// Cast a vote on a poll: insert a `vote/vote` child whose data is the array of
+/// selected option indices (matching the React VoteApp).
+pub async fn cast_vote(
+    access_token: Option<&str>,
+    poll_id: &str,
+    context_id: Option<&str>,
+    selected: &[usize],
+    key_suffix: &str,
+) -> Result<bool, String> {
+    let data = serde_json::Value::Array(
+        selected
+            .iter()
+            .map(|i| serde_json::Value::from(u64::try_from(*i).unwrap_or(0)))
+            .collect(),
+    );
+    let input = NodesInsertInput {
+        name: Some(format!("vote-{key_suffix}")),
+        key: Some(format!("vote-{key_suffix}")),
+        mime_id: Some("vote/vote".to_string()),
+        parent_id: Some(Uuid(poll_id.to_string())),
+        context_id: context_id.map(|c| Uuid(c.to_string())),
+        data: Some(Jsonb(data)),
+        mutable: None,
+        index: None,
+    };
+    Ok(insert_node(access_token, input).await?.is_some())
 }
 
 /// Search nodes by name (case-insensitive substring match)

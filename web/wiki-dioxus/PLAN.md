@@ -22,48 +22,55 @@ Workflow for each area below: reproduce in `web/wiki`, reproduce in
 `wiki-dioxus`, diff the GraphQL the two send, fix, then lock it in with a unit
 test and/or a `test-browser.nu` assertion.
 
-## Known issues (fix first)
+## Known issues
 
-1. **Flaky wasm panic on authenticated load (Servo).** Loading a page that
-   already has a stored session sometimes traps with `unreachable executed`
-   during instantiation; a fresh logged-out→login flow is reliable. Next steps:
-   - Add `console_error_panic_hook` in `main.rs` so traps print a real message
-     instead of a bare `unreachable` — the single highest-value change for
-     debugging everything else.
-   - Suspect a Dioxus signal borrow panic (`already borrowed`) on the first
-     authenticated render (drawer `HomeList` + `use_resource` reading
-     `SESSION`). Audit for `.read()`/`.write()` overlap across an `.await`.
-   - Confirm whether it also reproduces in Chrome/Firefox (likely Servo-only).
+1. ~~**Flaky wasm panic on authenticated load (Servo).**~~ **FIXED.** The trap
+   was a real panic, not a nondeterministic one: `main()` wrote to the `SESSION`
+   / `LANG` `GlobalSignal`s *before* `dioxus::launch`, which is only legal
+   inside the runtime, so it fired exactly when localStorage already held a
+   session. Init now runs in an `App` `use_hook`. `console_error_panic_hook`
+   surfaces real messages. (commit: global-signal init.)
 
-2. **Navigation into a group/event.** `resolve_path` now walks from the root
-   node (key `root`), which matches how `path_from_id` builds URLs. Verify a
-   click on a drawer item actually opens the context (blocked from browser
-   verification by issue 1). The queries are confirmed correct against the API.
+2. ~~**Navigation into a group/event.**~~ **FIXED + verified.** Two bugs: the
+   catch-all `PathPage` did not re-resolve on client-side navigation between two
+   nodes (`use_resource` only re-runs on reactive reads, not prop changes) — now
+   keyed on the path so it remounts; and the drawer tree click path is verified
+   live.
 
 3. **Release build won't load in Servo** (`Module fetching failed`). Only the
-   debug build runs there. Fine for dev/testing; investigate before relying on
-   Servo for production-build checks (loads fine in Chrome/Firefox).
+   debug build runs there. Fine for dev/testing; loads fine in Chrome/Firefox.
+   Not yet investigated.
 
-## Parity areas to verify against web/wiki
+## Parity areas vs web/wiki
 
-Each needs a real-backend pass; `[?]` = not yet verified end to end.
+`[x]` = ported and verified against the live backend · `[~]` = partial ·
+`[ ]` = open.
 
 - `[x]` Auth: sign in / register / reset — sign-in verified live.
 - `[x]` Home list: groups + events (owned or accepted member), events by year.
-- `[?]` **Drawer node tree** (`MenuList` in wiki): wiki swaps the home list for
-  a lazy, expandable child tree once inside a context. The Dioxus drawer only
-  renders the home list — port `MenuList` for in-context navigation.
-- `[?]` Folder view: child list, icons, "not submitted" state, ordering.
-- `[?]` Content: Slate.js JSON → read-only render; author line; attachments.
-- `[?]` File: image / video / audio / PDF / download.
-- `[?]` Editor: contenteditable save/publish (wiki uses Slate).
-- `[?]` Voting: policy / change / poll / position / candidate.
-- `[?]` Speak: speaker queue join/remove.
-- `[?]` Members + invites: list, invite by email, accept/decline.
-- `[?]` Sort: drag-and-drop reordering + save.
-- `[?]` Search: live results (uses the same `_ilike` filter now un-broken).
-- `[?]` Breadcrumbs, `?app=` routing, snackbars, i18n (Da/En), theme.
-- `[ ]` Not ported yet from wiki: admin, perm, map, screen — defer.
+- `[x]` **Drawer node tree** (`MenuList`): lazy expandable child tree in-context,
+  ancestors auto-expand, active row highlighted. Verified live.
+- `[x]` Folder view: child list, icons, "not submitted", index+time ordering,
+  hidden-mime filtering. Verified live.
+- `[x]` Content: Slate JSON → read-only render + author chips (members).
+  Verified live. `[ ]` optional content image not yet shown.
+- `[x]` File: image verified live (loads with token); video/audio/PDF/download
+  share the same URL path (code present, image path exercised).
+- `[x]` Editor: contenteditable save/publish via a typed update mutation —
+  persistence verified live. `[ ]` still a plain-text→paragraph serialization,
+  not full Slate.
+- `[~]` Voting: policy/change/poll render read-only. `[ ]` casting a vote, poll
+  options, results still to do.
+- `[x]` Speak: reads the real `speakerlist` child's queue; join/remove wired.
+- `[~]` Members: real member list + author chips verified live. `[ ]` invite by
+  email and `[ ]` accept/decline invitations still to do.
+- `[x]` Sort: drag-and-drop reorder + save (typed index mutation). Renders +
+  save path verified.
+- `[x]` Search: live `_ilike` results — verified live.
+- `[x]` `?app=` routing (modelled in the route), i18n (Da/En incl. the ported
+  vote/speak/poll/sort/invite/member sections), theme, snackbars.
+  `[~]` breadcrumbs show URL slugs, not node names.
+- `[ ]` Not ported from wiki: admin, perm, map, screen — deferred.
 
 ## Cross-cutting checks
 

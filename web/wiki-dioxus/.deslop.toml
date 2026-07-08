@@ -48,4 +48,9 @@ disabled_rules = [
   # `web_sys::window()` / `Window::performance()` are always present in the
   # browser runtime this app targets, so unwrapping them cannot fail.
   "unwrap_in_non_test_code",
+
+  # ── rsx rendering loops ───────────────────────────────────────────────
+  # Iterating a small child/option/member list and reading a field per row
+  # inside `rsx!` is the idiomatic Dioxus render pattern, not a hot data path.
+  "rust_aos_hot_path",
 ]
