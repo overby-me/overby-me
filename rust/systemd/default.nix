@@ -127,8 +127,10 @@
           withImportd = false;
           withKmod = false;
           withLocaled = true;
+          withLogind = true;
           withMachined = true;
           withNetworkd = true;
+          withNspawn = true;
           withHomed = true;
           withPortabled = true;
           withSysupdate = false;
