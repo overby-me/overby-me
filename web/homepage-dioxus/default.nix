@@ -13,6 +13,7 @@
       dioxus-cli
       wasm-bindgen-cli
       binaryen
+      lld
     ];
   };
 }
