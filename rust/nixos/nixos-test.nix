@@ -6,7 +6,7 @@
 # Run with: nix build .#checks.x86_64-linux.rust-nixos-boot
 {pkgs}: let
   rustSystemdPackage = pkgs.rust-systemd-systemd.override {
-    rust-systemd = pkgs.rust-systemd-drowse;
+    inherit (pkgs) rust-systemd;
   };
 in
   pkgs.testers.nixosTest {

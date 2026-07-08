@@ -48,7 +48,7 @@
   testName = "TEST-${name}";
 
   rustSystemdPackage = pkgs.rust-systemd-systemd.override {
-    rust-systemd = pkgs.rust-systemd-drowse;
+    inherit (pkgs) rust-systemd;
   };
 in
   pkgs.testers.nixosTest {

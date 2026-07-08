@@ -44,63 +44,63 @@
         };
       };
 
-    rust-systemd-drowse = {
-      drowse,
-      lib,
-    }:
-    # crate2nix constructs its own derivation and drops the `meta` we pass in,
-    # so re-apply meta.platforms via overrideAttrs to ensure meta.available is
-    # false on non-Linux (otherwise nix flake check forces it on darwin and the
-    # crate2nix builtins.outputOf usage fails).
-      (drowse.crate2nix {
-        pname = "rust-systemd";
-        version = "unstable";
+    # rust-systemd-drowse = {
+    #   drowse,
+    #   lib,
+    # }:
+    # # crate2nix constructs its own derivation and drops the `meta` we pass in,
+    # # so re-apply meta.platforms via overrideAttrs to ensure meta.available is
+    # # false on non-Linux (otherwise nix flake check forces it on darwin and the
+    # # crate2nix builtins.outputOf usage fails).
+    #   (drowse.crate2nix {
+    #     pname = "rust-systemd";
+    #     version = "unstable";
 
-        src = lib.fileset.toSource {
-          root = ./.;
-          fileset = lib.fileset.unions [
-            ./Cargo.toml
-            ./Cargo.lock
-            ./crates
-          ];
-        };
+    #     src = lib.fileset.toSource {
+    #       root = ./.;
+    #       fileset = lib.fileset.unions [
+    #         ./Cargo.toml
+    #         ./Cargo.lock
+    #         ./crates
+    #       ];
+    #     };
 
-        #dynamicCargoDeps = false;
+    #     #dynamicCargoDeps = false;
 
-        select = ''
-          project:
-          let
-            pkgs = import <nixpkgs> {};
-            members = lib.attrValues (lib.mapAttrs (_: m: m.build) project.workspaceMembers);
-          in
-          pkgs.runCommand "rust-systemd" {} '''
-            mkdir -p $out/bin
-            for pkg in ''${pkgs.lib.concatMapStringsSep " " toString members}; do
-              for bin in $pkg/bin/*; do
-                cp -a "$bin" "$out/bin/"
-              done
-            done
-          '''
-        '';
+    #     select = ''
+    #       project:
+    #       let
+    #         pkgs = import <nixpkgs> {};
+    #         members = lib.attrValues (lib.mapAttrs (_: m: m.build) project.workspaceMembers);
+    #       in
+    #       pkgs.runCommand "rust-systemd" {} '''
+    #         mkdir -p $out/bin
+    #         for pkg in ''${pkgs.lib.concatMapStringsSep " " toString members}; do
+    #           for bin in $pkg/bin/*; do
+    #             cp -a "$bin" "$out/bin/"
+    #           done
+    #         done
+    #       '''
+    #     '';
 
-        doCheck = false;
+    #     doCheck = false;
 
-        meta = {
-          description = "A service manager that is able to run \"traditional\" systemd services, written in rust";
-          homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/systemd";
-          license = lib.licenses.mit;
-          maintainers = with lib.maintainers; [overby-me];
-          mainProgram = "systemd";
-          platforms = lib.platforms.linux;
-        };
-      }).overrideAttrs
-      (old: {
-        meta =
-          (old.meta or {})
-          // {
-            platforms = lib.platforms.linux;
-          };
-      });
+    #     meta = {
+    #       description = "A service manager that is able to run \"traditional\" systemd services, written in rust";
+    #       homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/systemd";
+    #       license = lib.licenses.mit;
+    #       maintainers = with lib.maintainers; [overby-me];
+    #       mainProgram = "systemd";
+    #       platforms = lib.platforms.linux;
+    #     };
+    #   }).overrideAttrs
+    #   (old: {
+    #     meta =
+    #       (old.meta or {})
+    #       // {
+    #         platforms = lib.platforms.linux;
+    #       };
+    #   });
 
     rust-systemd-systemd = {
       runCommand,
