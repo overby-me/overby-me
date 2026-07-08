@@ -41,7 +41,7 @@ let nixFeatures = "nix-command flakes ca-derivations dynamic-derivations recursi
           cat /etc/nix/nix.conf 2>/dev/null || echo "(no /etc/nix/nix.conf)"
           ulimit -n 65536
           printf '{"PWD":"%s"}' "$PWD" > .env
-          nix flake check --extra-experimental-features "%%{nixFeatures}" --max-jobs 1 --cores 2 --override-input env path:$(realpath $PWD/.env)
+          nix flake check --keep-going --extra-experimental-features "%%{nixFeatures}" --max-jobs 1 --cores 2 --override-input env path:$(realpath $PWD/.env)
         "%%,
       },
       {
