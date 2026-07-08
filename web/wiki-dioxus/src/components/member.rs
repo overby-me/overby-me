@@ -1,8 +1,9 @@
 use dioxus::prelude::*;
 
-use crate::graphql::NodeWithChildren;
+use crate::graphql::{self, NodeWithChildren};
 use crate::i18n::t;
 use crate::session::use_session;
+use crate::snackbar::show_snackbar;
 
 /// MemberApp — member list and invitation management
 #[component]
@@ -11,6 +12,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
     let members = &node.members;
     let session = use_session();
     let is_auth = session.read().is_authenticated();
+    let node_id = node.id.0.clone();
     let mut invite_input = use_signal(String::new);
 
     rsx! {
@@ -71,10 +73,23 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                     button {
                         class: "btn btn-primary mt-1",
                         disabled: invite_input.read().is_empty(),
-                        onclick: move |_| {
-                            // TODO: Execute GraphQL mutation to invite member
-                            log::info!("Invite: {}", invite_input.read());
-                            invite_input.set(String::new());
+                        onclick: {
+                            let node_id = node_id.clone();
+                            move |_| {
+                                let email = invite_input.read().trim().to_string();
+                                if email.is_empty() {
+                                    return;
+                                }
+                                let token = session.read().access_token.clone();
+                                let node_id = node_id.clone();
+                                invite_input.set(String::new());
+                                spawn(async move {
+                                    match graphql::invite_member(token.as_deref(), &node_id, &email).await {
+                                        Ok(true) => show_snackbar(&t("invite.invite")),
+                                        _ => show_snackbar(&t("error.somethingWentWrong")),
+                                    }
+                                });
+                            }
                         },
                         "{t(\"invite.invite\")}"
                     }

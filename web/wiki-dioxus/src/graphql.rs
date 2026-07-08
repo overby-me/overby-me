@@ -502,6 +502,59 @@ pub struct DeleteMemberMutation {
     pub delete_member: Option<UpdatedMember>,
 }
 
+// --- Invite a member (by email) to a context ---
+
+#[derive(cynic::QueryVariables, Debug)]
+pub struct InsertMemberVariables {
+    pub object: MembersInsertInput,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "mutation_root",
+    variables = "InsertMemberVariables"
+)]
+pub struct InsertMemberMutation {
+    #[arguments(object: $object)]
+    pub insert_member: Option<UpdatedMember>,
+}
+
+#[derive(cynic::InputObject, Debug, Default)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "members_insert_input"
+)]
+pub struct MembersInsertInput {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<Uuid>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<Uuid>,
+}
+
+/// Invite someone to a context by email (a pending membership they accept from
+/// their home screen). Mirrors the React invite: email set, no node id yet.
+pub async fn invite_member(
+    access_token: Option<&str>,
+    parent_id: &str,
+    email: &str,
+) -> Result<bool, String> {
+    use cynic::MutationBuilder;
+    let operation = InsertMemberMutation::build(InsertMemberVariables {
+        object: MembersInsertInput {
+            email: Some(email.to_string()),
+            parent_id: Some(Uuid(parent_id.to_string())),
+            ..Default::default()
+        },
+    });
+    let result = execute(access_token, operation).await?;
+    Ok(result.insert_member.is_some())
+}
+
 /// Filter for the home invitations list: pending (accepted=false) memberships on
 /// a group or event that belong to this user (by node id or invited email).
 fn invitations_where_clause(user_id: &str, email: &str) -> MembersBoolExp {
@@ -827,6 +880,33 @@ pub async fn resolve_path(
     }
 
     Ok(None)
+}
+
+/// Resolve each path segment (a node key) to its display name, walking from the
+/// root like `resolve_path`. Used to show node names in breadcrumbs instead of
+/// URL slugs; falls back to the raw segment if a node cannot be resolved.
+pub async fn path_names(
+    access_token: Option<&str>,
+    segments: &[String],
+) -> Result<Vec<String>, String> {
+    let Some(root_id) = query_root_id(access_token).await? else {
+        return Ok(segments.to_vec());
+    };
+    let mut parent_id: Option<String> = Some(root_id);
+    let mut names = Vec::with_capacity(segments.len());
+    for segment in segments {
+        match query_node_by_key(access_token, segment, parent_id.as_deref()).await? {
+            Some(n) => {
+                names.push(n.name.clone());
+                parent_id = Some(n.id.0);
+            }
+            None => {
+                names.push(segment.clone());
+                break;
+            }
+        }
+    }
+    Ok(names)
 }
 
 /// Insert a node

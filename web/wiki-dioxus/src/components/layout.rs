@@ -193,20 +193,57 @@ fn Breadcrumbs() -> Element {
         _ => vec![],
     };
 
+    let key = segments.join("\u{1f}");
     rsx! {
         div { class: "breadcrumbs",
             Link { to: Route::HomeApp {}, "\u{1F3E0}" }
-            for (i , segment) in segments.iter().enumerate() {
-                span { class: "separator", " / " }
+            if !segments.is_empty() {
+                BreadcrumbTrail { key: "{key}", segments: segments.clone() }
+            }
+        }
+    }
+}
+
+/// The breadcrumb segments after home, showing resolved node names (not URL
+/// slugs). Keyed on the path so it remounts and re-resolves on navigation.
+#[component]
+fn BreadcrumbTrail(segments: Vec<String>) -> Element {
+    let session = use_session();
+    let token = session.read().access_token.clone();
+    let segs = segments.clone();
+    let names = use_resource(move || {
+        let token = token.clone();
+        let segs = segs.clone();
+        async move {
+            graphql::path_names(token.as_deref(), &segs)
+                .await
+                .unwrap_or_default()
+        }
+    });
+    let names = names.read().clone().unwrap_or_default();
+
+    rsx! {
+        for (i , segment) in segments.iter().enumerate() {
+            span { class: "separator", " / " }
+            {
+                let label = names
+                    .get(i)
+                    .filter(|s| !s.is_empty())
+                    .cloned()
+                    .unwrap_or_else(|| segment.clone());
                 if i == segments.len() - 1 {
-                    span { "{segment}" }
+                    rsx! {
+                        span { "{label}" }
+                    }
                 } else {
-                    Link {
-                        to: Route::PathPage {
-                            segments: segments[..=i].to_vec(),
-                            app: None,
-                        },
-                        "{segment}"
+                    rsx! {
+                        Link {
+                            to: Route::PathPage {
+                                segments: segments[..=i].to_vec(),
+                                app: None,
+                            },
+                            "{label}"
+                        }
                     }
                 }
             }

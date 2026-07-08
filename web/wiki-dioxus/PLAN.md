@@ -59,18 +59,30 @@ test and/or a `test-browser.nu` assertion.
 - `[x]` Editor: contenteditable save/publish via a typed update mutation —
   persistence verified live. `[ ]` still a plain-text→paragraph serialization,
   not full Slate.
-- `[~]` Voting: policy/change/poll render read-only. `[ ]` casting a vote, poll
-  options, results still to do.
-- `[x]` Speak: reads the real `speakerlist` child's queue; join/remove wired.
-- `[~]` Members: real member list + author chips verified live. `[ ]` invite by
-  email and `[ ]` accept/decline invitations still to do.
+- `[x]` Voting: poll ballot (radio/checkbox, Blank-alone, min/max), cast a
+  vote, "you have voted" state. Verified live end to end on a test poll.
+- `[x]` Speak: reads the real `speakerlist` child's queue; join/remove wired
+  (insert path verified via the shared null-field fix).
+- `[x]` Members: real member list + author chips, and invite by email
+  (insertMember). Verified live.
+- `[x]` Invitations: home list of pending group/event invites with
+  accept (updateMember) / decline (deleteMember). Verified live end to end.
 - `[x]` Sort: drag-and-drop reorder + save (typed index mutation). Renders +
   save path verified.
 - `[x]` Search: live `_ilike` results — verified live.
 - `[x]` `?app=` routing (modelled in the route), i18n (Da/En incl. the ported
-  vote/speak/poll/sort/invite/member sections), theme, snackbars.
-  `[~]` breadcrumbs show URL slugs, not node names.
+  vote/speak/poll/sort/invite/member sections), theme, snackbars, breadcrumbs
+  (resolved node names, verified live).
 - `[ ]` Not ported from wiki: admin, perm, map, screen — deferred.
+
+## Known remaining gaps
+
+- Voting `?app=vote` on a context uses the poll node directly; the React
+  "active poll" relation and live result tallies are not ported.
+- Speaker list has no real-time subscription or speaking timer (static queue).
+- Editor serializes contenteditable text to paragraph blocks, not full Slate
+  formatting.
+- Content optional inline image (`data.image`) is not shown.
 
 ## Cross-cutting checks
 
