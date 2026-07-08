@@ -407,6 +407,24 @@ a:hover {
     color: var(--md-on-surface-variant);
 }
 
+/* Member / author chips */
+.chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 10px 2px 2px;
+    border: 1px solid var(--md-outline, #79747e);
+    border-radius: 16px;
+    font-size: 13px;
+    color: var(--md-on-surface, inherit);
+}
+
 /* Typography */
 h1, .headline-large {
     font-size: 32px;

@@ -8,7 +8,7 @@ use crate::session::use_session;
 #[component]
 pub fn MemberApp(node: NodeWithChildren) -> Element {
     let name = node.name.as_str();
-    let children = &node.children;
+    let members = &node.members;
     let session = use_session();
     let is_auth = session.read().is_authenticated();
     let mut invite_input = use_signal(String::new);
@@ -26,8 +26,8 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                 }
             }
 
-            // Member list
-            if children.is_empty() {
+            // Member list (the node's actual memberships, not its children).
+            if members.is_empty() {
                 div { class: "card-content",
                     p { class: "body-medium",
                         style: "color: var(--md-on-surface-variant);",
@@ -36,13 +36,19 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                 }
             } else {
                 div { class: "list",
-                    for child in children.iter() {
-                        div { class: "list-item", key: "{child.id.0}",
+                    for member in members.iter() {
+                        div { class: "list-item", key: "{member.id.0}",
                             div { class: "avatar small", "\u{1F464}" }
                             div { class: "list-item-text",
-                                div { class: "list-item-primary", "{child.name}" }
+                                div { class: "list-item-primary", "{member.label()}" }
                                 div { class: "list-item-secondary",
-                                    "{child.mime_id.as_deref().unwrap_or(\"\")}"
+                                    if member.owner {
+                                        "{t(\"member.owner\")}"
+                                    } else if member.accepted {
+                                        "{t(\"member.active\")}"
+                                    } else {
+                                        "{t(\"invite.invitations\")}"
+                                    }
                                 }
                             }
                         }

@@ -122,6 +122,44 @@ pub struct NodeWithChildren {
     pub mime: Option<MimeFields>,
     pub parent: Option<Box<ParentNodeFields>>,
     pub children: Vec<ChildNodeFields>,
+    pub members: Vec<MemberFields>,
+}
+
+/// A membership row on a node — used as the author chips on documents and the
+/// member list of a context (mirrors the React `MemberChips`).
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "members")]
+pub struct MemberFields {
+    pub id: Uuid,
+    pub name: Option<String>,
+    pub accepted: bool,
+    pub owner: bool,
+    pub user: Option<UserRef>,
+    pub node: Option<MemberNodeRef>,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "users")]
+pub struct UserRef {
+    pub display_name: String,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "nodes")]
+pub struct MemberNodeRef {
+    pub mime_id: Option<String>,
+}
+
+impl MemberFields {
+    /// The display label for a member: their explicit name, else the linked
+    /// user's display name, else their email-less fallback.
+    pub fn label(&self) -> String {
+        self.name
+            .clone()
+            .filter(|n| !n.is_empty())
+            .or_else(|| self.user.as_ref().map(|u| u.display_name.clone()))
+            .unwrap_or_default()
+    }
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]

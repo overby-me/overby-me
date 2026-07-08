@@ -80,6 +80,7 @@ mod tests {
                 "poll.managePoll",
                 "sort.saveSorting",
                 "invite.nameOrEmail",
+                "member.author",
                 "mime.vote",
             ] {
                 assert!(
@@ -243,6 +244,15 @@ const EN_JSON: &str = r#"{
         "invite": "Invite",
         "nameOrEmail": "Name or Email",
         "acceptInvitation": "Accept invitation to {{name}}"
+    },
+    "member": {
+        "name": "Name",
+        "email": "Email",
+        "hidden": "Hidden",
+        "owner": "Owner",
+        "active": "Active",
+        "actions": "Actions",
+        "author": "Author"
     },
     "mime": {
         "group": "Group",
@@ -408,6 +418,15 @@ const DA_JSON: &str = r#"{
         "invite": "Inviter",
         "nameOrEmail": "Navn eller Email",
         "acceptInvitation": "Accepter invitation til {{name}}"
+    },
+    "member": {
+        "name": "Navn",
+        "email": "EMail",
+        "hidden": "Skjul",
+        "owner": "Ejer",
+        "active": "Aktiv",
+        "actions": "Handlinger",
+        "author": "Forfatter"
     },
     "mime": {
         "group": "Gruppe",

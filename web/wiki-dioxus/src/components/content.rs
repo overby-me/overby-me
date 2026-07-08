@@ -1,12 +1,14 @@
 use dioxus::prelude::*;
 
 use crate::graphql::NodeWithChildren;
+use crate::i18n::t;
 
 use super::loader::mime_icon;
 
 #[component]
 pub fn ContentApp(node: NodeWithChildren) -> Element {
-    let name = node.name.as_str();
+    let name = node.name.clone();
+    let members = node.members.clone();
     let data = node.data.map(|d| d.0);
 
     rsx! {
@@ -14,6 +16,22 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
             div { class: "card-header",
                 div { class: "avatar", "{mime_icon(\"wiki/document\")}" }
                 h3 { class: "title-medium", "{name}" }
+            }
+            // Author chips (the document's members), mirroring MemberChips.
+            if !members.is_empty() {
+                div { class: "chip-row", style: "padding: 0 16px 8px;",
+                    for member in members.iter() {
+                        span {
+                            class: "chip",
+                            key: "{member.id.0}",
+                            title: "{t(\"member.author\")}",
+                            span { class: "avatar small secondary",
+                                "{mime_icon(member.node.as_ref().and_then(|n| n.mime_id.as_deref()).unwrap_or(\"wiki/user\"))}"
+                            }
+                            "{member.label()}"
+                        }
+                    }
+                }
             }
             div { class: "card-content",
                 SlateRenderer { data }
