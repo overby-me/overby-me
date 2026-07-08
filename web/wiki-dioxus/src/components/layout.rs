@@ -224,9 +224,17 @@ fn AppRail() -> Element {
     }
 
     let apps = [
-        ("member", "\u{1F465}", t("mime.members")),
-        ("speak", "\u{1F3A4}", t("mime.speak")),
-        ("vote", "\u{1F4CA}", t("mime.vote")),
+        (
+            "member",
+            super::loader::mime_icon("app/member"),
+            t("mime.members"),
+        ),
+        (
+            "speak",
+            super::loader::mime_icon("app/speak"),
+            t("mime.speak"),
+        ),
+        ("vote", super::loader::mime_icon("app/vote"), t("mime.vote")),
     ];
 
     rsx! {
@@ -390,6 +398,11 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
 #[component]
 fn DrawerContent() -> Element {
     let session = use_session();
+    let route = use_route::<Route>();
+    let segments: Vec<String> = match &route {
+        Route::PathPage { segments } => segments.clone(),
+        _ => vec![],
+    };
     let is_auth = session.read().is_authenticated();
     let display_name = session
         .read()
@@ -432,9 +445,181 @@ fn DrawerContent() -> Element {
                 }
             }
 
-            // HomeList — load groups and events from GraphQL
+            // In-context navigation: at the home route show the groups/events
+            // home list; once inside a context show its lazy child tree (the
+            // React app's MenuList).
             if is_auth {
-                HomeList {}
+                if segments.is_empty() {
+                    HomeList {}
+                } else {
+                    MenuList { segments: segments.clone() }
+                }
+            }
+        }
+    }
+}
+
+/// MenuList — the in-context drawer tree. Resolves the context (first path
+/// segment) node, then renders its children lazily and expandably, mirroring
+/// the React `MenuList`/`DrawerList`/`DrawerElement` trio.
+#[component]
+fn MenuList(segments: Vec<String>) -> Element {
+    let session = use_session();
+    let access_token = session.read().access_token.clone();
+    let context_key = segments.first().cloned().unwrap_or_default();
+
+    let context = use_resource(move || {
+        let token = access_token.clone();
+        let key = context_key.clone();
+        async move {
+            graphql::resolve_path(token.as_deref(), &[key])
+                .await
+                .ok()
+                .flatten()
+                .map(|n| n.id.0)
+        }
+    });
+
+    let hint_style = "padding: 4px 16px; color: var(--md-on-surface-variant);";
+    let ctx = context.read().clone();
+    match ctx {
+        Some(Some(context_id)) => rsx! {
+            div { class: "list", style: "margin-top: 8px;",
+                DrawerLevel {
+                    parent_id: context_id,
+                    path_prefix: segments[..1].to_vec(),
+                    current_path: segments.clone(),
+                    depth: 0,
+                }
+            }
+        },
+        Some(None) => rsx! {},
+        None => rsx! {
+            p { class: "body-medium", style: "{hint_style}", "…" }
+        },
+    }
+}
+
+/// Whether a mime type can hold children (so its drawer row gets an expander).
+/// Leaves (documents, files, maps) never do.
+fn mime_has_children(mime_id: &str) -> bool {
+    !matches!(mime_id, "wiki/document" | "wiki/file" | "map/map")
+}
+
+/// One lazily-loaded level of the drawer tree: the visible children of
+/// `parent_id`, ordered like the folder view.
+#[component]
+fn DrawerLevel(
+    parent_id: String,
+    path_prefix: Vec<String>,
+    current_path: Vec<String>,
+    depth: usize,
+) -> Element {
+    let session = use_session();
+    let access_token = session.read().access_token.clone();
+    let user_id = session.read().user.as_ref().map(|u| u.id.clone());
+    let parent = parent_id.clone();
+
+    let children = use_resource(move || {
+        let token = access_token.clone();
+        let parent = parent.clone();
+        let user_id = user_id.clone();
+        async move {
+            let Some(user_id) = user_id else {
+                return Vec::new();
+            };
+            graphql::query_children(token.as_deref(), &parent, &user_id)
+                .await
+                .unwrap_or_default()
+        }
+    });
+
+    let items = children.read().clone();
+    match items {
+        Some(items) => rsx! {
+            for child in items.iter() {
+                DrawerNodeItem {
+                    key: "{child.id.0}",
+                    node: child.clone(),
+                    path_prefix: path_prefix.clone(),
+                    current_path: current_path.clone(),
+                    depth,
+                }
+            }
+        },
+        None => rsx! {},
+    }
+}
+
+/// A single row in the drawer tree: icon, name, "not submitted" badge, and an
+/// expander that lazily reveals the node's own children. Rows on the current
+/// path start expanded and the active node is highlighted.
+#[component]
+fn DrawerNodeItem(
+    node: graphql::ChildNodeFields,
+    path_prefix: Vec<String>,
+    current_path: Vec<String>,
+    depth: usize,
+) -> Element {
+    let nav = use_navigator();
+
+    let mut full_path = path_prefix.clone();
+    full_path.push(node.key.clone());
+
+    // This row is on the active path if its full path is a prefix of the URL.
+    let on_path = full_path.len() <= current_path.len()
+        && full_path
+            .iter()
+            .zip(current_path.iter())
+            .all(|(a, b)| a == b);
+    let selected = full_path == current_path;
+
+    let mime_id = node.mime_id.clone().unwrap_or_default();
+    let expandable = mime_has_children(&mime_id);
+    let icon = super::loader::mime_icon(&mime_id);
+
+    // Auto-expand ancestors of the current node; let the user toggle the rest.
+    let mut expanded = use_signal(|| on_path && !selected);
+
+    let node_id = node.id.0.clone();
+    let indent = format!("padding-left: {}px;", 12 + depth * 14);
+    let nav_path = full_path.clone();
+
+    rsx! {
+        div {
+            class: if selected { "list-item selected" } else { "list-item" },
+            style: "cursor: pointer; {indent}",
+            onclick: move |_| {
+                nav.push(Route::PathPage { segments: nav_path.clone() });
+            },
+            div { class: "avatar small", "{icon}" }
+            div { class: "list-item-text",
+                div { class: "list-item-primary", "{node.name}" }
+                if node.mutable {
+                    div { class: "list-item-secondary",
+                        "\u{1F513} {t(\"layout.notSubmitted\")}"
+                    }
+                }
+            }
+            if expandable {
+                button {
+                    class: "btn-icon",
+                    style: "margin-left: auto;",
+                    onclick: move |evt| {
+                        evt.stop_propagation();
+                        let now = *expanded.read();
+                        expanded.set(!now);
+                    },
+                    if *expanded.read() { "\u{25BE}" } else { "\u{25B8}" }
+                }
+            }
+        }
+        if expandable && *expanded.read() {
+            DrawerLevel {
+                parent_id: node_id,
+                path_prefix: full_path.clone(),
+                current_path: current_path.clone(),
+                depth: depth + 1,
             }
         }
     }

@@ -181,6 +181,54 @@ pub struct ContextsWhereQuery {
     pub nodes: Vec<ContextNodeFields>,
 }
 
+// --- Ordering (for the drawer child tree) ---
+
+#[derive(cynic::Enum, Clone, Copy, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "order_by",
+    rename_all = "snake_case"
+)]
+pub enum OrderBy {
+    Asc,
+    AscNullsFirst,
+    AscNullsLast,
+    Desc,
+    DescNullsFirst,
+    DescNullsLast,
+}
+
+#[derive(cynic::InputObject, Debug, Default)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "nodes_order_by"
+)]
+pub struct NodesOrderBy {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub index: Option<OrderBy>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<OrderBy>,
+}
+
+// --- Query: children of a node, filtered + ordered (drawer MenuList) ---
+
+#[derive(cynic::QueryVariables, Debug)]
+pub struct ChildrenVariables {
+    pub where_clause: NodesBoolExp,
+    pub order_by: Option<Vec<NodesOrderBy>>,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "query_root",
+    variables = "ChildrenVariables"
+)]
+pub struct ChildrenQuery {
+    #[arguments(where: $where_clause, order_by: $order_by)]
+    pub nodes: Vec<ChildNodeFields>,
+}
+
 // --- Input types ---
 
 #[derive(cynic::InputObject, Debug, Default)]
@@ -204,7 +252,21 @@ pub struct NodesBoolExp {
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub owner_id: Option<UuidComparisonExp>,
     #[cynic(skip_serializing_if = "Option::is_none")]
+    pub mutable: Option<BooleanComparisonExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub members: Option<MembersBoolExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub mime: Option<MimesBoolExp>,
+}
+
+#[derive(cynic::InputObject, Debug, Default)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "mimes_bool_exp"
+)]
+pub struct MimesBoolExp {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<BooleanComparisonExp>,
 }
 
 #[derive(cynic::InputObject, Debug, Default)]
@@ -581,6 +643,84 @@ pub async fn query_contexts(
         let b_ts = b.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
         b_ts.cmp(a_ts)
     });
+    Ok(result.nodes)
+}
+
+/// Build the `where` filter for a node's visible children, mirroring the React
+/// drawer (`DrawerList`): children the user may see (immutable, or owned, or a
+/// member of) whose mime is not hidden.
+fn children_where_clause(parent_id: &str, user_id: &str) -> NodesBoolExp {
+    let visible = NodesBoolExp {
+        or: Some(vec![
+            NodesBoolExp {
+                mutable: Some(BooleanComparisonExp { eq: Some(false) }),
+                ..Default::default()
+            },
+            NodesBoolExp {
+                owner_id: Some(UuidComparisonExp {
+                    eq: Some(Uuid(user_id.to_string())),
+                    is_null: None,
+                }),
+                ..Default::default()
+            },
+            NodesBoolExp {
+                members: Some(MembersBoolExp {
+                    node_id: Some(UuidComparisonExp {
+                        eq: Some(Uuid(user_id.to_string())),
+                        is_null: None,
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ]),
+        ..Default::default()
+    };
+
+    NodesBoolExp {
+        and: Some(vec![
+            NodesBoolExp {
+                parent_id: Some(UuidComparisonExp {
+                    eq: Some(Uuid(parent_id.to_string())),
+                    is_null: None,
+                }),
+                ..Default::default()
+            },
+            visible,
+            NodesBoolExp {
+                mime: Some(MimesBoolExp {
+                    hidden: Some(BooleanComparisonExp { eq: Some(false) }),
+                }),
+                ..Default::default()
+            },
+        ]),
+        ..Default::default()
+    }
+}
+
+/// Fetch a node's visible children, ordered by index then creation time — the
+/// data behind one level of the drawer's lazy node tree.
+pub async fn query_children(
+    access_token: Option<&str>,
+    parent_id: &str,
+    user_id: &str,
+) -> Result<Vec<ChildNodeFields>, String> {
+    let where_clause = children_where_clause(parent_id, user_id);
+    let order_by = vec![
+        NodesOrderBy {
+            index: Some(OrderBy::Asc),
+            created_at: None,
+        },
+        NodesOrderBy {
+            index: None,
+            created_at: Some(OrderBy::Asc),
+        },
+    ];
+    let operation = ChildrenQuery::build(ChildrenVariables {
+        where_clause,
+        order_by: Some(order_by),
+    });
+    let result = execute(access_token, operation).await?;
     Ok(result.nodes)
 }
 

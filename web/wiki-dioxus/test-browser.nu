@@ -249,6 +249,44 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # Groups + events render as context items (avatar badges) in the drawer.
     let r = (assert-count $session_id "drawer shows group/event items" ".drawer .avatar.secondary" 1 -p $p -f $fl); $p = $r.passed; $fl = $r.failed
 
+    # ── In-context navigation (drawer node tree + app rail) ──────────────
+    # Click the first context; the app should route into it, render a node
+    # view, switch the drawer from the home list to the MenuList tree, and
+    # reveal the app rail.
+    let first_ctx = (try { wd-find $session_id ".drawer .avatar.secondary" } catch { "" })
+    if ($first_ctx | is-empty) or $first_ctx == "null" {
+        log-warn "no context to open — skipping in-context checks"
+        return { passed: $p, failed: $fl }
+    }
+    # Click the list-item that carries the onclick handler (the avatar is just a
+    # child span), dispatching a DOM click the Dioxus delegated listener sees.
+    wd-execute $session_id 'var e=document.querySelector(".drawer .avatar.secondary"); if(e){e.closest(".list-item").click()} return e?"clicked":"none"' | ignore
+    mut navigated = false
+    for _ in 1..($timeout) {
+        let path = (wd-execute $session_id 'return location.pathname')
+        if ($path != null) and ($path != "/") { $navigated = true; break }
+        sleep 500ms
+    }
+    if not $navigated {
+        log-fail "clicking a context did not navigate"
+        return { passed: $p, failed: ($fl + 1) }
+    }
+    log-ok "navigated into a context"; $p = $p + 1
+    sleep 2sec
+
+    let r = (assert-exists $session_id "context view renders a card" "#main .card" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+    # The app rail only appears inside a context; its presence confirms the
+    # in-context layout (and that its icons rendered).
+    let r = (assert-count $session_id "app rail shown in context" ".app-rail .btn-icon" 1 -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+    # The drawer must have swapped the home list for the node tree: the
+    # "Groups" home heading is gone once inside a context.
+    let drawer_txt = (wd-execute $session_id 'return (document.querySelector(".drawer")||{innerText:""}).innerText')
+    if ($drawer_txt | describe) == "string" and (not ($drawer_txt | str contains "Groups")) {
+        log-ok "drawer switched to node tree (home list gone)"; $p = $p + 1
+    } else {
+        log-fail "drawer still shows the home list inside a context"; $fl = $fl + 1
+    }
+
     { passed: $p, failed: $fl }
 }
 
