@@ -189,15 +189,21 @@ pub struct ContextsWhereQuery {
     graphql_type = "nodes_bool_exp"
 )]
 pub struct NodesBoolExp {
-    #[cynic(rename = "_and")]
+    #[cynic(rename = "_and", skip_serializing_if = "Option::is_none")]
     pub and: Option<Vec<NodesBoolExp>>,
-    #[cynic(rename = "_or")]
+    #[cynic(rename = "_or", skip_serializing_if = "Option::is_none")]
     pub or: Option<Vec<NodesBoolExp>>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub key: Option<StringComparisonExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub name: Option<StringComparisonExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<UuidComparisonExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub mime_id: Option<StringComparisonExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub owner_id: Option<UuidComparisonExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub members: Option<MembersBoolExp>,
 }
 
@@ -207,9 +213,11 @@ pub struct NodesBoolExp {
     graphql_type = "members_bool_exp"
 )]
 pub struct MembersBoolExp {
-    #[cynic(rename = "_and")]
+    #[cynic(rename = "_and", skip_serializing_if = "Option::is_none")]
     pub and: Option<Vec<MembersBoolExp>>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub accepted: Option<BooleanComparisonExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub node_id: Option<UuidComparisonExp>,
 }
 
@@ -219,11 +227,11 @@ pub struct MembersBoolExp {
     graphql_type = "String_comparison_exp"
 )]
 pub struct StringComparisonExp {
-    #[cynic(rename = "_eq")]
+    #[cynic(rename = "_eq", skip_serializing_if = "Option::is_none")]
     pub eq: Option<String>,
-    #[cynic(rename = "_ilike")]
+    #[cynic(rename = "_ilike", skip_serializing_if = "Option::is_none")]
     pub ilike: Option<String>,
-    #[cynic(rename = "_is_null")]
+    #[cynic(rename = "_is_null", skip_serializing_if = "Option::is_none")]
     pub is_null: Option<bool>,
 }
 
@@ -233,9 +241,9 @@ pub struct StringComparisonExp {
     graphql_type = "uuid_comparison_exp"
 )]
 pub struct UuidComparisonExp {
-    #[cynic(rename = "_eq")]
+    #[cynic(rename = "_eq", skip_serializing_if = "Option::is_none")]
     pub eq: Option<Uuid>,
-    #[cynic(rename = "_is_null")]
+    #[cynic(rename = "_is_null", skip_serializing_if = "Option::is_none")]
     pub is_null: Option<bool>,
 }
 
@@ -245,7 +253,7 @@ pub struct UuidComparisonExp {
     graphql_type = "Boolean_comparison_exp"
 )]
 pub struct BooleanComparisonExp {
-    #[cynic(rename = "_eq")]
+    #[cynic(rename = "_eq", skip_serializing_if = "Option::is_none")]
     pub eq: Option<bool>,
 }
 
@@ -418,11 +426,31 @@ pub async fn query_node_by_id(
     Ok(result.node)
 }
 
+/// Id of the single parent-less root node ("Hjem", key "root"). Paths are
+/// resolved relative to it: the root's key is not part of any URL path.
+async fn query_root_id(access_token: Option<&str>) -> Result<Option<String>, String> {
+    let where_clause = NodesBoolExp {
+        parent_id: Some(UuidComparisonExp {
+            is_null: Some(true),
+            eq: None,
+        }),
+        ..Default::default()
+    };
+    let operation = NodesWhereQuery::build(NodesWhereVariables { where_clause });
+    let result = execute(access_token, operation).await?;
+    Ok(result.nodes.into_iter().next().map(|n| n.id.0))
+}
+
 pub async fn resolve_path(
     access_token: Option<&str>,
     segments: &[String],
 ) -> Result<Option<NodeWithChildren>, String> {
-    let mut parent_id: Option<String> = None;
+    // Path segments are keys of nodes below the root, so start the walk at the
+    // root node rather than at the (parent-less) top level.
+    let Some(root_id) = query_root_id(access_token).await? else {
+        return Ok(None);
+    };
+    let mut parent_id: Option<String> = Some(root_id);
     let mut last_node_id: Option<String> = None;
 
     for segment in segments {
@@ -489,13 +517,9 @@ pub async fn search_nodes(
     Ok(result.nodes)
 }
 
-/// Fetch the user's context nodes (groups or events) of a given mime type.
-/// Matches nodes the user owns or has an accepted membership in, newest first.
-pub async fn query_contexts(
-    access_token: Option<&str>,
-    user_id: &str,
-    mime_id: &str,
-) -> Result<Vec<ContextNodeFields>, String> {
+/// Build the `where` filter for the user's context nodes (groups or events) of
+/// a given mime type: nodes the user owns or has an accepted membership in.
+fn contexts_where_clause(user_id: &str, mime_id: &str) -> NodesBoolExp {
     let owned = NodesBoolExp {
         owner_id: Some(UuidComparisonExp {
             eq: Some(Uuid(user_id.to_string())),
@@ -523,7 +547,7 @@ pub async fn query_contexts(
         ..Default::default()
     };
 
-    let where_clause = NodesBoolExp {
+    NodesBoolExp {
         and: Some(vec![
             NodesBoolExp {
                 mime_id: Some(StringComparisonExp {
@@ -538,8 +562,17 @@ pub async fn query_contexts(
             },
         ]),
         ..Default::default()
-    };
+    }
+}
 
+/// Fetch the user's context nodes (groups or events) of a given mime type.
+/// Matches nodes the user owns or has an accepted membership in, newest first.
+pub async fn query_contexts(
+    access_token: Option<&str>,
+    user_id: &str,
+    mime_id: &str,
+) -> Result<Vec<ContextNodeFields>, String> {
+    let where_clause = contexts_where_clause(user_id, mime_id);
     let operation = ContextsWhereQuery::build(NodesWhereVariables { where_clause });
     let mut result = execute(access_token, operation).await?;
     // Newest first (the API returns no guaranteed order).
@@ -578,4 +611,52 @@ pub async fn path_from_id(access_token: Option<&str>, id: &str) -> Result<Vec<St
     }
     segments.reverse();
     Ok(segments)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The Hasura API rejects `null` for a comparison expression
+    /// (`expected an object for type 'String_comparison_exp', but found null`),
+    /// so unset `Option` input fields must be omitted from the wire format
+    /// rather than serialized as `null`.
+    #[test]
+    fn contexts_where_clause_omits_null_fields() {
+        let clause = contexts_where_clause("user-123", "wiki/group");
+        let json = serde_json::to_string(&clause).expect("serialize where clause");
+
+        assert!(
+            !json.contains("null"),
+            "where clause must not send null comparison expressions: {json}"
+        );
+        // The filter the query actually depends on must survive serialization.
+        assert!(json.contains("\"mimeId\""), "missing mimeId filter: {json}");
+        assert!(json.contains("wiki/group"), "missing mime value: {json}");
+        assert!(
+            json.contains("\"ownerId\""),
+            "missing ownerId filter: {json}"
+        );
+        assert!(
+            json.contains("\"members\""),
+            "missing members filter: {json}"
+        );
+        assert!(
+            json.contains("\"accepted\""),
+            "missing accepted filter: {json}"
+        );
+        assert!(json.contains("user-123"), "missing user id: {json}");
+    }
+
+    /// A single-field comparison expression must serialize to just that field,
+    /// with no sibling `null` keys.
+    #[test]
+    fn string_comparison_exp_omits_null_fields() {
+        let exp = StringComparisonExp {
+            eq: Some("wiki/event".to_string()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&exp).expect("serialize comparison exp");
+        assert_eq!(json, r#"{"_eq":"wiki/event"}"#);
+    }
 }
