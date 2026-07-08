@@ -62,14 +62,6 @@ pub static NODES: &[GraphNode] = &[
         url: None,
     },
     GraphNode {
-        id: "Fediverse",
-        desc: "Fediverse\nInfo",
-        icon: "fediverse.avif",
-        color: Some("#000000"),
-        opacity: None,
-        url: Some("https://fediverse.info"),
-    },
-    GraphNode {
         id: "LinkedIn",
         desc: "LinkedIn\nProfile",
         icon: "linkedin.avif",
@@ -128,14 +120,6 @@ pub static NODES: &[GraphNode] = &[
         url: Some("https://atproto.com/"),
     },
     GraphNode {
-        id: "Bridgy",
-        desc: "Bridgy Fed",
-        icon: "bridgy.avif",
-        color: Some("#ffffff"),
-        opacity: Some(0.1),
-        url: Some("https://fed.brid.gy"),
-    },
-    GraphNode {
         id: "GitHub",
         desc: "GitHub\nProfile",
         icon: "github.avif",
@@ -165,7 +149,7 @@ pub static NODES: &[GraphNode] = &[
         icon: "mastodon.avif",
         color: None,
         opacity: None,
-        url: Some("https://mas.to/@niclasoverby"),
+        url: Some("https://mastodon.social/@overby.me@bsky.brid.gy"),
     },
     GraphNode {
         id: "Bluesky",
@@ -232,12 +216,12 @@ pub static NODES: &[GraphNode] = &[
         url: Some("https://lemmy.world/u/noverby"),
     },
     GraphNode {
-        id: "NeoDB",
-        desc: "NeoDB\nProfile",
-        icon: "neodb.avif",
+        id: "PopFeed",
+        desc: "PopFeed\nProfile",
+        icon: "popfeed.avif",
         color: None,
         opacity: None,
-        url: Some("https://neodb.social/users/niclasoverby"),
+        url: Some("https://popfeed.social/profile/did:plc:eukcx4amfqmhfrnkix7zwm34"),
     },
 ];
 
@@ -320,7 +304,7 @@ pub static LINKS: &[GraphLink] = &[
     },
     GraphLink {
         source: "Immerse",
-        target: "NeoDB",
+        target: "PopFeed",
     },
     GraphLink {
         source: "Immerse",
@@ -364,7 +348,7 @@ pub static LINKS: &[GraphLink] = &[
     },
     GraphLink {
         source: "Improve",
-        target: "NeoDB",
+        target: "PopFeed",
     },
     GraphLink {
         source: "Bluesky",
@@ -379,35 +363,7 @@ pub static LINKS: &[GraphLink] = &[
         target: "Atmosphere",
     },
     GraphLink {
-        source: "Bridgy",
+        source: "PopFeed",
         target: "Atmosphere",
-    },
-    GraphLink {
-        source: "Atmosphere",
-        target: "Bridgy",
-    },
-    GraphLink {
-        source: "Fediverse",
-        target: "Bridgy",
-    },
-    GraphLink {
-        source: "Bridgy",
-        target: "Fediverse",
-    },
-    GraphLink {
-        source: "PixelFed",
-        target: "Fediverse",
-    },
-    GraphLink {
-        source: "Mastodon",
-        target: "Fediverse",
-    },
-    GraphLink {
-        source: "Lemmy",
-        target: "Fediverse",
-    },
-    GraphLink {
-        source: "NeoDB",
-        target: "Fediverse",
     },
 ];
