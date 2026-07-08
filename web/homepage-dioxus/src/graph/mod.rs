@@ -274,7 +274,7 @@ pub fn Graph() -> Element {
             // Tooltip overlay
             if let Some(text) = &*tooltip_text.read() {
                 div {
-                    style: "position: absolute; pointer-events: none; white-space: pre; color: #ffffff; font-size: 30px; text-shadow: 0 0 5px #000000, 2px 2px 18px #ff0072; text-align: center; transform: translate(-50%, -100%); left: {tooltip_x}px; top: {tooltip_y}px; font-weight: bold;",
+                    style: "position: absolute; pointer-events: none; white-space: pre; color: #ffffff; font-family: 'Space Grotesk', system-ui, sans-serif; font-size: 30px; text-shadow: 0 0 5px #000000, 2px 2px 18px #ff0072; text-align: center; transform: translate(-50%, -100%); left: {tooltip_x}px; top: {tooltip_y}px; font-weight: bold;",
                     "{text}"
                 }
             }
