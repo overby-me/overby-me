@@ -15,6 +15,8 @@ mod theme;
 use dioxus::prelude::*;
 use route::Route;
 
+const STYLE_CSS: Asset = asset!("/assets/style.css");
+
 fn main() {
     wasm_logger::init(wasm_logger::Config::default());
     log::info!("RadikalWiki starting...");
@@ -37,6 +39,7 @@ fn main() {
 #[component]
 fn App() -> Element {
     rsx! {
+        document::Stylesheet { href: STYLE_CSS }
         Router::<Route> {}
         snackbar::Snackbar {}
     }

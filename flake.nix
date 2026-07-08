@@ -209,6 +209,7 @@
 
         ./web/homepage
         ./web/wiki
+        ./web/wiki-dioxus
       ];
       nixDirAliases = {
         packages = ["pkgs"];

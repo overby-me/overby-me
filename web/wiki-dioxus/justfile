@@ -1,8 +1,10 @@
+dx := `which -a dx | grep dioxus | head -1`
+
 dev:
-    dx serve
+    {{dx}} serve
 
 build:
-    dx build --release
+    {{dx}} build --release
 
 check:
     cargo check --target wasm32-unknown-unknown

@@ -1,6 +1,7 @@
 {
   devShells.wiki-dioxus = pkgs: {
     packages = with pkgs; [
+      which
       just
       cargo
       rustc
@@ -8,6 +9,7 @@
       dioxus-cli
       wasm-bindgen-cli
       binaryen
+      lld
     ];
   };
 
