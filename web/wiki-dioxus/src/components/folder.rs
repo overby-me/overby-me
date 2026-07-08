@@ -4,13 +4,14 @@ use crate::graphql::{ChildNodeFields, NodeWithChildren};
 use crate::i18n::t;
 use crate::route::Route;
 
-use super::loader::mime_icon;
+use super::loader::{mime_icon, visible_sorted};
 
 #[component]
 pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
     let name = node.name.as_str();
     let mime_id = node.mime_id.as_deref().unwrap_or("wiki/folder");
-    let children = &node.children;
+    let children = visible_sorted(&node.children);
+    let children = &children;
 
     rsx! {
         div { class: "card",

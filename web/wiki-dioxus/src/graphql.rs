@@ -142,6 +142,7 @@ pub struct ChildNodeFields {
     pub mime_id: Option<String>,
     pub mutable: bool,
     pub index: i32,
+    pub created_at: Option<Timestamptz>,
     pub mime: Option<MimeFields>,
 }
 

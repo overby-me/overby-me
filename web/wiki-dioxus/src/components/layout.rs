@@ -452,7 +452,12 @@ fn DrawerContent() -> Element {
                 if segments.is_empty() {
                     HomeList {}
                 } else {
-                    MenuList { segments: segments.clone() }
+                    // Key on the context so switching contexts remounts and
+                    // re-resolves (use_resource does not re-run for prop changes).
+                    MenuList {
+                        key: "{segments.first().cloned().unwrap_or_default()}",
+                        segments: segments.clone(),
+                    }
                 }
             }
         }

@@ -3,7 +3,7 @@ use dioxus::prelude::*;
 use crate::graphql::NodeWithChildren;
 use crate::i18n::t;
 
-use super::loader::mime_icon;
+use super::loader::{mime_icon, visible_sorted};
 
 /// Generic node viewer — shows node info and its children
 #[component]
@@ -11,7 +11,8 @@ pub fn NodeApp(node: NodeWithChildren, title: String) -> Element {
     let name = node.name.as_str();
     let mime_id = node.mime_id.as_deref().unwrap_or("");
     let icon = mime_icon(mime_id);
-    let children = &node.children;
+    let children = visible_sorted(&node.children);
+    let children = &children;
 
     rsx! {
         div { class: "card",

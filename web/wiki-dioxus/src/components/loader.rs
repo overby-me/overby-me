@@ -16,9 +16,23 @@ use super::sort::SortApp;
 use super::speak::SpeakApp;
 use super::vote::{PolicyApp, PollApp, VoteApp};
 
-/// The catch-all path page — resolves URL segments to a node
+/// The catch-all path page. Re-keys the resolver on the full path so navigating
+/// between two `PathPage` routes remounts it and re-runs the query: `use_resource`
+/// only re-runs for reactive reads inside its closure, not for a changed prop, so
+/// without this the view would keep showing the previously resolved node.
 #[component]
 pub fn PathPage(segments: Vec<String>) -> Element {
+    // Join with a separator that cannot appear in node keys (not "/", which a
+    // lint mistakes for filesystem path joining) so the key is unique per path.
+    let key = segments.join("\u{1f}");
+    rsx! {
+        PathResolver { key: "{key}", segments }
+    }
+}
+
+/// Resolves a path to a node and renders the matching app. Remounted per path.
+#[component]
+fn PathResolver(segments: Vec<String>) -> Element {
     let session = use_session();
     let access_token = session.read().access_token.clone();
     let segments_clone = segments.clone();
@@ -158,6 +172,64 @@ fn mime_icon_by_prefix(mime_id: &str) -> &'static str {
         "\u{1F4D8}" // Word 📘
     } else {
         "\u{2753}" // QuestionMark ❓
+    }
+}
+
+/// Return a node's children the way the React folder/list views show them:
+/// hidden-mime entries dropped, ordered by `index` then creation time. Row-level
+/// permissions are already applied by Hasura, so only the hidden filter and the
+/// ordering need to happen client-side.
+pub fn visible_sorted(children: &[graphql::ChildNodeFields]) -> Vec<graphql::ChildNodeFields> {
+    let mut out: Vec<graphql::ChildNodeFields> = children
+        .iter()
+        .filter(|c| c.mime.as_ref().map(|m| !m.hidden).unwrap_or(true))
+        .cloned()
+        .collect();
+    out.sort_by(|a, b| {
+        a.index.cmp(&b.index).then_with(|| {
+            let a_ts = a.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
+            let b_ts = b.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
+            a_ts.cmp(b_ts)
+        })
+    });
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graphql::{ChildNodeFields, MimeFields, Timestamptz, Uuid};
+
+    fn child(name: &str, index: i32, hidden: bool, created: &str) -> ChildNodeFields {
+        ChildNodeFields {
+            id: Uuid(name.to_string()),
+            name: name.to_string(),
+            key: name.to_string(),
+            mime_id: Some("wiki/folder".to_string()),
+            mutable: false,
+            index,
+            created_at: Some(Timestamptz(created.to_string())),
+            mime: Some(MimeFields {
+                id: "wiki/folder".to_string(),
+                icon: "folder".to_string(),
+                hidden,
+                context: false,
+            }),
+        }
+    }
+
+    #[test]
+    fn visible_sorted_drops_hidden_and_orders_by_index_then_time() {
+        let children = vec![
+            child("b", 1, false, "2024-01-01"),
+            child("secret", 0, true, "2024-01-01"),
+            child("a", 0, false, "2024-01-02"),
+            child("a-older", 0, false, "2024-01-01"),
+        ];
+        let out = visible_sorted(&children);
+        let names: Vec<&str> = out.iter().map(|c| c.name.as_str()).collect();
+        // hidden dropped; index 0 before index 1; within index 0 older first.
+        assert_eq!(names, vec!["a-older", "a", "b"]);
     }
 }
 

@@ -287,6 +287,29 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         log-fail "drawer still shows the home list inside a context"; $fl = $fl + 1
     }
 
+    # ── Navigate to a child node (regression: PathPage must re-resolve on a
+    # client-side route change between two path pages, not show stale content).
+    let path_before = (wd-execute $session_id 'return location.pathname')
+    let main_before = (wd-execute $session_id 'return (document.getElementById("main")||{innerText:""}).innerText')
+    let clicked = (wd-execute $session_id 'var e=document.querySelector("#main .folder-item"); if(e){e.click(); return "y"} return "n"')
+    if $clicked == "y" {
+        mut deeper = false
+        for _ in 1..($timeout) {
+            let path_now = (wd-execute $session_id 'return location.pathname')
+            if ($path_now != null) and ($path_now != $path_before) { $deeper = true; break }
+            sleep 500ms
+        }
+        sleep 2sec
+        let main_after = (wd-execute $session_id 'return (document.getElementById("main")||{innerText:""}).innerText')
+        if $deeper and ($main_after != $main_before) {
+            log-ok "navigating to a child node updates the view"; $p = $p + 1
+        } else {
+            log-fail "child navigation did not update the view (stale PathPage)"; $fl = $fl + 1
+        }
+    } else {
+        log-warn "context has no folder-item children — skipping child-nav check"
+    }
+
     { passed: $p, failed: $fl }
 }
 

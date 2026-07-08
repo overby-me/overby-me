@@ -5,7 +5,7 @@ use crate::i18n::t;
 use crate::session::use_session;
 
 use super::content::ContentApp;
-use super::loader::mime_icon;
+use super::loader::{mime_icon, visible_sorted};
 
 /// VoteApp — voting interface for active polls
 #[component]
@@ -54,7 +54,8 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
 /// PolicyApp — document with comments, changes, and polls
 #[component]
 pub fn PolicyApp(node: NodeWithChildren) -> Element {
-    let children = &node.children;
+    let children = visible_sorted(&node.children);
+    let children = &children;
 
     let polls: Vec<_> = children
         .iter()
