@@ -1,4 +1,5 @@
-# deslop configuration for the homepage-dioxus WebGL force-graph.
+# deslop configuration for web/homepage (Dioxus/WASM WebGL force-graph + a small
+# axum backend).
 #
 # A Dioxus/WASM app that talks to WebGL directly inherently needs raw-memory
 # views into the wasm heap, narrowing casts to GL integer widths, cross-module
@@ -51,4 +52,9 @@ disabled_rules = [
   # The force simulation and renderer iterate node/link arrays accessing
   # several fields per element; that struct-of-arrays access is the point.
   "rust_aos_hot_path",
+
+  # ── Backend ───────────────────────────────────────────────────────────
+  # The RSS-proxy handler awaits a reqwest call; it holds no semaphore permit
+  # or pooled guard across the await, so the heuristic is a false positive.
+  "rust_async_hold_permit_across_await",
 ]

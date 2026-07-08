@@ -1,17 +1,13 @@
-install:
-    deno install
+dx := `which -a dx | grep dioxus | head -1`
 
 dev:
-    deno run -A npm:@rsbuild/core dev --open
+    {{dx}} serve
 
 build:
-    deno run -A npm:@rsbuild/core build
+    {{dx}} build --release
 
-start:
-    deno run -A npm:@rsbuild/core preview
+serve:
+    {{dx}} serve --release
 
-lint:
-    deno lint
-
-build-nix:
-    nix build .#homepage-frontend --print-build-logs
+clean:
+    {{dx}} clean

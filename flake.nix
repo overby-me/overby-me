@@ -208,7 +208,6 @@
         ./tangled/spindle-nix-engine
 
         ./web/homepage
-        ./web/homepage-dioxus
         ./web/wiki
       ];
       nixDirAliases = {

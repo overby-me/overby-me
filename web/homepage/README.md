@@ -4,7 +4,9 @@ Personal homepage for [overby.me](https://overby.me) — an interactive 3D graph
 
 ## Overview
 
-The landing page renders a 3D force-directed graph (using [three.js](https://threejs.org/) via [react-force-graph-3d](https://github.com/vasturiano/react-force-graph)) where nodes represent profiles, platforms, and life categories (Commerce, Improve, Connect, Immerse, Give). Clicking a node navigates to the corresponding URL.
+The landing page renders a 3D force-directed graph where nodes represent profiles, platforms, and life categories (Commerce, Improve, Connect, Immerse, Give). Clicking a node navigates to the corresponding URL; nodes can be dragged, and the camera orbits and zooms.
+
+The graph is a Rust/WebAssembly rewrite of the original React version: it draws directly to WebGL and runs a faithful port of [d3-force-3d](https://github.com/vasturiano/d3-force-3d) (the force model [react-force-graph-3d](https://github.com/vasturiano/react-force-graph) uses) for the layout.
 
 Additional utility routes:
 
@@ -14,22 +16,23 @@ Additional utility routes:
 
 ## Tech Stack
 
-- **React 19** with TypeScript
-- **Rsbuild** for bundling
-- **Deno** as the JavaScript runtime
-- **Three.js** / **react-force-graph-3d** for 3D graph rendering
-- **React Router** for client-side routing
-- **Nix** for reproducible dev environments
-- **Just** as a command runner
+- **[Dioxus](https://dioxuslabs.com/)** (Rust) compiled to **WebAssembly**
+- **WebGL** via `web-sys` for the custom 3D renderer, with **[glam](https://github.com/bitshifter/glam-rs)** for math
+- Self-hosted **[Space Grotesk](https://fonts.google.com/specimen/Space+Grotesk)** for the graph labels
+- **Dioxus Router** for client-side routing
+- **[Nix](https://nixos.org/)** for reproducible dev environments
+- **[Just](https://github.com/casey/just)** as a command runner, driving the **[Dioxus CLI](https://crates.io/crates/dioxus-cli)** (`dx`)
 
 ## Getting Started
 
 ### Prerequisites
 
-- [Deno](https://deno.land/)
-- [Just](https://github.com/casey/just)
+The Nix dev shell provides the full toolchain (`dx`, a Rust toolchain with the
+`wasm32-unknown-unknown` target, `wasm-bindgen-cli`, and `binaryen`):
 
-Or use the Nix dev shell which provides both.
+```sh
+nix develop .#homepage
+```
 
 ### Development
 
@@ -43,18 +46,14 @@ just dev
 just build
 ```
 
-### Preview
+The static site is written to `target/dx/homepage-dioxus/release/web/public`.
+
+### Clean
 
 ```sh
-just start
-```
-
-### Lint
-
-```sh
-just lint
+just clean
 ```
 
 ## License
 
-[AGPL-3.0](LICENSE)
+Licensed under AGPL-3.0.
