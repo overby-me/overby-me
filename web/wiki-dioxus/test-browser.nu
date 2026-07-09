@@ -471,6 +471,27 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         log-warn "no grid toggle (folder has <=1 child) — skipping persistence check"
     }
 
+    # ── Saving in an app returns to the node's non-app view ──────────────────
+    # Open the sort app and save (re-persists the same order); it should redirect
+    # back to the folder (?app=sort dropped from the URL).
+    wd-navigate $session_id $"(base-url)($ctx_path)?app=sort"
+    if (wd-wait-for-element $session_id "#main .btn-primary" 15) {
+        wd-execute $session_id 'var b=document.querySelector("#main .btn-primary"); if(b)b.click(); return 1' | ignore
+        mut redirected = false
+        for _ in 1..($timeout) {
+            let s = (wd-execute $session_id 'return location.search')
+            if not ($s | default "" | str contains "app=sort") { $redirected = true; break }
+            sleep 500ms
+        }
+        if $redirected {
+            log-ok "saving the sort app returns to the node view"; $p = $p + 1
+        } else {
+            log-fail "sort save did not redirect off ?app=sort"; $fl = $fl + 1
+        }
+    } else {
+        log-warn "sort app save button not found — skipping redirect check"
+    }
+
     { passed: $p, failed: $fl }
 }
 

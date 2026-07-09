@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 
 use crate::graphql::{self, NodeWithChildren};
 use crate::i18n::t;
+use crate::route::Route;
 use crate::session::use_session;
 use crate::snackbar::show_snackbar;
 
@@ -15,6 +16,14 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
     let session = use_session();
     let is_auth = session.read().is_authenticated();
     let node_id = node.id.0.clone();
+    let nav = use_navigator();
+    // The node's own path, so saving/publishing returns to the rendered node
+    // (its non-app view) rather than leaving the user in the editor.
+    let route = use_route::<Route>();
+    let segments: Vec<String> = match &route {
+        Route::PathPage { segments, .. } => segments.clone(),
+        _ => vec![],
+    };
 
     let mut title = use_signal(|| node.name.clone());
     let mut saving = use_signal(|| false);
@@ -34,9 +43,11 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
     let handle_save = {
         let token = session.read().access_token.clone();
         let node_id = node_id.clone();
+        let segments = segments.clone();
         move |mutable: bool| {
             let token = token.clone();
             let node_id = node_id.clone();
+            let segments = segments.clone();
             let title_val = title.read().clone();
             let content_val = content_html.read().clone();
             spawn(async move {
@@ -54,7 +65,14 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                 };
 
                 match graphql::update_node(token.as_deref(), &node_id, set).await {
-                    Ok(true) => show_snackbar(&t("common.save")),
+                    Ok(true) => {
+                        show_snackbar(&t("common.save"));
+                        // Return to the node's rendered (non-app) view.
+                        nav.push(Route::PathPage {
+                            segments: segments.clone(),
+                            app: None,
+                        });
+                    }
                     Ok(false) => show_snackbar(&t("error.somethingWentWrong")),
                     Err(e) => {
                         log::error!("Save failed: {e}");
@@ -103,7 +121,8 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                                 let save = handle_save.clone();
                                 move |_| save(true)
                             },
-                            "\u{1F4BE} {t(\"common.save\")}"
+                            span { class: "material-icons", "save" }
+                            " {t(\"common.save\")}"
                         }
                         if node.mutable {
                             button {
@@ -113,7 +132,8 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                                     let save = handle_save.clone();
                                     move |_| save(false)
                                 },
-                                "\u{1F4E4} {t(\"content.submit\")}"
+                                span { class: "material-icons", "publish" }
+                                " {t(\"content.submit\")}"
                             }
                         }
                         if *saving.read() {

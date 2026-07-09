@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 
 use crate::graphql::{self, NodeWithChildren};
 use crate::i18n::t;
+use crate::route::Route;
 use crate::session::use_session;
 use crate::snackbar::show_snackbar;
 
@@ -13,6 +14,13 @@ pub fn SortApp(node: NodeWithChildren) -> Element {
     let session = use_session();
     let is_auth = session.read().is_authenticated();
     let node_id = node.id.0.clone();
+    let nav = use_navigator();
+    // The folder's own path, so saving returns to its rendered (non-app) view.
+    let route = use_route::<Route>();
+    let segments: Vec<String> = match &route {
+        Route::PathPage { segments, .. } => segments.clone(),
+        _ => vec![],
+    };
 
     let mut items = use_signal(|| node.children.clone());
     let mut dragging_idx = use_signal(|| None::<usize>);
@@ -21,9 +29,11 @@ pub fn SortApp(node: NodeWithChildren) -> Element {
     let handle_save = {
         let token = session.read().access_token.clone();
         let node_id = node_id.clone();
+        let segments = segments.clone();
         move |_| {
             let token = token.clone();
             let _node_id = node_id.clone();
+            let segments = segments.clone();
             let current_items = items.read().clone();
             spawn(async move {
                 saving.set(true);
@@ -39,6 +49,11 @@ pub fn SortApp(node: NodeWithChildren) -> Element {
 
                 show_snackbar(&t("sort.saveSorting"));
                 saving.set(false);
+                // Return to the folder's rendered (non-app) view.
+                nav.push(Route::PathPage {
+                    segments,
+                    app: None,
+                });
             });
         }
     };
@@ -46,7 +61,7 @@ pub fn SortApp(node: NodeWithChildren) -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", "\u{2195}" }
+                div { class: "avatar", {icon_el("app/sort")} }
                 h3 { class: "title-medium", "{t(\"mime.sort\")}" }
                 div { class: "flex-grow" }
                 if is_auth {
@@ -54,7 +69,8 @@ pub fn SortApp(node: NodeWithChildren) -> Element {
                         class: "btn btn-primary",
                         disabled: *saving.read(),
                         onclick: handle_save,
-                        "\u{1F4BE} {t(\"sort.saveSorting\")}"
+                        span { class: "material-icons", "save" }
+                        " {t(\"sort.saveSorting\")}"
                     }
                     if *saving.read() {
                         div { class: "spinner", style: "margin-left: 8px;" }
@@ -92,8 +108,9 @@ pub fn SortApp(node: NodeWithChildren) -> Element {
 
                         // Drag handle
                         span {
+                            class: "material-icons",
                             style: "cursor: grab; margin-right: 8px; color: var(--md-on-surface-variant);",
-                            "\u{2630}"
+                            "drag_indicator"
                         }
                         div { class: "avatar small",
                             {icon_el(item.mime_id.as_deref().unwrap_or(""))}
