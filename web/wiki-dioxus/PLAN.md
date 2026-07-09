@@ -201,7 +201,8 @@ All the above build + render live (browser smoke test asserts each mounts).
 
 ### Voting / policy
 
-- `#27` Randomise the order of voting options.
+- `[x]` `#27` Randomise the order of voting options — ballot order is shuffled
+  once per mount (Blank kept last); unit-tested.
 - `#112` Show all sub-changes as a tree in the policy app.
 - `#138` Replace "questions" with a comment model.
 

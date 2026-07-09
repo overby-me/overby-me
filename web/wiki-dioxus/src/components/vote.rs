@@ -206,6 +206,8 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
     let mut selected = use_signal(|| vec![false; options.len()]);
     let mut error = use_signal(String::new);
     let mut refresh = use_signal(|| 0u32);
+    // Randomise the ballot order once per mount (#27); Blank stays last.
+    let order = use_hook(|| ballot_order(options.len(), js_sys::Math::random));
 
     // Live results: any vote cast on this poll re-runs the tally / voted checks.
     crate::subscription::use_live(
@@ -354,11 +356,17 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                                             error.set(String::new());
                                         }
                                     },
-                                    for (i , option) in opts.iter().enumerate() {
-                                        div { class: "list-item", key: "{i}", style: "gap: 8px;",
-                                            RadioItem { value: "{i}", index: i }
-                                            div { class: "list-item-text",
-                                                div { class: "list-item-primary", "{option}" }
+                                    for (dp , ri) in order.iter().enumerate() {
+                                        {
+                                            let ri = *ri;
+                                            let option = opts[ri].clone();
+                                            rsx! {
+                                                div { class: "list-item", key: "{ri}", style: "gap: 8px;",
+                                                    RadioItem { value: "{ri}", index: dp }
+                                                    div { class: "list-item-text",
+                                                        div { class: "list-item-primary", "{option}" }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -367,18 +375,24 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                         }
                     } else {
                         div { class: "list",
-                            for (i , option) in opts.iter().enumerate() {
-                                div { class: "list-item", key: "{i}", style: "gap: 8px;",
-                                    Checkbox {
-                                        checked: Some(if selected.read().get(i).copied().unwrap_or(false) {
-                                            CheckboxState::Checked
-                                        } else {
-                                            CheckboxState::Unchecked
-                                        }),
-                                        on_checked_change: move |_| apply_toggle(selected, error, i, false),
-                                    }
-                                    div { class: "list-item-text",
-                                        div { class: "list-item-primary", "{option}" }
+                            for ri in order.iter() {
+                                {
+                                    let ri = *ri;
+                                    let option = opts[ri].clone();
+                                    rsx! {
+                                        div { class: "list-item", key: "{ri}", style: "gap: 8px;",
+                                            Checkbox {
+                                                checked: Some(if selected.read().get(ri).copied().unwrap_or(false) {
+                                                    CheckboxState::Checked
+                                                } else {
+                                                    CheckboxState::Unchecked
+                                                }),
+                                                on_checked_change: move |_| apply_toggle(selected, error, ri, false),
+                                            }
+                                            div { class: "list-item-text",
+                                                div { class: "list-item-primary", "{option}" }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -451,4 +465,42 @@ fn apply_toggle(
     }
     selected.set(cur);
     error.set(String::new());
+}
+
+/// A randomised display order for a ballot's `n` options (#27), to remove
+/// first-listed bias. The final option ("Blank") is kept last (it can only be
+/// chosen alone); the rest are Fisher-Yates shuffled with `rand` in `[0, 1)`.
+/// Returns real option indices in display order, so callers still address
+/// `selected`/`counts` by the returned index.
+fn ballot_order(n: usize, mut rand: impl FnMut() -> f64) -> Vec<usize> {
+    if n <= 2 {
+        return (0..n).collect();
+    }
+    let mut order: Vec<usize> = (0..n - 1).collect();
+    for i in (1..order.len()).rev() {
+        let j = ((rand() * (i as f64 + 1.0)).floor() as usize).min(i);
+        order.swap(i, j);
+    }
+    order.push(n - 1);
+    order
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ballot_order;
+
+    #[test]
+    fn ballot_order_keeps_blank_last_and_is_a_permutation() {
+        // Deterministic "random" that always picks index 0 on each step.
+        let order = ballot_order(5, || 0.0);
+        assert_eq!(order.len(), 5);
+        assert_eq!(*order.last().unwrap(), 4, "Blank (last) stays last");
+        let mut sorted = order.clone();
+        sorted.sort();
+        assert_eq!(sorted, vec![0, 1, 2, 3, 4], "every option appears once");
+
+        // Small ballots are returned unchanged.
+        assert_eq!(ballot_order(2, || 0.5), vec![0, 1]);
+        assert_eq!(ballot_order(0, || 0.5), Vec::<usize>::new());
+    }
 }
