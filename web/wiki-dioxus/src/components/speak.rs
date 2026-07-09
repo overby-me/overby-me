@@ -25,14 +25,20 @@ pub fn SpeakApp(node: NodeWithChildren) -> Element {
     // Re-fetch the queue after every join/remove by bumping this counter.
     let mut refresh = use_signal(|| 0u32);
 
-    // Poll the queue so changes made by other participants show up without a
-    // manual reload — a lightweight stand-in for the React app's subscription.
-    // The future is dropped (and the loop ends) when the component unmounts.
-    use_future(move || async move {
-        loop {
-            gloo_timers::future::TimeoutFuture::new(4000).await;
-            refresh += 1;
-        }
+    // Live updates: subscribe to the speaker list's entries over the Hasura
+    // WebSocket. Each pushed change re-runs the query below, so entries added or
+    // removed by other participants appear immediately (no manual reload).
+    let sub_list = list_id
+        .clone()
+        .unwrap_or_else(|| "00000000-0000-0000-0000-000000000000".to_string());
+    let sub_query = format!(
+        "subscription {{ nodes(where: {{ parentId: {{ _eq: \"{sub_list}\" }}, mimeId: {{ _eq: \"speak/speak\" }} }}) {{ id }} }}"
+    );
+    let sub = crate::subscription::use_graphql_subscription(sub_query);
+    use_effect(move || {
+        // Reading the subscription signal ties this effect to each pushed update.
+        let _ = sub.read();
+        refresh += 1;
     });
 
     let access_token = session.read().access_token.clone();

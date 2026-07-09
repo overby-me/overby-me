@@ -84,17 +84,23 @@ test and/or a `test-browser.nu` assertion.
 - `[x]` `?app=vote` resolves the context's `active` relation to the open poll.
   All verified live against the backend.
 
-## Known remaining gaps
+## Real-time & rich features
 
-- **Real-time subscriptions.** The React app uses GraphQL subscriptions
-  (WebSocket) for live updates — speaker list, poll status, invite counts. This
-  port uses one-shot queries and refreshes after each mutation, so a change made
-  by another client needs a manual reload. Porting this means a `graphql-ws`
-  WebSocket transport; it is the main architectural piece still missing.
-- Speaker list has no speaking countdown timer.
-- The editor is plain-text (paragraphs), not full Slate rich-text formatting;
-  the read-side renderer already handles bold/italic/headings/lists/links.
-- Live poll result tallies (vote counts per option) are not shown.
+- `[x]` **GraphQL subscriptions** over the Hasura WebSocket
+  (`graphql-transport-ws`): `src/subscription.rs` does connection_init (bearer
+  token) → subscribe → `next`, surfaced as a signal. The speaker list uses it
+  for live updates (a pushed change re-runs the query). Protocol verified live
+  end to end (connection_ack + data). Other views can adopt the same hook.
+- `[x]` Speaker countdown timer (from the list's `time`/`updatedAt`).
+- `[x]` Poll result tallies (bar + count/percent per option).
+- `[x]` Editor inline formatting via markdown (`**bold**`, `*italic*`,
+  `` `code` ``) mapping to Slate marks the renderer displays.
+
+## Remaining nice-to-haves
+
+- Adopt the subscription hook for the other live views (poll status, invite
+  count) — currently those refresh after their own mutations.
+- A WYSIWYG toolbar (the editor is markdown-driven, not click-to-format).
 
 ## Cross-cutting checks
 

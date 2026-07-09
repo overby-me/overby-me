@@ -10,6 +10,8 @@ mod route;
 mod session;
 pub mod snackbar;
 #[allow(dead_code)]
+mod subscription;
+#[allow(dead_code)]
 mod theme;
 
 use dioxus::prelude::*;
