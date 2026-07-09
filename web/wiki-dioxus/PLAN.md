@@ -107,7 +107,14 @@ test and/or a `test-browser.nu` assertion.
 - `[x]` `?app=` routing (modelled in the route), i18n (Da/En incl. the ported
   vote/speak/poll/sort/invite/member sections), theme, snackbars, breadcrumbs
   (resolved node names, verified live).
-- `[ ]` Not ported from wiki: admin, perm, map, screen — deferred.
+- `[x]` **admin / perm / map / screen** (were deferred; React shipped admin &
+  perm as empty stubs). Now implemented and verified live via `?app=`:
+  - **screen**: the context's active node (MimeLoader) beside the speaker list.
+  - **admin**: a live results grid — every poll in the context with per-option
+    tallies and totals.
+  - **perm**: the context's permission rows (mime · role · insert/select/delete).
+  - **map**: a full-height OpenStreetMap view (OSM embed, centred on Denmark).
+  All four are reachable from the app rail.
 
 ## Content lifecycle (CRUD)
 

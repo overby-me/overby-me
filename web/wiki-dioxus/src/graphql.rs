@@ -287,6 +287,8 @@ pub struct NodesBoolExp {
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<UuidComparisonExp>,
     #[cynic(skip_serializing_if = "Option::is_none")]
+    pub context_id: Option<UuidComparisonExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub mime_id: Option<StringComparisonExp>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub owner_id: Option<UuidComparisonExp>,
@@ -1065,6 +1067,118 @@ pub struct VotesWhereQuery {
 pub struct VoteNodeFields {
     pub id: Uuid,
     pub data: Option<Jsonb>,
+}
+
+// --- Permissions of a context (the perm view) ---
+
+#[derive(cynic::QueryVariables, Debug)]
+pub struct PermissionsWhereVariables {
+    pub where_clause: PermissionsBoolExp,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "query_root",
+    variables = "PermissionsWhereVariables"
+)]
+pub struct PermissionsQuery {
+    #[arguments(where: $where_clause)]
+    pub permissions: Vec<PermissionFields>,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "permissions")]
+pub struct PermissionFields {
+    pub id: Uuid,
+    pub mime_id: Option<String>,
+    pub role: String,
+    pub insert: bool,
+    pub select: bool,
+    pub delete: bool,
+    pub active: bool,
+}
+
+#[derive(cynic::InputObject, Debug, Default)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "permissions_bool_exp"
+)]
+pub struct PermissionsBoolExp {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub context_id: Option<UuidComparisonExp>,
+}
+
+/// The permission rows configured on a context, for the perm overview.
+pub async fn query_permissions(
+    access_token: Option<&str>,
+    context_id: &str,
+) -> Result<Vec<PermissionFields>, String> {
+    let where_clause = PermissionsBoolExp {
+        context_id: Some(UuidComparisonExp {
+            eq: Some(Uuid(context_id.to_string())),
+            is_null: None,
+        }),
+    };
+    let operation = PermissionsQuery::build(PermissionsWhereVariables { where_clause });
+    let result = execute(access_token, operation).await?;
+    Ok(result.permissions)
+}
+
+// --- Polls of a context (the admin results overview) ---
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "query_root",
+    variables = "NodesWhereVariables"
+)]
+pub struct PollsWhereQuery {
+    #[arguments(where: $where_clause)]
+    pub nodes: Vec<PollSummaryFields>,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "nodes")]
+pub struct PollSummaryFields {
+    pub id: Uuid,
+    pub name: String,
+    pub data: Option<Jsonb>,
+    pub created_at: Option<Timestamptz>,
+}
+
+/// Every `vote/poll` in a context, newest first — for the admin results grid.
+pub async fn query_context_polls(
+    access_token: Option<&str>,
+    context_id: &str,
+) -> Result<Vec<PollSummaryFields>, String> {
+    let where_clause = NodesBoolExp {
+        and: Some(vec![
+            NodesBoolExp {
+                context_id: Some(UuidComparisonExp {
+                    eq: Some(Uuid(context_id.to_string())),
+                    is_null: None,
+                }),
+                ..Default::default()
+            },
+            NodesBoolExp {
+                mime_id: Some(StringComparisonExp {
+                    eq: Some("vote/poll".to_string()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ]),
+        ..Default::default()
+    };
+    let operation = PollsWhereQuery::build(NodesWhereVariables { where_clause });
+    let mut result = execute(access_token, operation).await?;
+    result.nodes.sort_by(|a, b| {
+        let a_ts = a.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
+        let b_ts = b.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
+        b_ts.cmp(a_ts)
+    });
+    Ok(result.nodes)
 }
 
 /// Every vote cast on a poll (each as its list of selected option indices),

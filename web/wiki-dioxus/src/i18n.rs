@@ -272,6 +272,9 @@ const EN_JSON: &str = r#"{
         "vote": "Vote",
         "members": "Members",
         "map": "Map",
+        "screen": "Screen",
+        "admin": "Results",
+        "permissions": "Permissions",
         "unknown": "Unknown"
     }
 }"#;
@@ -446,6 +449,9 @@ const DA_JSON: &str = r#"{
         "vote": "Afstemning",
         "members": "Medlemmer",
         "map": "Kort",
+        "screen": "Skærm",
+        "admin": "Resultater",
+        "permissions": "Tilladelser",
         "unknown": "Ukendt"
     }
 }"#;

@@ -56,6 +56,10 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
                 Some("member") => rsx! { MemberApp { node } },
                 Some("editor") => rsx! { EditorApp { node } },
                 Some("sort") => rsx! { SortApp { node } },
+                Some("screen") => rsx! { super::screen::ScreenApp { node } },
+                Some("admin") => rsx! { super::admin::AdminApp { node } },
+                Some("perm") => rsx! { super::perm::PermApp { node } },
+                Some("map") => rsx! { super::map::MapApp { node } },
                 _ => rsx! { MimeLoader { node, path: segments.clone() } },
             }
         }
@@ -84,7 +88,7 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
 
 /// Routes a node to the appropriate app based on its MIME type
 #[component]
-fn MimeLoader(node: NodeWithChildren, path: Vec<String>) -> Element {
+pub fn MimeLoader(node: NodeWithChildren, path: Vec<String>) -> Element {
     let mime_id = node.mime_id.as_deref().unwrap_or("");
 
     match mime_id {
@@ -105,6 +109,7 @@ fn MimeLoader(node: NodeWithChildren, path: Vec<String>) -> Element {
             rsx! { NodeApp { node: node.clone(), title: t("mime.candidate") } }
         }
         "vote/poll" => rsx! { PollApp { node: node.clone() } },
+        "map/map" => rsx! { super::map::MapApp { node: node.clone() } },
         _ => rsx! { NodeApp { node: node.clone(), title: t("mime.unknown") } },
     }
 }

@@ -312,6 +312,23 @@ fn AppRail() -> Element {
             },
             current_app.as_deref() == Some("vote"),
         ));
+        // Meeting / admin views.
+        for (icon, key, app) in [
+            ("app/screen", "mime.screen", "screen"),
+            ("vote/poll", "mime.admin", "admin"),
+            ("app/map", "mime.map", "map"),
+            ("wiki/user", "mime.permissions", "perm"),
+        ] {
+            apps.push((
+                icon,
+                t(key),
+                Route::PathPage {
+                    segments: vec![context.clone()],
+                    app: Some(app.to_string()),
+                },
+                current_app.as_deref() == Some(app),
+            ));
+        }
     }
 
     rsx! {
