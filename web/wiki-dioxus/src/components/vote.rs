@@ -7,6 +7,9 @@ use crate::snackbar::show_snackbar;
 
 use super::content::ContentApp;
 use super::loader::{mime_icon, visible_sorted};
+use super::ui::checkbox::Checkbox;
+use super::ui::radio_group::{RadioGroup, RadioItem};
+use dioxus_primitives::checkbox::CheckboxState;
 
 /// VoteApp — the context-level vote screen (`?app=vote`). Resolves the context's
 /// "active" relation to the currently open node; when that is a poll it shows
@@ -200,7 +203,7 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
     let open = node.mutable;
     let single = max_vote == 1 && min_vote == 1;
 
-    let selected = use_signal(|| vec![false; options.len()]);
+    let mut selected = use_signal(|| vec![false; options.len()]);
     let mut error = use_signal(String::new);
     let mut refresh = use_signal(|| 0u32);
 
@@ -332,22 +335,51 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                         "{t(\"common.noContent\")}"
                     }
                 } else if is_auth && open && !voted {
-                    // The ballot.
-                    div { class: "list",
-                        for (i , option) in opts.iter().enumerate() {
-                            div {
-                                class: "list-item",
-                                key: "{i}",
-                                style: "cursor: pointer;",
-                                onclick: move |_| apply_toggle(selected, error, i, single),
-                                input {
-                                    r#type: if single { "radio" } else { "checkbox" },
-                                    name: "poll-option",
-                                    checked: selected.read().get(i).copied().unwrap_or(false),
-                                    readonly: true,
+                    // The ballot: single-choice uses an accessible RadioGroup,
+                    // multi-choice uses Checkbox per option.
+                    if single {
+                        {
+                            let current = selected.read().iter().position(|&b| b).map(|i| i.to_string());
+                            let len = opts.len();
+                            rsx! {
+                                RadioGroup {
+                                    value: current,
+                                    on_value_change: move |v: String| {
+                                        if let Ok(idx) = v.parse::<usize>() {
+                                            let mut cur = vec![false; len];
+                                            if idx < cur.len() {
+                                                cur[idx] = true;
+                                            }
+                                            selected.set(cur);
+                                            error.set(String::new());
+                                        }
+                                    },
+                                    for (i , option) in opts.iter().enumerate() {
+                                        div { class: "list-item", key: "{i}", style: "gap: 8px;",
+                                            RadioItem { value: "{i}", index: i }
+                                            div { class: "list-item-text",
+                                                div { class: "list-item-primary", "{option}" }
+                                            }
+                                        }
+                                    }
                                 }
-                                div { class: "list-item-text",
-                                    div { class: "list-item-primary", "{option}" }
+                            }
+                        }
+                    } else {
+                        div { class: "list",
+                            for (i , option) in opts.iter().enumerate() {
+                                div { class: "list-item", key: "{i}", style: "gap: 8px;",
+                                    Checkbox {
+                                        checked: Some(if selected.read().get(i).copied().unwrap_or(false) {
+                                            CheckboxState::Checked
+                                        } else {
+                                            CheckboxState::Unchecked
+                                        }),
+                                        on_checked_change: move |_| apply_toggle(selected, error, i, false),
+                                    }
+                                    div { class: "list-item-text",
+                                        div { class: "list-item-primary", "{option}" }
+                                    }
                                 }
                             }
                         }
