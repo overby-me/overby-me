@@ -1,7 +1,11 @@
-/* RadikalWiki - Material Design 3 inspired theme */
+/* RadikalWiki theme — surfaces/text/borders track the dioxus-components
+ * (shadcn) tokens from dx-components-theme.css (which auto-switch on
+ * [data-theme]), while the RadikalWiki brand pink/green stay as the accents.
+ * Because surface = --primary-color and text = --secondary-color are opposites,
+ * contrast is guaranteed in both light and dark. */
 
 :root {
-    /* Light theme (default) */
+    /* Brand accents (RadikalWiki). */
     --md-primary: #B80F55;
     --md-on-primary: #FFFFFF;
     --md-primary-container: #FFD9DF;
@@ -12,22 +16,25 @@
     --md-on-secondary-container: #006B32;
     --md-tertiary: #006B32;
     --md-on-tertiary: #FFFFFF;
-    --md-error: #BA1A1A;
-    --md-on-error: #FFFFFF;
-    --md-error-container: #FFDAD6;
-    --md-background: #FFFBFF;
-    --md-on-background: #201A1B;
-    --md-surface: #FFFBFF;
-    --md-on-surface: #201A1B;
-    --md-surface-variant: #F3DDE0;
-    --md-on-surface-variant: #524346;
-    --md-outline: #847375;
-    --md-shadow: #000000;
-    --md-inverse-surface: #352F30;
-    --md-inverse-on-surface: #FAEEEF;
     --md-surface-tint: #B80F55;
+
+    /* Neutral surfaces / text / borders / status — from the shadcn tokens. */
+    --md-background: var(--primary-color-2, #fff);
+    --md-on-background: var(--secondary-color, #000);
+    --md-surface: var(--primary-color-1, #fbfbfb);
+    --md-on-surface: var(--secondary-color, #000);
+    --md-surface-variant: var(--primary-color-5, #f5f5f5);
+    --md-on-surface-variant: var(--secondary-color-5, #848484);
+    --md-outline: var(--primary-color-6, #e5e5e5);
+    --md-shadow: rgba(0, 0, 0, 0.12);
+    --md-error: var(--secondary-error-color, #ef4444);
+    --md-on-error: var(--primary-color, #fff);
+    --md-error-container: var(--primary-error-color, #dc2626);
+    --md-inverse-surface: var(--secondary-color, #000);
+    --md-inverse-on-surface: var(--primary-color, #fff);
 }
 
+/* Only the brand accents flip for dark; the neutrals ride the shadcn tokens. */
 [data-theme="dark"] {
     --md-primary: #FFB1C2;
     --md-on-primary: #66002B;
@@ -39,19 +46,6 @@
     --md-on-secondary-container: #003113;
     --md-tertiary: #5ADF82;
     --md-on-tertiary: #003917;
-    --md-error: #FFB4AB;
-    --md-on-error: #690005;
-    --md-error-container: #93000A;
-    --md-background: #201A1B;
-    --md-on-background: #ECE0E0;
-    --md-surface: #201A1B;
-    --md-on-surface: #ECE0E0;
-    --md-surface-variant: #524346;
-    --md-on-surface-variant: #D6C2C4;
-    --md-outline: #9E8C8F;
-    --md-shadow: #000000;
-    --md-inverse-surface: #ECE0E0;
-    --md-inverse-on-surface: #201A1B;
     --md-surface-tint: #FFB1C2;
 }
 
