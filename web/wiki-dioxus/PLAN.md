@@ -88,19 +88,19 @@ test and/or a `test-browser.nu` assertion.
 
 - `[x]` **GraphQL subscriptions** over the Hasura WebSocket
   (`graphql-transport-ws`): `src/subscription.rs` does connection_init (bearer
-  token) → subscribe → `next`, surfaced as a signal. The speaker list uses it
-  for live updates (a pushed change re-runs the query). Protocol verified live
-  end to end (connection_ack + data). Other views can adopt the same hook.
+  token) → subscribe → `next` (answering keepalive pings), surfaced as a signal;
+  a `use_live` helper ties it to a component's refresh counter. Used by the
+  folder children, poll results, home context list, home invitations and speaker
+  list. Verified live end to end: a node inserted by a **separate client**
+  appears in an open folder within ~2s with no reload.
 - `[x]` Speaker countdown timer (from the list's `time`/`updatedAt`).
 - `[x]` Poll result tallies (bar + count/percent per option).
-- `[x]` Editor inline formatting via markdown (`**bold**`, `*italic*`,
-  `` `code` ``) mapping to Slate marks the renderer displays.
+- `[x]` Editor formatting: a Bold/Italic/Code toolbar that wraps the selection,
+  plus inline markdown (`**bold**`, `*italic*`, `` `code` ``) mapping to Slate
+  marks the renderer displays. Verified live: Bold wraps and renders bold.
 
-## Remaining nice-to-haves
-
-- Adopt the subscription hook for the other live views (poll status, invite
-  count) — currently those refresh after their own mutations.
-- A WYSIWYG toolbar (the editor is markdown-driven, not click-to-format).
+The port now covers every RadikalWiki flow end to end, all verified against the
+live backend, with real-time updates and full create/read/update/delete.
 
 ## Cross-cutting checks
 
