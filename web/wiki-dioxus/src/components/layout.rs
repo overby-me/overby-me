@@ -197,12 +197,17 @@ fn Breadcrumbs() -> Element {
         _ => vec![],
     };
 
+    // Expanded on hover, collapsed again when the pointer leaves — matching the
+    // React breadcrumbs. Keyed reset happens by remounting the trail per path.
+    let mut expanded = use_signal(|| false);
     let key = segments.join("\u{1f}");
     rsx! {
-        div { class: "breadcrumbs",
+        div {
+            class: "breadcrumbs",
+            onmouseleave: move |_| expanded.set(false),
             Link { to: Route::HomeApp {}, "\u{1F3E0}" }
             if !segments.is_empty() {
-                BreadcrumbTrail { key: "{key}", segments: segments.clone() }
+                BreadcrumbTrail { key: "{key}", segments: segments.clone(), expanded }
             }
         }
     }
@@ -211,7 +216,7 @@ fn Breadcrumbs() -> Element {
 /// The breadcrumb segments after home, showing resolved node names (not URL
 /// slugs). Keyed on the path so it remounts and re-resolves on navigation.
 #[component]
-fn BreadcrumbTrail(segments: Vec<String>) -> Element {
+fn BreadcrumbTrail(segments: Vec<String>, expanded: Signal<bool>) -> Element {
     let session = use_session();
     let token = session.read().access_token.clone();
     let segs = segments.clone();
@@ -226,31 +231,55 @@ fn BreadcrumbTrail(segments: Vec<String>) -> Element {
     });
     let names = names.read().clone().unwrap_or_default();
 
-    rsx! {
-        for (i , segment) in segments.iter().enumerate() {
-            span { class: "separator", " / " }
-            {
-                let label = names
-                    .get(i)
-                    .filter(|s| !s.is_empty())
-                    .cloned()
-                    .unwrap_or_else(|| segment.clone());
-                if i == segments.len() - 1 {
-                    rsx! {
-                        span { "{label}" }
-                    }
-                } else {
-                    rsx! {
-                        Link {
-                            to: Route::PathPage {
-                                segments: segments[..=i].to_vec(),
-                                app: None,
-                            },
-                            "{label}"
-                        }
-                    }
+    // Collapse the middle of deep paths (keep the first and last two) behind a
+    // … that expands on hover, mirroring the React collapsible breadcrumbs.
+    let mut expanded = expanded;
+    let total = segments.len();
+    let collapse = total > 4 && !*expanded.read();
+
+    let label_at = |i: usize| -> String {
+        names
+            .get(i)
+            .filter(|s| !s.is_empty())
+            .cloned()
+            .unwrap_or_else(|| segments[i].clone())
+    };
+    let crumb = |i: usize| -> Element {
+        let label = label_at(i);
+        if i == total - 1 {
+            rsx! {
+                span { class: "separator", " / " }
+                span { "{label}" }
+            }
+        } else {
+            rsx! {
+                span { class: "separator", " / " }
+                Link {
+                    to: Route::PathPage { segments: segments[..=i].to_vec(), app: None },
+                    "{label}"
                 }
             }
+        }
+    };
+
+    // When collapsed, show only the first crumb and the last two.
+    let shown: Vec<usize> = if collapse {
+        vec![0, total - 2, total - 1]
+    } else {
+        (0..total).collect()
+    };
+
+    rsx! {
+        for (pos , i) in shown.iter().copied().enumerate() {
+            if collapse && pos == 1 {
+                span { class: "separator", " / " }
+                span {
+                    style: "cursor: pointer; padding: 0 4px;",
+                    onmouseenter: move |_| expanded.set(true),
+                    "\u{2026}"
+                }
+            }
+            {crumb(i)}
         }
     }
 }

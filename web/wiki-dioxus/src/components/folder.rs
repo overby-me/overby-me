@@ -136,6 +136,8 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
                 }
             }
             div { class: "stack stack-h mt-1", style: "align-items: center; gap: 8px;",
+                // TODO: migrate to the shadcn Select once its trigger shows the
+                // option label (not the raw value) for value != label cases.
                 select {
                     value: "{kind}",
                     onchange: move |e| kind.set(e.value()),
