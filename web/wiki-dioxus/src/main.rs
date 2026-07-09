@@ -18,6 +18,9 @@ use dioxus::prelude::*;
 use route::Route;
 
 const STYLE_CSS: Asset = asset!("/assets/style.css");
+// The dioxus-components (shadcn-style) theme tokens, loaded before our own CSS
+// so app styles can build on / override them as screens migrate to primitives.
+const DX_THEME_CSS: Asset = asset!("/assets/dx-components-theme.css");
 
 fn main() {
     // Print real panic messages (with a JS stack trace) to the console instead
@@ -56,6 +59,7 @@ fn App() -> Element {
     });
 
     rsx! {
+        document::Stylesheet { href: DX_THEME_CSS }
         document::Stylesheet { href: STYLE_CSS }
         Router::<Route> {}
         snackbar::Snackbar {}

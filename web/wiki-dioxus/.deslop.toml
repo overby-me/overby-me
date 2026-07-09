@@ -59,4 +59,10 @@ disabled_rules = [
   # i64 for display; f64 has no `TryFrom<i64>` so `as` is the only option and
   # the narrowing is intentional and bounded.
   "rust_narrowing_numeric_cast",
+
+  # ── Generated primitive re-exports ────────────────────────────────────
+  # The dioxus-components primitives in `components/ui` each `pub use
+  # component::*` from their generated mod.rs; that glob re-export is their
+  # standard shape, not an accidental surface.
+  "rust_pub_use_glob_surface",
 ]
