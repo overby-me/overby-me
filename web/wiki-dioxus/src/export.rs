@@ -150,7 +150,20 @@ fn block_to_odf(block: &Value) -> String {
     }
 }
 
-/// The ODF `content.xml` body for a document `title` + its Slate `content`.
+/// Wrap a pre-built ODF text `body` in a full `content.xml`.
+fn wrap_content(body: &str) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+<office:document-content \
+xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" \
+xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" \
+office:version=\"1.2\">\
+<office:body><office:text>{body}</office:text></office:body>\
+</office:document-content>"
+    )
+}
+
+/// The ODF `content.xml` for a single document `title` + its Slate `content`.
 fn content_xml(title: &str, content: Option<&Value>) -> String {
     let mut body = format!(
         "<text:h text:outline-level=\"1\">{}</text:h>",
@@ -161,15 +174,7 @@ fn content_xml(title: &str, content: Option<&Value>) -> String {
             body.push_str(&block_to_odf(block));
         }
     }
-    format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
-<office:document-content \
-xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" \
-xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" \
-office:version=\"1.2\">\
-<office:body><office:text>{body}</office:text></office:body>\
-</office:document-content>"
-    )
+    wrap_content(&body)
 }
 
 const STYLES_XML: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
@@ -187,8 +192,8 @@ manifest:media-type=\"application/vnd.oasis.opendocument.text\"/>\
 <manifest:file-entry manifest:full-path=\"styles.xml\" manifest:media-type=\"text/xml\"/>\
 </manifest:manifest>";
 
-/// Build a complete `.odt` for a document `title` and its Slate `content`.
-pub fn build_odt(title: &str, content: Option<&Value>) -> Vec<u8> {
+/// Package a full `content.xml` string into a complete `.odt` archive.
+fn odt_from_content_xml(content: String) -> Vec<u8> {
     let entries = [
         // The mimetype must be the first entry and stored uncompressed.
         ZipEntry {
@@ -197,7 +202,7 @@ pub fn build_odt(title: &str, content: Option<&Value>) -> Vec<u8> {
         },
         ZipEntry {
             name: "content.xml",
-            data: content_xml(title, content).into_bytes(),
+            data: content.into_bytes(),
         },
         ZipEntry {
             name: "styles.xml",
@@ -209,6 +214,11 @@ pub fn build_odt(title: &str, content: Option<&Value>) -> Vec<u8> {
         },
     ];
     build_zip(&entries)
+}
+
+/// Build a complete `.odt` for a single document `title` and its Slate `content`.
+pub fn build_odt(title: &str, content: Option<&Value>) -> Vec<u8> {
+    odt_from_content_xml(content_xml(title, content))
 }
 
 /// Trigger a browser download of `bytes` as `filename` with the given `mime`.
@@ -239,11 +249,109 @@ pub fn download_bytes(filename: &str, mime: &str, bytes: &[u8]) {
     }
 }
 
-/// Export a document node to `.odt` and start the download.
-pub fn export_document(name: &str, data: Option<&Value>) {
-    let content = data.and_then(|d| d.get("content"));
-    let odt = build_odt(name, content);
-    let filename = format!("{}.odt", sanitize_filename(name));
+/// The letter/number prefix for a heading (policy "A: ", change "1: "), by the
+/// node's ordinal among same-type siblings.
+fn heading_prefix(mime_id: Option<&str>, ordinal: Option<usize>) -> String {
+    use crate::components::loader::index_letter;
+    match (mime_id, ordinal) {
+        (Some("vote/policy"), Some(i)) => format!("{}: ", index_letter(i)),
+        (Some("vote/change"), Some(i)) => format!("{}: ", i + 1),
+        _ => String::new(),
+    }
+}
+
+/// The children to descend into for a recursive export, ordered like the folder
+/// view. Structural / content-bearing mimes only (not files, polls, speak…).
+fn export_children(
+    children: &[crate::graphql::ChildNodeFields],
+) -> Vec<crate::graphql::ChildNodeFields> {
+    let mut out: Vec<_> = children
+        .iter()
+        .filter(|c| {
+            matches!(
+                c.mime_id.as_deref(),
+                Some(
+                    "wiki/folder"
+                        | "wiki/document"
+                        | "vote/policy"
+                        | "vote/change"
+                        | "vote/position"
+                        | "vote/candidate"
+                )
+            )
+        })
+        .cloned()
+        .collect();
+    out.sort_by(|a, b| {
+        a.index.cmp(&b.index).then_with(|| {
+            let at = a.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
+            let bt = b.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
+            at.cmp(bt)
+        })
+    });
+    out
+}
+
+/// The ODF body for a node and its structural subtree. Boxed: recursive future.
+fn build_body(
+    token: Option<String>,
+    node_id: String,
+    level: usize,
+    prefix: String,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = String>>> {
+    Box::pin(async move {
+        let Ok(Some(node)) = crate::graphql::query_node_by_id(token.as_deref(), &node_id).await
+        else {
+            return String::new();
+        };
+        let lvl = level.clamp(1, 6);
+        let heading = xml_escape(&format!("{prefix}{}", node.name));
+        let mut out = format!("<text:h text:outline-level=\"{lvl}\">{heading}</text:h>");
+
+        // "Proposed by" — the node's members, unless it is a context (group/event).
+        let is_context = node.mime.as_ref().map(|m| m.context).unwrap_or(false);
+        if !is_context {
+            let authors: Vec<String> = node
+                .members
+                .iter()
+                .map(|m| m.label())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !authors.is_empty() {
+                out.push_str(&format!(
+                    "<text:p>{}: {}</text:p>",
+                    xml_escape(&crate::i18n::t("folder.proposedBy")),
+                    xml_escape(&authors.join(", "))
+                ));
+            }
+        }
+
+        // The node's own Slate content.
+        if let Some(Value::Array(blocks)) = node.data.as_ref().and_then(|d| d.0.get("content")) {
+            for block in blocks {
+                out.push_str(&block_to_odf(block));
+            }
+        }
+
+        // Recurse into structural children.
+        let children = export_children(&node.children);
+        let ordinals = crate::components::loader::sibling_ordinals(&children);
+        for (child, ordinal) in children.iter().zip(ordinals) {
+            let child_prefix = heading_prefix(child.mime_id.as_deref(), ordinal);
+            out.push_str(
+                &build_body(token.clone(), child.id.0.clone(), level + 1, child_prefix).await,
+            );
+        }
+        out
+    })
+}
+
+/// Recursively export a node (document, policy or whole folder) and everything
+/// nested under it to a single `.odt`, then start the download.
+pub async fn export_tree(token: Option<String>, node_id: String, name: String) {
+    let body = build_body(token, node_id, 1, String::new()).await;
+    let odt = odt_from_content_xml(wrap_content(&body));
+    let filename = format!("{}.odt", sanitize_filename(&name));
     download_bytes(&filename, "application/vnd.oasis.opendocument.text", &odt);
 }
 

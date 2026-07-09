@@ -100,6 +100,26 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                         }
                     }
                 }
+                // Export the folder and everything nested under it to an .odt.
+                if is_auth && count > 0 {
+                    button {
+                        class: "btn-icon",
+                        title: "{t(\"folder.export\")}",
+                        onclick: {
+                            let id = node.id.0.clone();
+                            let fname = name.to_string();
+                            move |_| {
+                                let token = session.read().access_token.clone();
+                                let id = id.clone();
+                                let fname = fname.clone();
+                                spawn(async move {
+                                    crate::export::export_tree(token, id, fname).await;
+                                });
+                            }
+                        },
+                        span { class: "material-icons", "download" }
+                    }
+                }
                 // Reorder children (the sort app) — only worth showing when there
                 // is more than one child and the user can act on it.
                 if is_auth && count > 1 && !parent_path.is_empty() {

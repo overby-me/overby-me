@@ -45,15 +45,20 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                 div { class: "avatar", {icon_el("wiki/document")} }
                 h3 { class: "title-medium", "{name}" }
                 div { class: "flex-grow" }
-                // Export the document to an OpenDocument (.odt) file.
+                // Export this document (and any nested content) to an .odt file.
                 button {
                     class: "btn-icon",
                     title: "{t(\"folder.export\")}",
                     onclick: {
                         let export_name = name.clone();
-                        let export_data = data.clone();
+                        let export_id = node_id.clone();
                         move |_| {
-                            crate::export::export_document(&export_name, export_data.as_ref());
+                            let token = session.read().access_token.clone();
+                            let id = export_id.clone();
+                            let name = export_name.clone();
+                            spawn(async move {
+                                crate::export::export_tree(token, id, name).await;
+                            });
                         }
                     },
                     span { class: "material-icons", "download" }

@@ -513,6 +513,22 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         log-warn "no add-content FAB — skipping FAB check"
     }
 
+    # ── Recursive folder export (.odt) runs without trapping the app ─────────
+    wd-navigate $session_id $"(base-url)($ctx_path)"
+    sleep 1sec
+    let exp = (wd-execute $session_id 'var b=[...document.querySelectorAll("#main .card-header .btn-icon")].find(x=>{var m=x.querySelector(".material-icons"); return m&&m.textContent=="download"}); if(b){b.click(); return "y"} return "n"')
+    if $exp == "y" {
+        sleep 4sec
+        let alive = (wd-execute $session_id 'return document.querySelector("#main .card")?"y":"n"')
+        if $alive == "y" {
+            log-ok "folder export runs without trapping"; $p = $p + 1
+        } else {
+            log-fail "folder export trapped the app"; $fl = $fl + 1
+        }
+    } else {
+        log-warn "no folder export button — skipping export check"
+    }
+
     { passed: $p, failed: $fl }
 }
 
