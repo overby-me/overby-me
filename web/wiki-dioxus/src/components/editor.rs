@@ -411,6 +411,15 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                         richtext::seed_editor(EDITOR_ID, &cmd_seed);
                         richtext::use_semantic_tags();
                     },
+                    // Ctrl/Cmd + ` toggles code (bold/italic/underline shortcuts
+                    // are handled natively by the contenteditable surface).
+                    onkeydown: move |evt| {
+                        let m = evt.modifiers();
+                        if (m.ctrl() || m.meta()) && evt.key().to_string() == "`" {
+                            evt.prevent_default();
+                            richtext::wrap_selection_code();
+                        }
+                    },
                     onkeyup: move |_| {
                         refresh_toolbar(st_bold, st_italic, st_underline, st_strike, st_block)
                     },

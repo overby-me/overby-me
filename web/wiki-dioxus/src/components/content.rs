@@ -270,25 +270,37 @@ fn SlateBlock(block: serde_json::Value, index: usize) -> Element {
         .map(|_| heading_anchor(index, &block_plain_text(&block)))
         .unwrap_or_default();
 
+    // Per-block alignment set in the editor.
+    let astyle = match block.get("align").and_then(|a| a.as_str()) {
+        Some(a @ ("center" | "right" | "justify" | "left")) => format!("text-align:{a}"),
+        _ => String::new(),
+    };
+
     match block_type {
-        "heading-one" | "h1" => rsx! { h1 { id: "{hid}", {rendered_children} } },
-        "heading-two" | "h2" => rsx! { h2 { id: "{hid}", {rendered_children} } },
-        "heading-three" | "h3" => rsx! { h3 { id: "{hid}", {rendered_children} } },
-        "heading-four" | "h4" => rsx! { h4 { id: "{hid}", {rendered_children} } },
-        "heading-five" | "h5" => rsx! { h5 { id: "{hid}", {rendered_children} } },
-        "heading-six" | "h6" => rsx! { h6 { id: "{hid}", {rendered_children} } },
-        "block-quote" => rsx! { blockquote { {rendered_children} } },
-        "block-pre" | "code" => rsx! { pre { {rendered_children} } },
-        "bulleted-list" | "ul" => rsx! { ul { {rendered_children} } },
-        "numbered-list" | "ol" => rsx! { ol { {rendered_children} } },
-        "list-item" | "li" => rsx! { li { {rendered_children} } },
+        "heading-one" | "h1" => rsx! { h1 { id: "{hid}", style: "{astyle}", {rendered_children} } },
+        "heading-two" | "h2" => rsx! { h2 { id: "{hid}", style: "{astyle}", {rendered_children} } },
+        "heading-three" | "h3" => {
+            rsx! { h3 { id: "{hid}", style: "{astyle}", {rendered_children} } }
+        }
+        "heading-four" | "h4" => {
+            rsx! { h4 { id: "{hid}", style: "{astyle}", {rendered_children} } }
+        }
+        "heading-five" | "h5" => {
+            rsx! { h5 { id: "{hid}", style: "{astyle}", {rendered_children} } }
+        }
+        "heading-six" | "h6" => rsx! { h6 { id: "{hid}", style: "{astyle}", {rendered_children} } },
+        "block-quote" => rsx! { blockquote { style: "{astyle}", {rendered_children} } },
+        "block-pre" | "code" => rsx! { pre { style: "{astyle}", {rendered_children} } },
+        "bulleted-list" | "ul" => rsx! { ul { style: "{astyle}", {rendered_children} } },
+        "numbered-list" | "ol" => rsx! { ol { style: "{astyle}", {rendered_children} } },
+        "list-item" | "li" => rsx! { li { style: "{astyle}", {rendered_children} } },
         "image" => {
             let url = block.get("url").and_then(|u| u.as_str()).unwrap_or("");
             rsx! {
                 super::widgets::ZoomableImage { src: url.to_string(), alt: "content image".to_string() }
             }
         }
-        _ => rsx! { p { {rendered_children} } },
+        _ => rsx! { p { style: "{astyle}", {rendered_children} } },
     }
 }
 
@@ -327,6 +339,26 @@ fn SlateInline(node: serde_json::Value) -> Element {
         }
 
         let style = style_parts.join("; ");
+
+        // An explicit link mark turns the whole leaf into an anchor (matching the
+        // editor, which stores links as a leaf mark rather than an element).
+        if let Some(url) = node
+            .get("link")
+            .and_then(|l| l.as_str())
+            .filter(|l| !l.is_empty())
+        {
+            return rsx! {
+                a { href: "{url}", target: "_blank", rel: "noopener",
+                    if code {
+                        code { "{text}" }
+                    } else if style.is_empty() {
+                        "{text}"
+                    } else {
+                        span { style: "{style}", "{text}" }
+                    }
+                }
+            };
+        }
 
         if code {
             return rsx! {
