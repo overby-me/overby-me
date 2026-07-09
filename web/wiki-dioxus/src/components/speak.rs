@@ -24,6 +24,17 @@ pub fn SpeakApp(node: NodeWithChildren) -> Element {
 
     // Re-fetch the queue after every join/remove by bumping this counter.
     let mut refresh = use_signal(|| 0u32);
+
+    // Poll the queue so changes made by other participants show up without a
+    // manual reload — a lightweight stand-in for the React app's subscription.
+    // The future is dropped (and the loop ends) when the component unmounts.
+    use_future(move || async move {
+        loop {
+            gloo_timers::future::TimeoutFuture::new(4000).await;
+            refresh += 1;
+        }
+    });
+
     let access_token = session.read().access_token.clone();
     let list_for_query = list_id.clone();
     let queue = use_resource(move || {
