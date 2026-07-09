@@ -48,7 +48,8 @@ fn App() -> Element {
             }
         }
 
-        // Apply the initial theme to the document element.
+        // Load the persisted theme, then apply it to the document element.
+        theme::load_theme();
         theme::apply_theme(&theme::THEME.read());
     });
 

@@ -3,11 +3,14 @@ use dioxus::prelude::*;
 use crate::graphql::{ChildNodeFields, NodeWithChildren};
 use crate::i18n::t;
 use crate::route::Route;
+use crate::session::use_session;
 
 use super::loader::{mime_icon, visible_sorted};
 
 #[component]
 pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
+    let session = use_session();
+    let is_auth = session.read().is_authenticated();
     let name = node.name.as_str();
     let mime_id = node.mime_id.as_deref().unwrap_or("wiki/folder");
     let children = visible_sorted(&node.children);
@@ -18,6 +21,20 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
             div { class: "card-header",
                 div { class: "avatar", "{mime_icon(mime_id)}" }
                 h3 { class: "title-medium", "{name}" }
+                // Reorder children (the sort app) — only worth showing when there
+                // is more than one child and the user can act on it.
+                if is_auth && children.len() > 1 && !parent_path.is_empty() {
+                    div { class: "flex-grow" }
+                    Link {
+                        to: Route::PathPage {
+                            segments: parent_path.clone(),
+                            app: Some("sort".to_string()),
+                        },
+                        class: "btn-icon",
+                        title: "{t(\"mime.sort\")}",
+                        "{mime_icon(\"app/sort\")}"
+                    }
+                }
             }
             if children.is_empty() {
                 div { class: "card-content",

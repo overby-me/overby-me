@@ -364,6 +364,7 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
                         onclick: move |_| {
                             let new_theme = theme.read().toggle();
                             apply_theme(&new_theme);
+                            crate::theme::save_theme(&new_theme);
                             *THEME.write() = new_theme;
                         },
                         span { style: "font-size: 18px; width: 24px; text-align: center;",

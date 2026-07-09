@@ -20,6 +20,13 @@ impl ThemeMode {
             ThemeMode::Dark => "dark",
         }
     }
+
+    fn from_attr(s: &str) -> Self {
+        match s {
+            "dark" => ThemeMode::Dark,
+            _ => ThemeMode::Light,
+        }
+    }
 }
 
 pub static THEME: GlobalSignal<ThemeMode> = Signal::global(|| ThemeMode::Light);
@@ -37,4 +44,24 @@ pub fn apply_theme(mode: &ThemeMode) {
             }
         }
     }
+}
+
+/// Persist the chosen theme so it survives a reload.
+pub fn save_theme(mode: &ThemeMode) {
+    if let Some(storage) = local_storage() {
+        let _ = storage.set_item("wiki_theme", mode.data_attr());
+    }
+}
+
+/// Load the persisted theme (defaults to Light) into the global signal.
+pub fn load_theme() {
+    if let Some(storage) = local_storage() {
+        if let Ok(Some(v)) = storage.get_item("wiki_theme") {
+            *THEME.write() = ThemeMode::from_attr(&v);
+        }
+    }
+}
+
+fn local_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok().flatten()
 }

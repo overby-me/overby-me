@@ -3,6 +3,7 @@ use dioxus::prelude::*;
 use crate::graphql::NodeWithChildren;
 use crate::i18n::t;
 use crate::nhost::storage_url;
+use crate::route::Route;
 use crate::session::use_session;
 
 use super::loader::mime_icon;
@@ -10,6 +11,12 @@ use super::loader::mime_icon;
 #[component]
 pub fn ContentApp(node: NodeWithChildren) -> Element {
     let session = use_session();
+    let is_auth = session.read().is_authenticated();
+    let route = use_route::<Route>();
+    let segments: Vec<String> = match &route {
+        Route::PathPage { segments, .. } => segments.clone(),
+        _ => vec![],
+    };
     let name = node.name.clone();
     let members = node.members.clone();
     let data = node.data.map(|d| d.0);
@@ -30,6 +37,18 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
             div { class: "card-header",
                 div { class: "avatar", "{mime_icon(\"wiki/document\")}" }
                 h3 { class: "title-medium", "{name}" }
+                if is_auth && !segments.is_empty() {
+                    div { class: "flex-grow" }
+                    Link {
+                        to: Route::PathPage {
+                            segments: segments.clone(),
+                            app: Some("editor".to_string()),
+                        },
+                        class: "btn-icon",
+                        title: "{t(\"mime.editor\")}",
+                        "{mime_icon(\"app/editor\")}"
+                    }
+                }
             }
             if let Some(url) = image_url {
                 div { class: "card-content",
