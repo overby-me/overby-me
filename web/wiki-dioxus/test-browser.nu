@@ -310,6 +310,32 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         log-warn "context has no folder-item children — skipping child-nav check"
     }
 
+    # ── Breadcrumb up-navigation re-resolves the view (regression) ───────
+    # Clicking a breadcrumb changes the URL to an ancestor path; the main view
+    # must re-render to that ancestor, not keep showing the deeper node. This
+    # broke when PathPage relied on router prop propagation between two PathPage
+    # routes instead of subscribing to the route itself.
+    let bc_path_before = (wd-execute $session_id 'return location.pathname')
+    let bc_main_before = (wd-execute $session_id 'return (document.getElementById("main")||{innerText:""}).innerText')
+    let bc_clicked = (wd-execute $session_id 'var a=[...document.querySelectorAll(".breadcrumbs a")]; if(a.length>1){a[a.length-1].click(); return "y"} return "n"')
+    if $bc_clicked == "y" {
+        mut bc_nav = false
+        for _ in 1..($timeout) {
+            let now = (wd-execute $session_id 'return location.pathname')
+            if ($now != null) and ($now != $bc_path_before) { $bc_nav = true; break }
+            sleep 500ms
+        }
+        sleep 2sec
+        let bc_main_after = (wd-execute $session_id 'return (document.getElementById("main")||{innerText:""}).innerText')
+        if $bc_nav and ($bc_main_after != $bc_main_before) {
+            log-ok "breadcrumb navigation updates the view"; $p = $p + 1
+        } else {
+            log-fail "breadcrumb changed the URL but not the view (stale PathPage)"; $fl = $fl + 1
+        }
+    } else {
+        log-warn "not enough breadcrumb links to test up-navigation"
+    }
+
     # ── App rail switches apps via the ?app= route query (client-side) ────
     # Go back to the context, then click the Vote rail item and confirm the URL
     # gains ?app=vote and the vote view renders. Click via JS on the anchor

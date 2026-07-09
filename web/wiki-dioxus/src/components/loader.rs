@@ -22,6 +22,18 @@ use super::vote::{PolicyApp, PollApp, VoteApp};
 /// without this the view would keep showing the previously resolved node.
 #[component]
 pub fn PathPage(segments: Vec<String>, app: Option<String>) -> Element {
+    // Read the route directly (like the breadcrumbs and app rail) so this
+    // re-renders on EVERY navigation. Relying only on the router handing us new
+    // props is unreliable when moving between two `PathPage` routes (e.g. a
+    // breadcrumb click going up a level): some renders keep the old props, so
+    // the URL changed but the view stayed put. Subscribing via `use_route`
+    // guarantees the re-render, after which the key below remounts the resolver.
+    let route = use_route::<Route>();
+    let (segments, app) = match route {
+        Route::PathPage { segments, app } => (segments, app),
+        _ => (segments, app),
+    };
+
     // Re-key the resolver on the path (not the app) so navigating between two
     // paths remounts and refetches, while switching apps at the same path just
     // re-renders and swaps the view without a redundant query. Join with a
