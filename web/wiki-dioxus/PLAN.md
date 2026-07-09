@@ -229,7 +229,8 @@ All the above build + render live (browser smoke test asserts each mounts).
 ### Members / contexts / permissions
 
 - `#41` Export event participants.
-- `#51` Allow users to be hidden in groups (members already have `hidden`).
+- `[x]` `#51` Allow users to be hidden in groups — owner can hide/unhide a
+  member (`set_member_hidden`); hidden members are dropped for non-owners.
 - `#132` Event viewer inside groups.
 - `#133` Integrate the invite list into the home list.
 - `#134` "Open" contexts anyone can join.

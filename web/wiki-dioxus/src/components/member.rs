@@ -9,11 +9,20 @@ use crate::snackbar::show_snackbar;
 #[component]
 pub fn MemberApp(node: NodeWithChildren) -> Element {
     let name = node.name.as_str();
-    let members = &node.members;
     let session = use_session();
     let is_auth = session.read().is_authenticated();
+    let user_id = session.read().user.as_ref().map(|u| u.id.clone());
     let node_id = node.id.0.clone();
     let mut invite_input = use_signal(String::new);
+
+    // The context owner may hide/unhide members (#51). Others don't see hidden
+    // members at all.
+    let is_owner = user_id.is_some() && node.owner_id.as_ref().map(|o| o.0.clone()) == user_id;
+    let members: Vec<&graphql::MemberFields> = node
+        .members
+        .iter()
+        .filter(|m| is_owner || !m.hidden)
+        .collect();
 
     rsx! {
         div { class: "card",
@@ -39,17 +48,47 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
             } else {
                 div { class: "list",
                     for member in members.iter() {
-                        div { class: "list-item", key: "{member.id.0}",
+                        div {
+                            class: "list-item",
+                            key: "{member.id.0}",
+                            style: if member.hidden { "opacity: 0.55;" } else { "" },
                             div { class: "avatar small", "\u{1F464}" }
                             div { class: "list-item-text",
                                 div { class: "list-item-primary", "{member.label()}" }
                                 div { class: "list-item-secondary",
-                                    if member.owner {
+                                    if member.hidden {
+                                        "\u{1F648} {t(\"member.hidden\")}"
+                                    } else if member.owner {
                                         "{t(\"member.owner\")}"
                                     } else if member.accepted {
                                         "{t(\"member.active\")}"
                                     } else {
                                         "{t(\"invite.invitations\")}"
+                                    }
+                                }
+                            }
+                            // Owner can hide/unhide a non-owner member (#51).
+                            if is_owner && !member.owner {
+                                {
+                                    let member_id = member.id.0.clone();
+                                    let hidden = member.hidden;
+                                    let token = session.read().access_token.clone();
+                                    rsx! {
+                                        button {
+                                            class: "btn-icon",
+                                            title: if hidden { "{t(\"member.show\")}" } else { "{t(\"member.hide\")}" },
+                                            onclick: move |_| {
+                                                let token = token.clone();
+                                                let id = member_id.clone();
+                                                spawn(async move {
+                                                    let _ = graphql::set_member_hidden(token.as_deref(), &id, !hidden).await;
+                                                    if let Some(w) = web_sys::window() {
+                                                        let _ = w.location().reload();
+                                                    }
+                                                });
+                                            },
+                                            if hidden { "\u{1F441}\u{FE0F}" } else { "\u{1F648}" }
+                                        }
                                     }
                                 }
                             }

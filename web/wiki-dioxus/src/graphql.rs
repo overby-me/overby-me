@@ -135,6 +135,7 @@ pub struct MemberFields {
     pub name: Option<String>,
     pub accepted: bool,
     pub owner: bool,
+    pub hidden: bool,
     pub user: Option<UserRef>,
     pub node: Option<MemberNodeRef>,
 }
@@ -549,6 +550,8 @@ pub struct MembersSetInput {
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub accepted: Option<bool>,
     #[cynic(skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub node_id: Option<Uuid>,
 }
 
@@ -706,6 +709,28 @@ pub async fn accept_invitation(
         set: MembersSetInput {
             accepted: Some(true),
             node_id: Some(Uuid(user_id.to_string())),
+            ..Default::default()
+        },
+    });
+    let result = execute(access_token, operation).await?;
+    Ok(result.update_member.is_some())
+}
+
+/// Hide or unhide a member in its context (#51). Owners use this to keep a
+/// user's membership private within a group without removing them.
+pub async fn set_member_hidden(
+    access_token: Option<&str>,
+    member_id: &str,
+    hidden: bool,
+) -> Result<bool, String> {
+    use cynic::MutationBuilder;
+    let operation = UpdateMemberMutation::build(UpdateMemberVariables {
+        pk: MembersPkColumnsInput {
+            id: Uuid(member_id.to_string()),
+        },
+        set: MembersSetInput {
+            hidden: Some(hidden),
+            ..Default::default()
         },
     });
     let result = execute(access_token, operation).await?;
