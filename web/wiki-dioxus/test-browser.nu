@@ -452,6 +452,25 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         log-warn "search input not found — skipping search-nav check"
     }
 
+    # ── Folder grid/list view mode is remembered across a reload (#125) ──────
+    wd-navigate $session_id $"(base-url)($ctx_path)"
+    sleep 1sec
+    let gt = (wd-execute $session_id 'var b=[...document.querySelectorAll("#main .btn-icon")].find(x=>{var m=x.querySelector(".material-icons"); return m&&m.textContent=="grid_view"}); if(b){b.click(); return "y"} return "n"')
+    if $gt == "y" {
+        sleep 1sec
+        let grid_now = (wd-execute $session_id 'return document.querySelector(".folder-grid")?"y":"n"')
+        wd-navigate $session_id $"(base-url)($ctx_path)"
+        sleep 2sec
+        let grid_after = (wd-execute $session_id 'return document.querySelector(".folder-grid")?"y":"n"')
+        if ($grid_now == "y") and ($grid_after == "y") {
+            log-ok "folder grid/list choice persists across reload"; $p = $p + 1
+        } else {
+            log-fail $"folder view not persisted; now=($grid_now) after=($grid_after)"; $fl = $fl + 1
+        }
+    } else {
+        log-warn "no grid toggle (folder has <=1 child) — skipping persistence check"
+    }
+
     { passed: $p, failed: $fl }
 }
 

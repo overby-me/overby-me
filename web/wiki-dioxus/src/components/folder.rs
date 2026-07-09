@@ -7,6 +7,24 @@ use crate::session::use_session;
 
 use super::loader::{icon_el, mime_icon, visible_sorted};
 
+const FOLDER_VIEW_KEY: &str = "wiki_folder_grid";
+
+/// Read the remembered folder view mode (grid = true) from localStorage.
+fn read_grid_pref() -> bool {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|s| s.get_item(FOLDER_VIEW_KEY).ok().flatten())
+        .map(|v| v == "1")
+        .unwrap_or(false)
+}
+
+/// Persist the folder view mode so it is remembered on the next visit.
+fn write_grid_pref(grid: bool) {
+    if let Some(store) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = store.set_item(FOLDER_VIEW_KEY, if grid { "1" } else { "0" });
+    }
+}
+
 #[component]
 pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
     let session = use_session();
@@ -49,8 +67,9 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
     let mime_id = mime_id.as_str();
     let name = name.as_str();
 
-    // Folder view mode: list (default) or a tile grid (#125).
-    let mut grid = use_signal(|| false);
+    // Folder view mode: list (default) or a tile grid (#125). Remembered across
+    // navigations / sessions in localStorage.
+    let mut grid = use_signal(read_grid_pref);
     let is_grid = *grid.read();
     let count = children.len();
 
@@ -70,10 +89,15 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                         class: "btn-icon",
                         title: if is_grid { "{t(\"common.listView\")}" } else { "{t(\"common.gridView\")}" },
                         onclick: move |_| {
-                            let v = *grid.read();
-                            grid.set(!v);
+                            let v = !*grid.read();
+                            grid.set(v);
+                            write_grid_pref(v);
                         },
-                        if is_grid { "\u{2630}" } else { "\u{25A6}" }
+                        if is_grid {
+                            span { class: "material-icons", "view_list" }
+                        } else {
+                            span { class: "material-icons", "grid_view" }
+                        }
                     }
                 }
                 // Reorder children (the sort app) — only worth showing when there
