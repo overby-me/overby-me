@@ -148,7 +148,10 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
     }
 }
 
-/// Inline "add content" form: pick document or folder, name it, insert it.
+/// "Add content" floating action button (matching the old wiki's AddContentFab):
+/// a fixed bottom-right FAB that opens a modal to pick document or folder, name
+/// it, and insert it. (dioxus-primitives has no FAB — it's a Material pattern —
+/// so it is a styled fixed button.)
 #[component]
 fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
     let session = use_session();
@@ -156,83 +159,91 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
     let mut title = use_signal(String::new);
     let mut kind = use_signal(|| "wiki/document".to_string());
 
-    if !*open.read() {
-        return rsx! {
-            div { class: "card-content",
-                button {
-                    class: "btn btn-outlined",
-                    onclick: move |_| open.set(true),
-                    "\u{2795} {t(\"content.addContent\")}"
-                }
+    let submit = {
+        let parent_id = parent_id.clone();
+        let context_id = context_id.clone();
+        move |_| {
+            let name = title.read().trim().to_string();
+            if name.is_empty() {
+                return;
             }
-        };
-    }
+            let token = session.read().access_token.clone();
+            let parent_id = parent_id.clone();
+            let context_id = context_id.clone();
+            let mime = kind.read().clone();
+            spawn(async move {
+                let key = crate::components::loader::slugify(&name);
+                let input = crate::graphql::NodesInsertInput {
+                    name: Some(name),
+                    key: Some(key),
+                    mime_id: Some(mime),
+                    parent_id: Some(crate::graphql::Uuid(parent_id)),
+                    context_id: context_id.map(crate::graphql::Uuid),
+                    data: None,
+                    mutable: Some(true),
+                    index: None,
+                };
+                if crate::graphql::insert_node(token.as_deref(), input)
+                    .await
+                    .is_ok()
+                {
+                    // Re-resolve the folder to show the new child.
+                    if let Some(w) = web_sys::window() {
+                        let _ = w.location().reload();
+                    }
+                }
+            });
+        }
+    };
 
     rsx! {
-        div { class: "card-content",
-            div { class: "text-field",
-                label { "{t(\"common.title\")}" }
-                input {
-                    r#type: "text",
-                    maxlength: "{crate::components::editor::NODE_NAME_MAXLEN}",
-                    value: "{title}",
-                    oninput: move |e| title.set(e.value()),
-                }
-            }
-            div { class: "stack stack-h mt-1", style: "align-items: center; gap: 8px;",
-                // TODO: migrate to the shadcn Select once its trigger shows the
-                // option label (not the raw value) for value != label cases.
-                select {
-                    value: "{kind}",
-                    onchange: move |e| kind.set(e.value()),
-                    option { value: "wiki/document", "{t(\"mime.document\")}" }
-                    option { value: "wiki/folder", "{t(\"mime.folder\")}" }
-                }
-                button {
-                    class: "btn btn-primary",
-                    disabled: title.read().trim().is_empty(),
-                    onclick: {
-                        let parent_id = parent_id.clone();
-                        let context_id = context_id.clone();
-                        move |_| {
-                            let name = title.read().trim().to_string();
-                            if name.is_empty() {
-                                return;
-                            }
-                            let token = session.read().access_token.clone();
-                            let parent_id = parent_id.clone();
-                            let context_id = context_id.clone();
-                            let mime = kind.read().clone();
-                            spawn(async move {
-                                let key = crate::components::loader::slugify(&name);
-                                let input = crate::graphql::NodesInsertInput {
-                                    name: Some(name),
-                                    key: Some(key),
-                                    mime_id: Some(mime),
-                                    parent_id: Some(crate::graphql::Uuid(parent_id)),
-                                    context_id: context_id.map(crate::graphql::Uuid),
-                                    data: None,
-                                    mutable: Some(true),
-                                    index: None,
-                                };
-                                if crate::graphql::insert_node(token.as_deref(), input)
-                                    .await
-                                    .is_ok()
-                                {
-                                    // Re-resolve the folder to show the new child.
-                                    if let Some(w) = web_sys::window() {
-                                        let _ = w.location().reload();
-                                    }
-                                }
-                            });
+        // The floating action button.
+        button {
+            class: "fab",
+            title: "{t(\"content.addContent\")}",
+            "aria-label": "{t(\"content.addContent\")}",
+            onclick: move |_| open.set(true),
+            span { class: "material-icons", "add" }
+        }
+
+        // Modal add-content form (click the backdrop or Cancel to dismiss).
+        if *open.read() {
+            div { class: "modal-backdrop", onclick: move |_| open.set(false),
+                div {
+                    class: "modal-card",
+                    onclick: move |e| e.stop_propagation(),
+                    h3 { class: "title-medium mb-2", "{t(\"content.addContent\")}" }
+                    div { class: "text-field",
+                        label { "{t(\"common.title\")}" }
+                        input {
+                            r#type: "text",
+                            maxlength: "{crate::components::editor::NODE_NAME_MAXLEN}",
+                            value: "{title}",
+                            oninput: move |e| title.set(e.value()),
                         }
-                    },
-                    "{t(\"common.add\")}"
-                }
-                button {
-                    class: "btn btn-outlined",
-                    onclick: move |_| open.set(false),
-                    "{t(\"common.cancel\")}"
+                    }
+                    div { class: "stack stack-h mt-2", style: "align-items: center; gap: 8px;",
+                        // TODO: migrate to the shadcn Select once its trigger shows
+                        // the option label (not the raw value) for value != label.
+                        select {
+                            value: "{kind}",
+                            onchange: move |e| kind.set(e.value()),
+                            option { value: "wiki/document", "{t(\"mime.document\")}" }
+                            option { value: "wiki/folder", "{t(\"mime.folder\")}" }
+                        }
+                        div { class: "flex-grow" }
+                        button {
+                            class: "btn btn-outlined",
+                            onclick: move |_| open.set(false),
+                            "{t(\"common.cancel\")}"
+                        }
+                        button {
+                            class: "btn btn-primary",
+                            disabled: title.read().trim().is_empty(),
+                            onclick: submit,
+                            "{t(\"common.add\")}"
+                        }
+                    }
                 }
             }
         }

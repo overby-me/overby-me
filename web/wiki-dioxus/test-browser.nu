@@ -492,6 +492,25 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         log-warn "sort app save button not found — skipping redirect check"
     }
 
+    # ── The add-content FAB opens a modal (does not add anything) ────────────
+    wd-navigate $session_id $"(base-url)($ctx_path)"
+    sleep 1sec
+    let fab = (wd-execute $session_id 'return document.querySelector(".fab")?"y":"n"')
+    if $fab == "y" {
+        wd-execute $session_id 'document.querySelector(".fab").click(); return 1' | ignore
+        sleep 1sec
+        let modal = (wd-execute $session_id 'return document.querySelector(".modal-card")?"y":"n"')
+        # Cancel (outlined button) — never Add — so no content is created.
+        wd-execute $session_id 'var c=document.querySelector(".modal-card .btn-outlined"); if(c)c.click(); return 1' | ignore
+        if $modal == "y" {
+            log-ok "add-content FAB opens a modal"; $p = $p + 1
+        } else {
+            log-fail "add-content FAB did not open a modal"; $fl = $fl + 1
+        }
+    } else {
+        log-warn "no add-content FAB — skipping FAB check"
+    }
+
     { passed: $p, failed: $fl }
 }
 

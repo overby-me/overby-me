@@ -320,6 +320,64 @@ a:hover {
     font-size: 8px;
 }
 
+/* Floating action button (Material pattern; dioxus-primitives has no FAB). */
+.fab {
+    position: fixed;
+    right: 24px;
+    bottom: 88px;
+    width: 56px;
+    height: 56px;
+    border: none;
+    border-radius: 50%;
+    background: var(--md-primary);
+    color: var(--md-on-primary);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 120;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.fab:hover {
+    transform: scale(1.06);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.36);
+}
+
+.fab .material-icons {
+    font-size: 26px;
+}
+
+/* On large screens the bar is at the top, so the bottom-right is free. */
+@media (min-width: 1200px) {
+    .fab {
+        bottom: 24px;
+    }
+}
+
+/* Modal overlay + card (add-content dialog). */
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 300;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.modal-card {
+    background: var(--md-surface);
+    border: 1px solid var(--md-outline);
+    border-radius: 12px;
+    padding: 20px;
+    width: 100%;
+    max-width: 420px;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
+}
+
 /* Buttons */
 .btn {
     display: inline-flex;
