@@ -3,7 +3,7 @@ use dioxus::prelude::*;
 use crate::i18n::t;
 use crate::nhost;
 use crate::route::Route;
-use crate::session::{save_session, Session, User, SESSION};
+use crate::session::{expires_at_from, save_session, Session, User, SESSION};
 
 #[derive(Clone, PartialEq)]
 enum AuthMode {
@@ -65,6 +65,9 @@ fn AuthForm(mode: AuthMode) -> Element {
                     match nhost::sign_in(&em, &pw).await {
                         Ok(session) => {
                             let new_session = Session {
+                                access_token_expires_at: expires_at_from(
+                                    session.access_token_expires_in,
+                                ),
                                 user: session.user.map(|u| User {
                                     id: u.id,
                                     email: u.email.unwrap_or_default(),

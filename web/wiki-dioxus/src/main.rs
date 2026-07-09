@@ -18,6 +18,8 @@ mod theme;
 
 use dioxus::prelude::*;
 use route::Route;
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::JsCast;
 
 const STYLE_CSS: Asset = asset!("/assets/style.css");
 // The dioxus-components (shadcn-style) theme tokens, loaded before our own CSS
@@ -58,7 +60,28 @@ fn App() -> Element {
         // Load the persisted theme, then apply it to the document element.
         theme::load_theme();
         theme::apply_theme(&theme::THEME.read());
+
+        // Nudge the token-refresh loop whenever the tab becomes visible again:
+        // a backgrounded tab throttles timers, so the access token can lapse
+        // while it sits stale. Refreshing on return keeps the session alive.
+        if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+            let doc = document.clone();
+            let closure = Closure::wrap(Box::new(move || {
+                if !doc.hidden() {
+                    session::nudge_refresh();
+                }
+            }) as Box<dyn FnMut()>);
+            let _ = document.add_event_listener_with_callback(
+                "visibilitychange",
+                closure.as_ref().unchecked_ref(),
+            );
+            // Leak the closure so the listener lives for the app's lifetime.
+            closure.forget();
+        }
     });
+
+    // Keep the NHost access token fresh (renew before expiry / on return).
+    use_future(session::run_token_refresh);
 
     rsx! {
         document::Stylesheet { href: DX_THEME_CSS }

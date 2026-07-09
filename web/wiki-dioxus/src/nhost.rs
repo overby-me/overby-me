@@ -58,6 +58,9 @@ pub struct RefreshTokenRequest {
 pub struct AuthSession {
     pub access_token: String,
     pub refresh_token: String,
+    /// Seconds until the access token expires (NHost default 900).
+    #[serde(default)]
+    pub access_token_expires_in: Option<i64>,
     pub user: Option<NhostUser>,
 }
 
@@ -239,13 +242,38 @@ pub async fn refresh_session(refresh_token: &str) -> Result<AuthSession, NhostEr
             message: Some(e.to_string()),
         })?;
 
-    let session: AuthSession = resp.json().await.map_err(|e| NhostError {
+    // A non-2xx response means the refresh token is invalid/expired; surface it
+    // as an auth error (not a parse error) so callers can sign the user out.
+    let status = resp.status();
+    if !status.is_success() {
+        let body: serde_json::Value = resp.json().await.unwrap_or_default();
+        return Err(
+            serde_json::from_value::<NhostError>(body).unwrap_or(NhostError {
+                status: Some(status.as_u16()),
+                error: Some("invalid-refresh-token".to_string()),
+                message: Some("Session expired".to_string()),
+            }),
+        );
+    }
+
+    resp.json().await.map_err(|e| NhostError {
         status: None,
         error: Some("parse_error".to_string()),
         message: Some(e.to_string()),
-    })?;
+    })
+}
 
-    Ok(session)
+/// Whether a refresh error means the session is unrecoverable (bad/expired
+/// refresh token) rather than a transient network blip or a request bug. Only
+/// an explicit rejection (401/403, or the `refresh-token` error code) counts —
+/// a 404/400 signals a client mistake and must not force the user to log out.
+pub fn is_auth_error(err: &NhostError) -> bool {
+    matches!(err.status, Some(401) | Some(403))
+        || err
+            .error
+            .as_deref()
+            .map(|e| e.contains("refresh-token"))
+            .unwrap_or(false)
 }
 
 pub fn sign_out() {
