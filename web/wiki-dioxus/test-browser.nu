@@ -340,6 +340,23 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         log-warn "app rail not found — skipping app-switch check"
     }
 
+    # ── New apps render via ?app= (graph / program / social / profile / cow) ──
+    # Each should mount a card (or its signature element) without trapping.
+    for app in [
+        { q: "cow", sel: ".cowsay", name: "cow app renders" }
+        { q: "graph", sel: "#main .card", name: "graph app renders" }
+        { q: "program", sel: "#main .card", name: "program app renders" }
+        { q: "social", sel: "#main input", name: "social app renders" }
+        { q: "profile", sel: "#main .card", name: "profile app renders" }
+    ] {
+        wd-navigate $session_id $"(base-url)($ctx_path)?app=($app.q)"
+        if (wd-wait-for-element $session_id $app.sel 15) {
+            let r = (assert-exists $session_id $app.name $app.sel -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+        } else {
+            log-fail $"($app.name): ($app.sel) not found"; $fl = $fl + 1
+        }
+    }
+
     { passed: $p, failed: $fl }
 }
 

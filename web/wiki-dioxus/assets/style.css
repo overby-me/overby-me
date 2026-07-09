@@ -682,6 +682,49 @@ h6, .title-small {
     white-space: nowrap;
 }
 
+/* Programme / agenda timeline (#60). */
+.program-timeline {
+    padding: 8px 0;
+}
+
+.program-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    cursor: pointer;
+    border-left: 2px solid var(--md-outline);
+    margin-left: 24px;
+    transition: background-color 0.15s;
+}
+
+.program-item:hover {
+    background-color: var(--md-surface-variant);
+}
+
+.program-index {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    margin-left: -30px;
+    border-radius: 50%;
+    background: var(--md-primary);
+    color: var(--md-on-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 13px;
+}
+
+/* Cowsay easter egg (#82). */
+.cowsay {
+    font-family: monospace;
+    line-height: 1.2;
+    white-space: pre;
+    overflow-x: auto;
+}
+
 /* Folder list */
 .folder-item {
     display: flex;

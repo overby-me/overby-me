@@ -242,6 +242,24 @@ const EN_JSON: &str = r#"{
         "managePoll": "Manage Poll",
         "hideResult": "Hide result"
     },
+    "redirect": {
+        "forwarding": "Forwarding you to:",
+        "noTarget": "No redirect target set yet.",
+        "targetUrl": "Target URL"
+    },
+    "social": {
+        "empty": "No posts yet.",
+        "query": "Search term",
+        "poweredBy": "Live from Bluesky"
+    },
+    "profile": {
+        "memberships": "Your groups and events",
+        "signedInAs": "Signed in as",
+        "userId": "User ID"
+    },
+    "program": {
+        "empty": "No programme items yet."
+    },
     "sort": {
         "saveSorting": "Save sorting"
     },
@@ -283,6 +301,10 @@ const EN_JSON: &str = r#"{
         "screen": "Screen",
         "admin": "Results",
         "permissions": "Permissions",
+        "graph": "Graph",
+        "program": "Programme",
+        "profile": "Profile",
+        "social": "Social wall",
         "unknown": "Unknown"
     }
 }"#;
@@ -427,6 +449,24 @@ const DA_JSON: &str = r#"{
         "managePoll": "Administrer Afstemning",
         "hideResult": "Skjul resultatet"
     },
+    "redirect": {
+        "forwarding": "Sender dig videre til:",
+        "noTarget": "Ingen omdirigering angivet endnu.",
+        "targetUrl": "Mål-URL"
+    },
+    "social": {
+        "empty": "Ingen opslag endnu.",
+        "query": "Søgeord",
+        "poweredBy": "Live fra Bluesky"
+    },
+    "profile": {
+        "memberships": "Dine grupper og begivenheder",
+        "signedInAs": "Logget ind som",
+        "userId": "Bruger-ID"
+    },
+    "program": {
+        "empty": "Ingen programpunkter endnu."
+    },
     "sort": {
         "saveSorting": "Gem sortering"
     },
@@ -468,6 +508,10 @@ const DA_JSON: &str = r#"{
         "screen": "Skærm",
         "admin": "Resultater",
         "permissions": "Tilladelser",
+        "graph": "Graf",
+        "program": "Program",
+        "profile": "Profil",
+        "social": "Social væg",
         "unknown": "Ukendt"
     }
 }"#;

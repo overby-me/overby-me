@@ -161,14 +161,21 @@ excluded (see "Ignored"). `#N` = issue number.
 ### Apps to port / add
 
 - `#154` "Dioxus" — the umbrella tracking issue for this whole port.
-- `#68` Graph app (visualise the node graph).
-- `#60` Program app (agenda/programme view).
-- `#57` Redirect app.
+- `[x]` `#68` Graph app — SVG node-link view of the context + children (rail +
+  `?app=graph`), child boxes link into nodes.
+- `[x]` `#60` Program app — numbered agenda timeline of the context's children
+  (rail + `?app=program`).
+- `[x]` `#57` Redirect app — node forwards to a `data.url` target; owner can set
+  it (`?app=redirect`).
 - ~~`#53` WebDAV app~~ — skipped (owner request).
-- `#78` Profile app (user profile).
-- `#137` Social wall app — **Bluesky only** (ignore Mastodon/PixelFed); relates
-  to the screen app.
+- `[x]` `#78` Profile app — signed-in user + their groups/events (rail +
+  `?app=profile`).
+- `[x]` `#137` Social wall app — **Bluesky only** via the public AppView
+  `searchPosts` (rail + `?app=social`); Mastodon/PixelFed ignored.
+- `[x]` `#82` Secret cow app — cowsay easter egg at `?app=cow` (not in the rail).
 - ~~`#18` Pixel app~~ — skipped (owner request).
+
+All the above build + render live (browser smoke test asserts each mounts).
 
 ### Speaker list
 
@@ -244,7 +251,6 @@ excluded (see "Ignored"). `#N` = issue number.
 
 - `#149` "Missing parent App" — unclear what this app is.
 - `#123` "MimeAvatar path on screen" — unclear which behaviour.
-- `#82` "Secret cow app" — an easter egg? priority?
 - `#155` Find an nhost alternative — backend/infra, out of the frontend port?
 - `#135`, `#136` Native DB primitives / get-index DB function — backend work.
 - `#153` Register campaign activity — large new feature; scope/priority?

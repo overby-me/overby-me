@@ -345,7 +345,11 @@ fn AppRail() -> Element {
         for (icon, key, app) in [
             ("app/screen", "mime.screen", "screen"),
             ("vote/poll", "mime.admin", "admin"),
+            ("app/program", "mime.program", "program"),
+            ("app/graph", "mime.graph", "graph"),
+            ("app/social", "mime.social", "social"),
             ("app/map", "mime.map", "map"),
+            ("app/profile", "mime.profile", "profile"),
             ("wiki/user", "mime.permissions", "perm"),
         ] {
             apps.push((

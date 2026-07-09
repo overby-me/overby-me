@@ -62,6 +62,14 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
                 Some("admin") => rsx! { super::admin::AdminApp { node } },
                 Some("perm") => rsx! { super::perm::PermApp { node } },
                 Some("map") => rsx! { super::map::MapApp { node } },
+                Some("graph") => rsx! { super::graph::GraphApp { node, path: segments.clone() } },
+                Some("program") => {
+                    rsx! { super::program::ProgramApp { node, path: segments.clone() } }
+                }
+                Some("profile") => rsx! { super::profile::ProfileApp {} },
+                Some("redirect") => rsx! { super::redirect::RedirectApp { node } },
+                Some("social") => rsx! { super::social::SocialApp { node } },
+                Some("cow") => rsx! { super::cow::CowApp { node } },
                 _ => rsx! { MimeLoader { node, path: segments.clone() } },
             }
         }
@@ -144,6 +152,12 @@ pub fn mime_icon(mime_id: &str) -> &'static str {
         "app/screen" => "\u{1F4FA}",                       // ConnectedTv 📺
         "application/pdf" => "\u{1F4D5}",                  // PDF 📕
         "app/map" | "map/map" => "\u{1F5FA}\u{FE0F}",      // Map 🗺️
+        "app/graph" => "\u{1F578}\u{FE0F}",                // Graph/web 🕸️
+        "app/program" => "\u{1F5D3}\u{FE0F}",              // Programme 🗓️
+        "app/profile" => "\u{1F464}",                      // Profile 👤
+        "app/social" => "\u{1F98B}",                       // Social (Bluesky) 🦋
+        "app/redirect" => "\u{21AA}\u{FE0F}",              // Redirect ↪️
+        "app/cow" => "\u{1F404}",                          // Cow 🐄
         _ => mime_icon_by_prefix(mime_id),
     }
 }
