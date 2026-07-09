@@ -19,15 +19,11 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
         .map(|c| c.0)
         .unwrap_or_else(|| node.id.0.clone());
 
-    let polls = use_resource(move || {
-        let token = access_token.clone();
-        let ctx = context_id.clone();
-        async move {
-            graphql::query_context_polls(token.as_deref(), &ctx)
-                .await
-                .unwrap_or_default()
-        }
-    });
+    let polls = use_resource(use_reactive!(|(context_id, access_token)| async move {
+        graphql::query_context_polls(access_token.as_deref(), &context_id)
+            .await
+            .unwrap_or_default()
+    }));
     let polls = polls.read().clone().unwrap_or_default();
 
     rsx! {
@@ -74,15 +70,13 @@ fn AdminPollRow(poll: PollSummaryFields) -> Element {
         })
         .unwrap_or_default();
 
-    let tally = use_resource(move || {
-        let token = access_token.clone();
-        let poll_id = poll_id.clone();
-        let n = options.len();
-        async move {
-            let votes = graphql::query_poll_votes(token.as_deref(), &poll_id)
+    let n_opts = options.len();
+    let tally = use_resource(use_reactive!(
+        |(poll_id, access_token, n_opts)| async move {
+            let votes = graphql::query_poll_votes(access_token.as_deref(), &poll_id)
                 .await
                 .unwrap_or_default();
-            let mut counts = vec![0usize; n];
+            let mut counts = vec![0usize; n_opts];
             for vote in &votes {
                 for &i in vote {
                     if let Some(c) = counts.get_mut(i) {
@@ -92,7 +86,7 @@ fn AdminPollRow(poll: PollSummaryFields) -> Element {
             }
             (counts, votes.len())
         }
-    });
+    ));
     let (counts, total) = tally.read().clone().unwrap_or((vec![], 0));
     let opts: Vec<String> = poll
         .data

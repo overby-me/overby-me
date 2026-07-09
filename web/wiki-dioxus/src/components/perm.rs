@@ -19,15 +19,11 @@ pub fn PermApp(node: NodeWithChildren) -> Element {
         .map(|c| c.0)
         .unwrap_or_else(|| node.id.0.clone());
 
-    let perms = use_resource(move || {
-        let token = access_token.clone();
-        let ctx = context_id.clone();
-        async move {
-            graphql::query_permissions(token.as_deref(), &ctx)
-                .await
-                .unwrap_or_default()
-        }
-    });
+    let perms = use_resource(use_reactive!(|(context_id, access_token)| async move {
+        graphql::query_permissions(access_token.as_deref(), &context_id)
+            .await
+            .unwrap_or_default()
+    }));
     let mut perms = perms.read().clone().unwrap_or_default();
     perms.sort_by(|a, b| {
         (a.role.as_str(), a.mime_id.as_deref().unwrap_or(""))

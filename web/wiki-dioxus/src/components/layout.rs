@@ -219,16 +219,14 @@ fn Breadcrumbs() -> Element {
 fn BreadcrumbTrail(segments: Vec<String>, expanded: Signal<bool>) -> Element {
     let session = use_session();
     let token = session.read().access_token.clone();
+    // Reactively depend on the path so names re-resolve on navigation (rather
+    // than relying on a keyed remount, unreliable in the web renderer).
     let segs = segments.clone();
-    let names = use_resource(move || {
-        let token = token.clone();
-        let segs = segs.clone();
-        async move {
-            graphql::path_names(token.as_deref(), &segs)
-                .await
-                .unwrap_or_default()
-        }
-    });
+    let names = use_resource(use_reactive!(|(segs, token)| async move {
+        graphql::path_names(token.as_deref(), &segs)
+            .await
+            .unwrap_or_default()
+    }));
     let names = names.read().clone().unwrap_or_default();
 
     // Collapse the middle of deep paths (keep the first and last two) behind a
@@ -551,17 +549,15 @@ fn MenuList(segments: Vec<String>) -> Element {
     let access_token = session.read().access_token.clone();
     let context_key = segments.first().cloned().unwrap_or_default();
 
-    let context = use_resource(move || {
-        let token = access_token.clone();
-        let key = context_key.clone();
-        async move {
-            graphql::resolve_path(token.as_deref(), &[key])
-                .await
-                .ok()
-                .flatten()
-                .map(|n| n.id.0)
-        }
-    });
+    // Re-resolve reactively when the context changes (keyed remount is not
+    // reliable in the web renderer).
+    let context = use_resource(use_reactive!(|(context_key, access_token)| async move {
+        graphql::resolve_path(access_token.as_deref(), &[context_key])
+            .await
+            .ok()
+            .flatten()
+            .map(|n| n.id.0)
+    }));
 
     let hint_style = "padding: 4px 16px; color: var(--md-on-surface-variant);";
     let ctx = context.read().clone();
@@ -603,19 +599,16 @@ fn DrawerLevel(
     let user_id = session.read().user.as_ref().map(|u| u.id.clone());
     let parent = parent_id.clone();
 
-    let children = use_resource(move || {
-        let token = access_token.clone();
-        let parent = parent.clone();
-        let user_id = user_id.clone();
-        async move {
+    let children = use_resource(use_reactive!(
+        |(parent, access_token, user_id)| async move {
             let Some(user_id) = user_id else {
                 return Vec::new();
             };
-            graphql::query_children(token.as_deref(), &parent, &user_id)
+            graphql::query_children(access_token.as_deref(), &parent, &user_id)
                 .await
                 .unwrap_or_default()
         }
-    });
+    ));
 
     let items = children.read().clone();
     match items {

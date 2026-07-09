@@ -19,19 +19,15 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
         .map(|c| c.0)
         .unwrap_or_else(|| node.id.0.clone());
 
-    let active = use_resource(move || {
-        let token = access_token.clone();
-        let ctx = context_id.clone();
-        async move {
-            let id = graphql::active_node_id(token.as_deref(), &ctx)
-                .await
-                .ok()
-                .flatten()?;
-            graphql::query_node_by_id(token.as_deref(), &id)
-                .await
-                .ok()?
-        }
-    });
+    let active = use_resource(use_reactive!(|(context_id, access_token)| async move {
+        let id = graphql::active_node_id(access_token.as_deref(), &context_id)
+            .await
+            .ok()
+            .flatten()?;
+        graphql::query_node_by_id(access_token.as_deref(), &id)
+            .await
+            .ok()?
+    }));
     let active = active.read().clone().flatten();
 
     rsx! {

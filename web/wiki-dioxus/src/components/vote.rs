@@ -22,19 +22,15 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
     let access_token = session.read().access_token.clone();
     let context_id = node.context_id.clone().map(|c| c.0).unwrap_or(node.id.0);
 
-    let active = use_resource(move || {
-        let token = access_token.clone();
-        let ctx = context_id.clone();
-        async move {
-            let id = graphql::active_node_id(token.as_deref(), &ctx)
-                .await
-                .ok()
-                .flatten()?;
-            graphql::query_node_by_id(token.as_deref(), &id)
-                .await
-                .ok()?
-        }
-    });
+    let active = use_resource(use_reactive!(|(context_id, access_token)| async move {
+        let id = graphql::active_node_id(access_token.as_deref(), &context_id)
+            .await
+            .ok()
+            .flatten()?;
+        graphql::query_node_by_id(access_token.as_deref(), &id)
+            .await
+            .ok()?
+    }));
 
     let no_vote = rsx! {
         div { class: "card",
@@ -246,53 +242,49 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
         refresh,
     );
 
+    // Live results depend on the poll (node) id and the refresh counter; use
+    // use_reactive so they re-run when navigating to a different poll, not only
+    // via a keyed remount (unreliable in the web renderer).
+    let rev = *refresh.read();
+    let n_opts = options.len();
+
     // Whether the current user has already voted (own votes are visible to them).
-    let already_voted = use_resource({
-        let token = session.read().access_token.clone();
-        let poll = poll_id.clone();
-        let uid = user_id.clone();
-        move || {
-            let token = token.clone();
-            let poll = poll.clone();
-            let uid = uid.clone();
-            let _ = refresh.read();
-            async move {
-                let Some(uid) = uid else { return false };
-                graphql::count_user_votes(token.as_deref(), &poll, &uid)
-                    .await
-                    .map(|n| n > 0)
-                    .unwrap_or(false)
-            }
+    let av_poll = poll_id.clone();
+    let av_token = session.read().access_token.clone();
+    let av_user = user_id.clone();
+    let already_voted = use_resource(use_reactive!(
+        |(av_poll, av_token, av_user, rev)| async move {
+            let _ = rev;
+            let Some(uid) = av_user else { return false };
+            graphql::count_user_votes(av_token.as_deref(), &av_poll, &uid)
+                .await
+                .map(|n| n > 0)
+                .unwrap_or(false)
         }
-    });
+    ));
     let voted = already_voted.read().unwrap_or(false);
 
     // Tally of the votes visible to this user (all of them for the poll owner /
     // an admin; just their own otherwise). Counts per option index.
-    let tally = use_resource({
-        let token = session.read().access_token.clone();
-        let poll = poll_id.clone();
-        let n = options.len();
-        move || {
-            let token = token.clone();
-            let poll = poll.clone();
-            let _ = refresh.read();
-            async move {
-                let votes = graphql::query_poll_votes(token.as_deref(), &poll)
-                    .await
-                    .unwrap_or_default();
-                let mut counts = vec![0usize; n];
-                for vote in &votes {
-                    for &i in vote {
-                        if let Some(c) = counts.get_mut(i) {
-                            *c += 1;
-                        }
+    let ty_poll = poll_id.clone();
+    let ty_token = session.read().access_token.clone();
+    let tally = use_resource(use_reactive!(
+        |(ty_poll, ty_token, n_opts, rev)| async move {
+            let _ = rev;
+            let votes = graphql::query_poll_votes(ty_token.as_deref(), &ty_poll)
+                .await
+                .unwrap_or_default();
+            let mut counts = vec![0usize; n_opts];
+            for vote in &votes {
+                for &i in vote {
+                    if let Some(c) = counts.get_mut(i) {
+                        *c += 1;
                     }
                 }
-                (counts, votes.len())
             }
+            (counts, votes.len())
         }
-    });
+    ));
     let (counts, total_votes) = tally.read().clone().unwrap_or((vec![], 0));
 
     let opts = options.clone();

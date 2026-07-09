@@ -45,18 +45,22 @@ pub fn PathPage(segments: Vec<String>, app: Option<String>) -> Element {
     }
 }
 
-/// Resolves a path to a node and renders the matching app. Remounted per path.
+/// Resolves a path to a node and renders the matching app. The query re-runs
+/// whenever the path (or token) changes.
 #[component]
 fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
     let session = use_session();
     let access_token = session.read().access_token.clone();
-    let segments_clone = segments.clone();
 
-    let node_future = use_resource(move || {
-        let token = access_token.clone();
-        let segs = segments_clone.clone();
-        async move { graphql::resolve_path(token.as_deref(), &segs).await }
-    });
+    // Depend reactively on `segments` so the query re-runs when the path
+    // changes, WITHOUT relying on a keyed remount: changing a single child's
+    // `key` does not reliably force a remount in the web renderer (it does in
+    // Servo, which is why this only showed up in real browsers), so a
+    // path-change navigation would otherwise keep the previously resolved node.
+    let segs = segments.clone();
+    let node_future = use_resource(use_reactive!(|(segs, access_token)| async move {
+        graphql::resolve_path(access_token.as_deref(), &segs).await
+    }));
 
     let result = node_future.read().clone();
     match result {
