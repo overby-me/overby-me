@@ -294,6 +294,14 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # The app rail only appears inside a context; its presence confirms the
     # in-context layout (and that its icons rendered).
     let r = (assert-count $session_id "app rail shown in context" ".app-rail .btn-icon" 1 -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+    # The app rail sits to the LEFT of the side panel (rail | drawer | content).
+    let layout = (wd-execute $session_id 'var rl=document.querySelector(".app-rail"),dr=document.querySelector(".drawer-inner"); if(!rl||!dr) return "missing"; return JSON.stringify({rail:Math.round(rl.getBoundingClientRect().left), drawer:Math.round(dr.getBoundingClientRect().left)})')
+    let ok = (try { let j = ($layout | from json); ($j.rail < $j.drawer) and ($j.rail < 10) } catch { false })
+    if $ok {
+        log-ok $"app rail is left of the drawer ($layout)"; $p = $p + 1
+    } else {
+        log-fail $"app rail not left of drawer: ($layout)"; $fl = $fl + 1
+    }
     # The drawer must have swapped the home list for the node tree: the
     # "Groups" home heading is gone once inside a context.
     let drawer_txt = (wd-execute $session_id 'return (document.querySelector(".drawer")||{innerText:""}).innerText')

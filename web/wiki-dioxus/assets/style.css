@@ -150,14 +150,16 @@ a:hover {
 @media (min-width: 1200px) {
     .drawer {
         display: block;
-        width: 400px;
+        /* Reserve the whole left chrome (72px rail + 400px drawer) at the start
+         * of the flex row so the content begins to their right. */
+        width: 472px;
         flex-shrink: 0;
-        /* Sit at the start of the flex row so it reserves space on the LEFT. */
         order: -1;
     }
     .drawer-inner {
         position: fixed;
-        left: 0;
+        /* Right of the app rail (which is the leftmost 72px). */
+        left: 72px;
         top: 0;
         bottom: 0;
         width: 400px;
@@ -200,7 +202,8 @@ a:hover {
         align-items: center;
         width: 72px;
         position: fixed;
-        left: 400px;
+        /* Leftmost column, to the left of the drawer. */
+        left: 0;
         top: 0;
         bottom: 0;
         padding-top: 64px;
