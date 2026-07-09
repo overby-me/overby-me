@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::graphql::{ChildNodeFields, NodeWithChildren};
+use crate::graphql::{self, ChildNodeFields, NodeWithChildren};
 use crate::i18n::t;
 use crate::route::Route;
 use crate::session::use_session;
@@ -11,10 +11,47 @@ use super::loader::{mime_icon, visible_sorted};
 pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
     let session = use_session();
     let is_auth = session.read().is_authenticated();
-    let name = node.name.as_str();
-    let mime_id = node.mime_id.as_deref().unwrap_or("wiki/folder");
-    let children = visible_sorted(&node.children);
+    let user_id = session.read().user.as_ref().map(|u| u.id.clone());
+    let access_token = session.read().access_token.clone();
+    let name = node.name.clone();
+    let mime_id = node
+        .mime_id
+        .clone()
+        .unwrap_or_else(|| "wiki/folder".to_string());
+    let node_id = node.id.0.clone();
+
+    // Live children: subscribe to this folder's child nodes so additions and
+    // removals (by anyone) show up immediately, filtered + ordered like React.
+    let refresh = use_signal(|| 0u32);
+    crate::subscription::use_live(
+        format!(
+            "subscription {{ nodes(where: {{ parentId: {{ _eq: \"{node_id}\" }} }}) {{ id }} }}"
+        ),
+        refresh,
+    );
+    let initial = visible_sorted(&node.children);
+    let children_res = use_resource({
+        let token = access_token.clone();
+        let node_id = node_id.clone();
+        let user_id = user_id.clone();
+        move || {
+            let token = token.clone();
+            let node_id = node_id.clone();
+            let user_id = user_id.clone();
+            let _ = refresh.read();
+            async move {
+                let uid = user_id?;
+                graphql::query_children(token.as_deref(), &node_id, &uid)
+                    .await
+                    .ok()
+            }
+        }
+    });
+    // Use live children once loaded; fall back to the already-resolved set.
+    let children = children_res.read().clone().flatten().unwrap_or(initial);
     let children = &children;
+    let mime_id = mime_id.as_str();
+    let name = name.as_str();
 
     rsx! {
         div { class: "card",

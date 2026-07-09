@@ -720,9 +720,23 @@ fn HomeList() -> Element {
     let user_id = session.read().user.as_ref().map(|u| u.id.clone());
     let access_token = session.read().access_token.clone();
 
+    // Live home list: accepting an invitation or a membership change re-fetches
+    // the user's groups and events.
+    let refresh = use_signal(|| 0u32);
+    let sub_uid = user_id
+        .clone()
+        .unwrap_or_else(|| "00000000-0000-0000-0000-000000000000".to_string());
+    crate::subscription::use_live(
+        format!(
+            "subscription {{ members(where: {{ nodeId: {{ _eq: \"{sub_uid}\" }} }}) {{ id }} }}"
+        ),
+        refresh,
+    );
+
     let contexts = use_resource(move || {
         let token = access_token.clone();
         let user_id = user_id.clone();
+        let _ = refresh.read();
         async move {
             let Some(user_id) = user_id else {
                 return Ok::<ContextLists, String>((Vec::new(), Vec::new()));

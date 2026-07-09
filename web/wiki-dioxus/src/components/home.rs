@@ -77,6 +77,18 @@ fn InvitesUserList() -> Element {
     let access_token = session.read().access_token.clone();
 
     let refresh = use_signal(|| 0u32);
+
+    // Live invitations: any change to this user's memberships re-runs the query.
+    let sub_uid = user_id
+        .clone()
+        .unwrap_or_else(|| "00000000-0000-0000-0000-000000000000".to_string());
+    crate::subscription::use_live(
+        format!(
+            "subscription {{ members(where: {{ nodeId: {{ _eq: \"{sub_uid}\" }} }}) {{ id }} }}"
+        ),
+        refresh,
+    );
+
     let invites = use_resource(move || {
         let token = access_token.clone();
         let user_id = user_id.clone();

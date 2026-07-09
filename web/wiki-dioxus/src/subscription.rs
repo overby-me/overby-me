@@ -13,6 +13,19 @@ use web_sys::{MessageEvent, WebSocket};
 use crate::nhost::graphql_url;
 use crate::session::use_session;
 
+/// Wire a subscription to a component's refresh counter: every pushed update
+/// bumps `refresh`, so a `use_resource` keyed on it re-fetches live. This is the
+/// common pattern — the payload itself is ignored; the query just needs to
+/// cover the rows whose change should trigger a refresh.
+pub fn use_live(query: String, mut refresh: Signal<u32>) {
+    let sub = use_graphql_subscription(query);
+    use_effect(move || {
+        // Reading the subscription signal ties this effect to each push.
+        let _ = sub.read();
+        refresh += 1;
+    });
+}
+
 /// Subscribe to `query` and return a signal holding the latest `data` payload.
 /// The socket is opened once for the component and closed when it unmounts.
 pub fn use_graphql_subscription(query: String) -> Signal<Option<serde_json::Value>> {

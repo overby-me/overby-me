@@ -204,6 +204,14 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
     let mut error = use_signal(String::new);
     let mut refresh = use_signal(|| 0u32);
 
+    // Live results: any vote cast on this poll re-runs the tally / voted checks.
+    crate::subscription::use_live(
+        format!(
+            "subscription {{ nodes(where: {{ parentId: {{ _eq: \"{poll_id}\" }}, mimeId: {{ _eq: \"vote/vote\" }} }}) {{ id }} }}"
+        ),
+        refresh,
+    );
+
     // Whether the current user has already voted (own votes are visible to them).
     let already_voted = use_resource({
         let token = session.read().access_token.clone();

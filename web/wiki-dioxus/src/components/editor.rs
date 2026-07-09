@@ -113,8 +113,35 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                     }
                 }
 
+                // Formatting toolbar — wraps the current selection in the
+                // markdown markers that map to Slate marks.
+                div { class: "stack stack-h mb-1", style: "gap: 4px;",
+                    button {
+                        class: "btn-icon",
+                        style: "font-weight: bold;",
+                        title: "Bold",
+                        onclick: move |_| wrap_selection("**", content_html),
+                        "B"
+                    }
+                    button {
+                        class: "btn-icon",
+                        style: "font-style: italic;",
+                        title: "Italic",
+                        onclick: move |_| wrap_selection("*", content_html),
+                        "I"
+                    }
+                    button {
+                        class: "btn-icon",
+                        style: "font-family: monospace;",
+                        title: "Code",
+                        onclick: move |_| wrap_selection("`", content_html),
+                        "<>"
+                    }
+                }
+
                 // Content editor — a plain-text area, one paragraph per line.
                 textarea {
+                    id: "editor-textarea",
                     class: "editor-area",
                     style: "width: 100%; min-height: 240px; resize: vertical;",
                     value: "{content_html}",
@@ -125,6 +152,36 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
             }
         }
     }
+}
+
+/// Wrap the editor textarea's current selection in `marker` (e.g. `**`) and push
+/// the result back into the content signal. Selection indices are UTF-16 units,
+/// which match Rust `char` indices for the BMP text this app handles.
+fn wrap_selection(marker: &str, mut content: Signal<String>) {
+    use wasm_bindgen::JsCast;
+    let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id("editor-textarea"))
+    else {
+        return;
+    };
+    let Ok(ta) = el.dyn_into::<web_sys::HtmlTextAreaElement>() else {
+        return;
+    };
+    let value = ta.value();
+    let chars: Vec<char> = value.chars().collect();
+    let start = ta.selection_start().ok().flatten().unwrap_or(0) as usize;
+    let end = ta.selection_end().ok().flatten().unwrap_or(0) as usize;
+    let (start, end) = (start.min(chars.len()), end.min(chars.len()));
+    if start >= end {
+        return; // nothing selected
+    }
+    let before: String = chars[..start].iter().collect();
+    let sel: String = chars[start..end].iter().collect();
+    let after: String = chars[end..].iter().collect();
+    let new = format!("{before}{marker}{sel}{marker}{after}");
+    ta.set_value(&new);
+    content.set(new);
 }
 
 /// Flatten Slate content to editable text, re-emitting inline marks as markdown
