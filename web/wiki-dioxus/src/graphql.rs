@@ -86,6 +86,9 @@ pub struct NodeFields {
     pub owner_id: Option<Uuid>,
     pub mutable: bool,
     pub index: i32,
+    // Computed ordinal among same-type siblings (1-based) — drives the A/B/C and
+    // 1/2/3 avatar labels for policies / change proposals.
+    pub get_index: Option<i32>,
     pub mime: Option<MimeFields>,
 }
 
@@ -973,11 +976,14 @@ pub async fn resolve_path(
     Ok(None)
 }
 
-/// A resolved breadcrumb segment: its display name and mime (for the avatar).
+/// A resolved breadcrumb segment: its display name, mime, and (for policy /
+/// change nodes) its 0-based ordinal among same-type siblings, so the crumb
+/// avatar can show the same letter/number label as elsewhere.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Crumb {
     pub name: String,
     pub mime_id: Option<String>,
+    pub ordinal: Option<usize>,
 }
 
 /// Resolve each path segment to its `(name, mime_id)`, walking from the root like
@@ -992,6 +998,7 @@ pub async fn path_crumbs(
             .map(|s| Crumb {
                 name: s.clone(),
                 mime_id: None,
+                ordinal: None,
             })
             .collect());
     };
@@ -1000,9 +1007,12 @@ pub async fn path_crumbs(
     for segment in segments {
         match query_node_by_key(access_token, segment, parent_id.as_deref()).await? {
             Some(n) => {
+                // getIndex is 1-based; node_avatar wants a 0-based ordinal.
+                let ordinal = n.get_index.filter(|i| *i >= 1).map(|i| (i - 1) as usize);
                 out.push(Crumb {
                     name: n.name.clone(),
                     mime_id: n.mime_id.clone(),
+                    ordinal,
                 });
                 parent_id = Some(n.id.0);
             }
@@ -1010,6 +1020,7 @@ pub async fn path_crumbs(
                 out.push(Crumb {
                     name: segment.clone(),
                     mime_id: None,
+                    ordinal: None,
                 });
                 break;
             }

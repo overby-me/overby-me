@@ -298,6 +298,7 @@ fn BreadcrumbTrail(segments: Vec<String>, hovered: Signal<Option<usize>>) -> Ele
             to: Route::HomeApp {},
             mime: "app/home".to_string(),
             name: t("common.home"),
+            ordinal: None,
             open: is_open(0),
             crumb_id: 0,
             hovered,
@@ -311,12 +312,14 @@ fn BreadcrumbTrail(segments: Vec<String>, hovered: Signal<Option<usize>>) -> Ele
                     .filter(|n| !n.is_empty())
                     .unwrap_or_else(|| segments[i].clone());
                 let mime = info.and_then(|c| c.mime_id.clone()).unwrap_or_default();
+                let ordinal = info.and_then(|c| c.ordinal);
                 rsx! {
                     BreadcrumbCrumb {
                         key: "{i}",
                         to: Route::PathPage { segments: segments[..=i].to_vec(), app: None },
                         mime,
                         name,
+                        ordinal,
                         open: is_open(i + 1),
                         crumb_id: i + 1,
                         hovered,
@@ -334,6 +337,7 @@ fn BreadcrumbCrumb(
     to: Route,
     mime: String,
     name: String,
+    ordinal: Option<usize>,
     open: bool,
     crumb_id: usize,
     hovered: Signal<Option<usize>>,
@@ -344,7 +348,9 @@ fn BreadcrumbCrumb(
             class: "crumb",
             onmouseenter: move |_| hovered.set(Some(crumb_id)),
             Link { to, class: "crumb-link",
-                div { class: "avatar small crumb-avatar", {super::loader::icon_el(&mime)} }
+                div { class: "avatar small crumb-avatar",
+                    {super::loader::node_avatar(&mime, &name, ordinal)}
+                }
                 span {
                     class: if open { "crumb-name open" } else { "crumb-name" },
                     "{name}"
