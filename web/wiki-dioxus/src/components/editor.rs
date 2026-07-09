@@ -15,12 +15,14 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
     let mut title = use_signal(|| node.name.clone());
     let mut saving = use_signal(|| false);
 
-    // Extract existing content from node data
+    // Extract the existing content as editable plain text (one line per block).
+    // Loading the raw Slate JSON here would show markup and, on save, round-trip
+    // that JSON back into paragraphs.
     let initial_content = node
         .data
         .as_ref()
         .and_then(|d| d.0.get("content"))
-        .and_then(|c| serde_json::to_string_pretty(c).ok())
+        .map(slate_to_text)
         .unwrap_or_default();
 
     let mut content_html = use_signal(|| initial_content);
@@ -111,21 +113,47 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                     }
                 }
 
-                // Content editor — uses contenteditable div
-                div {
-                    class: "slate-content editor-area",
-                    contenteditable: "true",
+                // Content editor — a plain-text area, one paragraph per line.
+                textarea {
+                    class: "editor-area",
+                    style: "width: 100%; min-height: 240px; resize: vertical;",
+                    value: "{content_html}",
                     oninput: move |evt| {
                         content_html.set(evt.value());
                     },
-                    dangerous_inner_html: "{content_html}",
                 }
             }
         }
     }
 }
 
-/// Convert plain text/HTML content into Slate-compatible JSON blocks
+/// Flatten Slate content JSON to editable plain text: one line per top-level
+/// block, concatenating each block's leaf `text` runs.
+fn slate_to_text(content: &serde_json::Value) -> String {
+    fn collect_text(node: &serde_json::Value, out: &mut String) {
+        if let Some(t) = node.get("text").and_then(|t| t.as_str()) {
+            out.push_str(t);
+        } else if let Some(children) = node.get("children").and_then(|c| c.as_array()) {
+            for child in children {
+                collect_text(child, out);
+            }
+        }
+    }
+    match content.as_array() {
+        Some(blocks) => blocks
+            .iter()
+            .map(|block| {
+                let mut line = String::new();
+                collect_text(block, &mut line);
+                line
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        None => String::new(),
+    }
+}
+
+/// Convert plain text into Slate-compatible JSON blocks (one paragraph per line)
 fn build_slate_content(html: &str) -> serde_json::Value {
     let paragraphs: Vec<serde_json::Value> = html
         .split('\n')
@@ -145,5 +173,28 @@ fn build_slate_content(html: &str) -> serde_json::Value {
         }])
     } else {
         serde_json::Value::Array(paragraphs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slate_to_text_flattens_blocks_and_marks() {
+        let content = serde_json::json!([
+            {"type": "paragraph", "children": [{"text": "Hello "}, {"text": "world", "bold": true}]},
+            {"type": "heading-one", "children": [{"text": "Title"}]}
+        ]);
+        assert_eq!(slate_to_text(&content), "Hello world\nTitle");
+    }
+
+    #[test]
+    fn build_slate_content_makes_one_paragraph_per_line() {
+        let v = build_slate_content("a\nb");
+        let arr = v.as_array().expect("array");
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["children"][0]["text"], "a");
+        assert_eq!(arr[1]["children"][0]["text"], "b");
     }
 }
