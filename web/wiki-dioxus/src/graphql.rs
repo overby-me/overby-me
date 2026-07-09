@@ -417,6 +417,67 @@ pub struct NodesInsertInput {
     pub index: Option<i32>,
 }
 
+// --- Relations (the context's "active" node, e.g. the live poll) ---
+
+#[derive(cynic::QueryVariables, Debug)]
+pub struct RelationsWhereVariables {
+    pub where_clause: RelationsBoolExp,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "query_root",
+    variables = "RelationsWhereVariables"
+)]
+pub struct RelationsQuery {
+    #[arguments(where: $where_clause)]
+    pub relations: Vec<RelationFields>,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "relations")]
+pub struct RelationFields {
+    pub name: String,
+    pub node_id: Option<Uuid>,
+}
+
+#[derive(cynic::InputObject, Debug, Default)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "relations_bool_exp"
+)]
+pub struct RelationsBoolExp {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub name: Option<StringComparisonExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<UuidComparisonExp>,
+}
+
+/// The id of a context's "active" node — during a vote this is the open poll,
+/// mirroring the React VoteApp's `get("active")`.
+pub async fn active_node_id(
+    access_token: Option<&str>,
+    context_id: &str,
+) -> Result<Option<String>, String> {
+    let where_clause = RelationsBoolExp {
+        name: Some(StringComparisonExp {
+            eq: Some("active".to_string()),
+            ..Default::default()
+        }),
+        parent_id: Some(UuidComparisonExp {
+            eq: Some(Uuid(context_id.to_string())),
+            is_null: None,
+        }),
+    };
+    let operation = RelationsQuery::build(RelationsWhereVariables { where_clause });
+    let result = execute(access_token, operation).await?;
+    Ok(result
+        .relations
+        .into_iter()
+        .find_map(|r| r.node_id.map(|n| n.0)))
+}
+
 // --- Invitations (pending memberships on groups / events) ---
 
 #[derive(cynic::QueryVariables, Debug)]

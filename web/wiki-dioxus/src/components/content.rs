@@ -2,20 +2,43 @@ use dioxus::prelude::*;
 
 use crate::graphql::NodeWithChildren;
 use crate::i18n::t;
+use crate::nhost::storage_url;
+use crate::session::use_session;
 
 use super::loader::mime_icon;
 
 #[component]
 pub fn ContentApp(node: NodeWithChildren) -> Element {
+    let session = use_session();
     let name = node.name.clone();
     let members = node.members.clone();
     let data = node.data.map(|d| d.0);
+
+    // Optional inline image (a `data.image` file id), mirroring React's Content.
+    let image_url = data
+        .as_ref()
+        .and_then(|d| d.get("image"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|file_id| {
+            let token = session.read().access_token.clone().unwrap_or_default();
+            format!("{}/files/{file_id}?token={token}", storage_url())
+        });
 
     rsx! {
         div { class: "card",
             div { class: "card-header",
                 div { class: "avatar", "{mime_icon(\"wiki/document\")}" }
                 h3 { class: "title-medium", "{name}" }
+            }
+            if let Some(url) = image_url {
+                div { class: "card-content",
+                    img {
+                        src: "{url}",
+                        alt: "{t(\"content.imageAlt\")}",
+                        style: "max-width: 100%; border-radius: 8px;",
+                    }
+                }
             }
             // Author chips (the document's members), mirroring MemberChips.
             if !members.is_empty() {

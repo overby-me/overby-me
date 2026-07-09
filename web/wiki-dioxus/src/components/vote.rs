@@ -8,47 +8,55 @@ use crate::snackbar::show_snackbar;
 use super::content::ContentApp;
 use super::loader::{mime_icon, visible_sorted};
 
-/// VoteApp — voting interface for active polls
+/// VoteApp — the context-level vote screen (`?app=vote`). Resolves the context's
+/// "active" relation to the currently open node; when that is a poll it shows
+/// the ballot (via PollApp), mirroring the React VoteApp's `get("active")`.
 #[component]
 pub fn VoteApp(node: NodeWithChildren) -> Element {
     let session = use_session();
     let is_auth = session.read().is_authenticated();
-    let children = &node.children;
+    let access_token = session.read().access_token.clone();
+    let context_id = node.context_id.clone().map(|c| c.0).unwrap_or(node.id.0);
 
-    // Find active poll among children
-    let polls: Vec<_> = children
-        .iter()
-        .filter(|c| c.mime_id.as_deref() == Some("vote/poll"))
-        .collect();
+    let active = use_resource(move || {
+        let token = access_token.clone();
+        let ctx = context_id.clone();
+        async move {
+            let id = graphql::active_node_id(token.as_deref(), &ctx)
+                .await
+                .ok()
+                .flatten()?;
+            graphql::query_node_by_id(token.as_deref(), &id)
+                .await
+                .ok()?
+        }
+    });
 
-    rsx! {
+    let no_vote = rsx! {
         div { class: "card",
             div { class: "card-header",
                 div { class: "avatar", "{mime_icon(\"vote/poll\")}" }
                 h3 { class: "title-medium", "{t(\"mime.vote\")}" }
             }
             div { class: "card-content",
-                if !is_auth {
-                    p { class: "body-large", "{t(\"vote.noVotingRight\")}" }
-                } else if polls.is_empty() {
-                    p { class: "body-large", "{t(\"vote.noVoteNow\")}" }
-                } else {
-                    // Show polls
-                    for poll in polls.iter() {
-                        div { class: "list-item", key: "{poll.id.0}",
-                            div { class: "avatar small", "{mime_icon(\"vote/poll\")}" }
-                            div { class: "list-item-text",
-                                div { class: "list-item-primary", "{poll.name}" }
-                            }
-                        }
-                    }
-                    p { class: "body-medium mt-1",
-                        style: "color: var(--md-on-surface-variant);",
-                        "{t(\"vote.castVote\")}"
-                    }
+                p { class: "body-large",
+                    if is_auth { "{t(\"vote.noVoteNow\")}" } else { "{t(\"vote.noVotingRight\")}" }
                 }
             }
         }
+    };
+
+    let state = active.read().clone();
+    match state {
+        Some(Some(active)) if active.mime_id.as_deref() == Some("vote/poll") => {
+            rsx! { PollApp { node: active } }
+        }
+        Some(_) => no_vote,
+        None => rsx! {
+            div { class: "spinner-overlay",
+                div { class: "spinner" }
+            }
+        },
     }
 }
 
