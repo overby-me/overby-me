@@ -165,6 +165,39 @@ fn mime_icon_by_prefix(mime_id: &str) -> &'static str {
     }
 }
 
+/// The URL-safe base of a node key: lowercase, non-alphanumerics collapsed to
+/// single dashes, trimmed. Pure (no browser globals) so it is unit-testable.
+fn slug_base(name: &str) -> String {
+    let mut base = String::new();
+    let mut prev_dash = false;
+    for c in name.trim().to_lowercase().chars() {
+        if c.is_alphanumeric() {
+            base.push(c);
+            prev_dash = false;
+        } else if !prev_dash {
+            base.push('-');
+            prev_dash = true;
+        }
+    }
+    base.trim_matches('-').to_string()
+}
+
+/// Build a URL-safe node key from a display name plus a short unique suffix, so
+/// a freshly created child does not collide with a sibling's key.
+pub fn slugify(name: &str) -> String {
+    let base = slug_base(name);
+    let suffix = web_sys::window()
+        .and_then(|w| w.performance())
+        .map(|p| format!("{:.0}", p.now()))
+        .unwrap_or_default();
+    let tail = &suffix[suffix.len().saturating_sub(4)..];
+    if base.is_empty() {
+        format!("n-{tail}")
+    } else {
+        format!("{base}-{tail}")
+    }
+}
+
 /// Return a node's children the way the React folder/list views show them:
 /// hidden-mime entries dropped, ordered by `index` then creation time. Row-level
 /// permissions are already applied by Hasura, so only the hidden filter and the
@@ -206,6 +239,13 @@ mod tests {
                 context: false,
             }),
         }
+    }
+
+    #[test]
+    fn slug_base_is_url_safe() {
+        assert_eq!(super::slug_base("Hello, World! 123"), "hello-world-123");
+        assert_eq!(super::slug_base("  Trim -- Me  "), "trim-me");
+        assert_eq!(super::slug_base("!!!"), "");
     }
 
     #[test]

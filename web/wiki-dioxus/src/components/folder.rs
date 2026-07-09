@@ -55,6 +55,103 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                     }
                 }
             }
+
+            // Create a document or subfolder here (a folder/group/event the user
+            // can add to). Mirrors the React AddContent flow for the simple mimes.
+            if is_auth {
+                FolderAdd {
+                    parent_id: node.id.0.clone(),
+                    context_id: node.context_id.clone().map(|c| c.0),
+                }
+            }
+        }
+    }
+}
+
+/// Inline "add content" form: pick document or folder, name it, insert it.
+#[component]
+fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
+    let session = use_session();
+    let mut open = use_signal(|| false);
+    let mut title = use_signal(String::new);
+    let mut kind = use_signal(|| "wiki/document".to_string());
+
+    if !*open.read() {
+        return rsx! {
+            div { class: "card-content",
+                button {
+                    class: "btn btn-outlined",
+                    onclick: move |_| open.set(true),
+                    "\u{2795} {t(\"content.addContent\")}"
+                }
+            }
+        };
+    }
+
+    rsx! {
+        div { class: "card-content",
+            div { class: "text-field",
+                label { "{t(\"common.title\")}" }
+                input {
+                    r#type: "text",
+                    value: "{title}",
+                    oninput: move |e| title.set(e.value()),
+                }
+            }
+            div { class: "stack stack-h mt-1", style: "align-items: center; gap: 8px;",
+                select {
+                    value: "{kind}",
+                    onchange: move |e| kind.set(e.value()),
+                    option { value: "wiki/document", "{t(\"mime.document\")}" }
+                    option { value: "wiki/folder", "{t(\"mime.folder\")}" }
+                }
+                button {
+                    class: "btn btn-primary",
+                    disabled: title.read().trim().is_empty(),
+                    onclick: {
+                        let parent_id = parent_id.clone();
+                        let context_id = context_id.clone();
+                        move |_| {
+                            let name = title.read().trim().to_string();
+                            if name.is_empty() {
+                                return;
+                            }
+                            let token = session.read().access_token.clone();
+                            let parent_id = parent_id.clone();
+                            let context_id = context_id.clone();
+                            let mime = kind.read().clone();
+                            spawn(async move {
+                                let key = crate::components::loader::slugify(&name);
+                                let input = crate::graphql::NodesInsertInput {
+                                    name: Some(name),
+                                    key: Some(key),
+                                    mime_id: Some(mime),
+                                    parent_id: Some(crate::graphql::Uuid(parent_id)),
+                                    context_id: context_id.map(crate::graphql::Uuid),
+                                    data: None,
+                                    mutable: Some(true),
+                                    index: None,
+                                };
+                                if crate::graphql::insert_node(token.as_deref(), input)
+                                    .await
+                                    .is_ok()
+                                {
+                                    // Re-resolve the folder to show the new child.
+                                    if let Some(w) = web_sys::window() {
+                                        let _ = w.location().reload();
+                                    }
+                                }
+                            });
+                        }
+                    },
+                    "{t(\"common.add\")}"
+                }
+                button {
+                    class: "btn btn-outlined",
+                    onclick: move |_| open.set(false),
+                    "{t(\"common.cancel\")}"
+                }
+            }
         }
     }
 }
