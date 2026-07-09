@@ -35,6 +35,15 @@
       url = "github:nix-community/home-manager/release-26.05";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    system-manager = {
+      # system-manager imports a curated subset of NixOS modules that is
+      # version-locked to nixpkgs-unstable (its own default). Following this
+      # flake's stable nixpkgs (26.05) pulls in modules whose dependencies
+      # aren't part of that subset (e.g. nginx referencing `security.dhparams`),
+      # breaking evaluation. Follow nixpkgs-unstable to match its expectations.
+      url = "github:numtide/system-manager";
+      inputs.nixpkgs.follows = "nixpkgs-unstable";
+    };
     agenix = {
       url = "github:ryantm/agenix";
       inputs = {
@@ -137,6 +146,7 @@
       imports = [
         ./flake/modules/colmena.nix
         ./flake/modules/darwin.nix
+        ./flake/modules/systemConfigs.nix
         ./flake/modules/desktops.nix
         ./flake/modules/devShellNames.nix
         ./flake/modules/devenvConfigurations.nix
@@ -218,6 +228,8 @@
         nixosModules = ["nixos/modules"];
         darwinConfigurations = ["darwin/config"];
         darwinModules = ["darwin/modules"];
+        systemConfigs = ["system-manager/config"];
+        systemModules = ["system-manager/modules"];
         homeConfigurations = ["home-manager/config"];
         homeModules = ["home-manager/modules"];
         devenvConfiguration = ["devenv/config"];
