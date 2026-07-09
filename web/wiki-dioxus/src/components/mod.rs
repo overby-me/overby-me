@@ -17,6 +17,7 @@ pub mod perm;
 pub mod profile;
 pub mod program;
 pub mod redirect;
+pub mod richtext;
 pub mod screen;
 pub mod social;
 pub mod sort;

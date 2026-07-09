@@ -529,6 +529,61 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         log-warn "no folder export button — skipping export check"
     }
 
+    # ── Rich text editor: mount, seed, toolbar and live formatting ───────────
+    # Exercised entirely in the browser DOM without ever clicking Save, so no
+    # node's stored content is modified.
+    wd-navigate $session_id $"(base-url)($ctx_path)?app=editor"
+    if (wd-wait-for-element $session_id "#rich-editor" 15) {
+        # The editing surface is a real contenteditable element.
+        let ce = (wd-execute $session_id 'return document.getElementById("rich-editor")?.getAttribute("contenteditable")')
+        if $ce == "true" {
+            log-ok "rich editor mounts (contenteditable)"; $p = $p + 1
+        } else {
+            log-fail $"rich editor not contenteditable: ($ce)"; $fl = $fl + 1
+        }
+        # Toolbar: block-style dropdown plus the formatting icon buttons.
+        let tools = (wd-execute $session_id 'return JSON.stringify({sel:document.querySelector(".editor-select")?1:0, btns:document.querySelectorAll(".editor-tools .btn-icon").length})')
+        let ok = (try { let j = ($tools | from json); ($j.sel == 1) and ($j.btns >= 10) } catch { false })
+        if $ok {
+            log-ok $"rich editor toolbar renders ($tools)"; $p = $p + 1
+        } else {
+            log-fail $"editor toolbar incomplete: ($tools)"; $fl = $fl + 1
+        }
+        # Seeded from the node's Slate content (an empty doc still seeds a block).
+        let seeded = (wd-execute $session_id 'var e=document.getElementById("rich-editor"); return e && e.children.length>0 ? "y":"n"')
+        if $seeded == "y" {
+            log-ok "rich editor seeds content"; $p = $p + 1
+        } else {
+            log-fail "rich editor empty (not seeded)"; $fl = $fl + 1
+        }
+        # Critical: a Dioxus re-render (triggered via keyup, which fires the
+        # toolbar-state handler) must NOT wipe the browser-owned editor DOM.
+        wd-execute $session_id 'var e=document.getElementById("rich-editor"); e.innerHTML="<p>keepme-xyz</p>"; e.dispatchEvent(new KeyboardEvent("keyup",{bubbles:true})); return 1' | ignore
+        sleep 1sec
+        let kept = (wd-execute $session_id 'return (document.getElementById("rich-editor")||{innerHTML:""}).innerHTML.indexOf("keepme-xyz")>=0?"y":"n"')
+        if $kept == "y" {
+            log-ok "editor survives re-render (contenteditable not clobbered)"; $p = $p + 1
+        } else {
+            log-fail "editor content wiped on re-render"; $fl = $fl + 1
+        }
+        # Live inline formatting: select all and toggle bold via execCommand.
+        let bolded = (wd-execute $session_id 'var e=document.getElementById("rich-editor"); if(!e) return "no"; if(!e.innerText.trim()){e.innerHTML="<p>sample text</p>";} e.focus(); document.execCommand("selectAll",false,null); document.execCommand("bold",false,null); return (/<(b|strong)\b/i.test(e.innerHTML)||/font-weight/i.test(e.innerHTML))?"y":"n"')
+        if $bolded == "y" {
+            log-ok "editor bold command applies"; $p = $p + 1
+        } else {
+            log-fail "editor bold command had no effect"; $fl = $fl + 1
+        }
+        # Live block formatting: turn the selection into a heading.
+        let blocked = (wd-execute $session_id 'var e=document.getElementById("rich-editor"); e.focus(); document.execCommand("selectAll",false,null); document.execCommand("formatBlock",false,"<h1>"); return e.querySelector("h1")?"y":"n"')
+        if $blocked == "y" {
+            log-ok "editor block-format applies"; $p = $p + 1
+        } else {
+            log-fail "editor formatBlock had no effect"; $fl = $fl + 1
+        }
+    } else {
+        log-warn "rich editor did not mount, skipping editor checks"
+    }
+
     { passed: $p, failed: $fl }
 }
 

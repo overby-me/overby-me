@@ -1307,3 +1307,125 @@ a.list-item:hover {
     border-width: 2px;
     padding: 15px;
 }
+
+/* Rich-text toolbar */
+.editor-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px;
+    margin-bottom: 8px;
+}
+
+.editor-select {
+    height: 36px;
+    min-width: 130px;
+    margin-right: 4px;
+}
+
+.editor-divider {
+    width: 1px;
+    align-self: stretch;
+    min-height: 24px;
+    margin: 0 4px;
+    background: var(--md-outline);
+}
+
+.btn-icon.active {
+    background: var(--md-secondary-container);
+    color: var(--md-on-secondary-container);
+}
+
+.btn-icon .material-icons {
+    font-size: 20px;
+}
+
+/* Link popover */
+.link-popover {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    margin-bottom: 8px;
+    border: 1px solid var(--md-outline);
+    border-radius: 8px;
+    background: var(--md-surface);
+}
+
+.link-input {
+    flex: 1 1 200px;
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--md-outline);
+    border-radius: 8px;
+    background: var(--md-surface);
+    color: var(--md-on-surface);
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 13px;
+}
+
+/* Rendered rich content inside the editing surface */
+.rich-editor h1,
+.rich-editor h2,
+.rich-editor h3,
+.rich-editor h4,
+.rich-editor h5,
+.rich-editor h6 {
+    margin: 0.4em 0 0.2em;
+    line-height: 1.25;
+    font-weight: 600;
+}
+
+.rich-editor h1 { font-size: 2em; }
+.rich-editor h2 { font-size: 1.6em; }
+.rich-editor h3 { font-size: 1.35em; }
+.rich-editor h4 { font-size: 1.2em; }
+.rich-editor h5 { font-size: 1.1em; }
+.rich-editor h6 { font-size: 1em; }
+
+.rich-editor p {
+    margin: 0 0 0.5em;
+}
+
+.rich-editor ul,
+.rich-editor ol {
+    margin: 0 0 0.5em;
+    padding-left: 1.6em;
+}
+
+.rich-editor blockquote {
+    margin: 0 0 0.5em;
+    padding-left: 12px;
+    border-left: 3px solid var(--md-outline);
+    color: var(--md-on-surface-variant);
+}
+
+.rich-editor pre {
+    margin: 0 0 0.5em;
+    padding: 12px;
+    border-radius: 6px;
+    background: var(--md-surface-variant);
+    font-family: "Courier New", monospace;
+    white-space: pre-wrap;
+}
+
+.rich-editor code {
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: var(--md-surface-variant);
+    font-family: "Courier New", monospace;
+}
+
+.rich-editor a {
+    color: var(--md-primary);
+    text-decoration: underline;
+}
+
+.rich-editor img {
+    max-width: 100%;
+    height: auto;
+}

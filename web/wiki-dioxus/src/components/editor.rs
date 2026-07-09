@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 
+use crate::components::richtext;
 use crate::graphql::{self, NodeWithChildren};
 use crate::i18n::t;
 use crate::route::Route;
@@ -10,7 +11,42 @@ use crate::snackbar::show_snackbar;
 /// the name inputs (editor title, add-content form).
 pub const NODE_NAME_MAXLEN: usize = 120;
 
-/// EditorApp — rich text content editor
+/// DOM id of the `contenteditable` editing surface.
+const EDITOR_ID: &str = "rich-editor";
+
+/// The block-type key for the caret, from the browser's `formatBlock` state.
+fn current_block() -> String {
+    match richtext::query_value("formatBlock").as_str() {
+        "h1" => "heading-one",
+        "h2" => "heading-two",
+        "h3" => "heading-three",
+        "h4" => "heading-four",
+        "h5" => "heading-five",
+        "h6" => "heading-six",
+        "blockquote" => "block-quote",
+        "pre" => "block-pre",
+        _ => "paragraph",
+    }
+    .to_string()
+}
+
+/// Sync the toolbar's active-state signals from the current selection.
+fn refresh_toolbar(
+    mut bold: Signal<bool>,
+    mut italic: Signal<bool>,
+    mut underline: Signal<bool>,
+    mut strike: Signal<bool>,
+    mut block: Signal<String>,
+) {
+    bold.set(richtext::query_state("bold"));
+    italic.set(richtext::query_state("italic"));
+    underline.set(richtext::query_state("underline"));
+    strike.set(richtext::query_state("strikeThrough"));
+    block.set(current_block());
+}
+
+/// EditorApp: a WYSIWYG rich text editor over a `contenteditable` surface,
+/// reading and writing the same Slate JSON model as the reference wiki.
 #[component]
 pub fn EditorApp(node: NodeWithChildren) -> Element {
     let session = use_session();
@@ -28,17 +64,25 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
     let mut title = use_signal(|| node.name.clone());
     let mut saving = use_signal(|| false);
 
-    // Extract the existing content as editable plain text (one line per block).
-    // Loading the raw Slate JSON here would show markup and, on save, round-trip
-    // that JSON back into paragraphs.
-    let initial_content = node
-        .data
-        .as_ref()
-        .and_then(|d| d.0.get("content"))
-        .map(slate_to_text)
-        .unwrap_or_default();
+    // The initial editor HTML, rendered once from the stored Slate content.
+    let initial_html = use_hook(|| {
+        node.data
+            .as_ref()
+            .and_then(|d| d.0.get("content"))
+            .map(richtext::slate_to_html)
+            .unwrap_or_else(|| "<p><br></p>".to_string())
+    });
 
-    let mut content_html = use_signal(|| initial_content);
+    // Toolbar active state (reflects the caret).
+    let st_bold = use_signal(|| false);
+    let st_italic = use_signal(|| false);
+    let st_underline = use_signal(|| false);
+    let st_strike = use_signal(|| false);
+    let st_block = use_signal(|| "paragraph".to_string());
+
+    // Link editor popover.
+    let mut link_open = use_signal(|| false);
+    let mut link_url = use_signal(String::new);
 
     let handle_save = {
         let token = session.read().access_token.clone();
@@ -49,12 +93,13 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
             let node_id = node_id.clone();
             let segments = segments.clone();
             let title_val = title.read().clone();
-            let content_val = content_html.read().clone();
             spawn(async move {
                 saving.set(true);
 
-                // Build content as Slate-compatible JSON.
-                let content_json = build_slate_content(&content_val);
+                // Serialize the live editor DOM back to Slate JSON.
+                let content_json = richtext::serialize_editor(EDITOR_ID).unwrap_or_else(
+                    || serde_json::json!([{ "type": "paragraph", "children": [{"text": ""}] }]),
+                );
                 let data = serde_json::json!({ "content": content_json });
 
                 let set = graphql::NodesSetInput {
@@ -67,7 +112,6 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                 match graphql::update_node(token.as_deref(), &node_id, set).await {
                     Ok(true) => {
                         show_snackbar(&t("common.save"));
-                        // Return to the node's rendered (non-app) view.
                         nav.push(Route::PathPage {
                             segments: segments.clone(),
                             app: None,
@@ -95,6 +139,9 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
         };
     }
 
+    // Seed HTML moved into the mount handler (the surface is populated once).
+    let cmd_seed = initial_html.clone();
+
     rsx! {
         div { class: "card",
             div { class: "card-content",
@@ -112,7 +159,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                 // Sticky toolbar (#94): action buttons + formatting controls
                 // stay pinned while scrolling a long document.
                 div { class: "editor-toolbar",
-                    // Action buttons
+                    // Action buttons (save / submit).
                     div { class: "stack stack-h mb-1",
                         button {
                             class: "btn btn-primary",
@@ -141,276 +188,241 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                         }
                     }
 
-                    // Formatting toolbar — wraps the current selection in the
-                    // markdown markers that map to Slate marks.
-                    div { class: "stack stack-h mb-1", style: "gap: 4px;",
+                    // Formatting controls.
+                    div { class: "editor-tools",
+                        // Block style.
+                        select {
+                            class: "editor-select",
+                            title: "{t(\"editor.style\")}",
+                            value: "{st_block}",
+                            onmousedown: move |_| richtext::save_selection(),
+                            onchange: move |evt| {
+                                let tag = match evt.value().as_str() {
+                                    "heading-one" => "<h1>",
+                                    "heading-two" => "<h2>",
+                                    "heading-three" => "<h3>",
+                                    "heading-four" => "<h4>",
+                                    "heading-five" => "<h5>",
+                                    "heading-six" => "<h6>",
+                                    "block-quote" => "<blockquote>",
+                                    "block-pre" => "<pre>",
+                                    _ => "<p>",
+                                };
+                                richtext::focus_editor(EDITOR_ID);
+                                richtext::restore_selection();
+                                richtext::exec_value("formatBlock", tag);
+                                refresh_toolbar(st_bold, st_italic, st_underline, st_strike, st_block);
+                            },
+                            option { value: "paragraph", "{t(\"editor.paragraph\")}" }
+                            option { value: "heading-one", "{t(\"editor.headingOne\")}" }
+                            option { value: "heading-two", "{t(\"editor.headingTwo\")}" }
+                            option { value: "heading-three", "{t(\"editor.headingThree\")}" }
+                            option { value: "heading-four", "{t(\"editor.headingFour\")}" }
+                            option { value: "heading-five", "{t(\"editor.headingFive\")}" }
+                            option { value: "heading-six", "{t(\"editor.headingSix\")}" }
+                            option { value: "block-quote", "{t(\"editor.blockQuote\")}" }
+                            option { value: "block-pre", "{t(\"editor.blockPre\")}" }
+                        }
+
+                        div { class: "editor-divider" }
+
+                        // Undo / redo.
                         button {
                             class: "btn-icon",
-                            style: "font-weight: bold;",
-                            title: "Bold",
-                            onclick: move |_| wrap_selection("**", content_html),
-                            "B"
+                            title: "{t(\"editor.undo\")}",
+                            onmousedown: move |e| e.prevent_default(),
+                            onclick: move |_| { richtext::exec("undo"); },
+                            span { class: "material-icons", "undo" }
                         }
                         button {
                             class: "btn-icon",
-                            style: "font-style: italic;",
-                            title: "Italic",
-                            onclick: move |_| wrap_selection("*", content_html),
-                            "I"
+                            title: "{t(\"editor.redo\")}",
+                            onmousedown: move |e| e.prevent_default(),
+                            onclick: move |_| { richtext::exec("redo"); },
+                            span { class: "material-icons", "redo" }
+                        }
+
+                        div { class: "editor-divider" }
+
+                        // Inline marks.
+                        button {
+                            class: if st_bold() { "btn-icon active" } else { "btn-icon" },
+                            title: "{t(\"editor.bold\")}",
+                            onmousedown: move |e| e.prevent_default(),
+                            onclick: move |_| {
+                                richtext::exec("bold");
+                                refresh_toolbar(st_bold, st_italic, st_underline, st_strike, st_block);
+                            },
+                            span { class: "material-icons", "format_bold" }
+                        }
+                        button {
+                            class: if st_italic() { "btn-icon active" } else { "btn-icon" },
+                            title: "{t(\"editor.italic\")}",
+                            onmousedown: move |e| e.prevent_default(),
+                            onclick: move |_| {
+                                richtext::exec("italic");
+                                refresh_toolbar(st_bold, st_italic, st_underline, st_strike, st_block);
+                            },
+                            span { class: "material-icons", "format_italic" }
+                        }
+                        button {
+                            class: if st_underline() { "btn-icon active" } else { "btn-icon" },
+                            title: "{t(\"editor.underline\")}",
+                            onmousedown: move |e| e.prevent_default(),
+                            onclick: move |_| {
+                                richtext::exec("underline");
+                                refresh_toolbar(st_bold, st_italic, st_underline, st_strike, st_block);
+                            },
+                            span { class: "material-icons", "format_underlined" }
+                        }
+                        button {
+                            class: if st_strike() { "btn-icon active" } else { "btn-icon" },
+                            title: "{t(\"editor.strikethrough\")}",
+                            onmousedown: move |e| e.prevent_default(),
+                            onclick: move |_| {
+                                richtext::exec("strikeThrough");
+                                refresh_toolbar(st_bold, st_italic, st_underline, st_strike, st_block);
+                            },
+                            span { class: "material-icons", "strikethrough_s" }
                         }
                         button {
                             class: "btn-icon",
-                            style: "font-family: monospace;",
-                            title: "Code",
-                            onclick: move |_| wrap_selection("`", content_html),
-                            "<>"
+                            title: "{t(\"editor.code\")}",
+                            onmousedown: move |e| e.prevent_default(),
+                            onclick: move |_| { richtext::wrap_selection_code(); },
+                            span { class: "material-icons", "code" }
+                        }
+
+                        div { class: "editor-divider" }
+
+                        // Lists.
+                        button {
+                            class: "btn-icon",
+                            title: "{t(\"editor.bulletedList\")}",
+                            onmousedown: move |e| e.prevent_default(),
+                            onclick: move |_| { richtext::exec("insertUnorderedList"); },
+                            span { class: "material-icons", "format_list_bulleted" }
+                        }
+                        button {
+                            class: "btn-icon",
+                            title: "{t(\"editor.numberedList\")}",
+                            onmousedown: move |e| e.prevent_default(),
+                            onclick: move |_| { richtext::exec("insertOrderedList"); },
+                            span { class: "material-icons", "format_list_numbered" }
+                        }
+
+                        div { class: "editor-divider" }
+
+                        // Alignment.
+                        button {
+                            class: "btn-icon",
+                            title: "{t(\"editor.alignLeft\")}",
+                            onmousedown: move |e| e.prevent_default(),
+                            onclick: move |_| { richtext::exec("justifyLeft"); },
+                            span { class: "material-icons", "format_align_left" }
+                        }
+                        button {
+                            class: "btn-icon",
+                            title: "{t(\"editor.alignCenter\")}",
+                            onmousedown: move |e| e.prevent_default(),
+                            onclick: move |_| { richtext::exec("justifyCenter"); },
+                            span { class: "material-icons", "format_align_center" }
+                        }
+                        button {
+                            class: "btn-icon",
+                            title: "{t(\"editor.alignRight\")}",
+                            onmousedown: move |e| e.prevent_default(),
+                            onclick: move |_| { richtext::exec("justifyRight"); },
+                            span { class: "material-icons", "format_align_right" }
+                        }
+                        button {
+                            class: "btn-icon",
+                            title: "{t(\"editor.alignJustify\")}",
+                            onmousedown: move |e| e.prevent_default(),
+                            onclick: move |_| { richtext::exec("justifyFull"); },
+                            span { class: "material-icons", "format_align_justify" }
+                        }
+
+                        div { class: "editor-divider" }
+
+                        // Link.
+                        button {
+                            class: "btn-icon",
+                            title: "{t(\"editor.link\")}",
+                            onmousedown: move |e| e.prevent_default(),
+                            onclick: move |_| {
+                                richtext::save_selection();
+                                link_url.set(richtext::current_link().unwrap_or_default());
+                                let open = link_open();
+                                link_open.set(!open);
+                            },
+                            span { class: "material-icons", "link" }
+                        }
+                    }
+
+                    // Link URL popover.
+                    if link_open() {
+                        div { class: "link-popover",
+                            input {
+                                r#type: "url",
+                                class: "link-input",
+                                placeholder: "{t(\"editor.linkUrl\")}",
+                                value: "{link_url}",
+                                oninput: move |evt| link_url.set(evt.value()),
+                            }
+                            button {
+                                class: "btn btn-primary btn-sm",
+                                onclick: move |_| {
+                                    let url = link_url.read().clone();
+                                    richtext::focus_editor(EDITOR_ID);
+                                    richtext::restore_selection();
+                                    if url.trim().is_empty() {
+                                        richtext::exec("unlink");
+                                    } else {
+                                        richtext::exec_value("createLink", url.trim());
+                                    }
+                                    link_open.set(false);
+                                },
+                                "{t(\"editor.addLink\")}"
+                            }
+                            button {
+                                class: "btn btn-secondary btn-sm",
+                                onclick: move |_| {
+                                    richtext::focus_editor(EDITOR_ID);
+                                    richtext::restore_selection();
+                                    richtext::exec("unlink");
+                                    link_open.set(false);
+                                },
+                                "{t(\"editor.removeLink\")}"
+                            }
                         }
                     }
                 }
 
-                // Content editor — a plain-text area, one paragraph per line.
-                textarea {
-                    id: "editor-textarea",
-                    class: "editor-area",
-                    style: "width: 100%; min-height: 240px; resize: vertical;",
-                    value: "{content_html}",
-                    oninput: move |evt| {
-                        content_html.set(evt.value());
+                // The editing surface. Seeded once on mount; the browser owns its
+                // DOM thereafter (Dioxus renders no children into it), and it is
+                // serialized back to Slate on save.
+                div {
+                    id: EDITOR_ID,
+                    class: "editor-area rich-editor",
+                    contenteditable: "true",
+                    spellcheck: "true",
+                    onmounted: move |_| {
+                        richtext::seed_editor(EDITOR_ID, &cmd_seed);
+                        richtext::use_semantic_tags();
                     },
+                    onkeyup: move |_| {
+                        refresh_toolbar(st_bold, st_italic, st_underline, st_strike, st_block)
+                    },
+                    onmouseup: move |_| {
+                        refresh_toolbar(st_bold, st_italic, st_underline, st_strike, st_block)
+                    },
+                    oninput: move |_| {
+                        refresh_toolbar(st_bold, st_italic, st_underline, st_strike, st_block)
+                    },
+                    onblur: move |_| richtext::save_selection(),
                 }
             }
         }
-    }
-}
-
-/// Wrap the editor textarea's current selection in `marker` (e.g. `**`) and push
-/// the result back into the content signal. Selection indices are UTF-16 units,
-/// which match Rust `char` indices for the BMP text this app handles.
-fn wrap_selection(marker: &str, mut content: Signal<String>) {
-    use wasm_bindgen::JsCast;
-    let Some(el) = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.get_element_by_id("editor-textarea"))
-    else {
-        return;
-    };
-    let Ok(ta) = el.dyn_into::<web_sys::HtmlTextAreaElement>() else {
-        return;
-    };
-    let value = ta.value();
-    let chars: Vec<char> = value.chars().collect();
-    let start = ta.selection_start().ok().flatten().unwrap_or(0) as usize;
-    let end = ta.selection_end().ok().flatten().unwrap_or(0) as usize;
-    let (start, end) = (start.min(chars.len()), end.min(chars.len()));
-    if start >= end {
-        return; // nothing selected
-    }
-    let before: String = chars[..start].iter().collect();
-    let sel: String = chars[start..end].iter().collect();
-    let after: String = chars[end..].iter().collect();
-    let new = format!("{before}{marker}{sel}{marker}{after}");
-    ta.set_value(&new);
-    content.set(new);
-}
-
-/// Flatten Slate content to editable text, re-emitting inline marks as markdown
-/// (`**bold**`, `*italic*`, `` `code` ``) — one line per top-level block.
-fn slate_to_text(content: &serde_json::Value) -> String {
-    fn leaf_to_md(leaf: &serde_json::Value) -> Option<String> {
-        let text = leaf.get("text").and_then(|t| t.as_str())?;
-        let flag = |k: &str| leaf.get(k).and_then(|b| b.as_bool()).unwrap_or(false);
-        Some(if flag("bold") {
-            format!("**{text}**")
-        } else if flag("italic") {
-            format!("*{text}*")
-        } else if flag("code") {
-            format!("`{text}`")
-        } else {
-            text.to_string()
-        })
-    }
-    fn block_text(block: &serde_json::Value) -> String {
-        match block.get("children").and_then(|c| c.as_array()) {
-            Some(children) => children
-                .iter()
-                .map(|leaf| leaf_to_md(leaf).unwrap_or_else(|| block_text(leaf)))
-                .collect(),
-            None => String::new(),
-        }
-    }
-    // Blocks are paragraphs separated by a blank line; soft breaks inside a
-    // paragraph are "\n" leaves that `block_text` already re-emits verbatim.
-    match content.as_array() {
-        Some(blocks) => blocks
-            .iter()
-            .map(block_text)
-            .collect::<Vec<_>>()
-            .join("\n\n"),
-        None => String::new(),
-    }
-}
-
-fn leaf(text: &str, mark: Option<&str>) -> serde_json::Value {
-    let mut obj = serde_json::Map::new();
-    obj.insert("text".to_string(), serde_json::Value::from(text));
-    if let Some(m) = mark {
-        obj.insert(m.to_string(), serde_json::Value::Bool(true));
-    }
-    serde_json::Value::Object(obj)
-}
-
-/// Parse one line of markdown-ish inline syntax into Slate leaves. Supports
-/// non-nested `**bold**`, `*italic*` and `` `code` ``.
-fn parse_inline(line: &str) -> Vec<serde_json::Value> {
-    let chars: Vec<char> = line.chars().collect();
-    let mut out: Vec<serde_json::Value> = Vec::new();
-    let mut plain = String::new();
-    let mut i = 0;
-
-    let find = |from: usize, pat: &[char]| -> Option<usize> {
-        let mut j = from;
-        while j + pat.len() <= chars.len() {
-            if chars[j..j + pat.len()] == *pat {
-                return Some(j);
-            }
-            j += 1;
-        }
-        None
-    };
-
-    while i < chars.len() {
-        // Try each marker: (delimiter chars, mark name).
-        let markers: [(&[char], &str); 3] =
-            [(&['*', '*'], "bold"), (&['*'], "italic"), (&['`'], "code")];
-        let mut matched = false;
-        for (delim, mark) in markers {
-            if i + delim.len() <= chars.len() && chars[i..i + delim.len()] == *delim {
-                if let Some(close) = find(i + delim.len(), delim) {
-                    if close > i + delim.len() {
-                        if !plain.is_empty() {
-                            out.push(leaf(&plain, None));
-                            plain.clear();
-                        }
-                        let text: String = chars[i + delim.len()..close].iter().collect();
-                        out.push(leaf(&text, Some(mark)));
-                        i = close + delim.len();
-                        matched = true;
-                        break;
-                    }
-                }
-            }
-        }
-        if !matched {
-            plain.push(chars[i]);
-            i += 1;
-        }
-    }
-    if !plain.is_empty() {
-        out.push(leaf(&plain, None));
-    }
-    if out.is_empty() {
-        out.push(leaf("", None));
-    }
-    out
-}
-
-/// Group the editable text into paragraphs of soft-break lines, using the
-/// Markdown convention: a blank line starts a new paragraph, a single newline is
-/// a soft line break within the current paragraph (#92).
-fn split_paragraphs(text: &str) -> Vec<Vec<&str>> {
-    let mut paras: Vec<Vec<&str>> = Vec::new();
-    let mut cur: Vec<&str> = Vec::new();
-    for line in text.split('\n') {
-        if line.trim().is_empty() {
-            if !cur.is_empty() {
-                paras.push(std::mem::take(&mut cur));
-            }
-        } else {
-            cur.push(line);
-        }
-    }
-    if !cur.is_empty() {
-        paras.push(cur);
-    }
-    paras
-}
-
-/// Convert editable text into Slate blocks: one paragraph per blank-line group,
-/// soft breaks as "\n" leaves, each line parsed for inline markdown marks.
-fn build_slate_content(text: &str) -> serde_json::Value {
-    let paragraphs: Vec<serde_json::Value> = split_paragraphs(text)
-        .into_iter()
-        .map(|lines| {
-            let mut children: Vec<serde_json::Value> = Vec::new();
-            for (i, line) in lines.iter().enumerate() {
-                if i > 0 {
-                    children.push(leaf("\n", None));
-                }
-                children.extend(parse_inline(line));
-            }
-            if children.is_empty() {
-                children.push(leaf("", None));
-            }
-            serde_json::json!({ "type": "paragraph", "children": children })
-        })
-        .collect();
-
-    if paragraphs.is_empty() {
-        serde_json::json!([{ "type": "paragraph", "children": [{"text": ""}] }])
-    } else {
-        serde_json::Value::Array(paragraphs)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn slate_to_text_reemits_marks_as_markdown() {
-        let content = serde_json::json!([
-            {"type": "paragraph", "children": [{"text": "Hello "}, {"text": "world", "bold": true}]},
-            {"type": "heading-one", "children": [{"text": "Title"}]}
-        ]);
-        // Separate blocks re-emit as separate paragraphs (blank line between).
-        assert_eq!(slate_to_text(&content), "Hello **world**\n\nTitle");
-    }
-
-    #[test]
-    fn blank_line_separates_paragraphs_single_newline_is_soft_break() {
-        // Two blank-line-separated groups → two paragraphs.
-        let v = build_slate_content("a\n\nb");
-        let arr = v.as_array().expect("array");
-        assert_eq!(arr.len(), 2);
-        assert_eq!(arr[0]["children"][0]["text"], "a");
-        assert_eq!(arr[1]["children"][0]["text"], "b");
-
-        // A single newline is a soft break inside one paragraph: [a, \n, c].
-        let soft = build_slate_content("a\nc");
-        let sarr = soft.as_array().expect("array");
-        assert_eq!(sarr.len(), 1);
-        let kids = sarr[0]["children"].as_array().unwrap();
-        assert_eq!(kids[0]["text"], "a");
-        assert_eq!(kids[1]["text"], "\n");
-        assert_eq!(kids[2]["text"], "c");
-
-        // Round-trips back to the same text.
-        assert_eq!(slate_to_text(&soft), "a\nc");
-        assert_eq!(slate_to_text(&v), "a\n\nb");
-    }
-
-    #[test]
-    fn inline_markdown_round_trips() {
-        let text = "plain **b** and *i* and `c`";
-        let content = build_slate_content(text);
-        // Bold/italic/code leaves are produced with the right marks.
-        let leaves = content[0]["children"].as_array().unwrap();
-        assert!(leaves.iter().any(|l| l["text"] == "b" && l["bold"] == true));
-        assert!(leaves
-            .iter()
-            .any(|l| l["text"] == "i" && l["italic"] == true));
-        assert!(leaves.iter().any(|l| l["text"] == "c" && l["code"] == true));
-        // And the text survives a round trip.
-        assert_eq!(slate_to_text(&content), text);
     }
 }

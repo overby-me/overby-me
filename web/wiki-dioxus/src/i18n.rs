@@ -97,6 +97,35 @@ fn da_translations() -> HashMap<String, serde_json::Value> {
 }
 
 const EN_JSON: &str = r#"{
+    "editor": {
+        "style": "Style",
+        "paragraph": "Paragraph",
+        "headingOne": "Heading 1",
+        "headingTwo": "Heading 2",
+        "headingThree": "Heading 3",
+        "headingFour": "Heading 4",
+        "headingFive": "Heading 5",
+        "headingSix": "Heading 6",
+        "blockQuote": "Quote",
+        "blockPre": "Preformatted",
+        "bold": "Bold",
+        "italic": "Italic",
+        "underline": "Underline",
+        "strikethrough": "Strikethrough",
+        "code": "Code",
+        "bulletedList": "Bulleted list",
+        "numberedList": "Numbered list",
+        "alignLeft": "Align left",
+        "alignCenter": "Align center",
+        "alignRight": "Align right",
+        "alignJustify": "Justify",
+        "undo": "Undo",
+        "redo": "Redo",
+        "link": "Link",
+        "linkUrl": "Link URL",
+        "addLink": "Apply",
+        "removeLink": "Remove link"
+    },
     "common": {
         "add": "Add",
         "cancel": "Cancel",
@@ -322,6 +351,35 @@ const EN_JSON: &str = r#"{
 }"#;
 
 const DA_JSON: &str = r#"{
+    "editor": {
+        "style": "Stil",
+        "paragraph": "Afsnit",
+        "headingOne": "Overskrift 1",
+        "headingTwo": "Overskrift 2",
+        "headingThree": "Overskrift 3",
+        "headingFour": "Overskrift 4",
+        "headingFive": "Overskrift 5",
+        "headingSix": "Overskrift 6",
+        "blockQuote": "Citat",
+        "blockPre": "Præformateret",
+        "bold": "Fed",
+        "italic": "Kursiv",
+        "underline": "Understreget",
+        "strikethrough": "Gennemstreget",
+        "code": "Kode",
+        "bulletedList": "Punktliste",
+        "numberedList": "Nummereret liste",
+        "alignLeft": "Venstrejuster",
+        "alignCenter": "Centrer",
+        "alignRight": "Højrejuster",
+        "alignJustify": "Lige margener",
+        "undo": "Fortryd",
+        "redo": "Gentag",
+        "link": "Link",
+        "linkUrl": "Link-URL",
+        "addLink": "Anvend",
+        "removeLink": "Fjern link"
+    },
     "common": {
         "add": "Tilf\u00f8j",
         "cancel": "Annuller",
