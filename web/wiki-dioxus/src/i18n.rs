@@ -260,6 +260,11 @@ const EN_JSON: &str = r#"{
     "program": {
         "empty": "No programme items yet."
     },
+    "parent": {
+        "title": "Missing parents",
+        "description": "Nodes that have lost their parent (orphans).",
+        "none": "No orphaned nodes."
+    },
     "sort": {
         "saveSorting": "Save sorting"
     },
@@ -305,6 +310,7 @@ const EN_JSON: &str = r#"{
         "program": "Programme",
         "profile": "Profile",
         "social": "Social wall",
+        "parent": "Missing parents",
         "unknown": "Unknown"
     }
 }"#;
@@ -467,6 +473,11 @@ const DA_JSON: &str = r#"{
     "program": {
         "empty": "Ingen programpunkter endnu."
     },
+    "parent": {
+        "title": "Manglende forældre",
+        "description": "Noder der har mistet deres forælder (forældreløse).",
+        "none": "Ingen forældreløse noder."
+    },
     "sort": {
         "saveSorting": "Gem sortering"
     },
@@ -512,6 +523,7 @@ const DA_JSON: &str = r#"{
         "program": "Program",
         "profile": "Profil",
         "social": "Social væg",
+        "parent": "Manglende forældre",
         "unknown": "Ukendt"
     }
 }"#;

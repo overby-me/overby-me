@@ -173,6 +173,8 @@ excluded (see "Ignored"). `#N` = issue number.
 - `[x]` `#137` Social wall app — **Bluesky only** via the public AppView
   `searchPosts` (rail + `?app=social`); Mastodon/PixelFed ignored.
 - `[x]` `#82` Secret cow app — cowsay easter egg at `?app=cow` (not in the rail).
+- `[x]` `#149` Missing-parent app — lists nodes with a null `parentId` (orphans),
+  excluding the legitimate root (rail + `?app=parent`).
 - ~~`#18` Pixel app~~ — skipped (owner request).
 
 All the above build + render live (browser smoke test asserts each mounts).
@@ -249,7 +251,6 @@ All the above build + render live (browser smoke test asserts each mounts).
 
 ### Uncertain — need your input (questions prepared)
 
-- `#149` "Missing parent App" — unclear what this app is.
 - `#123` "MimeAvatar path on screen" — unclear which behaviour.
 - `#155` Find an nhost alternative — backend/infra, out of the frontend port?
 - `#135`, `#136` Native DB primitives / get-index DB function — backend work.

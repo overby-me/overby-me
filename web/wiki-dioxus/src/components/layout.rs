@@ -351,6 +351,7 @@ fn AppRail() -> Element {
             ("app/map", "mime.map", "map"),
             ("app/profile", "mime.profile", "profile"),
             ("wiki/user", "mime.permissions", "perm"),
+            ("app/parent", "mime.parent", "parent"),
         ] {
             apps.push((
                 icon,

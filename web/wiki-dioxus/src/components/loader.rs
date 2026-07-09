@@ -67,6 +67,7 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
                     rsx! { super::program::ProgramApp { node, path: segments.clone() } }
                 }
                 Some("profile") => rsx! { super::profile::ProfileApp {} },
+                Some("parent") => rsx! { super::parent::ParentApp {} },
                 Some("redirect") => rsx! { super::redirect::RedirectApp { node } },
                 Some("social") => rsx! { super::social::SocialApp { node } },
                 Some("cow") => rsx! { super::cow::CowApp { node } },
@@ -158,6 +159,7 @@ pub fn mime_icon(mime_id: &str) -> &'static str {
         "app/social" => "\u{1F98B}",                       // Social (Bluesky) 🦋
         "app/redirect" => "\u{21AA}\u{FE0F}",              // Redirect ↪️
         "app/cow" => "\u{1F404}",                          // Cow 🐄
+        "app/parent" => "\u{1F9F9}",                       // Missing parent (cleanup) 🧹
         _ => mime_icon_by_prefix(mime_id),
     }
 }

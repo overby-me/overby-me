@@ -12,6 +12,7 @@ pub mod loader;
 pub mod map;
 pub mod member;
 pub mod node;
+pub mod parent;
 pub mod perm;
 pub mod profile;
 pub mod program;

@@ -348,6 +348,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         { q: "program", sel: "#main .card", name: "program app renders" }
         { q: "social", sel: "#main input", name: "social app renders" }
         { q: "profile", sel: "#main .card", name: "profile app renders" }
+        { q: "parent", sel: "#main .card", name: "parent (missing-parents) app renders" }
     ] {
         wd-navigate $session_id $"(base-url)($ctx_path)?app=($app.q)"
         if (wd-wait-for-element $session_id $app.sel 15) {

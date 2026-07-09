@@ -1347,6 +1347,22 @@ pub async fn query_contexts(
     Ok(result.nodes)
 }
 
+/// Nodes with a missing parent (`parentId is null`) — the "Missing parent" admin
+/// view (#149). The single legitimate root is one of these, so callers filter it
+/// out; anything else is an orphan that lost its parent.
+pub async fn query_orphans(access_token: Option<&str>) -> Result<Vec<ContextNodeFields>, String> {
+    let where_clause = NodesBoolExp {
+        parent_id: Some(UuidComparisonExp {
+            is_null: Some(true),
+            eq: None,
+        }),
+        ..Default::default()
+    };
+    let operation = ContextsWhereQuery::build(NodesWhereVariables { where_clause });
+    let result = execute(access_token, operation).await?;
+    Ok(result.nodes)
+}
+
 /// Build the `where` filter for a node's visible children, mirroring the React
 /// drawer (`DrawerList`): children the user may see (immutable, or owned, or a
 /// member of) whose mime is not hidden.
