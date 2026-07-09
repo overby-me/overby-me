@@ -4,6 +4,12 @@
  * Because surface = --primary-color and text = --secondary-color are opposites,
  * contrast is guaranteed in both light and dark. */
 
+/* Atkinson Hyperlegible — a high-legibility face designed for low-vision
+ * readers (#37). Loaded from Google Fonts; if the fetch is blocked the
+ * body font-family falls back to the system stack below. @import must precede
+ * every rule set, so it stays at the very top. */
+@import url('https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+
 :root {
     /* Brand accents (RadikalWiki). */
     --md-primary: #B80F55;
@@ -56,7 +62,7 @@
 }
 
 body {
-    font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: 'Atkinson Hyperlegible', 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     background-color: var(--md-background);
     color: var(--md-on-background);
     line-height: 1.5;
@@ -618,6 +624,12 @@ h6, .title-small {
     overflow-x: auto;
 }
 
+/* Soft line breaks (#92): a "\n" text leaf inside a paragraph must render as a
+ * line break rather than collapse to a space. Preserve newlines but keep wrap. */
+.slate-content p {
+    white-space: pre-wrap;
+}
+
 .slate-content blockquote {
     border-left: 3px solid var(--md-outline);
     padding-left: 16px;
@@ -857,6 +869,19 @@ a.list-item:hover {
 
 .sort-list .sort-item:hover {
     background-color: var(--md-surface-variant);
+}
+
+/* Sticky formatting toolbar (#94): keeps Save/format controls visible while
+ * scrolling a long document. Sits at the top of the scroll container with an
+ * opaque surface so text doesn't show through. */
+.editor-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: var(--md-surface);
+    padding-top: 8px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--md-outline);
 }
 
 /* Editor area */

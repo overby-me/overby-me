@@ -164,10 +164,11 @@ excluded (see "Ignored"). `#N` = issue number.
 - `#68` Graph app (visualise the node graph).
 - `#60` Program app (agenda/programme view).
 - `#57` Redirect app.
-- `#53` WebDAV app.
+- ~~`#53` WebDAV app~~ — skipped (owner request).
 - `#78` Profile app (user profile).
-- `#137` Social wall app (Bluesky/Mastodon/PixelFed) — relates to the screen app.
-- `#18` Pixel app.
+- `#137` Social wall app — **Bluesky only** (ignore Mastodon/PixelFed); relates
+  to the screen app.
+- ~~`#18` Pixel app~~ — skipped (owner request).
 
 ### Speaker list
 

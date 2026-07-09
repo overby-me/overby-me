@@ -240,11 +240,13 @@ fn SlateInline(node: serde_json::Value) -> Element {
         }
 
         if style.is_empty() {
-            return rsx! { "{text}" };
+            return rsx! {
+                AutoLinked { text: text.to_string() }
+            };
         }
 
         return rsx! {
-            span { style: "{style}", "{text}" }
+            span { style: "{style}", AutoLinked { text: text.to_string() } }
         };
     }
 
@@ -289,4 +291,87 @@ fn SlateInline(node: serde_json::Value) -> Element {
     }
 
     rsx! {}
+}
+
+/// A plain-text run with bare URLs and email addresses turned into links (#97).
+#[component]
+fn AutoLinked(text: String) -> Element {
+    rsx! {
+        for (i , token) in autolink_tokens(&text).into_iter().enumerate() {
+            match token {
+                LinkToken::Text(s) => rsx! { "{s}" },
+                LinkToken::Url(url, trail) => rsx! {
+                    a { key: "{i}", href: "{url}", target: "_blank", rel: "noopener", "{url}" }
+                    "{trail}"
+                },
+                LinkToken::Email(addr, trail) => rsx! {
+                    a { key: "{i}", href: "mailto:{addr}", "{addr}" }
+                    "{trail}"
+                },
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum LinkToken {
+    Text(String),
+    Url(String, String),
+    Email(String, String),
+}
+
+/// Split a text run into plain / URL / email tokens, keeping spacing. URLs must
+/// start http(s)://; emails are `local@domain.tld`. Trailing punctuation is kept
+/// out of the link target.
+fn autolink_tokens(text: &str) -> Vec<LinkToken> {
+    let mut out = Vec::new();
+    for (i, word) in text.split(' ').enumerate() {
+        if i > 0 {
+            out.push(LinkToken::Text(" ".to_string()));
+        }
+        if word.is_empty() {
+            continue;
+        }
+        let end = word.trim_end_matches(|c: char| ".,;:!?)]}'\"".contains(c));
+        let trail = word[end.len()..].to_string();
+        if end.starts_with("http://") || end.starts_with("https://") {
+            out.push(LinkToken::Url(end.to_string(), trail));
+        } else if is_email(end) {
+            out.push(LinkToken::Email(end.to_string(), trail));
+        } else {
+            out.push(LinkToken::Text(word.to_string()));
+        }
+    }
+    out
+}
+
+fn is_email(w: &str) -> bool {
+    let mut parts = w.splitn(2, '@');
+    match (parts.next(), parts.next()) {
+        (Some(local), Some(domain)) => {
+            !local.is_empty()
+                && domain.contains('.')
+                && !domain.starts_with('.')
+                && !domain.ends_with('.')
+                && !domain.contains('@')
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn autolink_detects_url_and_email() {
+        let toks = autolink_tokens("see https://x.org, mail me@x.dk!");
+        assert!(toks.contains(&LinkToken::Url("https://x.org".into(), ",".into())));
+        assert!(toks.contains(&LinkToken::Email("me@x.dk".into(), "!".into())));
+        // Plain words stay text.
+        assert!(toks.contains(&LinkToken::Text("see".into())));
+        assert!(!is_email("not-an-email"));
+        assert!(!is_email("a@b"));
+        assert!(is_email("a@b.dk"));
+    }
 }

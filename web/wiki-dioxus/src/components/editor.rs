@@ -5,6 +5,10 @@ use crate::i18n::t;
 use crate::session::use_session;
 use crate::snackbar::show_snackbar;
 
+/// Maximum length for a node's display name (#111). Applied as `maxlength` on
+/// the name inputs (editor title, add-content form).
+pub const NODE_NAME_MAXLEN: usize = 120;
+
 /// EditorApp — rich text content editor
 #[component]
 pub fn EditorApp(node: NodeWithChildren) -> Element {
@@ -76,66 +80,71 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-content",
-                // Title field
+                // Title field. maxlength caps the node name length (#111).
                 div { class: "text-field mb-2",
                     label { "{t(\"common.title\")}" }
                     input {
                         r#type: "text",
+                        maxlength: "{NODE_NAME_MAXLEN}",
                         value: "{title}",
                         oninput: move |evt| title.set(evt.value()),
                     }
                 }
 
-                // Action buttons
-                div { class: "stack stack-h mb-2",
-                    button {
-                        class: "btn btn-primary",
-                        disabled: *saving.read(),
-                        onclick: {
-                            let save = handle_save.clone();
-                            move |_| save(true)
-                        },
-                        "\u{1F4BE} {t(\"common.save\")}"
-                    }
-                    if node.mutable {
+                // Sticky toolbar (#94): action buttons + formatting controls
+                // stay pinned while scrolling a long document.
+                div { class: "editor-toolbar",
+                    // Action buttons
+                    div { class: "stack stack-h mb-1",
                         button {
-                            class: "btn btn-secondary",
+                            class: "btn btn-primary",
                             disabled: *saving.read(),
                             onclick: {
                                 let save = handle_save.clone();
-                                move |_| save(false)
+                                move |_| save(true)
                             },
-                            "\u{1F4E4} {t(\"content.submit\")}"
+                            "\u{1F4BE} {t(\"common.save\")}"
+                        }
+                        if node.mutable {
+                            button {
+                                class: "btn btn-secondary",
+                                disabled: *saving.read(),
+                                onclick: {
+                                    let save = handle_save.clone();
+                                    move |_| save(false)
+                                },
+                                "\u{1F4E4} {t(\"content.submit\")}"
+                            }
+                        }
+                        if *saving.read() {
+                            div { class: "spinner" }
                         }
                     }
-                    if *saving.read() {
-                        div { class: "spinner" }
-                    }
-                }
 
-                // Formatting toolbar — wraps the current selection in the
-                // markdown markers that map to Slate marks.
-                div { class: "stack stack-h mb-1", style: "gap: 4px;",
-                    button {
-                        class: "btn-icon",
-                        style: "font-weight: bold;",
-                        title: "Bold",
-                        onclick: move |_| wrap_selection("**", content_html),
-                        "B"
-                    }
-                    button {
-                        class: "btn-icon",
-                        style: "font-style: italic;",
-                        title: "Italic",
-                        onclick: move |_| wrap_selection("*", content_html),
-                        "I"
-                    }
-                    button {
-                        class: "btn-icon",
-                        style: "font-family: monospace;",
-                        title: "Code",
-                        onclick: move |_| wrap_selection("`", content_html),
-                        "<>"
+                    // Formatting toolbar — wraps the current selection in the
+                    // markdown markers that map to Slate marks.
+                    div { class: "stack stack-h mb-1", style: "gap: 4px;",
+                        button {
+                            class: "btn-icon",
+                            style: "font-weight: bold;",
+                            title: "Bold",
+                            onclick: move |_| wrap_selection("**", content_html),
+                            "B"
+                        }
+                        button {
+                            class: "btn-icon",
+                            style: "font-style: italic;",
+                            title: "Italic",
+                            onclick: move |_| wrap_selection("*", content_html),
+                            "I"
+                        }
+                        button {
+                            class: "btn-icon",
+                            style: "font-family: monospace;",
+                            title: "Code",
+                            onclick: move |_| wrap_selection("`", content_html),
+                            "<>"
+                        }
                     }
                 }
 
@@ -209,8 +218,14 @@ fn slate_to_text(content: &serde_json::Value) -> String {
             None => String::new(),
         }
     }
+    // Blocks are paragraphs separated by a blank line; soft breaks inside a
+    // paragraph are "\n" leaves that `block_text` already re-emits verbatim.
     match content.as_array() {
-        Some(blocks) => blocks.iter().map(block_text).collect::<Vec<_>>().join("\n"),
+        Some(blocks) => blocks
+            .iter()
+            .map(block_text)
+            .collect::<Vec<_>>()
+            .join("\n\n"),
         None => String::new(),
     }
 }
@@ -279,16 +294,44 @@ fn parse_inline(line: &str) -> Vec<serde_json::Value> {
     out
 }
 
-/// Convert editable text into Slate blocks: one paragraph per line, each parsed
-/// for inline markdown marks.
+/// Group the editable text into paragraphs of soft-break lines, using the
+/// Markdown convention: a blank line starts a new paragraph, a single newline is
+/// a soft line break within the current paragraph (#92).
+fn split_paragraphs(text: &str) -> Vec<Vec<&str>> {
+    let mut paras: Vec<Vec<&str>> = Vec::new();
+    let mut cur: Vec<&str> = Vec::new();
+    for line in text.split('\n') {
+        if line.trim().is_empty() {
+            if !cur.is_empty() {
+                paras.push(std::mem::take(&mut cur));
+            }
+        } else {
+            cur.push(line);
+        }
+    }
+    if !cur.is_empty() {
+        paras.push(cur);
+    }
+    paras
+}
+
+/// Convert editable text into Slate blocks: one paragraph per blank-line group,
+/// soft breaks as "\n" leaves, each line parsed for inline markdown marks.
 fn build_slate_content(text: &str) -> serde_json::Value {
-    let paragraphs: Vec<serde_json::Value> = text
-        .split('\n')
-        .map(|line| {
-            serde_json::json!({
-                "type": "paragraph",
-                "children": parse_inline(line),
-            })
+    let paragraphs: Vec<serde_json::Value> = split_paragraphs(text)
+        .into_iter()
+        .map(|lines| {
+            let mut children: Vec<serde_json::Value> = Vec::new();
+            for (i, line) in lines.iter().enumerate() {
+                if i > 0 {
+                    children.push(leaf("\n", None));
+                }
+                children.extend(parse_inline(line));
+            }
+            if children.is_empty() {
+                children.push(leaf("", None));
+            }
+            serde_json::json!({ "type": "paragraph", "children": children })
         })
         .collect();
 
@@ -309,16 +352,31 @@ mod tests {
             {"type": "paragraph", "children": [{"text": "Hello "}, {"text": "world", "bold": true}]},
             {"type": "heading-one", "children": [{"text": "Title"}]}
         ]);
-        assert_eq!(slate_to_text(&content), "Hello **world**\nTitle");
+        // Separate blocks re-emit as separate paragraphs (blank line between).
+        assert_eq!(slate_to_text(&content), "Hello **world**\n\nTitle");
     }
 
     #[test]
-    fn build_slate_content_makes_one_paragraph_per_line() {
-        let v = build_slate_content("a\nb");
+    fn blank_line_separates_paragraphs_single_newline_is_soft_break() {
+        // Two blank-line-separated groups → two paragraphs.
+        let v = build_slate_content("a\n\nb");
         let arr = v.as_array().expect("array");
         assert_eq!(arr.len(), 2);
         assert_eq!(arr[0]["children"][0]["text"], "a");
         assert_eq!(arr[1]["children"][0]["text"], "b");
+
+        // A single newline is a soft break inside one paragraph: [a, \n, c].
+        let soft = build_slate_content("a\nc");
+        let sarr = soft.as_array().expect("array");
+        assert_eq!(sarr.len(), 1);
+        let kids = sarr[0]["children"].as_array().unwrap();
+        assert_eq!(kids[0]["text"], "a");
+        assert_eq!(kids[1]["text"], "\n");
+        assert_eq!(kids[2]["text"], "c");
+
+        // Round-trips back to the same text.
+        assert_eq!(slate_to_text(&soft), "a\nc");
+        assert_eq!(slate_to_text(&v), "a\n\nb");
     }
 
     #[test]

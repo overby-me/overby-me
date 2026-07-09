@@ -131,6 +131,7 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
                 label { "{t(\"common.title\")}" }
                 input {
                     r#type: "text",
+                    maxlength: "{crate::components::editor::NODE_NAME_MAXLEN}",
                     value: "{title}",
                     oninput: move |e| title.set(e.value()),
                 }
