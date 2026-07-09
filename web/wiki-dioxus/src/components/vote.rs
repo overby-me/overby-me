@@ -225,6 +225,34 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
     });
     let voted = already_voted.read().unwrap_or(false);
 
+    // Tally of the votes visible to this user (all of them for the poll owner /
+    // an admin; just their own otherwise). Counts per option index.
+    let tally = use_resource({
+        let token = session.read().access_token.clone();
+        let poll = poll_id.clone();
+        let n = options.len();
+        move || {
+            let token = token.clone();
+            let poll = poll.clone();
+            let _ = refresh.read();
+            async move {
+                let votes = graphql::query_poll_votes(token.as_deref(), &poll)
+                    .await
+                    .unwrap_or_default();
+                let mut counts = vec![0usize; n];
+                for vote in &votes {
+                    for &i in vote {
+                        if let Some(c) = counts.get_mut(i) {
+                            *c += 1;
+                        }
+                    }
+                }
+                (counts, votes.len())
+            }
+        }
+    });
+    let (counts, total_votes) = tally.read().clone().unwrap_or((vec![], 0));
+
     let opts = options.clone();
 
     let submit = {
@@ -325,19 +353,31 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                         "\u{1F5F3}\u{FE0F} {t(\"vote.castVote\")}"
                     }
                 } else {
-                    // Read-only option list (closed poll, already voted, or logged out).
+                    // Read-only option list with per-option tallies (closed poll,
+                    // already voted, or logged out).
                     div { class: "list",
                         for (i , option) in opts.iter().enumerate() {
                             div { class: "list-item", key: "{i}",
                                 div { class: "avatar small", "{i + 1}" }
                                 div { class: "list-item-text",
                                     div { class: "list-item-primary", "{option}" }
+                                    {
+                                        let count = counts.get(i).copied().unwrap_or(0);
+                                        let pct = (count * 100).checked_div(total_votes).unwrap_or(0);
+                                        rsx! {
+                                            div { class: "vote-bar",
+                                                div { class: "vote-bar-fill", style: "width: {pct}%;" }
+                                            }
+                                            div { class: "list-item-secondary", "{count} ({pct}%)" }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                    if voted {
-                        p { class: "body-medium mt-1", "{t(\"vote.hasVoted\")}" }
+                    p { class: "body-medium mt-1",
+                        if voted { "{t(\"vote.hasVoted\")} · " }
+                        "{t(\"vote.voteCount\")}: {total_votes}"
                     }
                 }
             }

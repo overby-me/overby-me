@@ -425,6 +425,20 @@ a:hover {
     color: var(--md-on-surface, inherit);
 }
 
+/* Poll result bars */
+.vote-bar {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--md-surface-variant, #e7e0ec);
+    overflow: hidden;
+    margin: 4px 0;
+}
+.vote-bar-fill {
+    height: 100%;
+    background: var(--md-primary, #6750a4);
+    transition: width 0.3s ease;
+}
+
 /* Typography */
 h1, .headline-large {
     font-size: 32px;

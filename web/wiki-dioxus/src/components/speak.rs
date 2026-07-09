@@ -42,26 +42,50 @@ pub fn SpeakApp(node: NodeWithChildren) -> Element {
         let list = list_for_query.clone();
         let _ = refresh.read();
         async move {
-            let Some(list) = list else {
-                return Vec::new();
-            };
-            match graphql::query_node_by_id(token.as_deref(), &list).await {
-                Ok(Some(n)) => {
-                    let mut kids = n.children;
-                    // Queue order is arrival order (oldest first).
-                    kids.sort_by(|a, b| {
-                        let a_ts = a.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
-                        let b_ts = b.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
-                        a_ts.cmp(b_ts)
-                    });
-                    kids
-                }
-                _ => Vec::new(),
-            }
+            let list = list?;
+            let n = graphql::query_node_by_id(token.as_deref(), &list)
+                .await
+                .ok()??;
+            let mut kids = n.children;
+            // Queue order is arrival order (oldest first).
+            kids.sort_by(|a, b| {
+                let a_ts = a.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
+                let b_ts = b.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
+                a_ts.cmp(b_ts)
+            });
+            // The speaker time limit lives on the list node's data.
+            let time = n
+                .data
+                .as_ref()
+                .and_then(|d| d.0.get("time"))
+                .and_then(|t| t.as_f64())
+                .unwrap_or(0.0);
+            let updated_at = n
+                .data
+                .as_ref()
+                .and_then(|d| d.0.get("updatedAt"))
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_string();
+            Some((time, updated_at, kids))
         }
     });
 
-    let speakers: Vec<ChildNodeFields> = queue.read().clone().unwrap_or_default();
+    // Tick once a second so the countdown updates (cancelled on unmount).
+    let mut tick = use_signal(|| 0u32);
+    use_future(move || async move {
+        loop {
+            gloo_timers::future::TimeoutFuture::new(1000).await;
+            tick += 1;
+        }
+    });
+
+    let state = queue.read().clone().flatten();
+    let speakers: Vec<ChildNodeFields> = state.as_ref().map(|s| s.2.clone()).unwrap_or_default();
+    let remaining = state.as_ref().map_or(0, |(time, updated_at, _)| {
+        let _ = tick.read();
+        remaining_seconds(*time, updated_at)
+    });
 
     rsx! {
         div { class: "grid grid-2",
@@ -76,6 +100,13 @@ pub fn SpeakApp(node: NodeWithChildren) -> Element {
                                 class: "body-medium",
                                 style: "color: var(--md-on-surface-variant);",
                                 "{t(\"speak.speakerList\")}"
+                            }
+                        }
+                        // Countdown for the current speaker's remaining time.
+                        if remaining > 0 {
+                            div { class: "flex-grow" }
+                            div { class: "avatar secondary", title: "{t(\"speak.talk\")}",
+                                "\u{23F1}\u{FE0F} {remaining}"
                             }
                         }
                     }
@@ -204,4 +235,39 @@ fn now_ms() -> String {
     let window = web_sys::window().unwrap();
     let performance = window.performance().unwrap();
     format!("{:.0}", performance.now())
+}
+
+/// Seconds left on the current speaker's turn: the `time` limit minus the wall
+/// clock elapsed since the list was last updated. Uses JS `Date` for the clock.
+fn remaining_seconds(time: f64, updated_at: &str) -> i64 {
+    remaining_seconds_at(time, js_sys::Date::parse(updated_at), js_sys::Date::now())
+}
+
+/// Pure countdown maths (testable off-browser).
+fn remaining_seconds_at(time: f64, updated_ms: f64, now_ms: f64) -> i64 {
+    if time <= 0.0 || updated_ms.is_nan() {
+        return 0;
+    }
+    let elapsed = (now_ms - updated_ms) / 1000.0;
+    let rem = time - elapsed;
+    if rem > 0.0 {
+        rem.floor() as i64
+    } else {
+        0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::remaining_seconds_at;
+
+    #[test]
+    fn countdown_subtracts_elapsed_and_clamps() {
+        // 60s limit, updated 10s ago -> 50 left.
+        assert_eq!(remaining_seconds_at(60.0, 100_000.0, 110_000.0), 50);
+        // Past the limit -> 0.
+        assert_eq!(remaining_seconds_at(5.0, 100_000.0, 110_000.0), 0);
+        // No limit set -> 0.
+        assert_eq!(remaining_seconds_at(0.0, 100_000.0, 100_000.0), 0);
+    }
 }

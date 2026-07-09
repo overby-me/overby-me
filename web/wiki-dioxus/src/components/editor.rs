@@ -127,50 +127,116 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
     }
 }
 
-/// Flatten Slate content JSON to editable plain text: one line per top-level
-/// block, concatenating each block's leaf `text` runs.
+/// Flatten Slate content to editable text, re-emitting inline marks as markdown
+/// (`**bold**`, `*italic*`, `` `code` ``) — one line per top-level block.
 fn slate_to_text(content: &serde_json::Value) -> String {
-    fn collect_text(node: &serde_json::Value, out: &mut String) {
-        if let Some(t) = node.get("text").and_then(|t| t.as_str()) {
-            out.push_str(t);
-        } else if let Some(children) = node.get("children").and_then(|c| c.as_array()) {
-            for child in children {
-                collect_text(child, out);
-            }
+    fn leaf_to_md(leaf: &serde_json::Value) -> Option<String> {
+        let text = leaf.get("text").and_then(|t| t.as_str())?;
+        let flag = |k: &str| leaf.get(k).and_then(|b| b.as_bool()).unwrap_or(false);
+        Some(if flag("bold") {
+            format!("**{text}**")
+        } else if flag("italic") {
+            format!("*{text}*")
+        } else if flag("code") {
+            format!("`{text}`")
+        } else {
+            text.to_string()
+        })
+    }
+    fn block_text(block: &serde_json::Value) -> String {
+        match block.get("children").and_then(|c| c.as_array()) {
+            Some(children) => children
+                .iter()
+                .map(|leaf| leaf_to_md(leaf).unwrap_or_else(|| block_text(leaf)))
+                .collect(),
+            None => String::new(),
         }
     }
     match content.as_array() {
-        Some(blocks) => blocks
-            .iter()
-            .map(|block| {
-                let mut line = String::new();
-                collect_text(block, &mut line);
-                line
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
+        Some(blocks) => blocks.iter().map(block_text).collect::<Vec<_>>().join("\n"),
         None => String::new(),
     }
 }
 
-/// Convert plain text into Slate-compatible JSON blocks (one paragraph per line)
-fn build_slate_content(html: &str) -> serde_json::Value {
-    let paragraphs: Vec<serde_json::Value> = html
+fn leaf(text: &str, mark: Option<&str>) -> serde_json::Value {
+    let mut obj = serde_json::Map::new();
+    obj.insert("text".to_string(), serde_json::Value::from(text));
+    if let Some(m) = mark {
+        obj.insert(m.to_string(), serde_json::Value::Bool(true));
+    }
+    serde_json::Value::Object(obj)
+}
+
+/// Parse one line of markdown-ish inline syntax into Slate leaves. Supports
+/// non-nested `**bold**`, `*italic*` and `` `code` ``.
+fn parse_inline(line: &str) -> Vec<serde_json::Value> {
+    let chars: Vec<char> = line.chars().collect();
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    let mut plain = String::new();
+    let mut i = 0;
+
+    let find = |from: usize, pat: &[char]| -> Option<usize> {
+        let mut j = from;
+        while j + pat.len() <= chars.len() {
+            if chars[j..j + pat.len()] == *pat {
+                return Some(j);
+            }
+            j += 1;
+        }
+        None
+    };
+
+    while i < chars.len() {
+        // Try each marker: (delimiter chars, mark name).
+        let markers: [(&[char], &str); 3] =
+            [(&['*', '*'], "bold"), (&['*'], "italic"), (&['`'], "code")];
+        let mut matched = false;
+        for (delim, mark) in markers {
+            if i + delim.len() <= chars.len() && chars[i..i + delim.len()] == *delim {
+                if let Some(close) = find(i + delim.len(), delim) {
+                    if close > i + delim.len() {
+                        if !plain.is_empty() {
+                            out.push(leaf(&plain, None));
+                            plain.clear();
+                        }
+                        let text: String = chars[i + delim.len()..close].iter().collect();
+                        out.push(leaf(&text, Some(mark)));
+                        i = close + delim.len();
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if !matched {
+            plain.push(chars[i]);
+            i += 1;
+        }
+    }
+    if !plain.is_empty() {
+        out.push(leaf(&plain, None));
+    }
+    if out.is_empty() {
+        out.push(leaf("", None));
+    }
+    out
+}
+
+/// Convert editable text into Slate blocks: one paragraph per line, each parsed
+/// for inline markdown marks.
+fn build_slate_content(text: &str) -> serde_json::Value {
+    let paragraphs: Vec<serde_json::Value> = text
         .split('\n')
-        .filter(|line| !line.is_empty())
         .map(|line| {
             serde_json::json!({
                 "type": "paragraph",
-                "children": [{"text": line.trim()}]
+                "children": parse_inline(line),
             })
         })
         .collect();
 
     if paragraphs.is_empty() {
-        serde_json::json!([{
-            "type": "paragraph",
-            "children": [{"text": ""}]
-        }])
+        serde_json::json!([{ "type": "paragraph", "children": [{"text": ""}] }])
     } else {
         serde_json::Value::Array(paragraphs)
     }
@@ -181,12 +247,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn slate_to_text_flattens_blocks_and_marks() {
+    fn slate_to_text_reemits_marks_as_markdown() {
         let content = serde_json::json!([
             {"type": "paragraph", "children": [{"text": "Hello "}, {"text": "world", "bold": true}]},
             {"type": "heading-one", "children": [{"text": "Title"}]}
         ]);
-        assert_eq!(slate_to_text(&content), "Hello world\nTitle");
+        assert_eq!(slate_to_text(&content), "Hello **world**\nTitle");
     }
 
     #[test]
@@ -196,5 +262,20 @@ mod tests {
         assert_eq!(arr.len(), 2);
         assert_eq!(arr[0]["children"][0]["text"], "a");
         assert_eq!(arr[1]["children"][0]["text"], "b");
+    }
+
+    #[test]
+    fn inline_markdown_round_trips() {
+        let text = "plain **b** and *i* and `c`";
+        let content = build_slate_content(text);
+        // Bold/italic/code leaves are produced with the right marks.
+        let leaves = content[0]["children"].as_array().unwrap();
+        assert!(leaves.iter().any(|l| l["text"] == "b" && l["bold"] == true));
+        assert!(leaves
+            .iter()
+            .any(|l| l["text"] == "i" && l["italic"] == true));
+        assert!(leaves.iter().any(|l| l["text"] == "c" && l["code"] == true));
+        // And the text survives a round trip.
+        assert_eq!(slate_to_text(&content), text);
     }
 }

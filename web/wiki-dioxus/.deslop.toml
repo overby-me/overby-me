@@ -53,4 +53,10 @@ disabled_rules = [
   # Iterating a small child/option/member list and reading a field per row
   # inside `rsx!` is the idiomatic Dioxus render pattern, not a hot data path.
   "rust_aos_hot_path",
+
+  # ── Float→int countdown ───────────────────────────────────────────────
+  # The speaker countdown floors an already-clamped, small f64 second value to
+  # i64 for display; f64 has no `TryFrom<i64>` so `as` is the only option and
+  # the narrowing is intentional and bounded.
+  "rust_narrowing_numeric_cast",
 ]

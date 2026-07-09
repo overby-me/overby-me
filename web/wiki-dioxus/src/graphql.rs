@@ -1049,6 +1049,67 @@ pub async fn count_user_votes(
     Ok(result.nodes.len())
 }
 
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "query_root",
+    variables = "NodesWhereVariables"
+)]
+pub struct VotesWhereQuery {
+    #[arguments(where: $where_clause)]
+    pub nodes: Vec<VoteNodeFields>,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "nodes")]
+pub struct VoteNodeFields {
+    pub id: Uuid,
+    pub data: Option<Jsonb>,
+}
+
+/// Every vote cast on a poll (each as its list of selected option indices),
+/// for tallying results. Visibility follows row permissions.
+pub async fn query_poll_votes(
+    access_token: Option<&str>,
+    poll_id: &str,
+) -> Result<Vec<Vec<usize>>, String> {
+    let where_clause = NodesBoolExp {
+        and: Some(vec![
+            NodesBoolExp {
+                parent_id: Some(UuidComparisonExp {
+                    eq: Some(Uuid(poll_id.to_string())),
+                    is_null: None,
+                }),
+                ..Default::default()
+            },
+            NodesBoolExp {
+                mime_id: Some(StringComparisonExp {
+                    eq: Some("vote/vote".to_string()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ]),
+        ..Default::default()
+    };
+    let operation = VotesWhereQuery::build(NodesWhereVariables { where_clause });
+    let result = execute(access_token, operation).await?;
+    Ok(result
+        .nodes
+        .into_iter()
+        .map(|n| {
+            n.data
+                .and_then(|d| d.0.as_array().cloned())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_u64().and_then(|n| usize::try_from(n).ok()))
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .collect())
+}
+
 /// Cast a vote on a poll: insert a `vote/vote` child whose data is the array of
 /// selected option indices (matching the React VoteApp).
 pub async fn cast_vote(
