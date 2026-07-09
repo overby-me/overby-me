@@ -126,6 +126,16 @@ fn block_text(node: &Value) -> String {
     out
 }
 
+/// A styled ODF heading: carries both the `Heading N` common style (so it
+/// renders as a real header) and the matching outline level (so it shows up in
+/// the document structure). `inner` must already be XML-escaped.
+fn heading_el(level: usize, inner: &str) -> String {
+    let l = level.clamp(1, 6);
+    format!(
+        "<text:h text:style-name=\"Heading_20_{l}\" text:outline-level=\"{l}\">{inner}</text:h>"
+    )
+}
+
 /// Render one Slate block as an ODF `<text:h>` / `<text:p>` element, with soft
 /// breaks (`\n`) mapped to `<text:line-break/>`.
 fn block_to_odf(block: &Value) -> String {
@@ -145,7 +155,7 @@ fn block_to_odf(block: &Value) -> String {
         _ => None,
     };
     match level {
-        Some(l) => format!("<text:h text:outline-level=\"{l}\">{escaped}</text:h>"),
+        Some(l) => heading_el(l, &escaped),
         None => format!("<text:p>{escaped}</text:p>"),
     }
 }
@@ -165,10 +175,7 @@ office:version=\"1.2\">\
 
 /// The ODF `content.xml` for a single document `title` + its Slate `content`.
 fn content_xml(title: &str, content: Option<&Value>) -> String {
-    let mut body = format!(
-        "<text:h text:outline-level=\"1\">{}</text:h>",
-        xml_escape(title)
-    );
+    let mut body = heading_el(1, &xml_escape(title));
     if let Some(Value::Array(blocks)) = content {
         for block in blocks {
             body.push_str(&block_to_odf(block));
@@ -177,10 +184,43 @@ fn content_xml(title: &str, content: Option<&Value>) -> String {
     wrap_content(&body)
 }
 
+/// Named common styles: `Heading 1`..`Heading 6` (bold, graduated sizes, tied to
+/// their outline level) plus an italic `Emphasis` run style. Without these, the
+/// `<text:h>` elements are structurally headings but render as plain body text,
+/// which is why an export previously looked like it had no headers. Mirrors the
+/// old wiki, where `html-to-docx` mapped `<h1>`..`<h6>` to Word heading styles.
 const STYLES_XML: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
 <office:document-styles \
 xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" \
-office:version=\"1.2\"><office:styles/></office:document-styles>";
+xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" \
+xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" \
+office:version=\"1.2\"><office:styles>\
+<style:style style:name=\"Standard\" style:family=\"paragraph\" style:class=\"text\"/>\
+<style:style style:name=\"Heading\" style:family=\"paragraph\" \
+style:parent-style-name=\"Standard\" style:next-style-name=\"Standard\" style:class=\"text\">\
+<style:paragraph-properties fo:margin-top=\"0.166in\" fo:margin-bottom=\"0.083in\" \
+fo:keep-with-next=\"always\"/><style:text-properties fo:font-weight=\"bold\"/></style:style>\
+<style:style style:name=\"Heading_20_1\" style:display-name=\"Heading 1\" \
+style:family=\"paragraph\" style:parent-style-name=\"Heading\" style:default-outline-level=\"1\" \
+style:class=\"text\"><style:text-properties fo:font-size=\"22pt\" fo:font-weight=\"bold\"/></style:style>\
+<style:style style:name=\"Heading_20_2\" style:display-name=\"Heading 2\" \
+style:family=\"paragraph\" style:parent-style-name=\"Heading\" style:default-outline-level=\"2\" \
+style:class=\"text\"><style:text-properties fo:font-size=\"18pt\" fo:font-weight=\"bold\"/></style:style>\
+<style:style style:name=\"Heading_20_3\" style:display-name=\"Heading 3\" \
+style:family=\"paragraph\" style:parent-style-name=\"Heading\" style:default-outline-level=\"3\" \
+style:class=\"text\"><style:text-properties fo:font-size=\"15pt\" fo:font-weight=\"bold\"/></style:style>\
+<style:style style:name=\"Heading_20_4\" style:display-name=\"Heading 4\" \
+style:family=\"paragraph\" style:parent-style-name=\"Heading\" style:default-outline-level=\"4\" \
+style:class=\"text\"><style:text-properties fo:font-size=\"13pt\" fo:font-weight=\"bold\"/></style:style>\
+<style:style style:name=\"Heading_20_5\" style:display-name=\"Heading 5\" \
+style:family=\"paragraph\" style:parent-style-name=\"Heading\" style:default-outline-level=\"5\" \
+style:class=\"text\"><style:text-properties fo:font-size=\"12pt\" fo:font-weight=\"bold\"/></style:style>\
+<style:style style:name=\"Heading_20_6\" style:display-name=\"Heading 6\" \
+style:family=\"paragraph\" style:parent-style-name=\"Heading\" style:default-outline-level=\"6\" \
+style:class=\"text\"><style:text-properties fo:font-size=\"11pt\" fo:font-weight=\"bold\"/></style:style>\
+<style:style style:name=\"Emphasis\" style:family=\"text\">\
+<style:text-properties fo:font-style=\"italic\"/></style:style>\
+</office:styles></office:document-styles>";
 
 const MANIFEST_XML: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
 <manifest:manifest \
@@ -304,11 +344,11 @@ fn build_body(
         else {
             return String::new();
         };
-        let lvl = level.clamp(1, 6);
         let heading = xml_escape(&format!("{prefix}{}", node.name));
-        let mut out = format!("<text:h text:outline-level=\"{lvl}\">{heading}</text:h>");
+        let mut out = heading_el(level, &heading);
 
-        // "Proposed by" — the node's members, unless it is a context (group/event).
+        // "Proposed by": the node's members, unless it is a context (group/event).
+        // Italic, matching the old wiki's `<i>` run.
         let is_context = node.mime.as_ref().map(|m| m.context).unwrap_or(false);
         if !is_context {
             let authors: Vec<String> = node
@@ -319,7 +359,7 @@ fn build_body(
                 .collect();
             if !authors.is_empty() {
                 out.push_str(&format!(
-                    "<text:p>{}: {}</text:p>",
+                    "<text:p><text:span text:style-name=\"Emphasis\">{}: {}</text:span></text:p>",
                     xml_escape(&crate::i18n::t("folder.proposedBy")),
                     xml_escape(&authors.join(", "))
                 ));
@@ -408,8 +448,34 @@ mod tests {
         ]);
         let xml = content_xml("Doc", Some(&content));
         assert!(xml.contains("a &amp; b<text:line-break/>c"));
-        assert!(xml.contains("<text:h text:outline-level=\"1\">Doc</text:h>"));
-        assert!(xml.contains("<text:h text:outline-level=\"1\">Title</text:h>"));
+        assert!(xml.contains(
+            "<text:h text:style-name=\"Heading_20_1\" text:outline-level=\"1\">Doc</text:h>"
+        ));
+        assert!(xml.contains(
+            "<text:h text:style-name=\"Heading_20_1\" text:outline-level=\"1\">Title</text:h>"
+        ));
         assert!(xml.contains("<text:p>"));
+    }
+
+    #[test]
+    fn heading_carries_style_and_outline_level() {
+        assert_eq!(
+            heading_el(2, "Hi"),
+            "<text:h text:style-name=\"Heading_20_2\" text:outline-level=\"2\">Hi</text:h>"
+        );
+        // Levels clamp into the 1..=6 range that styles.xml defines.
+        assert!(heading_el(9, "x").contains("Heading_20_6"));
+        assert!(heading_el(0, "x").contains("Heading_20_1"));
+    }
+
+    #[test]
+    fn styles_define_the_heading_styles_they_reference() {
+        // Every heading level referenced by `heading_el` must have a matching
+        // style definition, or the headers render as plain text.
+        for level in 1..=6 {
+            assert!(STYLES_XML.contains(&format!("style:name=\"Heading_20_{level}\"")));
+            assert!(STYLES_XML.contains(&format!("style:display-name=\"Heading {level}\"")));
+        }
+        assert!(STYLES_XML.contains("style:name=\"Emphasis\""));
     }
 }
