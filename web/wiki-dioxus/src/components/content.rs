@@ -44,8 +44,21 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
             div { class: "card-header",
                 div { class: "avatar", {icon_el("wiki/document")} }
                 h3 { class: "title-medium", "{name}" }
+                div { class: "flex-grow" }
+                // Export the document to an OpenDocument (.odt) file.
+                button {
+                    class: "btn-icon",
+                    title: "{t(\"folder.export\")}",
+                    onclick: {
+                        let export_name = name.clone();
+                        let export_data = data.clone();
+                        move |_| {
+                            crate::export::export_document(&export_name, export_data.as_ref());
+                        }
+                    },
+                    span { class: "material-icons", "download" }
+                }
                 if is_auth && !segments.is_empty() {
-                    div { class: "flex-grow" }
                     Link {
                         to: Route::PathPage {
                             segments: segments.clone(),
@@ -60,7 +73,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                         class: "btn-icon",
                         title: "{t(\"common.delete\")}",
                         onclick: move |_| confirm_open.set(true),
-                        "\u{1F5D1}\u{FE0F}"
+                        span { class: "material-icons", "delete" }
                     }
                     AlertDialog {
                         open: Some(confirm_open()),
@@ -116,7 +129,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                 }
             }
             div { class: "card-content",
-                SlateRenderer { data }
+                SlateRenderer { data: data.clone() }
             }
         }
     }
