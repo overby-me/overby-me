@@ -291,6 +291,8 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     sleep 2sec
 
     let r = (assert-exists $session_id "context view renders a card" "#main .card" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+    # Draft (not-submitted, mutable) nodes show a lock badge on their avatar.
+    let r = (assert-count $session_id "draft nodes show a not-submitted badge" "#main .avatar-badge" 1 -p $p -f $fl); $p = $r.passed; $fl = $r.failed
     # The app rail only appears inside a context; its presence confirms the
     # in-context layout (and that its icons rendered).
     let r = (assert-count $session_id "app rail shown in context" ".app-rail .btn-icon" 1 -p $p -f $fl); $p = $r.passed; $fl = $r.failed

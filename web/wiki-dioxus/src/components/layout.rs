@@ -765,19 +765,15 @@ fn DrawerNodeItem(
                     app: None,
                 });
             },
-            div { class: "avatar small", {super::loader::node_avatar(&mime_id, &node_name, ordinal)} }
+            super::loader::NodeAvatar {
+                mime: mime_id.clone(),
+                name: node_name.clone(),
+                ordinal,
+                mutable: node.mutable,
+                small: true,
+            }
             div { class: "list-item-text",
                 div { class: "list-item-primary", "{node.name}" }
-                if node.mutable {
-                    div { class: "list-item-secondary",
-                        span {
-                            class: "material-icons",
-                            style: "font-size: 14px; vertical-align: middle;",
-                            "lock_open"
-                        }
-                        " {t(\"layout.notSubmitted\")}"
-                    }
-                }
             }
             if expandable {
                 button {

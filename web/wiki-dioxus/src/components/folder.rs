@@ -269,19 +269,15 @@ fn FolderItem(
         Link {
             to: Route::PathPage { segments: full_path, app: None },
             class: if grid { "folder-tile" } else { "folder-item" },
-            div { class: "avatar small", {super::loader::node_avatar(mime_id, name, ordinal)} }
+            super::loader::NodeAvatar {
+                mime: mime_id.to_string(),
+                name: name.to_string(),
+                ordinal,
+                mutable: is_mutable,
+                small: true,
+            }
             div { class: "list-item-text",
                 div { class: "list-item-primary", "{name}" }
-                if is_mutable {
-                    div { class: "list-item-secondary",
-                        span {
-                            class: "material-icons",
-                            style: "font-size: 14px; vertical-align: middle;",
-                            "lock_open"
-                        }
-                        " {t(\"layout.notSubmitted\")}"
-                    }
-                }
             }
         }
     }

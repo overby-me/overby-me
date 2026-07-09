@@ -236,6 +236,30 @@ pub fn node_avatar(mime_id: &str, name: &str, ordinal: Option<usize>) -> Element
     }
 }
 
+/// A node's avatar with a "not submitted" badge overlaid when it is still a
+/// mutable draft, mirroring the old wiki's `MimeAvatarNode` (a MUI Badge with a
+/// LockOpen icon). Use in the folder list / drawer tree / headers.
+#[component]
+pub fn NodeAvatar(
+    mime: String,
+    name: String,
+    ordinal: Option<usize>,
+    mutable: bool,
+    small: bool,
+) -> Element {
+    let cls = if small { "avatar small" } else { "avatar" };
+    rsx! {
+        div { class: "avatar-badged",
+            div { class: "{cls}", {node_avatar(&mime, &name, ordinal)} }
+            if mutable {
+                span { class: "avatar-badge", title: "{t(\"layout.notSubmitted\")}",
+                    span { class: "material-icons", "lock_open" }
+                }
+            }
+        }
+    }
+}
+
 /// For each child, its ordinal among preceding siblings of the SAME lettered /
 /// numbered mime (policies, changes). Others get `None`. Feeds `node_avatar` so
 /// the A/B/C and 1/2/3 labels count within their own type, like the old wiki.
