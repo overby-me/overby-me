@@ -228,7 +228,15 @@ const EN_JSON: &str = r#"{
         "procedure": "Procedure",
         "speakerList": "Speaker List",
         "removeFromList": "Remove from speaker list",
-        "emptyList": "The speaker list is empty"
+        "emptyList": "The speaker list is empty",
+        "clear": "Clear",
+        "start": "Start",
+        "stop": "Stop",
+        "speakingTime": "Speaking time (s)",
+        "speakingNow": "Speaking now",
+        "next": "Next",
+        "moveUp": "Move to top",
+        "moveDown": "Move to bottom"
     },
     "poll": {
         "managePoll": "Manage Poll",
@@ -405,7 +413,15 @@ const DA_JSON: &str = r#"{
         "procedure": "Procedure",
         "speakerList": "Talerliste",
         "removeFromList": "Fjern fra talerliste",
-        "emptyList": "Talerlisten er tom"
+        "emptyList": "Talerlisten er tom",
+        "clear": "Ryd",
+        "start": "Start",
+        "stop": "Stop",
+        "speakingTime": "Taletid (s)",
+        "speakingNow": "Taler nu",
+        "next": "Næste",
+        "moveUp": "Flyt øverst",
+        "moveDown": "Flyt nederst"
     },
     "poll": {
         "managePoll": "Administrer Afstemning",

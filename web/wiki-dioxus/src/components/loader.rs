@@ -52,7 +52,9 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
             // The active app comes from the route's `?app=` query.
             match app.as_deref() {
                 Some("vote") => rsx! { VoteApp { node } },
-                Some("speak") => rsx! { SpeakApp { node } },
+                Some("speak") => rsx! {
+                    SpeakApp { node, mode: super::speak::SpeakMode::Full }
+                },
                 Some("member") => rsx! { MemberApp { node } },
                 Some("editor") => rsx! { EditorApp { node } },
                 Some("sort") => rsx! { SortApp { node } },
@@ -233,6 +235,8 @@ mod tests {
             mutable: false,
             index,
             created_at: Some(Timestamptz(created.to_string())),
+            owner_id: None,
+            data: None,
             mime: Some(MimeFields {
                 id: "wiki/folder".to_string(),
                 icon: "folder".to_string(),

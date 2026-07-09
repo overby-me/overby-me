@@ -656,6 +656,32 @@ h6, .title-small {
     border-radius: 8px;
 }
 
+/* Speaker list (#14): highlight the current speaker and the one on deck so the
+ * room can see who is up now and next at a glance. */
+.speak-current {
+    border-left: 4px solid var(--md-primary);
+    background: var(--md-primary-container);
+    color: var(--md-on-primary-container);
+    border-radius: 8px;
+}
+
+.speak-next {
+    border-left: 4px solid var(--md-secondary);
+    background: var(--md-surface-variant);
+    border-radius: 8px;
+}
+
+/* Speaking-time countdown pill in the list header. */
+.chip-timer {
+    background: var(--md-primary);
+    color: var(--md-on-primary);
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
 /* Folder list */
 .folder-item {
     display: flex;

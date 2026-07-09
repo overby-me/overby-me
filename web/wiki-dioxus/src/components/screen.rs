@@ -4,7 +4,7 @@ use crate::graphql::{self, NodeWithChildren};
 use crate::session::use_session;
 
 use super::loader::MimeLoader;
-use super::speak::SpeakApp;
+use super::speak::{SpeakApp, SpeakMode};
 
 /// ScreenApp — the projector/presentation view (`?app=screen`). Shows the
 /// context's currently active node next to the speaker list, mirroring the
@@ -51,7 +51,7 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
             }
             // Speaker list alongside it.
             div {
-                SpeakApp { node: node.clone() }
+                SpeakApp { node: node.clone(), mode: SpeakMode::Screen }
             }
         }
     }

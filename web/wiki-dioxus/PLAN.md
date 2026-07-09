@@ -172,10 +172,17 @@ excluded (see "Ignored"). `#N` = issue number.
 
 ### Speaker list
 
-- `#6` Allow hiding the speaker list.
-- `#7` Make the speaker list sortable.
-- `#13` Support multiple speaker-list instances per context.
-- `#14` Simpler design (current + next speaker highlighted).
+- `[x]` `#6` Allow hiding the speaker list — owner admin panel opens/closes
+  (locks) the list; when closed the join panel is hidden.
+- `[x]` `#7` Make the speaker list sortable — owner move-to-top / move-to-bottom
+  via an `index` override; default keeps procedural-priority + arrival order.
+- `[x]` `#13` Support multiple speaker-list instances per context — every
+  `speak/list` child renders as its own card.
+- `[x]` `#14` Simpler design — current speaker + next highlighted, MM:SS
+  countdown pill, speak-type icon per row.
+- Also fixed the queue ordering to match React (`data` desc = procedural motions
+  jump the queue, then `createdAt` asc). Pure ordering/countdown unit-tested;
+  build renders live. Admin/reorder flows not yet driven end-to-end in a test.
 
 ### Editor
 

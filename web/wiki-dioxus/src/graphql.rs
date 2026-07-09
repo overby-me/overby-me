@@ -116,6 +116,7 @@ pub struct NodeWithChildren {
     pub mime_id: Option<String>,
     pub parent_id: Option<Uuid>,
     pub context_id: Option<Uuid>,
+    pub owner_id: Option<Uuid>,
     pub mutable: bool,
     pub index: i32,
     pub data: Option<Jsonb>,
@@ -181,6 +182,8 @@ pub struct ChildNodeFields {
     pub mutable: bool,
     pub index: i32,
     pub created_at: Option<Timestamptz>,
+    pub owner_id: Option<Uuid>,
+    pub data: Option<Jsonb>,
     pub mime: Option<MimeFields>,
 }
 
