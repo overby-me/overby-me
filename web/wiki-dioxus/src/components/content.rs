@@ -7,6 +7,10 @@ use crate::route::Route;
 use crate::session::use_session;
 
 use super::loader::mime_icon;
+use super::ui::alert_dialog::{
+    AlertDialog, AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogDescription,
+    AlertDialogTitle,
+};
 
 #[component]
 pub fn ContentApp(node: NodeWithChildren) -> Element {
@@ -19,7 +23,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
         _ => vec![],
     };
     let node_id = node.id.0.clone();
-    let mut confirming = use_signal(|| false);
+    let mut confirm_open = use_signal(|| false);
     let name = node.name.clone();
     let members = node.members.clone();
     let data = node.data.map(|d| d.0);
@@ -51,39 +55,44 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                         title: "{t(\"mime.editor\")}",
                         "{mime_icon(\"app/editor\")}"
                     }
-                    // Delete (two-click confirm), then navigate to the parent.
-                    if *confirming.read() {
-                        button {
-                            class: "btn btn-primary",
-                            style: "background: var(--md-error, #b3261e);",
-                            onclick: {
-                                let node_id = node_id.clone();
-                                let parent = segments[..segments.len() - 1].to_vec();
-                                move |_| {
-                                    let token = session.read().access_token.clone();
+                    // Delete via an accessible modal confirm dialog.
+                    button {
+                        class: "btn-icon",
+                        title: "{t(\"common.delete\")}",
+                        onclick: move |_| confirm_open.set(true),
+                        "\u{1F5D1}\u{FE0F}"
+                    }
+                    AlertDialog {
+                        open: Some(confirm_open()),
+                        on_open_change: move |v| confirm_open.set(v),
+                        AlertDialogTitle { "{t(\"content.confirmDelete\")}" }
+                        AlertDialogDescription { "{name}" }
+                        AlertDialogActions {
+                            AlertDialogCancel { "{t(\"common.cancel\")}" }
+                            AlertDialogAction {
+                                on_click: {
                                     let node_id = node_id.clone();
-                                    let parent = parent.clone();
-                                    spawn(async move {
-                                        if graphql::delete_node(token.as_deref(), &node_id)
-                                            .await
-                                            .unwrap_or(false)
-                                        {
-                                            nav.push(Route::PathPage {
-                                                segments: parent,
-                                                app: None,
-                                            });
-                                        }
-                                    });
-                                }
-                            },
-                            "{t(\"content.confirmDelete\")}"
-                        }
-                    } else {
-                        button {
-                            class: "btn-icon",
-                            title: "{t(\"common.delete\")}",
-                            onclick: move |_| confirming.set(true),
-                            "\u{1F5D1}\u{FE0F}"
+                                    let parent = segments[..segments.len() - 1].to_vec();
+                                    move |_| {
+                                        let token = session.read().access_token.clone();
+                                        let node_id = node_id.clone();
+                                        let parent = parent.clone();
+                                        confirm_open.set(false);
+                                        spawn(async move {
+                                            if graphql::delete_node(token.as_deref(), &node_id)
+                                                .await
+                                                .unwrap_or(false)
+                                            {
+                                                nav.push(Route::PathPage {
+                                                    segments: parent,
+                                                    app: None,
+                                                });
+                                            }
+                                        });
+                                    }
+                                },
+                                "{t(\"common.delete\")}"
+                            }
                         }
                     }
                 }
