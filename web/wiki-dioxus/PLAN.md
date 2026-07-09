@@ -75,14 +75,26 @@ test and/or a `test-browser.nu` assertion.
   (resolved node names, verified live).
 - `[ ]` Not ported from wiki: admin, perm, map, screen — deferred.
 
+## Content lifecycle (CRUD)
+
+- `[x]` Create: add a document or folder from the folder view (inline form).
+- `[x]` Read: all node types render (see the parity list above).
+- `[x]` Update: edit content as text + publish/submit; drag-sort reordering.
+- `[x]` Delete: remove a document (two-click confirm) then go to the parent.
+- `[x]` `?app=vote` resolves the context's `active` relation to the open poll.
+  All verified live against the backend.
+
 ## Known remaining gaps
 
-- Voting `?app=vote` on a context uses the poll node directly; the React
-  "active poll" relation and live result tallies are not ported.
-- Speaker list has no real-time subscription or speaking timer (static queue).
-- Editor serializes contenteditable text to paragraph blocks, not full Slate
-  formatting.
-- Content optional inline image (`data.image`) is not shown.
+- **Real-time subscriptions.** The React app uses GraphQL subscriptions
+  (WebSocket) for live updates — speaker list, poll status, invite counts. This
+  port uses one-shot queries and refreshes after each mutation, so a change made
+  by another client needs a manual reload. Porting this means a `graphql-ws`
+  WebSocket transport; it is the main architectural piece still missing.
+- Speaker list has no speaking countdown timer.
+- The editor is plain-text (paragraphs), not full Slate rich-text formatting;
+  the read-side renderer already handles bold/italic/headings/lists/links.
+- Live poll result tallies (vote counts per option) are not shown.
 
 ## Cross-cutting checks
 
