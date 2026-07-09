@@ -144,6 +144,103 @@ test and/or a `test-browser.nu` assertion.
 The port now covers every RadikalWiki flow end to end, all verified against the
 live backend, with real-time updates and full create/read/update/delete.
 
+## Known parity gaps (small)
+
+- **Breadcrumb collapse.** React collapses breadcrumb segments (MUI `Collapse`,
+  expand/scroll-into-view) on deep paths; our trail renders every segment. Add a
+  collapse (middle segments → `…`, expandable) for long paths.
+- Optional content inline image edit; `Card`/`ListItem`/`Avatar`/`Snackbar`
+  still hand-rolled (see the migration section above).
+
+## Backlog — from RadikalWiki GitHub issues
+
+Triaged from <https://github.com/RadikalWiki/radikalwiki/issues>. Only issues
+that apply to the Dioxus frontend are listed; legacy React/TS-only ones are
+excluded (see "Ignored"). `#N` = issue number.
+
+### Apps to port / add
+
+- `#154` "Dioxus" — the umbrella tracking issue for this whole port.
+- `#68` Graph app (visualise the node graph).
+- `#60` Program app (agenda/programme view).
+- `#57` Redirect app.
+- `#53` WebDAV app.
+- `#78` Profile app (user profile).
+- `#137` Social wall app (Bluesky/Mastodon/PixelFed) — relates to the screen app.
+- `#18` Pixel app.
+
+### Speaker list
+
+- `#6` Allow hiding the speaker list.
+- `#7` Make the speaker list sortable.
+- `#13` Support multiple speaker-list instances per context.
+- `#14` Simpler design (current + next speaker highlighted).
+
+### Editor
+
+- `#92` Line-break support (shift-enter).
+- `#94` Sticky formatting toolbar on long documents.
+- `#97` Auto-link URLs and emails.
+
+### Voting / policy
+
+- `#27` Randomise the order of voting options.
+- `#112` Show all sub-changes as a tree in the policy app.
+- `#138` Replace "questions" with a comment model.
+
+### Content / nodes
+
+- `#25` Content metadata attributes (e.g. a "keep longer" flag for programs).
+- `#32` Comment system.
+- `#34` "Newest contents" page (recent items, maybe on home).
+- `#44` Don't create the node until the first save (draft new content).
+- `#69` Node revision/history table.
+- `#108` Remove hardcoded mime lists (drive icons/apps from the mime data).
+- `#111` Limit node name length.
+- `#114` Zoom/maximise images (candidate + file views).
+- `#115` Live collaborative editing.
+- `#117` Table of contents in the side bar (anchors).
+- `#119` MS Office viewer dark mode.
+- `#125` Folder grid view mode.
+- `#128` Audio / MIDI file support.
+- `#143` Show the child count in every content overview.
+
+### Members / contexts / permissions
+
+- `#41` Export event participants.
+- `#51` Allow users to be hidden in groups (members already have `hidden`).
+- `#132` Event viewer inside groups.
+- `#133` Integrate the invite list into the home list.
+- `#134` "Open" contexts anyone can join.
+- `#147` New permission system (informs the perm app).
+
+### Design / UX / platform
+
+- `#37` Atkinson Hyperlegible font for accessibility.
+- `#73` Pull-to-refresh (feature, not the React lib).
+- `#118` Move the toolbar to the right-hand bar.
+- `#122` Refresh data on window focus (complements subscriptions).
+- `#158` New bottom-bar design (list menu · app select · tools).
+- `#33` PWA / offline mode.
+- `#139` Native notifications (poll open, your turn to speak).
+- `#145` Error/stacktrace reporting API.
+
+### Ignored (legacy React/TS only)
+
+- `#85` React strict mode (react-beautiful-dnd / devexpress).
+- `#45` Port build to deno/bun.
+- `#146` Use the Plate editor (React/Slate-only lib).
+- `#95`, `#96` Slate-specific editor bugs (our editor is a textarea, N/A).
+
+### Uncertain — need your input (questions prepared)
+
+- `#149` "Missing parent App" — unclear what this app is.
+- `#123` "MimeAvatar path on screen" — unclear which behaviour.
+- `#82` "Secret cow app" — an easter egg? priority?
+- `#155` Find an nhost alternative — backend/infra, out of the frontend port?
+- `#135`, `#136` Native DB primitives / get-index DB function — backend work.
+- `#153` Register campaign activity — large new feature; scope/priority?
+
 ## Cross-cutting checks
 
 - **GraphQL correctness:** every filtered query must omit unset fields (Hasura
