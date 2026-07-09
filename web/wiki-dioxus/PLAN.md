@@ -239,7 +239,8 @@ All the above build + render live (browser smoke test asserts each mounts).
 - `#37` Atkinson Hyperlegible font for accessibility.
 - `#73` Pull-to-refresh (feature, not the React lib).
 - `#118` Move the toolbar to the right-hand bar.
-- `#122` Refresh data on window focus (complements subscriptions).
+- `[x]` `#122` Refresh data on window focus — `use_live` re-fetches when the
+  window regains focus (via `use_focus_refresh`), recovering a dropped socket.
 - `#158` New bottom-bar design (list menu · app select · tools).
 - `#33` PWA / offline mode.
 - `#139` Native notifications (poll open, your turn to speak).

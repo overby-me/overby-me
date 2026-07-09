@@ -3,6 +3,8 @@
 //! polling. Only what this app needs: connection_init with the bearer token,
 //! one subscribe, and the latest `data` payload surfaced as a Dioxus signal.
 
+use std::rc::Rc;
+
 use dioxus::core::{Runtime, RuntimeGuard};
 use dioxus::prelude::*;
 use serde_json::json;
@@ -16,13 +18,48 @@ use crate::session::use_session;
 /// Wire a subscription to a component's refresh counter: every pushed update
 /// bumps `refresh`, so a `use_resource` keyed on it re-fetches live. This is the
 /// common pattern — the payload itself is ignored; the query just needs to
-/// cover the rows whose change should trigger a refresh.
+/// cover the rows whose change should trigger a refresh. Also refreshes when the
+/// window regains focus (#122), so a view recovers immediately if its socket was
+/// dropped while the tab was in the background.
 pub fn use_live(query: String, mut refresh: Signal<u32>) {
     let sub = use_graphql_subscription(query);
     use_effect(move || {
         // Reading the subscription signal ties this effect to each push.
         let _ = sub.read();
         refresh += 1;
+    });
+    use_focus_refresh(refresh);
+}
+
+/// Bump `refresh` whenever the window regains focus (and the tab is visible), so
+/// data re-fetches on return to the app (#122). The listener is removed when the
+/// component unmounts.
+pub fn use_focus_refresh(mut refresh: Signal<u32>) {
+    let runtime = Runtime::current();
+    #[allow(clippy::type_complexity)]
+    let handle: Option<(web_sys::Window, Rc<Closure<dyn FnMut()>>)> = use_hook(move || {
+        let window = web_sys::window()?;
+        let cb = Rc::new(Closure::<dyn FnMut()>::new(move || {
+            // Skip if the tab is hidden (focus can fire on a background tab).
+            let hidden = web_sys::window()
+                .and_then(|w| w.document())
+                .map(|d| d.hidden())
+                .unwrap_or(false);
+            if !hidden {
+                let _guard = RuntimeGuard::new(runtime.clone());
+                refresh += 1;
+            }
+        }));
+        window
+            .add_event_listener_with_callback("focus", (*cb).as_ref().unchecked_ref())
+            .ok()?;
+        Some((window, cb))
+    });
+    use_drop(move || {
+        if let Some((window, cb)) = &handle {
+            let _ = window
+                .remove_event_listener_with_callback("focus", (**cb).as_ref().unchecked_ref());
+        }
     });
 }
 
