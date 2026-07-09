@@ -107,7 +107,7 @@ pub fn MimeLoader(node: NodeWithChildren, path: Vec<String>) -> Element {
             rsx! { FolderApp { node: node.clone(), parent_path: path } }
         }
         "vote/policy" | "vote/change" => {
-            rsx! { PolicyApp { node: node.clone() } }
+            rsx! { PolicyApp { node: node.clone(), path } }
         }
         "vote/position" => {
             rsx! { NodeApp { node: node.clone(), title: t("mime.position") } }

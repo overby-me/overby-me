@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 
 use crate::graphql::{self, NodeWithChildren};
 use crate::i18n::{t, t_with};
+use crate::route::Route;
 use crate::session::use_session;
 use crate::snackbar::show_snackbar;
 
@@ -63,9 +64,11 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
     }
 }
 
-/// PolicyApp — document with comments, changes, and polls
+/// PolicyApp — document with comments, changes, and polls. Sub-changes form a
+/// tree: each `vote/change` row links into its own PolicyApp, so the whole
+/// amendment tree is browsable (#112).
 #[component]
-pub fn PolicyApp(node: NodeWithChildren) -> Element {
+pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     let children = visible_sorted(&node.children);
     let children = &children;
 
@@ -102,10 +105,19 @@ pub fn PolicyApp(node: NodeWithChildren) -> Element {
                 }
                 div { class: "list",
                     for item in amendments.iter() {
-                        div { class: "list-item", key: "{item.id.0}",
-                            div { class: "avatar small", "{mime_icon(\"vote/change\")}" }
-                            div { class: "list-item-text",
-                                div { class: "list-item-primary", "{item.name}" }
+                        {
+                            let mut full = path.clone();
+                            full.push(item.key.clone());
+                            rsx! {
+                                Link {
+                                    key: "{item.id.0}",
+                                    to: Route::PathPage { segments: full, app: None },
+                                    class: "folder-item",
+                                    div { class: "avatar small", "{mime_icon(\"vote/change\")}" }
+                                    div { class: "list-item-text",
+                                        div { class: "list-item-primary", "{item.name}" }
+                                    }
+                                }
                             }
                         }
                     }
@@ -122,10 +134,19 @@ pub fn PolicyApp(node: NodeWithChildren) -> Element {
                 }
                 div { class: "list",
                     for poll in polls.iter() {
-                        div { class: "list-item", key: "{poll.id.0}",
-                            div { class: "avatar small", "{mime_icon(\"vote/poll\")}" }
-                            div { class: "list-item-text",
-                                div { class: "list-item-primary", "{poll.name}" }
+                        {
+                            let mut full = path.clone();
+                            full.push(poll.key.clone());
+                            rsx! {
+                                Link {
+                                    key: "{poll.id.0}",
+                                    to: Route::PathPage { segments: full, app: None },
+                                    class: "folder-item",
+                                    div { class: "avatar small", "{mime_icon(\"vote/poll\")}" }
+                                    div { class: "list-item-text",
+                                        div { class: "list-item-primary", "{poll.name}" }
+                                    }
+                                }
                             }
                         }
                     }
@@ -138,12 +159,20 @@ pub fn PolicyApp(node: NodeWithChildren) -> Element {
             div { class: "card mt-1",
                 div { class: "list",
                     for child in comments.iter() {
-                        div { class: "list-item", key: "{child.id.0}",
-                            div { class: "avatar small",
-                                "{mime_icon(child.mime_id.as_deref().unwrap_or(\"\"))}"
-                            }
-                            div { class: "list-item-text",
-                                div { class: "list-item-primary", "{child.name}" }
+                        {
+                            let mut full = path.clone();
+                            full.push(child.key.clone());
+                            let icon = mime_icon(child.mime_id.as_deref().unwrap_or(""));
+                            rsx! {
+                                Link {
+                                    key: "{child.id.0}",
+                                    to: Route::PathPage { segments: full, app: None },
+                                    class: "folder-item",
+                                    div { class: "avatar small", "{icon}" }
+                                    div { class: "list-item-text",
+                                        div { class: "list-item-primary", "{child.name}" }
+                                    }
+                                }
                             }
                         }
                     }

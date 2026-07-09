@@ -203,7 +203,9 @@ All the above build + render live (browser smoke test asserts each mounts).
 
 - `[x]` `#27` Randomise the order of voting options — ballot order is shuffled
   once per mount (Blank kept last); unit-tested.
-- `#112` Show all sub-changes as a tree in the policy app.
+- `[x]` `#112` Show all sub-changes as a tree in the policy app — amendment /
+  poll / comment rows link into their nodes, so a `vote/change` drills into its
+  own PolicyApp and the whole amendment tree is browsable.
 - `#138` Replace "questions" with a comment model.
 
 ### Content / nodes
@@ -211,7 +213,9 @@ All the above build + render live (browser smoke test asserts each mounts).
 - `#25` Content metadata attributes (e.g. a "keep longer" flag for programs).
 - `#32` Comment system.
 - `#34` "Newest contents" page (recent items, maybe on home).
-- `#44` Don't create the node until the first save (draft new content).
+- `[x]` `#44` Don't create the node until the first save — satisfied by design:
+  the add-content form only inserts on the explicit Add action (no pre-created
+  draft node like the React flow had).
 - `#69` Node revision/history table.
 - `#108` Remove hardcoded mime lists (drive icons/apps from the mime data).
 - `[x]` `#111` Limit node name length — `maxlength` on the name inputs.
@@ -232,7 +236,8 @@ All the above build + render live (browser smoke test asserts each mounts).
 - `[x]` `#51` Allow users to be hidden in groups — owner can hide/unhide a
   member (`set_member_hidden`); hidden members are dropped for non-owners.
 - `#132` Event viewer inside groups.
-- `#133` Integrate the invite list into the home list.
+- `[x]` `#133` Integrate the invite list into the home list — the home screen
+  already shows pending group/event invites inline with accept / decline.
 - `#134` "Open" contexts anyone can join.
 - `#147` New permission system (informs the perm app).
 
