@@ -1,17 +1,19 @@
 #!/usr/bin/env nu
 
-# test-browser.nu — Load the RadikalWiki Dioxus app in headless Servo and verify
-#                   DOM state via W3C WebDriver, driven from nushell + curl + jq.
+# test-browser.nu — Load the RadikalWiki Dioxus app in a headless browser and
+#                   verify DOM state via W3C WebDriver (nushell + curl + jq).
 #
-# Adapted from mojo/gui/web/test-browser.nu. The app is a single Dioxus/WASM SPA
-# served by `dx serve` (the debug build is the one that runs in Servo — see
-# README.md). Servo exposes a built-in WebDriver server we drive over HTTP.
+# The app is a single Dioxus/WASM SPA served by `dx serve` (debug build). Two
+# WebDriver backends: headless Servo (default) or real Firefox via geckodriver
+# (--firefox). Prefer --firefox: Servo masks client-side routing / rendering bugs
+# that real browsers hit (it hid the whole navigation-stale-view bug).
 #
 # Usage:
-#   nu test-browser.nu                     # Unauthenticated smoke tests
+#   nu test-browser.nu                     # Unauthenticated smoke tests (Servo)
+#   nu test-browser.nu --firefox           # Drive real Firefox (geckodriver)
 #   nu test-browser.nu --timeout 30        # Per-wait timeout (seconds)
-#   nu test-browser.nu --verbose           # Print Servo stderr at the end
-#   nu test-browser.nu --keep              # Keep dx serve + Servo running after
+#   nu test-browser.nu --verbose           # Print WebDriver-server stderr at end
+#   nu test-browser.nu --keep              # Keep dx serve + browser running after
 #
 #   # Authenticated tests are opt-in and need credentials (never commit these):
 #   WIKI_EMAIL=you@example.com WIKI_PASSWORD=secret nu test-browser.nu
@@ -43,8 +45,8 @@ def wd-delete [path: string] {
     try { ^curl -sf -X DELETE $"(wd-url)($path)" | complete | ignore } catch { }
 }
 
-def wd-new-session [] {
-    let resp = (wd-post "/session" '{"capabilities":{}}')
+def wd-new-session [caps: string] {
+    let resp = (wd-post "/session" $caps)
     if $resp == null { return "" }
     $resp | get -o value.sessionId | default ($resp | get -o sessionId | default "")
 }
@@ -164,16 +166,30 @@ def servo-bin [] {
     if (which servoshell | is-not-empty) { "servoshell" } else if (which servo | is-not-empty) { "servo" } else { "" }
 }
 
-def do-cleanup [session_id: string, servo_pid: int, server_pid: int] {
+# Shell command that starts geckodriver on the WebDriver port. Prefers a
+# geckodriver + firefox already on PATH; otherwise fetches them via nix. Real
+# Firefox catches client-side routing / rendering bugs that headless Servo masks.
+def gecko-cmd [log: string] {
+    if (which geckodriver | is-not-empty) and (which firefox | is-not-empty) {
+        $'geckodriver --port ($WD_PORT) > "($log)" 2>&1 & echo $!'
+    } else {
+        $'nix shell nixpkgs#geckodriver nixpkgs#firefox --command geckodriver --port ($WD_PORT) > "($log)" 2>&1 & echo $!'
+    }
+}
+
+def do-cleanup [session_id: string, driver_pid: int, server_pid: int] {
     if ($session_id | is-not-empty) { wd-delete $"/session/($session_id)" }
-    for pid in [$servo_pid $server_pid] {
+    for pid in [$driver_pid $server_pid] {
         if $pid > 0 {
             let alive = (do -i { ^kill -0 $pid } | complete)
             if $alive.exit_code == 0 { do -i { ^kill $pid } | complete | ignore }
         }
     }
-    # dx serve spawns a wrapped child that outlives its parent; sweep the port.
+    # dx serve spawns a wrapped child that outlives its parent, and geckodriver
+    # is launched through a nix wrapper whose pid isn't the driver's — sweep both
+    # ports so neither the dev server nor the WebDriver server is left running.
     kill-port $SERVE_PORT
+    kill-port $WD_PORT
 }
 
 # ── Tests: unauthenticated shell ────────────────────────────────────────────
@@ -317,7 +333,9 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # routes instead of subscribing to the route itself.
     let bc_path_before = (wd-execute $session_id 'return location.pathname')
     let bc_main_before = (wd-execute $session_id 'return (document.getElementById("main")||{innerText:""}).innerText')
-    let bc_clicked = (wd-execute $session_id 'var a=[...document.querySelectorAll(".breadcrumbs a")]; if(a.length>1){a[a.length-1].click(); return "y"} return "n"')
+    # Click a PARENT crumb (every crumb is now a link incl. the current node, so
+    # click the second-to-last to actually navigate up a level).
+    let bc_clicked = (wd-execute $session_id 'var a=[...document.querySelectorAll(".breadcrumbs a")]; if(a.length>1){a[a.length-2].click(); return "y"} return "n"')
     if $bc_clicked == "y" {
         mut bc_nav = false
         for _ in 1..($timeout) {
@@ -335,6 +353,9 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     } else {
         log-warn "not enough breadcrumb links to test up-navigation"
     }
+
+    # Breadcrumbs show a mime avatar per crumb (home + each segment).
+    let r = (assert-count $session_id "breadcrumbs render avatars" ".breadcrumbs .crumb-avatar" 1 -p $p -f $fl); $p = $r.passed; $fl = $r.failed
 
     # ── App rail switches apps via the ?app= route query (client-side) ────
     # Go back to the context, then click the Vote rail item and confirm the URL
@@ -384,6 +405,45 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         }
     }
 
+    # ── Search resolves a result to its full node path (not just the key) ────
+    wd-navigate $session_id $"(base-url)($ctx_path)"
+    sleep 1sec
+    wd-execute $session_id 'var b=[...document.querySelectorAll(".bar button.btn-icon")].find(x=>{var m=x.querySelector(".material-icons"); return m&&m.textContent=="search"}); if(b)b.click(); return 1' | ignore
+    sleep 500ms
+    let sinput = (try { wd-find $session_id ".bar input" } catch { "" })
+    if ($sinput | is-not-empty) and $sinput != "null" {
+        wd-send-keys $session_id $sinput "e"
+        sleep 2sec
+        let has_res = (wd-execute $session_id 'return document.querySelector(".search-results .list-item")?"y":"n"')
+        if $has_res == "y" {
+            let sp_before = (wd-execute $session_id 'return location.pathname')
+            wd-execute $session_id 'var it=document.querySelector(".search-results .list-item"); if(it)it.click(); return 1' | ignore
+            mut moved = false
+            for _ in 1..($timeout) {
+                let now = (wd-execute $session_id 'return location.pathname')
+                if ($now != null) and ($now != $sp_before) { $moved = true; break }
+                sleep 500ms
+            }
+            sleep 1sec
+            if $moved {
+                log-ok "search result navigates to its node"; $p = $p + 1
+                # And the app-less URL has no stray "?" left by the router.
+                let srch = (wd-execute $session_id 'return location.search')
+                if ($srch | default "") == "?" {
+                    log-fail "plain URL kept a stray '?'"; $fl = $fl + 1
+                } else {
+                    log-ok "no trailing '?' on app-less URL"; $p = $p + 1
+                }
+            } else {
+                log-fail "search result click did not navigate"; $fl = $fl + 1
+            }
+        } else {
+            log-warn "no search results — skipping search-nav check"
+        }
+    } else {
+        log-warn "search input not found — skipping search-nav check"
+    }
+
     { passed: $p, failed: $fl }
 }
 
@@ -393,6 +453,8 @@ def main [
     --timeout: int = 30
     --verbose
     --keep
+    --firefox   # Drive real Firefox (via geckodriver) instead of Servo. Firefox
+                # catches client-side routing / rendering bugs Servo masks.
 ] {
     let proj = $env.FILE_PWD
     mut servo_pid = 0
@@ -402,8 +464,11 @@ def main [
     mut failed = 0
 
     # Preflight
-    let servo = (servo-bin)
-    if ($servo | is-empty) { log-fail "Servo not found (need `servo` in the dev shell)"; exit 2 }
+    let servo = if $firefox { "" } else { (servo-bin) }
+    if (not $firefox) and ($servo | is-empty) { log-fail "Servo not found (need `servo` in the dev shell)"; exit 2 }
+    if $firefox and (which geckodriver | is-empty) and (which nix | is-empty) {
+        log-fail "Firefox mode needs `geckodriver` + `firefox` on PATH, or `nix`"; exit 2
+    }
     for cmd in [dx curl jq] {
         if (which $cmd | is-empty) { log-fail $"Required command not found: ($cmd)"; exit 2 }
     }
@@ -433,20 +498,31 @@ def main [
     if not $ready { log-fail "dx serve did not finish its first build"; if ($serve_log | path exists) { print -e (open --raw $serve_log | lines | last 15 | str join "\n") }; do-cleanup $session_id $servo_pid $server_pid; exit 2 }
     log-info "dx serve ready (build complete)"
 
-    # Start Servo (headless + WebDriver).
-    log-info $"Starting Servo \(headless, WebDriver on :($WD_PORT))..."
-    let servo_log = (^mktemp /tmp/wiki-servo-XXXXXX.log | str trim)
-    $servo_pid = (^bash -c $'($servo) --headless --webdriver=($WD_PORT) "about:blank" > "($servo_log)" 2>&1 & echo $!' | str trim | into int)
+    # Start the WebDriver browser: Servo by default, or real Firefox (geckodriver)
+    # with --firefox.
+    let servo_log = (^mktemp /tmp/wiki-wd-XXXXXX.log | str trim)
+    if $firefox {
+        log-info $"Starting geckodriver + Firefox \(WebDriver on :($WD_PORT))..."
+        $servo_pid = (^bash -c (gecko-cmd $servo_log) | str trim | into int)
+    } else {
+        log-info $"Starting Servo \(headless, WebDriver on :($WD_PORT))..."
+        $servo_pid = (^bash -c $'($servo) --headless --webdriver=($WD_PORT) "about:blank" > "($servo_log)" 2>&1 & echo $!' | str trim | into int)
+    }
 
     mut wd_ready = false
-    for _ in 1..51 {
+    for _ in 1..101 {
         let check = (do -i { ^curl -sf $"(wd-url)/status" } | complete)
         if $check.exit_code == 0 { $wd_ready = true; break }
-        sleep 200ms
+        sleep 300ms
     }
-    if not $wd_ready { log-fail "Servo WebDriver did not become ready"; do-cleanup $session_id $servo_pid $server_pid; exit 2 }
+    if not $wd_ready { log-fail "WebDriver server did not become ready"; do-cleanup $session_id $servo_pid $server_pid; exit 2 }
 
-    $session_id = (wd-new-session)
+    let caps = if $firefox {
+        '{"capabilities":{"alwaysMatch":{"moz:firefoxOptions":{"args":["-headless"]},"acceptInsecureCerts":true}}}'
+    } else {
+        '{"capabilities":{}}'
+    }
+    $session_id = (wd-new-session $caps)
     if ($session_id | is-empty) { log-fail "Failed to create WebDriver session"; do-cleanup $session_id $servo_pid $server_pid; exit 2 }
     wd-set-timeouts $session_id 20000
     log-info $"Session: ($session_id)"
