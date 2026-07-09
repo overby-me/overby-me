@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::graphql::NodeWithChildren;
+use crate::graphql::{self, NodeWithChildren};
 use crate::i18n::t;
 use crate::nhost::storage_url;
 use crate::route::Route;
@@ -11,12 +11,15 @@ use super::loader::mime_icon;
 #[component]
 pub fn ContentApp(node: NodeWithChildren) -> Element {
     let session = use_session();
+    let nav = use_navigator();
     let is_auth = session.read().is_authenticated();
     let route = use_route::<Route>();
     let segments: Vec<String> = match &route {
         Route::PathPage { segments, .. } => segments.clone(),
         _ => vec![],
     };
+    let node_id = node.id.0.clone();
+    let mut confirming = use_signal(|| false);
     let name = node.name.clone();
     let members = node.members.clone();
     let data = node.data.map(|d| d.0);
@@ -47,6 +50,41 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                         class: "btn-icon",
                         title: "{t(\"mime.editor\")}",
                         "{mime_icon(\"app/editor\")}"
+                    }
+                    // Delete (two-click confirm), then navigate to the parent.
+                    if *confirming.read() {
+                        button {
+                            class: "btn btn-primary",
+                            style: "background: var(--md-error, #b3261e);",
+                            onclick: {
+                                let node_id = node_id.clone();
+                                let parent = segments[..segments.len() - 1].to_vec();
+                                move |_| {
+                                    let token = session.read().access_token.clone();
+                                    let node_id = node_id.clone();
+                                    let parent = parent.clone();
+                                    spawn(async move {
+                                        if graphql::delete_node(token.as_deref(), &node_id)
+                                            .await
+                                            .unwrap_or(false)
+                                        {
+                                            nav.push(Route::PathPage {
+                                                segments: parent,
+                                                app: None,
+                                            });
+                                        }
+                                    });
+                                }
+                            },
+                            "{t(\"content.confirmDelete\")}"
+                        }
+                    } else {
+                        button {
+                            class: "btn-icon",
+                            title: "{t(\"common.delete\")}",
+                            onclick: move |_| confirming.set(true),
+                            "\u{1F5D1}\u{FE0F}"
+                        }
                     }
                 }
             }
