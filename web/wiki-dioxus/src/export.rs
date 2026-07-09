@@ -112,64 +112,225 @@ fn xml_escape(s: &str) -> String {
     out
 }
 
-/// All leaf text of a Slate node, concatenated (soft breaks kept as `\n`).
-fn block_text(node: &Value) -> String {
-    let mut out = String::new();
-    if let Some(t) = node.get("text").and_then(|t| t.as_str()) {
-        out.push_str(t);
-    }
-    if let Some(children) = node.get("children").and_then(|c| c.as_array()) {
-        for child in children {
-            out.push_str(&block_text(child));
+/// One Slate text leaf as escaped ODF, wrapped in spans/link for its marks
+/// (bold, italic, underline, code, link). Soft breaks (`\n`) become
+/// `<text:line-break/>`. Mirrors the old wiki's inline `format`.
+fn leaf_to_odf(leaf: &Value) -> String {
+    let raw = leaf.get("text").and_then(|t| t.as_str()).unwrap_or("");
+    let mut s = xml_escape(raw).replace('\n', "<text:line-break/>");
+    let mark = |key: &str| leaf.get(key).and_then(|v| v.as_bool()).unwrap_or(false);
+    for (active, style) in [
+        (mark("bold"), "Bold"),
+        (mark("italic"), "Emphasis"),
+        (mark("underline"), "Underline"),
+        (mark("strikethrough"), "Strikethrough"),
+        (mark("code"), "Code"),
+    ] {
+        if active {
+            s = format!("<text:span text:style-name=\"{style}\">{s}</text:span>");
         }
     }
-    out
+    if let Some(link) = leaf.get("link").and_then(|l| l.as_str()) {
+        if !link.is_empty() {
+            s = format!(
+                "<text:a xlink:type=\"simple\" xlink:href=\"{}\">{s}</text:a>",
+                xml_escape(link)
+            );
+        }
+    }
+    s
 }
 
-/// A styled ODF heading: carries both the `Heading N` common style (so it
-/// renders as a real header) and the matching outline level (so it shows up in
-/// the document structure). `inner` must already be XML-escaped.
+/// The inline content of a block: each child leaf run, concatenated.
+fn inline_children(block: &Value) -> String {
+    block
+        .get("children")
+        .and_then(|c| c.as_array())
+        .map(|children| children.iter().map(leaf_to_odf).collect())
+        .unwrap_or_default()
+}
+
+/// The base paragraph kind of a block, used to pick its named ODF style and,
+/// when the block carries an `align`, the matching alignment automatic style.
+enum Base {
+    Paragraph,
+    Heading(usize),
+    Quote,
+    Pre,
+}
+
+/// The `fo:text-align` value for a Slate `align`, or `None` for the default
+/// (left / unset), which needs no override.
+fn align_value(align: Option<&str>) -> Option<&'static str> {
+    match align {
+        Some("center") => Some("center"),
+        Some("right") => Some("end"),
+        Some("justify") => Some("justify"),
+        _ => None,
+    }
+}
+
+/// The style key (`p`, `h1`..`h6`, `quote`, `pre`) used to name a base's
+/// alignment automatic styles; see [`automatic_styles`].
+fn base_key(base: &Base) -> String {
+    match base {
+        Base::Paragraph => "p".to_string(),
+        Base::Heading(l) => format!("h{}", (*l).clamp(1, 6)),
+        Base::Quote => "quote".to_string(),
+        Base::Pre => "pre".to_string(),
+    }
+}
+
+/// The named ODF style for a base with no alignment (empty for a plain
+/// paragraph, which needs no style attribute).
+fn base_style(base: &Base) -> String {
+    match base {
+        Base::Paragraph => String::new(),
+        Base::Heading(l) => format!("Heading_20_{}", (*l).clamp(1, 6)),
+        Base::Quote => "Quotations".to_string(),
+        Base::Pre => "Preformatted_20_Text".to_string(),
+    }
+}
+
+/// Render a paragraph-like block (`inner` already XML-escaped) with its base
+/// style and, if present, its alignment. Headings emit `<text:h>` with the
+/// outline level; everything else emits `<text:p>`.
+fn styled_block(base: Base, align: Option<&str>, inner: &str) -> String {
+    // With an alignment, use the generated `Al_<base>_<value>` automatic style
+    // (which inherits from the base style); otherwise the base style itself.
+    let style = match align_value(align) {
+        Some(value) => format!("Al_{}_{}", base_key(&base), value),
+        None => base_style(&base),
+    };
+    match base {
+        Base::Heading(level) => {
+            let l = level.clamp(1, 6);
+            let name = if style.is_empty() {
+                format!("Heading_20_{l}")
+            } else {
+                style
+            };
+            format!(
+                "<text:h text:style-name=\"{name}\" text:outline-level=\"{l}\">{inner}</text:h>"
+            )
+        }
+        _ if style.is_empty() => format!("<text:p>{inner}</text:p>"),
+        _ => format!("<text:p text:style-name=\"{style}\">{inner}</text:p>"),
+    }
+}
+
+/// A styled ODF heading with no alignment (document title, node names).
 fn heading_el(level: usize, inner: &str) -> String {
-    let l = level.clamp(1, 6);
-    format!(
-        "<text:h text:style-name=\"Heading_20_{l}\" text:outline-level=\"{l}\">{inner}</text:h>"
-    )
+    styled_block(Base::Heading(level), None, inner)
 }
 
-/// Render one Slate block as an ODF `<text:h>` / `<text:p>` element, with soft
-/// breaks (`\n`) mapped to `<text:line-break/>`.
+/// A `<text:list>` with the given list style, one `<text:list-item>` per child.
+fn list_to_odf(block: &Value, style: &str) -> String {
+    let items: String = block
+        .get("children")
+        .and_then(|c| c.as_array())
+        .map(|children| {
+            children
+                .iter()
+                .map(|item| {
+                    format!(
+                        "<text:list-item><text:p>{}</text:p></text:list-item>",
+                        inline_children(item)
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    format!("<text:list text:style-name=\"{style}\">{items}</text:list>")
+}
+
+/// A void `image` block: the old wiki drops images on export, but rather than
+/// lose the reference we emit the source as a link.
+fn image_to_odf(block: &Value) -> String {
+    match block
+        .get("url")
+        .and_then(|u| u.as_str())
+        .filter(|u| !u.is_empty())
+    {
+        Some(url) => {
+            let escaped = xml_escape(url);
+            format!("<text:p><text:a xlink:type=\"simple\" xlink:href=\"{escaped}\">{escaped}</text:a></text:p>")
+        }
+        None => String::new(),
+    }
+}
+
+/// Render one Slate block as ODF: headings, bulleted/numbered lists,
+/// block-quotes, preformatted blocks, images and paragraphs, preserving inline
+/// marks and per-block alignment. Mirrors the old wiki's editor schema.
 fn block_to_odf(block: &Value) -> String {
-    let text = block_text(block);
-    let escaped = xml_escape(&text).replace('\n', "<text:line-break/>");
     let ty = block
         .get("type")
         .and_then(|t| t.as_str())
         .unwrap_or("paragraph");
-    let level = match ty {
-        "heading-one" | "h1" => Some(1),
-        "heading-two" | "h2" => Some(2),
-        "heading-three" | "h3" => Some(3),
-        "heading-four" | "h4" => Some(4),
-        "heading-five" | "h5" => Some(5),
-        "heading-six" | "h6" => Some(6),
-        _ => None,
-    };
-    match level {
-        Some(l) => heading_el(l, &escaped),
-        None => format!("<text:p>{escaped}</text:p>"),
+    let align = block.get("align").and_then(|a| a.as_str());
+    match ty {
+        "heading-one" | "h1" => styled_block(Base::Heading(1), align, &inline_children(block)),
+        "heading-two" | "h2" => styled_block(Base::Heading(2), align, &inline_children(block)),
+        "heading-three" | "h3" => styled_block(Base::Heading(3), align, &inline_children(block)),
+        "heading-four" | "h4" => styled_block(Base::Heading(4), align, &inline_children(block)),
+        "heading-five" | "h5" => styled_block(Base::Heading(5), align, &inline_children(block)),
+        "heading-six" | "h6" => styled_block(Base::Heading(6), align, &inline_children(block)),
+        "bulleted-list" | "ul" => list_to_odf(block, "ListBullet"),
+        "numbered-list" | "ol" => list_to_odf(block, "ListNumber"),
+        "block-quote" => styled_block(Base::Quote, align, &inline_children(block)),
+        "block-pre" | "pre" => styled_block(Base::Pre, align, &inline_children(block)),
+        "image" => image_to_odf(block),
+        _ => styled_block(Base::Paragraph, align, &inline_children(block)),
     }
 }
 
-/// Wrap a pre-built ODF text `body` in a full `content.xml`.
+/// The `<office:automatic-styles>` block: one alignment style per (base kind ×
+/// non-default alignment), each inheriting from the base's named style. Kept
+/// small and always-present so [`block_to_odf`] can reference them by name
+/// without threading a style collector through the recursion.
+fn automatic_styles() -> String {
+    let bases = [
+        ("p", "Standard"),
+        ("h1", "Heading_20_1"),
+        ("h2", "Heading_20_2"),
+        ("h3", "Heading_20_3"),
+        ("h4", "Heading_20_4"),
+        ("h5", "Heading_20_5"),
+        ("h6", "Heading_20_6"),
+        ("quote", "Quotations"),
+        ("pre", "Preformatted_20_Text"),
+    ];
+    let mut out = String::from("<office:automatic-styles>");
+    for (key, parent) in bases {
+        for value in ["center", "end", "justify"] {
+            out.push_str(&format!(
+                "<style:style style:name=\"Al_{key}_{value}\" style:family=\"paragraph\" \
+style:parent-style-name=\"{parent}\">\
+<style:paragraph-properties fo:text-align=\"{value}\"/></style:style>"
+            ));
+        }
+    }
+    out.push_str("</office:automatic-styles>");
+    out
+}
+
+/// Wrap a pre-built ODF text `body` in a full `content.xml`, including the
+/// alignment automatic styles the body may reference.
 fn wrap_content(body: &str) -> String {
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
 <office:document-content \
 xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" \
+xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" \
+xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" \
 xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" \
+xmlns:xlink=\"http://www.w3.org/1999/xlink\" \
 office:version=\"1.2\">\
+{}\
 <office:body><office:text>{body}</office:text></office:body>\
-</office:document-content>"
+</office:document-content>",
+        automatic_styles()
     )
 }
 
@@ -184,16 +345,22 @@ fn content_xml(title: &str, content: Option<&Value>) -> String {
     wrap_content(&body)
 }
 
-/// Named common styles: `Heading 1`..`Heading 6` (bold, graduated sizes, tied to
-/// their outline level) plus an italic `Emphasis` run style. Without these, the
-/// `<text:h>` elements are structurally headings but render as plain body text,
-/// which is why an export previously looked like it had no headers. Mirrors the
-/// old wiki, where `html-to-docx` mapped `<h1>`..`<h6>` to Word heading styles.
+/// Named styles referenced by the exported content: `Heading 1`..`Heading 6`
+/// (bold, graduated sizes, tied to their outline level), the `Bold` / `Emphasis`
+/// / `Underline` / `Strikethrough` / `Code` run styles for inline marks, the
+/// indented `Quotations` and monospace `Preformatted Text` paragraphs, and the
+/// `ListBullet` / `ListNumber` list styles (so bulleted and numbered lists
+/// actually show bullets and numbers). Without these the headings render as
+/// plain body text and lists as run-on paragraphs. Mirrors the old wiki, where
+/// `html-to-docx` mapped `<h1>`..`<h6>`, `<ul>`/`<ol>` and inline tags to their
+/// Word equivalents. Per-block alignment is layered on top via the automatic
+/// styles in [`automatic_styles`].
 const STYLES_XML: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
 <office:document-styles \
 xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" \
 xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" \
 xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" \
+xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" \
 office:version=\"1.2\"><office:styles>\
 <style:style style:name=\"Standard\" style:family=\"paragraph\" style:class=\"text\"/>\
 <style:style style:name=\"Heading\" style:family=\"paragraph\" \
@@ -220,6 +387,56 @@ style:family=\"paragraph\" style:parent-style-name=\"Heading\" style:default-out
 style:class=\"text\"><style:text-properties fo:font-size=\"11pt\" fo:font-weight=\"bold\"/></style:style>\
 <style:style style:name=\"Emphasis\" style:family=\"text\">\
 <style:text-properties fo:font-style=\"italic\"/></style:style>\
+<style:style style:name=\"Bold\" style:family=\"text\">\
+<style:text-properties fo:font-weight=\"bold\"/></style:style>\
+<style:style style:name=\"Underline\" style:family=\"text\">\
+<style:text-properties style:text-underline-style=\"solid\" \
+style:text-underline-width=\"auto\" style:text-underline-color=\"font-color\"/></style:style>\
+<style:style style:name=\"Strikethrough\" style:family=\"text\">\
+<style:text-properties style:text-line-through-style=\"solid\" \
+style:text-line-through-type=\"single\"/></style:style>\
+<style:style style:name=\"Code\" style:family=\"text\">\
+<style:text-properties fo:font-family=\"Courier New\"/></style:style>\
+<style:style style:name=\"Quotations\" style:family=\"paragraph\" \
+style:parent-style-name=\"Standard\"><style:paragraph-properties fo:margin-left=\"0.5in\" \
+fo:margin-right=\"0.5in\" fo:margin-top=\"0.083in\" fo:margin-bottom=\"0.083in\"/></style:style>\
+<style:style style:name=\"Preformatted_20_Text\" style:display-name=\"Preformatted Text\" \
+style:family=\"paragraph\" style:parent-style-name=\"Standard\">\
+<style:text-properties fo:font-family=\"Courier New\"/></style:style>\
+<text:list-style style:name=\"ListBullet\">\
+<text:list-level-style-bullet text:level=\"1\" text:bullet-char=\"\u{2022}\">\
+<style:list-level-properties text:list-level-position-and-space-mode=\"label-alignment\">\
+<style:list-level-label-alignment text:label-followed-by=\"listtab\" \
+text:list-tab-stop-position=\"0.5in\" fo:text-indent=\"-0.25in\" fo:margin-left=\"0.5in\"/>\
+</style:list-level-properties></text:list-level-style-bullet>\
+<text:list-level-style-bullet text:level=\"2\" text:bullet-char=\"\u{25E6}\">\
+<style:list-level-properties text:list-level-position-and-space-mode=\"label-alignment\">\
+<style:list-level-label-alignment text:label-followed-by=\"listtab\" \
+text:list-tab-stop-position=\"1in\" fo:text-indent=\"-0.25in\" fo:margin-left=\"1in\"/>\
+</style:list-level-properties></text:list-level-style-bullet>\
+<text:list-level-style-bullet text:level=\"3\" text:bullet-char=\"\u{25AA}\">\
+<style:list-level-properties text:list-level-position-and-space-mode=\"label-alignment\">\
+<style:list-level-label-alignment text:label-followed-by=\"listtab\" \
+text:list-tab-stop-position=\"1.5in\" fo:text-indent=\"-0.25in\" fo:margin-left=\"1.5in\"/>\
+</style:list-level-properties></text:list-level-style-bullet>\
+</text:list-style>\
+<text:list-style style:name=\"ListNumber\">\
+<text:list-level-style-number text:level=\"1\" style:num-suffix=\".\" style:num-format=\"1\">\
+<style:list-level-properties text:list-level-position-and-space-mode=\"label-alignment\">\
+<style:list-level-label-alignment text:label-followed-by=\"listtab\" \
+text:list-tab-stop-position=\"0.5in\" fo:text-indent=\"-0.25in\" fo:margin-left=\"0.5in\"/>\
+</style:list-level-properties></text:list-level-style-number>\
+<text:list-level-style-number text:level=\"2\" style:num-suffix=\".\" style:num-format=\"1\">\
+<style:list-level-properties text:list-level-position-and-space-mode=\"label-alignment\">\
+<style:list-level-label-alignment text:label-followed-by=\"listtab\" \
+text:list-tab-stop-position=\"1in\" fo:text-indent=\"-0.25in\" fo:margin-left=\"1in\"/>\
+</style:list-level-properties></text:list-level-style-number>\
+<text:list-level-style-number text:level=\"3\" style:num-suffix=\".\" style:num-format=\"1\">\
+<style:list-level-properties text:list-level-position-and-space-mode=\"label-alignment\">\
+<style:list-level-label-alignment text:label-followed-by=\"listtab\" \
+text:list-tab-stop-position=\"1.5in\" fo:text-indent=\"-0.25in\" fo:margin-left=\"1.5in\"/>\
+</style:list-level-properties></text:list-level-style-number>\
+</text:list-style>\
 </office:styles></office:document-styles>";
 
 const MANIFEST_XML: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
@@ -469,13 +686,98 @@ mod tests {
     }
 
     #[test]
-    fn styles_define_the_heading_styles_they_reference() {
+    fn lists_and_marks_convert() {
+        let content = serde_json::json!([
+            {"type": "bulleted-list", "children": [
+                {"type": "list-item", "children": [{"text": "first"}]},
+                {"type": "list-item", "children": [{"text": "second"}]},
+            ]},
+            {"type": "numbered-list", "children": [
+                {"type": "list-item", "children": [{"text": "one"}]},
+            ]},
+            {"type": "paragraph", "children": [
+                {"text": "b", "bold": true},
+                {"text": "i", "italic": true},
+                {"text": "link", "link": "https://github.com/example/page"},
+            ]},
+        ]);
+        let xml = content_xml("Doc", Some(&content));
+        // Bulleted list: one <text:list-item><text:p> per item.
+        assert!(xml.contains(
+            "<text:list text:style-name=\"ListBullet\">\
+<text:list-item><text:p>first</text:p></text:list-item>\
+<text:list-item><text:p>second</text:p></text:list-item></text:list>"
+        ));
+        // Numbered list uses the ListNumber style.
+        assert!(xml.contains(
+            "<text:list text:style-name=\"ListNumber\">\
+<text:list-item><text:p>one</text:p></text:list-item></text:list>"
+        ));
+        // Inline marks become spans / a link.
+        assert!(xml.contains("<text:span text:style-name=\"Bold\">b</text:span>"));
+        assert!(xml.contains("<text:span text:style-name=\"Emphasis\">i</text:span>"));
+        assert!(xml.contains(
+            "<text:a xlink:type=\"simple\" xlink:href=\"https://github.com/example/page\">link</text:a>"
+        ));
+    }
+
+    #[test]
+    fn styles_define_the_styles_they_reference() {
         // Every heading level referenced by `heading_el` must have a matching
         // style definition, or the headers render as plain text.
         for level in 1..=6 {
             assert!(STYLES_XML.contains(&format!("style:name=\"Heading_20_{level}\"")));
             assert!(STYLES_XML.contains(&format!("style:display-name=\"Heading {level}\"")));
         }
-        assert!(STYLES_XML.contains("style:name=\"Emphasis\""));
+        // Run/paragraph/list styles referenced by the block + leaf converters.
+        for style in [
+            "Emphasis",
+            "Bold",
+            "Underline",
+            "Strikethrough",
+            "Code",
+            "Quotations",
+            "Preformatted_20_Text",
+            "ListBullet",
+            "ListNumber",
+        ] {
+            assert!(
+                STYLES_XML.contains(&format!("style:name=\"{style}\"")),
+                "missing style {style}"
+            );
+        }
+    }
+
+    #[test]
+    fn preformatted_strikethrough_and_alignment_convert() {
+        let content = serde_json::json!([
+            {"type": "block-pre", "children": [{"text": "code()"}]},
+            {"type": "paragraph", "children": [{"text": "s", "strikethrough": true}]},
+            {"type": "paragraph", "align": "center", "children": [{"text": "mid"}]},
+            {"type": "heading-two", "align": "right", "children": [{"text": "Title"}]},
+            {"type": "image", "url": "https://github.com/example/pic.png", "children": [{"text": ""}]},
+        ]);
+        let xml = content_xml("Doc", Some(&content));
+        // block-pre uses the monospace preformatted paragraph style.
+        assert!(xml.contains("<text:p text:style-name=\"Preformatted_20_Text\">code()</text:p>"));
+        // Strikethrough mark.
+        assert!(xml.contains("<text:span text:style-name=\"Strikethrough\">s</text:span>"));
+        // Centered paragraph and right-aligned heading use alignment auto styles.
+        assert!(xml.contains("<text:p text:style-name=\"Al_p_center\">mid</text:p>"));
+        assert!(xml.contains(
+            "<text:h text:style-name=\"Al_h2_end\" text:outline-level=\"2\">Title</text:h>"
+        ));
+        // The alignment auto styles are declared and inherit from the base style.
+        assert!(xml.contains(
+            "<style:style style:name=\"Al_h2_end\" style:family=\"paragraph\" \
+style:parent-style-name=\"Heading_20_2\"><style:paragraph-properties \
+fo:text-align=\"end\"/></style:style>"
+        ));
+        // An image is preserved as a link to its source.
+        assert!(xml.contains(
+            "<text:a xlink:type=\"simple\" \
+xlink:href=\"https://github.com/example/pic.png\">\
+https://github.com/example/pic.png</text:a>"
+        ));
     }
 }
