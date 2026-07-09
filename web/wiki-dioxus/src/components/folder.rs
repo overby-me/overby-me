@@ -53,15 +53,36 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
     let mime_id = mime_id.as_str();
     let name = name.as_str();
 
+    // Folder view mode: list (default) or a tile grid (#125).
+    let mut grid = use_signal(|| false);
+    let is_grid = *grid.read();
+    let count = children.len();
+
     rsx! {
         div { class: "card",
             div { class: "card-header",
                 div { class: "avatar", "{mime_icon(mime_id)}" }
                 h3 { class: "title-medium", "{name}" }
+                // Child count (#143).
+                if count > 0 {
+                    span { class: "count-badge", title: "{t(\"common.items\")}", "{count}" }
+                }
+                div { class: "flex-grow" }
+                // Toggle list/grid layout (#125).
+                if count > 1 {
+                    button {
+                        class: "btn-icon",
+                        title: if is_grid { "{t(\"common.listView\")}" } else { "{t(\"common.gridView\")}" },
+                        onclick: move |_| {
+                            let v = *grid.read();
+                            grid.set(!v);
+                        },
+                        if is_grid { "\u{2630}" } else { "\u{25A6}" }
+                    }
+                }
                 // Reorder children (the sort app) — only worth showing when there
                 // is more than one child and the user can act on it.
-                if is_auth && children.len() > 1 && !parent_path.is_empty() {
-                    div { class: "flex-grow" }
+                if is_auth && count > 1 && !parent_path.is_empty() {
                     Link {
                         to: Route::PathPage {
                             segments: parent_path.clone(),
@@ -82,12 +103,13 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                     }
                 }
             } else {
-                div { class: "list",
+                div { class: if is_grid { "folder-grid" } else { "list" },
                     for child in children.iter() {
                         FolderItem {
                             key: "{child.id.0}",
                             node: child.clone(),
                             parent_path: parent_path.clone(),
+                            grid: is_grid,
                         }
                     }
                 }
@@ -197,7 +219,7 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
 }
 
 #[component]
-fn FolderItem(node: ChildNodeFields, parent_path: Vec<String>) -> Element {
+fn FolderItem(node: ChildNodeFields, parent_path: Vec<String>, grid: bool) -> Element {
     let name = node.name.as_str();
     let mime_id = node.mime_id.as_deref().unwrap_or("");
     let icon = mime_icon(mime_id);
@@ -210,7 +232,7 @@ fn FolderItem(node: ChildNodeFields, parent_path: Vec<String>) -> Element {
     rsx! {
         Link {
             to: Route::PathPage { segments: full_path, app: None },
-            class: "folder-item",
+            class: if grid { "folder-tile" } else { "folder-item" },
             div { class: "avatar small", "{icon}" }
             div { class: "list-item-text",
                 div { class: "list-item-primary", "{name}" }

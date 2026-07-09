@@ -717,6 +717,30 @@ h6, .title-small {
     font-size: 13px;
 }
 
+/* Click-to-zoom images (#114). */
+.zoomable {
+    cursor: zoom-in;
+}
+
+.image-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: zoom-out;
+    padding: 16px;
+}
+
+.image-lightbox img {
+    max-width: 95vw;
+    max-height: 95vh;
+    border-radius: 8px;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+}
+
 /* Cowsay easter egg (#82). */
 .cowsay {
     font-family: monospace;
@@ -737,6 +761,53 @@ h6, .title-small {
 
 .folder-item:hover {
     background-color: var(--md-surface-variant);
+}
+
+/* Child count badge in a folder header (#143). */
+.count-badge {
+    margin-left: 8px;
+    padding: 1px 10px;
+    border-radius: 12px;
+    background: var(--md-surface-variant);
+    color: var(--md-on-surface-variant);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+/* Folder grid view (#125): responsive tiles. */
+.folder-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 10px;
+    padding: 12px 16px;
+}
+
+.folder-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 8px;
+    padding: 16px 10px;
+    border: 1px solid var(--md-outline);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background-color 0.15s;
+}
+
+.folder-tile:hover {
+    background-color: var(--md-surface-variant);
+}
+
+.folder-tile .list-item-text {
+    min-width: 0;
+    width: 100%;
+}
+
+.folder-tile .list-item-primary {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* Theme toggle */

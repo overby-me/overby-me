@@ -28,6 +28,29 @@ pub fn Chip(icon: Option<String>, label: String, title: Option<String>) -> Eleme
     }
 }
 
+/// An image that opens full-screen on click (#114). Click the overlay (or press
+/// its close affordance) to dismiss. Keeps its own open/closed state.
+#[component]
+pub fn ZoomableImage(src: String, alt: String) -> Element {
+    let mut zoomed = use_signal(|| false);
+    rsx! {
+        img {
+            src: "{src}",
+            alt: "{alt}",
+            class: "zoomable",
+            onclick: move |_| zoomed.set(true),
+        }
+        if *zoomed.read() {
+            div {
+                class: "image-lightbox",
+                role: "dialog",
+                onclick: move |_| zoomed.set(false),
+                img { src: "{src}", alt: "{alt}" }
+            }
+        }
+    }
+}
+
 /// A horizontal proportion bar (e.g. a poll option's share of the vote).
 #[component]
 pub fn Bar(fraction: f64) -> Element {

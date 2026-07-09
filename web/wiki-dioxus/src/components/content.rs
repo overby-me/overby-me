@@ -99,11 +99,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
             }
             if let Some(url) = image_url {
                 div { class: "card-content",
-                    img {
-                        src: "{url}",
-                        alt: "{t(\"content.imageAlt\")}",
-                        style: "max-width: 100%; border-radius: 8px;",
-                    }
+                    super::widgets::ZoomableImage { src: url.clone(), alt: t("content.imageAlt") }
                 }
             }
             // Author chips (the document's members), mirroring MemberChips.
@@ -190,7 +186,7 @@ fn SlateBlock(block: serde_json::Value) -> Element {
         "image" => {
             let url = block.get("url").and_then(|u| u.as_str()).unwrap_or("");
             rsx! {
-                img { src: "{url}", alt: "content image" }
+                super::widgets::ZoomableImage { src: url.to_string(), alt: "content image".to_string() }
             }
         }
         _ => rsx! { p { {rendered_children} } },

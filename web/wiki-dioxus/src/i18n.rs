@@ -118,7 +118,10 @@ const EN_JSON: &str = r#"{
         "logIn": "Log in",
         "register": "Register",
         "unknown": "Unknown",
-        "download": "Download"
+        "download": "Download",
+        "gridView": "Grid view",
+        "listView": "List view",
+        "items": "items"
     },
     "auth": {
         "login": "Log In",
@@ -337,7 +340,10 @@ const DA_JSON: &str = r#"{
         "logIn": "Log ind",
         "register": "Registrer",
         "unknown": "Ukendt",
-        "download": "Download"
+        "download": "Download",
+        "gridView": "Gittervisning",
+        "listView": "Listevisning",
+        "items": "elementer"
     },
     "auth": {
         "login": "Log Ind",

@@ -213,14 +213,16 @@ All the above build + render live (browser smoke test asserts each mounts).
 - `#44` Don't create the node until the first save (draft new content).
 - `#69` Node revision/history table.
 - `#108` Remove hardcoded mime lists (drive icons/apps from the mime data).
-- `#111` Limit node name length.
-- `#114` Zoom/maximise images (candidate + file views).
+- `[x]` `#111` Limit node name length — `maxlength` on the name inputs.
+- `[x]` `#114` Zoom/maximise images — click-to-zoom lightbox (`ZoomableImage`) in
+  the file, content-block and inline-content image views.
 - `#115` Live collaborative editing.
 - `#117` Table of contents in the side bar (anchors).
 - `#119` MS Office viewer dark mode.
-- `#125` Folder grid view mode.
+- `[x]` `#125` Folder grid view mode — list/grid toggle in the folder header.
 - `#128` Audio / MIDI file support.
-- `#143` Show the child count in every content overview.
+- `[x]` `#143` Show the child count in every content overview — count badge in
+  the folder header.
 
 ### Members / contexts / permissions
 

@@ -41,7 +41,7 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                 if file_url.is_empty() {
                     p { class: "body-medium", "No file attached" }
                 } else if file_mime.starts_with("image/") {
-                    img { src: "{file_url}", alt: "{name}" }
+                    super::widgets::ZoomableImage { src: file_url.clone(), alt: name.to_string() }
                 } else if file_mime.starts_with("video/") {
                     video { controls: true, src: "{file_url}" }
                 } else if file_mime.starts_with("audio/") {
