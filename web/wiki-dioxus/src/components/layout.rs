@@ -19,6 +19,29 @@ pub fn Layout() -> Element {
     let menu_open = use_signal(|| false);
 
     let route = use_route::<Route>();
+
+    // Dioxus renders a lone "?" for the optional `app` query even when it is
+    // None (e.g. "/group?"); strip it from the address bar on each navigation so
+    // URLs read cleanly. Cosmetic only — the router's own state is untouched.
+    {
+        let route_dep = route.clone();
+        use_effect(use_reactive!(|(route_dep,)| {
+            let _ = route_dep;
+            if let Some(w) = web_sys::window() {
+                let bare = w.location().search().map(|s| s == "?").unwrap_or(false);
+                if bare {
+                    if let (Ok(path), Ok(history)) = (w.location().pathname(), w.history()) {
+                        let _ = history.replace_state_with_url(
+                            &wasm_bindgen::JsValue::NULL,
+                            "",
+                            Some(&path),
+                        );
+                    }
+                }
+            }
+        }));
+    }
+
     let is_auth_page = matches!(
         route,
         Route::Login {}
@@ -125,6 +148,10 @@ fn SearchBar(
     let nav = use_navigator();
     let mut input = input;
     let mut results = results;
+    // Monotonic request id so out-of-order responses don't clobber newer ones
+    // (typing fires a query per keystroke; the last issued must win, not the
+    // last to return).
+    let mut seq = use_signal(|| 0u32);
 
     rsx! {
         div { style: "flex: 1; position: relative;",
@@ -136,11 +163,20 @@ fn SearchBar(
                 oninput: move |evt| {
                     let value = evt.value();
                     input.set(value.clone());
+                    let my = *seq.read() + 1;
+                    seq.set(my);
+                    if value.trim().is_empty() {
+                        results.set(vec![]);
+                        return;
+                    }
                     let token = session.read().access_token.clone();
                     spawn(async move {
-                        match graphql::search_nodes(token.as_deref(), &value).await {
-                            Ok(nodes) => results.set(nodes),
-                            Err(_) => results.set(vec![]),
+                        let nodes = graphql::search_nodes(token.as_deref(), &value)
+                            .await
+                            .unwrap_or_default();
+                        // Only apply if this is still the latest query.
+                        if *seq.read() == my {
+                            results.set(nodes);
                         }
                     });
                 },
@@ -158,18 +194,38 @@ fn SearchBar(
                             class: "list-item",
                             key: "{node.id.0}",
                             onclick: {
+                                // A search hit can live anywhere in the tree, so
+                                // resolve its full ancestor path (root excluded)
+                                // rather than treating the key as a top-level
+                                // segment. Fall back to the bare key if the walk
+                                // yields nothing.
+                                let node_id = node.id.0.clone();
                                 let key = node.key.clone();
                                 let on_close = on_close;
                                 move |_| {
-                                    nav.push(Route::PathPage {
-                                        segments: vec![key.clone()],
-                                        app: None,
+                                    let node_id = node_id.clone();
+                                    let key = key.clone();
+                                    let token = session.read().access_token.clone();
+                                    // Resolve first, THEN navigate and close: closing
+                                    // unmounts the SearchBar, which would cancel this
+                                    // task before the async path lookup finished.
+                                    spawn(async move {
+                                        let mut segments = graphql::path_from_id(
+                                                token.as_deref(),
+                                                &node_id,
+                                            )
+                                            .await
+                                            .unwrap_or_default();
+                                        if segments.is_empty() {
+                                            segments = vec![key];
+                                        }
+                                        nav.push(Route::PathPage { segments, app: None });
+                                        on_close.call(());
                                     });
-                                    on_close.call(());
                                 }
                             },
                             div { class: "avatar small",
-                                "{super::loader::mime_icon(node.mime_id.as_deref().unwrap_or(\"\"))}"
+                                {super::loader::icon_el(node.mime_id.as_deref().unwrap_or(""))}
                             }
                             div { class: "list-item-text",
                                 div { class: "list-item-primary", "{node.name}" }
@@ -370,7 +426,7 @@ fn AppRail() -> Element {
                 class: if active { "btn-icon active" } else { "btn-icon" },
                 style: "flex-direction: column; gap: 2px; width: 56px; height: 56px;",
                 title: "{label}",
-                span { style: "font-size: 20px;", "{super::loader::mime_icon(mime_id)}" }
+                span { style: "font-size: 20px;", {super::loader::icon_el(mime_id)} }
                 span { style: "font-size: 10px; color: var(--md-on-surface-variant);", "{label}" }
             }
         }
@@ -671,7 +727,7 @@ fn DrawerNodeItem(
                     app: None,
                 });
             },
-            div { class: "avatar small", "{icon}" }
+            div { class: "avatar small", span { class: "material-icons", "{icon}" } }
             div { class: "list-item-text",
                 div { class: "list-item-primary", "{node.name}" }
                 if node.mutable {

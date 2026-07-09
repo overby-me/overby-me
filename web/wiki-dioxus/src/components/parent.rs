@@ -4,7 +4,7 @@ use crate::graphql::{self, ContextNodeFields};
 use crate::i18n::t;
 use crate::session::use_session;
 
-use super::loader::mime_icon;
+use super::loader::icon_el;
 
 /// ParentApp — the "Missing parent" admin view (#149): lists nodes whose
 /// `parentId` is null, i.e. that have lost their parent. The single legitimate
@@ -27,7 +27,7 @@ pub fn ParentApp() -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", "{mime_icon(\"app/parent\")}" }
+                div { class: "avatar", {icon_el("app/parent")} }
                 div {
                     h3 { class: "title-medium", "{t(\"parent.title\")}" }
                     p {
@@ -42,7 +42,7 @@ pub fn ParentApp() -> Element {
                     div { class: "list",
                         for node in list.iter() {
                             div { class: "list-item", key: "{node.id.0}",
-                                div { class: "avatar small", "{mime_icon(node.mime_id.as_deref().unwrap_or(\"\"))}" }
+                                div { class: "avatar small", {icon_el(node.mime_id.as_deref().unwrap_or(""))} }
                                 div { class: "list-item-text",
                                     div { class: "list-item-primary", "{node.name}" }
                                     div {

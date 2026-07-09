@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 
 use crate::graphql::NodeWithChildren;
 
-use super::loader::mime_icon;
+use super::loader::icon_el;
 
 /// MapApp — a full-height OpenStreetMap view (`?app=map`), mirroring the React
 /// MapApp's MapLibre map centred on Denmark. Uses OSM's embed rather than
@@ -17,7 +17,7 @@ pub fn MapApp(node: NodeWithChildren) -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", "{mime_icon(\"map/map\")}" }
+                div { class: "avatar", {icon_el("map/map")} }
                 h3 { class: "title-medium", "{name}" }
             }
             iframe {

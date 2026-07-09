@@ -4,7 +4,7 @@ use crate::graphql::{self, NodeWithChildren, PollSummaryFields};
 use crate::i18n::t;
 use crate::session::use_session;
 
-use super::loader::mime_icon;
+use super::loader::icon_el;
 
 /// AdminApp — the results overview (`?app=admin`): every poll in the context
 /// with its per-option tallies. React shipped this as a stubbed data grid; here
@@ -29,7 +29,7 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", "{mime_icon(\"vote/poll\")}" }
+                div { class: "avatar", {icon_el("vote/poll")} }
                 h3 { class: "title-medium", "{t(\"mime.vote\")}" }
             }
             if polls.is_empty() {

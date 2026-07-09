@@ -10,6 +10,11 @@
  * every rule set, so it stays at the very top. */
 @import url('https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&display=swap');
 
+/* Material Icons (filled) — the exact icon set the reference React app uses via
+ * @mui/icons-material. Rendered as ligatures: <span class="material-icons">home
+ * </span>. Kept identical to the old wiki's IconId map. */
+@import url('https://fonts.googleapis.com/icon?family=Material+Icons');
+
 :root {
     /* Brand accents (RadikalWiki). */
     --md-primary: #B80F55;
@@ -129,7 +134,7 @@ a:hover {
         position: fixed;
         top: 0;
         bottom: auto;
-        right: 400px;
+        left: 472px;
     }
 }
 
@@ -147,14 +152,16 @@ a:hover {
         display: block;
         width: 400px;
         flex-shrink: 0;
+        /* Sit at the start of the flex row so it reserves space on the LEFT. */
+        order: -1;
     }
     .drawer-inner {
         position: fixed;
-        right: 0;
+        left: 0;
         top: 0;
         bottom: 0;
         width: 400px;
-        border-left: 1px solid var(--md-outline);
+        border-right: 1px solid var(--md-outline);
         background: var(--md-surface);
         overflow-y: auto;
         padding-top: 64px;
@@ -193,7 +200,7 @@ a:hover {
         align-items: center;
         width: 72px;
         position: fixed;
-        right: 400px;
+        left: 400px;
         top: 0;
         bottom: 0;
         padding-top: 64px;
@@ -246,6 +253,34 @@ a:hover {
     width: 24px;
     height: 24px;
     font-size: 12px;
+}
+
+/* Material Icons ligature rendering (exact old-wiki icon set). */
+.material-icons {
+    font-family: 'Material Icons';
+    font-weight: normal;
+    font-style: normal;
+    font-size: 22px;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-block;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    font-feature-settings: 'liga';
+    -webkit-font-feature-settings: 'liga';
+    -webkit-font-smoothing: antialiased;
+    vertical-align: middle;
+}
+
+/* Icons scale to their container (small avatars, the app rail). */
+.avatar.small .material-icons {
+    font-size: 16px;
+}
+
+.app-rail .material-icons {
+    font-size: 22px;
 }
 
 /* Buttons */
@@ -414,15 +449,33 @@ a:hover {
     gap: 6px;
     align-items: center;
 }
+/* Outlined "secondary" chip, matching the old wiki's MUI
+ * <Chip color="secondary" variant="outlined"> (author chips etc.): a pill with
+ * a secondary-coloured border + label and a small inline icon. */
 .chip {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 2px 10px 2px 2px;
-    border: 1px solid var(--md-outline, #79747e);
+    gap: 5px;
+    height: 24px;
+    padding: 0 10px 0 7px;
+    border: 1px solid var(--md-secondary);
     border-radius: 16px;
     font-size: 13px;
-    color: var(--md-on-surface, inherit);
+    line-height: 1;
+    color: var(--md-secondary);
+    background: transparent;
+    max-width: 100%;
+}
+
+.chip .material-icons {
+    font-size: 18px;
+    color: var(--md-secondary);
+}
+
+.chip-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* Poll result bars */

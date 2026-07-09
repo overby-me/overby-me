@@ -4,7 +4,7 @@ use crate::graphql::NodeWithChildren;
 use crate::i18n::t;
 use crate::route::Route;
 
-use super::loader::{mime_icon, visible_sorted};
+use super::loader::{icon_el, mime_icon, visible_sorted};
 
 /// ProgramApp — an agenda / programme view of a context (#60). Renders the
 /// context's ordered children as a numbered vertical timeline, each item linking
@@ -16,7 +16,7 @@ pub fn ProgramApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", "{mime_icon(\"app/program\")}" }
+                div { class: "avatar", {icon_el("app/program")} }
                 h3 { class: "title-medium", "{node.name}" }
             }
             if items.is_empty() {
@@ -42,7 +42,14 @@ pub fn ProgramApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                     class: "program-item",
                                     div { class: "program-index", "{i + 1}" }
                                     div { class: "program-body",
-                                        div { class: "list-item-primary", "{icon} {item.name}" }
+                                        div { class: "list-item-primary",
+                                            span {
+                                                class: "material-icons",
+                                                style: "vertical-align: middle; font-size: 18px; margin-right: 6px;",
+                                                "{icon}"
+                                            }
+                                            "{item.name}"
+                                        }
                                         if let Some(t) = time {
                                             div {
                                                 class: "list-item-secondary",

@@ -3,7 +3,7 @@ use dioxus::prelude::*;
 use crate::graphql::NodeWithChildren;
 use crate::i18n::t;
 
-use super::loader::mime_icon;
+use super::loader::icon_el;
 
 /// SocialApp — a live social wall backed by **Bluesky only** (#137). It searches
 /// the public Bluesky AppView for posts matching a term (the context's
@@ -30,7 +30,7 @@ pub fn SocialApp(node: NodeWithChildren) -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", "{mime_icon(\"app/social\")}" }
+                div { class: "avatar", {icon_el("app/social")} }
                 div {
                     h3 { class: "title-medium", "{node.name}" }
                     p {

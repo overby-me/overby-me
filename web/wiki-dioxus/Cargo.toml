@@ -28,6 +28,7 @@ web-sys = { version = "=0.3.98", features = [
   "Element",
   "ErrorEvent",
   "EventTarget",
+  "History",
   "HtmlTextAreaElement",
   "Location",
   "MessageEvent",

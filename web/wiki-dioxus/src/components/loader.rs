@@ -137,46 +137,57 @@ pub fn MimeLoader(node: NodeWithChildren, path: Vec<String>) -> Element {
     }
 }
 
-/// Mime type to icon glyph. Mirrors the React `IconId` (core/mime.tsx) mapping
-/// from mime id to a Material icon, using the closest emoji equivalent so the
-/// drawer, folder list and headers show the same icon the reference app does.
+/// Mime type to a **Material Icons ligature name**, matching the reference React
+/// app's `IconId` (core/mime.tsx), which renders `@mui/icons-material` (filled
+/// Material Icons). Render via `icon_el` (or a `.material-icons` span) so the
+/// drawer, folder list, headers and app rail show the exact same icons.
 pub fn mime_icon(mime_id: &str) -> &'static str {
     match mime_id {
         // wiki/*
-        "wiki/search" => "\u{1F50D}",                // Search 🔍
-        "wiki/home" | "app/home" => "\u{1F3E0}",     // Home 🏠
-        "wiki/group" | "app/member" => "\u{1F465}",  // Group 👥
-        "wiki/event" => "\u{1F4C5}",                 // Event 📅
-        "wiki/folder" | "app/folder" => "\u{1F4C1}", // Folder 📁
-        "wiki/document" => "\u{1F4C4}",              // Article 📄
-        "wiki/file" => "\u{1F4CE}",                  // UploadFile 📎
-        "wiki/user" => "\u{1F464}",                  // Person 👤
-        "text/plain" => "\u{1F4C3}",                 // Subject 📃
+        "wiki/search" | "app/search" => "search",
+        "wiki/home" | "app/home" => "home",
+        "wiki/group" | "app/member" => "group",
+        "wiki/event" => "event",
+        "wiki/folder" | "app/folder" => "folder",
+        "wiki/document" => "article",
+        "wiki/file" => "upload_file",
+        "wiki/user" => "person",
+        "text/plain" => "subject",
         // vote/*
-        "vote/policy" => "\u{2696}\u{FE0F}", // Gavel ⚖️
-        "vote/position" => "\u{1F64B}",      // HowToReg 🙋
-        "vote/candidate" => "\u{1F642}",     // Face 🙂
-        "vote/question" => "\u{2753}",       // QuestionMark ❓
-        "vote/comment" => "\u{1F4AC}",       // AddComment 💬
-        "vote/change" => "\u{1F4DD}",        // RateReview 📝
-        "vote/poll" => "\u{1F4CA}",          // Poll 📊
-        // speak / apps
-        "speak/list" | "app/speak" => "\u{1F5E3}\u{FE0F}", // RecordVoiceOver/Interpreter 🗣️
-        "app/editor" => "\u{270F}\u{FE0F}",                // Edit ✏️
-        "app/sort" => "\u{2195}\u{FE0F}",                  // LowPriority ↕️
-        "app/vote" => "\u{1F5F3}\u{FE0F}",                 // HowToVote 🗳️
-        "app/search" => "\u{1F50D}",                       // Search 🔍
-        "app/screen" => "\u{1F4FA}",                       // ConnectedTv 📺
-        "application/pdf" => "\u{1F4D5}",                  // PDF 📕
-        "app/map" | "map/map" => "\u{1F5FA}\u{FE0F}",      // Map 🗺️
-        "app/graph" => "\u{1F578}\u{FE0F}",                // Graph/web 🕸️
-        "app/program" => "\u{1F5D3}\u{FE0F}",              // Programme 🗓️
-        "app/profile" => "\u{1F464}",                      // Profile 👤
-        "app/social" => "\u{1F98B}",                       // Social (Bluesky) 🦋
-        "app/redirect" => "\u{21AA}\u{FE0F}",              // Redirect ↪️
-        "app/cow" => "\u{1F404}",                          // Cow 🐄
-        "app/parent" => "\u{1F9F9}",                       // Missing parent (cleanup) 🧹
+        "vote/policy" => "gavel",
+        "vote/position" => "how_to_reg",
+        "vote/candidate" => "face",
+        "vote/question" => "question_mark",
+        "vote/comment" => "add_comment",
+        "vote/change" => "rate_review",
+        "vote/poll" => "poll",
+        // speak / apps (old wiki: speak/list=InterpreterMode, app/speak=RecordVoiceOver)
+        "speak/list" => "interpreter_mode",
+        "app/speak" => "record_voice_over",
+        "app/editor" => "edit",
+        "app/sort" => "low_priority",
+        "app/vote" => "how_to_vote",
+        "app/screen" => "connected_tv",
+        "application/pdf" => "picture_as_pdf",
+        "app/map" | "map/map" => "map",
+        // Apps the old wiki did not have — closest Material icons.
+        "app/graph" => "hub",
+        "app/program" => "calendar_month",
+        "app/profile" => "account_circle",
+        "app/social" => "public",
+        "app/redirect" => "open_in_new",
+        "app/cow" => "pets",
+        "app/parent" => "link_off",
         _ => mime_icon_by_prefix(mime_id),
+    }
+}
+
+/// An icon element for a mime type: a `.material-icons` span holding the ligature
+/// so the Material Icons webfont renders it. Use in place of the old emoji text.
+pub fn icon_el(mime_id: &str) -> Element {
+    let name = mime_icon(mime_id);
+    rsx! {
+        span { class: "material-icons", "{name}" }
     }
 }
 
@@ -184,19 +195,19 @@ pub fn mime_icon(mime_id: &str) -> &'static str {
 /// substring (image/, audio/, video/, spreadsheet, presentation, document).
 fn mime_icon_by_prefix(mime_id: &str) -> &'static str {
     if mime_id.contains("image/") {
-        "\u{1F5BC}\u{FE0F}" // Image 🖼️
+        "image"
     } else if mime_id.contains("audio/") {
-        "\u{1F3B5}" // MusicNote 🎵
+        "music_note"
     } else if mime_id.contains("video/") {
-        "\u{1F3AC}" // Video 🎬
+        "movie"
     } else if mime_id.contains("spreadsheet") {
-        "\u{1F4D7}" // Excel 📗
+        "table_chart"
     } else if mime_id.contains("presentation") {
-        "\u{1F4D9}" // PowerPoint 📙
+        "slideshow"
     } else if mime_id.contains("document") {
-        "\u{1F4D8}" // Word 📘
+        "description"
     } else {
-        "\u{2753}" // QuestionMark ❓
+        "question_mark"
     }
 }
 

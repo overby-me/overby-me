@@ -179,7 +179,7 @@ fn InviteItem(invite: InvitationFields, refresh: Signal<u32>) -> Element {
 
     rsx! {
         div { class: "list-item",
-            div { class: "avatar small secondary", "{super::loader::mime_icon(&mime_id)}" }
+            div { class: "avatar small secondary", {super::loader::icon_el(&mime_id)} }
             div { class: "list-item-text",
                 div { class: "list-item-primary", "{name}" }
             }

@@ -34,7 +34,7 @@ pub fn RedirectApp(node: NodeWithChildren) -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", "{super::loader::mime_icon(\"app/redirect\")}" }
+                div { class: "avatar", {super::loader::icon_el("app/redirect")} }
                 h3 { class: "title-medium", "{node.name}" }
             }
             div { class: "card-content",

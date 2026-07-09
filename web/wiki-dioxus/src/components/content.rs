@@ -6,7 +6,7 @@ use crate::nhost::storage_url;
 use crate::route::Route;
 use crate::session::use_session;
 
-use super::loader::mime_icon;
+use super::loader::{icon_el, mime_icon};
 use super::ui::alert_dialog::{
     AlertDialog, AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogDescription,
     AlertDialogTitle,
@@ -42,7 +42,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", "{mime_icon(\"wiki/document\")}" }
+                div { class: "avatar", {icon_el("wiki/document")} }
                 h3 { class: "title-medium", "{name}" }
                 if is_auth && !segments.is_empty() {
                     div { class: "flex-grow" }
@@ -53,7 +53,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                         },
                         class: "btn-icon",
                         title: "{t(\"mime.editor\")}",
-                        "{mime_icon(\"app/editor\")}"
+                        {icon_el("app/editor")}
                     }
                     // Delete via an accessible modal confirm dialog.
                     button {

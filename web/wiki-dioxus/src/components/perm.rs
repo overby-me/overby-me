@@ -4,7 +4,7 @@ use crate::graphql::{self, NodeWithChildren};
 use crate::i18n::t;
 use crate::session::use_session;
 
-use super::loader::mime_icon;
+use super::loader::icon_el;
 
 /// PermApp — a read-only view of a context's permission rows (`?app=perm`):
 /// which mime types each role may insert / select / delete. React left this
@@ -57,7 +57,7 @@ pub fn PermApp(node: NodeWithChildren) -> Element {
                             ];
                             rsx! {
                                 div { class: "list-item", key: "{perm.id.0}",
-                                    div { class: "avatar small", "{mime_icon(&mime)}" }
+                                    div { class: "avatar small", {icon_el(&mime)} }
                                     div { class: "list-item-text",
                                         div { class: "list-item-primary", "{mime} — {perm.role}" }
                                         div { class: "list-item-secondary",

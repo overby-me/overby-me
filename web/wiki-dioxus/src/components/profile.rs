@@ -5,7 +5,7 @@ use crate::i18n::t;
 use crate::route::Route;
 use crate::session::use_session;
 
-use super::loader::mime_icon;
+use super::loader::icon_el;
 
 /// ProfileApp — the signed-in user's profile (#78): who they are plus the groups
 /// and events they belong to. Reachable via `?app=profile`.
@@ -48,7 +48,7 @@ pub fn ProfileApp() -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", "{mime_icon(\"app/profile\")}" }
+                div { class: "avatar", {icon_el("app/profile")} }
                 div {
                     h3 { class: "title-medium", "{user.display_name}" }
                     p {
@@ -86,7 +86,7 @@ pub fn ProfileApp() -> Element {
                             key: "{ctx.id.0}",
                             to: Route::PathPage { segments: vec![ctx.key.clone()], app: None },
                             class: "folder-item",
-                            div { class: "avatar small", "{mime_icon(ctx.mime_id.as_deref().unwrap_or(\"\"))}" }
+                            div { class: "avatar small", {icon_el(ctx.mime_id.as_deref().unwrap_or(""))} }
                             div { class: "list-item-text",
                                 div { class: "list-item-primary", "{ctx.name}" }
                             }

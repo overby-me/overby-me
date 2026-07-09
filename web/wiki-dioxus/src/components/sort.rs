@@ -5,7 +5,7 @@ use crate::i18n::t;
 use crate::session::use_session;
 use crate::snackbar::show_snackbar;
 
-use super::loader::mime_icon;
+use super::loader::icon_el;
 
 /// SortApp — drag-and-drop reordering of child nodes
 #[component]
@@ -96,7 +96,7 @@ pub fn SortApp(node: NodeWithChildren) -> Element {
                             "\u{2630}"
                         }
                         div { class: "avatar small",
-                            "{mime_icon(item.mime_id.as_deref().unwrap_or(\"\"))}"
+                            {icon_el(item.mime_id.as_deref().unwrap_or(""))}
                         }
                         div { class: "list-item-text",
                             div { class: "list-item-primary", "{item.name}" }

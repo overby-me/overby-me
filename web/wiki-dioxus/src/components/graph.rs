@@ -4,7 +4,7 @@ use crate::graphql::NodeWithChildren;
 use crate::i18n::t;
 use crate::route::Route;
 
-use super::loader::{mime_icon, visible_sorted};
+use super::loader::{icon_el, mime_icon, visible_sorted};
 
 /// GraphApp — a simple node-link visualisation of the context and its immediate
 /// children (#68). The parent sits on top with an edge down to each child box;
@@ -29,7 +29,7 @@ pub fn GraphApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", "{mime_icon(\"app/graph\")}" }
+                div { class: "avatar", {icon_el("app/graph")} }
                 h3 { class: "title-medium", "{node.name}" }
             }
             div { class: "card-content", style: "overflow-x: auto;",
@@ -124,8 +124,10 @@ fn GraphBox(x: f64, y: f64, w: f64, h: f64, icon: String, label: String, primary
             }
             text {
                 x: "{x + 12.0}",
-                y: "{y + h / 2.0 + 5.0}",
-                font_size: "16",
+                y: "{y + h / 2.0 + 6.0}",
+                font_family: "Material Icons",
+                font_size: "18",
+                fill: "var(--md-on-surface)",
                 "{icon}"
             }
             text {

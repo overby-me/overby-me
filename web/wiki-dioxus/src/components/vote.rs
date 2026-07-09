@@ -7,7 +7,7 @@ use crate::session::use_session;
 use crate::snackbar::show_snackbar;
 
 use super::content::ContentApp;
-use super::loader::{mime_icon, visible_sorted};
+use super::loader::{icon_el, mime_icon, visible_sorted};
 use super::ui::checkbox::Checkbox;
 use super::ui::radio_group::{RadioGroup, RadioItem};
 use dioxus_primitives::checkbox::CheckboxState;
@@ -35,7 +35,7 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
     let no_vote = rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", "{mime_icon(\"vote/poll\")}" }
+                div { class: "avatar", {icon_el("vote/poll")} }
                 h3 { class: "title-medium", "{t(\"mime.vote\")}" }
             }
             div { class: "card-content",
@@ -109,7 +109,7 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                     key: "{item.id.0}",
                                     to: Route::PathPage { segments: full, app: None },
                                     class: "folder-item",
-                                    div { class: "avatar small", "{mime_icon(\"vote/change\")}" }
+                                    div { class: "avatar small", {icon_el("vote/change")} }
                                     div { class: "list-item-text",
                                         div { class: "list-item-primary", "{item.name}" }
                                     }
@@ -125,7 +125,7 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         if !polls.is_empty() {
             div { class: "card mt-1",
                 div { class: "card-header",
-                    div { class: "avatar", "{mime_icon(\"vote/poll\")}" }
+                    div { class: "avatar", {icon_el("vote/poll")} }
                     h3 { class: "title-medium", "{t(\"mime.vote\")}" }
                 }
                 div { class: "list",
@@ -138,7 +138,7 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                     key: "{poll.id.0}",
                                     to: Route::PathPage { segments: full, app: None },
                                     class: "folder-item",
-                                    div { class: "avatar small", "{mime_icon(\"vote/poll\")}" }
+                                    div { class: "avatar small", {icon_el("vote/poll")} }
                                     div { class: "list-item-text",
                                         div { class: "list-item-primary", "{poll.name}" }
                                     }
@@ -164,7 +164,7 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                     key: "{child.id.0}",
                                     to: Route::PathPage { segments: full, app: None },
                                     class: "folder-item",
-                                    div { class: "avatar small", "{icon}" }
+                                    div { class: "avatar small", span { class: "material-icons", "{icon}" } }
                                     div { class: "list-item-text",
                                         div { class: "list-item-primary", "{child.name}" }
                                     }
@@ -339,7 +339,7 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", "{mime_icon(\"vote/poll\")}" }
+                div { class: "avatar", {icon_el("vote/poll")} }
                 div {
                     h3 { class: "title-medium", "{name}" }
                     p {

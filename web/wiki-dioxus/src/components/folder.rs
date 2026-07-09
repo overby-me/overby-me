@@ -5,7 +5,7 @@ use crate::i18n::t;
 use crate::route::Route;
 use crate::session::use_session;
 
-use super::loader::{mime_icon, visible_sorted};
+use super::loader::{icon_el, mime_icon, visible_sorted};
 
 #[component]
 pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
@@ -57,7 +57,7 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", "{mime_icon(mime_id)}" }
+                div { class: "avatar", {icon_el(mime_id)} }
                 h3 { class: "title-medium", "{name}" }
                 // Child count (#143).
                 if count > 0 {
@@ -86,7 +86,7 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                         },
                         class: "btn-icon",
                         title: "{t(\"mime.sort\")}",
-                        "{mime_icon(\"app/sort\")}"
+                        {icon_el("app/sort")}
                     }
                 }
             }
@@ -229,7 +229,7 @@ fn FolderItem(node: ChildNodeFields, parent_path: Vec<String>, grid: bool) -> El
         Link {
             to: Route::PathPage { segments: full_path, app: None },
             class: if grid { "folder-tile" } else { "folder-item" },
-            div { class: "avatar small", "{icon}" }
+            div { class: "avatar small", span { class: "material-icons", "{icon}" } }
             div { class: "list-item-text",
                 div { class: "list-item-primary", "{name}" }
                 if is_mutable {

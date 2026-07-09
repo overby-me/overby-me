@@ -4,7 +4,7 @@ use crate::graphql::NodeWithChildren;
 use crate::nhost::storage_url;
 use crate::session::use_session;
 
-use super::loader::mime_icon;
+use super::loader::icon_el;
 
 #[component]
 pub fn FileApp(node: NodeWithChildren) -> Element {
@@ -34,7 +34,7 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", "{mime_icon(\"wiki/file\")}" }
+                div { class: "avatar", {icon_el("wiki/file")} }
                 h3 { class: "title-medium", "{name}" }
             }
             div { class: "file-viewer",

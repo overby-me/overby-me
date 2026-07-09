@@ -15,15 +15,16 @@ pub fn Spinner() -> Element {
     }
 }
 
-/// A small outlined chip: an optional leading icon/avatar and a label.
+/// A small outlined chip matching the old wiki's MUI outlined-secondary Chip: an
+/// optional leading Material icon (the mime icon) plus a label.
 #[component]
 pub fn Chip(icon: Option<String>, label: String, title: Option<String>) -> Element {
     rsx! {
         span { class: "chip", title: title.unwrap_or_default(),
             if let Some(icon) = icon {
-                span { class: "avatar small secondary", "{icon}" }
+                span { class: "material-icons", "{icon}" }
             }
-            "{label}"
+            span { class: "chip-label", "{label}" }
         }
     }
 }
