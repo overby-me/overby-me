@@ -77,11 +77,7 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
             }
         }
         None => {
-            rsx! {
-                div { class: "spinner-overlay",
-                    div { class: "spinner" }
-                }
-            }
+            rsx! { super::widgets::Spinner {} }
         }
     }
 }

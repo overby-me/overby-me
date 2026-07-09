@@ -27,11 +27,12 @@ look and component model as the target UI style. Concretely:
     buttons), **tooltips**, **tabs** for the app views, and the form controls
     (**select**, **checkbox**/**radio** in the poll ballot, **switch** for the
     theme toggle).
-- **Isolate our own reusable components.** Factor the app-agnostic pieces out of
-  `components/` into a dedicated `components/ui` module (later possibly a small
-  sibling crate) with no wiki/GraphQL knowledge: `Card`, `ListItem`, `Avatar`,
-  `Chip`, `Snackbar`, `Spinner`, the poll result `Bar`, etc. Keep wiki-specific
-  components (drawer tree, folder, vote, speak, …) composing those primitives.
+- **Isolate our own reusable components.** Factor the app-agnostic pieces with
+  no wiki/GraphQL knowledge into a shared module (later possibly a sibling
+  crate). Started: `components::ui` holds the generated dioxus-primitives, and
+  `components::widgets` holds our own (`Spinner`, `Chip`, poll `Bar`) — screen
+  components compose those. Still to extract: `Card`/`ListItem`/`Avatar`
+  wrappers, `Snackbar`.
 - **Upstream what generalises.** Anything we build that is genuinely generic and
   higher-quality than what dioxus-components has (or missing there) is a
   candidate to contribute back upstream.

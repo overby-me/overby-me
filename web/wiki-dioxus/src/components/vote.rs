@@ -404,10 +404,9 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                                     {
                                         let count = counts.get(i).copied().unwrap_or(0);
                                         let pct = (count * 100).checked_div(total_votes).unwrap_or(0);
+                                        let fraction = count as f64 / total_votes.max(1) as f64;
                                         rsx! {
-                                            div { class: "vote-bar",
-                                                div { class: "vote-bar-fill", style: "width: {pct}%;" }
-                                            }
+                                            super::widgets::Bar { fraction }
                                             div { class: "list-item-secondary", "{count} ({pct}%)" }
                                         }
                                     }

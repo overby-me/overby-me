@@ -14,6 +14,7 @@ pub mod perm;
 pub mod screen;
 pub mod sort;
 pub mod speak;
+pub mod widgets;
 // Generated dioxus-primitives components; some are not wired into screens yet.
 #[allow(dead_code, unused_imports)]
 pub mod ui;

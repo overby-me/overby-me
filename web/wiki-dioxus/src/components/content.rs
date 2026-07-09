@@ -110,14 +110,11 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
             if !members.is_empty() {
                 div { class: "chip-row", style: "padding: 0 16px 8px;",
                     for member in members.iter() {
-                        span {
-                            class: "chip",
+                        super::widgets::Chip {
                             key: "{member.id.0}",
-                            title: "{t(\"member.author\")}",
-                            span { class: "avatar small secondary",
-                                "{mime_icon(member.node.as_ref().and_then(|n| n.mime_id.as_deref()).unwrap_or(\"wiki/user\"))}"
-                            }
-                            "{member.label()}"
+                            icon: mime_icon(member.node.as_ref().and_then(|n| n.mime_id.as_deref()).unwrap_or("wiki/user")).to_string(),
+                            label: member.label(),
+                            title: t("member.author"),
                         }
                     }
                 }
