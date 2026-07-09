@@ -5,7 +5,41 @@ Goal: get `web/wiki-dioxus` to behave like the reference React app in
 <https://radikal.wiki>; test with a real account — never commit credentials).
 
 The initial port (scaffolding through all screens) is done; this plan is about
-**verifying each area against the real backend and fixing what's broken**.
+**verifying each area against the real backend and fixing what's broken**, and
+(see below) **moving the UI onto the dioxus-components style and component set**.
+
+## Design direction: dioxus-components / dioxus-primitives
+
+Adopt the [dioxus-components](https://github.com/DioxusLabs/dioxus-components)
+look and component model as the target UI style. Concretely:
+
+- **Follow that visual style.** The current CSS is a bespoke Material-ish theme
+  in `assets/style.css`; migrate it toward the dioxus-components (shadcn-style)
+  design — its tokens, spacing, radii, and neutral palette — rather than MUI.
+  New UI should be built in that style, and existing screens restyled to match
+  as they are touched.
+- **Use components from dioxus-components where it makes sense.** It ships
+  accessible (WAI-ARIA) primitives via `dioxus-primitives` (added with
+  `dx components add`). Prefer them over the hand-rolled equivalents, especially
+  the interactive, a11y-sensitive bits we currently open-code:
+  - the user-menu **dropdown/popover** (no outside-click / keyboard handling
+    today), the delete/confirm and submit **dialogs** (currently two-click
+    buttons), **tooltips**, **tabs** for the app views, and the form controls
+    (**select**, **checkbox**/**radio** in the poll ballot, **switch** for the
+    theme toggle).
+- **Isolate our own reusable components.** Factor the app-agnostic pieces out of
+  `components/` into a dedicated `components/ui` module (later possibly a small
+  sibling crate) with no wiki/GraphQL knowledge: `Card`, `ListItem`, `Avatar`,
+  `Chip`, `Snackbar`, `Spinner`, the poll result `Bar`, etc. Keep wiki-specific
+  components (drawer tree, folder, vote, speak, …) composing those primitives.
+- **Upstream what generalises.** Anything we build that is genuinely generic and
+  higher-quality than what dioxus-components has (or missing there) is a
+  candidate to contribute back upstream.
+
+Do this **incrementally**, not as a big-bang rewrite: swap one hand-rolled
+component for a primitive (or move one into `components/ui`) at a time, keep the
+browser tests green, and prefer the highest-duplication / weakest-a11y pieces
+first. Each migration should keep `just test` + `just test-browser` passing.
 
 ## How to test
 
