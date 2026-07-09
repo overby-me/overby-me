@@ -6,6 +6,10 @@ use crate::route::Route;
 use crate::session::{save_session, use_session, SESSION};
 use crate::theme::{apply_theme, use_theme, ThemeMode, THEME};
 
+use super::ui::dropdown_menu::{
+    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+};
+
 #[component]
 pub fn Layout() -> Element {
     let mut open_drawer = use_signal(|| false);
@@ -340,127 +344,76 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
         .map(|u| u.display_name.chars().next().unwrap_or('?').to_string())
         .unwrap_or_else(|| "?".to_string());
 
+    let dark = *theme.read() == ThemeMode::Dark;
+
     rsx! {
-        div { style: "position: relative;",
-            button {
+        DropdownMenu {
+            open: Some(menu_open()),
+            on_open_change: move |v| menu_open.set(v),
+            DropdownMenuTrigger {
                 class: "btn-icon",
-                onclick: move |_| {
-                    let current = *menu_open.read();
-                    menu_open.set(!current);
-                },
                 if is_auth {
                     span { class: "avatar small secondary", "{initial}" }
                 } else {
                     span { class: "avatar small", "\u{1F464}" }
                 }
             }
-
-            // Dropdown menu
-            if *menu_open.read() {
-                div { class: "user-menu-dropdown",
-                    // Theme toggle
-                    div {
-                        class: "list-item",
-                        onclick: move |_| {
-                            let new_theme = theme.read().toggle();
-                            apply_theme(&new_theme);
-                            crate::theme::save_theme(&new_theme);
-                            *THEME.write() = new_theme;
-                        },
-                        span { style: "font-size: 18px; width: 24px; text-align: center;",
-                            if *theme.read() == ThemeMode::Dark {
-                                "\u{2600}"
-                            } else {
-                                "\u{1F319}"
-                            }
-                        }
-                        div { class: "list-item-text",
-                            div { class: "list-item-primary",
-                                if *theme.read() == ThemeMode::Dark {
-                                    "{t(\"layout.light\")}"
-                                } else {
-                                    "{t(\"layout.dark\")}"
-                                }
-                            }
-                        }
+            DropdownMenuContent {
+                // Theme toggle
+                DropdownMenuItem::<String> {
+                    value: "theme".to_string(),
+                    index: 0usize,
+                    on_select: move |_| {
+                        let new_theme = theme.read().toggle();
+                        apply_theme(&new_theme);
+                        crate::theme::save_theme(&new_theme);
+                        *THEME.write() = new_theme;
+                    },
+                    if dark { "\u{2600} {t(\"layout.light\")}" } else { "\u{1F319} {t(\"layout.dark\")}" }
+                }
+                // Language toggle
+                DropdownMenuItem::<String> {
+                    value: "lang".to_string(),
+                    index: 1usize,
+                    on_select: move |_| {
+                        let new_lang = match *LANG.read() {
+                            Lang::En => Lang::Da,
+                            Lang::Da => Lang::En,
+                        };
+                        *LANG.write() = new_lang;
+                    },
+                    {match *LANG.read() { Lang::En => "\u{1F310} Dansk", Lang::Da => "\u{1F310} English" }}
+                }
+                if is_auth {
+                    DropdownMenuItem::<String> {
+                        value: "setpw".to_string(),
+                        index: 2usize,
+                        on_select: move |_| { nav.push(Route::SetPassword {}); },
+                        "\u{1F512} {t(\"auth.setPassword\")}"
                     }
-
-                    // Language toggle
-                    div {
-                        class: "list-item",
-                        onclick: move |_| {
-                            let new_lang = match *LANG.read() {
-                                Lang::En => Lang::Da,
-                                Lang::Da => Lang::En,
-                            };
-                            *LANG.write() = new_lang;
+                    DropdownMenuItem::<String> {
+                        value: "logout".to_string(),
+                        index: 3usize,
+                        on_select: move |_| {
+                            crate::nhost::sign_out();
+                            *SESSION.write() = Default::default();
+                            save_session(&Default::default());
+                            nav.push(Route::HomeApp {});
                         },
-                        span { style: "font-size: 18px; width: 24px; text-align: center;", "\u{1F310}" }
-                        div { class: "list-item-text",
-                            div { class: "list-item-primary",
-                                {match *LANG.read() {
-                                    Lang::En => "Dansk",
-                                    Lang::Da => "English",
-                                }}
-                            }
-                        }
+                        "\u{1F6AA} {t(\"auth.logout\")}"
                     }
-
-                    if is_auth {
-                        // Set password
-                        div {
-                            class: "list-item",
-                            onclick: move |_| {
-                                nav.push(Route::SetPassword {});
-                                menu_open.set(false);
-                            },
-                            span { style: "font-size: 18px; width: 24px; text-align: center;", "\u{1F512}" }
-                            div { class: "list-item-text",
-                                div { class: "list-item-primary", "{t(\"auth.setPassword\")}" }
-                            }
-                        }
-
-                        // Logout
-                        div {
-                            class: "list-item",
-                            onclick: move |_| {
-                                crate::nhost::sign_out();
-                                *SESSION.write() = Default::default();
-                                save_session(&Default::default());
-                                menu_open.set(false);
-                                nav.push(Route::HomeApp {});
-                            },
-                            span { style: "font-size: 18px; width: 24px; text-align: center;", "\u{1F6AA}" }
-                            div { class: "list-item-text",
-                                div { class: "list-item-primary", "{t(\"auth.logout\")}" }
-                            }
-                        }
-                    } else {
-                        // Login
-                        div {
-                            class: "list-item",
-                            onclick: move |_| {
-                                nav.push(Route::Login {});
-                                menu_open.set(false);
-                            },
-                            span { style: "font-size: 18px; width: 24px; text-align: center;", "\u{1F511}" }
-                            div { class: "list-item-text",
-                                div { class: "list-item-primary", "{t(\"common.logIn\")}" }
-                            }
-                        }
-
-                        // Register
-                        div {
-                            class: "list-item",
-                            onclick: move |_| {
-                                nav.push(Route::Register {});
-                                menu_open.set(false);
-                            },
-                            span { style: "font-size: 18px; width: 24px; text-align: center;", "\u{1F464}" }
-                            div { class: "list-item-text",
-                                div { class: "list-item-primary", "{t(\"auth.register\")}" }
-                            }
-                        }
+                } else {
+                    DropdownMenuItem::<String> {
+                        value: "login".to_string(),
+                        index: 2usize,
+                        on_select: move |_| { nav.push(Route::Login {}); },
+                        "\u{1F511} {t(\"common.logIn\")}"
+                    }
+                    DropdownMenuItem::<String> {
+                        value: "register".to_string(),
+                        index: 3usize,
+                        on_select: move |_| { nav.push(Route::Register {}); },
+                        "\u{1F464} {t(\"auth.register\")}"
                     }
                 }
             }
