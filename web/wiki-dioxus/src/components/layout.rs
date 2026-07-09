@@ -85,7 +85,7 @@ pub fn Layout() -> Element {
                         onclick: move |_| {
                             open_drawer.set(true);
                         },
-                        span { class: "avatar small", "\u{2630}" }
+                        span { class: "material-icons", "menu" }
                     }
 
                     // Search or breadcrumbs
@@ -104,7 +104,7 @@ pub fn Layout() -> Element {
                         button {
                             class: "btn-icon",
                             onclick: move |_| search_mode.set(true),
-                            span { class: "avatar small", "\u{1F50D}" }
+                            span { class: "material-icons", "search" }
                         }
                     }
 
@@ -128,7 +128,7 @@ pub fn Layout() -> Element {
                         onclick: move |_| {
                             open_drawer.set(false);
                         },
-                        span { class: "avatar small", "\u{2715}" }
+                        span { class: "material-icons", "close" }
                     }
                 }
             }
@@ -238,12 +238,14 @@ fn SearchBar(
         button {
             class: "btn-icon",
             onclick: move |_| on_close.call(()),
-            span { class: "avatar small", "\u{2715}" }
+            span { class: "material-icons", "close" }
         }
     }
 }
 
-/// Breadcrumb navigation based on current route
+/// Breadcrumb navigation based on current route. Mirrors the old wiki: a row of
+/// mime avatars (home + each path node); only the current node's name is shown,
+/// and hovering a crumb reveals its name (the whole bar resets on mouse-leave).
 #[component]
 fn Breadcrumbs() -> Element {
     let route = use_route::<Route>();
@@ -253,87 +255,101 @@ fn Breadcrumbs() -> Element {
         _ => vec![],
     };
 
-    // Expanded on hover, collapsed again when the pointer leaves — matching the
-    // React breadcrumbs. Keyed reset happens by remounting the trail per path.
-    let mut expanded = use_signal(|| false);
+    let mut hovered = use_signal(|| None::<usize>);
     let key = segments.join("\u{1f}");
     rsx! {
         div {
             class: "breadcrumbs",
-            onmouseleave: move |_| expanded.set(false),
-            Link { to: Route::HomeApp {}, "\u{1F3E0}" }
-            if !segments.is_empty() {
-                BreadcrumbTrail { key: "{key}", segments: segments.clone(), expanded }
+            onmouseleave: move |_| hovered.set(None),
+            BreadcrumbTrail { key: "{key}", segments: segments.clone(), hovered }
+        }
+    }
+}
+
+/// The breadcrumb crumbs: home (id 0) then one per path segment (id 1..=n), each
+/// an avatar + a collapsible name. Keyed on the path so it re-resolves on nav.
+#[component]
+fn BreadcrumbTrail(segments: Vec<String>, hovered: Signal<Option<usize>>) -> Element {
+    let session = use_session();
+    let token = session.read().access_token.clone();
+    // Reactively depend on the path so crumbs re-resolve on navigation (a keyed
+    // remount is unreliable in the web renderer).
+    let segs = segments.clone();
+    let crumbs_res = use_resource(use_reactive!(|(segs, token)| async move {
+        graphql::path_crumbs(token.as_deref(), &segs)
+            .await
+            .unwrap_or_default()
+    }));
+    let crumbs = crumbs_res.read().clone().unwrap_or_default();
+
+    let total = segments.len();
+    // The crumb shown by default (no hover) is the deepest one: the last segment,
+    // or home when at the root.
+    let last_id = if total > 0 { total } else { 0 };
+    let hov = *hovered.read();
+    let is_open = move |c: usize| match hov {
+        Some(h) => h == c,
+        None => c == last_id,
+    };
+
+    rsx! {
+        // Home crumb (id 0).
+        BreadcrumbCrumb {
+            to: Route::HomeApp {},
+            mime: "app/home".to_string(),
+            name: t("common.home"),
+            open: is_open(0),
+            crumb_id: 0,
+            hovered,
+        }
+        // One crumb per path segment (id = index + 1).
+        for i in 0..total {
+            {
+                let info = crumbs.get(i);
+                let name = info
+                    .map(|c| c.name.clone())
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or_else(|| segments[i].clone());
+                let mime = info.and_then(|c| c.mime_id.clone()).unwrap_or_default();
+                rsx! {
+                    BreadcrumbCrumb {
+                        key: "{i}",
+                        to: Route::PathPage { segments: segments[..=i].to_vec(), app: None },
+                        mime,
+                        name,
+                        open: is_open(i + 1),
+                        crumb_id: i + 1,
+                        hovered,
+                    }
+                }
             }
         }
     }
 }
 
-/// The breadcrumb segments after home, showing resolved node names (not URL
-/// slugs). Keyed on the path so it remounts and re-resolves on navigation.
+/// A single breadcrumb: an always-visible mime avatar and a name that expands on
+/// hover (horizontal collapse), matching the old wiki's `BreadcrumbsLink`.
 #[component]
-fn BreadcrumbTrail(segments: Vec<String>, expanded: Signal<bool>) -> Element {
-    let session = use_session();
-    let token = session.read().access_token.clone();
-    // Reactively depend on the path so names re-resolve on navigation (rather
-    // than relying on a keyed remount, unreliable in the web renderer).
-    let segs = segments.clone();
-    let names = use_resource(use_reactive!(|(segs, token)| async move {
-        graphql::path_names(token.as_deref(), &segs)
-            .await
-            .unwrap_or_default()
-    }));
-    let names = names.read().clone().unwrap_or_default();
-
-    // Collapse the middle of deep paths (keep the first and last two) behind a
-    // … that expands on hover, mirroring the React collapsible breadcrumbs.
-    let mut expanded = expanded;
-    let total = segments.len();
-    let collapse = total > 4 && !*expanded.read();
-
-    let label_at = |i: usize| -> String {
-        names
-            .get(i)
-            .filter(|s| !s.is_empty())
-            .cloned()
-            .unwrap_or_else(|| segments[i].clone())
-    };
-    let crumb = |i: usize| -> Element {
-        let label = label_at(i);
-        if i == total - 1 {
-            rsx! {
-                span { class: "separator", " / " }
-                span { "{label}" }
-            }
-        } else {
-            rsx! {
-                span { class: "separator", " / " }
-                Link {
-                    to: Route::PathPage { segments: segments[..=i].to_vec(), app: None },
-                    "{label}"
-                }
-            }
-        }
-    };
-
-    // When collapsed, show only the first crumb and the last two.
-    let shown: Vec<usize> = if collapse {
-        vec![0, total - 2, total - 1]
-    } else {
-        (0..total).collect()
-    };
-
+fn BreadcrumbCrumb(
+    to: Route,
+    mime: String,
+    name: String,
+    open: bool,
+    crumb_id: usize,
+    hovered: Signal<Option<usize>>,
+) -> Element {
+    let mut hovered = hovered;
     rsx! {
-        for (pos , i) in shown.iter().copied().enumerate() {
-            if collapse && pos == 1 {
-                span { class: "separator", " / " }
+        div {
+            class: "crumb",
+            onmouseenter: move |_| hovered.set(Some(crumb_id)),
+            Link { to, class: "crumb-link",
+                div { class: "avatar small crumb-avatar", {super::loader::icon_el(&mime)} }
                 span {
-                    style: "cursor: pointer; padding: 0 4px;",
-                    onmouseenter: move |_| expanded.set(true),
-                    "\u{2026}"
+                    class: if open { "crumb-name open" } else { "crumb-name" },
+                    "{name}"
                 }
             }
-            {crumb(i)}
         }
     }
 }
@@ -460,7 +476,7 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
                 if is_auth {
                     span { class: "avatar small secondary", "{initial}" }
                 } else {
-                    span { class: "avatar small", "\u{1F464}" }
+                    span { class: "avatar small", span { class: "material-icons", "person" } }
                 }
             }
             DropdownMenuContent {
@@ -474,7 +490,13 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
                         crate::theme::save_theme(&new_theme);
                         *THEME.write() = new_theme;
                     },
-                    if dark { "\u{2600} {t(\"layout.light\")}" } else { "\u{1F319} {t(\"layout.dark\")}" }
+                    if dark {
+                        span { class: "material-icons", "light_mode" }
+                        " {t(\"layout.light\")}"
+                    } else {
+                        span { class: "material-icons", "dark_mode" }
+                        " {t(\"layout.dark\")}"
+                    }
                 }
                 // Language toggle
                 DropdownMenuItem::<String> {
@@ -487,14 +509,16 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
                         };
                         *LANG.write() = new_lang;
                     },
-                    {match *LANG.read() { Lang::En => "\u{1F310} Dansk", Lang::Da => "\u{1F310} English" }}
+                    span { class: "material-icons", "language" }
+                    {match *LANG.read() { Lang::En => " Dansk", Lang::Da => " English" }}
                 }
                 if is_auth {
                     DropdownMenuItem::<String> {
                         value: "setpw".to_string(),
                         index: 2usize,
                         on_select: move |_| { nav.push(Route::SetPassword {}); },
-                        "\u{1F512} {t(\"auth.setPassword\")}"
+                        span { class: "material-icons", "lock" }
+                        " {t(\"auth.setPassword\")}"
                     }
                     DropdownMenuItem::<String> {
                         value: "logout".to_string(),
@@ -505,20 +529,23 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
                             save_session(&Default::default());
                             nav.push(Route::HomeApp {});
                         },
-                        "\u{1F6AA} {t(\"auth.logout\")}"
+                        span { class: "material-icons", "logout" }
+                        " {t(\"auth.logout\")}"
                     }
                 } else {
                     DropdownMenuItem::<String> {
                         value: "login".to_string(),
                         index: 2usize,
                         on_select: move |_| { nav.push(Route::Login {}); },
-                        "\u{1F511} {t(\"common.logIn\")}"
+                        span { class: "material-icons", "login" }
+                        " {t(\"common.logIn\")}"
                     }
                     DropdownMenuItem::<String> {
                         value: "register".to_string(),
                         index: 3usize,
                         on_select: move |_| { nav.push(Route::Register {}); },
-                        "\u{1F464} {t(\"auth.register\")}"
+                        span { class: "material-icons", "person_add" }
+                        " {t(\"auth.register\")}"
                     }
                 }
             }
@@ -554,7 +581,7 @@ fn DrawerContent() -> Element {
             if is_auth {
                 div { class: "card",
                     div { class: "card-header",
-                        div { class: "avatar", "\u{1F464}" }
+                        div { class: "avatar", span { class: "material-icons", "person" } }
                         div {
                             h3 { class: "title-medium", "{display_name}" }
                             p { class: "body-medium",
@@ -570,7 +597,7 @@ fn DrawerContent() -> Element {
                 Link {
                     to: Route::HomeApp {},
                     class: "list-item",
-                    div { class: "avatar small", "\u{1F3E0}" }
+                    div { class: "avatar small", span { class: "material-icons", "home" } }
                     div { class: "list-item-text",
                         div { class: "list-item-primary", "{t(\"common.home\")}" }
                     }
@@ -732,7 +759,12 @@ fn DrawerNodeItem(
                 div { class: "list-item-primary", "{node.name}" }
                 if node.mutable {
                     div { class: "list-item-secondary",
-                        "\u{1F513} {t(\"layout.notSubmitted\")}"
+                        span {
+                            class: "material-icons",
+                            style: "font-size: 14px; vertical-align: middle;",
+                            "lock_open"
+                        }
+                        " {t(\"layout.notSubmitted\")}"
                     }
                 }
             }
@@ -745,7 +777,11 @@ fn DrawerNodeItem(
                         let now = *expanded.read();
                         expanded.set(!now);
                     },
-                    if *expanded.read() { "\u{25BE}" } else { "\u{25B8}" }
+                    if *expanded.read() {
+                        span { class: "material-icons", "expand_more" }
+                    } else {
+                        span { class: "material-icons", "chevron_right" }
+                    }
                 }
             }
         }

@@ -644,30 +644,54 @@ h6, .title-small {
 .breadcrumbs {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 2px;
     flex: 1;
     min-width: 0;
-    padding: 8px 16px;
+    padding: 6px 12px;
     color: #fff;
     font-size: 14px;
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
 }
 
-.breadcrumbs a {
+.breadcrumbs::-webkit-scrollbar {
+    display: none;
+}
+
+/* One breadcrumb crumb: an always-visible mime avatar + a name that expands on
+ * hover (horizontal collapse), matching the old wiki. */
+.crumb {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+}
+
+.crumb-link {
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none;
     color: #fff;
-    opacity: 0.8;
-    white-space: nowrap;
+    cursor: pointer;
+}
+
+.crumb-avatar {
+    flex: 0 0 auto;
+}
+
+.crumb-name {
+    max-width: 0;
     overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 0;
+    color: #fff;
+    transition: max-width 0.25s ease, opacity 0.2s ease, margin 0.25s ease;
 }
 
-.breadcrumbs a:last-child {
+.crumb-name.open {
+    max-width: 260px;
     opacity: 1;
-}
-
-.breadcrumbs .separator {
-    opacity: 0.6;
-    flex-shrink: 0;
+    margin: 0 8px 0 4px;
 }
 
 /* Content (Slate document renderer) */

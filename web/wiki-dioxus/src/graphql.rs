@@ -973,31 +973,49 @@ pub async fn resolve_path(
     Ok(None)
 }
 
-/// Resolve each path segment (a node key) to its display name, walking from the
-/// root like `resolve_path`. Used to show node names in breadcrumbs instead of
-/// URL slugs; falls back to the raw segment if a node cannot be resolved.
-pub async fn path_names(
+/// A resolved breadcrumb segment: its display name and mime (for the avatar).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Crumb {
+    pub name: String,
+    pub mime_id: Option<String>,
+}
+
+/// Resolve each path segment to its `(name, mime_id)`, walking from the root like
+/// `resolve_path`. Feeds the breadcrumb trail its per-segment avatar + name.
+pub async fn path_crumbs(
     access_token: Option<&str>,
     segments: &[String],
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<Crumb>, String> {
     let Some(root_id) = query_root_id(access_token).await? else {
-        return Ok(segments.to_vec());
+        return Ok(segments
+            .iter()
+            .map(|s| Crumb {
+                name: s.clone(),
+                mime_id: None,
+            })
+            .collect());
     };
     let mut parent_id: Option<String> = Some(root_id);
-    let mut names = Vec::with_capacity(segments.len());
+    let mut out = Vec::with_capacity(segments.len());
     for segment in segments {
         match query_node_by_key(access_token, segment, parent_id.as_deref()).await? {
             Some(n) => {
-                names.push(n.name.clone());
+                out.push(Crumb {
+                    name: n.name.clone(),
+                    mime_id: n.mime_id.clone(),
+                });
                 parent_id = Some(n.id.0);
             }
             None => {
-                names.push(segment.clone());
+                out.push(Crumb {
+                    name: segment.clone(),
+                    mime_id: None,
+                });
                 break;
             }
         }
     }
-    Ok(names)
+    Ok(out)
 }
 
 /// Insert a node
