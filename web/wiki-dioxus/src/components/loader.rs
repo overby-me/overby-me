@@ -191,6 +191,75 @@ pub fn icon_el(mime_id: &str) -> Element {
     }
 }
 
+/// The spreadsheet-style letter for an index (0→A, 1→B, …, 25→Z, 26→AA, …),
+/// ported from the React `getLetter`. Used to label policy proposals.
+pub fn index_letter(index: usize) -> String {
+    let last = (b'A' + (index % 26) as u8) as char;
+    if index >= 26 {
+        let first = (b'@' + (index / 26) as u8) as char;
+        format!("{first}{last}")
+    } else {
+        last.to_string()
+    }
+}
+
+/// The avatar content for a node, matching the reference app's `IconId`:
+/// policies get a **letter** (A, B, …) and change proposals a **number**
+/// (1, 2, …) by their `ordinal` among same-type siblings; folders show the
+/// folder icon with their name's first letter; everything else shows its mime
+/// icon. `ordinal` is None when there is no meaningful position (falls back to
+/// the gavel / rate-review icon).
+pub fn node_avatar(mime_id: &str, name: &str, ordinal: Option<usize>) -> Element {
+    match (mime_id, ordinal) {
+        ("vote/policy", Some(i)) => {
+            let label = index_letter(i);
+            rsx! {
+                span { class: "avatar-label", "{label}" }
+            }
+        }
+        ("vote/change", Some(i)) => {
+            let n = i + 1;
+            rsx! {
+                span { class: "avatar-label", "{n}" }
+            }
+        }
+        ("wiki/folder", _) => match name.chars().next() {
+            Some(first) => rsx! {
+                span { class: "folder-avatar",
+                    span { class: "material-icons", "folder" }
+                    span { class: "folder-letter", "{first}" }
+                }
+            },
+            None => icon_el(mime_id),
+        },
+        _ => icon_el(mime_id),
+    }
+}
+
+/// For each child, its ordinal among preceding siblings of the SAME lettered /
+/// numbered mime (policies, changes). Others get `None`. Feeds `node_avatar` so
+/// the A/B/C and 1/2/3 labels count within their own type, like the old wiki.
+pub fn sibling_ordinals(children: &[graphql::ChildNodeFields]) -> Vec<Option<usize>> {
+    let mut policies = 0usize;
+    let mut changes = 0usize;
+    children
+        .iter()
+        .map(|c| match c.mime_id.as_deref() {
+            Some("vote/policy") => {
+                let o = policies;
+                policies += 1;
+                Some(o)
+            }
+            Some("vote/change") => {
+                let o = changes;
+                changes += 1;
+                Some(o)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// Fallback icons for the media / office families the React app matches by
 /// substring (image/, audio/, video/, spreadsheet, presentation, document).
 fn mime_icon_by_prefix(mime_id: &str) -> &'static str {
@@ -294,6 +363,15 @@ mod tests {
         assert_eq!(super::slug_base("Hello, World! 123"), "hello-world-123");
         assert_eq!(super::slug_base("  Trim -- Me  "), "trim-me");
         assert_eq!(super::slug_base("!!!"), "");
+    }
+
+    #[test]
+    fn index_letter_matches_react_getletter() {
+        assert_eq!(super::index_letter(0), "A");
+        assert_eq!(super::index_letter(1), "B");
+        assert_eq!(super::index_letter(25), "Z");
+        assert_eq!(super::index_letter(26), "AA");
+        assert_eq!(super::index_letter(27), "AB");
     }
 
     #[test]

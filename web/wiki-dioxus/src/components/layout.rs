@@ -695,17 +695,21 @@ fn DrawerLevel(
 
     let items = children.read().clone();
     match items {
-        Some(items) => rsx! {
-            for child in items.iter() {
-                DrawerNodeItem {
-                    key: "{child.id.0}",
-                    node: child.clone(),
-                    path_prefix: path_prefix.clone(),
-                    current_path: current_path.clone(),
-                    depth,
+        Some(items) => {
+            let ordinals = super::loader::sibling_ordinals(&items);
+            rsx! {
+                for (child , ordinal) in items.iter().zip(ordinals) {
+                    DrawerNodeItem {
+                        key: "{child.id.0}",
+                        node: child.clone(),
+                        path_prefix: path_prefix.clone(),
+                        current_path: current_path.clone(),
+                        depth,
+                        ordinal,
+                    }
                 }
             }
-        },
+        }
         None => rsx! {},
     }
 }
@@ -719,6 +723,7 @@ fn DrawerNodeItem(
     path_prefix: Vec<String>,
     current_path: Vec<String>,
     depth: usize,
+    ordinal: Option<usize>,
 ) -> Element {
     let nav = use_navigator();
 
@@ -735,7 +740,7 @@ fn DrawerNodeItem(
 
     let mime_id = node.mime_id.clone().unwrap_or_default();
     let expandable = mime_has_children(&mime_id);
-    let icon = super::loader::mime_icon(&mime_id);
+    let node_name = node.name.clone();
 
     // Auto-expand ancestors of the current node; let the user toggle the rest.
     let mut expanded = use_signal(|| on_path && !selected);
@@ -754,7 +759,7 @@ fn DrawerNodeItem(
                     app: None,
                 });
             },
-            div { class: "avatar small", span { class: "material-icons", "{icon}" } }
+            div { class: "avatar small", {super::loader::node_avatar(&mime_id, &node_name, ordinal)} }
             div { class: "list-item-text",
                 div { class: "list-item-primary", "{node.name}" }
                 if node.mutable {

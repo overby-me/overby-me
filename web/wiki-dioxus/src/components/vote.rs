@@ -100,7 +100,7 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                     h3 { class: "title-medium", "{t(\"vote.amendments\")}" }
                 }
                 div { class: "list",
-                    for item in amendments.iter() {
+                    for (n , item) in amendments.iter().enumerate() {
                         {
                             let mut full = path.clone();
                             full.push(item.key.clone());
@@ -109,7 +109,9 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                     key: "{item.id.0}",
                                     to: Route::PathPage { segments: full, app: None },
                                     class: "folder-item",
-                                    div { class: "avatar small", {icon_el("vote/change")} }
+                                    div { class: "avatar small",
+                                        {super::loader::node_avatar("vote/change", &item.name, Some(n))}
+                                    }
                                     div { class: "list-item-text",
                                         div { class: "list-item-primary", "{item.name}" }
                                     }

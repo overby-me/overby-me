@@ -286,6 +286,40 @@ a:hover {
     font-size: 22px;
 }
 
+/* Letter/number avatars for policy (A, B, C…) and change proposals (1, 2, 3…). */
+.avatar-label {
+    font-weight: 700;
+    font-size: 16px;
+    line-height: 1;
+}
+
+.avatar.small .avatar-label {
+    font-size: 13px;
+}
+
+/* Folder avatar: the folder icon with the name's first letter overlaid. */
+.folder-avatar {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+.folder-letter {
+    position: absolute;
+    top: 58%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-weight: 700;
+    font-size: 10px;
+    color: var(--md-primary);
+}
+
+.avatar.small .folder-letter {
+    font-size: 8px;
+}
+
 /* Buttons */
 .btn {
     display: inline-flex;

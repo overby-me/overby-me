@@ -5,7 +5,7 @@ use crate::i18n::t;
 use crate::route::Route;
 use crate::session::use_session;
 
-use super::loader::{icon_el, mime_icon, visible_sorted};
+use super::loader::{icon_el, visible_sorted};
 
 const FOLDER_VIEW_KEY: &str = "wiki_folder_grid";
 
@@ -124,12 +124,13 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                 }
             } else {
                 div { class: if is_grid { "folder-grid" } else { "list" },
-                    for child in children.iter() {
+                    for (child , ordinal) in children.iter().zip(super::loader::sibling_ordinals(children)) {
                         FolderItem {
                             key: "{child.id.0}",
                             node: child.clone(),
                             parent_path: parent_path.clone(),
                             grid: is_grid,
+                            ordinal,
                         }
                     }
                 }
@@ -239,10 +240,14 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
 }
 
 #[component]
-fn FolderItem(node: ChildNodeFields, parent_path: Vec<String>, grid: bool) -> Element {
+fn FolderItem(
+    node: ChildNodeFields,
+    parent_path: Vec<String>,
+    grid: bool,
+    ordinal: Option<usize>,
+) -> Element {
     let name = node.name.as_str();
     let mime_id = node.mime_id.as_deref().unwrap_or("");
-    let icon = mime_icon(mime_id);
     let is_mutable = node.mutable;
 
     // Build full path by appending this child's key to the parent path
@@ -253,12 +258,17 @@ fn FolderItem(node: ChildNodeFields, parent_path: Vec<String>, grid: bool) -> El
         Link {
             to: Route::PathPage { segments: full_path, app: None },
             class: if grid { "folder-tile" } else { "folder-item" },
-            div { class: "avatar small", span { class: "material-icons", "{icon}" } }
+            div { class: "avatar small", {super::loader::node_avatar(mime_id, name, ordinal)} }
             div { class: "list-item-text",
                 div { class: "list-item-primary", "{name}" }
                 if is_mutable {
                     div { class: "list-item-secondary",
-                        "\u{1F513} {t(\"layout.notSubmitted\")}"
+                        span {
+                            class: "material-icons",
+                            style: "font-size: 14px; vertical-align: middle;",
+                            "lock_open"
+                        }
+                        " {t(\"layout.notSubmitted\")}"
                     }
                 }
             }
