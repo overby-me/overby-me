@@ -265,8 +265,8 @@ pub async fn refresh_session(refresh_token: &str) -> Result<AuthSession, NhostEr
 
 /// Whether a refresh error means the session is unrecoverable (bad/expired
 /// refresh token) rather than a transient network blip or a request bug. Only
-/// an explicit rejection (401/403, or the `refresh-token` error code) counts —
-/// a 404/400 signals a client mistake and must not force the user to log out.
+/// an explicit rejection (401/403, or the `refresh-token` error code) counts.
+/// A 404/400 signals a client mistake and must not force the user to log out.
 pub fn is_auth_error(err: &NhostError) -> bool {
     matches!(err.status, Some(401) | Some(403))
         || err

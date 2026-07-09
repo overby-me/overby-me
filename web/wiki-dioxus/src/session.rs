@@ -19,7 +19,7 @@ pub struct Session {
     pub refresh_token: Option<String>,
     pub node_id: Option<String>,
     /// When the access token expires, in ms since the Unix epoch. `None` for
-    /// sessions persisted before this field existed — treated as "refresh now".
+    /// sessions persisted before this field existed (treated as "refresh now").
     #[serde(default)]
     pub access_token_expires_at: Option<f64>,
 }
@@ -79,8 +79,8 @@ fn stored_session() -> Option<Session> {
 // The NHost access token (JWT) is short-lived (~15 min). Nothing used to renew
 // it, so the session silently died after the token's lifetime and after the tab
 // had been backgrounded past expiry. `run_token_refresh` (driven by a
-// `use_future` in `App`) keeps it alive: it refreshes once on startup — swapping
-// out a possibly-stale stored token — then again shortly before each expiry, and
+// `use_future` in `App`) keeps it alive: it refreshes once on startup (swapping
+// out a possibly-stale stored token), then again shortly before each expiry, and
 // immediately when the tab regains visibility.
 // ---------------------------------------------------------------------------
 
@@ -181,8 +181,8 @@ async fn refresh_access_token() -> RefreshOutcome {
                     return RefreshOutcome::Transient;
                 }
             }
-            // The refresh token itself is dead — clear the session so the UI
-            // falls back to the login screen instead of looping on a bad token.
+            // The refresh token itself is dead, so clear the session and let the
+            // UI fall back to the login screen instead of looping on a bad token.
             log::warn!("session refresh rejected, signing out: {err}");
             *SESSION.write() = Session::default();
             save_session(&Session::default());
@@ -216,7 +216,7 @@ pub async fn run_token_refresh() {
                 .is_none_or(|exp| now_ms() >= exp - BUFFER_MS)
     };
 
-    // On startup, refresh only if the stored token is missing/expired — a token
+    // On startup, refresh only if the stored token is missing/expired. A token
     // still comfortably valid is used as-is, avoiding a redundant refresh (and
     // the double data-fetch it would trigger via access-token-keyed queries).
     if due_to_refresh() {
