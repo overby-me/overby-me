@@ -421,7 +421,7 @@ fn NodeNotFound() -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", "\u{26A0}" }
+                div { class: "avatar", span { class: "material-icons", "warning" } }
                 h3 { class: "headline-small", "{t(\"node.documentUnavailable\")}" }
             }
             div { class: "card-content",

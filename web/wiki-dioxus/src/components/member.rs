@@ -27,7 +27,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", "\u{1F465}" }
+                div { class: "avatar", span { class: "material-icons", "group" } }
                 div {
                     h3 { class: "title-medium", "{name}" }
                     p { class: "body-medium",
@@ -52,12 +52,13 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                             class: "list-item",
                             key: "{member.id.0}",
                             style: if member.hidden { "opacity: 0.55;" } else { "" },
-                            div { class: "avatar small", "\u{1F464}" }
+                            div { class: "avatar small", span { class: "material-icons", "person" } }
                             div { class: "list-item-text",
                                 div { class: "list-item-primary", "{member.label()}" }
                                 div { class: "list-item-secondary",
                                     if member.hidden {
-                                        "\u{1F648} {t(\"member.hidden\")}"
+                                        span { class: "material-icons", style: "font-size: 14px; vertical-align: middle;", "visibility_off" }
+                                        " {t(\"member.hidden\")}"
                                     } else if member.owner {
                                         "{t(\"member.owner\")}"
                                     } else if member.accepted {
@@ -87,7 +88,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                                                     }
                                                 });
                                             },
-                                            if hidden { "\u{1F441}\u{FE0F}" } else { "\u{1F648}" }
+                                            if hidden { span { class: "material-icons", "visibility" } } else { span { class: "material-icons", "visibility_off" } }
                                         }
                                     }
                                 }

@@ -96,7 +96,7 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         if !amendments.is_empty() {
             div { class: "card mt-1",
                 div { class: "card-header",
-                    div { class: "avatar", "\u{1F4DD}" }
+                    div { class: "avatar", {icon_el("vote/change")} }
                     h3 { class: "title-medium", "{t(\"vote.amendments\")}" }
                 }
                 div { class: "list",
@@ -427,7 +427,8 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                     button {
                         class: "btn btn-primary mt-1",
                         onclick: submit,
-                        "\u{1F5F3}\u{FE0F} {t(\"vote.castVote\")}"
+                        span { class: "material-icons", "how_to_vote" }
+                        " {t(\"vote.castVote\")}"
                     }
                 } else {
                     // Read-only option list with per-option tallies (closed poll,

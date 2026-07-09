@@ -60,7 +60,8 @@ pub fn ParentApp() -> Element {
                         p {
                             class: "body-medium",
                             style: "color: var(--md-on-surface-variant);",
-                            "\u{2705} {t(\"parent.none\")}"
+                            span { class: "material-icons", style: "vertical-align: middle;", "check_circle" }
+                            " {t(\"parent.none\")}"
                         }
                     }
                 },

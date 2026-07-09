@@ -53,7 +53,8 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                         href: "{file_url}",
                         target: "_blank",
                         class: "btn btn-outlined",
-                        "\u{1F4E5} Download {name}"
+                        span { class: "material-icons", "download" }
+                        " Download {name}"
                     }
                 }
             }

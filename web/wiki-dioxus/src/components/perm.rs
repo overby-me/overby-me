@@ -33,7 +33,7 @@ pub fn PermApp(node: NodeWithChildren) -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", "\u{1F510}" }
+                div { class: "avatar", span { class: "material-icons", "lock" } }
                 h3 { class: "title-medium", "{node.name}" }
             }
             if perms.is_empty() {
@@ -50,10 +50,10 @@ pub fn PermApp(node: NodeWithChildren) -> Element {
                         {
                             let mime = perm.mime_id.clone().unwrap_or_default();
                             let flags = [
-                                ("+", perm.insert),
-                                ("\u{1F441}", perm.select),
-                                ("\u{1F5D1}", perm.delete),
-                                ("\u{2713}", perm.active),
+                                ("add", perm.insert),
+                                ("visibility", perm.select),
+                                ("delete", perm.delete),
+                                ("check", perm.active),
                             ];
                             rsx! {
                                 div { class: "list-item", key: "{perm.id.0}",
@@ -63,7 +63,7 @@ pub fn PermApp(node: NodeWithChildren) -> Element {
                                         div { class: "list-item-secondary",
                                             for (label , on) in flags {
                                                 if on {
-                                                    span { style: "margin-right: 8px;", "{label}" }
+                                                    span { class: "material-icons", style: "margin-right: 8px; font-size: 16px;", "{label}" }
                                                 }
                                             }
                                         }

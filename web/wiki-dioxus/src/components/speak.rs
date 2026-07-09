@@ -152,7 +152,7 @@ fn SpeakList(
                 div {
                     class: if mutable { "avatar secondary" } else { "avatar" },
                     title: if mutable { "{t(\"speak.open\")}" } else { "{t(\"speak.close\")}" },
-                    if mutable { "\u{1F513}" } else { "\u{1F512}" }
+                    if mutable { span { class: "material-icons", "lock_open" } } else { span { class: "material-icons", "lock" } }
                 }
                 div {
                     h3 { class: "title-medium", "{list_name}" }
@@ -165,7 +165,8 @@ fn SpeakList(
                 if remaining > 0 {
                     div { class: "flex-grow" }
                     div { class: "chip-timer", title: "{t(\"speak.talk\")}",
-                        "\u{23F1}\u{FE0F} {time_string(remaining)}"
+                        span { class: "material-icons", style: "font-size: 18px; vertical-align: middle;", "timer" }
+                        " {time_string(remaining)}"
                     }
                 }
             }
@@ -186,9 +187,9 @@ fn SpeakList(
                             let name = speaker.name.clone();
                             let (type_icon , type_key) = speak_type_meta(speaker_type(speaker));
                             let secondary = match i {
-                                0 => format!("{type_icon} {}", t("speak.speakingNow")),
-                                1 => format!("{type_icon} {}", t("speak.next")),
-                                _ => format!("{type_icon} {}", t(type_key)),
+                                0 => t("speak.speakingNow"),
+                                1 => t("speak.next"),
+                                _ => t(type_key),
                             };
                             let row_class = match i {
                                 0 => "list-item speak-current",
@@ -205,7 +206,14 @@ fn SpeakList(
                                     div { class: "avatar small secondary", "{i + 1}" }
                                     div { class: "list-item-text",
                                         div { class: "list-item-primary", "{name}" }
-                                        div { class: "list-item-secondary", "{secondary}" }
+                                        div { class: "list-item-secondary",
+                                            span {
+                                                class: "material-icons",
+                                                style: "font-size: 14px; vertical-align: middle; margin-right: 2px;",
+                                                "{type_icon}"
+                                            }
+                                            "{secondary}"
+                                        }
                                     }
                                     // Owner reorder (#7): pull a speaker to the
                                     // front or back of the queue.
@@ -230,7 +238,7 @@ fn SpeakList(
                                                     });
                                                 }
                                             },
-                                            "\u{2B06}"
+                                            span { class: "material-icons", "vertical_align_top" }
                                         }
                                         button {
                                             class: "btn-icon",
@@ -252,7 +260,7 @@ fn SpeakList(
                                                     });
                                                 }
                                             },
-                                            "\u{2B07}"
+                                            span { class: "material-icons", "vertical_align_bottom" }
                                         }
                                     }
                                     if can_remove {
@@ -271,7 +279,7 @@ fn SpeakList(
                                                     });
                                                 }
                                             },
-                                            "\u{2715}"
+                                            span { class: "material-icons", "close" }
                                         }
                                     }
                                 }
@@ -305,7 +313,13 @@ fn SpeakList(
                                     });
                                 }
                             },
-                            if mutable { "\u{1F512} {t(\"speak.close\")}" } else { "\u{1F513} {t(\"speak.open\")}" }
+                            if mutable {
+                                span { class: "material-icons", "lock" }
+                                " {t(\"speak.close\")}"
+                            } else {
+                                span { class: "material-icons", "lock_open" }
+                                " {t(\"speak.open\")}"
+                            }
                         }
                         button {
                             class: "btn btn-outlined",
@@ -324,7 +338,8 @@ fn SpeakList(
                                     });
                                 }
                             },
-                            "\u{1F5D1}\u{FE0F} {t(\"speak.clear\")}"
+                            span { class: "material-icons", "delete" }
+                            " {t(\"speak.clear\")}"
                         }
                         button {
                             class: "btn btn-primary",
@@ -339,7 +354,13 @@ fn SpeakList(
                                     move_timer(token, id, secs, refresh);
                                 }
                             },
-                            if running { "\u{23F9}\u{FE0F} {t(\"speak.stop\")}" } else { "\u{25B6}\u{FE0F} {t(\"speak.start\")}" }
+                            if running {
+                                span { class: "material-icons", "stop" }
+                                " {t(\"speak.stop\")}"
+                            } else {
+                                span { class: "material-icons", "play_arrow" }
+                                " {t(\"speak.start\")}"
+                            }
                         }
                         div { class: "text-field", style: "margin: 0; width: 120px;",
                             label { "{t(\"speak.speakingTime\")}" }
@@ -465,10 +486,10 @@ fn speaker_type(node: &ChildNodeFields) -> i64 {
 /// Icon + i18n key for a speak type.
 fn speak_type_meta(kind: i64) -> (&'static str, &'static str) {
     match kind {
-        3 => ("\u{2696}\u{FE0F}", "speak.procedure"),
-        2 => ("\u{1F4A1}", "speak.clarify"),
-        1 => ("\u{2753}", "speak.question"),
-        _ => ("\u{1F5E3}\u{FE0F}", "speak.talk"),
+        3 => ("gavel", "speak.procedure"),
+        2 => ("lightbulb", "speak.clarify"),
+        1 => ("question_mark", "speak.question"),
+        _ => ("record_voice_over", "speak.talk"),
     }
 }
 

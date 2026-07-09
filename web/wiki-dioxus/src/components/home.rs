@@ -22,7 +22,7 @@ pub fn HomeApp() -> Element {
             div {
                 div { class: "card",
                     div { class: "card-header",
-                        div { class: "avatar", "\u{1F44B}" }
+                        div { class: "avatar", span { class: "material-icons", "waving_hand" } }
                         h3 { class: "headline-small", "{t(\"layout.welcomeTitle\")}" }
                     }
                     div { class: "card-content",
@@ -33,12 +33,14 @@ pub fn HomeApp() -> Element {
                                 Link {
                                     to: Route::Login {},
                                     class: "btn btn-outlined",
-                                    "\u{1F511} {t(\"common.logIn\")}"
+                                    span { class: "material-icons", "login" }
+                                    " {t(\"common.logIn\")}"
                                 }
                                 Link {
                                     to: Route::Register {},
                                     class: "btn btn-outlined",
-                                    "\u{1F464} {t(\"auth.register\")}"
+                                    span { class: "material-icons", "person_add" }
+                                    " {t(\"auth.register\")}"
                                 }
                             }
                         } else {
@@ -109,7 +111,7 @@ fn InvitesUserList() -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", "\u{2709}\u{FE0F}" }
+                div { class: "avatar", span { class: "material-icons", "mail" } }
                 h3 { class: "title-medium", "{t(\"invite.invitations\")}" }
             }
             {match list {
@@ -187,13 +189,13 @@ fn InviteItem(invite: InvitationFields, refresh: Signal<u32>) -> Element {
                 class: "btn-icon",
                 title: "{t_with(\"invite.acceptInvitation\", &[(\"name\", &name)])}",
                 onclick: accept,
-                "\u{2795}"
+                span { class: "material-icons", "add" }
             }
             button {
                 class: "btn-icon",
                 title: "{t(\"common.delete\")}",
                 onclick: decline,
-                "\u{2715}"
+                span { class: "material-icons", "close" }
             }
         }
     }

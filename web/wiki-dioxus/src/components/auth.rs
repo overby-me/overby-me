@@ -34,10 +34,10 @@ fn AuthForm(mode: AuthMode) -> Element {
     };
 
     let icon = match mode {
-        AuthMode::Login => "\u{1F511}",
-        AuthMode::Register => "\u{1F464}",
-        AuthMode::ResetPassword => "\u{2709}",
-        AuthMode::SetPassword => "\u{1F512}",
+        AuthMode::Login => "login",
+        AuthMode::Register => "person_add",
+        AuthMode::ResetPassword => "mail",
+        AuthMode::SetPassword => "lock",
     };
 
     let mode_clone = mode.clone();
@@ -181,7 +181,7 @@ fn AuthForm(mode: AuthMode) -> Element {
     rsx! {
         div { class: "auth-container",
             form { class: "auth-form", onsubmit: on_submit,
-                div { class: "avatar", "{icon}" }
+                div { class: "avatar", span { class: "material-icons", "{icon}" } }
                 h2 { class: "title-large", "{title}" }
 
                 // Name field (register only)
@@ -332,7 +332,7 @@ pub fn Unverified() -> Element {
     rsx! {
         div { class: "auth-container",
             div { class: "auth-form",
-                div { class: "avatar", "\u{2709}" }
+                div { class: "avatar", span { class: "material-icons", "mail" } }
                 h2 { class: "title-large", "{t(\"auth.verifyEmail\")}" }
                 p { class: "body-large", "{t(\"auth.verificationEmailSent\")}" }
                 p { class: "body-large", "{t(\"auth.useToActivate\")}" }

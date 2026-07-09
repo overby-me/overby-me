@@ -97,7 +97,7 @@ fn PostCard(post: Post) -> Element {
                             alt: "avatar",
                         }
                     } else {
-                        div { class: "avatar small", "\u{1F98B}" }
+                        div { class: "avatar small", span { class: "material-icons", "public" } }
                     }
                     div {
                         div { class: "list-item-primary", "{post.display_name}" }
