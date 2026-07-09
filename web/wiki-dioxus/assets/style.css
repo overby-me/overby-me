@@ -630,6 +630,44 @@ h6, .title-small {
     white-space: pre-wrap;
 }
 
+/* Table of contents (#117): a boxed list of heading anchors above the content. */
+.toc {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0 0 16px;
+    padding: 12px 16px;
+    border: 1px solid var(--md-outline);
+    border-radius: 8px;
+    background: var(--md-surface-variant);
+}
+
+.toc-item {
+    color: var(--md-on-surface);
+    text-decoration: none;
+    font-size: 14px;
+    padding: 2px 0;
+}
+
+.toc-item:hover {
+    text-decoration: underline;
+    color: var(--md-primary);
+}
+
+.toc-l2 {
+    padding-left: 16px;
+}
+
+.toc-l3 {
+    padding-left: 32px;
+}
+
+.toc-l4,
+.toc-l5,
+.toc-l6 {
+    padding-left: 48px;
+}
+
 .slate-content blockquote {
     border-left: 3px solid var(--md-outline);
     padding-left: 16px;

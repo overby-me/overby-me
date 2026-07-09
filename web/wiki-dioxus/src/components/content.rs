@@ -132,10 +132,19 @@ fn SlateRenderer(data: Option<serde_json::Value>) -> Element {
 
     match content {
         Some(serde_json::Value::Array(blocks)) => {
+            // Table of contents (#117): heading blocks become anchored links.
+            let headings = extract_headings(blocks);
             rsx! {
                 div { class: "slate-content",
+                    if headings.len() >= 2 {
+                        nav { class: "toc", aria_label: "{t(\"content.tableOfContents\")}",
+                            for (level , text , anchor) in headings.iter() {
+                                a { class: "toc-item toc-l{level}", href: "#{anchor}", "{text}" }
+                            }
+                        }
+                    }
                     for (i , block) in blocks.iter().enumerate() {
-                        SlateBlock { key: "{i}", block: block.clone() }
+                        SlateBlock { key: "{i}", index: i, block: block.clone() }
                     }
                 }
             }
@@ -153,8 +162,75 @@ fn SlateRenderer(data: Option<serde_json::Value>) -> Element {
     }
 }
 
+/// The heading blocks of a Slate document as `(level, text, anchor)`, for the
+/// table of contents. The anchor matches the `id` `SlateBlock` renders.
+fn extract_headings(blocks: &[serde_json::Value]) -> Vec<(u8, String, String)> {
+    blocks
+        .iter()
+        .enumerate()
+        .filter_map(|(i, block)| {
+            let ty = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            let level = heading_level(ty)?;
+            let text = block_plain_text(block);
+            if text.trim().is_empty() {
+                return None;
+            }
+            let anchor = heading_anchor(i, &text);
+            Some((level, text, anchor))
+        })
+        .collect()
+}
+
+/// Heading depth (1..6) for a Slate block type, or None if it is not a heading.
+fn heading_level(block_type: &str) -> Option<u8> {
+    match block_type {
+        "heading-one" | "h1" => Some(1),
+        "heading-two" | "h2" => Some(2),
+        "heading-three" | "h3" => Some(3),
+        "heading-four" | "h4" => Some(4),
+        "heading-five" | "h5" => Some(5),
+        "heading-six" | "h6" => Some(6),
+        _ => None,
+    }
+}
+
+/// All leaf text of a block, concatenated (for the TOC label / anchor).
+fn block_plain_text(block: &serde_json::Value) -> String {
+    fn collect(v: &serde_json::Value, out: &mut String) {
+        if let Some(t) = v.get("text").and_then(|t| t.as_str()) {
+            out.push_str(t);
+        }
+        if let Some(children) = v.get("children").and_then(|c| c.as_array()) {
+            for c in children {
+                collect(c, out);
+            }
+        }
+    }
+    let mut s = String::new();
+    collect(block, &mut s);
+    s
+}
+
+/// A unique, stable anchor id for the heading at block `index` — slug of its
+/// text prefixed with the index so duplicate headings do not collide.
+fn heading_anchor(index: usize, text: &str) -> String {
+    let mut slug = String::new();
+    let mut prev_dash = false;
+    for c in text.trim().to_lowercase().chars() {
+        if c.is_alphanumeric() {
+            slug.push(c);
+            prev_dash = false;
+        } else if !prev_dash {
+            slug.push('-');
+            prev_dash = true;
+        }
+    }
+    let slug = slug.trim_matches('-');
+    format!("h{index}-{slug}")
+}
+
 #[component]
-fn SlateBlock(block: serde_json::Value) -> Element {
+fn SlateBlock(block: serde_json::Value, index: usize) -> Element {
     let block_type = block
         .get("type")
         .and_then(|t| t.as_str())
@@ -171,13 +247,18 @@ fn SlateBlock(block: serde_json::Value) -> Element {
         }
     };
 
+    // Heading anchor id so the table of contents can link to it (#117).
+    let hid = heading_level(block_type)
+        .map(|_| heading_anchor(index, &block_plain_text(&block)))
+        .unwrap_or_default();
+
     match block_type {
-        "heading-one" | "h1" => rsx! { h1 { {rendered_children} } },
-        "heading-two" | "h2" => rsx! { h2 { {rendered_children} } },
-        "heading-three" | "h3" => rsx! { h3 { {rendered_children} } },
-        "heading-four" | "h4" => rsx! { h4 { {rendered_children} } },
-        "heading-five" | "h5" => rsx! { h5 { {rendered_children} } },
-        "heading-six" | "h6" => rsx! { h6 { {rendered_children} } },
+        "heading-one" | "h1" => rsx! { h1 { id: "{hid}", {rendered_children} } },
+        "heading-two" | "h2" => rsx! { h2 { id: "{hid}", {rendered_children} } },
+        "heading-three" | "h3" => rsx! { h3 { id: "{hid}", {rendered_children} } },
+        "heading-four" | "h4" => rsx! { h4 { id: "{hid}", {rendered_children} } },
+        "heading-five" | "h5" => rsx! { h5 { id: "{hid}", {rendered_children} } },
+        "heading-six" | "h6" => rsx! { h6 { id: "{hid}", {rendered_children} } },
         "block-quote" => rsx! { blockquote { {rendered_children} } },
         "block-pre" | "code" => rsx! { pre { {rendered_children} } },
         "bulleted-list" | "ul" => rsx! { ul { {rendered_children} } },
@@ -358,6 +439,24 @@ fn is_email(w: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn headings_extracted_with_stable_anchors() {
+        let blocks = vec![
+            serde_json::json!({ "type": "heading-one", "children": [{"text": "Intro"}] }),
+            serde_json::json!({ "type": "paragraph", "children": [{"text": "body"}] }),
+            serde_json::json!({ "type": "heading-two", "children": [{"text": "Intro"}] }),
+            serde_json::json!({ "type": "heading-three", "children": [{"text": "  "}] }),
+        ];
+        let hs = extract_headings(&blocks);
+        // Two non-empty headings; the blank one is skipped.
+        assert_eq!(hs.len(), 2);
+        assert_eq!(hs[0], (1, "Intro".to_string(), "h0-intro".to_string()));
+        // Duplicate text gets a distinct anchor via the block index.
+        assert_eq!(hs[1], (2, "Intro".to_string(), "h2-intro".to_string()));
+        // The block renderer computes the same anchor for the same index/text.
+        assert_eq!(heading_anchor(0, "Intro"), "h0-intro");
+    }
 
     #[test]
     fn autolink_detects_url_and_email() {

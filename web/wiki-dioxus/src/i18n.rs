@@ -164,7 +164,8 @@ const EN_JSON: &str = r#"{
         "uploadImage": "Upload Image",
         "uploadFile": "Upload File",
         "contentNameExists": "Content with this name already exists",
-        "imageAlt": "Content image"
+        "imageAlt": "Content image",
+        "tableOfContents": "Table of contents"
     },
     "layout": {
         "welcomeTitle": "Welcome to RadikalWiki",
@@ -381,7 +382,8 @@ const DA_JSON: &str = r#"{
         "submit": "Indsend",
         "authors": "Forfattere",
         "addAuthor": "Tilf\u00f8j forfatter",
-        "imageAlt": "Indholdsbillede"
+        "imageAlt": "Indholdsbillede",
+        "tableOfContents": "Indholdsfortegnelse"
     },
     "layout": {
         "welcomeTitle": "Velkommen til RadikalWiki",

@@ -218,7 +218,8 @@ All the above build + render live (browser smoke test asserts each mounts).
 - `[x]` `#114` Zoom/maximise images — click-to-zoom lightbox (`ZoomableImage`) in
   the file, content-block and inline-content image views.
 - `#115` Live collaborative editing.
-- `#117` Table of contents in the side bar (anchors).
+- `[x]` `#117` Table of contents — heading blocks become anchored links in a TOC
+  above documents with two or more headings; unit-tested.
 - `#119` MS Office viewer dark mode.
 - `[x]` `#125` Folder grid view mode — list/grid toggle in the folder header.
 - `#128` Audio / MIDI file support.
