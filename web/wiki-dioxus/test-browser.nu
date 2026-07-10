@@ -566,15 +566,15 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # The drawer's top entry switches from Home to the current context (old-wiki
     # behaviour); a mobile-only Home fallback stays in the DOM (desktop reaches
     # Home via the app rail).
-    let dsw = (wd-execute $session_id 'var d=document.querySelector(".drawer"); if(!d) return "nodrawer"; var mh=d.querySelector(".drawer-mobile-home")?1:0; var fi=d.querySelector(".list .list-item .list-item-primary"); return JSON.stringify({mobileHome:mh, firstText: fi?fi.innerText.trim():""})')
+    let dsw = (wd-execute $session_id 'var d=document.querySelector(".drawer"); if(!d) return "nodrawer"; var mh=d.querySelector(".drawer-mobile-home")?1:0; var cn=d.querySelector(".drawer-context-bar .drawer-context-name"); return JSON.stringify({mobileHome:mh, contextText: cn?cn.innerText.trim():""})')
     if $dsw == "nodrawer" {
         log-warn "no drawer to check the context switch"
     } else {
         let m = ($dsw | from json)
-        if ($m.firstText != "Home") and ($m.mobileHome == 1) {
-            log-ok $"drawer top switched to context '($m.firstText)', mobile Home kept"; $p = $p + 1
+        if ($m.contextText != "Home") and ($m.contextText != "") and ($m.mobileHome == 1) {
+            log-ok $"drawer top is the context bar '($m.contextText)', mobile Home kept"; $p = $p + 1
         } else {
-            log-fail $"drawer context switch off: top='($m.firstText)', mobileHome=($m.mobileHome)"; $fl = $fl + 1
+            log-fail $"drawer context bar off: text='($m.contextText)', mobileHome=($m.mobileHome)"; $fl = $fl + 1
         }
     }
 

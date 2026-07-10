@@ -624,25 +624,22 @@ fn DrawerContent() -> Element {
         div { style: "padding: 16px;",
             div { class: "list",
                 if segments.is_empty() {
-                    // At the home route: the Home entry.
+                    // At the home route: Home, styled as a bar like the top panel.
                     Link {
                         to: Route::HomeApp {},
-                        class: "list-item",
+                        class: "bar drawer-context-bar",
                         div { class: "avatar small", span { class: "material-icons", "home" } }
-                        div { class: "list-item-text",
-                            div { class: "list-item-primary", "{t(\"common.home\")}" }
-                        }
+                        span { class: "drawer-context-name", "{t(\"common.home\")}" }
                     }
                 } else {
-                    // Inside a context: the current context (abbrev avatar + name),
-                    // linking to its root.
+                    // Inside a context: the current context, styled as a bar like
+                    // the top panel (the old wiki's drawer Bar/Title), linking to
+                    // its root.
                     Link {
                         to: Route::PathPage { segments: ctx_path.clone(), app: None },
-                        class: "list-item",
-                        div { class: "avatar small secondary", "{ctx_abbr}" }
-                        div { class: "list-item-text",
-                            div { class: "list-item-primary", "{ctx_name}" }
-                        }
+                        class: "bar drawer-context-bar",
+                        div { class: "avatar small", "{ctx_abbr}" }
+                        span { class: "drawer-context-name", "{ctx_name}" }
                     }
                     // On mobile there is no app rail, so keep Home reachable here
                     // (desktop reaches it via the rail).

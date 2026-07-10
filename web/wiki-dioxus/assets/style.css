@@ -168,6 +168,32 @@ a:hover {
     padding: 4px;
 }
 
+/* Drawer's Home / current-context entry, styled like the top panel: a green
+   bar (.bar) with an inverted avatar (light on green) and an on-primary name. */
+.drawer-context-bar {
+    gap: 8px;
+    padding: 6px 10px;
+    text-decoration: none;
+    margin-bottom: 8px;
+}
+
+.drawer-context-bar .avatar {
+    background: var(--md-on-primary);
+    color: var(--md-primary);
+    flex-shrink: 0;
+}
+
+.drawer-context-name {
+    min-width: 0;
+    font-size: var(--md-sys-typescale-title-medium-size);
+    line-height: var(--md-sys-typescale-title-medium-line);
+    font-weight: 500;
+    color: var(--md-on-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .bottom-bar {
     position: fixed;
     bottom: 0;
