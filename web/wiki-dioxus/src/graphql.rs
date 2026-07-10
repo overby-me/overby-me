@@ -243,6 +243,9 @@ pub struct ContextNodeFields {
     pub mime_id: Option<String>,
     pub parent_id: Option<Uuid>,
     pub created_at: Option<Timestamptz>,
+    // A file's content `type`, so orphan file nodes (missing-parents app) show a
+    // format-specific icon instead of the generic file glyph.
+    pub data: Option<Jsonb>,
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone)]
@@ -1037,6 +1040,8 @@ pub struct Crumb {
     pub name: String,
     pub mime_id: Option<String>,
     pub ordinal: Option<usize>,
+    // A file crumb's content `type`, so it shows a format-specific icon.
+    pub data: Option<Jsonb>,
 }
 
 /// How many leading path segments belong to the current node's context: the
@@ -1063,6 +1068,7 @@ pub async fn path_crumbs(
                 name: s.clone(),
                 mime_id: None,
                 ordinal: None,
+                data: None,
             })
             .collect());
     };
@@ -1077,6 +1083,7 @@ pub async fn path_crumbs(
                     name: n.name.clone(),
                     mime_id: n.mime_id.clone(),
                     ordinal,
+                    data: n.data.clone(),
                 });
                 parent_id = Some(n.id.0);
             }
@@ -1085,6 +1092,7 @@ pub async fn path_crumbs(
                     name: segment.clone(),
                     mime_id: None,
                     ordinal: None,
+                    data: None,
                 });
                 break;
             }

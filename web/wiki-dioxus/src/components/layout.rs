@@ -320,7 +320,14 @@ fn Breadcrumbs() -> Element {
                         .map(|c| c.name.clone())
                         .filter(|n| !n.is_empty())
                         .unwrap_or_else(|| segments[i].clone());
-                    let mime = info.and_then(|c| c.mime_id.clone()).unwrap_or_default();
+                    let mime = info
+                        .map(|c| {
+                            super::loader::node_icon_mime_id(
+                                c.mime_id.as_deref().unwrap_or(""),
+                                c.data.as_ref().map(|d| &d.0),
+                            )
+                        })
+                        .unwrap_or_default();
                     let ordinal = info.and_then(|c| c.ordinal);
                     let badge = if i + 1 == total { app_badge.clone() } else { None };
                     rsx! {
@@ -787,7 +794,7 @@ fn DrawerNodeItem(
                 });
             },
             super::loader::NodeAvatar {
-                mime: mime_id.clone(),
+                mime: super::loader::node_icon_mime_id(&mime_id, node.data.as_ref().map(|d| &d.0)),
                 name: node_name.clone(),
                 ordinal,
                 mutable: node.mutable,

@@ -33,7 +33,10 @@ pub fn ProgramApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                         {
                             let mut full = path.clone();
                             full.push(item.key.clone());
-                            let icon = mime_icon(item.mime_id.as_deref().unwrap_or(""));
+                            let icon = mime_icon(&super::loader::node_icon_mime_id(
+                                item.mime_id.as_deref().unwrap_or(""),
+                                item.data.as_ref().map(|d| &d.0),
+                            ));
                             let time = program_time(item.data.as_ref().map(|d| &d.0));
                             rsx! {
                                 Link {

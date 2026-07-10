@@ -116,7 +116,7 @@ pub fn SortApp(node: NodeWithChildren) -> Element {
                             "drag_indicator"
                         }
                         div { class: "avatar small",
-                            {icon_el(item.mime_id.as_deref().unwrap_or(""))}
+                            {super::loader::node_icon_el(item.mime_id.as_deref().unwrap_or(""), item.data.as_ref().map(|d| &d.0))}
                         }
                         div { class: "list-item-text",
                             div { class: "list-item-primary", "{item.name}" }

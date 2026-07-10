@@ -42,7 +42,7 @@ pub fn ParentApp() -> Element {
                     div { class: "list",
                         for node in list.iter() {
                             div { class: "list-item", key: "{node.id.0}",
-                                div { class: "avatar small", {icon_el(node.mime_id.as_deref().unwrap_or(""))} }
+                                div { class: "avatar small", {super::loader::node_icon_el(node.mime_id.as_deref().unwrap_or(""), node.data.as_ref().map(|d| &d.0))} }
                                 div { class: "list-item-text",
                                     div { class: "list-item-primary", "{node.name}" }
                                     div {
@@ -96,6 +96,7 @@ mod tests {
             mime_id: Some(mime.to_string()),
             parent_id: None,
             created_at: None,
+            data: None,
         }
     }
 

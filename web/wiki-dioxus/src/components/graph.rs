@@ -24,7 +24,10 @@ pub fn GraphApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     let box_h = 44.0;
     let child_y = 168.0;
     let parent_name = node.name.clone();
-    let parent_icon = mime_icon(node.mime_id.as_deref().unwrap_or(""));
+    let parent_icon = mime_icon(&super::loader::node_icon_mime_id(
+        node.mime_id.as_deref().unwrap_or(""),
+        node.data.as_ref().map(|d| &d.0),
+    ));
 
     rsx! {
         div { class: "card",
@@ -70,7 +73,10 @@ pub fn GraphApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                             {
                                 let mut full = path.clone();
                                 full.push(child.key.clone());
-                                let icon = mime_icon(child.mime_id.as_deref().unwrap_or(""));
+                                let icon = mime_icon(&super::loader::node_icon_mime_id(
+                                    child.mime_id.as_deref().unwrap_or(""),
+                                    child.data.as_ref().map(|d| &d.0),
+                                ));
                                 rsx! {
                                     Link {
                                         key: "{child.id.0}",
