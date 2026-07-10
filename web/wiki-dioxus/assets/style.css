@@ -1643,11 +1643,45 @@ a.list-item:hover {
     background: var(--md-surface);
     border: 1px solid var(--md-outline);
     border-radius: 12px;
-    min-width: 180px;
+    min-width: 240px;
+    max-width: 300px;
     z-index: 300;
     margin-bottom: 8px;
     box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
     overflow: hidden;
+}
+
+/* Signed-in identity header at the top of the account menu. */
+.user-menu-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--md-outline-variant);
+    margin-bottom: 4px;
+}
+
+.user-menu-identity {
+    min-width: 0;
+}
+
+.user-menu-name {
+    font-size: var(--md-sys-typescale-title-small-size);
+    line-height: var(--md-sys-typescale-title-small-line);
+    font-weight: 500;
+    color: var(--md-on-surface);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.user-menu-email {
+    font-size: var(--md-sys-typescale-body-small-size);
+    line-height: var(--md-sys-typescale-body-small-line);
+    color: var(--md-on-surface-variant);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 @media (min-width: 1200px) {

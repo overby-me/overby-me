@@ -390,6 +390,16 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         let dd = (wd-execute $session_id 'return document.querySelector(".user-menu-dropdown")?"y":"n"')
         if $dd == "y" {
             log-ok "user menu opens a dropdown"; $p = $p + 1
+            # The account menu now carries the signed-in identity header (moved
+            # out of the sidebar).
+            let hdr = (wd-execute $session_id 'var h=document.querySelector(".user-menu-dropdown .user-menu-header"); if(!h) return "none"; var e=h.querySelector(".user-menu-email"); return e?e.innerText.trim():"nomail"')
+            if ($hdr | str contains "@") { log-ok "account menu shows the signed-in identity"; $p = $p + 1 } else { log-fail $"account menu identity header missing: ($hdr)"; $fl = $fl + 1 }
+            if (($env | get -o WIKI_SHOTS | default "") == "1") {
+                mkdir screenshots
+                wd-screenshot $session_id "screenshots/user-menu.png"
+                sleep 150ms
+                wd-screenshot $session_id "screenshots/user-menu.png"
+            }
             let inview = (wd-execute $session_id 'var d=document.querySelector(".user-menu-dropdown"); var r=d.getBoundingClientRect(); return (r.left>=-1 && r.top>=-1 && r.right<=window.innerWidth+1 && r.bottom<=window.innerHeight+1)?"y":JSON.stringify({l:Math.round(r.left),t:Math.round(r.top),r:Math.round(r.right),b:Math.round(r.bottom),w:window.innerWidth,h:window.innerHeight})')
             if $inview == "y" { log-ok "user menu popup is within the viewport"; $p = $p + 1 } else { log-fail $"user menu popup off-screen: ($inview)"; $fl = $fl + 1 }
             let bw = (wd-execute $session_id 'var b=document.querySelector(".user-menu > button"); return getComputedStyle(b).borderTopWidth')

@@ -476,6 +476,18 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
         .unwrap_or_else(|| "?".to_string());
 
     let dark = *theme.read() == ThemeMode::Dark;
+    let display_name = session
+        .read()
+        .user
+        .as_ref()
+        .map(|u| u.display_name.clone())
+        .unwrap_or_default();
+    let email = session
+        .read()
+        .user
+        .as_ref()
+        .map(|u| u.email.clone())
+        .unwrap_or_default();
 
     rsx! {
         div { class: "user-menu",
@@ -496,6 +508,17 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
                 // Full-viewport click-catcher so a click anywhere else closes it.
                 div { class: "menu-backdrop", onclick: move |_| menu_open.set(false) }
                 div { class: "user-menu-dropdown",
+                    // Signed-in identity header (the old wiki had no user card in
+                    // the sidebar; this belongs with the account menu instead).
+                    if is_auth {
+                        div { class: "user-menu-header",
+                            span { class: "avatar secondary", "{initial}" }
+                            div { class: "user-menu-identity",
+                                div { class: "user-menu-name", "{display_name}" }
+                                div { class: "user-menu-email", "{email}" }
+                            }
+                        }
+                    }
                     // Dark-mode toggle, as an accessible on/off switch (the menu
                     // stays open so the flip is visible).
                     div { class: "list-item switch-row",
@@ -585,18 +608,6 @@ fn DrawerContent() -> Element {
         _ => vec![],
     };
     let is_auth = session.read().is_authenticated();
-    let display_name = session
-        .read()
-        .user
-        .as_ref()
-        .map(|u| u.display_name.clone())
-        .unwrap_or_default();
-    let email = session
-        .read()
-        .user
-        .as_ref()
-        .map(|u| u.email.clone())
-        .unwrap_or_default();
 
     // The drawer's top entry switches from Home to the current context (the
     // nearest group/event, linking to its root) once inside one — mirroring the
@@ -611,22 +622,7 @@ fn DrawerContent() -> Element {
 
     rsx! {
         div { style: "padding: 16px;",
-            if is_auth {
-                div { class: "card",
-                    div { class: "card-header",
-                        div { class: "avatar", span { class: "material-icons", "person" } }
-                        div {
-                            h3 { class: "title-medium", "{display_name}" }
-                            p { class: "body-medium",
-                                class: "text-muted",
-                                "{email}"
-                            }
-                        }
-                    }
-                }
-            }
-
-            div { class: "list", style: "margin-top: 8px;",
+            div { class: "list",
                 if segments.is_empty() {
                     // At the home route: the Home entry.
                     Link {
