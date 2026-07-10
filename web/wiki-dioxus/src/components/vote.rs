@@ -142,6 +142,9 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
             }
         }
 
+        // Propose a new amendment (redirects to its editor).
+        AddChangeButton { node: node.clone(), path: path.clone() }
+
         // Polls
         if !polls.is_empty() {
             div { class: "card mt-1",
@@ -422,6 +425,102 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Control to propose an amendment (`vote/change`) on a policy or change: names
+/// it, inserts the node under the parent, and jumps to its editor. Mirrors React
+/// AddChangeButton (insert + redirect to `?app=editor`).
+#[component]
+fn AddChangeButton(node: NodeWithChildren, path: Vec<String>) -> Element {
+    let session = use_session();
+    let is_auth = session.read().is_authenticated();
+    let nav = use_navigator();
+    let mut open = use_signal(|| false);
+    let mut title = use_signal(String::new);
+    let node_id = node.id.0.clone();
+    let context_id = node.context_id.clone().map(|c| c.0);
+
+    // Proposing an amendment is a member action; the backend enforces who may.
+    if !is_auth {
+        return rsx! {};
+    }
+
+    let submit = {
+        let path = path.clone();
+        move |_| {
+            let name = title.read().trim().to_string();
+            if name.is_empty() {
+                return;
+            }
+            let token = session.read().access_token.clone();
+            let node_id = node_id.clone();
+            let context_id = context_id.clone();
+            let path = path.clone();
+            spawn(async move {
+                let key = crate::components::loader::slugify(&name);
+                let input = graphql::NodesInsertInput {
+                    name: Some(name),
+                    key: Some(key.clone()),
+                    mime_id: Some("vote/change".to_string()),
+                    parent_id: Some(graphql::Uuid(node_id)),
+                    context_id: context_id.map(graphql::Uuid),
+                    data: None,
+                    mutable: Some(true),
+                    index: None,
+                };
+                if graphql::insert_node(token.as_deref(), input).await.is_ok() {
+                    crate::session::bump_data_version();
+                    // Redirect to the new amendment's editor to write its body.
+                    let mut full = path.clone();
+                    full.push(key);
+                    nav.push(Route::PathPage {
+                        segments: full,
+                        app: Some("editor".to_string()),
+                    });
+                }
+            });
+        }
+    };
+
+    rsx! {
+        button {
+            class: "btn btn-outlined mt-1",
+            onclick: move |_| open.set(true),
+            span { class: "material-icons", "add" }
+            " {t(\"vote.newAmendment\")}"
+        }
+        if open() {
+            div { class: "modal-backdrop", onclick: move |_| open.set(false),
+                div {
+                    class: "modal-card",
+                    onclick: move |e| e.stop_propagation(),
+                    h3 { class: "title-medium mb-2", "{t(\"vote.newAmendment\")}" }
+                    div { class: "text-field",
+                        label { "{t(\"common.title\")}" }
+                        input {
+                            r#type: "text",
+                            value: "{title}",
+                            oninput: move |e| title.set(e.value()),
+                        }
+                    }
+                    div { class: "stack stack-h mt-2", style: "align-items: center; gap: 8px;",
+                        div { class: "flex-grow" }
+                        button {
+                            class: "btn btn-outlined",
+                            onclick: move |_| open.set(false),
+                            "{t(\"common.cancel\")}"
+                        }
+                        button {
+                            class: "btn btn-primary",
+                            disabled: title.read().trim().is_empty(),
+                            onclick: submit,
+                            "{t(\"common.add\")}"
                         }
                     }
                 }
