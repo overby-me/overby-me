@@ -22,6 +22,62 @@ fn context_path(segments: &[String]) -> Vec<String> {
     segments.iter().take(depth).cloned().collect()
 }
 
+thread_local! {
+    /// A password-reset `refreshToken` captured from the launch URL before the
+    /// router normalized the query away (see [`capture_reset_token`]).
+    static PENDING_RESET: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Stash the `refreshToken` from a password-reset deep link
+/// (`/?type=passwordReset&refreshToken=...`) so [`Layout`] can act on it. Called
+/// from `main` *before* the router mounts: the router renders home for `/` and
+/// rewrites the query, which would otherwise drop these params before any
+/// component reads them.
+pub fn capture_reset_token() {
+    let Some(search) = web_sys::window().and_then(|w| w.location().search().ok()) else {
+        return;
+    };
+    let Some(raw) = parse_reset_token(&search) else {
+        return;
+    };
+    // The token is usually URL-safe, but decode any percent-encoding to be safe.
+    let token = js_sys::decode_uri_component(&raw)
+        .ok()
+        .map(|s| String::from(&s))
+        .unwrap_or(raw);
+    PENDING_RESET.with(|c| *c.borrow_mut() = Some(token));
+}
+
+/// Take the captured password-reset token (consuming it), if any.
+fn take_reset_token() -> Option<String> {
+    PENDING_RESET.with(|c| c.borrow_mut().take())
+}
+
+/// Extract the `refreshToken` value from a `?type=passwordReset&refreshToken=...`
+/// query string, or `None` when it is not a password-reset link. Pure (no
+/// percent-decoding) so it is unit-testable off the wasm target.
+fn parse_reset_token(search: &str) -> Option<String> {
+    let query = search.strip_prefix('?').unwrap_or(search);
+    let mut is_reset = false;
+    let mut token: Option<String> = None;
+    for pair in query.split('&') {
+        let Some((k, v)) = pair.split_once('=') else {
+            continue;
+        };
+        match k {
+            "type" if v == "passwordReset" => is_reset = true,
+            "refreshToken" => token = Some(v.to_string()),
+            _ => {}
+        }
+    }
+    if is_reset {
+        token
+    } else {
+        None
+    }
+}
+
 #[component]
 pub fn Layout() -> Element {
     let mut open_drawer = use_signal(|| false);
@@ -31,6 +87,21 @@ pub fn Layout() -> Element {
     let menu_open = use_signal(|| false);
 
     let route = use_route::<Route>();
+    let nav = use_navigator();
+
+    // NHost password-reset emails link to `/?type=passwordReset&refreshToken=...`,
+    // which the router renders as home. The token was stashed by
+    // `capture_reset_token` in `main` (before the router dropped the query); act
+    // on it once here: exchange it for a session and route to set-password.
+    use_hook(move || {
+        if let Some(rt) = take_reset_token() {
+            spawn(async move {
+                if crate::session::establish_from_refresh_token(&rt).await {
+                    nav.replace(Route::SetPassword {});
+                }
+            });
+        }
+    });
 
     // Resolve the path once for the whole chrome. The breadcrumbs, drawer and app
     // rail all key off the current context (the nearest group/event), so
@@ -1086,5 +1157,33 @@ fn abbrev_context_name(name: &str) -> String {
     match words.len() {
         1..=3 => words.concat(),
         _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_reset_token;
+
+    #[test]
+    fn extracts_reset_token() {
+        assert_eq!(
+            parse_reset_token("?type=passwordReset&refreshToken=abc123"),
+            Some("abc123".to_string())
+        );
+        // Order-independent.
+        assert_eq!(
+            parse_reset_token("?refreshToken=xyz&type=passwordReset"),
+            Some("xyz".to_string())
+        );
+    }
+
+    #[test]
+    fn ignores_non_reset_links() {
+        assert_eq!(parse_reset_token(""), None);
+        assert_eq!(parse_reset_token("?app=vote"), None);
+        // A refresh token without the reset type is not a reset link.
+        assert_eq!(parse_reset_token("?refreshToken=abc"), None);
+        // The reset type without a token yields nothing to exchange.
+        assert_eq!(parse_reset_token("?type=passwordReset"), None);
     }
 }

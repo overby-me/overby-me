@@ -93,6 +93,37 @@ pub fn save_session(session: &Session) {
     }
 }
 
+/// Establish a session from a bare refresh token — the one embedded in an NHost
+/// password-reset email link (`/?type=passwordReset&refreshToken=...`). Populates
+/// and persists `SESSION` so the set-password form has a valid access token.
+/// Returns whether the exchange succeeded.
+pub async fn establish_from_refresh_token(refresh_token: &str) -> bool {
+    match nhost::refresh_session(refresh_token).await {
+        Ok(new) => {
+            let snapshot = {
+                let mut session = SESSION.write();
+                session.access_token = Some(new.access_token);
+                session.refresh_token = Some(new.refresh_token);
+                session.access_token_expires_at = expires_at_from(new.access_token_expires_in);
+                if let Some(user) = new.user {
+                    session.user = Some(User {
+                        id: user.id,
+                        email: user.email.unwrap_or_default(),
+                        display_name: user.display_name.unwrap_or_default(),
+                    });
+                }
+                session.clone()
+            };
+            save_session(&snapshot);
+            true
+        }
+        Err(err) => {
+            log::warn!("password-reset token exchange failed: {err}");
+            false
+        }
+    }
+}
+
 fn web_sys_storage() -> Result<Option<String>, ()> {
     let window = web_sys::window().ok_or(())?;
     let storage = window.local_storage().map_err(|_| ())?.ok_or(())?;

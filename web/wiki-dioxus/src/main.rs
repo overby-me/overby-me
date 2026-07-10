@@ -53,6 +53,11 @@ fn main() {
     // before the first navigation writes it to the address bar.
     install_history_query_shim();
 
+    // Capture a password-reset deep link (`/?type=passwordReset&refreshToken=...`)
+    // now, before the router mounts and rewrites `/`'s query away; Layout then
+    // exchanges the token and shows the set-password form.
+    components::layout::capture_reset_token();
+
     // PWA: install the manifest / icon / theme-color head tags and register the
     // service worker (offline where the SW controls the root).
     pwa::setup();
